@@ -89,6 +89,105 @@ export default function Order_Tracking() {
   const visibleLogs = useMemo(() => {
     const latestLogByPerformer = new Map<string, OrderLog>();
     const performerLogIds = new Set<number>();
+    const getPerformerKey = (log: OrderLog) =>
+      String(log.performed_by_name || "").trim().toLowerCase();
+    const isRealPerformer = (value: string) =>
+      value && value !== "pending" && value !== "system";
+    const isRateLog = (log: OrderLog) =>
+      String(log.status_name || "").toLowerCase().includes("rate");
+    const isRejectedLog = (log: OrderLog) =>
+      String(log.status_name || "").toLowerCase().includes("reject");
+    const isGenericApprovedLog = (log: OrderLog) => {
+      const statusName = String(log.status_name || "").trim().toLowerCase();
+      return statusName === "approved" || statusName === "accepted";
+    };
+    const hasLaterSameCycleRateRejection = (log: OrderLog) => {
+      const performer = getPerformerKey(log);
+      const logTime = new Date(log.created_at || "").getTime();
+
+      if (!isRateLog(log) || !isRealPerformer(performer)) {
+        return false;
+      }
+
+      return orderedLogs.some((otherLog) => {
+        const otherPerformer = getPerformerKey(otherLog);
+        const otherTime = new Date(otherLog.created_at || "").getTime();
+        const hasStageBoundaryBetween = orderedLogs.some((betweenLog) => {
+          const betweenTime = new Date(betweenLog.created_at || "").getTime();
+          const betweenStatus = String(betweenLog.status_name || "").toLowerCase();
+
+          return (
+            betweenLog.id !== log.id &&
+            betweenLog.id !== otherLog.id &&
+            (betweenTime > logTime || (betweenTime === logTime && betweenLog.id > log.id)) &&
+            (betweenTime < otherTime || (betweenTime === otherTime && betweenLog.id < otherLog.id)) &&
+            (
+              betweenStatus.includes("billing") ||
+              betweenStatus.includes("auditor") ||
+              betweenStatus.includes("rate")
+            )
+          );
+        });
+
+        return (
+          otherLog.id !== log.id &&
+          otherPerformer === performer &&
+          isRejectedLog(otherLog) &&
+          !hasStageBoundaryBetween &&
+          (otherTime > logTime || (otherTime === logTime && otherLog.id > log.id))
+        );
+      });
+    };
+    const hasNearbyRateDecision = (log: OrderLog) => {
+      const performer = getPerformerKey(log);
+      const logTime = new Date(log.created_at || "").getTime();
+
+      if (!isGenericApprovedLog(log) || !isRealPerformer(performer)) {
+        return false;
+      }
+
+      const hasSamePerformerRateDecision = orderedLogs.some((otherLog) => {
+        const otherPerformer = getPerformerKey(otherLog);
+        const otherTime = new Date(otherLog.created_at || "").getTime();
+
+        return (
+          otherLog.id !== log.id &&
+          otherPerformer === performer &&
+          isRateLog(otherLog) &&
+          Math.abs(otherTime - logTime) <= 10000
+        );
+      });
+
+      if (hasSamePerformerRateDecision) {
+        return true;
+      }
+
+      return orderedLogs.some((otherLog) => {
+        const otherTime = new Date(otherLog.created_at || "").getTime();
+
+        return (
+          otherLog.id !== log.id &&
+          isRateLog(otherLog) &&
+          (otherTime < logTime || (otherTime === logTime && otherLog.id < log.id))
+        );
+      });
+    };
+    const isDecisionHistoryLog = (log: OrderLog) => {
+      const statusName = String(log.status_name || "").toLowerCase();
+      const remarks = String(log.remarks || "").toLowerCase();
+      const performer = getPerformerKey(log);
+      const combined = `${statusName} ${remarks}`;
+      const hasRealPerformer = isRealPerformer(performer);
+
+      return (
+        combined.includes("reject") ||
+        combined.includes("approved") ||
+        combined.includes("accepted") ||
+        combined.includes("complete") ||
+        combined.includes("sent to auditor") ||
+        (hasRealPerformer && statusName.includes("rate"))
+      );
+    };
     const getStageKey = (log: OrderLog) => {
       const statusName = String(log.status_name || "").toLowerCase();
 
@@ -117,13 +216,13 @@ export default function Order_Tracking() {
         laterStatus.includes("accepted") ||
         laterStatus.includes("complete");
 
-      return isDecision && pendingStage === "auditor";
+      return isDecision && (pendingStage === "auditor" || pendingStage === "rate");
     };
 
     orderedLogs.forEach((log) => {
-      const performer = String(log.performed_by_name || "").trim().toLowerCase();
+      const performer = getPerformerKey(log);
 
-      if (!performer || performer === "pending" || performer === "system") {
+      if (!isRealPerformer(performer)) {
         return;
       }
 
@@ -148,29 +247,141 @@ export default function Order_Tracking() {
     });
 
     return orderedLogs.filter((log) => {
-      const performer = String(log.performed_by_name || "").trim().toLowerCase();
-      const isPendingLog = !performer || performer === "pending" || performer === "system";
+      const performer = getPerformerKey(log);
+      const isPendingLog = !isRealPerformer(performer);
 
       if (isPendingLog) {
         const logTime = new Date(log.created_at || "").getTime();
 
         return !orderedLogs.some((otherLog) => {
-          const otherPerformer = String(otherLog.performed_by_name || "").trim().toLowerCase();
+          const otherPerformer = getPerformerKey(otherLog);
           const otherTime = new Date(otherLog.created_at || "").getTime();
-          const isRealPerformer =
-            otherPerformer && otherPerformer !== "pending" && otherPerformer !== "system";
 
           return (
-            isRealPerformer &&
+            isRealPerformer(otherPerformer) &&
             isOutcomeForPendingStage(log, otherLog) &&
             (otherTime > logTime || (otherTime === logTime && otherLog.id > log.id))
           );
         });
       }
 
-      return performerLogIds.has(log.id);
+      if (hasLaterSameCycleRateRejection(log) || hasNearbyRateDecision(log)) {
+        return false;
+      }
+
+      return isDecisionHistoryLog(log) || performerLogIds.has(log.id);
     });
   }, [orderedLogs]);
+
+  const displayLogs = useMemo(() => {
+    const isRealPerformer = (value: string | null) => {
+      const normalized = String(value || "").trim().toLowerCase();
+      return normalized && normalized !== "pending" && normalized !== "system";
+    };
+    const isRateLog = (log: OrderLog) =>
+      String(log.status_name || "").toLowerCase().includes("rate");
+    const isRejectedLog = (log: OrderLog) =>
+      String(log.status_name || "").toLowerCase().includes("reject");
+    const isGenericApprovedLog = (log: OrderLog) => {
+      const statusName = String(log.status_name || "").trim().toLowerCase();
+      return statusName === "approved" || statusName === "accepted";
+    };
+    const getTime = (log: OrderLog) => new Date(log.created_at || "").getTime();
+    const isAfter = (candidate: OrderLog, source: OrderLog) => {
+      const candidateTime = getTime(candidate);
+      const sourceTime = getTime(source);
+
+      return (
+        candidateTime > sourceTime ||
+        (candidateTime === sourceTime && candidate.id > source.id)
+      );
+    };
+    const hasStageBoundaryBetween = (source: OrderLog, target: OrderLog) => {
+      const sourceTime = getTime(source);
+      const targetTime = getTime(target);
+
+      return orderedLogs.some((betweenLog) => {
+        const betweenTime = getTime(betweenLog);
+        const betweenStatus = String(betweenLog.status_name || "").toLowerCase();
+
+        return (
+          betweenLog.id !== source.id &&
+          betweenLog.id !== target.id &&
+          (betweenTime > sourceTime || (betweenTime === sourceTime && betweenLog.id > source.id)) &&
+          (betweenTime < targetTime || (betweenTime === targetTime && betweenLog.id < target.id)) &&
+          (
+            betweenStatus.includes("billing") ||
+            betweenStatus.includes("auditor") ||
+            betweenStatus.includes("rate")
+          )
+        );
+      });
+    };
+    const findApprovalForRateLog = (rateLog: OrderLog) =>
+      orderedLogs.find((candidate) => {
+        if (
+          !isGenericApprovedLog(candidate) ||
+          !isRealPerformer(candidate.performed_by_name) ||
+          !isAfter(candidate, rateLog) ||
+          hasStageBoundaryBetween(rateLog, candidate)
+        ) {
+          return false;
+        }
+
+        return !orderedLogs.some((betweenLog) => (
+          isRejectedLog(betweenLog) &&
+          isAfter(betweenLog, rateLog) &&
+          isAfter(candidate, betweenLog)
+        ));
+      });
+
+    return visibleLogs.map((log) => {
+      if (!isRateLog(log) || isRejectedLog(log)) {
+        return log;
+      }
+
+      const approvalLog = findApprovalForRateLog(log);
+
+      if (!approvalLog) {
+        return log;
+      }
+
+      return {
+        ...log,
+        performed_by_name: approvalLog.performed_by_name,
+        remarks: approvalLog.remarks || log.remarks,
+        created_at: approvalLog.created_at || log.created_at,
+      };
+    });
+  }, [orderedLogs, visibleLogs]);
+
+  const timelineLogs = useMemo(() => {
+    const currentStatus = String(selectedOrder?.status_display || "").trim();
+    const normalizedStatus = currentStatus.toLowerCase();
+
+    if (!selectedOrder || !normalizedStatus.includes("billing")) {
+      return displayLogs;
+    }
+
+    const hasBillingStep = displayLogs.some((log) =>
+      String(log.status_name || "").toLowerCase().includes("billing")
+    );
+
+    if (hasBillingStep) {
+      return displayLogs;
+    }
+
+    return [
+      ...displayLogs,
+      {
+        id: -selectedOrder.id,
+        status_name: currentStatus.includes("Pending") ? currentStatus : "Billing Pending",
+        remarks: "",
+        performed_by_name: null,
+        created_at: displayLogs[displayLogs.length - 1]?.created_at || selectedOrder.created_at,
+      },
+    ];
+  }, [selectedOrder, displayLogs]);
 
   const formatDateTime = (value?: string | null) => {
     if (!value) return "-";
@@ -189,6 +400,43 @@ export default function Order_Tracking() {
   const getLogDisplayTitle = (log: OrderLog) => {
     const statusName = String(log.status_name || "").toLowerCase();
     const remarks = String(log.remarks || "").toLowerCase();
+    const performer = String(log.performed_by_name || "").trim().toLowerCase();
+    const hasRealPerformer =
+      performer && performer !== "pending" && performer !== "system";
+    const isRejected = statusName.includes("reject");
+    const logTime = new Date(log.created_at || "").getTime();
+    const lastPreviousStage = [...orderedLogs]
+      .filter((entry) => {
+        const entryTime = new Date(entry.created_at || "").getTime();
+        return (
+          entry.id !== log.id &&
+          (entryTime < logTime || (entryTime === logTime && entry.id < log.id))
+        );
+      })
+      .reverse()
+      .find((entry) => {
+        const entryStatus = String(entry.status_name || "").toLowerCase();
+        return (
+          entryStatus.includes("rate") ||
+          entryStatus.includes("auditor") ||
+          entryStatus.includes("billing")
+        );
+      });
+    const lastPreviousStageName = String(lastPreviousStage?.status_name || "").toLowerCase();
+
+    if (isRejected && lastPreviousStageName.includes("rate")) {
+      return "Rate Approval Rejected";
+    }
+
+    if (statusName.includes("billing") && !hasRealPerformer) {
+      return "Billing Pending";
+    }
+
+    if (statusName.includes("rate") && hasRealPerformer) {
+      return isRejected
+        ? "Rate Approval Rejected"
+        : "Accepted by Rate Approver";
+    }
 
     if (statusName.includes("billing") && statusName.includes("reject")) {
       return "Billing Rejected";
@@ -228,6 +476,10 @@ export default function Order_Tracking() {
 
     if (isPendingPerformer) {
       return "pending";
+    }
+
+    if (normalized.includes("rate")) {
+      return "approved";
     }
 
     if (
@@ -448,10 +700,10 @@ export default function Order_Tracking() {
 
             {logsLoading ? (
               <p className="vo-empty">Loading order logs...</p>
-            ) : visibleLogs.length === 0 ? (
+            ) : timelineLogs.length === 0 ? (
               <p className="vo-empty">No tracking logs found for this order.</p>
             ) : (
-              visibleLogs.map((log, index) => {
+              timelineLogs.map((log, index) => {
                 const tone = getLogTone(log.status_name, log.performed_by_name);
                 const displayRemark = getLogDisplayRemark(log);
 
@@ -465,7 +717,7 @@ export default function Order_Tracking() {
                             ? "✕"
                             : "•"}
                       </div>
-                      {index !== visibleLogs.length - 1 ? (
+                      {index !== timelineLogs.length - 1 ? (
                         <div className={`tracker-line ${tone}`} />
                       ) : null}
                     </div>
