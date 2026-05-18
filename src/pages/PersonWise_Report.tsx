@@ -3,7 +3,7 @@ import { userService } from "../services/userService";
 import type { User } from "../services/userService";
 import type { Order, OrderItem } from "../services/ordersService";
 import { loadManagerOrders } from "../utils/orderHistory";
-import { getOrderItemSchemeNames, getOrderItemSchemes, getOrderItemSchemeQtyText, getOrderItemTotalLtrs, ordersService } from "../services/ordersService";
+import { formatOrderCreatedAt, getOrderItemSchemeNames, getOrderItemSchemes, getOrderItemSchemeQtyText, getOrderItemTotalLtrs, ordersService } from "../services/ordersService";
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
 import "../styles/Report.css";
@@ -216,6 +216,7 @@ export default function PersonWise_Report() {
           "Order Number": order.order_number,
           "Card Code": order.card_code,
           "Card Name": order.card_name,
+          "Created At": formatOrderCreatedAt(order.created_at),
           "Bill To": order.bill_to_address,
           "Ship To": order.ship_to_address,
           "Delivery Date": order.delivery_date,
@@ -240,6 +241,7 @@ export default function PersonWise_Report() {
         "Order Number": order.order_number,
         "Card Code": order.card_code,
         "Card Name": order.card_name,
+        "Created At": formatOrderCreatedAt(order.created_at),
         "Delivery Date": order.delivery_date,
         "Status": order.status_display,
         "FOC": order.is_foc ? "Yes" : "No",
@@ -251,6 +253,7 @@ export default function PersonWise_Report() {
       "Order Number": "",
       "Card Code": "",
       "Card Name": "",
+      "Created At": "",
       "Bill To": "",
       "Ship To": "",
       "Delivery Date": "",
@@ -286,8 +289,9 @@ export default function PersonWise_Report() {
           excelData.push({
             "Order Number": order.order_number,
             "Card Code": order.card_code,
-        "Card Name": order.card_name,
-        "Bill To": order.bill_to_address,
+            "Card Name": order.card_name,
+            "Created At": formatOrderCreatedAt(order.created_at),
+            "Bill To": order.bill_to_address,
         "Ship To": order.ship_to_address,
         "Delivery Date": order.delivery_date,
         "Status": order.status_display,
@@ -311,6 +315,7 @@ export default function PersonWise_Report() {
           "Order Number": order.order_number,
           "Card Code": order.card_code,
           "Card Name": order.card_name,
+          "Created At": formatOrderCreatedAt(order.created_at),
           "Delivery Date": order.delivery_date,
           "Status": order.status_display,
           "FOC": order.is_foc ? "Yes" : "No",
@@ -325,6 +330,7 @@ export default function PersonWise_Report() {
       "Order Number": "",
       "Card Code": "",
       "Card Name": "",
+      "Created At": "",
       "Bill To": "",
       "Ship To": "",
       "Delivery Date": "",
@@ -525,6 +531,7 @@ export default function PersonWise_Report() {
                         <th>Order Number</th>
                         <th>Card Code</th>
                         <th>Card Name</th>
+                        <th>Created At</th>
                         <th>Delivery Date</th>
                         <th>FOC</th>
                         <th>Status</th>
@@ -541,6 +548,7 @@ export default function PersonWise_Report() {
                           <td className="dr-bold">{order.order_number}</td>
                           <td>{order.card_code}</td>
                           <td>{order.card_name}</td>
+                          <td>{formatOrderCreatedAt(order.created_at)}</td>
                           <td>{order.delivery_date}</td>
                           <td>{order.is_foc ? "Yes" : "No"}</td>
                           <td>
@@ -615,6 +623,10 @@ export default function PersonWise_Report() {
                   <span className="dr-d-ordnum">{orderDetails.order_number}</span>
                   <span className={`dr-badge dr-badge-${(orderDetails.status_display || "").toLowerCase().replace(/\s+/g, "-")}`}>{orderDetails.status_display}</span>
                 </div>
+              </div>
+              <div className="dr-d-info-field">
+                <span className="dr-d-hf-label">Created At</span>
+                <span className="dr-d-hf-value">{formatOrderCreatedAt(orderDetails.created_at)}</span>
               </div>
               <div className="dr-d-info-field">
                 <span className="dr-d-hf-label">Delivery Date</span>

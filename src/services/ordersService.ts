@@ -204,6 +204,22 @@ export const getOrderItemTotalLtrs = (item: OrderItem) => {
   return Number(item.ltrs || 0) + schemeQty;
 };
 
+export const formatOrderCreatedAt = (createdAt?: string | null) => {
+  if (!createdAt) return "-";
+
+  const date = new Date(createdAt);
+  if (Number.isNaN(date.getTime())) return createdAt;
+
+  return date.toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  });
+};
+
 const normalizeOrderItem = (item: OrderItem): OrderItem => {
   const schemes = Array.isArray(item.schemes)
     ? item.schemes.map((scheme) => ({
