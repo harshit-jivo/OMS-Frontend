@@ -1,0 +1,76 @@
+    
+        .sap-page { font-family: 'Inter', sans-serif; width: 100%; }
+
+        .sap-header { margin-bottom: 16px; }
+        .sap-title { margin: 0; }
+        .sap-subtitle { margin-top: 3px; }
+
+        .sap-tabs {
+          display: flex; gap: 0;
+          border: 1px solid #e2e8f0;
+          margin-bottom: 0;
+          background: #fff; border-radius: var(--radius-sm, 8px) var(--radius-sm, 8px) 0 0;
+          padding: 0 4px;
+          box-shadow: 0 1px 3px rgba(0,0,0,.05), 0 1px 2px rgba(0,0,0,.03);
+        }
+
+        .sap-tab {
+          padding: 10px 18px; background: transparent; border: none;
+          border-bottom: 2px solid transparent;
+          font-family: 'Inter', sans-serif; font-size: 12px;
+          font-weight: 500; color: #64748b; cursor: pointer;
+          transition: all .15s; margin-bottom: -2px;
+          letter-spacing: .02em;
+        }
+        .sap-tab:hover { color: #1e293b; background: #f8fafc; }
+
+        .sap-tab-active {
+          color: #2563eb; font-weight: 600;
+          border-bottom-color: #2563eb;
+          background: transparent;
+        }
+
+        .sap-content {
+          width: 100%;
+          background: #fff;
+          border: 1px solid #e2e8f0;
+          border-top: none;
+          border-radius: 0 0 var(--radius-sm, 8px) var(--radius-sm, 8px);
+          padding: 18px;
+          box-shadow: 0 1px 3px rgba(0,0,0,.05), 0 1px 2px rgba(0,0,0,.03);
+        }
+
+        .sap-content .st-page,
+        .sap-content .ad-page,
+        .sap-content .pr-page,
+        .sap-content .pt-page,
+        .sap-content .br-page,
+        .sap-content .lg-page {
+          background: transparent;
+          min-height: auto;
+          padding: 0;
+        }
+
+        @media (max-width: 768px) {
+          .sap-tabs {
+            overflow-x: auto;
+            white-space: nowrap;
+            scrollbar-width: thin;
+          }
+
+          .sap-content {
+            padding: 14px;
+          }
+        }
+
+        @media (max-width: 480px) {
+          .sap-tab {
+            padding: 10px 14px;
+            font-size: 11px;
+          }
+
+          .sap-content {
+            padding: 12px;
+          }
+        }
+      
