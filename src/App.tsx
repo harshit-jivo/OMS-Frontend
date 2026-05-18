@@ -19,6 +19,7 @@ import Party_Assignment from "./pages/Party_Assignment";
 import Party_Product_Assignment from "./pages/Party_Product_Assignment";
 import Add_Scheme from "./pages/Add_Scheme";
 import FOC from "./pages/FOC";
+import SalesInvoice from "./pages/Sales_Invoice";
 
 function App() {
   return (
@@ -65,6 +66,14 @@ function App() {
           element={
             <Sidebar>
               <FOC />
+            </Sidebar>}
+        />
+
+        <Route
+          path="/Sales_Invoice"
+          element={
+            <Sidebar>
+              <SalesInvoice />
             </Sidebar>}
         />
 

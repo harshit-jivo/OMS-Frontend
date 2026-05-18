@@ -116,15 +116,20 @@ const handleLogin = async () => {
   
   try {
     const data = await loginUser(username, password);
+    const user = data.data.user;
+    const tokens = data.data.tokens;
 
-    console.log('datatype'+JSON.stringify(data));
-    console.log(data);
-    localStorage.setItem("access", data.data.tokens.access);
-    localStorage.setItem("refresh", data.data.tokens.refresh);
-    localStorage.setItem("username", data.data.user.username);
-    localStorage.setItem("name", data.data.user.name);
-
-    console.log("Access Token:", data.data.user.username);
+    localStorage.setItem("access", tokens.access);
+    localStorage.setItem("refresh", tokens.refresh);
+    localStorage.setItem("user_id", String(user.id));
+    localStorage.setItem("username", user.username);
+    localStorage.setItem("name", user.name);
+    localStorage.setItem("role", user.role);
+    localStorage.setItem("role_display", user.role_display || user.role);
+    localStorage.setItem("company_id", String(user.company?.id || ""));
+    localStorage.setItem("company_name", user.company?.name || "");
+    localStorage.setItem("main_group_id", String(user.main_group?.id || ""));
+    localStorage.setItem("main_group_name", user.main_group?.name || "");
 
     showToast("Login successful. Redirecting...", "success");
 

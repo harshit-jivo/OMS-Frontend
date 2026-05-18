@@ -22,8 +22,11 @@ export default function Sidebar({ children }: SidebarProps) {
 
   const [salesOpen, setSalesOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [userRole, setUserRole] = useState("");
-  const [userName, setUserName] = useState("");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    localStorage.getItem("sidebar_collapsed") === "true"
+  );
+  const [userRole, setUserRole] = useState(localStorage.getItem("role") || "");
+  const [userName, setUserName] = useState(localStorage.getItem("name") || localStorage.getItem("username") || "");
   const [reportsOpen, setReportsOpen] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const location = useLocation();
@@ -38,6 +41,14 @@ export default function Sidebar({ children }: SidebarProps) {
     setMenuOpen(false);
   };
 
+  const toggleSidebarCollapsed = () => {
+    setSidebarCollapsed((current) => {
+      const next = !current;
+      localStorage.setItem("sidebar_collapsed", String(next));
+      return next;
+    });
+  };
+
   useEffect(() => {
     fetchCurrentUser();
   }, []);
@@ -46,8 +57,12 @@ export default function Sidebar({ children }: SidebarProps) {
     try {
       const data = await getCurrentUser();
       const role = data.role || data.role_name || data.role_display || "";
-      setUserRole(typeof role === "object" ? role.name : role);
-      setUserName(data.full_name || data.name || data.username || "");
+      const roleName = typeof role === "object" ? role.name : role;
+      const name = data.full_name || data.name || data.username || "";
+      setUserRole(roleName);
+      setUserName(name);
+      localStorage.setItem("role", roleName);
+      localStorage.setItem("name", name);
     } catch (error) {
       console.error("Failed to fetch user:", error);
     }
@@ -98,7 +113,10 @@ export default function Sidebar({ children }: SidebarProps) {
 
   useEffect(() => {
     setSalesOpen(
-      location.pathname === "/Add_Sales" || location.pathname === "/View_Orders"
+      location.pathname === "/Add_Sales" ||
+        location.pathname === "/View_Orders" ||
+        location.pathname === "/FOC" ||
+        location.pathname === "/Sales_Invoice"
     );
     setReportsOpen(
       location.pathname === "/Daily_Report" ||
@@ -163,6 +181,21 @@ export default function Sidebar({ children }: SidebarProps) {
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16"/>
             </svg>
           </button>
+          <button
+            className="sidebar-collapse-btn"
+            type="button"
+            onClick={toggleSidebarCollapsed}
+            title={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
+            aria-label={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
+          >
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
+              {sidebarCollapsed ? (
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              ) : (
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 5l-7 7 7 7" />
+              )}
+            </svg>
+          </button>
           <div className="logo-mark" aria-hidden="true">
             <img src="/logo.png" alt="OMS logo" className="logo-mark-img" />
           </div>
@@ -219,7 +252,7 @@ export default function Sidebar({ children }: SidebarProps) {
 
       {menuOpen && <div className="overlay" onClick={closeSidebar}></div>}
 
-      <aside className={`sidebar ${menuOpen ? "open" : ""}`}>
+      <aside className={`sidebar ${menuOpen ? "open" : ""} ${sidebarCollapsed ? "collapsed" : ""}`}>
         <ul>
           <li className={location.pathname === "/Dashboard" ? "active" : ""}>
             <Link to="/Dashboard" onClick={closeSidebar}>
@@ -236,8 +269,8 @@ export default function Sidebar({ children }: SidebarProps) {
           {(userRole?.toLowerCase() === "admin") && (
 
             <>
-            <li className={location.pathname === "/Sap_sync" ? "active" : ""}>
-              <Link to="/Sap_sync" onClick={closeSidebar}>SAP Sync</Link>
+            <li className={location.pathname === "/Sap_Sync" ? "active" : ""}>
+              <Link to="/Sap_Sync" onClick={closeSidebar}>SAP Sync</Link>
             </li>
 
              <li className={location.pathname === "/Party_Assignment" ? "active" : ""}>
@@ -266,6 +299,9 @@ export default function Sidebar({ children }: SidebarProps) {
                   <li><Link to="/Add_Sales" onClick={closeSidebar}>Add Sales</Link></li>
                   {userRole?.toLowerCase() === "manager" && (
                     <li><Link to="/FOC" onClick={closeSidebar}>FOC</Link></li>
+                  )}
+                  {userRole?.toLowerCase() === "billing" && (
+                    <li><Link to="/Sales_Invoice" onClick={closeSidebar}>Sales Invoice</Link></li>
                   )}
                
                   <li><Link to="/View_Orders" onClick={closeSidebar}>View Orders</Link></li>
@@ -391,6 +427,16 @@ export default function Sidebar({ children }: SidebarProps) {
               <button className="sb-modal-cancel" onClick={() => setShowLogoutModal(false)}>Cancel</button>
               <button className="sb-modal-confirm" onClick={() => {
                 localStorage.removeItem("access");
+                localStorage.removeItem("refresh");
+                localStorage.removeItem("user_id");
+                localStorage.removeItem("username");
+                localStorage.removeItem("name");
+                localStorage.removeItem("role");
+                localStorage.removeItem("role_display");
+                localStorage.removeItem("company_id");
+                localStorage.removeItem("company_name");
+                localStorage.removeItem("main_group_id");
+                localStorage.removeItem("main_group_name");
                 window.location.href = "/";
               }}>Yes, Logout</button>
             </div>
@@ -398,7 +444,7 @@ export default function Sidebar({ children }: SidebarProps) {
         </div>
       )}
 
-      <main className="content-area">{children}</main>
+      <main className={`content-area ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>{children}</main>
     </>
   );
 }

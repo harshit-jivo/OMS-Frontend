@@ -5,6 +5,7 @@ import Parties from "./Parties";
 import Addresses from "./Addresses";
 import Branches from "./Branches";
 import Logs from "./Logs";
+import SalesInvoice from "./Sales_Invoice";
 import "../styles/Sap_Sync.css";
 
 export default function Sap_sync() {
@@ -24,6 +25,8 @@ export default function Sap_sync() {
         return <Branches />;
       case "Logs":
         return <Logs />;
+      case "Sales Invoice":
+        return <SalesInvoice />;
       default:
         return null;
     }
@@ -34,7 +37,7 @@ export default function Sap_sync() {
 
       {/* ── TABS ── */}
       <div className="sap-tabs">
-        {["Status", "Products", "Parties", "Addresses", "Branches", "Logs"].map((tab) => (
+        {["Status", "Products", "Parties", "Addresses", "Branches", "Logs", "Sales Invoice"].map((tab) => (
           <button
             key={tab}
             className={`sap-tab ${activeTab === tab ? "sap-tab-active" : ""}`}

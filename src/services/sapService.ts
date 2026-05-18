@@ -26,10 +26,53 @@ export interface Party  {
   id: number;
   card_code: string;
   card_name: string;
+  address?: string;
   category?: string;
   state?: string;
   main_group?: string;
+  chain?: string;
+  country?: string;
+  card_type?: string;
+  synced_at?: string;
 };
+
+export interface SapSalesOrderLine {
+  LineNum: number;
+  ItemCode: string;
+  Dscription: string;
+  Quantity: number;
+  OpenQty: number;
+  Price: number;
+  PriceBefDi: number;
+  DiscPrcnt: number;
+  LineTotal: number;
+  VatPrcnt: number;
+  VatGroup: string | null;
+  WhsCode: string;
+  TaxCode: string;
+  ShipDate: string;
+  AcctCode: string;
+  Project: string;
+  OcrCode: string;
+  LineStatus: string;
+}
+
+export interface SapSalesOrder {
+  DocEntry: number;
+  DocNum: number;
+  DocDate: string;
+  DocDueDate: string;
+  CardCode: string;
+  CardName: string;
+  NumAtCard: string | null;
+  DocStatus: string;
+  DocTotal: number;
+  VatSum: number;
+  DiscSum: number;
+  Comments: string | null;
+  SlpCode: number;
+  lines: SapSalesOrderLine[];
+}
 
 export interface Branch {
   id: number;
@@ -71,6 +114,20 @@ export const sapService = {
   getParties: async () => {
     const response = await api.get("/sap/parties/");
     return response.data;
+  },
+
+  getPartiesByCategory: async (category: string) => {
+    const response = await api.get("/sap/parties/category/", {
+      params: { category },
+    });
+    return (response.data?.data || []) as Party[];
+  },
+
+  getOpenSalesOrders: async (cardCode: string) => {
+    const response = await api.get("/hana/so/", {
+      params: { card_code: cardCode },
+    });
+    return (Array.isArray(response.data) ? response.data : []) as SapSalesOrder[];
   },
 
   getBranches: async () => {
