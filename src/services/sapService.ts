@@ -26,6 +26,7 @@ export interface Party  {
   id: number;
   card_code: string;
   card_name: string;
+  open_sales_order_count?: number;
   address?: string;
   category?: string;
   state?: string;
@@ -72,6 +73,12 @@ export interface SapSalesOrder {
   Comments: string | null;
   SlpCode: number;
   lines: SapSalesOrderLine[];
+}
+
+export interface OpenPartyResponse {
+  CardCode: string;
+  CardName: string;
+  Num_of_Open_SalesOrder: number;
 }
 
 export interface Branch {
@@ -121,6 +128,18 @@ export const sapService = {
       params: { category },
     });
     return (response.data?.data || []) as Party[];
+  },
+
+  getOpenParties: async () => {
+    const response = await api.get("/hana/open-parties/");
+    const data = Array.isArray(response.data) ? response.data : [];
+
+    return data.map((party: OpenPartyResponse, index: number) => ({
+      id: index,
+      card_code: party.CardCode,
+      card_name: party.CardName,
+      open_sales_order_count: Number(party.Num_of_Open_SalesOrder || 0),
+    })) as Party[];
   },
 
   getOpenSalesOrders: async (cardCode: string) => {

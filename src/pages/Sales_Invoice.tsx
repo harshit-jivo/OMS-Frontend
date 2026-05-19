@@ -49,11 +49,11 @@ export default function SalesInvoice() {
       setError("");
 
       try {
-        const data = await sapService.getPartiesByCategory("OIL");
+        const data = await sapService.getOpenParties();
         setParties(data);
       } catch (loadError) {
-        console.error("Error loading OIL parties:", loadError);
-        setError("Unable to load OIL parties.");
+        console.error("Error loading open parties:", loadError);
+        setError("Unable to load open parties.");
       } finally {
         setLoadingParties(false);
       }
@@ -218,9 +218,9 @@ export default function SalesInvoice() {
       <div className="si-head">
         <div>
           <h2 className="si-title">Sales Invoice Builder</h2>
-          <p className="si-subtitle">Select an OIL party, pick open SAP sales order lines, and prepare an invoice draft.</p>
+          <p className="si-subtitle">Select a party with open sales orders, pick SAP sales order lines, and prepare an invoice draft.</p>
         </div>
-        <span className="si-pill">OIL parties only</span>
+        <span className="si-pill">Open sales orders</span>
       </div>
 
       {error && <div className="si-alert">{error}</div>}
@@ -230,7 +230,7 @@ export default function SalesInvoice() {
           <div className="si-panel-head">
             <div>
               <h3>Party</h3>
-              <p>{parties.length} OIL parties synced from SAP</p>
+              <p>{parties.length} parties with open sales orders</p>
             </div>
           </div>
 
@@ -245,7 +245,7 @@ export default function SalesInvoice() {
             {loadingParties ? (
               <div className="si-empty">Loading parties...</div>
             ) : filteredParties.length === 0 ? (
-              <div className="si-empty">No matching OIL parties found.</div>
+              <div className="si-empty">No matching open parties found.</div>
             ) : (
               filteredParties.map((party) => (
                 <button
@@ -255,7 +255,11 @@ export default function SalesInvoice() {
                 >
                   <span className="si-party-name">{party.card_name}</span>
                   <span className="si-party-meta">
-                    {party.card_code} {party.state ? `- ${party.state}` : ""} {party.main_group ? `- ${party.main_group}` : ""}
+                    {party.card_code}
+                    {party.open_sales_order_count !== undefined
+                      ? ` - ${party.open_sales_order_count} open SO`
+                      : ""}
+                    {party.state ? ` - ${party.state}` : ""} {party.main_group ? ` - ${party.main_group}` : ""}
                   </span>
                 </button>
               ))
