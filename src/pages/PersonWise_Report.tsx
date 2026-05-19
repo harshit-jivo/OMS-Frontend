@@ -541,7 +541,7 @@ export default function PersonWise_Report() {
                     </thead>
                     <tbody>
                       {paginatedOrders.map((order, i) => (
-                        <tr key={order.id}>
+                        <tr key={order.id} className={order.is_foc ? "dr-foc-row" : ""}>
                           <td className="dr-muted">
                             {(currentPage - 1) * itemsPerPage + i + 1}
                           </td>
@@ -550,7 +550,13 @@ export default function PersonWise_Report() {
                           <td>{order.card_name}</td>
                           <td>{formatOrderCreatedAt(order.created_at)}</td>
                           <td>{order.delivery_date}</td>
-                          <td>{order.is_foc ? "Yes" : "No"}</td>
+                          <td>
+                            {order.is_foc ? (
+                              <span className="dr-foc-badge">FOC</span>
+                            ) : (
+                              <span className="dr-foc-empty">No</span>
+                            )}
+                          </td>
                           <td>
                             <span className={`dr-badge dr-badge-${(order.status_display || "").toLowerCase().replace(/\s+/g, "-")}`}>
                               {order.status_display}
@@ -621,6 +627,7 @@ export default function PersonWise_Report() {
                 <span className="dr-d-hf-label">Order Number</span>
                 <div className="dr-d-ordnum-row">
                   <span className="dr-d-ordnum">{orderDetails.order_number}</span>
+                  {orderDetails.is_foc ? <span className="dr-foc-badge dr-foc-badge-detail">FOC ORDER</span> : null}
                   <span className={`dr-badge dr-badge-${(orderDetails.status_display || "").toLowerCase().replace(/\s+/g, "-")}`}>{orderDetails.status_display}</span>
                 </div>
               </div>

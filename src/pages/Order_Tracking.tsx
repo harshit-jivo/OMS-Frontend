@@ -5,6 +5,19 @@ import type { Order, OrderLog } from "../services/ordersService";
 import { loadCurrentUserOrders } from "../utils/orderHistory";
 import "../styles/Order_Tracking.css";
 
+const formatCreatedDateTime = (value?: string | null) => {
+  if (!value) return "-";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString("en-GB", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
 export default function Order_Tracking() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -576,9 +589,10 @@ export default function Order_Tracking() {
                 <thead>
                   <tr>
                     <th>Order ID</th>
+                    <th>FOC</th>
                     <th>Card Code</th>
                     <th>Card Name</th>
-                    <th>Created Date</th>
+                    <th>Created At</th>
                     <th>Delivery Date</th>
                     <th>Status</th>
                     <th>Tracker</th>
@@ -586,11 +600,18 @@ export default function Order_Tracking() {
                 </thead>
                 <tbody>
                   {filteredOrders.map((order) => (
-                      <tr key={order.id}>
+                      <tr key={order.id} className={order.is_foc ? "tracker-foc-row" : ""}>
                         <td>{order.order_number}</td>
+                        <td>
+                          {order.is_foc ? (
+                            <span className="tracker-foc-badge">FOC</span>
+                          ) : (
+                            <span className="tracker-foc-empty">-</span>
+                          )}
+                        </td>
                         <td>{order.card_code}</td>
                         <td>{order.card_name}</td>
-                        <td>{order.created_at ? new Date(order.created_at).toLocaleDateString("en-GB") : "—"}</td>
+                        <td>{formatCreatedDateTime(order.created_at)}</td>
                         <td>{order.delivery_date}</td>
                         <td>
                           <span
@@ -665,6 +686,7 @@ export default function Order_Tracking() {
               >
                 {selectedOrder.status_display}
               </span>
+              {selectedOrder.is_foc ? <span className="tracker-foc-badge tracker-foc-badge-detail">FOC ORDER</span> : null}
             </div>
           </div>
 
@@ -682,8 +704,8 @@ export default function Order_Tracking() {
               <p>{selectedOrder.card_name}</p>
             </div>
             <div>
-              <p className="tracker-label">Created Date</p>
-              <p>{selectedOrder.created_at ? new Date(selectedOrder.created_at).toLocaleDateString("en-GB") : "-"}</p>
+              <p className="tracker-label">Created At</p>
+              <p>{formatCreatedDateTime(selectedOrder.created_at)}</p>
             </div>
             <div>
               <p className="tracker-label">Delivery Date</p>

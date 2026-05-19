@@ -5,6 +5,7 @@ import { getOrderItemSchemeNames, getOrderItemSchemes, getOrderItemSchemeQtyText
 import type { Order, OrderItem } from "../services/ordersService";
 import "../styles/Auditor_Order.css";
 import { useLocation, useNavigate } from "react-router-dom";
+import { loadDetailedOrders } from "../utils/orderHistory";
 import api from '../services/api';
 import { 
   HiCheckCircle,   // Approve
@@ -17,6 +18,19 @@ import {
 const now = new Date();
 const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0];
 const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString().split("T")[0];
+
+const formatCreatedDateTime = (value?: string | null) => {
+  if (!value) return "-";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString("en-GB", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
 
 export default function Auditor_orders() {
   const location = useLocation();
@@ -48,8 +62,9 @@ export default function Auditor_orders() {
     setIsOrdersLoading(true);
     try {
       const data = await ordersService.getOrders('AUDITOR_APPROVAL');
-      setOrders(data);
-      console.log("Fetched Orders:", data);
+      const detailedOrders = await loadDetailedOrders(data || []);
+      setOrders(detailedOrders);
+      console.log("Fetched Orders:", detailedOrders);
     } catch (error) {
       console.log("Error fetching orders:", error);
     } finally {
@@ -215,9 +230,10 @@ export default function Auditor_orders() {
                 <thead>
                   <tr>
                     <th>Order ID</th>
+                    <th>FOC</th>
                     <th>Card Code</th>
                     <th>Card Name</th>
-                    <th>Created Date</th>
+                    <th>Created At</th>
                     <th>Delivery Date</th>
                     {/* <th>Status</th> */}
                     <th>Details</th>
@@ -227,11 +243,18 @@ export default function Auditor_orders() {
                 </thead>
                 <tbody>
                   {filteredOrders.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((order) => (
-                      <tr key={order.id}>
+                      <tr key={order.id} className={order.is_foc ? "ao-foc-row" : ""}>
                         <td>{order.order_number}</td>
+                        <td>
+                          {order.is_foc ? (
+                            <span className="ao-foc-badge">FOC</span>
+                          ) : (
+                            <span className="ao-foc-empty">-</span>
+                          )}
+                        </td>
                         <td>{order.card_code}</td>
                         <td>{order.card_name}</td>
-                        <td>{order.created_at ? new Date(order.created_at).toLocaleDateString("en-GB") : "-"}</td>
+                        <td>{formatCreatedDateTime(order.created_at)}</td>
                         <td>{order.delivery_date}</td>
                         {/* <td>
                           <span className={`ao-badge ao-badge-${(order.status_display || "").toLowerCase().replace(/\s+/g, "-")}`}>
@@ -312,6 +335,7 @@ export default function Auditor_orders() {
                 <span className="ao-d-hf-label">Order Number</span>
                 <div className="ao-d-ordnum-row">
                   <span className="ao-d-ordnum">{orderDetails.order_number}</span>
+                  {orderDetails.is_foc ? <span className="ao-foc-badge ao-foc-badge-detail">FOC ORDER</span> : null}
                   {/* <span className={`ao-badge ao-badge-${(orderDetails.status_display || "").toLowerCase().replace(/\s+/g, "-")}`}>{orderDetails.status_display}</span> */}
                 </div>
               </div>
@@ -327,8 +351,8 @@ export default function Auditor_orders() {
               </div>
         
               <div className="ao-d-info-field">
-                <span className="ao-d-hf-label">Created Date</span>
-                <span className="ao-d-hf-value">{orderDetails.created_at ? new Date(orderDetails.created_at).toLocaleDateString("en-GB") : "-"}</span>
+                <span className="ao-d-hf-label">Created At</span>
+                <span className="ao-d-hf-value">{formatCreatedDateTime(orderDetails.created_at)}</span>
               </div>
         
               <div className="ao-d-info-field">

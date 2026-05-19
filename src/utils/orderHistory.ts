@@ -17,7 +17,7 @@ const sortOrders = (orders: Order[]) =>
 const uniqueOrders = (orders: Array<Pick<Order, "id">>) =>
   Array.from(new Map(orders.map((order) => [order.id, order])).values());
 
-const loadDetailedOrders = async (summaries: Array<Pick<Order, "id">>) => {
+export const loadDetailedOrders = async (summaries: Array<Pick<Order, "id">>) => {
   const detailedOrders = await Promise.all(
     uniqueOrders(summaries).map(async (order) => {
       try {

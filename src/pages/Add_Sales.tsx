@@ -1520,6 +1520,22 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
 
         <div className="sl-table-wrap">
           <table className="sl-table">
+            <colgroup>
+              <col className="sl-col-category" />
+              <col className="sl-col-brand" />
+              <col className="sl-col-variety" />
+              <col className="sl-col-type" />
+              <col className="sl-col-item" />
+              <col className="sl-col-pcs" />
+              <col className="sl-col-boxes" />
+              <col className="sl-col-qty" />
+              <col className="sl-col-ltrs" />
+              <col className="sl-col-basic-price" />
+              <col className="sl-col-market-price" />
+              <col className="sl-col-tax" />
+              <col className="sl-col-amount" />
+              <col className="sl-col-actions" />
+            </colgroup>
             <thead>
               <tr>
                 <th>Category</th>
@@ -1678,18 +1694,20 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
                       </select>
                     </td>
 
-                    <td>
+                    <td className="sl-pcs-cell">
                       <input
+                        className="sl-compact-number-input"
                         type="number"
                         value={row.pcs ? Number(row.pcs).toFixed(1) : ""}
                         readOnly
                       />
                     </td>
 
-                    <td>
+                    <td className="sl-boxes-cell">
                       <input
                         type="number"
                         name="boxes"
+                        className="sl-size-input"
                         value={row.boxes}
                         onChange={(e) => handleRowChange(index, e)}
                         disabled={row.confirmed && !isEditMode}
@@ -1697,10 +1715,11 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
                       />
                     </td>
 
-                    <td>
+                    <td className="sl-qty-cell">
                       <input
                         type="number"
                         name="qty"
+                        className="sl-size-input"
                         value={row.qty}
                         onChange={(e) => handleRowChange(index, e)}
                         disabled={row.confirmed && !isEditMode}
@@ -1708,12 +1727,12 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
                       />
                     </td>
 
-                    <td>
-                      <input type="number" value={row.ltrs} readOnly />
+                    <td className="sl-ltrs-cell">
+                      <input className="sl-compact-number-input" type="number" value={row.ltrs} readOnly />
                     </td>
 
-                    <td>
-                      <input type="number" value={row.basicPrice} readOnly />
+                    <td className="sl-basic-price-cell">
+                      <input className="sl-compact-number-input" type="number" value={row.basicPrice} readOnly />
                     </td>
 
                     <td>

@@ -8,7 +8,7 @@ import {
   getOrderItemTotalLtrs,
   ordersService,
 } from "../services/ordersService";
-import type { OrderItem, Order, OrderStatus, PartyProduct } from "../services/ordersService";
+import type { OrderItem, Order, OrderLog, OrderStatus, PartyProduct } from "../services/ordersService";
 import { loadCurrentUserOrders } from "../utils/orderHistory";
 import "../styles/View_Orders.css";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -39,6 +39,40 @@ type ItemFilterOption = {
   itemName: string;
 };
 
+const formatCreatedDateTime = (value?: string | null) => {
+  if (!value) return "-";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString("en-GB", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
+const isRejectedOrder = (order: Pick<Order, "status_display">) =>
+  String(order.status_display || "").toLowerCase().includes("reject");
+
+const getRejectedByFromLogs = (logs: OrderLog[]) => {
+  const isRealPerformer = (value: string | null) => {
+    const normalized = String(value || "").trim().toLowerCase();
+    return normalized && normalized !== "pending" && normalized !== "system";
+  };
+
+  return [...logs]
+    .reverse()
+    .find((log) => {
+      const statusName = String(log.status_name || "").toLowerCase();
+      const remarks = String(log.remarks || "").toLowerCase();
+      return (
+        isRealPerformer(log.performed_by_name) &&
+        (statusName.includes("reject") || remarks.includes("reject"))
+      );
+    })?.performed_by_name || null;
+};
+
 export default function View_Orders() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -57,6 +91,7 @@ export default function View_Orders() {
   const [fromDate, setFromDate] = useState(firstDay);
   const [toDate, setToDate] = useState(lastDay);
   const [currentPage, setCurrentPage] = useState(1);
+  const [rejectedByByOrderId, setRejectedByByOrderId] = useState<Record<number, string>>({});
   const itemsPerPage = 10;
 
   useEffect(() => {
@@ -171,6 +206,42 @@ export default function View_Orders() {
       isCancelled = true;
     };
   }, [partyFilter]);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    const fetchRejectedByNames = async () => {
+      const rejectedOrders = orders.filter(isRejectedOrder);
+
+      if (rejectedOrders.length === 0) {
+        setRejectedByByOrderId({});
+        return;
+      }
+
+      const entries = await Promise.all(
+        rejectedOrders.map(async (order) => {
+          try {
+            const logs = await ordersService.getOrderLogs(order.id);
+            const rejectedBy = getRejectedByFromLogs(logs);
+            return rejectedBy ? ([order.id, rejectedBy] as const) : null;
+          } catch (error) {
+            console.log(`Error fetching rejected-by log for order ${order.id}:`, error);
+            return null;
+          }
+        }),
+      );
+
+      if (!isCancelled) {
+        setRejectedByByOrderId(Object.fromEntries(entries.filter((entry): entry is readonly [number, string] => entry !== null)));
+      }
+    };
+
+    void fetchRejectedByNames();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [orders]);
 
   const itemOptions = useMemo<ItemFilterOption[]>(() => {
     const uniqueItems = new Map<string, ItemFilterOption>();
@@ -361,9 +432,10 @@ export default function View_Orders() {
                 <thead>
                   <tr>
                     <th>Order ID</th>
+                    <th>FOC</th>
                     <th>Card Code</th>
                     <th>Card Name</th>
-                    <th>Created Date</th>
+                    <th>Created At</th>
                     <th>Delivery Date</th>
                     <th>Status</th>
                     <th>Details</th>
@@ -372,16 +444,30 @@ export default function View_Orders() {
                 </thead>
                 <tbody>
                   {paginatedOrders.map((order) => (
-                      <tr key={order.id}>
+                      <tr key={order.id} className={order.is_foc ? "vo-foc-row" : ""}>
                         <td>{order.order_number}</td>
+                        <td>
+                          {order.is_foc ? (
+                            <span className="vo-foc-badge">FOC</span>
+                          ) : (
+                            <span className="vo-foc-empty">-</span>
+                          )}
+                        </td>
                         <td>{order.card_code}</td>
                         <td>{order.card_name}</td>
-                        <td>{order.created_at ? new Date(order.created_at).toLocaleDateString("en-GB") : "—"}</td>
+                        <td>{formatCreatedDateTime(order.created_at)}</td>
                         <td>{order.delivery_date}</td>
                         <td>
-                          <span className={`vo-badge vo-badge-${(order.status_display || "").toLowerCase().replace(/\s+/g, "-")}`}>
-                            {order.status_display}
-                          </span>
+                          <div className="vo-status-stack">
+                            <span className={`vo-badge vo-badge-${(order.status_display || "").toLowerCase().replace(/\s+/g, "-")}`}>
+                              {order.status_display}
+                            </span>
+                            {isRejectedOrder(order) && rejectedByByOrderId[order.id] ? (
+                              <span className="vo-rejected-by">
+                                By: {rejectedByByOrderId[order.id]}
+                              </span>
+                            ) : null}
+                          </div>
                         </td>
                         <td>
                           <button
@@ -442,12 +528,18 @@ export default function View_Orders() {
                 <span className="vo-d-hf-label">Order Number</span>
                 <div className="vo-d-ordnum-row">
                   <span className="vo-d-ordnum">{orderDetails.order_number}</span>
+                  {orderDetails.is_foc ? <span className="vo-foc-badge vo-foc-badge-detail">FOC ORDER</span> : null}
                   <span className={`vo-badge vo-badge-${(orderDetails.status_display || "").toLowerCase().replace(/\s+/g, "-")}`}>{orderDetails.status_display}</span>
+                  {isRejectedOrder(orderDetails) && rejectedByByOrderId[orderDetails.id] ? (
+                    <span className="vo-rejected-by vo-rejected-by-detail">
+                      By: {rejectedByByOrderId[orderDetails.id]}
+                    </span>
+                  ) : null}
                 </div>
               </div>
               <div className="vo-d-info-field">
-                <span className="vo-d-hf-label">Created Date</span>
-                <span className="vo-d-hf-value">{orderDetails.created_at ? new Date(orderDetails.created_at).toLocaleDateString("en-GB") : "—"}</span>
+                <span className="vo-d-hf-label">Created At</span>
+                <span className="vo-d-hf-value">{formatCreatedDateTime(orderDetails.created_at)}</span>
               </div>
               <div className="vo-d-info-field">
                 <span className="vo-d-hf-label">Delivery Date</span>

@@ -5,6 +5,7 @@ import { getOrderItemSchemeNames, getOrderItemSchemes, getOrderItemSchemeQtyText
 import type { Order, OrderItem } from "../services/ordersService";
 import "../styles/Billing_Order.css";
 import { useNavigate, useLocation } from "react-router-dom";
+import { loadDetailedOrders } from "../utils/orderHistory";
 import {
   HiCheckCircle,   // Approve
   HiXCircle,       // Reject
@@ -25,6 +26,19 @@ const firstDay = new Date(now.getFullYear(), now.getMonth(), 1)
 const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 1)
   .toISOString()
   .split("T")[0];
+
+const formatCreatedDateTime = (value?: string | null) => {
+  if (!value) return "-";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString("en-GB", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
 
 const isRejectedBillingOrder = (order: Order) => {
   const statusCode = String(order.status || "").toUpperCase();
@@ -67,7 +81,9 @@ export default function Billing_orders() {
     setIsOrdersLoading(true);
     try {
       const data: Order[] = await ordersService.getOrders(undefined, true);
-      setOrders(data.filter((order) => !isRejectedBillingOrder(order)));
+      const activeOrders = data.filter((order) => !isRejectedBillingOrder(order));
+      const detailedOrders = await loadDetailedOrders(activeOrders);
+      setOrders(detailedOrders.filter((order) => !isRejectedBillingOrder(order)));
     } catch (error) {
       console.log("Error fetching orders:", error);
     } finally {
@@ -255,9 +271,10 @@ export default function Billing_orders() {
               <thead>
                 <tr>
                   <th>Order ID</th>
+                  <th>FOC</th>
                   <th>Card Code</th>
                   <th>Card Name</th>
-                  <th>Created Date</th>
+                  <th>Created At</th>
                   <th>Delivery Date</th>
                   {/* <th>Status</th> */}
                   <th>Details</th>
@@ -269,7 +286,7 @@ export default function Billing_orders() {
               <tbody>
                 {isOrdersLoading ? (
                   <tr>
-                    <td colSpan={9}>
+                    <td colSpan={10}>
                       <div className="order-loading-state">
                         <span className="order-loading-spinner" />
                         <span>Loading orders...</span>
@@ -278,11 +295,18 @@ export default function Billing_orders() {
                   </tr>
                 ) : filteredOrders.length > 0 ? (
                   filteredOrders.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((order) => (
-                    <tr key={order.id}>
+                    <tr key={order.id} className={order.is_foc ? "bo-foc-row" : ""}>
                       <td>{order.order_number}</td>
+                      <td>
+                        {order.is_foc ? (
+                          <span className="bo-foc-badge">FOC</span>
+                        ) : (
+                          <span className="bo-foc-empty">-</span>
+                        )}
+                      </td>
                       <td>{order.card_code}</td>
                       <td>{order.card_name}</td>
-                      <td>{order.created_at ? new Date(order.created_at).toLocaleDateString("en-GB") : "-"}</td>
+                      <td>{formatCreatedDateTime(order.created_at)}</td>
                       <td>{order.delivery_date}</td>
                       {/* <td>
                         <span className={`bo-badge bo-badge-${(order.status_display || "").toLowerCase().replace(/\s+/g, "-")}`}>
@@ -338,7 +362,7 @@ export default function Billing_orders() {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={7} className="bo-empty">No orders found</td>
+                    <td colSpan={10} className="bo-empty">No orders found</td>
                   </tr>
                 )}
               </tbody>
@@ -375,6 +399,7 @@ export default function Billing_orders() {
                 <span className="bo-d-hf-label">Order Number</span>
                 <div className="bo-d-ordnum-row">
                   <span className="bo-d-ordnum">{orderDetails.order_number}</span>
+                  {orderDetails.is_foc ? <span className="bo-foc-badge bo-foc-badge-detail">FOC ORDER</span> : null}
                   {/* <span className={`bo-badge bo-badge-${(orderDetails.status_display || "").toLowerCase().replace(/\s+/g, "-")}`}>{orderDetails.status_display}</span> */}
                 </div>
                 <div className="ao-d-info-field">
@@ -387,8 +412,8 @@ export default function Billing_orders() {
                 <span className="bo-d-hf-value">{orderDetails.created_by_name || "-"}</span>
               </div>
               <div className="bo-d-info-field">
-                <span className="bo-d-hf-label">Created Date</span>
-                <span className="bo-d-hf-value">{orderDetails.created_at ? new Date(orderDetails.created_at).toLocaleDateString("en-GB") : "-"}</span>
+                <span className="bo-d-hf-label">Created At</span>
+                <span className="bo-d-hf-value">{formatCreatedDateTime(orderDetails.created_at)}</span>
               </div>
               <div className="bo-d-info-field">
                 <span className="bo-d-hf-label">Delivery Date</span>

@@ -40,6 +40,15 @@
         .bo-table tbody tr:hover { background: #eff6ff; }
         .bo-table tbody tr:nth-child(even) { background: #f8fafc; }
         .bo-table tbody tr:nth-child(even):hover { background: #eff6ff; }
+        .bo-table tbody tr.bo-foc-row,
+        .bo-table tbody tr.bo-foc-row:nth-child(even) {
+          background: #fff7ed;
+          box-shadow: inset 4px 0 0 #f97316;
+        }
+        .bo-table tbody tr.bo-foc-row:hover,
+        .bo-table tbody tr.bo-foc-row:nth-child(even):hover {
+          background: #ffedd5;
+        }
         .bo-action-cell { white-space: nowrap; }
         .bo-empty { text-align: center; color: #94a3b8; padding: 32px !important; font-style: italic; }
 
@@ -56,6 +65,27 @@
         .bo-badge-pending, .bo-badge-pending-approval { background: #fef3c7; color: #92400e; }
         .bo-badge-need-approval { background: #ede9fe; color: #5b21b6; }
         .bo-badge-billed { background: #d1fae5; color: #065f46; }
+        .bo-foc-badge {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-height: 24px;
+          padding: 3px 10px;
+          border: 1px solid #fed7aa;
+          border-radius: 6px;
+          background: #f97316;
+          color: #fff;
+          font-size: 11px;
+          font-weight: 800;
+          letter-spacing: .04em;
+          white-space: nowrap;
+        }
+        .bo-foc-badge-detail {
+          background: #fb923c;
+          border-color: rgba(255,255,255,.32);
+          box-shadow: 0 0 0 3px rgba(251,146,60,.18);
+        }
+        .bo-foc-empty { color: #94a3b8; font-weight: 600; }
 
         /* Buttons */
         .bo-btn-view {

@@ -270,9 +270,25 @@ background: #475569;
 
 .sl-table {
 width: 100%;
-min-width: 1040px; 
+min-width: 1300px;
+table-layout: fixed;
 border-collapse: collapse;
 }
+
+.sl-col-category { width: 90px; }
+.sl-col-brand { width: 90px; }
+.sl-col-variety { width: 104px; }
+.sl-col-type { width: 76px; }
+.sl-col-item { width: 160px; }
+.sl-col-pcs { width: 64px; }
+.sl-col-boxes { width: 88px; }
+.sl-col-qty { width: 88px; }
+.sl-col-ltrs { width: 96px; }
+.sl-col-basic-price { width: 104px; }
+.sl-col-market-price { width: 104px; }
+.sl-col-tax { width: 62px; }
+.sl-col-amount { width: 104px; }
+.sl-col-actions { width: 130px; }
 
 /* header */
 .sl-table thead {
@@ -299,6 +315,8 @@ color: #334155;
 .sl-table td input,
 .sl-table td select {
 width: 100%;
+min-height: 36px;
+padding: 6px 8px;
 border: 1px solid #d1d5db;
 border-radius: var(--radius-sm, 8px);
 font-size: var(--font-ui, 13px);
@@ -310,6 +328,37 @@ color-scheme: light;
 .sl-table td input:focus,
 .sl-table td select:focus {
 border-color: #2563eb;
+}
+
+.sl-table .sl-pcs-cell {
+width: 64px;
+min-width: 64px;
+}
+
+.sl-table .sl-boxes-cell,
+.sl-table .sl-qty-cell {
+width: 88px;
+min-width: 88px;
+}
+
+.sl-table .sl-ltrs-cell {
+width: 96px;
+min-width: 96px;
+}
+
+.sl-table .sl-basic-price-cell {
+width: 104px;
+min-width: 104px;
+}
+
+.sl-table .sl-size-input,
+.sl-table .sl-compact-number-input {
+min-width: 0;
+min-height: 40px;
+padding: 7px 8px;
+font-size: 14px;
+font-weight: 400;
+text-align: center;
 }
 
 .sl-scheme-row-wrap td {

@@ -31,6 +31,19 @@ const BILLING_REJECTED_CODES = ["BILLING_REJECTED"];
 
 const normalizeStatusClass = (status: string) => status.toLowerCase().replace(/\s+/g, "-");
 
+const formatCreatedDateTime = (value?: string | null) => {
+  if (!value) return "-";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString("en-GB", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
 const getDecisionType = (order: Order, mode: TrackingMode) => {
   const normalized = (order.status_display || "").toLowerCase();
   const statusCode = String(order.status || "").toUpperCase();
@@ -362,9 +375,11 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
               <thead>
                 <tr>
                   <th>Order ID</th>
+                  <th>FOC</th>
               {/* <th>Quotation No</th> */}
                   <th>Card Code</th>
                   <th>Card Name</th>
+                  <th>Created At</th>
                   <th>Delivery Date</th>
                   <th>Status</th>
                   <th>Details</th>
@@ -374,7 +389,7 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
               <tbody>
                 {isOrdersLoading ? (
                   <tr>
-                    <td colSpan={7}>
+                    <td colSpan={8}>
                       <div className="order-loading-state">
                         <span className="order-loading-spinner" />
                         <span>Loading orders...</span>
@@ -383,8 +398,15 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
                   </tr>
                 ) : paginatedOrders.length > 0 ? (
                   paginatedOrders.map((order) => (
-                    <tr key={order.id}>
+                    <tr key={order.id} className={order.is_foc ? "ot-foc-row" : ""}>
                       <td>{order.order_number}</td>
+                      <td>
+                        {order.is_foc ? (
+                          <span className="ot-foc-badge">FOC</span>
+                        ) : (
+                          <span className="ot-foc-empty">-</span>
+                        )}
+                      </td>
                   {/* <td>
                     {String(order.sap_doc_number || "").trim() ? (
                       <span className="ot-badge" style={{ background: "#f8fafc", color: "#475569", border: "1px solid #e2e8f0" }}>
@@ -394,6 +416,7 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
                   </td> */}
                       <td>{order.card_code}</td>
                       <td>{order.card_name}</td>
+                      <td>{formatCreatedDateTime(order.created_at)}</td>
                       <td>{order.delivery_date}</td>
                       <td>
                         <span className={`ot-badge ot-badge-${normalizeStatusClass(order.status_display || "unknown")}`}>
@@ -464,6 +487,7 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
                 <span className="ot-detail-label">Order Number</span>
                 <div className="ot-detail-order-row">
                   <span className="ot-detail-number">{orderDetails.order_number}</span>
+                  {orderDetails.is_foc ? <span className="ot-foc-badge ot-foc-badge-detail">FOC ORDER</span> : null}
                   <span className={`ot-badge ot-badge-${normalizeStatusClass(orderDetails.status_display || "unknown")}`}>
                     {orderDetails.status_display || "Unknown"}
                   </span>
@@ -478,8 +502,8 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
                 <span className="ot-detail-value">{orderDetails.created_by_name || "—"}</span>
               </div>
               <div className="ot-detail-field">
-                <span className="ot-detail-label">Created Date</span>
-                <span className="ot-detail-value">{orderDetails.created_at ? new Date(orderDetails.created_at).toLocaleDateString("en-GB") : "—"}</span>
+                <span className="ot-detail-label">Created At</span>
+                <span className="ot-detail-value">{formatCreatedDateTime(orderDetails.created_at)}</span>
               </div>
               <div className="ot-detail-field">
                 <span className="ot-detail-label">Delivery Date</span>
