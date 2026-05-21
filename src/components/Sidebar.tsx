@@ -1,6 +1,27 @@
 import { useState, useEffect } from "react";
 import type { ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import {
+  HiArrowPath,
+  HiArrowRightOnRectangle,
+  HiCalendarDays,
+  HiChartBar,
+  HiChevronDown,
+  HiClock,
+  HiClipboardDocumentList,
+  HiCube,
+  HiDocumentText,
+  HiEye,
+  HiGift,
+  HiHome,
+  HiPlusCircle,
+  HiPresentationChartLine,
+  HiReceiptPercent,
+  HiShoppingCart,
+  HiUserCircle,
+  HiUserGroup,
+  HiUsers,
+} from "react-icons/hi2";
 import { getCurrentUser } from "../services/authService";
 import api from "../services/api";
 import "./Sidebar.css";
@@ -17,6 +38,12 @@ type Notification = {
   order_id?: number;
   created_at: string;
 };
+
+const SidebarIcon = ({ children }: { children: ReactNode }) => (
+  <span className="sb-nav-icon" aria-hidden="true">
+    {children}
+  </span>
+);
 
 export default function Sidebar({ children }: SidebarProps) {
 
@@ -256,13 +283,17 @@ export default function Sidebar({ children }: SidebarProps) {
         <ul>
           <li className={location.pathname === "/Dashboard" ? "active" : ""}>
             <Link to="/Dashboard" onClick={closeSidebar}>
+              <SidebarIcon><HiHome /></SidebarIcon>
               Dashboard
             </Link>
           </li>
 
           {(userRole?.toLowerCase() === "admin") && (
             <li className={location.pathname === "/App_User" ? "active" : ""}>
-              <Link to="/App_User" onClick={closeSidebar}>App User</Link>
+              <Link to="/App_User" onClick={closeSidebar}>
+                <SidebarIcon><HiUsers /></SidebarIcon>
+                App User
+              </Link>
             </li>
           )}
 
@@ -270,19 +301,31 @@ export default function Sidebar({ children }: SidebarProps) {
 
             <>
             <li className={location.pathname === "/Sap_Sync" ? "active" : ""}>
-              <Link to="/Sap_Sync" onClick={closeSidebar}>SAP Sync</Link>
+              <Link to="/Sap_Sync" onClick={closeSidebar}>
+                <SidebarIcon><HiArrowPath /></SidebarIcon>
+                SAP Sync
+              </Link>
             </li>
 
              <li className={location.pathname === "/Party_Assignment" ? "active" : ""}>
-              <Link to="/Party_Assignment" onClick={closeSidebar}>Party Assignment</Link>
+              <Link to="/Party_Assignment" onClick={closeSidebar}>
+                <SidebarIcon><HiUserGroup /></SidebarIcon>
+                Party Assignment
+              </Link>
             </li>
 
             <li className={location.pathname === "/Party_Product_Assignment" ? "active" : ""}>
-              <Link to="/Party_Product_Assignment" onClick={closeSidebar}>Party Product Assignment</Link>
+              <Link to="/Party_Product_Assignment" onClick={closeSidebar}>
+                <SidebarIcon><HiCube /></SidebarIcon>
+                Party Product Assignment
+              </Link>
             </li>
 
              <li className={location.pathname === "/Add_Scheme" ? "active" : ""}>
-              <Link to="/Add_Scheme" onClick={closeSidebar}>Add Scheme</Link>
+              <Link to="/Add_Scheme" onClick={closeSidebar}>
+                <SidebarIcon><HiReceiptPercent /></SidebarIcon>
+                Add Scheme
+              </Link>
             </li>
 
             </>
@@ -291,20 +334,21 @@ export default function Sidebar({ children }: SidebarProps) {
           {(userRole?.toLowerCase() === "manager" || userRole?.toLowerCase() == "billing") && (
             <li>
               <div className="dropdown-toggle" onClick={() => setSalesOpen(!salesOpen)}>
+                <SidebarIcon><HiShoppingCart /></SidebarIcon>
                 Sales
-                <span className={`sb-chevron ${salesOpen ? "open" : ""}`}></span>
+                <HiChevronDown className={`sb-chevron ${salesOpen ? "open" : ""}`} />
               </div>
               {salesOpen && (
                 <ul className="dropdown-list">
-                  <li><Link to="/Add_Sales" onClick={closeSidebar}>Add Sales</Link></li>
+                  <li><Link to="/Add_Sales" onClick={closeSidebar}><SidebarIcon><HiPlusCircle /></SidebarIcon>Add Sales</Link></li>
                   {userRole?.toLowerCase() === "manager" && (
-                    <li><Link to="/FOC" onClick={closeSidebar}>FOC</Link></li>
+                    <li><Link to="/FOC" onClick={closeSidebar}><SidebarIcon><HiGift /></SidebarIcon>FOC</Link></li>
                   )}
                   {userRole?.toLowerCase() === "billing" && (
-                    <li><Link to="/Sales_Invoice" onClick={closeSidebar}>Sales Invoice</Link></li>
+                    <li><Link to="/Sales_Invoice" onClick={closeSidebar}><SidebarIcon><HiDocumentText /></SidebarIcon>Sales Invoice</Link></li>
                   )}
                
-                  <li><Link to="/View_Orders" onClick={closeSidebar}>View Orders</Link></li>
+                  <li><Link to="/View_Orders" onClick={closeSidebar}><SidebarIcon><HiEye /></SidebarIcon>View Orders</Link></li>
                 </ul>
               )}
             </li>
@@ -313,10 +357,16 @@ export default function Sidebar({ children }: SidebarProps) {
           {(userRole?.toLowerCase() ===  "auditor") && (
             <>
               <li className={location.pathname === "/Auditor_orders" ? "active" : ""}>
-                <Link to="/Auditor_orders" onClick={closeSidebar}>Pending Orders</Link>
+                <Link to="/Auditor_orders" onClick={closeSidebar}>
+                  <SidebarIcon><HiClipboardDocumentList /></SidebarIcon>
+                  Pending Orders
+                </Link>
               </li>
               <li className={location.pathname === "/Auditor_status_tracking" ? "active" : ""}>
-                <Link to="/Auditor_status_tracking" onClick={closeSidebar}>Status Tracking</Link>
+                <Link to="/Auditor_status_tracking" onClick={closeSidebar}>
+                  <SidebarIcon><HiClock /></SidebarIcon>
+                  Status Tracking
+                </Link>
               </li>
             </>
           )}
@@ -324,10 +374,16 @@ export default function Sidebar({ children }: SidebarProps) {
           {(userRole?.toLowerCase() ===  "billing" ) && (
             <>
               <li className={location.pathname === "/Billing_orders" ? "active" : ""}>
-                <Link to="/Billing_orders" onClick={closeSidebar}>Pending Orders</Link>
+                <Link to="/Billing_orders" onClick={closeSidebar}>
+                  <SidebarIcon><HiClipboardDocumentList /></SidebarIcon>
+                  Pending Orders
+                </Link>
               </li>
               <li className={location.pathname === "/Billing_status_tracking" ? "active" : ""}>
-                <Link to="/Billing_status_tracking" onClick={closeSidebar}>Status Tracking</Link>
+                <Link to="/Billing_status_tracking" onClick={closeSidebar}>
+                  <SidebarIcon><HiClock /></SidebarIcon>
+                  Status Tracking
+                </Link>
               </li>
             </>
           )}
@@ -335,7 +391,10 @@ export default function Sidebar({ children }: SidebarProps) {
           {(userRole?.toLowerCase() ===  "manager" ) && (
             <>
               <li className={location.pathname === "/Order_Tracking" ? "active" : ""}>
-                <Link to="/Order_Tracking" onClick={closeSidebar}>Order Tracker</Link>
+                <Link to="/Order_Tracking" onClick={closeSidebar}>
+                  <SidebarIcon><HiPresentationChartLine /></SidebarIcon>
+                  Order Tracker
+                </Link>
               </li>
             </>
           )}
@@ -343,14 +402,15 @@ export default function Sidebar({ children }: SidebarProps) {
           {(userRole?.toLowerCase() ===  "billing" || userRole?.toLowerCase() === "admin") && (
             <li>
               <div className="dropdown-toggle" onClick={() => setReportsOpen(!reportsOpen)}>
+                <SidebarIcon><HiChartBar /></SidebarIcon>
                 Reports
-                <span className={`sb-chevron ${reportsOpen ? "open" : ""}`}></span>
+                <HiChevronDown className={`sb-chevron ${reportsOpen ? "open" : ""}`} />
               </div>
               {reportsOpen && (
                 <ul className="dropdown-list">
-                  <li><Link to="/Daily_Report" onClick={closeSidebar}>Daily Report</Link></li>
-                  <li><Link to="/PersonWise_Report" onClick={closeSidebar}>Person Wise Report</Link></li>
-                  <li><Link to="/Sales_Report" onClick={closeSidebar}>Sales Report</Link></li>
+                  <li><Link to="/Daily_Report" onClick={closeSidebar}><SidebarIcon><HiCalendarDays /></SidebarIcon>Daily Report</Link></li>
+                  <li><Link to="/PersonWise_Report" onClick={closeSidebar}><SidebarIcon><HiUserCircle /></SidebarIcon>Person Wise Report</Link></li>
+                  <li><Link to="/Sales_Report" onClick={closeSidebar}><SidebarIcon><HiChartBar /></SidebarIcon>Sales Report</Link></li>
                   
                 </ul>
               )}
@@ -365,9 +425,7 @@ export default function Sidebar({ children }: SidebarProps) {
             className="sb-logout"
             onClick={() => setShowLogoutModal(true)}
           >
-            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.6" style={{width:'14px',height:'14px',flexShrink:0}}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h6a2 2 0 012 2v1"/>
-            </svg>
+            <SidebarIcon><HiArrowRightOnRectangle /></SidebarIcon>
             Logout
           </button>
         </div>
