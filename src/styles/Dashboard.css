@@ -566,6 +566,10 @@
   margin-bottom: 18px;
 }
 
+.db-charts-row--single {
+  grid-template-columns: 1fr;
+}
+
 .db-chart-box--wide {
   min-width: 0;
   background:

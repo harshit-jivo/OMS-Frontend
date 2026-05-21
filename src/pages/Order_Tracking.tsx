@@ -28,6 +28,8 @@ export default function Order_Tracking() {
   const [tracker, setTracker] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [statusFilter, setStatusFilter] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
   
   useEffect(() => {
     void fetchOrders();
@@ -82,6 +84,22 @@ export default function Order_Tracking() {
         return first - second;
       });
   }, [orders, statusFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredOrders.length / itemsPerPage));
+  const paginatedOrders = useMemo(
+    () => filteredOrders.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage),
+    [filteredOrders, currentPage],
+  );
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [statusFilter]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   const orderedLogs = useMemo(() => {
     return [...logs].sort((a, b) => {
@@ -599,7 +617,7 @@ export default function Order_Tracking() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredOrders.map((order) => (
+                  {paginatedOrders.map((order) => (
                       <tr key={order.id} className={order.is_foc ? "tracker-foc-row" : ""}>
                         <td>{order.order_number}</td>
                         <td>
@@ -652,6 +670,30 @@ export default function Order_Tracking() {
             </div>
           ) : (
             <div className="vo-empty" style={{ padding: "40px", textAlign: "center", color: "#64748b", background: "#f8fafc", borderRadius: "8px", border: "1px dashed #cbd5e1", margin: "20px 0" }}>No orders found</div>
+          )}
+
+          {!loading && filteredOrders.length > itemsPerPage && (
+            <div className="tracker-pagination">
+              <button
+                type="button"
+                className="tracker-pg-btn"
+                disabled={currentPage === 1}
+                onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+              >
+                Prev
+              </button>
+              <span className="tracker-pg-info">
+                {currentPage} / {totalPages}
+              </span>
+              <button
+                type="button"
+                className="tracker-pg-btn"
+                disabled={currentPage === totalPages}
+                onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+              >
+                Next
+              </button>
+            </div>
           )}
         </div>
       )}

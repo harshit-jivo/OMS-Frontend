@@ -139,6 +139,7 @@ export interface Order {
   sap_doc_number?: string;
   created_by_name?: string;
   party_state?: string;
+  decision_type?: "accepted" | "rejected";
 
 }
 
@@ -344,6 +345,13 @@ export const ordersService = {
   getOrdersStatus: async () => {
     const response = await api.get("/orders/status/");
     return response.data;
+  },
+
+  getStatusTrackingOrders: async (mode: "auditor" | "billing") => {
+    const response = await api.get("/orders/status-tracking/", {
+      params: { mode },
+    });
+    return Array.isArray(response.data) ? response.data.map(normalizeOrder) : response.data;
   },
 
   getBranches: async () => {

@@ -3,7 +3,6 @@ import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
 import type { Order, OrderItem } from "../services/ordersService";
 import { sapService } from "../services/sapService";
-import { loadManagerOrders } from "../utils/orderHistory";
 import { getOrderItemSchemes, getOrderItemTotalLtrs, ordersService } from "../services/ordersService";
 import "../styles/Order_Status_Tracking.css";
 import {
@@ -45,6 +44,10 @@ const formatCreatedDateTime = (value?: string | null) => {
 };
 
 const getDecisionType = (order: Order, mode: TrackingMode) => {
+  if (order.decision_type === "accepted" || order.decision_type === "rejected") {
+    return order.decision_type;
+  }
+
   const normalized = (order.status_display || "").toLowerCase();
   const statusCode = String(order.status || "").toUpperCase();
 
@@ -97,7 +100,7 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
   const fetchOrders = async () => {
     setIsOrdersLoading(true);
     try {
-      const data = await loadManagerOrders();
+      const data = await ordersService.getStatusTrackingOrders(mode);
       setOrders(data || []);
     } catch (error) {
       console.log("Error fetching orders:", error);

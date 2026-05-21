@@ -37,6 +37,7 @@ interface ChartsData {
   monthly_sales: { month: string; label: string; revenue: number; count: number }[];
   statewise_orders: { state: string; orders: number }[];
   status_distribution: { status: string; label: string; count: number }[];
+  decision_distribution?: { status: string; label: string; count: number }[];
   top_parties: { card_code: string; card_name: string; count: number; revenue: number }[];
   category_sales: { category: string; total_sales: number; count: number }[];
 }
@@ -56,6 +57,13 @@ const TOP_PARTY_VIEW_OPTIONS: Array<{ label: string; value: TopPartyView }> = [
   { label: "All", value: "all" },
   { label: "Top 5", value: 5 },
   { label: "Top 10", value: 10 },
+];
+const MONTH_OPTIONS = [
+  { label: "All Months", value: 0 },
+  ...Array.from({ length: 12 }, (_, index) => ({
+    label: new Date(2000, index).toLocaleString("default", { month: "short" }),
+    value: index + 1,
+  })),
 ];
 
 const currentYear = new Date().getFullYear();
@@ -115,6 +123,7 @@ const EMPTY_CHARTS: ChartsData = {
   monthly_sales: [],
   statewise_orders: [],
   status_distribution: [],
+  decision_distribution: [],
   top_parties: [],
   category_sales: [],
 };
@@ -212,6 +221,7 @@ export default function Dashboard() {
   const role = normalizeRole(user?.role);
   const roleMeta = roleContent[role];
   const isBilling = role === "billing";
+  const shouldExpandVolumeChart = role === "billing" || role === "auditor";
 
   const activeStatus = useMemo(
     () => (charts?.status_distribution ?? []).filter((item) => item.count > 0),
@@ -246,13 +256,6 @@ export default function Dashboard() {
       return ["approved", "accepted", "completed", "delivered"].some((value) => statusValue.includes(value));
     })
     .reduce((sum, item) => sum + item.count, 0);
-  const rejectedCount = activeStatus
-    .filter((item) => {
-      const statusValue = `${item.status} ${item.label}`.toLowerCase();
-      return ["rejected", "declined", "cancelled", "canceled"].some((value) => statusValue.includes(value));
-    })
-    .reduce((sum, item) => sum + item.count, 0);
-
   // Billing-specific counts derived from status_counts (more accurate than keyword matching)
   const statusCounts = kpi?.status_counts ?? {};
   const billingRejectedCount = Object.entries(statusCounts).reduce(
@@ -271,18 +274,12 @@ export default function Dashboard() {
     )
   );
   const auditorPendingCount = kpi?.pending_review_orders ?? 0;
-  const auditorReviewedCount = kpi?.reviewed_orders ?? (auditorAcceptedCount + auditorRejectedCount);
   const billingAcceptedCount = kpi?.accepted_orders ?? 0;
-  const billingRejectedHandledCount = kpi?.rejected_orders ?? billingRejectedCount;
+  const billingRejectedHandledCount = billingRejectedCount;
   const billingHandledCount = billingAcceptedCount + billingRejectedHandledCount;
   const totalOrders = kpi?.total_orders ?? 0;
   const billingPendingCount = kpi?.pending_review_orders ?? billingQueueCount;
   const completionCount = role === "auditor" ? auditorAcceptedCount : role === "billing" ? billingHandledCount : acceptedCount;
-  const completionRate = totalOrders > 0 ? Math.round((completionCount / totalOrders) * 100) : 0;
-  const monthlyMomentum = totalOrders > 0 ? Math.round(((kpi?.this_month_orders ?? 0) / totalOrders) * 100) : 0;
-  const reviewedRate = totalOrders > 0
-    ? Math.round(((role === "auditor" ? auditorReviewedCount : role === "billing" ? billingHandledCount : acceptedCount + rejectedCount) / totalOrders) * 100)
-    : 0;
   const outstandingOrders = role === "auditor"
     ? auditorPendingCount
     : billingPendingCount;
@@ -296,7 +293,40 @@ export default function Dashboard() {
     { status: "rejected", label: "Rejected", count: billingRejectedHandledCount },
     { status: "queue", label: "Pending", count: billingPendingCount },
   ].filter((item) => item.count > 0);
-  const statusItems = role === "auditor" ? auditorDecisionChart : role === "billing" ? billingDecisionChart : activeStatus;
+  const decisionDistribution = charts?.decision_distribution;
+  const monthDecisionChart = (decisionDistribution ?? []).filter((item) => item.count > 0);
+  const statusItems = (role === "auditor" || role === "billing")
+    ? decisionDistribution
+      ? monthDecisionChart
+      : monthDecisionChart.length > 0
+      ? monthDecisionChart
+      : role === "auditor"
+        ? auditorDecisionChart
+        : billingDecisionChart
+    : activeStatus;
+  const selectedMonthLabel = MONTH_OPTIONS.find((option) => option.value === month)?.label ?? "All Months";
+  const selectedPeriodLabel = month === 0 ? `${year}` : `${selectedMonthLabel} ${year}`;
+  const overviewTotalCount = statusItems.reduce((sum, item) => sum + item.count, 0);
+  const overviewAcceptedCount = statusItems
+    .filter((item) => {
+      const statusValue = `${item.status} ${item.label}`.toLowerCase();
+      return ["accepted", "approved", "completed", "delivered"].some((value) => statusValue.includes(value));
+    })
+    .reduce((sum, item) => sum + item.count, 0);
+  const overviewRejectedCount = statusItems
+    .filter((item) => {
+      const statusValue = `${item.status} ${item.label}`.toLowerCase();
+      return ["rejected", "declined", "cancelled", "canceled"].some((value) => statusValue.includes(value));
+    })
+    .reduce((sum, item) => sum + item.count, 0);
+  const overviewPendingCount = statusItems
+    .filter((item) => {
+      const statusValue = `${item.status} ${item.label}`.toLowerCase();
+      return ["pending", "queue", "review", "billing"].some((value) => statusValue.includes(value));
+    })
+    .reduce((sum, item) => sum + item.count, 0);
+  const overviewHandledCount = overviewAcceptedCount + overviewRejectedCount;
+  const overviewRate = overviewTotalCount > 0 ? Math.round((overviewHandledCount / overviewTotalCount) * 100) : 0;
 
   const kpiConfig = {
     admin: [
@@ -490,7 +520,21 @@ export default function Dashboard() {
             <div className="db-panel-title">Visual Overview</div>
             <div className="db-highlights-subtitle">Quick chart summaries for {roleMeta.focus.toLowerCase()}</div>
           </div>
-          <div className="db-highlights-badge">3 charts</div>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+            <select
+              className="db-year-select"
+              value={month}
+              onChange={(e) => setMonth(Number(e.target.value))}
+              style={{ height: "32px", fontSize: "13px", padding: "0 10px" }}
+            >
+              {MONTH_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <div className="db-highlights-badge">3 charts</div>
+          </div>
         </div>
         <div className="db-overview-grid">
           <div className="db-overview-card db-overview-card--pulse">
@@ -504,19 +548,6 @@ export default function Dashboard() {
                 </div>
               </div>
             <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", width: "100%" }}>
-                <select
-                  className="db-year-select"
-                  value={month}
-                  onChange={(e) => setMonth(Number(e.target.value))}
-                  style={{ height: "30px", fontSize: "13px", padding: "0 8px" }}
-                >
-                  <option value={0}>All Months</option>
-                  {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
-                    <option key={m} value={m}>
-                      {new Date(2000, m - 1).toLocaleString('default', { month: 'short' })}
-                    </option>
-                  ))}
-                </select>
                 <div className="db-segmented-control" role="tablist" aria-label="Top parties view">
                   {TOP_PARTY_VIEW_OPTIONS.map((option) => (
                     <button
@@ -560,58 +591,66 @@ export default function Dashboard() {
             <div className="db-overview-top">
               <div>
                 <div className="db-highlight-label">
-                  {role === "auditor" ? "Review Completion" : role === "manager" ? "Monthly Momentum" : role === "admin" ? "Order Throughput" : "Handling Progress"}
+                  {role === "auditor" ? "Review Completion" : role === "manager" ? "Order Momentum" : role === "admin" ? "Order Throughput" : "Handling Progress"}
                 </div>
                 <div className="db-overview-hero">
-                  {role === "auditor" ? fmt(auditorReviewedCount) : role === "manager" ? fmt(kpi?.this_month_orders ?? 0) : role === "admin" ? fmt(kpi?.this_month_orders ?? 0) : `${completionRate}%`}
+                  {role === "auditor"
+                    ? fmt(overviewHandledCount)
+                    : role === "manager" || role === "admin"
+                      ? fmt(overviewTotalCount)
+                      : `${overviewRate}%`}
                 </div>
                 <div className="db-highlight-sub">
                   {role === "auditor"
-                    ? auditorReviewedCount > 0
-                      ? `${fmt(auditorPendingCount)} pending review in ${year}`
-                      : "No audit reviews completed yet"
+                    ? overviewTotalCount > 0
+                      ? `${fmt(overviewPendingCount)} pending review in ${selectedPeriodLabel}`
+                      : `No audit data for ${selectedPeriodLabel}`
                     : role === "manager"
-                      ? (kpi?.this_month_orders ?? 0) > 0
-                        ? `${fmt(kpi?.today_orders ?? 0)} created today in ${year}`
-                        : "No orders created this month yet"
+                      ? overviewTotalCount > 0
+                        ? `${fmt(overviewAcceptedCount)} completed or approved in ${selectedPeriodLabel}`
+                        : `No orders for ${selectedPeriodLabel}`
                     : role === "admin"
-                      ? (kpi?.this_month_orders ?? 0) > 0
-                        ? `${fmt(kpi?.today_orders ?? 0)} orders created today across the platform`
-                        : "No order activity recorded this month yet"
-                    : completionCount > 0
-                      ? `${fmt(billingPendingCount)} still waiting in billing queue`
-                      : "No handled orders yet"}
+                      ? overviewTotalCount > 0
+                        ? `${fmt(overviewHandledCount)} handled in ${selectedPeriodLabel}`
+                        : `No order activity for ${selectedPeriodLabel}`
+                    : overviewTotalCount > 0
+                      ? `${fmt(overviewPendingCount)} still waiting in billing queue for ${selectedPeriodLabel}`
+                      : `No billing activity for ${selectedPeriodLabel}`}
                 </div>
               </div>
             </div>
             <div className="db-progress">
               <div className="db-progress-bar">
-                <div className="db-progress-fill" style={{ width: `${role === "auditor" ? reviewedRate : role === "manager" || role === "admin" ? monthlyMomentum : completionRate}%` }} />
+                <div className="db-progress-fill" style={{ width: `${overviewRate}%` }} />
               </div>
               <div className="db-progress-meta">
                 <span>
                   {role === "auditor"
-                    ? `${fmt(auditorPendingCount)} pending`
+                    ? `${fmt(overviewPendingCount)} pending`
                     : role === "manager"
-                      ? `${fmt(kpi?.today_orders ?? 0)} today`
+                      ? `${fmt(overviewAcceptedCount)} completed`
                       : role === "admin"
-                        ? `${fmt(kpi?.today_orders ?? 0)} today`
-                        : `${fmt(completionCount)} handled`}
+                        ? `${fmt(overviewHandledCount)} handled`
+                        : `${fmt(overviewHandledCount)} handled`}
                 </span>
                 <strong>
                   {role === "auditor"
-                    ? `${fmt(auditorReviewedCount)} reviewed`
+                    ? `${fmt(overviewHandledCount)} reviewed`
                     : role === "manager" || role === "admin"
-                      ? `${fmt(totalOrders)} total`
-                      : `${fmt(totalOrders)} total`}
+                      ? `${fmt(overviewTotalCount)} total`
+                      : `${fmt(overviewTotalCount)} total`}
                 </strong>
               </div>
             </div>
           </div>
 
           <div className="db-overview-card db-overview-card--summary">
-            <div className="db-highlight-label">{chartCopy[role].statusTitle}</div>
-            <div className="db-highlight-sub">{chartCopy[role].statusSubtitle}</div>
+            <div className="db-overview-top db-overview-top--compact">
+              <div>
+                <div className="db-highlight-label">{chartCopy[role].statusTitle}</div>
+                <div className="db-highlight-sub">{chartCopy[role].statusSubtitle}</div>
+              </div>
+            </div>
             {statusItems.length === 0 ? (
               <div className="db-no-data">No data for this period</div>
             ) : (
@@ -649,7 +688,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {!isBilling && (
+      {!shouldExpandVolumeChart && (
       <div className="db-charts-row">
         <div className="db-chart-box db-chart-box--wide" style={{ gridColumn: "1 / -1" }}>
           <div className="db-chart-head">
@@ -686,7 +725,7 @@ export default function Dashboard() {
       </div>
       )}
 
-      <div className="db-charts-row">
+      <div className={`db-charts-row${shouldExpandVolumeChart ? " db-charts-row--single" : ""}`}>
         <div className="db-chart-box db-chart-box--wide">
           <div className="db-chart-head">
             <div>
@@ -701,13 +740,13 @@ export default function Dashboard() {
           {monthlySales.length === 0 ? (
             <div className="db-no-data">No monthly order data for this period</div>
           ) : (
-            <ResponsiveContainer width="100%" height={250}>
+            <ResponsiveContainer width="100%" height={shouldExpandVolumeChart ? 360 : 250}>
               <BarChart data={monthlySales} margin={{ top: 10, right: 16, bottom: 0, left: 10 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#dbe4ea" />
                 <XAxis dataKey="label" tick={{ fontSize: 12, fill: "#5b6878" }} />
                 <YAxis tick={{ fontSize: 11, fill: "#5b6878" }} width={42} />
                 <Tooltip formatter={(v) => [v, "Orders"]} />
-                <Bar dataKey="count" radius={[6, 6, 0, 0]}>
+                <Bar dataKey="count" radius={[6, 6, 0, 0]} maxBarSize={shouldExpandVolumeChart ? 44 : 72}>
                   {monthlySales.map((item, index) => (
                     <Cell key={item.label} fill={PALETTE[index % PALETTE.length]} />
                   ))}
@@ -717,6 +756,7 @@ export default function Dashboard() {
           )}
         </div>
 
+        {!shouldExpandVolumeChart && (
         <div className="db-chart-box">
           <div className="db-chart-head">
             <div>
@@ -746,6 +786,7 @@ export default function Dashboard() {
             </ResponsiveContainer>
           )}
         </div>
+        )}
       </div>
     </div>
   );
