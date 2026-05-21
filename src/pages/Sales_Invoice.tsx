@@ -6,6 +6,7 @@ import "../styles/Sales_Invoice.css";
 type SelectedLine = {
   docEntry: number;
   docNum: number;
+  docDueDate: string;
   lineNum: number;
   itemCode: string;
   description: string;
@@ -33,9 +34,22 @@ const formatDate = (value: string) => {
 
 const lineKey = (docEntry: number, lineNum: number) => `${docEntry}-${lineNum}`;
 
+const toSapDate = (value?: string) => {
+  if (!value) return new Date().toISOString().slice(0, 10);
+
+  const [datePart] = value.split(" ");
+  return datePart || new Date().toISOString().slice(0, 10);
+};
+
+const containsSearch = (values: Array<string | number | null | undefined>, query: string) =>
+  values
+    .filter((value) => value !== null && value !== undefined)
+    .some((value) => String(value).toLowerCase().includes(query));
+
 export default function SalesInvoice() {
   const [parties, setParties] = useState<Party[]>([]);
   const [partySearch, setPartySearch] = useState("");
+  const [orderSearch, setOrderSearch] = useState("");
   const [selectedParty, setSelectedParty] = useState<Party | null>(null);
   const [salesOrders, setSalesOrders] = useState<SapSalesOrder[]>([]);
   const [selectedLines, setSelectedLines] = useState<Record<string, SelectedLine>>({});
@@ -67,12 +81,14 @@ export default function SalesInvoice() {
       if (!selectedParty) {
         setSalesOrders([]);
         setSelectedLines({});
+        setOrderSearch("");
         return;
       }
 
       setLoadingOrders(true);
       setError("");
       setSelectedLines({});
+      setOrderSearch("");
 
       try {
         const data = await sapService.getOpenSalesOrders(selectedParty.card_code);
@@ -101,6 +117,57 @@ export default function SalesInvoice() {
 
   const selectedLineList = useMemo(() => Object.values(selectedLines), [selectedLines]);
 
+  const filteredSalesOrders = useMemo(() => {
+    const query = orderSearch.trim().toLowerCase();
+    if (!query) return salesOrders;
+
+    return salesOrders
+      .map((order) => {
+        const orderMatches = containsSearch(
+          [
+            order.DocEntry,
+            order.DocNum,
+            order.DocDate,
+            order.DocDueDate,
+            order.CardCode,
+            order.CardName,
+            order.NumAtCard,
+            order.Comments,
+            order.DocStatus,
+            order.DocTotal,
+          ],
+          query,
+        );
+
+        if (orderMatches) return order;
+
+        const matchingLines = order.lines.filter((line) =>
+          containsSearch(
+            [
+              line.LineNum,
+              line.ItemCode,
+              line.Dscription,
+              line.Quantity,
+              line.OpenQty,
+              line.Price,
+              line.WhsCode,
+              line.TaxCode,
+              line.VatGroup,
+              line.VatPrcnt,
+              line.AcctCode,
+              line.Project,
+              line.OcrCode,
+              line.LineStatus,
+            ],
+            query,
+          ),
+        );
+
+        return matchingLines.length > 0 ? { ...order, lines: matchingLines } : null;
+      })
+      .filter((order): order is SapSalesOrder => Boolean(order));
+  }, [orderSearch, salesOrders]);
+
   const totals = useMemo(() => {
     return selectedLineList.reduce(
       (sum, line) => {
@@ -119,16 +186,14 @@ export default function SalesInvoice() {
 
   const invoicePayload = useMemo(
     () => ({
-      card_code: selectedParty?.card_code || "",
-      card_name: selectedParty?.card_name || "",
-      lines: selectedLineList.map((line) => ({
-        base_doc_entry: line.docEntry,
-        base_doc_num: line.docNum,
-        base_line_num: line.lineNum,
-        item_code: line.itemCode,
-        quantity: line.invoiceQty,
-        warehouse_code: line.whsCode,
-        tax_code: line.taxCode,
+      CardCode: selectedParty?.card_code || "",
+      DocDueDate: toSapDate(selectedLineList[0]?.docDueDate),
+      Comments: "Sales invoice pushed from OMS",
+      DocumentLines: selectedLineList.map((line) => ({
+        BaseType: 17,
+        BaseEntry: line.docEntry,
+        BaseLine: line.lineNum,
+        Quantity: line.invoiceQty,
       })),
     }),
     [selectedLineList, selectedParty],
@@ -148,6 +213,7 @@ export default function SalesInvoice() {
       next[key] = {
         docEntry: order.DocEntry,
         docNum: order.DocNum,
+        docDueDate: order.DocDueDate,
         lineNum: line.LineNum,
         itemCode: line.ItemCode,
         description: line.Dscription,
@@ -179,6 +245,7 @@ export default function SalesInvoice() {
           next[key] = {
             docEntry: order.DocEntry,
             docNum: order.DocNum,
+            docDueDate: order.DocDueDate,
             lineNum: line.LineNum,
             itemCode: line.ItemCode,
             description: line.Dscription,
@@ -282,73 +349,86 @@ export default function SalesInvoice() {
           ) : salesOrders.length === 0 ? (
             <div className="si-empty si-large-empty">No open sales orders found for this party.</div>
           ) : (
-            <div className="si-orders">
-              {salesOrders.map((order) => {
-                const selectedCount = order.lines.filter((line) => selectedLines[lineKey(order.DocEntry, line.LineNum)]).length;
+            <>
+              <input
+                className="si-search si-order-search"
+                value={orderSearch}
+                onChange={(event) => setOrderSearch(event.target.value)}
+                placeholder="Omni search SO, DocEntry, item, description, warehouse, tax"
+              />
 
-                return (
-                  <article className="si-order" key={order.DocEntry}>
-                    <div className="si-order-head">
-                      <div>
-                        <h4>SO #{order.DocNum}</h4>
-                        <p>
-                          DocEntry {order.DocEntry} - {formatDate(order.DocDate)} - Due {formatDate(order.DocDueDate)}
-                        </p>
-                      </div>
-                      <div className="si-order-actions">
-                        <span>{selectedCount}/{order.lines.length} lines</span>
-                        <button onClick={() => toggleOrder(order)}>
-                          {selectedCount === order.lines.length ? "Clear order" : "Select order"}
-                        </button>
-                      </div>
-                    </div>
+              {filteredSalesOrders.length === 0 ? (
+                <div className="si-empty si-large-empty">No sales order lines match your search.</div>
+              ) : (
+                <div className="si-orders">
+                  {filteredSalesOrders.map((order) => {
+                    const selectedCount = order.lines.filter((line) => selectedLines[lineKey(order.DocEntry, line.LineNum)]).length;
 
-                    <div className="si-lines">
-                      {order.lines.map((line) => {
-                        const key = lineKey(order.DocEntry, line.LineNum);
-                        const selected = selectedLines[key];
-                        const disabled = Number(line.OpenQty || 0) <= 0;
-
-                        return (
-                          <div className={`si-line ${selected ? "selected" : ""}`} key={key}>
-                            <label className="si-check">
-                              <input
-                                type="checkbox"
-                                checked={Boolean(selected)}
-                                disabled={disabled}
-                                onChange={() => toggleLine(order, line)}
-                              />
-                              <span />
-                            </label>
-
-                            <div className="si-line-main">
-                              <strong>{line.Dscription}</strong>
-                              <span>
-                                {line.ItemCode} - Line {line.LineNum} - {line.WhsCode} - {line.TaxCode}
-                              </span>
-                            </div>
-
-                            <div className="si-line-numbers">
-                              <span>Open: {line.OpenQty}</span>
-                              <span>Price: {formatAmount(Number(line.Price || 0))}</span>
-                              {selected && (
-                                <input
-                                  type="number"
-                                  min="0"
-                                  max={selected.openQty}
-                                  value={selected.invoiceQty}
-                                  onChange={(event) => updateInvoiceQty(key, event.target.value)}
-                                />
-                              )}
-                            </div>
+                    return (
+                      <article className="si-order" key={order.DocEntry}>
+                        <div className="si-order-head">
+                          <div>
+                            <h4>SO #{order.DocNum}</h4>
+                            <p>
+                              DocEntry {order.DocEntry} - {formatDate(order.DocDate)} - Due {formatDate(order.DocDueDate)}
+                            </p>
                           </div>
-                        );
-                      })}
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
+                          <div className="si-order-actions">
+                            <span>{selectedCount}/{order.lines.length} lines</span>
+                            <button onClick={() => toggleOrder(order)}>
+                              {selectedCount === order.lines.length ? "Clear order" : "Select order"}
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="si-lines">
+                          {order.lines.map((line) => {
+                            const key = lineKey(order.DocEntry, line.LineNum);
+                            const selected = selectedLines[key];
+                            const disabled = Number(line.OpenQty || 0) <= 0;
+
+                            return (
+                              <div className={`si-line ${selected ? "selected" : ""}`} key={key}>
+                                <label className="si-check">
+                                  <input
+                                    type="checkbox"
+                                    checked={Boolean(selected)}
+                                    disabled={disabled}
+                                    onChange={() => toggleLine(order, line)}
+                                  />
+                                  <span />
+                                </label>
+
+                                <div className="si-line-main">
+                                  <strong>{line.Dscription}</strong>
+                                  <span>
+                                    {line.ItemCode} - Line {line.LineNum} - {line.WhsCode} - {line.TaxCode}
+                                  </span>
+                                </div>
+
+                                <div className="si-line-numbers">
+                                  <span>Open: {line.OpenQty}</span>
+                                  <span>Price: {formatAmount(Number(line.Price || 0))}</span>
+                                  {selected && (
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      max={selected.openQty}
+                                      value={selected.invoiceQty}
+                                      onChange={(event) => updateInvoiceQty(key, event.target.value)}
+                                    />
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+            </>
           )}
         </section>
 
