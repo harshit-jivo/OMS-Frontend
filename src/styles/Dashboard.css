@@ -118,6 +118,14 @@
   gap: 16px;
 }
 
+.db-filter-group {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .db-title {
   margin: 0 0 4px;
   font-size: 24px;
