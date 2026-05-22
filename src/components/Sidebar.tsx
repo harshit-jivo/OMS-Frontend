@@ -212,8 +212,8 @@ export default function Sidebar({ children }: SidebarProps) {
             className="sidebar-collapse-btn"
             type="button"
             onClick={toggleSidebarCollapsed}
-            title={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
-            aria-label={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
+            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
             <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
               {sidebarCollapsed ? (
