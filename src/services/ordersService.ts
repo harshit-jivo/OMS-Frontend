@@ -347,7 +347,7 @@ export const ordersService = {
     return response.data;
   },
 
-  getStatusTrackingOrders: async (mode: "auditor" | "billing") => {
+  getStatusTrackingOrders: async (mode: "auditor" | "billing" | "rate_approver") => {
     const response = await api.get("/orders/status-tracking/", {
       params: { mode },
     });

@@ -9,7 +9,7 @@ import {
   HiEye,HiArrowDownTray
 }from "react-icons/hi2";
 
-type TrackingMode = "auditor" | "billing";
+type TrackingMode = "auditor" | "billing" | "rate_approver";
 
 type OrderStatusTrackingProps = {
   mode: TrackingMode;
@@ -22,11 +22,14 @@ const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString()
 const ACCEPTED_KEYWORDS: Record<TrackingMode, string[]> = {
   auditor: ["billed", "completed", "quotation"],
   billing: ["auditor", "audit", "billed", "completed", "quotation"],
+  rate_approver: ["billing", "approved", "accepted", "rate"],
 };
 const REJECTED_KEYWORDS = ["rejected", "declined", "cancelled", "canceled"];
 const BILLING_REJECTED_KEYWORDS = ["billing rejected", "rejected by billing", "billing reject"];
 const AUDITOR_REJECTED_CODES = ["REJECTED"];
 const BILLING_REJECTED_CODES = ["BILLING_REJECTED"];
+const APPROVER_ACCEPTED_STATUS_CODES = ["APPROVED", "BILLING"];
+const RATE_APPROVER_REJECTED_KEYWORDS = ["rate approver rejected", "rate rejected", "rejected"];
 
 const normalizeStatusClass = (status: string) => status.toLowerCase().replace(/\s+/g, "-");
 
@@ -69,6 +72,15 @@ const getDecisionType = (order: Order, mode: TrackingMode) => {
     }
   }
 
+  if (mode === "rate_approver") {
+    if (RATE_APPROVER_REJECTED_KEYWORDS.some((keyword) => normalized.includes(keyword))) {
+      return "rejected";
+    }
+    if (APPROVER_ACCEPTED_STATUS_CODES.includes(statusCode) || normalized.includes("billing")) {
+      return "accepted";
+    }
+  }
+
   if (ACCEPTED_KEYWORDS[mode].some((keyword) => normalized.includes(keyword))) {
     return "accepted";
   }
@@ -91,7 +103,12 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
   const fetchedQuotationIds = useRef<Set<number>>(new Set());
 
   const itemsPerPage = 10;
-  const pageTitle = mode === "auditor" ? "Auditor Status Tracking" : "Billing Status Tracking";
+  const pageTitle =
+    mode === "auditor"
+      ? "Auditor Status Tracking"
+      : mode === "billing"
+        ? "Billing Status Tracking"
+        : "Rate Approver Status Tracking";
   
   useEffect(() => {
     void fetchOrders();

@@ -8,6 +8,7 @@ import Add_Sales from "./pages/Add_Sales";
 import View_Orders from "./pages/View_Orders";
 import Auditor_orders from "./pages/Auditor_Order";
 import Billing_orders from "./pages/Billing_Order";
+import RateApproverOrders from "./pages/Rate_Approver_Order";
 import Order_Status_Tracking from "./pages/Order_Status_Tracking";
 import Daily_Report from "./pages/Daily_Report";
 import PersonWise_Report from "./pages/PersonWise_Report";
@@ -20,6 +21,7 @@ import Party_Product_Assignment from "./pages/Party_Product_Assignment";
 import Add_Scheme from "./pages/Add_Scheme";
 import FOC from "./pages/FOC";
 import SalesInvoice from "./pages/Sales_Invoice";
+import Staff from "./pages/Staff";
 
 function App() {
   return (
@@ -102,6 +104,14 @@ function App() {
         />
 
         <Route
+          path="/Rate_Approver_orders"
+          element={
+            <Sidebar>
+              <RateApproverOrders />
+            </Sidebar>}
+        />
+
+        <Route
           path="/Auditor_status_tracking"
           element={
             <Sidebar>
@@ -114,6 +124,14 @@ function App() {
           element={
             <Sidebar>
               <Order_Status_Tracking mode="billing" />
+            </Sidebar>}
+        />
+
+        <Route
+          path="/Rate_Approver_status_tracking"
+          element={
+            <Sidebar>
+              <Order_Status_Tracking mode="rate_approver" />
             </Sidebar>}
         />
 
@@ -170,6 +188,14 @@ function App() {
           element={
             <Sidebar>
               <Add_Scheme />
+            </Sidebar>}
+        />
+
+        <Route
+          path="/Staff"
+          element={
+            <Sidebar>
+              <Staff />
             </Sidebar>}
         />
 

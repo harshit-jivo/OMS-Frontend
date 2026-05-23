@@ -63,6 +63,11 @@ export default function Sidebar({ children }: SidebarProps) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [showNotificationsModal, setShowNotificationsModal] = useState(false);
+  const normalizedRole = userRole?.toLowerCase().replace(/[_-]+/g, " ").trim() || "";
+  const isRateApprover =
+    normalizedRole === "rate approver" ||
+    normalizedRole === "rateapprover" ||
+    normalizedRole === "approver";
 
   const closeSidebar = () => {
     setMenuOpen(false);
@@ -171,8 +176,8 @@ export default function Sidebar({ children }: SidebarProps) {
   };
 
   const handleNotificationClick = async (notification: Notification) => {
-    const role = userRole?.toLowerCase() || "";
-    const isActionableRole = role === "auditor" || role === "billing";
+    const role = normalizedRole;
+    const isActionableRole = role === "auditor" || role === "billing" || isRateApprover;
 
     if (!isActionableRole) {
       if (!notification.is_read) {
@@ -195,6 +200,7 @@ export default function Sidebar({ children }: SidebarProps) {
     const navState = notification.order_id ? { state: { openOrderId: notification.order_id } } : {};
     if (role === "auditor") navigate("/Auditor_orders", navState);
     else if (role === "billing") navigate("/Billing_orders", navState);
+    else if (isRateApprover) navigate("/Rate_Approver_orders", navState);
     else if (role === "manager") navigate("/Order_Tracking", navState);
     else navigate("/View_Orders", navState);
   };
@@ -229,7 +235,7 @@ export default function Sidebar({ children }: SidebarProps) {
           <span className="logo-text">OMS</span>
         </div>
         <div className="header-right" style={{ display: 'flex', alignItems: 'center' }}>
-          {["auditor", "billing", "manager"].includes(userRole?.toLowerCase()) && (
+          {(["auditor", "billing", "manager"].includes(normalizedRole) || isRateApprover) && (
             <button 
               className="header-bell-btn" 
               onClick={() => setShowNotificationsModal(true)}
@@ -328,6 +334,13 @@ export default function Sidebar({ children }: SidebarProps) {
               </Link>
             </li>
 
+            <li className={location.pathname === "/Staff" ? "active" : ""}>
+              <Link to="/Staff" onClick={closeSidebar}>
+                <SidebarIcon><HiReceiptPercent /></SidebarIcon>
+                Staff Orders
+              </Link>
+            </li>
+
             </>
           )}
 
@@ -381,6 +394,23 @@ export default function Sidebar({ children }: SidebarProps) {
               </li>
               <li className={location.pathname === "/Billing_status_tracking" ? "active" : ""}>
                 <Link to="/Billing_status_tracking" onClick={closeSidebar}>
+                  <SidebarIcon><HiClock /></SidebarIcon>
+                  Status Tracking
+                </Link>
+              </li>
+            </>
+          )}
+
+          {isRateApprover && (
+            <>
+              <li className={location.pathname === "/Rate_Approver_orders" ? "active" : ""}>
+                <Link to="/Rate_Approver_orders" onClick={closeSidebar}>
+                  <SidebarIcon><HiClipboardDocumentList /></SidebarIcon>
+                  Pending Orders
+                </Link>
+              </li>
+              <li className={location.pathname === "/Rate_Approver_status_tracking" ? "active" : ""}>
+                <Link to="/Rate_Approver_status_tracking" onClick={closeSidebar}>
                   <SidebarIcon><HiClock /></SidebarIcon>
                   Status Tracking
                 </Link>
