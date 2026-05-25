@@ -10,6 +10,7 @@ export interface Product {
   sal_pack_unit: string | null;
   tax_rate: string | number;
   basic_rate: string | number;
+  staff_rate?: string | number;
 };
 
 export interface PartyProduct {
@@ -92,6 +93,8 @@ export interface OrderItem {
 
 export interface CreateOrder {
   order_id?: number;
+  order_type?: "PARTY" | "STAFF";
+  employee_id?: string;
   card_code: string;
   card_name: string;
   bill_to_id: number;
@@ -287,6 +290,11 @@ export const ordersService = {
     const response = await api.get("/orders/schemes/", {
       params: state_code ? { state_code } : undefined,
     });
+    return response.data || [];
+  },
+
+  getStaffProducts: async () => {
+    const response = await api.get("/orders/staff-products/");
     return response.data || [];
   },
 

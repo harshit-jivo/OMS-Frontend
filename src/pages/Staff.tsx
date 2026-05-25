@@ -4,7 +4,7 @@ import { ordersService } from "../services/ordersService";
 import type { Product } from "../services/ordersService";
 import { userService } from "../services/userService";
 import "../styles/Add_Sales.css";
-import { sapService } from "../services/sapService";
+
 
 type StaffRow = {
   category: string;
@@ -73,6 +73,8 @@ export default function Staff() {
   const [products, setProducts] = useState<Product[]>([]);
   const [categoryOptions, setCategoryOptions] = useState<string[]>([]);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [savedOrderNumber, setSavedOrderNumber] = useState("");
   const [typeSearch, setTypeSearch] = useState<Record<number, string>>({});
   const [itemSearch, setItemSearch] = useState<Record<number, string>>({});
   const [typeDropdownOpen, setTypeDropdownOpen] = useState<Record<number, boolean>>({});
@@ -91,7 +93,7 @@ export default function Staff() {
       try {
         const [branchData, productData, categoryData] = await Promise.all([
           ordersService.getBranches(),
-          sapService.getProducts(),
+          ordersService.getStaffProducts(),
           userService.getCategories(),
         ]);
         const nextProducts = asArray(productData) as Product[];
@@ -235,7 +237,7 @@ export default function Staff() {
         if (product) {
           row.type = getProductType(product.item_name);
           row.pcs = String(product.sal_factor2 ?? "");
-          row.basicPrice = String(product.basic_rate ?? "");
+          row.basicPrice = String(product.staff_rate ?? "");
           row.tax = String(product.tax_rate ?? "");
         }
       }
@@ -355,9 +357,10 @@ export default function Staff() {
     setTypeDropdownOpen({});
     setItemDropdownOpen({});
     setShowSuccess(false);
+    setSavedOrderNumber("");
   };
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
 
     if (!formData.dispatch) {
@@ -366,7 +369,7 @@ export default function Staff() {
     }
 
     if (!employeeName.trim()) {
-      alert("Please enter employee name.");
+      alert("Please enter Employee ID.");
       return;
     }
 
@@ -380,8 +383,62 @@ export default function Staff() {
       return;
     }
 
-    setShowSuccess(true);
-    setRows([createEmptyRow()]);
+    const selectedBranch = branches.find(
+      (branch) => String(branch.bpl_id) === String(formData.dispatch),
+    );
+
+    const payload = {
+      order_type: "STAFF" as const,
+      employee_id: employeeName.trim(),
+      card_code: "",
+      card_name: employeeName.trim(),
+      bill_to_id: 0,
+      bill_to_address: "",
+      ship_to_id: 0,
+      ship_to_address: "",
+      dispatch_from_id: Number(formData.dispatch),
+      dispatch_from_name: selectedBranch?.bpl_name || "",
+      delivery_date: formData.date,
+      company: 0,
+      total_amount: totalAmount,
+      tax_amount: taxAmount,
+      grand_total: grandTotal,
+      items: confirmedRows.map((row) => {
+        const product = getRowProduct(row);
+
+        return {
+          item_code: product?.item_code || "",
+          item_name: row.item,
+          category: row.category,
+          brand: "",
+          variety: "",
+          item_type: row.type,
+          qty: Number(row.qty || 0),
+          pcs: Number(row.pcs || 0),
+          boxes: Number(row.boxes || 0),
+          ltrs: Number(row.ltrs || 0),
+          basic_price: Number(row.basicPrice || 0),
+          market_price: 0,
+          tax_rate: Number(row.tax || 0),
+          total: Number(row.amount || 0),
+          schemes: [],
+          total_ltrs: Number(row.ltrs || 0),
+        };
+      }),
+    };
+
+    try {
+      setIsSaving(true);
+      const response = await ordersService.createOrder(payload);
+      setSavedOrderNumber(String(response?.order_number || ""));
+      setShowSuccess(true);
+      setRows([createEmptyRow()]);
+    } catch (error) {
+      console.log("Error saving staff order:", error);
+      alert("Failed to save staff order.");
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -397,7 +454,7 @@ export default function Staff() {
         <div className="sl-grid sl-order-grid">
           <div className="sl-field">
             <label className="sl-label" htmlFor="employeeName">
-              Employee Name
+              Employee ID
             </label>
             <div className="sl-input-wrap">
               <input
@@ -405,7 +462,7 @@ export default function Staff() {
                 type="text"
                 value={employeeName}
                 onChange={(e) => setEmployeeName(e.target.value)}
-                placeholder="Enter employee name"
+                placeholder="Enter Employee ID"
                 required
               />
             </div>
@@ -848,11 +905,12 @@ export default function Staff() {
             type="submit"
             className="sl-btn-save"
             disabled={
+              isSaving ||
               confirmedRows.length === 0 ||
               rows.some((row) => !row.confirmed && row.item)
             }
           >
-            <span>Save Staff Order</span>
+            <span>{isSaving ? "Saving..." : "Save Staff Order"}</span>
           </button>
           <button type="button" className="sl-btn-clear" onClick={handleClear}>
             <span>Clear</span>
@@ -872,7 +930,11 @@ export default function Staff() {
               </div>
               <div className="sl-success-row">
                 <span>Status</span>
-                <strong>Frontend only</strong>
+                <strong>Saved</strong>
+              </div>
+              <div className="sl-success-row">
+                <span>Order No.</span>
+                <strong>{savedOrderNumber || "-"}</strong>
               </div>
             </div>
             <div className="sl-modal-actions">

@@ -398,6 +398,12 @@ export default function Sidebar({ children }: SidebarProps) {
                   Status Tracking
                 </Link>
               </li>
+              <li className={location.pathname === "/Order_Tracking" ? "active" : ""}>
+                <Link to="/Order_Tracking" onClick={closeSidebar}>
+                  <SidebarIcon><HiPresentationChartLine /></SidebarIcon>
+                  Order Tracker
+                </Link>
+              </li>
             </>
           )}
 
