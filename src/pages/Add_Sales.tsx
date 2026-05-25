@@ -166,7 +166,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
   const isBillingUser = userRole.toLowerCase() === "billing";
   const isFocOrder = isFocMode || editOrderIsFoc;
   const canEditPoNumber =
-    isEditMode && isBillingUser && locationState?.allowPoNumber === true;
+    isBillingUser && (!isEditMode || locationState?.allowPoNumber === true);
 
   // Use Effects
   useEffect(() => {
