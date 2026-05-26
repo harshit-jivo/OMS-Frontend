@@ -62,6 +62,12 @@ export type InvoiceForm = {
   shippingPriority: string;
 };
 
+export type FreightRow = {
+  expenseCode: string;
+  expenseName: string;
+  lineTotal: number;
+};
+
 export type Party = {
   CardCode: string;
   CardName: string;
@@ -100,7 +106,7 @@ export const emptyForm = (): InvoiceForm => ({
   shippingPriority: "Normal",
 });
 
-export const calculateTotals = (lines: SelectedLine[], discountPercent = 0) => {
+export const calculateTotals = (lines: SelectedLine[], discountPercent = 0, freightRows: FreightRow[] = []) => {
   const totalQty = lines.reduce((sum, line) => sum + toNumber(line.invoiceQty), 0);
   const totalBeforeDiscount = lines.reduce(
     (sum, line) => sum + toNumber(line.invoiceQty) * toNumber(line.Price),
@@ -113,6 +119,7 @@ export const calculateTotals = (lines: SelectedLine[], discountPercent = 0) => {
     const lineDiscount = lineTotal * (Math.max(toNumber(discountPercent), 0) / 100);
     return sum + Math.max(lineTotal - lineDiscount, 0) * (toNumber(line.VatPrcnt) / 100);
   }, 0);
+  const freight = freightRows.reduce((sum, row) => sum + Math.max(toNumber(row.lineTotal), 0), 0);
 
   return {
     totalQty,
@@ -120,7 +127,8 @@ export const calculateTotals = (lines: SelectedLine[], discountPercent = 0) => {
     discountAmount,
     taxable,
     tax,
-    grandTotal: taxable + tax,
+    freight,
+    grandTotal: taxable + tax + freight,
   };
 };
 
@@ -128,9 +136,17 @@ export const buildInvoicePayload = (
   party: Party | null,
   selectedLines: Record<string, SelectedLine>,
   form: InvoiceForm,
+  freightRows: FreightRow[] = [],
 ) => {
   const lines = Object.values(selectedLines);
   const firstLine = lines[0];
+  const additionalExpenses = freightRows
+    .filter((row) => row.expenseCode && toNumber(row.lineTotal) > 0)
+    .map((row) => ({
+      ExpenseCode: toNumber(row.expenseCode),
+      LineTotal: toNumber(row.lineTotal),
+      Remarks: "",
+    }));
 
   return {
     CardCode: party?.CardCode || "",
@@ -157,5 +173,6 @@ export const buildInvoicePayload = (
       WarehouseCode: line.WhsCode,
       TaxCode: line.TaxCode,
     })),
+    DocumentAdditionalExpenses: additionalExpenses,
   };
 };

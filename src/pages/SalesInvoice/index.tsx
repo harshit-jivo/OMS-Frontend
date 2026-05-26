@@ -30,12 +30,12 @@ export default function SalesInvoiceWizard() {
           <h1>Sales Invoice</h1>
           <p>Create A/R invoice drafts from open SAP sales orders.</p>
         </div>
-        {state.selectedParty && state.step > 1 && (
+        {/* {state.selectedParty && state.step > 1 && (
           <div className="si-selected-party">
             <strong>{state.selectedParty.CardName} · {state.selectedParty.CardCode}</strong>
             <button type="button" onClick={state.changeParty}>Change party</button>
           </div>
-        )}
+        )} */}
       </header>
 
       <nav className="si-stepper" aria-label="Sales invoice steps">

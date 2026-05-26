@@ -1052,9 +1052,138 @@
   overflow: auto;
 }
 
+.si-freight-section {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #dbe4ee;
+  border-radius: 10px;
+  background: #f8fbff;
+  padding: 12px;
+}
+
+.si-freight-head {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.si-freight-head strong {
+  color: #172554;
+  font-size: 14px;
+  font-weight: 900;
+  text-transform: none;
+}
+
+.si-add-freight-btn {
+  justify-self: start;
+  min-height: 36px;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 850;
+  padding: 0 14px;
+}
+
+.si-add-freight-btn:hover {
+  background: #dbeafe;
+  border-color: #93c5fd;
+}
+
+.si-freight-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.si-freight-table th {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 850;
+  padding: 8px 10px;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.si-freight-table td {
+  padding: 6px 10px;
+  vertical-align: middle;
+}
+
+.si-freight-table th:nth-child(1),
+.si-freight-table td:nth-child(1) {
+  width: 55%;
+}
+
+.si-freight-table th:nth-child(2),
+.si-freight-table td:nth-child(2) {
+  width: 220px;
+}
+
+.si-freight-table th:nth-child(3),
+.si-freight-table th:nth-child(4),
+.si-freight-table td:nth-child(3),
+.si-freight-table td:nth-child(4) {
+  width: 72px;
+  text-align: center;
+}
+
+.si-freight-section input,
+.si-freight-section select {
+  width: 100%;
+  box-sizing: border-box;
+  height: 36px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 750;
+  outline: none;
+  padding: 0 10px;
+}
+
+.si-freight-section input:focus,
+.si-freight-section select:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.si-freight-add,
+.si-freight-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 18px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.si-freight-add {
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.si-freight-remove {
+  border: 1px solid #fecaca;
+  background: #fff5f5;
+  color: #ef4444;
+}
+
 .si-lines-table {
   width: 100%;
-  min-width: 1180px;
+  min-width: 980px;
   border-collapse: collapse;
   font-size: 12px;
 }
@@ -1093,6 +1222,20 @@
   min-width: 86px;
 }
 
+.si-line-readonly {
+  display: block;
+  min-height: 36px;
+  box-sizing: border-box;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #334155;
+  font-weight: 750;
+  line-height: 1.35;
+  padding: 9px;
+  overflow-wrap: anywhere;
+}
+
 .si-delete-btn {
   width: 30px;
   height: 30px;
@@ -1112,8 +1255,17 @@
 }
 
 .si-form-summary-row-compact {
-  grid-template-columns: minmax(280px, 360px);
-  justify-content: end;
+  grid-template-columns: 1fr;
+  justify-content: stretch;
+}
+
+.si-form-summary-row-compact .si-form-totals {
+  width: 100%;
+}
+
+.si-form-summary-row-compact .si-total-grid {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px 24px;
 }
 
 .si-logistics-info,
@@ -1474,6 +1626,7 @@
   .si-draft-document-panel,
   .si-draft-meta-row,
   .si-customer-card,
+  .si-freight-section,
   .si-form-grid {
     grid-template-columns: 1fr;
   }

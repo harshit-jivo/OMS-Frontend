@@ -7,6 +7,7 @@ import {
   normalizeDateInput,
   toNumber,
   type CustomerDetails,
+  type FreightRow,
   type InvoiceForm,
   type Party,
   type SalespersonDetails,
@@ -42,6 +43,13 @@ export type SalesOrder = {
   Document_Lines?: SalesOrderLine[];
   [key: string]: unknown;
 };
+
+export type FreightMaster = {
+  ExpnsCode: number;
+  ExpnsName: string;
+};
+
+const createFreightRow = (): FreightRow => ({ expenseCode: "", expenseName: "", lineTotal: 0 });
 
 const apiFetch = async <T,>(url: string, init?: RequestInit): Promise<T> => {
   const token = localStorage.getItem("access");
@@ -117,6 +125,8 @@ export function useSalesInvoice() {
   const [selectedParty, setSelectedParty] = useState<Party | null>(null);
   const [salesOrders, setSalesOrders] = useState<SalesOrder[]>([]);
   const [selectedLines, setSelectedLines] = useState<Record<string, SelectedLine>>({});
+  const [freightOptions, setFreightOptions] = useState<FreightMaster[]>([]);
+  const [freightRows, setFreightRows] = useState<FreightRow[]>([]);
   const [customerDetails, setCustomerDetails] = useState<CustomerDetails | null>(null);
   const [salespersonDetails, setSalespersonDetails] = useState<SalespersonDetails | null>(null);
   const [form, setForm] = useState<InvoiceForm>(() => emptyForm());
@@ -149,11 +159,28 @@ export function useSalesInvoice() {
     loadParties();
   }, []);
 
+  useEffect(() => {
+    const loadFreightOptions = async () => {
+      try {
+        const data = await apiFetch<FreightMaster[] | { data?: FreightMaster[]; results?: FreightMaster[] }>(
+          "/api/hana/freight-masters/",
+        );
+        const options = Array.isArray(data) ? data : data.data || data.results || [];
+        setFreightOptions(options);
+      } catch (error) {
+        console.error("Unable to load freight masters:", error);
+      }
+    };
+
+    loadFreightOptions();
+  }, []);
+
   const selectParty = useCallback(async (party: Party) => {
     setSelectedParty({ CardCode: party.CardCode, CardName: party.CardName });
     setStep(2);
     setSalesOrders([]);
     setSelectedLines({});
+    setFreightRows([]);
     setCustomerDetails(null);
     setSalespersonDetails(null);
     setOrdersError("");
@@ -178,6 +205,7 @@ export function useSalesInvoice() {
     setSelectedParty(null);
     setSalesOrders([]);
     setSelectedLines({});
+    setFreightRows([]);
     setCustomerDetails(null);
     setSalespersonDetails(null);
     setForm(emptyForm());
@@ -250,15 +278,29 @@ export function useSalesInvoice() {
     setForm((current) => ({ ...current, ...patch }));
   };
 
+  const updateFreightRow = (index: number, patch: Partial<FreightRow>) => {
+    setFreightRows((current) =>
+      current.map((row, rowIndex) => (rowIndex === index ? { ...row, ...patch } : row)),
+    );
+  };
+
+  const addFreightRow = () => {
+    setFreightRows((current) => [...current, createFreightRow()]);
+  };
+
+  const removeFreightRow = (index: number) => {
+    setFreightRows((current) => current.filter((_, rowIndex) => rowIndex !== index));
+  };
+
   const selectedLineList = useMemo(() => Object.values(selectedLines), [selectedLines]);
   const firstSelectedLine = selectedLineList[0];
   const totals = useMemo(
-    () => calculateTotals(selectedLineList, form.discountPercent),
-    [form.discountPercent, selectedLineList],
+    () => calculateTotals(selectedLineList, form.discountPercent, freightRows),
+    [form.discountPercent, freightRows, selectedLineList],
   );
   const payload = useMemo(
-    () => buildInvoicePayload(selectedParty, selectedLines, form),
-    [form, selectedLines, selectedParty],
+    () => buildInvoicePayload(selectedParty, selectedLines, form, freightRows),
+    [form, freightRows, selectedLines, selectedParty],
   );
 
   const loadDraftDetails = useCallback(async () => {
@@ -321,7 +363,7 @@ export function useSalesInvoice() {
   };
 
   const saveDraft = () => {
-    localStorage.setItem("sales_invoice_draft", JSON.stringify({ selectedParty, selectedLines, form }));
+    localStorage.setItem("sales_invoice_draft", JSON.stringify({ selectedParty, selectedLines, freightRows, form }));
   };
 
   const postInvoice = async () => {
@@ -370,6 +412,8 @@ export function useSalesInvoice() {
     salesOrders,
     selectedLines,
     selectedLineList,
+    freightOptions,
+    freightRows,
     customerDetails,
     salespersonDetails,
     form,
@@ -391,6 +435,9 @@ export function useSalesInvoice() {
     updateLine,
     removeLine,
     updateForm,
+    updateFreightRow,
+    addFreightRow,
+    removeFreightRow,
     createInvoiceDraft,
     proceedToDraft,
     resetStep3Form,

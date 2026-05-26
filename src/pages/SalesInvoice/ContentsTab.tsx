@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import { formatMoney, lineKey, toNumber } from "./salesInvoice.utils";
 import type { SalesInvoiceState } from "./useSalesInvoice";
 
@@ -6,6 +7,8 @@ type Props = {
 };
 
 export default function ContentsTab({ state }: Props) {
+  const summaryFreightRows = state.freightRows.filter((row) => row.expenseName || toNumber(row.lineTotal) > 0);
+
   return (
     <div className="si-tab-grid">
       <div className="si-table-wrap">
@@ -14,13 +17,11 @@ export default function ContentsTab({ state }: Props) {
             <tr>
               <th>#</th>
               <th>Type</th>
-              <th>Item No.</th>
               <th>Description</th>
               <th>Qty</th>
               <th>Unit Price</th>
               <th>Disc%</th>
               <th>Price After Disc</th>
-              <th>Tax Code</th>
               <th>Total (LC)</th>
               <th>Whse</th>
               <th />
@@ -35,10 +36,7 @@ export default function ContentsTab({ state }: Props) {
                   <td>{index + 1}</td>
                   <td>Item</td>
                   <td>
-                    <input value={line.ItemCode} onChange={(event) => state.updateLine(key, { ItemCode: event.target.value })} />
-                  </td>
-                  <td>
-                    <input value={line.Dscription} onChange={(event) => state.updateLine(key, { Dscription: event.target.value })} />
+                    <span className="si-line-readonly">{line.Dscription || "-"}</span>
                   </td>
                   <td>
                     <input
@@ -50,11 +48,7 @@ export default function ContentsTab({ state }: Props) {
                     />
                   </td>
                   <td>
-                    <input
-                      type="number"
-                      value={line.Price}
-                      onChange={(event) => state.updateLine(key, { Price: toNumber(event.target.value) })}
-                    />
+                    <span className="si-line-readonly">{line.Price}</span>
                   </td>
                   <td>
                     <input
@@ -64,16 +58,13 @@ export default function ContentsTab({ state }: Props) {
                     />
                   </td>
                   <td>{formatMoney(priceAfterDiscount)}</td>
-                  <td>
-                    <input value={line.TaxCode} onChange={(event) => state.updateLine(key, { TaxCode: event.target.value })} />
-                  </td>
                   <td>{formatMoney(line.invoiceQty * priceAfterDiscount)}</td>
                   <td>
-                    <input value={line.WhsCode} onChange={(event) => state.updateLine(key, { WhsCode: event.target.value })} />
+                    <span className="si-line-readonly">{line.WhsCode || "-"}</span>
                   </td>
                   <td>
                     <button className="si-delete-btn" type="button" onClick={() => state.removeLine(key)}>
-                      ×
+                      x
                     </button>
                   </td>
                 </tr>
@@ -82,6 +73,74 @@ export default function ContentsTab({ state }: Props) {
           </tbody>
         </table>
       </div>
+
+      <section className="si-freight-section">
+        <div className="si-freight-head">
+          <span>Planned SO</span>
+          <strong>Freight / Expense</strong>
+        </div>
+        {state.freightRows.length === 0 ? (
+          <button className="si-add-freight-btn" type="button" onClick={state.addFreightRow}>
+            + Add freight expense
+          </button>
+        ) : (
+          <table className="si-freight-table">
+            <thead>
+              <tr>
+                <th>Expense</th>
+                <th>Amount</th>
+                <th>Add</th>
+                <th>Remove</th>
+              </tr>
+            </thead>
+            <tbody>
+              {state.freightRows.map((row, index) => (
+                <tr key={`${row.expenseCode}-${index}`}>
+                  <td>
+                    <select
+                      value={row.expenseCode}
+                      onChange={(event) => {
+                        const selected = state.freightOptions.find(
+                          (option) => String(option.ExpnsCode) === event.target.value,
+                        );
+                        state.updateFreightRow(index, {
+                          expenseCode: event.target.value,
+                          expenseName: selected?.ExpnsName || "",
+                        });
+                      }}
+                    >
+                      <option value="">Select freight</option>
+                      {state.freightOptions.map((option) => (
+                        <option key={option.ExpnsCode} value={option.ExpnsCode}>
+                          {option.ExpnsName}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td>
+                    <input
+                      type="number"
+                      min="0"
+                      value={row.lineTotal}
+                      onChange={(event) => state.updateFreightRow(index, { lineTotal: toNumber(event.target.value) })}
+                    />
+                  </td>
+                  <td>
+                    <button className="si-freight-add" type="button" onClick={state.addFreightRow}>
+                      +
+                    </button>
+                  </td>
+                  <td>
+                    <button className="si-freight-remove" type="button" onClick={() => state.removeFreightRow(index)}>
+                      x
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
 
       <div className="si-form-summary-row si-form-summary-row-compact">
         <aside className="si-card si-form-totals">
@@ -102,6 +161,12 @@ export default function ContentsTab({ state }: Props) {
             <dd>{formatMoney(state.totals.taxable)}</dd>
             <dt>Tax (GST)</dt>
             <dd>{formatMoney(state.totals.tax)}</dd>
+            {summaryFreightRows.map((row, index) => (
+              <Fragment key={`${row.expenseCode}-${index}-summary`}>
+                <dt>{row.expenseName || "Freight Expense"}</dt>
+                <dd>{formatMoney(toNumber(row.lineTotal))}</dd>
+              </Fragment>
+            ))}
             <dt>Total Amount</dt>
             <dd>{formatMoney(state.totals.grandTotal)}</dd>
           </dl>
