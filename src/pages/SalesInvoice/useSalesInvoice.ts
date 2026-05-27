@@ -10,6 +10,7 @@ import {
   type FreightRow,
   type InvoiceForm,
   type Party,
+  type PartyAddress,
   type SalespersonDetails,
   type SelectedLine,
 } from "./salesInvoice.utils";
@@ -36,6 +37,8 @@ export type SalesOrder = {
   DocDate: string;
   DocDueDate: string;
   SlpCode?: number;
+  ShipToCode?: string;
+  PayToCode?: string;
   DocTotal?: number;
   lines?: SalesOrderLine[];
   Lines?: SalesOrderLine[];
@@ -47,6 +50,14 @@ export type SalesOrder = {
 export type FreightMaster = {
   ExpnsCode: number;
   ExpnsName: string;
+};
+
+export type VendorState = {
+  State1: string | null;
+};
+
+export type NextDocNumber = {
+  NextNumber: number | string | null;
 };
 
 const createFreightRow = (): FreightRow => ({ expenseCode: "", expenseName: "", lineTotal: 0 });
@@ -112,12 +123,88 @@ const normalizeOrder = (order: SalesOrder): SalesOrder => {
     DocDate: String(pick(source, ["DocDate", "Doc_Date", "doc_date"], "")),
     DocDueDate: String(pick(source, ["DocDueDate", "Doc_Due_Date", "doc_due_date"], "")),
     SlpCode: toNumber(pick(source, ["SlpCode", "SalesPersonCode", "Slp_Code"], 0)),
+    ShipToCode: String(pick(source, ["ShipToCode", "Ship_To_Code", "ship_to_code"], "")),
+    PayToCode: String(pick(source, ["PayToCode", "Pay_To_Code", "pay_to_code"], "")),
     DocTotal: toNumber(pick(source, ["DocTotal", "Doc_Total", "doc_total"], 0)),
     lines,
   };
 };
 
 const getOrderLines = (order: SalesOrder) => order.lines || [];
+
+const getAddressCode = (address: PartyAddress) => String(address.Address || "").trim();
+
+const normalizeAddresses = (addresses: PartyAddress[], addressType: "B" | "S") => {
+  const seen = new Set<string>();
+
+  return addresses.filter((address) => {
+    if (address.AdresType !== addressType) return false;
+
+    const key = [
+      getAddressCode(address),
+      address.City || "",
+      address.State || "",
+      address.GSTRegnNo || "",
+    ].join("|");
+
+    if (!getAddressCode(address) || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+const uniqueTextValues = (values: Array<string | undefined>) => {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+
+  values.forEach((value) => {
+    const text = String(value || "").trim();
+    if (!text || seen.has(text)) return;
+    seen.add(text);
+    unique.push(text);
+  });
+
+  return unique;
+};
+
+const mergeSalesOrderAddressCodes = (
+  addresses: PartyAddress[],
+  salesOrderCodes: string[],
+  addressType: "B" | "S",
+  cardCode: string,
+) => {
+  const used = new Set<string>();
+  const merged: PartyAddress[] = [];
+
+  const addAddress = (address: PartyAddress) => {
+    const code = getAddressCode(address);
+    if (!code || used.has(code)) return;
+    used.add(code);
+    merged.push(address);
+  };
+
+  salesOrderCodes.forEach((code) => {
+    const matchingAddress = addresses.find((address) => getAddressCode(address) === code);
+    addAddress(matchingAddress || { Address: code, AdresType: addressType, CardCode: cardCode });
+  });
+
+  addresses.forEach(addAddress);
+
+  return merged;
+};
+
+const resolveDefaultAddress = (
+  currentValue: string,
+  salesOrderDefault: string | undefined,
+  customerDefault: string | undefined,
+  addresses: PartyAddress[],
+) => {
+  const addressCodes = addresses.map((address) => getAddressCode(address));
+  if (salesOrderDefault) return salesOrderDefault;
+  if (currentValue && addressCodes.includes(currentValue)) return currentValue;
+  if (customerDefault) return customerDefault;
+  return addressCodes[0] || "";
+};
 
 export function useSalesInvoice() {
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
@@ -126,9 +213,13 @@ export function useSalesInvoice() {
   const [salesOrders, setSalesOrders] = useState<SalesOrder[]>([]);
   const [selectedLines, setSelectedLines] = useState<Record<string, SelectedLine>>({});
   const [freightOptions, setFreightOptions] = useState<FreightMaster[]>([]);
+  const [vendorStates, setVendorStates] = useState<string[]>([]);
+  const [nextDocNumber, setNextDocNumber] = useState("");
   const [freightRows, setFreightRows] = useState<FreightRow[]>([]);
   const [customerDetails, setCustomerDetails] = useState<CustomerDetails | null>(null);
   const [salespersonDetails, setSalespersonDetails] = useState<SalespersonDetails | null>(null);
+  const [billToAddresses, setBillToAddresses] = useState<PartyAddress[]>([]);
+  const [shipToAddresses, setShipToAddresses] = useState<PartyAddress[]>([]);
   const [form, setForm] = useState<InvoiceForm>(() => emptyForm());
   const [loadingParties, setLoadingParties] = useState(false);
   const [loadingOrders, setLoadingOrders] = useState(false);
@@ -146,17 +237,48 @@ export function useSalesInvoice() {
       setPartyError("");
 
       try {
-        const data = await apiFetch<Party[]>("/api/hana/open-parties/");
+        const data = await apiFetch<Party[]>("/api/hana/all-customers/");
         setParties(Array.isArray(data) ? data : []);
       } catch (error) {
         console.error(error);
-        setPartyError("Unable to load open parties.");
+        setPartyError("Unable to load customers.");
       } finally {
         setLoadingParties(false);
       }
     };
 
     loadParties();
+  }, []);
+
+  useEffect(() => {
+    const loadVendorStates = async () => {
+      try {
+        const data = await apiFetch<VendorState[]>("/api/hana/vendor-states");
+        const states = Array.isArray(data)
+          ? [...new Set(data.map((item) => String(item.State1 || "").trim()).filter(Boolean))].sort()
+          : [];
+        setVendorStates(states);
+      } catch (error) {
+        console.error("Unable to load vendor states:", error);
+      }
+    };
+
+    loadVendorStates();
+  }, []);
+
+  useEffect(() => {
+    const loadNextDocNumber = async () => {
+      try {
+        const data = await apiFetch<NextDocNumber[]>("/api/hana/next-doc-number/?doc_type=13");
+        const nextNumber = Array.isArray(data) ? data[0]?.NextNumber : "";
+        setNextDocNumber(nextNumber === null || nextNumber === undefined ? "" : String(nextNumber));
+      } catch (error) {
+        console.error("Unable to load next document number:", error);
+        setNextDocNumber("");
+      }
+    };
+
+    loadNextDocNumber();
   }, []);
 
   useEffect(() => {
@@ -176,13 +298,21 @@ export function useSalesInvoice() {
   }, []);
 
   const selectParty = useCallback(async (party: Party) => {
-    setSelectedParty({ CardCode: party.CardCode, CardName: party.CardName });
+    setSelectedParty({
+      CardCode: party.CardCode,
+      CardName: party.CardName,
+      State1: party.State1,
+      U_Chain: party.U_Chain,
+    });
     setStep(2);
     setSalesOrders([]);
     setSelectedLines({});
     setFreightRows([]);
     setCustomerDetails(null);
     setSalespersonDetails(null);
+    setBillToAddresses([]);
+    setShipToAddresses([]);
+    setForm(emptyForm());
     setOrdersError("");
     setLoadingOrders(true);
 
@@ -208,6 +338,8 @@ export function useSalesInvoice() {
     setFreightRows([]);
     setCustomerDetails(null);
     setSalespersonDetails(null);
+    setBillToAddresses([]);
+    setShipToAddresses([]);
     setForm(emptyForm());
   };
 
@@ -217,6 +349,8 @@ export function useSalesInvoice() {
     DocDate: order.DocDate,
     DocDueDate: order.DocDueDate,
     SlpCode: order.SlpCode,
+    ShipToCode: order.ShipToCode,
+    PayToCode: order.PayToCode,
     LineNum: line.LineNum,
     ItemCode: line.ItemCode,
     Dscription: line.Dscription,
@@ -294,6 +428,14 @@ export function useSalesInvoice() {
 
   const selectedLineList = useMemo(() => Object.values(selectedLines), [selectedLines]);
   const firstSelectedLine = selectedLineList[0];
+  const selectedShipToCodes = useMemo(
+    () => uniqueTextValues(selectedLineList.map((line) => line.ShipToCode)),
+    [selectedLineList],
+  );
+  const selectedPayToCodes = useMemo(
+    () => uniqueTextValues(selectedLineList.map((line) => line.PayToCode)),
+    [selectedLineList],
+  );
   const totals = useMemo(
     () => calculateTotals(selectedLineList, form.discountPercent, freightRows),
     [form.discountPercent, freightRows, selectedLineList],
@@ -310,21 +452,44 @@ export function useSalesInvoice() {
 
     try {
       const slpCode = firstSelectedLine.SlpCode ?? 0;
-      const [customerData, salespersonData] = await Promise.all([
+      const [customerData, salespersonData, addressData] = await Promise.all([
         apiFetch<CustomerDetails[]>(`/api/hana/customer-details/?card_code=${encodeURIComponent(selectedParty.CardCode)}`),
         apiFetch<SalespersonDetails[]>(`/api/hana/salesperson-details/?slp_code=${encodeURIComponent(String(slpCode))}`),
+        apiFetch<PartyAddress[]>(`/api/hana/address/?card_code=${encodeURIComponent(selectedParty.CardCode)}`),
       ]);
       const customer = Array.isArray(customerData) ? customerData[0] || null : null;
       const salesperson = Array.isArray(salespersonData) ? salespersonData[0] || null : null;
+      const addresses = Array.isArray(addressData) ? addressData : [];
+      const billingAddresses = mergeSalesOrderAddressCodes(
+        normalizeAddresses(addresses, "B"),
+        selectedPayToCodes,
+        "B",
+        selectedParty.CardCode,
+      );
+      const shippingAddresses = mergeSalesOrderAddressCodes(
+        normalizeAddresses(addresses, "S"),
+        selectedShipToCodes,
+        "S",
+        selectedParty.CardCode,
+      );
 
       setCustomerDetails(customer);
       setSalespersonDetails(salesperson);
-      setForm((current) => ({
-        ...current,
-        dueDate: normalizeDateInput(firstSelectedLine.DocDueDate),
-        shipTo: current.shipTo || customer?.ShipToDef || "",
-        payTo: current.payTo || customer?.BillToDef || "",
-      }));
+      setBillToAddresses(billingAddresses);
+      setShipToAddresses(shippingAddresses);
+      setForm((current) => {
+        const dueDate = normalizeDateInput(firstSelectedLine.DocDueDate);
+        const postingDate = normalizeDateInput(firstSelectedLine.DocDate);
+        // Ensure DocDate <= DocDueDate
+        const adjustedPostingDate = postingDate > dueDate ? dueDate : postingDate;
+        return {
+          ...current,
+          postingDate: adjustedPostingDate,
+          dueDate,
+          shipTo: resolveDefaultAddress(current.shipTo, selectedShipToCodes[0], customer?.ShipToDef, shippingAddresses),
+          payTo: resolveDefaultAddress(current.payTo, selectedPayToCodes[0], customer?.BillToDef, billingAddresses),
+        };
+      });
       return true;
     } catch (error) {
       console.error(error);
@@ -333,7 +498,7 @@ export function useSalesInvoice() {
     } finally {
       setLoadingDraftDetails(false);
     }
-  }, [firstSelectedLine, selectedParty]);
+  }, [firstSelectedLine, selectedParty, selectedPayToCodes, selectedShipToCodes]);
 
   const createInvoiceDraft = async () => {
     if (selectedLineList.length === 0) return;
@@ -341,9 +506,10 @@ export function useSalesInvoice() {
   };
 
   const proceedToDraft = async () => {
-    if (selectedLineList.length === 0) return;
+    if (selectedLineList.length === 0) return false;
     const ok = await loadDraftDetails();
     if (ok) setStep(4);
+    return ok;
   };
 
   useEffect(() => {
@@ -353,11 +519,16 @@ export function useSalesInvoice() {
   }, [customerDetails, loadDraftDetails, loadingDraftDetails, selectedParty, step]);
 
   const resetStep3Form = () => {
+    const dueDate = normalizeDateInput(firstSelectedLine?.DocDueDate);
+    const postingDate = normalizeDateInput(firstSelectedLine?.DocDate);
+    // Ensure DocDate <= DocDueDate
+    const adjustedPostingDate = postingDate > dueDate ? dueDate : postingDate;
     setForm((current) => ({
       ...emptyForm(),
-      dueDate: normalizeDateInput(firstSelectedLine?.DocDueDate),
-      shipTo: customerDetails?.ShipToDef || "",
-      payTo: customerDetails?.BillToDef || "",
+      postingDate: adjustedPostingDate,
+      dueDate,
+      shipTo: selectedShipToCodes[0] || shipToAddresses[0]?.Address || customerDetails?.ShipToDef || "",
+      payTo: selectedPayToCodes[0] || billToAddresses[0]?.Address || customerDetails?.BillToDef || "",
       discountPercent: current.discountPercent,
     }));
   };
@@ -377,6 +548,11 @@ export function useSalesInvoice() {
 
     if (!form.postingDate || !form.dueDate || !form.documentDate) {
       setPostError("Posting date, due date, and document date are required.");
+      return;
+    }
+
+    if (form.postingDate > form.dueDate) {
+      setPostError("Document date must be less than or equal to due date.");
       return;
     }
 
@@ -413,9 +589,13 @@ export function useSalesInvoice() {
     selectedLines,
     selectedLineList,
     freightOptions,
+    vendorStates,
     freightRows,
     customerDetails,
     salespersonDetails,
+    billToAddresses,
+    shipToAddresses,
+    nextDocNumber,
     form,
     totals,
     payload,

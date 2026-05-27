@@ -5,12 +5,23 @@ import type { SalesInvoiceState } from "./useSalesInvoice";
 
 type Props = {
   state: SalesInvoiceState;
+  continueLabel?: string;
+  continueLoadingLabel?: string;
+  onContinue?: () => void | Promise<void>;
 };
 
-export default function OrdersStep({ state }: Props) {
+export default function OrdersStep({
+  state,
+  continueLabel = "Next: Review Lines",
+  continueLoadingLabel = "Loading draft...",
+  onContinue,
+}: Props) {
   const [query, setQuery] = useState("");
   const [expandedOrderKey, setExpandedOrderKey] = useState<string | null>(null);
   const selectedOrderCount = new Set(state.selectedLineList.map((line) => line.DocEntry)).size;
+  const hasInvalidQty = state.selectedLineList.some(
+    (line) => toNumber(line.invoiceQty) < 1 || toNumber(line.invoiceQty) > toNumber(line.OpenQty),
+  );
 
   const metrics = useMemo(() => {
     return state.salesOrders.reduce(
@@ -180,9 +191,16 @@ export default function OrdersStep({ state }: Props) {
             <button
               className="si-btn si-btn-primary si-order-selection-next"
               type="button"
-              onClick={state.createInvoiceDraft}
+              disabled={hasInvalidQty || state.loadingDraftDetails}
+              onClick={() => {
+                if (onContinue) {
+                  onContinue();
+                  return;
+                }
+                state.createInvoiceDraft();
+              }}
             >
-              Next: Review Lines
+              {state.loadingDraftDetails ? continueLoadingLabel : continueLabel}
               <HiArrowRight aria-hidden="true" />
             </button>
           </div>

@@ -76,8 +76,8 @@ export default function ContentsTab({ state }: Props) {
 
       <section className="si-freight-section">
         <div className="si-freight-head">
-          <span>Planned SO</span>
-          <strong>Freight / Expense</strong>
+          {/* <span>Planned SO</span> */}
+          <strong>Freight Expenses</strong>
         </div>
         {state.freightRows.length === 0 ? (
           <button className="si-add-freight-btn" type="button" onClick={state.addFreightRow}>

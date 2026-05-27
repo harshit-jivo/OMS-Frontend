@@ -30,6 +30,8 @@ export type SelectedLine = {
   DocDate?: string;
   DocDueDate?: string;
   SlpCode?: number;
+  ShipToCode?: string;
+  PayToCode?: string;
   LineNum: number;
   ItemCode: string;
   Dscription: string;
@@ -71,6 +73,8 @@ export type FreightRow = {
 export type Party = {
   CardCode: string;
   CardName: string;
+  State1?: string | null;
+  U_Chain?: string | null;
   Num_of_Open_SalesOrder?: number;
 };
 
@@ -81,6 +85,17 @@ export type CustomerDetails = {
   U_Chain?: string;
   BillToDef?: string;
   ShipToDef?: string;
+};
+
+export type PartyAddress = {
+  Address: string;
+  AdresType: "B" | "S" | string;
+  CardCode: string;
+  City?: string | null;
+  State?: string | null;
+  Country?: string | null;
+  GSTRegnNo?: string | null;
+  GSTType?: number | null;
 };
 
 export type SalespersonDetails = {
