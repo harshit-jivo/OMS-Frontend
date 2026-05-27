@@ -283,6 +283,7 @@ border-spacing: 0;
 
 .sl-table-wrap:has(.staff-order-table .sl-party-dropdown.open) {
 z-index: 3000;
+overflow: visible;
 }
 
 .staff-order-table td {
@@ -391,6 +392,8 @@ letter-spacing: .04em;
 padding: 8px;
 border-bottom: 1px solid #e5e7eb;
 color: #334155;
+position: relative;
+overflow: visible;
 }
 
 /* ================= TABLE INPUT ================= */

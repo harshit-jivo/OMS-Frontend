@@ -8,12 +8,14 @@ import {
   HiChartBar,
   HiChevronDown,
   HiClock,
+  HiCurrencyRupee,
   HiClipboardDocumentList,
   HiCube,
   HiDocumentText,
   HiEye,
   HiGift,
   HiHome,
+  HiIdentification,
   HiPlusCircle,
   HiPresentationChartLine,
   HiReceiptPercent,
@@ -336,8 +338,22 @@ export default function Sidebar({ children }: SidebarProps) {
 
             <li className={location.pathname === "/Staff" ? "active" : ""}>
               <Link to="/Staff" onClick={closeSidebar}>
-                <SidebarIcon><HiReceiptPercent /></SidebarIcon>
+                <SidebarIcon><HiIdentification /></SidebarIcon>
                 Staff Orders
+              </Link>
+            </li>
+
+            <li className={location.pathname === "/Staff_Rate_Assignment" ? "active" : ""}>
+              <Link to="/Staff_Rate_Assignment" onClick={closeSidebar}>
+                <SidebarIcon><HiCurrencyRupee /></SidebarIcon>
+                Staff Rate Assignment
+              </Link>
+            </li>
+
+            <li className={location.pathname === "/Order_Stock_Check" ? "active" : ""}>
+              <Link to="/Order_Stock_Check" onClick={closeSidebar}>
+                <SidebarIcon><HiClipboardDocumentList /></SidebarIcon>
+                Order Stock Check
               </Link>
             </li>
 

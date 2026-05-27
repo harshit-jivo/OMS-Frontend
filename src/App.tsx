@@ -22,6 +22,8 @@ import Add_Scheme from "./pages/Add_Scheme";
 import FOC from "./pages/FOC";
 import SalesInvoice from "./pages/Sales_Invoice";
 import Staff from "./pages/Staff";
+import Staff_Rate_Assignment from "./pages/Staff_Rate_Assignment";
+import Order_Stock_Check from "./pages/Order_Stock_Check";
 
 function App() {
   return (
@@ -196,6 +198,22 @@ function App() {
           element={
             <Sidebar>
               <Staff />
+            </Sidebar>}
+        />
+
+        <Route
+          path="/Staff_Rate_Assignment"
+          element={
+            <Sidebar>
+              <Staff_Rate_Assignment />
+            </Sidebar>}
+        />
+
+        <Route
+          path="/Order_Stock_Check"
+          element={
+            <Sidebar>
+              <Order_Stock_Check />
             </Sidebar>}
         />
 

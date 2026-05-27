@@ -47,6 +47,14 @@
   filter: brightness(0.98);
 }
 
+.au-toggle-btn--compact {
+  height: 34px;
+  padding: 0 12px;
+  font-size: 12px;
+  letter-spacing: 0;
+  box-shadow: 0 8px 16px rgba(37, 99, 235, 0.14);
+}
+
 .au-table-card,
 .au-form-card {
   background: rgba(255, 255, 255, 0.96);
@@ -218,6 +226,22 @@
   margin-bottom: 20px;
 }
 
+.au-form-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.au-form-heading {
+  margin: 0 auto 0 0;
+  color: #0f172a;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
 .au-form-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
@@ -311,7 +335,7 @@
 .au-eye-btn {
   position: absolute;
   top: 50%;
-  right: 12px;
+  right: 8px;
 
   /* ✅ SUPER STABLE (no jump) */
   translate: 0 -50%;
@@ -372,7 +396,7 @@
   top: calc(100% + 6px);
   left: 0;
   right: 0;
-  background: #fff;
+  background: #ffffff;
   border: 1px solid #dbe4ee;
   border-radius: var(--radius-md, 12px);
   box-shadow: 0 16px 28px rgba(15, 23, 42, 0.08);
@@ -388,6 +412,7 @@
   padding: 9px 12px;
   font-size: 13px;
   color: #0f172a;
+  background: #ffffff;
   cursor: pointer;
   transition: background 0.15s ease;
 }
@@ -406,11 +431,27 @@
   color: #2563eb;
 }
 
-.au-submit {
+.au-select-option {
   width: 100%;
+  border: 0;
+  border-bottom: 1px solid #edf2f7;
+  text-align: left;
+  font-family: 'Inter', sans-serif;
+  background: #ffffff;
+}
+
+.au-select-option.is-selected {
+  color: #1d4ed8;
+  background: #eff6ff;
+  font-weight: 800;
+}
+
+.au-submit {
+  width: auto;
+  min-width: 142px;
   margin-top: 24px;
-  height: var(--btn-h, 40px);
-  padding: 0 16px;
+  height: 34px;
+  padding: 0 14px;
   background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
   color: white;
   border: none;
@@ -425,6 +466,11 @@
   gap: 8px;
   box-shadow: 0 14px 24px rgba(37, 99, 235, 0.16);
   transition: transform 0.18s ease, filter 0.18s ease;
+}
+
+.au-form-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .au-submit:hover {
@@ -449,6 +495,10 @@
   .au-toggle-btn {
     width: 100%;
     text-align: center;
+  }
+
+  .au-toggle-btn--compact {
+    width: auto;
   }
 
   .au-table-head {
@@ -484,8 +534,9 @@
   }
 
   .au-submit {
+    width: auto;
     font-size: 13px;
-    padding: 12px;
+    padding: 0 14px;
   }
 }
 

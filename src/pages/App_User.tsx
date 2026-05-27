@@ -20,6 +20,9 @@ export default function App_User() {
 
   const stateRef = useRef<HTMLDivElement>(null);
   const groupRef = useRef<HTMLDivElement>(null);
+  const roleRef = useRef<HTMLDivElement>(null);
+  const companyRef = useRef<HTMLDivElement>(null);
+  const categoryRef = useRef<HTMLDivElement>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [mainGroup, setMainGroup] = useState<Option[]>([]);
   const [state, setState] = useState<Option[]>([]);
@@ -44,6 +47,9 @@ export default function App_User() {
   const [showUsers, setShowUsers] = useState(true);
   const [mgDropdownOpen, setMgDropdownOpen] = useState(false);
   const [stDropdownOpen, setStDropdownOpen] = useState(false);
+  const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
+  const [companyDropdownOpen, setCompanyDropdownOpen] = useState(false);
+  const [categoryDropdownOpen, setCategoryDropdownOpen] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 7;
@@ -73,6 +79,27 @@ export default function App_User() {
         !groupRef.current.contains(event.target as Node)
       ) {
         setMgDropdownOpen(false);
+      }
+
+      if (
+        roleRef.current &&
+        !roleRef.current.contains(event.target as Node)
+      ) {
+        setRoleDropdownOpen(false);
+      }
+
+      if (
+        companyRef.current &&
+        !companyRef.current.contains(event.target as Node)
+      ) {
+        setCompanyDropdownOpen(false);
+      }
+
+      if (
+        categoryRef.current &&
+        !categoryRef.current.contains(event.target as Node)
+      ) {
+        setCategoryDropdownOpen(false);
       }
     };
 
@@ -188,6 +215,18 @@ export default function App_User() {
     });
   };
 
+  const getOptionName = (options: Option[], id: number | null | undefined, fallback: string) =>
+    options.find((item) => item.id === id)?.name || fallback;
+
+  const getCategoryName = (id: number | null | undefined) =>
+    categories.find((item) => item.id === id)?.category || "Select Category";
+
+  const closeSingleSelects = () => {
+    setRoleDropdownOpen(false);
+    setCompanyDropdownOpen(false);
+    setCategoryDropdownOpen(false);
+  };
+
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
   ) => {
@@ -254,6 +293,11 @@ export default function App_User() {
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+
+    if (!formData.role || !formData.company || !formData.category) {
+      alert("Please select role, company and category.");
+      return;
+    }
 
     try {
       let result;
@@ -352,21 +396,18 @@ export default function App_User() {
   return (
     <div className="au-page app-page">
       {/* ── PAGE HEADER ── */}
+      {!showForm && (
       <div className="au-header app-page-head" style={{ marginBottom: '24px', alignItems: 'center' }}>
         <div>
-          <h1 className="au-title app-page-title">
-            {showForm ? (isEditMode ? "Update User" : "Add New User") : "App Users"}
-          </h1>
+          <h1 className="au-title app-page-title">App Users</h1>
           <p className="au-subtitle app-page-subtitle" style={{ margin: '4px 0 0', fontSize: '13px', color: '#64748b' }}>
-            {showForm ? (isEditMode ? "Update application user details, role, territory mapping and company assignment." : "Create application users with roles, territory mapping and company assignment.") : "Manage user access, review account status and keep operational roles aligned."}
+            Manage user access, review account status and keep operational roles aligned.
           </p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-          {!showForm && (
             <span className="au-table-count" style={{ margin: 0 }}>
               Total: {users.length}
             </span>
-          )}
           <button
             className="au-toggle-btn"
             onClick={() => {
@@ -374,10 +415,11 @@ export default function App_User() {
             setShowUsers(showForm);
           }}
         >
-          <span>{showForm ? "← Back to Users" : "+ Add User"}</span>
+          <span>+ Add User</span>
           </button>
         </div>
       </div>
+      )}
 
       {/* ── USERS TABLE ── */}
       {showUsers && (
@@ -468,15 +510,22 @@ export default function App_User() {
       {/* ── ADD USER FORM ── */}
       {showForm && (
         <div className="au-form-card">
-          <div className="au-form-head" style={{ marginBottom: "24px" }}>
-            <h2 style={{ fontSize: "24px", fontWeight: 800, color: "#0f172a", margin: "0 0 4px", letterSpacing: "-0.02em" }}>
+          <div className="au-form-toolbar">
+            <h2 className="au-form-heading">
               {isEditMode ? "Update User Details" : "User Details"}
             </h2>
-            {/* <p style={{ margin: 0, fontSize: "13px", color: "#64748b" }}>
-              {isEditMode
-                ? "Update credentials, role and mapping information."
-                : "Fill in credentials, role and mapping information."}
-            </p> */}
+            <button
+              type="button"
+              className="au-toggle-btn au-toggle-btn--compact"
+              onClick={() => {
+                setShowForm(false);
+                setShowUsers(true);
+                setIsEditMode(false);
+                setEditUserId(null);
+              }}
+            >
+              <span>← Back to Users</span>
+            </button>
           </div>
           <form onSubmit={handleSubmit}>
             <div className="au-form-grid">
@@ -704,90 +753,160 @@ export default function App_User() {
                   )}
                 </div>
               </div>
-              <div className="au-field">
+              <div className="au-field" ref={roleRef}>
                 <label className="au-label">User Role</label>
-                <div className="au-input-wrap au-has-icon">
-                  <HiShieldCheck className="au-field-icon" aria-hidden="true" />
-
-                  <select
-                    name="role"
-                    value={formData.role || ""}
-                    onChange={handleChange}
-                    required
+                <div className="au-mg-dropdown">
+                  <div
+                    className="au-mg-trigger"
+                    onClick={() => {
+                      closeSingleSelects();
+                      setRoleDropdownOpen((value) => !value);
+                    }}
                   >
-                    <option value="">Select Role</option>
-                    {role.map((r) => (
-                      <option key={r.id} value={r.id}>
-                        {r.name}
-                      </option>
-                    ))}
-                  </select>
-                  <div className="au-focus-line" />
+                    <span className="au-trigger-label">
+                      <HiShieldCheck className="au-field-icon" aria-hidden="true" />
+                      <span>{getOptionName(role, formData.role, "Select Role")}</span>
+                    </span>
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                      <path
+                        d="M3 4.5L6 7.5L9 4.5"
+                        stroke="#64748b"
+                        strokeWidth="1.4"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </div>
+                  {roleDropdownOpen && (
+                    <div className="au-mg-menu">
+                      {role.map((r) => (
+                        <button
+                          key={r.id}
+                          type="button"
+                          className={`au-mg-option au-select-option${formData.role === r.id ? " is-selected" : ""}`}
+                          onClick={() => {
+                            setFormData((prev) => ({ ...prev, role: r.id }));
+                            setRoleDropdownOpen(false);
+                          }}
+                        >
+                          {r.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="au-field au-full">
                 <label className="au-label">Company</label>
-                <div className="au-input-wrap au-has-icon">
-                  <HiBuildingOffice2 className="au-field-icon" aria-hidden="true" />
-                  <select
-                    name="company"
-                    value={formData.company ?? ""}
-                    onChange={handleChange}
-                    required
+                <div className="au-mg-dropdown" ref={companyRef}>
+                  <div
+                    className="au-mg-trigger"
+                    onClick={() => {
+                      closeSingleSelects();
+                      setCompanyDropdownOpen((value) => !value);
+                    }}
                   >
-                    <option value="">Select Company</option>
-                    {company.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                  <div className="au-focus-line" />
+                    <span className="au-trigger-label">
+                      <HiBuildingOffice2 className="au-field-icon" aria-hidden="true" />
+                      <span>{getOptionName(company, formData.company, "Select Company")}</span>
+                    </span>
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                      <path
+                        d="M3 4.5L6 7.5L9 4.5"
+                        stroke="#64748b"
+                        strokeWidth="1.4"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </div>
+                  {companyDropdownOpen && (
+                    <div className="au-mg-menu">
+                      {company.map((c) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          className={`au-mg-option au-select-option${formData.company === c.id ? " is-selected" : ""}`}
+                          onClick={() => {
+                            setFormData((prev) => ({ ...prev, company: c.id }));
+                            setCompanyDropdownOpen(false);
+                          }}
+                        >
+                          {c.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="au-field au-full">
                 <label className="au-label">Category</label>
-                <div className="au-input-wrap au-has-icon">
-                  <HiTag className="au-field-icon" aria-hidden="true" />
-                  <select
-                    name="category"
-                    value={formData.category ?? ""}
-                    onChange={handleChange}
-                    required
+                <div className="au-mg-dropdown" ref={categoryRef}>
+                  <div
+                    className="au-mg-trigger"
+                    onClick={() => {
+                      closeSingleSelects();
+                      setCategoryDropdownOpen((value) => !value);
+                    }}
                   >
-                    <option value="">Select Category</option>
-                    {categories.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.category}
-                      </option>
-                    ))}
-                  </select>
-                  <div className="au-focus-line" />
+                    <span className="au-trigger-label">
+                      <HiTag className="au-field-icon" aria-hidden="true" />
+                      <span>{getCategoryName(formData.category)}</span>
+                    </span>
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                      <path
+                        d="M3 4.5L6 7.5L9 4.5"
+                        stroke="#64748b"
+                        strokeWidth="1.4"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </div>
+                  {categoryDropdownOpen && (
+                    <div className="au-mg-menu">
+                      {categories.map((c) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          className={`au-mg-option au-select-option${formData.category === c.id ? " is-selected" : ""}`}
+                          onClick={() => {
+                            setFormData((prev) => ({ ...prev, category: c.id }));
+                            setCategoryDropdownOpen(false);
+                          }}
+                        >
+                          {c.category}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
 
-            <button type="submit" className="au-submit">
-              <span>{isEditMode ? "Update User" : "Create User"}</span>
-              <svg
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                style={{
-                  width: "13px",
-                  height: "13px",
-                  position: "relative",
-                  zIndex: 1,
-                }}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M17 8l4 4m0 0l-4 4m4-4H3"
-                />
-              </svg>
-            </button>
+            <div className="au-form-actions">
+              <button type="submit" className="au-submit">
+                <span>{isEditMode ? "Update User" : "Create User"}</span>
+                <svg
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  style={{
+                    width: "13px",
+                    height: "13px",
+                    position: "relative",
+                    zIndex: 1,
+                  }}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M17 8l4 4m0 0l-4 4m4-4H3"
+                  />
+                </svg>
+              </button>
+            </div>
           </form>
         </div>
       )}

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { ReactNode } from "react";
+import { FiChevronDown, FiChevronUp } from "react-icons/fi";
 import { HiOutlineClipboardDocumentList } from "react-icons/hi2";
 import {
   Area,
@@ -23,6 +24,9 @@ import "../styles/Dashboard.css";
 interface KPIData {
   total_orders: number;
   total_revenue: string;
+  completed_revenue?: string;
+  rejected_revenue?: string;
+  pending_revenue?: string;
   today_orders: number;
   this_month_orders: number;
   status_counts: Record<string, number>;
@@ -35,11 +39,14 @@ interface KPIData {
 
 interface ChartsData {
   monthly_sales: { month: string; label: string; revenue: number; count: number }[];
-  statewise_orders: { state: string; orders: number }[];
+  statewise_orders: { state: string; orders: number; sales?: number }[];
+  manager_performance?: { manager_id: number | null; manager_name: string; orders: number; sales: number }[];
+  manager_state_performance?: { manager_id: number | null; manager_name: string; state: string; orders: number; sales: number }[];
   status_distribution: { status: string; label: string; count: number }[];
   decision_distribution?: { status: string; label: string; count: number }[];
   top_parties: { card_code: string; card_name: string; count: number; revenue: number }[];
   category_sales: { category: string; total_sales: number; count: number }[];
+  highest_sales_order?: { order_number: string | null; amount: number };
 }
 
 interface CurrentUser {
@@ -72,8 +79,18 @@ const YEARS = Array.from({ length: 5 }, (_, index) => currentYear - index);
 const fmt = (n: number | string) =>
   Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 });
 
+const currencyPrefix = "\u20B9";
+
 const fmtCurrency = (n: number | string) =>
-  `₹${Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  `${currencyPrefix}${Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+const fmtCompactCurrency = (value: number | string) => {
+  const amount = Number(value || 0);
+  if (amount >= 10000000) return `${currencyPrefix}${(amount / 10000000).toFixed(1)}Cr`;
+  if (amount >= 100000) return `${currencyPrefix}${(amount / 100000).toFixed(1)}L`;
+  if (amount >= 1000) return `${currencyPrefix}${(amount / 1000).toFixed(1)}K`;
+  return `${currencyPrefix}${amount.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+};
 
 const roleContent: Record<SupportedRole, { title: string; subtitle: string; focus: string; accent: string }> = {
   admin: {
@@ -116,6 +133,49 @@ const normalizeRole = (role?: string): SupportedRole => {
   return "manager";
 };
 
+const mergeRejectedStatuses = <T extends { status: string; label: string; count: number }>(items: T[]) => {
+  const merged: Array<{ status: string; label: string; count: number }> = [];
+  let rejectedItem: { status: string; label: string; count: number } | null = null;
+
+  for (const item of items) {
+    const statusValue = `${item.status} ${item.label}`.toLowerCase();
+
+    if (statusValue.includes("rejected")) {
+      if (!rejectedItem) {
+        rejectedItem = { status: "rejected", label: "Rejected", count: 0 };
+        merged.push(rejectedItem);
+      }
+      rejectedItem.count += item.count;
+      continue;
+    }
+
+    merged.push(item);
+  }
+
+  return merged;
+};
+
+const getStatusDisplayLabel = (item: { status: string; label: string }) => {
+  const statusValue = `${item.status} ${item.label}`.toLowerCase();
+
+  if (statusValue.includes("rate approval")) return "Rate Approver Pending";
+  if (statusValue.includes("auditor approval")) return "Auditor Pending";
+  if (statusValue.includes("billing") && !statusValue.includes("rejected")) return "Billing Pending";
+
+  return item.label;
+};
+
+const normalizeStatusLabels = <T extends { status: string; label: string; count: number }>(items: T[]) =>
+  items.map((item) => ({
+    ...item,
+    label: getStatusDisplayLabel(item),
+  }));
+
+const shouldHideStatus = (item: { status: string; label: string }) => {
+  const statusValue = `${item.status} ${item.label}`.toLowerCase();
+  return statusValue.includes("order created");
+};
+
 const EMPTY_KPI: KPIData = {
   total_orders: 0,
   total_revenue: "0",
@@ -128,10 +188,13 @@ const EMPTY_KPI: KPIData = {
 const EMPTY_CHARTS: ChartsData = {
   monthly_sales: [],
   statewise_orders: [],
+  manager_performance: [],
+  manager_state_performance: [],
   status_distribution: [],
   decision_distribution: [],
   top_parties: [],
   category_sales: [],
+  highest_sales_order: { order_number: null, amount: 0 },
 };
 
 export default function Dashboard() {
@@ -144,6 +207,10 @@ export default function Dashboard() {
   const [year, setYear] = useState(currentYear);
   const [month, setMonth] = useState(0);
   const [topPartyView, setTopPartyView] = useState<TopPartyView>(5);
+  const [showMoreStatuses, setShowMoreStatuses] = useState(false);
+  const [showSalesBreakdown, setShowSalesBreakdown] = useState(false);
+  const [showManagerPerformance, setShowManagerPerformance] = useState(false);
+  const [performanceView, setPerformanceView] = useState<"manager" | "state">("manager");
 
   const isUnauthorized = (result: PromiseSettledResult<unknown>) =>
     result.status === "rejected" &&
@@ -235,10 +302,11 @@ export default function Dashboard() {
     [charts?.status_distribution]
   );
 
+  const categorySales = charts?.category_sales ?? [];
   const topCategory = useMemo(() => {
-    const [best] = [...(charts?.category_sales ?? [])].sort((a, b) => b.total_sales - a.total_sales);
+    const [best] = [...categorySales].sort((a, b) => b.total_sales - a.total_sales);
     return best;
-  }, [charts?.category_sales]);
+  }, [categorySales]);
   const topParties = useMemo(
     () =>
       (charts?.top_parties ?? [])
@@ -252,10 +320,59 @@ export default function Dashboard() {
   const topParty = topParties[0];
 
   const monthlySales = charts?.monthly_sales ?? [];
+  const managerPerformance = useMemo(
+    () =>
+      (charts?.manager_performance ?? [])
+        .map((item) => ({
+          id: item.manager_id ?? item.manager_name,
+          name: item.manager_name,
+          sales: item.sales ?? 0,
+          orders: item.orders ?? 0,
+        })),
+    [charts?.manager_performance]
+  );
+  const statePerformance = useMemo(
+    () =>
+      (charts?.statewise_orders ?? [])
+        .map((item) => ({
+          id: item.state,
+          name: item.state,
+          sales: item.sales ?? 0,
+          orders: item.orders ?? 0,
+        }))
+        .sort((a, b) => b.sales - a.sales || b.orders - a.orders || a.name.localeCompare(b.name)),
+    [charts?.statewise_orders]
+  );
+  const activePerformance = performanceView === "state" ? statePerformance : managerPerformance;
+  const topManager = managerPerformance[0];
+  const topManagerPerformance = useMemo(() => managerPerformance.slice(0, 5), [managerPerformance]);
+  const managerMaxSales = useMemo(
+    () => Math.max(...managerPerformance.map((item) => item.sales), 0),
+    [managerPerformance]
+  );
+  const activePerformanceMaxSales = useMemo(
+    () => Math.max(...activePerformance.map((item) => item.sales), 0),
+    [activePerformance]
+  );
+  const getSalesWidth = (sales: number, maxSales: number) => {
+    if (maxSales <= 0) return "0%";
+    const percent = (sales / maxSales) * 100;
+    return `${sales > 0 ? Math.max(percent, 6) : 0}%`;
+  };
   const peakMonth = useMemo(() => {
     const [best] = [...monthlySales].sort((a, b) => b.revenue - a.revenue);
     return best;
   }, [monthlySales]);
+  const highestSalesOrder = charts?.highest_sales_order;
+  const revenueMetricLabel = month === 0 ? "Peak Revenue" : "Highest Order";
+  const revenueMetricValue =
+    month === 0
+      ? peakMonth
+        ? fmtCurrency(peakMonth.revenue)
+        : "N/A"
+      : highestSalesOrder && highestSalesOrder.amount > 0
+        ? fmtCurrency(highestSalesOrder.amount)
+        : "N/A";
 
   const acceptedCount = activeStatus
     .filter((item) => {
@@ -296,7 +413,7 @@ export default function Dashboard() {
   ].filter((item) => item.count > 0);
   const decisionDistribution = charts?.decision_distribution;
   const monthDecisionChart = (decisionDistribution ?? []).filter((item) => item.count > 0);
-  const statusItems = (isReviewRole || role === "billing")
+  const rawStatusItems = (isReviewRole || role === "billing")
     ? decisionDistribution
       ? monthDecisionChart
       : monthDecisionChart.length > 0
@@ -304,14 +421,54 @@ export default function Dashboard() {
       : isReviewRole
         ? reviewDecisionChart
         : billingDecisionChart
-    : activeStatus;
+      : activeStatus;
+  const statusItems = normalizeStatusLabels(
+    mergeRejectedStatuses(rawStatusItems).filter((item) => !shouldHideStatus(item))
+  );
+  const isPrimaryStatus = (item: { status: string; label: string }) => {
+    const statusValue = `${item.status} ${item.label}`.toLowerCase();
+    return (
+      /\bcompleted\b/.test(statusValue) ||
+      /\brejected\b/.test(statusValue) ||
+      /\baccepted\b/.test(statusValue) ||
+      /\bapproved\b/.test(statusValue) ||
+      /\bdelivered\b/.test(statusValue)
+    );
+  };
+  const primaryStatusItems = statusItems.filter(isPrimaryStatus);
+  const statusDisplayItems =
+    primaryStatusItems.length > 0
+      ? primaryStatusItems
+      : statusItems;
+  const hiddenStatusItems =
+    primaryStatusItems.length > 0
+      ? statusItems.filter((item) => !isPrimaryStatus(item))
+      : [];
+  const hiddenStatusCount = hiddenStatusItems.length;
+  const getStatusColor = (statusItem: { status: string; label: string }) => {
+    const sourceIndex = statusItems.findIndex(
+      (item) => item.status === statusItem.status && item.label === statusItem.label
+    );
+    return PALETTE[(sourceIndex >= 0 ? sourceIndex : 0) % PALETTE.length];
+  };
   const selectedMonthLabel = MONTH_OPTIONS.find((option) => option.value === month)?.label ?? "All Months";
   const selectedPeriodLabel = month === 0 ? `${year}` : `${selectedMonthLabel} ${year}`;
+  const orderVolumeMetricLabel = month === 0 ? "Year Total" : `${selectedMonthLabel} Total`;
+  const completedRevenue = kpi?.completed_revenue ?? 0;
+  const allRevenue = kpi?.total_revenue ?? 0;
+  const rejectedRevenue = kpi?.rejected_revenue ?? 0;
+  const pendingRevenue = kpi?.pending_revenue ?? 0;
   const overviewTotalCount = statusItems.reduce((sum, item) => sum + item.count, 0);
   const overviewAcceptedCount = statusItems
     .filter((item) => {
       const statusValue = `${item.status} ${item.label}`.toLowerCase();
       return ["accepted", "approved", "completed", "delivered"].some((value) => statusValue.includes(value));
+    })
+    .reduce((sum, item) => sum + item.count, 0);
+  const overviewCompletedCount = statusItems
+    .filter((item) => {
+      const statusValue = `${item.status} ${item.label}`.toLowerCase();
+      return statusValue.includes("completed");
     })
     .reduce((sum, item) => sum + item.count, 0);
   const overviewRejectedCount = statusItems
@@ -326,12 +483,22 @@ export default function Dashboard() {
       return ["pending", "queue", "review", "billing"].some((value) => statusValue.includes(value));
     })
     .reduce((sum, item) => sum + item.count, 0);
-  const overviewHandledCount = overviewAcceptedCount + overviewRejectedCount;
+  const overviewHandledCount =
+    role === "admin"
+      ? overviewCompletedCount + overviewRejectedCount
+      : overviewAcceptedCount + overviewRejectedCount;
   const overviewRate = overviewTotalCount > 0 ? Math.round((overviewHandledCount / overviewTotalCount) * 100) : 0;
 
   const kpiConfig = {
     admin: [
-      { icon: "₹", tone: "db-card--teal", label: "Total Sales", value: fmtCurrency(kpi?.total_revenue ?? 0), sub: `${year} revenue` },
+      {
+        icon: currencyPrefix,
+        tone: "db-card--teal",
+        label: "Total Sales",
+        value: fmtCurrency(completedRevenue),
+        sub: "Completed order sales",
+        salesBreakdown: true,
+      },
       { icon: "⚡", tone: "db-card--dark", label: "This Month", value: fmt(kpi?.this_month_orders ?? 0), sub: "Monthly order momentum" },
       { icon: "🗓️", tone: "db-card--teal", label: "Today Orders", value: fmt(kpi?.today_orders ?? 0), sub: "Orders created today" },
     ],
@@ -346,7 +513,7 @@ export default function Dashboard() {
       { icon: "✅", tone: "db-card--dark", label: "Approved Orders", value: fmt(reviewAcceptedCount), sub: "Orders approved by rate approver" },
     ],
     manager: [
-      { icon: "₹", tone: "db-card--teal", label: "Total Sales", value: fmtCurrency(kpi?.total_revenue ?? 0), sub: `${year} revenue` },
+      { icon: currencyPrefix, tone: "db-card--teal", label: "Total Sales", value: fmtCurrency(completedRevenue), sub: "Completed order sales", salesBreakdown: true },
       { icon: "📦", tone: "db-card--blue", label: "Completed  Orders", value: fmt(completionCount ?? 0), sub: "Across selected year" },
       { icon: "⚡", tone: "db-card--dark", label: "Today Orders", value: fmt(kpi?.today_orders ?? 0), sub: "Live operational pace" },
     ],
@@ -355,7 +522,7 @@ export default function Dashboard() {
       { icon: "📌", tone: "db-card--teal", label: "Handled Orders", value: fmt(billingHandledCount), sub: "Orders sent to auditor or rejected" },
       { icon: "🗓️", tone: "db-card--blue", label: "Today Orders", value: fmt(kpi?.today_orders ?? 0), sub: "Billing orders updated today" },
     ],
-  } satisfies Record<SupportedRole, { icon: ReactNode; tone: string; label: string; value: string; sub: string }[]>;
+  } satisfies Record<SupportedRole, { icon: ReactNode; tone: string; label: string; value: string; sub: string; salesBreakdown?: boolean }[]>;
 
   const chartCopy = {
     admin: {
@@ -363,6 +530,8 @@ export default function Dashboard() {
       salesSubtitle: "Revenue movement across the selected year",
       statusTitle: `Order Status (${year})`,
       statusSubtitle: "Current mix of order stages",
+      managerPerformanceTitle: `Top Manager Performance (${year})`,
+      managerPerformanceSubtitle: "Click to view all managers by sales",
       volumeTitle: `Monthly Order Volume (${year})`,
       volumeSubtitle: "How order count moves across the year",
       categoryTitle: `Category Sales (${year})`,
@@ -373,6 +542,8 @@ export default function Dashboard() {
       salesSubtitle: "Received order value across the selected year",
       statusTitle: `Audit Decisions (${year})`,
       statusSubtitle: "Accepted, rejected and in-review mix",
+      managerPerformanceTitle: `Manager Performance (${year})`,
+      managerPerformanceSubtitle: "Sales value by manager",
       volumeTitle: `Monthly Orders Received (${year})`,
       volumeSubtitle: "Audit intake across the year",
       categoryTitle: `Category Value Under Review (${year})`,
@@ -383,6 +554,8 @@ export default function Dashboard() {
       salesSubtitle: "Rate approval value across the selected year",
       statusTitle: `Rate Approval Decisions (${year})`,
       statusSubtitle: "Approved, rejected and pending approval mix",
+      managerPerformanceTitle: `Manager Performance (${year})`,
+      managerPerformanceSubtitle: "Sales value by manager",
       volumeTitle: `Monthly Orders Received (${year})`,
       volumeSubtitle: "Rate approval intake across the year",
       categoryTitle: `Category Value Under Approval (${year})`,
@@ -393,6 +566,8 @@ export default function Dashboard() {
       salesSubtitle: "Revenue movement across the selected year",
       statusTitle: `Order Status (${year})`,
       statusSubtitle: "Current mix of order stages",
+      managerPerformanceTitle: `Manager Performance (${year})`,
+      managerPerformanceSubtitle: "Sales value by manager",
       volumeTitle: `Monthly Order Volume (${year})`,
       volumeSubtitle: "How order count moves across the year",
       categoryTitle: `Category Sales (${year})`,
@@ -403,6 +578,8 @@ export default function Dashboard() {
       salesSubtitle: "Billing order movement across the selected year",
       statusTitle: `Billing Decisions (${year})`,
       statusSubtitle: "Accepted, rejected and queued billing orders",
+      managerPerformanceTitle: `Manager Performance (${year})`,
+      managerPerformanceSubtitle: "Sales value by manager",
       volumeTitle: `Monthly Billing Orders (${year})`,
       volumeSubtitle: "Billing-stage order volume across the year",
       categoryTitle: `Category Billing Orders (${year})`,
@@ -413,6 +590,8 @@ export default function Dashboard() {
     salesSubtitle: string;
     statusTitle: string;
     statusSubtitle: string;
+    managerPerformanceTitle: string;
+    managerPerformanceSubtitle: string;
     volumeTitle: string;
     volumeSubtitle: string;
     categoryTitle: string;
@@ -460,7 +639,6 @@ export default function Dashboard() {
           .db-legend { flex-wrap: wrap !important; }
         }
         @media (max-width: 480px) {
-          .db-hero-stats { flex-direction: column !important; align-items: flex-start !important; gap: 8px !important; }
           .db-filter-group { width: 100% !important; }
           .db-year-select { width: 100% !important; }
           .db-segmented-control { width: 100% !important; display: flex !important; flex-wrap: wrap !important; }
@@ -474,16 +652,6 @@ export default function Dashboard() {
             <div>
               <h1 className="db-title">{roleMeta.title}</h1>
               <p className="db-subtitle">{roleMeta.subtitle}</p>
-              <div className="db-hero-stats">
-                <div className="db-hero-stat">
-                  <span className="db-hero-stat-label">Selected period</span>
-                  <strong>{month === 0 ? year : `${selectedMonthLabel} ${year}`}</strong>
-                </div>
-                <div className="db-hero-stat">
-                  <span className="db-hero-stat-label">View</span>
-                  <strong>{roleMeta.focus}</strong>
-                </div>
-              </div>
             </div>
             <div className="db-filter-group">
               <select
@@ -538,6 +706,19 @@ export default function Dashboard() {
       <div className="db-kpi-row">
         {kpiConfig[role].map((item) => (
           <div className={`db-card ${item.tone}`} key={item.label}>
+            {"salesBreakdown" in item && item.salesBreakdown ? (
+              <div className="db-card-menu-wrap">
+                <button
+                  type="button"
+                  className="db-card-menu-trigger"
+                  onClick={() => setShowSalesBreakdown((current) => !current)}
+                  aria-label={`${showSalesBreakdown ? "Hide" : "Show"} sales breakdown`}
+                  aria-expanded={showSalesBreakdown}
+                >
+                  {showSalesBreakdown ? <FiChevronUp /> : <FiChevronDown />}
+                </button>
+              </div>
+            ) : null}
             <div className="db-card-icon">{item.icon}</div>
             <div className="db-card-label">{item.label}</div>
             <div className={`db-card-value ${item.label.toLowerCase().includes("sales") ? "db-card-value--sm" : ""}`}>{item.value}</div>
@@ -678,7 +859,7 @@ export default function Dashboard() {
                 <ResponsiveContainer width="100%" height={130}>
                   <PieChart>
                     <Pie
-                      data={statusItems}
+                      data={statusDisplayItems}
                       dataKey="count"
                       nameKey="label"
                       cx="50%"
@@ -686,42 +867,213 @@ export default function Dashboard() {
                       outerRadius={55}
                       innerRadius={32}
                     >
-                      {statusItems.map((item, index) => (
-                        <Cell key={item.status} fill={PALETTE[index % PALETTE.length]} />
+                      {statusDisplayItems.map((item) => (
+                        <Cell key={item.status} fill={getStatusColor(item)} />
                       ))}
                     </Pie>
                     <Tooltip formatter={(value, name) => [value, name]} />
                   </PieChart>
                 </ResponsiveContainer>
                 <div className="db-legend">
-                  {statusItems.map((item, index) => (
+                  {statusDisplayItems.map((item) => (
                     <div key={item.status} className="db-legend-item">
-                      <span className="db-legend-dot" style={{ background: PALETTE[index % PALETTE.length] }} />
+                      <span className="db-legend-dot" style={{ background: getStatusColor(item) }} />
                       <span className="db-legend-label">{item.label}</span>
                       <span className="db-legend-val">{item.count}</span>
                     </div>
                   ))}
                 </div>
+                {hiddenStatusCount > 0 ? (
+                  <div className="db-status-popover-wrap">
+                    <button
+                      type="button"
+                      className="db-status-popover-trigger"
+                      onClick={() => setShowMoreStatuses((current) => !current)}
+                      aria-label={`${showMoreStatuses ? "Hide" : "Show"} ${hiddenStatusCount} more statuses`}
+                      aria-expanded={showMoreStatuses}
+                    >
+                      {showMoreStatuses ? <FiChevronUp /> : <FiChevronDown />}
+                    </button>
+                  </div>
+                ) : null}
               </>
             )}
           </div>
         </div>
       </div>
 
+      {showSalesBreakdown ? (
+        <div className="db-status-modal-backdrop" onClick={() => setShowSalesBreakdown(false)}>
+          <div
+            className="db-sales-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Sales breakdown"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="db-status-modal-head">
+              <div>
+                <div className="db-chart-title">Sales Breakdown</div>
+                <div className="db-chart-subtitle">{selectedPeriodLabel} order sales</div>
+              </div>
+              <button
+                type="button"
+                className="db-status-modal-close"
+                onClick={() => setShowSalesBreakdown(false)}
+                aria-label="Close sales breakdown"
+              >
+                <FiChevronUp />
+              </button>
+            </div>
+            <div className="db-sales-modal-list">
+              <div className="db-sales-modal-row">
+                <span>All Orders Sales</span>
+                <strong>{fmtCurrency(allRevenue)}</strong>
+              </div>
+              <div className="db-sales-modal-row db-sales-modal-row--primary">
+                <span>Completed Orders Sales</span>
+                <strong>{fmtCurrency(completedRevenue)}</strong>
+              </div>
+              <div className="db-sales-modal-row">
+                <span>Pending Orders Sales</span>
+                <strong>{fmtCurrency(pendingRevenue)}</strong>
+              </div>
+              <div className="db-sales-modal-row">
+                <span>Rejected Orders Sales</span>
+                <strong>{fmtCurrency(rejectedRevenue)}</strong>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {showMoreStatuses ? (
+        <div className="db-status-modal-backdrop" onClick={() => setShowMoreStatuses(false)}>
+          <div
+            className="db-status-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="More order statuses"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="db-status-modal-head">
+              <div>
+                <div className="db-chart-title">More Statuses</div>
+                <div className="db-chart-subtitle">Additional order status counts</div>
+              </div>
+              <button
+                type="button"
+                className="db-status-modal-close"
+                onClick={() => setShowMoreStatuses(false)}
+                aria-label="Close more statuses"
+              >
+                <FiChevronUp />
+              </button>
+            </div>
+            <div className="db-status-modal-list">
+              {hiddenStatusItems.map((item) => (
+                <div key={item.status} className="db-legend-item">
+                  <span className="db-legend-dot" style={{ background: getStatusColor(item) }} />
+                  <span className="db-legend-label">{item.label}</span>
+                  <span className="db-legend-val">{item.count}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {showManagerPerformance ? (
+        <div className="db-status-modal-backdrop" onClick={() => setShowManagerPerformance(false)}>
+          <div
+            className="db-manager-performance-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="All managers performance"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="db-status-modal-head">
+              <div>
+                <div className="db-chart-title">
+                  {performanceView === "state" ? "State-wise Performance" : "All Managers Performance"}
+                </div>
+                <div className="db-chart-subtitle">
+                  {selectedPeriodLabel} sales by {performanceView === "state" ? "state" : "manager"}
+                </div>
+              </div>
+              <div className="db-performance-switch" aria-label="Performance view">
+                <button
+                  type="button"
+                  className={performanceView === "manager" ? "is-active" : ""}
+                  onClick={() => setPerformanceView("manager")}
+                >
+                  Managers
+                </button>
+                <button
+                  type="button"
+                  className={performanceView === "state" ? "is-active" : ""}
+                  onClick={() => setPerformanceView("state")}
+                >
+                  States
+                </button>
+              </div>
+              <button
+                type="button"
+                className="db-status-modal-close"
+                onClick={() => setShowManagerPerformance(false)}
+                aria-label="Close manager performance"
+              >
+                <FiChevronUp />
+              </button>
+            </div>
+            {activePerformance.length === 0 ? (
+              <div className="db-no-data">No manager sales data for this period</div>
+            ) : (
+              <div className="db-manager-ranking db-manager-ranking--full">
+                {activePerformance.map((item, index) => (
+                  <div className="db-manager-rank-row" key={item.id}>
+                    <span className="db-manager-rank-number">{index + 1}</span>
+                    <div className="db-manager-rank-main">
+                      <div className="db-manager-rank-meta">
+                        <span className="db-manager-rank-name">{item.name}</span>
+                        <strong>{fmtCurrency(item.sales)}</strong>
+                      </div>
+                      <div className="db-manager-rank-track">
+                        <span
+                          className="db-manager-rank-fill"
+                          style={{
+                            width: getSalesWidth(item.sales, activePerformanceMaxSales),
+                            background: PALETTE[index % PALETTE.length],
+                          }}
+                        />
+                      </div>
+                      <span className="db-manager-rank-orders">{fmt(item.orders)} orders</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
+
       {!shouldExpandVolumeChart && (
       <div className="db-charts-row">
-        <div className="db-chart-box db-chart-box--wide" style={{ gridColumn: "1 / -1" }}>
+        <div
+          className="db-chart-box db-chart-box--wide"
+          style={{ gridColumn: role === "admin" ? undefined : "1 / -1" }}
+        >
           <div className="db-chart-head">
             <div>
               <div className="db-chart-title">{chartCopy[role].salesTitle}</div>
               <div className="db-chart-subtitle">{chartCopy[role].salesSubtitle}</div>
             </div>
             <div className="db-chart-metric">
-              <span>Peak Revenue</span>
-              <strong>{peakMonth ? fmtCurrency(peakMonth.revenue) : "N/A"}</strong>
+              <span>{revenueMetricLabel}</span>
+              <strong>{revenueMetricValue}</strong>
             </div>
           </div>
-          <ResponsiveContainer width="100%" height={250}>
+          <ResponsiveContainer width="100%" height={role === "admin" ? 205 : 240}>
             <AreaChart data={monthlySales} margin={{ top: 10, right: 16, bottom: 0, left: 10 }}>
               <defs>
                 <linearGradient id="revGrad" x1="0" y1="0" x2="0" y2="1">
@@ -733,15 +1085,85 @@ export default function Dashboard() {
               <XAxis dataKey="label" tick={{ fontSize: 12, fill: "#5b6878" }} />
               <YAxis
                 tick={{ fontSize: 11, fill: "#5b6878" }}
-                tickFormatter={isBilling ? undefined : (v) => `₹${(v / 1000).toFixed(1)}k`}
+                tickFormatter={isBilling ? undefined : (v) => `${currencyPrefix}${(v / 1000).toFixed(1)}k`}
                 width={52}
               />
-              <Tooltip formatter={(v) => isBilling ? [v, "Orders"] : [`₹${Number(v).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, "Revenue"]} />
+              <Tooltip formatter={(v) => isBilling ? [v, "Orders"] : [`${currencyPrefix}${Number(v).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, "Revenue"]} />
               <Area type="monotone" dataKey={isBilling ? "count" : "revenue"} stroke="#0f172a" strokeWidth={2} fill="url(#revGrad)" dot={{ r: 3, fill: "#0f766e" }} />
             </AreaChart>
           </ResponsiveContainer>
         </div>
 
+        {role === "admin" ? (
+          <div
+            className="db-chart-box db-chart-box--clickable"
+            role="button"
+            tabIndex={0}
+            onClick={() => {
+              if (managerPerformance.length > 0) {
+                setPerformanceView("manager");
+                setShowManagerPerformance(true);
+              }
+            }}
+            onKeyDown={(event) => {
+              if ((event.key === "Enter" || event.key === " ") && managerPerformance.length > 0) {
+                event.preventDefault();
+                setPerformanceView("manager");
+                setShowManagerPerformance(true);
+              }
+            }}
+          >
+            <div className="db-chart-head">
+              <div>
+                <div className="db-chart-title">{chartCopy[role].managerPerformanceTitle}</div>
+                <div className="db-chart-subtitle">{chartCopy[role].managerPerformanceSubtitle}</div>
+              </div>
+              <div className="db-chart-metric">
+                <span>Top Manager</span>
+                <strong>{topManager?.name ?? "N/A"}</strong>
+              </div>
+            </div>
+              <div className="db-performance-card-actions">
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setPerformanceView("state");
+                    setShowManagerPerformance(true);
+                  }}
+                  aria-label="View state-wise performance"
+                >
+                  States <FiChevronDown />
+                </button>
+              </div>
+            {topManagerPerformance.length === 0 ? (
+              <div className="db-no-data">No manager sales data for this period</div>
+            ) : (
+              <div className="db-manager-ranking db-manager-ranking--compact">
+                {topManagerPerformance.map((item, index) => (
+                  <div className="db-manager-rank-row" key={item.id}>
+                    <span className="db-manager-rank-number">{index + 1}</span>
+                    <div className="db-manager-rank-main">
+                      <div className="db-manager-rank-meta">
+                        <span className="db-manager-rank-name">{item.name}</span>
+                        <strong>{fmtCompactCurrency(item.sales)}</strong>
+                      </div>
+                      <div className="db-manager-rank-track">
+                        <span
+                          className="db-manager-rank-fill"
+                          style={{
+                            width: getSalesWidth(item.sales, managerMaxSales),
+                            background: PALETTE[index % PALETTE.length],
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : null}
       </div>
       )}
 
@@ -753,14 +1175,14 @@ export default function Dashboard() {
               <div className="db-chart-subtitle">{chartCopy[role].volumeSubtitle}</div>
             </div>
             <div className="db-chart-metric">
-              <span>Year Total</span>
+              <span>{orderVolumeMetricLabel}</span>
               <strong>{fmt(totalOrders)}</strong>
             </div>
           </div>
           {monthlySales.length === 0 ? (
             <div className="db-no-data">No monthly order data for this period</div>
           ) : (
-            <ResponsiveContainer width="100%" height={shouldExpandVolumeChart ? 360 : 250}>
+            <ResponsiveContainer width="100%" height={shouldExpandVolumeChart ? 360 : 235}>
               <BarChart data={monthlySales} margin={{ top: 10, right: 16, bottom: 0, left: 10 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#dbe4ea" />
                 <XAxis dataKey="label" tick={{ fontSize: 12, fill: "#5b6878" }} />
@@ -788,17 +1210,22 @@ export default function Dashboard() {
               <strong>{topCategory?.category ?? "N/A"}</strong>
             </div>
           </div>
-          {(charts?.category_sales ?? []).length === 0 ? (
+          {categorySales.length === 0 ? (
             <div className="db-no-data">No category data for this period</div>
           ) : (
-            <ResponsiveContainer width="100%" height={250}>
-              <BarChart data={charts?.category_sales ?? []} margin={{ top: 10, right: 16, bottom: 24, left: 10 }}>
+            <ResponsiveContainer width="100%" height={270}>
+              <BarChart data={categorySales} margin={{ top: 10, right: 16, bottom: 24, left: 18 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#dbe4ea" />
-                <XAxis dataKey="category" tick={{ fontSize: 11, fill: "#5b6878" }} angle={-20} textAnchor="end" />
-                <YAxis tick={{ fontSize: 11, fill: "#5b6878" }} tickFormatter={(v) => `₹${(v / 1000).toFixed(1)}k`} width={52} />
-                <Tooltip formatter={(v) => [`₹${Number(v).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, "Sales"]} />
+                <XAxis
+                  dataKey="category"
+                  tick={{ fontSize: 11, fill: "#5b6878" }}
+                  angle={-20}
+                  textAnchor="end"
+                />
+                <YAxis tick={{ fontSize: 11, fill: "#5b6878" }} tickFormatter={fmtCompactCurrency} width={72} />
+                <Tooltip formatter={(v) => [`${currencyPrefix}${Number(v).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, "Sales"]} />
                 <Bar dataKey="total_sales" radius={[5, 5, 0, 0]} maxBarSize={40}>
-                  {(charts?.category_sales ?? []).map((item, index) => (
+                  {categorySales.map((item, index) => (
                     <Cell key={item.category} fill={PALETTE[index % PALETTE.length]} />
                   ))}
                 </Bar>

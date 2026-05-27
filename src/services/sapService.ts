@@ -8,6 +8,8 @@ export interface Product  {
   category?: string;
   sal_pack_unit?: string;
   variety?: string;
+  staff_rate?: string | number;
+  on_hand?: string | number | null;
 };
 
 export interface Address {

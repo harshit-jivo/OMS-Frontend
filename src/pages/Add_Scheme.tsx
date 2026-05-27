@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
 import { ordersService } from "../services/ordersService";
 import { userService } from "../services/userService";
@@ -11,9 +11,11 @@ type StateOption = {
 };
 
 export default function Add_Scheme() {
+  const stateDropdownRef = useRef<HTMLDivElement>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [states, setStates] = useState<StateOption[]>([]);
   const [isLoadingStates, setIsLoadingStates] = useState(false);
+  const [stateDropdownOpen, setStateDropdownOpen] = useState(false);
   const [formData, setFormData] = useState({
     scheme_name: "",
     item_code: "",
@@ -43,6 +45,20 @@ export default function Add_Scheme() {
     void fetchStates();
   }, []);
 
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        stateDropdownRef.current &&
+        !stateDropdownRef.current.contains(event.target as Node)
+      ) {
+        setStateDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
@@ -68,7 +84,7 @@ export default function Add_Scheme() {
   };
 
   const handleChange = (
-    e: ChangeEvent<HTMLInputElement | HTMLSelectElement>,
+    e: ChangeEvent<HTMLInputElement>,
   ) => {
     const { name, value } = e.target;
     setFormData((prev) => ({
@@ -76,6 +92,10 @@ export default function Add_Scheme() {
       [name]: value,
     }));
   };
+
+  const selectedStateName =
+    states.find((state) => state.code === formData.state_code)?.name ||
+    (isLoadingStates ? "Loading states..." : "Select state");
 
   return (
     <div className="asg-page app-page">
@@ -117,27 +137,45 @@ export default function Add_Scheme() {
             </div>
 
             <div className="asg-field">
-              <label className="asg-label" htmlFor="state_code">
+              <label className="asg-label">
                 State
               </label>
-              <div className="asg-input-wrap">
-                <select
-                  id="state_code"
-                  name="state_code"
-                  value={formData.state_code}
-                  onChange={handleChange}
-                  required
+              <div className="asg-dropdown" ref={stateDropdownRef}>
+                <button
+                  type="button"
+                  className="asg-dropdown-trigger"
+                  onClick={() => !isLoadingStates && setStateDropdownOpen((value) => !value)}
                   disabled={isLoadingStates}
+                  aria-expanded={stateDropdownOpen}
                 >
-                  <option value="">
-                    {isLoadingStates ? "Loading states..." : "Select state"}
-                  </option>
-                  {states.map((state) => (
-                    <option key={state.id} value={state.code}>
-                      {state.name}
-                    </option>
-                  ))}
-                </select>
+                  <span>{selectedStateName}</span>
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                    <path
+                      d="M3 4.5L6 7.5L9 4.5"
+                      stroke="#64748b"
+                      strokeWidth="1.4"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+                {stateDropdownOpen && (
+                  <div className="asg-dropdown-menu">
+                    {states.map((state) => (
+                      <button
+                        key={state.id}
+                        type="button"
+                        className={`asg-dropdown-option${formData.state_code === state.code ? " is-selected" : ""}`}
+                        onClick={() => {
+                          setFormData((prev) => ({ ...prev, state_code: state.code }));
+                          setStateDropdownOpen(false);
+                        }}
+                      >
+                        {state.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 

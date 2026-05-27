@@ -715,7 +715,7 @@ export default function Staff() {
                                   filteredItemOptions.map((product) => (
                                     <button
                                       type="button"
-                                      key={product.item_code || product.item_name}
+                                      key={`${product.item_code || product.item_name}-${product.category || ""}`}
                                       className="sl-party-option"
                                       onClick={() =>
                                         updateRowField(index, "item", product.item_name)

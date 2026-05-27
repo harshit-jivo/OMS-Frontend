@@ -1,6 +1,7 @@
 import api from "./api"
 
 export interface Product {
+  id: number;
   category: string;
   brand: string | null;
   variety: string | null;
@@ -11,6 +12,19 @@ export interface Product {
   tax_rate: string | number;
   basic_rate: string | number;
   staff_rate?: string | number;
+};
+
+type StaffProductRatePayload = {
+  product_id: number;
+  item_code: string;
+  category: string;
+  rate: number;
+};
+
+type StaffProductRemovePayload = {
+  product_id: number;
+  item_code: string;
+  category: string;
 };
 
 export interface PartyProduct {
@@ -120,6 +134,8 @@ export interface Order {
   id: number;
   status?: number;
   order_number: string;
+  order_type?: "PARTY" | "STAFF";
+  employee_id?: string;
   card_code: string;
   card_name: string;
   bill_to_id?: number;
@@ -157,6 +173,25 @@ export interface OrderLog {
   remarks: string;
   performed_by_name: string | null;
   created_at: string;
+}
+
+export interface OrderStockCheckItem {
+  item_code: string;
+  item_name: string;
+  category: string;
+  required_qty: number;
+  available_stock: number;
+}
+
+export interface OrderStockCheck {
+  id: number;
+  order_number: string;
+  date: string;
+  customer: string;
+  order_type: "Party" | "Staff";
+  dispatch_from: string;
+  status: string;
+  items: OrderStockCheckItem[];
 }
 
 export type ItemSchemeDisplay = {
@@ -298,6 +333,17 @@ export const ordersService = {
     return response.data || [];
   },
 
+  saveStaffProductRates: async (
+    products: StaffProductRatePayload[],
+    removedProducts: StaffProductRemovePayload[] = [],
+  ) => {
+    const response = await api.post("/orders/staff-products/", {
+      products,
+      removed_products: removedProducts,
+    });
+    return response.data;
+  },
+
   createOrder: async (formData: CreateOrder) => {
     const payload = {
       ...formData,
@@ -348,6 +394,11 @@ export const ordersService = {
   getOrderLogs: async (orderId: number) => {
     const response = await api.get(`/orders/${orderId}/orderlogs/`);
     return response.data as OrderLog[];
+  },
+
+  getOrderStockCheck: async () => {
+    const response = await api.get("/orders/stock-check/");
+    return response.data as OrderStockCheck[];
   },
 
   getOrdersStatus: async () => {
