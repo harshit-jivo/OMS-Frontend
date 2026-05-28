@@ -129,10 +129,6 @@ export default function Status() {
       <section className="st-hero">
         <div className="st-hero-copy">
           <span className="app-chip st-chip">SAP Sync</span>
-          <h1 className="st-title app-page-title">Sync Center</h1>
-          <p className="st-subtitle app-page-subtitle">
-            Manage SAP data refreshes with a cleaner control panel .
-          </p>
           <div className="st-hero-strip">
             <div className="st-hero-strip-item">
               <span className="st-hero-strip-label">Sources</span>
@@ -153,7 +149,6 @@ export default function Status() {
               <div className="st-section-label">Manual Sync</div>
               <h2 className="st-panel-title">Choose an action</h2>
             </div>
-            <div className="st-panel-note">Run a complete refresh or update one module at a time</div>
           </div>
           <div className="st-sync-grid">
             {syncActions.map((action) => (

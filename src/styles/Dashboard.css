@@ -823,6 +823,169 @@
   font-weight: 700;
 }
 
+.db-state-item-box {
+  margin-bottom: 18px;
+}
+
+.db-state-item-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: thin;
+}
+
+.db-state-item-tabs button {
+  flex: 0 0 auto;
+  max-width: 160px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 999px;
+  background: #fff;
+  color: #1d4ed8;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-state-item-tabs button.is-active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+
+.db-state-item-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: -4px 0 12px;
+}
+
+.db-state-item-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 999px;
+  background: #fff;
+  color: #1d4ed8;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.db-state-item-actions button {
+  gap: 6px;
+}
+
+.db-state-item-actions svg {
+  width: 14px;
+  height: 14px;
+}
+
+.db-state-item-back {
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.db-state-item-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.db-state-item-list--modal {
+  max-height: min(68vh, 620px);
+  overflow: auto;
+  padding-right: 6px;
+}
+
+.db-state-item-row {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid rgba(219, 234, 254, 0.92);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.92));
+}
+
+.db-state-item-row--button {
+  width: 100%;
+  cursor: pointer;
+  text-align: left;
+}
+
+.db-state-item-row--button:hover,
+.db-state-item-row--button.is-active {
+  border-color: rgba(37, 99, 235, 0.42);
+  background:
+    radial-gradient(circle at top right, rgba(37, 99, 235, 0.12), transparent 34%),
+    linear-gradient(180deg, #ffffff, #eff6ff);
+}
+
+.db-state-item-main {
+  min-width: 0;
+}
+
+.db-state-item-meta {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.db-state-item-meta > div {
+  min-width: 0;
+}
+
+.db-state-item-meta span {
+  display: block;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 900;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-state-item-meta small,
+.db-state-item-foot {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.db-state-item-meta strong {
+  flex-shrink: 0;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.db-state-item-foot {
+  display: block;
+  margin-top: 6px;
+}
+
 .db-legend {
   display: flex;
   flex-direction: column;

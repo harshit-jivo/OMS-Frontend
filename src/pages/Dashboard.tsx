@@ -46,7 +46,21 @@ interface ChartsData {
   decision_distribution?: { status: string; label: string; count: number }[];
   top_parties: { card_code: string; card_name: string; count: number; revenue: number }[];
   category_sales: { category: string; total_sales: number; count: number }[];
+  state_item_sales?: StateItemSales[];
   highest_sales_order?: { order_number: string | null; amount: number };
+}
+
+interface StateItemSales {
+  state: string;
+  products: {
+    item_code: string;
+    item_name: string;
+    category: string;
+    variety: string;
+    total_sales: number;
+    quantity: number;
+    count: number;
+  }[];
 }
 
 interface CurrentUser {
@@ -211,6 +225,9 @@ export default function Dashboard() {
   const [showSalesBreakdown, setShowSalesBreakdown] = useState(false);
   const [showManagerPerformance, setShowManagerPerformance] = useState(false);
   const [performanceView, setPerformanceView] = useState<"manager" | "state">("manager");
+  const [selectedItemState, setSelectedItemState] = useState<string | null>(null);
+  const [showStateItems, setShowStateItems] = useState(false);
+  const [selectedItemVariety, setSelectedItemVariety] = useState("ALL");
 
   const isUnauthorized = (result: PromiseSettledResult<unknown>) =>
     result.status === "rejected" &&
@@ -307,6 +324,48 @@ export default function Dashboard() {
     const [best] = [...categorySales].sort((a, b) => b.total_sales - a.total_sales);
     return best;
   }, [categorySales]);
+  const stateItemSales = charts?.state_item_sales ?? [];
+  const activeItemState =
+    selectedItemState && stateItemSales.some((item) => item.state === selectedItemState)
+      ? selectedItemState
+      : stateItemSales[0]?.state;
+  const activeStateProducts = useMemo(
+    () => stateItemSales.find((item) => item.state === activeItemState)?.products ?? [],
+    [activeItemState, stateItemSales]
+  );
+  const activeStateFilteredProducts = useMemo(
+    () =>
+      selectedItemVariety === "ALL"
+        ? activeStateProducts
+        : activeStateProducts.filter((item) => (item.variety || "Unknown") === selectedItemVariety),
+    [activeStateProducts, selectedItemVariety]
+  );
+  const activeStateVarietyTotals = useMemo(() => {
+    const totals = activeStateProducts.reduce<Record<string, { variety: string; total_sales: number; quantity: number; count: number }>>(
+      (acc, item) => {
+        const variety = item.variety || "Unknown";
+        if (!acc[variety]) {
+          acc[variety] = { variety, total_sales: 0, quantity: 0, count: 0 };
+        }
+        acc[variety].total_sales += item.total_sales;
+        acc[variety].quantity += item.quantity;
+        acc[variety].count += item.count;
+        return acc;
+      },
+      {}
+    );
+
+    return Object.values(totals).sort((a, b) => b.total_sales - a.total_sales);
+  }, [activeStateProducts]);
+  const activeStateMaxVarietySales = useMemo(
+    () => Math.max(...activeStateVarietyTotals.map((item) => item.total_sales), 0),
+    [activeStateVarietyTotals]
+  );
+  const topStateVarieties = useMemo(() => activeStateVarietyTotals.slice(0, 3), [activeStateVarietyTotals]);
+  const activeStateMaxProductSales = useMemo(
+    () => Math.max(...activeStateFilteredProducts.map((item) => item.total_sales), 0),
+    [activeStateFilteredProducts]
+  );
   const topParties = useMemo(
     () =>
       (charts?.top_parties ?? [])
@@ -627,6 +686,7 @@ export default function Dashboard() {
         @media (max-width: 1024px) {
           .db-kpi-row { grid-template-columns: repeat(2, 1fr) !important; }
           .db-overview-grid { grid-template-columns: repeat(2, 1fr) !important; }
+          .db-state-item-list { grid-template-columns: 1fr !important; }
           .db-charts-row { display: flex !important; flex-direction: column !important; gap: 24px !important; }
         }
         @media (max-width: 768px) {
@@ -1057,6 +1117,105 @@ export default function Dashboard() {
         </div>
       ) : null}
 
+      {showStateItems ? (
+        <div className="db-status-modal-backdrop" onClick={() => setShowStateItems(false)}>
+          <div
+            className="db-manager-performance-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="All state-wise item sales"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="db-status-modal-head">
+              <div>
+                <div className="db-chart-title">
+                  {selectedItemVariety === "ALL" ? `${activeItemState ?? "State"} Variety Sales` : `${selectedItemVariety} Products`}
+                </div>
+                <div className="db-chart-subtitle">
+                  {selectedItemVariety === "ALL" ? "All varieties ranked by total sales value" : `${activeItemState ?? "State"} products ranked by sales value`}
+                </div>
+              </div>
+              {selectedItemVariety !== "ALL" ? (
+                <button
+                  type="button"
+                  className="db-state-item-back"
+                  onClick={() => setSelectedItemVariety("ALL")}
+                >
+                  Varieties
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="db-status-modal-close"
+                onClick={() => setShowStateItems(false)}
+                aria-label="Close state-wise item sales"
+              >
+                <FiChevronUp />
+              </button>
+            </div>
+            <div className="db-state-item-list db-state-item-list--modal">
+              {selectedItemVariety === "ALL" ? activeStateVarietyTotals.map((item, index) => (
+                <button
+                  className="db-state-item-row db-state-item-row--button"
+                  key={`modal-variety-${item.variety}`}
+                  type="button"
+                  onClick={() => setSelectedItemVariety(item.variety)}
+                >
+                  <span className="db-manager-rank-number">{index + 1}</span>
+                  <div className="db-state-item-main">
+                    <div className="db-state-item-meta">
+                      <div>
+                        <span>{item.variety}</span>
+                        <small>Total variety sale</small>
+                      </div>
+                      <strong>{fmtCurrency(item.total_sales)}</strong>
+                    </div>
+                    <div className="db-manager-rank-track">
+                      <span
+                        className="db-manager-rank-fill"
+                        style={{
+                          width: getSalesWidth(item.total_sales, activeStateMaxVarietySales),
+                          background: PALETTE[index % PALETTE.length],
+                        }}
+                      />
+                    </div>
+                    <small className="db-state-item-foot">
+                      Qty {fmt(item.quantity)} | {fmt(item.count)} order lines
+                    </small>
+                  </div>
+                </button>
+              )) : activeStateFilteredProducts.map((item, index) => (
+                <div className="db-state-item-row" key={`modal-${item.item_code}-${item.variety}-${item.category}`}>
+                  <span className="db-manager-rank-number">{index + 1}</span>
+                  <div className="db-state-item-main">
+                    <div className="db-state-item-meta">
+                      <div>
+                        <span>{item.variety}</span>
+                        <small>{item.item_name}</small>
+                        <small>{item.item_code} | {item.category}</small>
+                      </div>
+                      <strong>{fmtCurrency(item.total_sales)}</strong>
+                    </div>
+                    <div className="db-manager-rank-track">
+                      <span
+                        className="db-manager-rank-fill"
+                        style={{
+                          width: getSalesWidth(item.total_sales, activeStateMaxProductSales),
+                          background: PALETTE[index % PALETTE.length],
+                        }}
+                      />
+                    </div>
+                    <small className="db-state-item-foot">
+                      Qty {fmt(item.quantity)} | {fmt(item.count)} order lines
+                    </small>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {!shouldExpandVolumeChart && (
       <div className="db-charts-row">
         <div
@@ -1235,6 +1394,89 @@ export default function Dashboard() {
         </div>
         )}
       </div>
+
+      {role === "admin" ? (
+        <div className="db-chart-box db-state-item-box">
+          <div className="db-chart-head">
+            <div>
+              <div className="db-chart-title">State-wise Item Sales</div>
+              <div className="db-chart-subtitle">Top 3 varieties by sales value in each state</div>
+            </div>
+            <div className="db-chart-metric">
+              <span>Selected State</span>
+              <strong>{activeItemState ?? "N/A"}</strong>
+            </div>
+          </div>
+          {stateItemSales.length === 0 ? (
+            <div className="db-no-data">No state-wise item data for this period</div>
+          ) : (
+            <>
+              <div className="db-state-item-tabs" aria-label="State-wise item sales">
+                {stateItemSales.map((item) => (
+                  <button
+                    key={item.state}
+                    type="button"
+                    className={item.state === activeItemState ? "is-active" : ""}
+                    onClick={() => {
+                      setSelectedItemState(item.state);
+                      setSelectedItemVariety("ALL");
+                    }}
+                  >
+                    {item.state}
+                  </button>
+                ))}
+              </div>
+              <div className="db-state-item-actions">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedItemVariety("ALL");
+                    setShowStateItems(true);
+                  }}
+                >
+                  View more <FiChevronDown />
+                </button>
+              </div>
+              <div className="db-state-item-list">
+                {topStateVarieties.map((item, index) => (
+                  <button
+                    className={`db-state-item-row db-state-item-row--button${item.variety === selectedItemVariety ? " is-active" : ""}`}
+                    key={item.variety}
+                    type="button"
+                    onClick={() => {
+                      setSelectedItemVariety(item.variety);
+                      setShowStateItems(true);
+                    }}
+                  >
+                    <span className="db-manager-rank-number">{index + 1}</span>
+                    <div className="db-state-item-main">
+                      <div className="db-state-item-meta">
+                        <div>
+                          <span>{item.variety}</span>
+                          <small>Total variety sale</small>
+                        </div>
+                        <strong>{fmtCompactCurrency(item.total_sales)}</strong>
+                      </div>
+                      <div className="db-manager-rank-track">
+                        <span
+                          className="db-manager-rank-fill"
+                          style={{
+                            width: getSalesWidth(item.total_sales, activeStateMaxVarietySales),
+                            background: PALETTE[index % PALETTE.length],
+                          }}
+                        />
+                      </div>
+                      <small className="db-state-item-foot">
+                        Qty {fmt(item.quantity)} | {fmt(item.count)} order lines
+                      </small>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }
