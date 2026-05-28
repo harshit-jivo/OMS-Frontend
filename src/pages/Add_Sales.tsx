@@ -25,6 +25,11 @@ type SalesRowScheme = {
   schemeQty: string;
 };
 
+type RowDropdownOption = {
+  value: string;
+  label: string;
+};
+
 const createEmptyRow = (): SalesRow => ({
   category: "",
   brand: "",
@@ -124,10 +129,13 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
   const [selectedPartyCategory, setSelectedPartyCategory] = useState("");
   const [partySearch, setPartySearch] = useState("");
   const [partyDropdownOpen, setPartyDropdownOpen] = useState(false);
+  const [dispatchDropdownOpen, setDispatchDropdownOpen] = useState(false);
   const [billSearch, setBillSearch] = useState("");
   const [billDropdownOpen, setBillDropdownOpen] = useState(false);
   const [shipSearch, setShipSearch] = useState("");
   const [shipDropdownOpen, setShipDropdownOpen] = useState(false);
+  const [companyDropdownOpen, setCompanyDropdownOpen] = useState(false);
+  const [openRowDropdown, setOpenRowDropdown] = useState<string | null>(null);
   const [branch, setBranch] = useState<any[]>([]);
   const [billAddress, setBillAddress] = useState<any[]>([]);
   const [shipAddress, setShipAddress] = useState<any[]>([]);
@@ -148,8 +156,10 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
   const [isLoadingEditOrder, setIsLoadingEditOrder] = useState(false);
   const [editOrderIsFoc, setEditOrderIsFoc] = useState(false);
   const partyDropdownRef = useRef<HTMLDivElement>(null);
+  const dispatchDropdownRef = useRef<HTMLDivElement>(null);
   const billDropdownRef = useRef<HTMLDivElement>(null);
   const shipDropdownRef = useRef<HTMLDivElement>(null);
+  const companyDropdownRef = useRef<HTMLDivElement>(null);
 
   const [formData, setFormData] = useState({
     parties: "",
@@ -209,10 +219,25 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
         setBillDropdownOpen(false);
       }
       if (
+        dispatchDropdownRef.current &&
+        !dispatchDropdownRef.current.contains(event.target as Node)
+      ) {
+        setDispatchDropdownOpen(false);
+      }
+      if (
         shipDropdownRef.current &&
         !shipDropdownRef.current.contains(event.target as Node)
       ) {
         setShipDropdownOpen(false);
+      }
+      if (
+        companyDropdownRef.current &&
+        !companyDropdownRef.current.contains(event.target as Node)
+      ) {
+        setCompanyDropdownOpen(false);
+      }
+      if (!(event.target as Element).closest(".sl-row-dropdown")) {
+        setOpenRowDropdown(null);
       }
     };
 
@@ -1065,6 +1090,13 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
     setRows(updatedRows);
   };
 
+  const handleRowSelect = (index: number, name: string, value: string) => {
+    handleRowChange(index, {
+      target: { name, value },
+    } as React.ChangeEvent<HTMLSelectElement>);
+    setOpenRowDropdown(null);
+  };
+
   const handleDeleteRow = (index: number) => {
     const updatedRows = rows.filter((_, i) => i !== index);
     setRows(updatedRows.length > 0 ? updatedRows : [createEmptyRow()]);
@@ -1136,6 +1168,22 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
     }));
     setShipSearch("");
     setShipDropdownOpen(false);
+  };
+
+  const handleDispatchSelect = (value: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      dispatch: value,
+    }));
+    setDispatchDropdownOpen(false);
+  };
+
+  const handleCompanySelect = (value: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      company: value,
+    }));
+    setCompanyDropdownOpen(false);
   };
 
   const isRowValid = (row: SalesRow) =>
@@ -1236,6 +1284,12 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
   const selectedShipAddress = shipAddress.find(
     (address) => String(address.id) === formData.shipAddress,
   );
+  const selectedDispatch = branch.find(
+    (dispatch) => String(dispatch.bpl_id) === formData.dispatch,
+  );
+  const selectedCompany = company.find(
+    (item) => String(item.id) === formData.company,
+  );
   const selectedBillAddressLabel =
     selectedBillAddress?.address_name ||
     selectedBillAddress?.full_address ||
@@ -1248,6 +1302,62 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
     selectedShipAddress?.address_id ||
     (formData.shipAddress ? editOrderFallback.shipAddress : "") ||
     "";
+  const selectedDispatchLabel = selectedDispatch?.bpl_name || "";
+  const selectedCompanyLabel = selectedCompany?.name || "";
+  const renderRowDropdown = (
+    rowIndex: number,
+    name: keyof SalesRow,
+    value: string,
+    options: RowDropdownOption[],
+    disabled: boolean,
+  ) => {
+    const dropdownId = `${rowIndex}-${String(name)}`;
+    const selected = options.find((option) => option.value === value);
+    const isOpen = openRowDropdown === dropdownId;
+
+    return (
+      <div className={`sl-row-dropdown${isOpen ? " open" : ""}`}>
+        <button
+          type="button"
+          className="sl-row-dropdown-trigger"
+          disabled={disabled}
+          onClick={() => setOpenRowDropdown((current) => current === dropdownId ? null : dropdownId)}
+        >
+          <span>{selected?.label || "--select--"}</span>
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+            <path
+              d="M3 4.5L6 7.5L9 4.5"
+              stroke="#64748b"
+              strokeWidth="1.4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
+        {isOpen && (
+          <div className="sl-row-dropdown-menu">
+            <button
+              type="button"
+              className={`sl-row-dropdown-option${!value ? " is-selected" : ""}`}
+              onClick={() => handleRowSelect(rowIndex, String(name), "")}
+            >
+              --select--
+            </button>
+            {options.map((option) => (
+              <button
+                type="button"
+                key={`${dropdownId}-${option.value}`}
+                className={`sl-row-dropdown-option${option.value === value ? " is-selected" : ""}`}
+                onClick={() => handleRowSelect(rowIndex, String(name), option.value)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
   return (
     <div className="sl-page app-page">
       <div className="sl-header app-page-head">
@@ -1317,7 +1427,13 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
                         <button
                           type="button"
                           key={`${party.value}-${party.category || ""}`}
-                          className="sl-party-option"
+                          className={`sl-party-option${
+                            party.value === formData.parties &&
+                            String(party.category || "").toUpperCase() ===
+                              selectedPartyCategory.toUpperCase()
+                              ? " is-selected"
+                              : ""
+                          }`}
                           onClick={() =>
                             handlePartySelect(party.value, party.category || "")
                           }
@@ -1344,23 +1460,56 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
           {/* Dispatch */}
           <div className="sl-field">
             <label className="sl-label">Dispatch From</label>
-            <div className="sl-input-wrap">
-              <select
-                value={formData.dispatch}
-                name="dispatch"
-                onChange={handleChange}
-                required
+            <div
+              className={`sl-party-dropdown${dispatchDropdownOpen ? " open" : ""}`}
+              ref={dispatchDropdownRef}
+            >
+              <button
+                type="button"
+                className="sl-party-trigger"
+                onClick={() => setDispatchDropdownOpen((prev) => !prev)}
               >
-                <option value="">--select--</option>
-                {branch.length > 0
-                  ? branch.map((d) => (
-                      <option key={d.bpl_id} value={d.bpl_id}>
-                        {d.bpl_name}
-                      </option>
-                    ))
-                  : null}
-              </select>
-              <div className="sl-focus-line" />
+                <span>{selectedDispatchLabel || "--select--"}</span>
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                  <path
+                    d="M3 4.5L6 7.5L9 4.5"
+                    stroke="#64748b"
+                    strokeWidth="1.4"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+              {dispatchDropdownOpen && (
+                <div className="sl-party-menu">
+                  <div className="sl-party-options">
+                    <button
+                      type="button"
+                      className={`sl-party-option${!formData.dispatch ? " is-selected" : ""}`}
+                      onClick={() => handleDispatchSelect("")}
+                    >
+                      <span className="sl-party-option-label">--select--</span>
+                    </button>
+                    {branch.length > 0 ? (
+                      branch.map((d) => (
+                        <button
+                          type="button"
+                          key={d.bpl_id}
+                          className={`sl-party-option${
+                            String(d.bpl_id) === formData.dispatch ? " is-selected" : ""
+                          }`}
+                          onClick={() => handleDispatchSelect(String(d.bpl_id))}
+                        >
+                          <span className="sl-party-option-label">{d.bpl_name}</span>
+                        </button>
+                      ))
+                    ) : (
+                      <div className="sl-party-empty">No dispatch locations found</div>
+                    )}
+                  </div>
+                </div>
+              )}
+              <input type="hidden" name="dispatch" value={formData.dispatch} required />
             </div>
           </div>
 
@@ -1413,7 +1562,9 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
                             <button
                               type="button"
                               key={b.id}
-                              className="sl-party-option"
+                              className={`sl-party-option${
+                                String(b.id) === formData.billAddress ? " is-selected" : ""
+                              }`}
                               onClick={() => handleBillAddressSelect(String(b.id))}
                             >
                               <span className="sl-party-option-label">
@@ -1476,7 +1627,9 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
                             <button
                               type="button"
                               key={s.id}
-                              className="sl-party-option"
+                              className={`sl-party-option${
+                                String(s.id) === formData.shipAddress ? " is-selected" : ""
+                              }`}
                               onClick={() => handleShipAddressSelect(String(s.id))}
                             >
                               <span className="sl-party-option-label">
@@ -1560,55 +1713,37 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
                 <Fragment key={index}>
                   <tr key={`main-${index}`}>
                     <td>
-                      <select
-                        value={row.category}
-                        name="category"
-                        onChange={(e) => handleRowChange(index, e)}
-                        disabled={row.confirmed && !isEditMode}
-                        required
-                      >
-                        <option value="">--select--</option>
-                        {category.map((c, i) => (
-                          <option key={i} value={c}>
-                            {c}
-                          </option>
-                        ))}
-                      </select>
+                      {renderRowDropdown(
+                        index,
+                        "category",
+                        row.category,
+                        category.map((c) => ({ value: c, label: c })),
+                        row.confirmed && !isEditMode,
+                      )}
                     </td>
 
                     <td>
-                      <select
-                        value={row.brand}
-                        name="brand"
-                        onChange={(e) => handleRowChange(index, e)}
-                        disabled={row.confirmed && !isEditMode}
-                        required
-                      >
-                        <option value="">--select--</option>
-                        {[
+                      {renderRowDropdown(
+                        index,
+                        "brand",
+                        row.brand,
+                        [
                           ...new Set(
                             partyProducts
                               .filter((p) => p.category === row.category)
                               .map((p) => p.brand),
                           ),
-                        ].map((b, i) => (
-                          <option key={i} value={b ?? ""}>
-                            {b}
-                          </option>
-                        ))}
-                      </select>
+                        ].map((b) => ({ value: b ?? "", label: b || "Unknown" })),
+                        row.confirmed && !isEditMode,
+                      )}
                     </td>
 
                     <td>
-                      <select
-                        value={row.variety}
-                        name="variety"
-                        onChange={(e) => handleRowChange(index, e)}
-                        disabled={row.confirmed && !isEditMode}
-                        required
-                      >
-                        <option value="">--select--</option>
-                        {[
+                      {renderRowDropdown(
+                        index,
+                        "variety",
+                        row.variety,
+                        [
                           ...new Set(
                             partyProducts
                               .filter(
@@ -1618,24 +1753,17 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
                               )
                               .map((p) => p.variety),
                           ),
-                        ].map((v, i) => (
-                          <option key={i} value={v ?? ""}>
-                            {v}
-                          </option>
-                        ))}
-                      </select>
+                        ].map((v) => ({ value: v ?? "", label: v || "Unknown" })),
+                        row.confirmed && !isEditMode,
+                      )}
                     </td>
 
                     <td>
-                      <select
-                        value={row.type}
-                        name="type"
-                        onChange={(e) => handleRowChange(index, e)}
-                        disabled={row.confirmed && !isEditMode}
-                        required
-                      >
-                        <option value="">--select--</option>
-                        {[
+                      {renderRowDropdown(
+                        index,
+                        "type",
+                        row.type,
+                        [
                           ...new Set(
                             partyProducts
                               .filter(
@@ -1659,24 +1787,17 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
                             if (b === "Others") return -1;
                             return parseFloat(a) - parseFloat(b);
                           })
-                          .map((t, i) => (
-                            <option key={i} value={t}>
-                              {t}
-                            </option>
-                          ))}
-                      </select>
+                          .map((t) => ({ value: t, label: t })),
+                        row.confirmed && !isEditMode,
+                      )}
                     </td>
 
                     <td>
-                      <select
-                        value={row.item}
-                        name="item"
-                        onChange={(e) => handleRowChange(index, e)}
-                        disabled={row.confirmed && !isEditMode}
-                        required
-                      >
-                        <option value="">--select--</option>
-                        {partyProducts
+                      {renderRowDropdown(
+                        index,
+                        "item",
+                        row.item,
+                        partyProducts
                           .filter(
                             (p) =>
                               p.category === row.category &&
@@ -1686,12 +1807,9 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
                                 ? getProductType(p.item_name) === row.type
                                 : true),
                           )
-                          .map((p, i) => (
-                            <option key={i} value={p.item_name}>
-                              {p.item_name}
-                            </option>
-                          ))}
-                      </select>
+                          .map((p) => ({ value: p.item_name, label: p.item_name })),
+                        row.confirmed && !isEditMode,
+                      )}
                     </td>
 
                     <td className="sl-pcs-cell">
@@ -2052,23 +2170,56 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
 
           <div className="sl-field">
             <label className="sl-label">Company</label>
-            <div className="sl-input-wrap">
-              <select
-                value={formData.company}
-                onChange={handleChange}
-                name="company"
-                required
+            <div
+              className={`sl-party-dropdown${companyDropdownOpen ? " open" : ""}`}
+              ref={companyDropdownRef}
+            >
+              <button
+                type="button"
+                className="sl-party-trigger"
+                onClick={() => setCompanyDropdownOpen((prev) => !prev)}
               >
-                <option value="">Select Company</option>
-                {company.length > 0
-                  ? company.map((company) => (
-                      <option key={company.id} value={company.id}>
-                        {company.name}
-                      </option>
-                    ))
-                  : null}
-              </select>
-              <div className="sl-focus-line" />
+                <span>{selectedCompanyLabel || "Select Company"}</span>
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                  <path
+                    d="M3 4.5L6 7.5L9 4.5"
+                    stroke="#64748b"
+                    strokeWidth="1.4"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+              {companyDropdownOpen && (
+                <div className="sl-party-menu">
+                  <div className="sl-party-options">
+                    <button
+                      type="button"
+                      className={`sl-party-option${!formData.company ? " is-selected" : ""}`}
+                      onClick={() => handleCompanySelect("")}
+                    >
+                      <span className="sl-party-option-label">Select Company</span>
+                    </button>
+                    {company.length > 0 ? (
+                      company.map((item) => (
+                        <button
+                          type="button"
+                          key={item.id}
+                          className={`sl-party-option${
+                            String(item.id) === formData.company ? " is-selected" : ""
+                          }`}
+                          onClick={() => handleCompanySelect(String(item.id))}
+                        >
+                          <span className="sl-party-option-label">{item.name}</span>
+                        </button>
+                      ))
+                    ) : (
+                      <div className="sl-party-empty">No companies found</div>
+                    )}
+                  </div>
+                </div>
+              )}
+              <input type="hidden" name="company" value={formData.company} required />
             </div>
           </div>
 
