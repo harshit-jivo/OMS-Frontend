@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { HiArrowRight, HiChevronRight } from "react-icons/hi2";
+import { useEffect, useMemo, useState } from "react";
+import { HiArrowRight } from "react-icons/hi2";
 import { formatDateDisplay, formatMoney, lineKey, toNumber } from "./salesInvoice.utils";
 import type { SalesInvoiceState } from "./useSalesInvoice";
 
@@ -17,25 +17,12 @@ export default function OrdersStep({
   onContinue,
 }: Props) {
   const [query, setQuery] = useState("");
-  const [expandedOrderKey, setExpandedOrderKey] = useState<string | null>(null);
+  const [activeOrderKey, setActiveOrderKey] = useState<string | null>(null);
   const selectedOrderCount = new Set(state.selectedLineList.map((line) => line.DocEntry)).size;
   const hasInvalidQty = state.selectedLineList.some(
     (line) => toNumber(line.invoiceQty) < 1 || toNumber(line.invoiceQty) > toNumber(line.OpenQty),
   );
-
-  const metrics = useMemo(() => {
-    return state.salesOrders.reduce(
-      (sum, order) => {
-        const lines = state.getOrderLines(order);
-        return {
-          orders: sum.orders + 1,
-          openLines: sum.openLines + lines.filter((line) => toNumber(line.OpenQty) > 0).length,
-          total: sum.total + toNumber(order.DocTotal),
-        };
-      },
-      { orders: 0, openLines: 0, total: 0 },
-    );
-  }, [state]);
+  const cannotContinue = hasInvalidQty || Boolean(state.selectedOrderAddressError);
 
   const filteredOrders = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -53,13 +40,28 @@ export default function OrdersStep({
       .filter((order): order is NonNullable<typeof order> => Boolean(order));
   }, [query, state]);
 
+  const getDocKey = (order: typeof state.salesOrders[number], index: number) => `${order.DocEntry || order.DocNum || index}-${index}`;
+
+  useEffect(() => {
+    if (filteredOrders.length === 0) {
+      setActiveOrderKey(null);
+      return;
+    }
+
+    const activeExists = filteredOrders.some((order, index) => getDocKey(order, index) === activeOrderKey);
+    if (!activeExists) setActiveOrderKey(getDocKey(filteredOrders[0], 0));
+  }, [activeOrderKey, filteredOrders]);
+
+  const activeOrderEntry = filteredOrders
+    .map((order, index) => ({ order, index, key: getDocKey(order, index) }))
+    .find((entry) => entry.key === activeOrderKey);
+  const activeOrder = activeOrderEntry?.order || filteredOrders[0] || null;
+  const activeOrderIndex = activeOrderEntry?.index || 0;
+  const activeOrderLines = activeOrder ? state.getOrderLines(activeOrder) : [];
+
   return (
     <div className="si-orders-stage">
       <section className="si-orders-main">
-        <div className="si-summary-bar">
-          <strong>{metrics.orders} orders - {metrics.openLines} open lines - {formatMoney(metrics.total)}</strong>
-        </div>
-
         <input
           className="si-search-input"
           value={query}
@@ -69,68 +71,80 @@ export default function OrdersStep({
 
         {state.ordersError && <div className="si-inline-error">{state.ordersError}</div>}
 
-        <div className="si-so-scroll">
+        <div className="si-so-split">
           {state.loadingOrders ? (
             <div className="si-loader">Loading sales orders...</div>
           ) : filteredOrders.length === 0 ? (
             <div className="si-empty">No open sales order lines found.</div>
           ) : (
-            filteredOrders.map((order, index) => {
-              const lines = state.getOrderLines(order);
-              const openLines = lines.filter((line) => toNumber(line.OpenQty) > 0);
-              const selectedCount = openLines.filter((line) => state.selectedLines[lineKey(order.DocEntry, line.LineNum)]).length;
-              const docKey = `${order.DocEntry || order.DocNum || index}-${index}`;
-              const isExpanded = expandedOrderKey === docKey;
+            <>
+              <div className="si-so-list-pane" aria-label="Sales orders">
+                {filteredOrders.map((order, index) => {
+                  const lines = state.getOrderLines(order);
+                  const openLines = lines.filter((line) => toNumber(line.OpenQty) > 0);
+                  const selectedCount = openLines.filter((line) => state.selectedLines[lineKey(order.DocEntry, line.LineNum)]).length;
+                  const docKey = getDocKey(order, index);
+                  const isActive = activeOrderKey === docKey;
 
-              return (
-                <div className={`si-visible-so ${isExpanded ? "is-expanded" : ""}`} key={docKey}>
-                  <div
-                    className="si-visible-so-head"
-                    role="button"
-                    tabIndex={0}
-                    aria-expanded={isExpanded}
-                    onClick={() => setExpandedOrderKey((current) => (current === docKey ? null : docKey))}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        setExpandedOrderKey((current) => (current === docKey ? null : docKey));
-                      }
-                    }}
-                  >
-                    <div>
-                      <strong>
-                        <span className={`si-accordion-caret ${isExpanded ? "is-open" : ""}`} aria-hidden="true">
-                          <HiChevronRight />
-                        </span>
-                        SO #{order.DocNum || order.DocEntry || index + 1}
-                      </strong>
+                  return (
+                    <div
+                      className={`si-so-list-row${isActive ? " is-active" : ""}`}
+                      role="button"
+                      tabIndex={0}
+                      key={docKey}
+                      onClick={() => setActiveOrderKey(docKey)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          setActiveOrderKey(docKey);
+                        }
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedCount > 0 && selectedCount === openLines.length}
+                        disabled={openLines.length === 0}
+                        onClick={(event) => event.stopPropagation()}
+                        onChange={() => state.toggleOrder(order)}
+                        aria-label={`Select sales order DocEntry ${order.DocEntry || index + 1}`}
+                      />
                       <span>
-                        DocEntry {order.DocEntry || "-"} - {formatDateDisplay(order.DocDate)} - Due {formatDateDisplay(order.DocDueDate)}
+                        <strong>DocEntry {order.DocEntry || index + 1}</strong>
+                        <small>
+                          {formatDateDisplay(order.DocDate)} - Due {formatDateDisplay(order.DocDueDate)}
+                        </small>
+                        <small>{selectedCount}/{openLines.length} selected - {formatMoney(toNumber(order.DocTotal))}</small>
                       </span>
                     </div>
-                    <div>
-                      <span>{selectedCount}/{openLines.length} selected</span>
-                      <button
-                        className={selectedCount > 0 ? "si-btn si-btn-outline" : "si-btn si-btn-primary"}
-                        type="button"
-                        disabled={openLines.length === 0}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          state.toggleOrder(order);
-                        }}
-                      >
-                        {selectedCount > 0 ? "Clear order" : "Select order"}
-                      </button>
-                    </div>
-                  </div>
+                  );
+                })}
+              </div>
 
-                  {isExpanded && (
+              <div className="si-so-lines-pane" aria-label="Sales order lines">
+                {activeOrder ? (
+                  <>
+                    <header className="si-so-lines-head">
+                      <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }} >
+                        <strong>DocEntry {activeOrder.DocEntry || activeOrderIndex + 1}</strong>
+                        <span>
+                          {formatDateDisplay(activeOrder.DocDate)} - Due {formatDateDisplay(activeOrder.DocDueDate)}
+                        </span>
+                      </div>
+                      <button
+                        className="si-btn si-btn-outline"
+                        type="button"
+                        disabled={activeOrderLines.filter((line) => toNumber(line.OpenQty) > 0).length === 0}
+                        onClick={() => state.toggleOrder(activeOrder)}
+                      >
+                        Toggle order
+                      </button>
+                    </header>
                     <div className="si-visible-lines">
-                      {lines.length === 0 ? (
+                      {activeOrderLines.length === 0 ? (
                         <div className="si-visible-empty-line">No lines found on this sales order.</div>
                       ) : (
-                        lines.map((line, lineIndex) => {
-                          const key = lineKey(order.DocEntry || index, line.LineNum ?? lineIndex);
+                        activeOrderLines.map((line, lineIndex) => {
+                          const key = lineKey(activeOrder.DocEntry || activeOrderIndex, line.LineNum ?? lineIndex);
                           const selected = state.selectedLines[key];
                           const disabled = toNumber(line.OpenQty) <= 0;
 
@@ -140,17 +154,12 @@ export default function OrdersStep({
                                 type="checkbox"
                                 checked={Boolean(selected)}
                                 disabled={disabled}
-                                onChange={() => state.toggleLine(order, line)}
+                                onChange={() => state.toggleLine(activeOrder, line)}
                               />
                               <div className="si-visible-line-main">
                                 <div>
-                                  <span>{line.ItemCode || "-"}</span>
                                   <strong>{line.Dscription || "Unnamed SAP line"}</strong>
                                 </div>
-                                <p>
-                                  <em>{line.WhsCode || "-"}</em>
-                                  <em>{line.TaxCode || line.VatGroup || "-"}</em>
-                                </p>
                               </div>
                               <div className="si-visible-line-side">
                                 <span>Open qty: {line.OpenQty}</span>
@@ -173,39 +182,45 @@ export default function OrdersStep({
                         })
                       )}
                     </div>
-                  )}
-                </div>
-              );
-            })
+                  </>
+                ) : (
+                  <div className="si-empty">Select a sales order to view items.</div>
+                )}
+              </div>
+            </>
           )}
         </div>
 
-        {state.selectedLineList.length > 0 && (
-          <div className="si-order-selection-bar">
-            <div>
-              <strong>{state.selectedLineList.length} lines selected across {selectedOrderCount} orders</strong>
-              <span>
-                Total Qty: {state.totals.totalQty} - Taxable: {formatMoney(state.totals.taxable)} - Grand Total: {formatMoney(state.totals.grandTotal)}
-              </span>
-            </div>
-            <button
-              className="si-btn si-btn-primary si-order-selection-next"
-              type="button"
-              disabled={hasInvalidQty || state.loadingDraftDetails}
-              onClick={() => {
-                if (onContinue) {
-                  onContinue();
-                  return;
-                }
-                state.createInvoiceDraft();
-              }}
-            >
-              {state.loadingDraftDetails ? continueLoadingLabel : continueLabel}
-              <HiArrowRight aria-hidden="true" />
-            </button>
-          </div>
-        )}
       </section>
+
+      {state.selectedLineList.length > 0 && (
+        <footer className={`si-order-selection-bar${state.selectedOrderAddressError ? " has-error" : ""}`}>
+          <div>
+            <strong>{state.selectedLineList.length} lines selected across {selectedOrderCount} orders</strong>
+            <span>
+              Total Qty: {state.totals.totalQty} - Taxable: {formatMoney(state.totals.taxable)} - Grand Total: {formatMoney(state.totals.grandTotal)}
+            </span>
+            {state.selectedOrderAddressError && (
+              <span className="si-order-selection-error">{state.selectedOrderAddressError}</span>
+            )}
+          </div>
+          <button
+            className="si-btn si-btn-primary si-order-selection-next"
+            type="button"
+            disabled={cannotContinue || state.loadingDraftDetails}
+            onClick={() => {
+              if (onContinue) {
+                onContinue();
+                return;
+              }
+              state.createInvoiceDraft();
+            }}
+          >
+            {state.loadingDraftDetails ? continueLoadingLabel : continueLabel}
+            <HiArrowRight aria-hidden="true" />
+          </button>
+        </footer>
+      )}
     </div>
   );
 }

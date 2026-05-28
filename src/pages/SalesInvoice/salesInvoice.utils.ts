@@ -135,6 +135,8 @@ export const calculateTotals = (lines: SelectedLine[], discountPercent = 0, frei
     return sum + Math.max(lineTotal - lineDiscount, 0) * (toNumber(line.VatPrcnt) / 100);
   }, 0);
   const freight = freightRows.reduce((sum, row) => sum + Math.max(toNumber(row.lineTotal), 0), 0);
+  const totalBeforeRoundOff = taxable + tax + freight;
+  const grandTotal = Math.floor(totalBeforeRoundOff + 0.5);
 
   return {
     totalQty,
@@ -143,7 +145,9 @@ export const calculateTotals = (lines: SelectedLine[], discountPercent = 0, frei
     taxable,
     tax,
     freight,
-    grandTotal: taxable + tax + freight,
+    totalBeforeRoundOff,
+    roundOff: grandTotal - totalBeforeRoundOff,
+    grandTotal,
   };
 };
 

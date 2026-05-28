@@ -62,7 +62,7 @@ export type NextDocNumber = {
 
 const createFreightRow = (): FreightRow => ({ expenseCode: "", expenseName: "", lineTotal: 0 });
 
-const apiFetch = async <T,>(url: string, init?: RequestInit): Promise<T> => {
+export const apiFetch = async <T,>(url: string, init?: RequestInit): Promise<T> => {
   const token = localStorage.getItem("access");
   const response = await fetch(url, {
     ...init,
@@ -166,6 +166,8 @@ const uniqueTextValues = (values: Array<string | undefined>) => {
 
   return unique;
 };
+
+const normalizeAddressCode = (value?: string) => String(value || "").trim();
 
 const mergeSalesOrderAddressCodes = (
   addresses: PartyAddress[],
@@ -436,6 +438,36 @@ export function useSalesInvoice() {
     () => uniqueTextValues(selectedLineList.map((line) => line.PayToCode)),
     [selectedLineList],
   );
+  const selectedOrderAddressError = useMemo(() => {
+    const selectedOrders = new Map<number, { docEntry: number; docNum: number; shipTo: string; payTo: string }>();
+
+    selectedLineList.forEach((line) => {
+      if (selectedOrders.has(line.DocEntry)) return;
+      selectedOrders.set(line.DocEntry, {
+        docEntry: line.DocEntry,
+        docNum: line.DocNum,
+        shipTo: normalizeAddressCode(line.ShipToCode),
+        payTo: normalizeAddressCode(line.PayToCode),
+      });
+    });
+
+    if (selectedOrders.size <= 1) return "";
+
+    const selectedOrderList = [...selectedOrders.values()];
+    const shipToValues = new Set(selectedOrderList.map((order) => order.shipTo));
+    const payToValues = new Set(selectedOrderList.map((order) => order.payTo));
+    if (shipToValues.size <= 1 && payToValues.size <= 1) return "";
+
+    const mismatchedFields = [
+      payToValues.size > 1 ? "Bill To" : "",
+      shipToValues.size > 1 ? "Ship To" : "",
+    ].filter(Boolean);
+    const orderLabels = selectedOrderList
+      .map((order) => `DocEntry ${order.docEntry || order.docNum}`)
+      .join(", ");
+
+    return `${mismatchedFields.join(" and ")} must be same for selected sales orders (${orderLabels}).`;
+  }, [selectedLineList]);
   const totals = useMemo(
     () => calculateTotals(selectedLineList, form.discountPercent, freightRows),
     [form.discountPercent, freightRows, selectedLineList],
@@ -444,6 +476,36 @@ export function useSalesInvoice() {
     () => buildInvoicePayload(selectedParty, selectedLines, form, freightRows),
     [form, freightRows, selectedLines, selectedParty],
   );
+
+  const loadPartyAddresses = useCallback(async () => {
+    if (!selectedParty) return false;
+    setLoadingDraftDetails(true);
+    setDraftError("");
+
+    try {
+      const addressData = await apiFetch<PartyAddress[]>(
+        `/api/hana/address/?card_code=${encodeURIComponent(selectedParty.CardCode)}`,
+      );
+      const addresses = Array.isArray(addressData) ? addressData : [];
+      const billingAddresses = normalizeAddresses(addresses, "B");
+      const shippingAddresses = normalizeAddresses(addresses, "S");
+
+      setBillToAddresses(billingAddresses);
+      setShipToAddresses(shippingAddresses);
+      setForm((current) => ({
+        ...current,
+        payTo: resolveDefaultAddress(current.payTo, undefined, undefined, billingAddresses),
+        shipTo: resolveDefaultAddress(current.shipTo, undefined, undefined, shippingAddresses),
+      }));
+      return true;
+    } catch (error) {
+      console.error(error);
+      setDraftError("Unable to load customer addresses.");
+      return false;
+    } finally {
+      setLoadingDraftDetails(false);
+    }
+  }, [selectedParty]);
 
   const loadDraftDetails = useCallback(async () => {
     if (!selectedParty || !firstSelectedLine) return false;
@@ -502,11 +564,19 @@ export function useSalesInvoice() {
 
   const createInvoiceDraft = async () => {
     if (selectedLineList.length === 0) return;
+    if (selectedOrderAddressError) {
+      setDraftError(selectedOrderAddressError);
+      return;
+    }
     setStep(3);
   };
 
   const proceedToDraft = async () => {
     if (selectedLineList.length === 0) return false;
+    if (selectedOrderAddressError) {
+      setDraftError(selectedOrderAddressError);
+      return false;
+    }
     const ok = await loadDraftDetails();
     if (ok) setStep(4);
     return ok;
@@ -588,6 +658,7 @@ export function useSalesInvoice() {
     salesOrders,
     selectedLines,
     selectedLineList,
+    selectedOrderAddressError,
     freightOptions,
     vendorStates,
     freightRows,
@@ -620,6 +691,7 @@ export function useSalesInvoice() {
     removeFreightRow,
     createInvoiceDraft,
     proceedToDraft,
+    loadPartyAddresses,
     resetStep3Form,
     saveDraft,
     postInvoice,

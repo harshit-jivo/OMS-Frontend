@@ -1,10 +1,11 @@
 import { useState } from "react";
 import ContentsTab from "./ContentsTab";
-import { formatDateDisplay, type PartyAddress } from "./salesInvoice.utils";
+import { formatDateDisplay, formatMoney, toNumber, type PartyAddress } from "./salesInvoice.utils";
 import type { SalesInvoiceState } from "./useSalesInvoice";
 
 type Props = {
   state: SalesInvoiceState;
+  onReset: () => void;
 };
 
 type DraftDateField = "postingDate" | "dueDate" | "documentDate";
@@ -13,16 +14,30 @@ const formatAddressOption = (address: PartyAddress) => {
   return [address.Address, address.GSTRegnNo ? `GST: ${address.GSTRegnNo}` : ""].filter(Boolean).join(" | ");
 };
 
-export default function DraftStep({ state }: Props) {
+export default function DraftStep({ state, onReset }: Props) {
   const [editableDates, setEditableDates] = useState<Record<DraftDateField, boolean>>({
     postingDate: false,
     dueDate: false,
     documentDate: false,
   });
+  const [footerDrawerOpen, setFooterDrawerOpen] = useState(false);
   const customerCode = state.customerDetails?.CardCode || state.selectedParty?.CardCode || "-";
   const customerName = state.customerDetails?.CardName || state.selectedParty?.CardName || "-";
-  const hasSelectedBillAddress = state.billToAddresses.some((address) => address.Address === state.form.payTo);
-  const hasSelectedShipAddress = state.shipToAddresses.some((address) => address.Address === state.form.shipTo);
+  const totalBeforeTax = state.totals.taxable + state.totals.freight;
+  const billToDisplay = formatAddressOption(
+    state.billToAddresses.find((address) => address.Address === state.form.payTo) || {
+      Address: state.form.payTo,
+      AdresType: "B",
+      CardCode: customerCode,
+    },
+  ) || "-";
+  const shipToDisplay = formatAddressOption(
+    state.shipToAddresses.find((address) => address.Address === state.form.shipTo) || {
+      Address: state.form.shipTo,
+      AdresType: "S",
+      CardCode: customerCode,
+    },
+  ) || "-";
 
   const enableDateEdit = (field: DraftDateField, input: HTMLInputElement) => {
     setEditableDates((current) => ({ ...current, [field]: true }));
@@ -34,6 +49,11 @@ export default function DraftStep({ state }: Props) {
 
   const disableDateEdit = (field: DraftDateField) => {
     setEditableDates((current) => ({ ...current, [field]: false }));
+  };
+
+  const addFreightRow = () => {
+    state.addFreightRow();
+    setFooterDrawerOpen(true);
   };
 
   return (
@@ -95,50 +115,17 @@ export default function DraftStep({ state }: Props) {
           <div className="si-draft-info-cell si-draft-customer-name">
             <span>Customer Name</span>
             <strong>{customerCode} - {customerName}</strong>
+            <button className="si-party-reset-btn" type="button" onClick={onReset}>
+              Reset
+            </button>
           </div>
-          <label className="si-draft-address-field">
+          <div className="si-draft-address-field si-draft-address-readonly">
             <span>Bill To</span>
-            <select
-              value={state.form.payTo}
-              onChange={(event) => state.updateForm({ payTo: event.target.value })}
-              disabled={state.loadingDraftDetails}
-            >
-              {!state.form.payTo && <option value="">Select billing address</option>}
-              {state.form.payTo && !hasSelectedBillAddress && (
-                <option value={state.form.payTo}>{state.form.payTo}</option>
-              )}
-              {state.billToAddresses.map((address, index) => (
-                <option value={address.Address} key={`${address.Address}-${address.City || ""}-${index}`}>
-                  {formatAddressOption(address)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="si-draft-address-field">
-            <span>Ship To</span>
-            <select
-              value={state.form.shipTo}
-              onChange={(event) => state.updateForm({ shipTo: event.target.value })}
-              disabled={state.loadingDraftDetails}
-            >
-              {!state.form.shipTo && <option value="">Select shipping address</option>}
-              {state.form.shipTo && !hasSelectedShipAddress && (
-                <option value={state.form.shipTo}>{state.form.shipTo}</option>
-              )}
-              {state.shipToAddresses.map((address, index) => (
-                <option value={address.Address} key={`${address.Address}-${address.City || ""}-${index}`}>
-                  {formatAddressOption(address)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="si-draft-info-cell">
-            <span>State</span>
-            <strong>{state.customerDetails?.State1 || "-"}</strong>
+            <strong>{billToDisplay}</strong>
           </div>
-          <div className="si-draft-info-cell">
-            <span>U-Chain</span>
-            <strong>{state.customerDetails?.U_Chain || "-"}</strong>
+          <div className="si-draft-address-field si-draft-address-readonly">
+            <span>Ship To</span>
+            <strong>{shipToDisplay}</strong>
           </div>
         </div>
       </section>
@@ -158,16 +145,107 @@ export default function DraftStep({ state }: Props) {
         </div>
       )}
 
-      <div className="si-action-bar">
-        <button className="si-btn si-btn-outline" type="button" onClick={state.resetStep3Form}>
-          Clear
-        </button>
-        <button className="si-btn si-btn-outline" type="button" onClick={state.saveDraft}>
-          Save as Draft
-        </button>
-        <button className="si-btn si-btn-primary" type="button" disabled={state.posting} onClick={state.postInvoice}>
-          {state.posting ? "Posting..." : "Post to SAP HANA"}
-        </button>
+      <div className={`si-action-bar${footerDrawerOpen ? " is-open" : ""}`}>
+        {footerDrawerOpen && (
+          <div className="si-action-total-panel">
+            <section className="si-footer-drawer-section">
+              <header className="si-footer-drawer-head">
+                <strong>Totals</strong>
+              </header>
+              <dl>
+                <dt>Total Before Tax</dt>
+                <dd>{formatMoney(totalBeforeTax)}</dd>
+                <dt>Tax Amount</dt>
+                <dd>{formatMoney(state.totals.tax)}</dd>
+                <dt>Grand Total</dt>
+                <dd>{formatMoney(state.totals.grandTotal)}</dd>
+              </dl>
+            </section>
+
+            <section className="si-footer-drawer-section">
+              <header className="si-footer-drawer-head">
+                <strong>Freight</strong>
+                <button className="si-footer-add-freight" type="button" onClick={addFreightRow}>
+                  + Add
+                </button>
+              </header>
+              {state.freightRows.length === 0 ? (
+                <div className="si-footer-freight-empty">No freight expenses added.</div>
+              ) : (
+                <div className="si-freight-rows">
+                  {state.freightRows.map((row, index) => (
+                    <div className="si-freight-row" key={`${row.expenseCode}-${index}`}>
+                      <span className="si-freight-row-index">{index + 1}</span>
+                      <label className="si-freight-field si-freight-field-expense">
+                        <span>Expense</span>
+                        <select
+                          value={row.expenseCode}
+                          aria-label={`Freight expense ${index + 1}`}
+                          onChange={(event) => {
+                            const selected = state.freightOptions.find(
+                              (option) => String(option.ExpnsCode) === event.target.value,
+                            );
+                            state.updateFreightRow(index, {
+                              expenseCode: event.target.value,
+                              expenseName: selected?.ExpnsName || "",
+                            });
+                          }}
+                        >
+                          <option value="">Select freight</option>
+                          {state.freightOptions.map((option) => (
+                            <option key={option.ExpnsCode} value={option.ExpnsCode}>
+                              {option.ExpnsName}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="si-freight-field si-freight-field-amount">
+                        <span>Amount</span>
+                        <div className="si-freight-amount-input">
+                          <em>₹</em>
+                          <input
+                            type="number"
+                            min="0"
+                            value={row.lineTotal}
+                            aria-label={`Freight amount ${index + 1}`}
+                            onChange={(event) => state.updateFreightRow(index, { lineTotal: toNumber(event.target.value) })}
+                          />
+                        </div>
+                      </label>
+                      <button
+                        className="si-freight-remove"
+                        type="button"
+                        onClick={() => state.removeFreightRow(index)}
+                        aria-label={`Remove freight row ${index + 1}`}
+                      >
+                        x
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          </div>
+        )}
+        <div className="si-action-bar-row">
+          <button
+            className="si-action-total-btn"
+            type="button"
+            aria-expanded={footerDrawerOpen}
+            onClick={() => setFooterDrawerOpen((current) => !current)}
+          >
+            <span>{footerDrawerOpen ? "Hide details" : "Total"}</span>
+            <strong>{formatMoney(state.totals.grandTotal)}</strong>
+          </button>
+          <div className="si-action-buttons">
+            <button className="si-btn si-btn-outline" type="button" onClick={addFreightRow}>
+              + Freight
+            </button>
+            <button className="si-btn si-btn-primary" type="button" disabled={state.posting} onClick={state.postInvoice}>
+              {state.posting ? "Posting..." : "Post to SAP HANA"}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
