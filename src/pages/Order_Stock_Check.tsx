@@ -489,13 +489,13 @@ export default function Order_Stock_Check() {
                 </tr>
               </thead>
               <tbody>
-                {selectedOrder.items.map((item) => {
+                {selectedOrder.items.map((item, index) => {
                   const itemStatus = getItemStatus(item);
                   const diff = item.available_stock - item.required_qty;
 
                   return (
                     <tr
-                      key={`${item.item_code}-${item.category}`}
+                      key={`${selectedOrder.order_number}-${item.item_code}-${item.category}-${index}`}
                       className={itemStatus === "OK" ? "" : "is-warning-row"}
                     >
                       <td>

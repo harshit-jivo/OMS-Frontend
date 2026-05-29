@@ -1,5 +1,5 @@
 .stock-check-page {
-  color: #172033;
+  color: #334155;
 }
 
 .stock-check-header {
@@ -12,7 +12,7 @@
 
 .stock-check-subtitle {
   margin: 6px 0 0;
-  color: #667085;
+  color: #64748b;
   font-size: 0.9rem;
 }
 
@@ -25,10 +25,10 @@
   padding: 0 14px;
   border: 1px solid #1f7a6f;
   border-radius: 8px;
-  background: #1f7a6f;
+  background: #0f766e;
   color: #fff;
   cursor: pointer;
-  font-weight: 800;
+  font-weight: 700;
   white-space: nowrap;
   box-shadow: 0 10px 22px rgba(31, 122, 111, 0.16);
 }
@@ -65,8 +65,8 @@
   padding: 14px;
   border: 1px solid #e3e8ef;
   border-radius: 8px;
-  background: #fff;
-  box-shadow: 0 10px 28px rgba(31, 42, 68, 0.06);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 10px 28px rgba(31, 42, 68, 0.045);
 }
 
 button.stock-metric {
@@ -95,23 +95,24 @@ button.stock-metric {
   height: 38px;
   border-radius: 8px;
   background: #eef3f8;
-  color: #344054;
+  color: #475569;
   font-size: 1.1rem;
 }
 
 .stock-metric span {
   display: block;
-  color: #667085;
+  color: #64748b;
   font-size: 0.75rem;
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: 0;
 }
 
 .stock-metric strong {
   display: block;
   margin-top: 3px;
-  color: #101828;
+  color: #1e293b;
   font-size: 1.55rem;
+  font-weight: 750;
   line-height: 1;
 }
 
@@ -178,16 +179,16 @@ button.stock-metric {
 
 .stock-popup-head h2 {
   margin: 0;
-  color: #101828;
+  color: #1e293b;
   font-size: 1.05rem;
-  font-weight: 950;
+  font-weight: 750;
 }
 
 .stock-popup-head p {
   margin: 5px 0 0;
-  color: #667085;
+  color: #64748b;
   font-size: 0.82rem;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .stock-popup-head button {
@@ -199,7 +200,7 @@ button.stock-metric {
   border: 1px solid #d0d5dd;
   border-radius: 999px;
   background: #fff;
-  color: #344054;
+  color: #475569;
   cursor: pointer;
 }
 
@@ -228,17 +229,17 @@ button.stock-metric {
 
 .stock-popup-row strong {
   display: block;
-  color: #101828;
+  color: #1e293b;
   font-size: 0.9rem;
-  font-weight: 950;
+  font-weight: 750;
 }
 
 .stock-popup-row span {
   display: block;
   margin-top: 4px;
-  color: #667085;
+  color: #64748b;
   font-size: 0.76rem;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .stock-popup-qty {
@@ -264,7 +265,7 @@ button.stock-metric {
   background: #1f7a6f;
   color: #fff;
   cursor: pointer;
-  font-weight: 900;
+  font-weight: 750;
 }
 
 .stock-toolbar {
@@ -288,7 +289,7 @@ button.stock-metric {
   padding: 0 12px;
   border: 1px solid #d0d5dd;
   border-radius: 8px;
-  color: #667085;
+  color: #64748b;
   background: #fff;
 }
 
@@ -297,7 +298,7 @@ button.stock-metric {
   min-width: 0;
   border: 0;
   outline: 0;
-  color: #172033;
+  color: #334155;
   background: transparent;
 }
 
@@ -313,9 +314,9 @@ button.stock-metric {
   padding: 0 34px 0 12px;
   border: 1px solid #d0d5dd;
   border-radius: 8px;
-  color: #172033;
+  color: #334155;
   background: #fff;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .stock-layout {
@@ -330,8 +331,8 @@ button.stock-metric {
   overflow: hidden;
   border: 1px solid #e3e8ef;
   border-radius: 8px;
-  background: #fff;
-  box-shadow: 0 12px 32px rgba(31, 42, 68, 0.07);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 12px 32px rgba(31, 42, 68, 0.045);
 }
 
 .stock-panel-head {
@@ -345,13 +346,14 @@ button.stock-metric {
 }
 
 .stock-panel-head strong {
-  color: #101828;
+  color: #1e293b;
+  font-weight: 750;
 }
 
 .stock-panel-head span {
-  color: #667085;
+  color: #64748b;
   font-size: 0.8rem;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .stock-table-wrap {
@@ -367,10 +369,10 @@ button.stock-metric {
 .stock-table th {
   padding: 11px 12px;
   border-bottom: 1px solid #e3e8ef;
-  color: #667085;
-  background: #fff;
+  color: #64748b;
+  background: #fbfdff;
   font-size: 0.72rem;
-  font-weight: 900;
+  font-weight: 750;
   text-align: left;
   text-transform: uppercase;
   white-space: nowrap;
@@ -379,7 +381,7 @@ button.stock-metric {
 .stock-table td {
   padding: 11px 12px;
   border-bottom: 1px solid #edf1f5;
-  color: #344054;
+  color: #475569;
   vertical-align: middle;
 }
 
@@ -409,15 +411,15 @@ button.stock-metric {
 }
 
 .stock-orders-panel tbody tr.is-active {
-  border-left-color: #2563eb;
-  background: #eef5ff;
+  border-left-color: #93c5fd;
+  background: #f5f9ff;
 }
 
 .stock-order-number,
 .stock-customer,
 .stock-product-name {
-  color: #101828;
-  font-weight: 900;
+  color: #1e293b;
+  font-weight: 750;
 }
 
 .stock-order-number {
@@ -433,9 +435,9 @@ button.stock-metric {
 
 .stock-muted {
   margin-top: 4px;
-  color: #667085;
+  color: #64748b;
   font-size: 0.74rem;
-  font-weight: 650;
+  font-weight: 500;
 }
 
 .stock-result {
@@ -450,7 +452,7 @@ button.stock-metric {
   padding: 4px 9px;
   border-radius: 999px;
   font-size: 0.72rem;
-  font-weight: 900;
+  font-weight: 700;
   white-space: nowrap;
 }
 
@@ -479,12 +481,12 @@ button.stock-metric {
   gap: 10px;
   min-height: 88px;
   padding: 24px;
-  color: #667085;
+  color: #64748b;
 }
 
 .stock-error {
   color: #b42318;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .stock-pagination {
@@ -495,7 +497,7 @@ button.stock-metric {
   flex-wrap: wrap;
   padding: 12px;
   border-top: 1px solid #e3e8ef;
-  color: #667085;
+  color: #64748b;
   font-size: 0.8rem;
 }
 
@@ -513,7 +515,7 @@ button.stock-metric {
   border: 1px solid #d0d5dd;
   border-radius: 8px;
   background: #fff;
-  color: #172033;
+  color: #334155;
   cursor: pointer;
 }
 
@@ -525,8 +527,8 @@ button.stock-metric {
 
 .stock-pagination span:last-of-type {
   min-width: 56px;
-  color: #344054;
-  font-weight: 800;
+  color: #475569;
+  font-weight: 700;
   text-align: center;
 }
 
@@ -544,14 +546,14 @@ button.stock-metric {
 }
 
 .stock-detail-title {
-  color: #101828;
+  color: #1e293b;
   font-size: 1.05rem;
-  font-weight: 950;
+  font-weight: 750;
 }
 
 .stock-detail-meta {
   margin-top: 5px;
-  color: #667085;
+  color: #64748b;
   font-size: 0.8rem;
   line-height: 1.4;
 }
@@ -570,16 +572,17 @@ button.stock-metric {
 
 .stock-summary-item span {
   display: block;
-  color: #667085;
+  color: #64748b;
   font-size: 0.72rem;
-  font-weight: 800;
+  font-weight: 650;
 }
 
 .stock-summary-item strong {
   display: block;
   margin-top: 3px;
-  color: #101828;
+  color: #334155;
   font-size: 0.94rem;
+  font-weight: 750;
   overflow-wrap: anywhere;
 }
 
@@ -634,7 +637,7 @@ button.stock-metric {
 .stock-strong-cell,
 .stock-positive,
 .stock-negative {
-  font-weight: 950;
+  font-weight: 750;
 }
 
 .stock-positive {
@@ -650,7 +653,7 @@ button.stock-metric {
   display: grid;
   place-items: center;
   padding: 24px;
-  color: #667085;
+  color: #64748b;
 }
 
 @media (max-width: 1050px) {

@@ -859,6 +859,17 @@
   color: #fff;
 }
 
+.db-state-item-tabs .db-state-more-btn {
+  border-style: dashed;
+  background: #f8fafc;
+  color: #475569;
+}
+
+.db-state-item-tabs .db-state-more-btn:hover {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
 .db-state-item-actions {
   display: flex;
   justify-content: flex-end;

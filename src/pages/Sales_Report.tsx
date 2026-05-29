@@ -35,6 +35,7 @@ export default function Sales_Report() {
   const [partyDropdownOpen, setPartyDropdownOpen] = useState(false);
   const [varietySearch, setVarietySearch] = useState<string>("");
   const [varietyDropdownOpen, setVarietyDropdownOpen] = useState(false);
+  const [openFilterDropdown, setOpenFilterDropdown] = useState<string | null>(null);
   const [mainGroup, setMainGroup] = useState<{ id: number; name: string }[]>(
     [],
   );
@@ -146,6 +147,9 @@ export default function Sales_Report() {
         !varietyRef.current.contains(event.target as Node)
       ) {
         setVarietyDropdownOpen(false);
+      }
+      if (!(event.target as Element).closest(".dr-choice")) {
+        setOpenFilterDropdown(null);
       }
   };
 
@@ -493,6 +497,11 @@ export default function Sales_Report() {
         .filter((category): category is string => Boolean(category)),
     ),
   ].sort((a, b) => a.localeCompare(b));
+  const focOptions = [
+    { value: "all", label: "All Orders" },
+    { value: "foc", label: "Only FOC" },
+    { value: "non_foc", label: "Without FOC" },
+  ] as const;
 
   return (
     <div className="dr-page">
@@ -711,16 +720,43 @@ export default function Sales_Report() {
               {/* From */}
               <div className="dr-field">
                 <label className="dr-label">Category</label>
-                <select
-                  className="dr-select"
-                  value={selectedCategory}
-                  onChange={(e) => setSelectedCategory(e.target.value)}
-                >
-                  <option value="">All Categories</option>
-                  {categoryOptions.map((category) => (
-                    <option key={category} value={category}>{category}</option>
-                  ))}
-                </select>
+                <div className={`dr-choice${openFilterDropdown === "category" ? " open" : ""}`}>
+                  <button
+                    type="button"
+                    className="dr-choice-trigger"
+                    onClick={() => setOpenFilterDropdown((current) => current === "category" ? null : "category")}
+                  >
+                    <span>{selectedCategory || "All Categories"}</span>
+                    <span className="dr-choice-caret">⌄</span>
+                  </button>
+                  {openFilterDropdown === "category" ? (
+                    <div className="dr-choice-menu">
+                      <button
+                        type="button"
+                        className={`dr-choice-option${!selectedCategory ? " is-selected" : ""}`}
+                        onClick={() => {
+                          setSelectedCategory("");
+                          setOpenFilterDropdown(null);
+                        }}
+                      >
+                        All Categories
+                      </button>
+                      {categoryOptions.map((category) => (
+                        <button
+                          type="button"
+                          key={category}
+                          className={`dr-choice-option${selectedCategory === category ? " is-selected" : ""}`}
+                          onClick={() => {
+                            setSelectedCategory(category);
+                            setOpenFilterDropdown(null);
+                          }}
+                        >
+                          {category}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
               </div>
 
               {/* From */}
@@ -747,15 +783,33 @@ export default function Sales_Report() {
 
               <div className="dr-field">
                 <label className="dr-label">FOC</label>
-                <select
-                  className="dr-select"
-                  value={focFilter}
-                  onChange={(e) => setFocFilter(e.target.value as "all" | "foc" | "non_foc")}
-                >
-                  <option value="all">All Orders</option>
-                  <option value="foc">Only FOC</option>
-                  <option value="non_foc">Without FOC</option>
-                </select>
+                <div className={`dr-choice${openFilterDropdown === "foc" ? " open" : ""}`}>
+                  <button
+                    type="button"
+                    className="dr-choice-trigger"
+                    onClick={() => setOpenFilterDropdown((current) => current === "foc" ? null : "foc")}
+                  >
+                    <span>{focOptions.find((option) => option.value === focFilter)?.label || "All Orders"}</span>
+                    <span className="dr-choice-caret">⌄</span>
+                  </button>
+                  {openFilterDropdown === "foc" ? (
+                    <div className="dr-choice-menu">
+                      {focOptions.map((option) => (
+                        <button
+                          type="button"
+                          key={option.value}
+                          className={`dr-choice-option${focFilter === option.value ? " is-selected" : ""}`}
+                          onClick={() => {
+                            setFocFilter(option.value);
+                            setOpenFilterDropdown(null);
+                          }}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
               </div>
             </div>
           </div>

@@ -228,6 +228,7 @@ export default function Dashboard() {
   const [selectedItemState, setSelectedItemState] = useState<string | null>(null);
   const [showStateItems, setShowStateItems] = useState(false);
   const [selectedItemVariety, setSelectedItemVariety] = useState("ALL");
+  const [showAllItemStates, setShowAllItemStates] = useState(false);
 
   const isUnauthorized = (result: PromiseSettledResult<unknown>) =>
     result.status === "rejected" &&
@@ -325,6 +326,8 @@ export default function Dashboard() {
     return best;
   }, [categorySales]);
   const stateItemSales = charts?.state_item_sales ?? [];
+  const visibleItemStates = showAllItemStates ? stateItemSales : stateItemSales.slice(0, 5);
+  const hiddenItemStateCount = Math.max(stateItemSales.length - visibleItemStates.length, 0);
   const activeItemState =
     selectedItemState && stateItemSales.some((item) => item.state === selectedItemState)
       ? selectedItemState
@@ -1132,7 +1135,9 @@ export default function Dashboard() {
                   {selectedItemVariety === "ALL" ? `${activeItemState ?? "State"} Variety Sales` : `${selectedItemVariety} Products`}
                 </div>
                 <div className="db-chart-subtitle">
-                  {selectedItemVariety === "ALL" ? "All varieties ranked by total sales value" : `${activeItemState ?? "State"} products ranked by sales value`}
+                  {selectedItemVariety === "ALL"
+                    ? `All varieties ranked by total sales value for ${selectedPeriodLabel}`
+                    : `${activeItemState ?? "State"} products ranked by sales value for ${selectedPeriodLabel}`}
                 </div>
               </div>
               {selectedItemVariety !== "ALL" ? (
@@ -1400,7 +1405,7 @@ export default function Dashboard() {
           <div className="db-chart-head">
             <div>
               <div className="db-chart-title">State-wise Item Sales</div>
-              <div className="db-chart-subtitle">Top 3 varieties by sales value in each state</div>
+              <div className="db-chart-subtitle">Top 3 varieties by sales value in each state for {selectedPeriodLabel}</div>
             </div>
             <div className="db-chart-metric">
               <span>Selected State</span>
@@ -1412,7 +1417,7 @@ export default function Dashboard() {
           ) : (
             <>
               <div className="db-state-item-tabs" aria-label="State-wise item sales">
-                {stateItemSales.map((item) => (
+                {visibleItemStates.map((item) => (
                   <button
                     key={item.state}
                     type="button"
@@ -1425,6 +1430,15 @@ export default function Dashboard() {
                     {item.state}
                   </button>
                 ))}
+                {stateItemSales.length > 5 ? (
+                  <button
+                    type="button"
+                    className="db-state-more-btn"
+                    onClick={() => setShowAllItemStates((current) => !current)}
+                  >
+                    {showAllItemStates ? "Less" : `More +${hiddenItemStateCount}`}
+                  </button>
+                ) : null}
               </div>
               <div className="db-state-item-actions">
                 <button
