@@ -505,7 +505,7 @@ export default function Sales_Report() {
 
   return (
     <div className="dr-page">
-      {/* â”€â”€ LIST VIEW â”€â”€ */}
+      {/* LIST VIEW */}
       {!showDetails && (
         <>
           <div className="dr-header">
@@ -946,7 +946,7 @@ export default function Sales_Report() {
         </>
       )}
 
-      {/* â”€â”€ DETAIL VIEW â”€â”€ */}
+      {/* DETAIL VIEW */}
       {showDetails && orderDetails && (
         <div className="dr-detail">
           <div className="dr-d-nav">

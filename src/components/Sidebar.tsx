@@ -16,6 +16,7 @@ import {
   HiGift,
   HiHome,
   HiIdentification,
+  HiMap,
   HiPlusCircle,
   HiPresentationChartLine,
   HiReceiptPercent,
@@ -155,7 +156,8 @@ export default function Sidebar({ children }: SidebarProps) {
     setReportsOpen(
       location.pathname === "/Daily_Report" ||
         location.pathname === "/PersonWise_Report" ||
-        location.pathname === "/Sales_Report"
+        location.pathname === "/Sales_Report" ||
+        location.pathname === "/StateWise_Report"
     );
   }, [location.pathname]);
 
@@ -463,6 +465,7 @@ export default function Sidebar({ children }: SidebarProps) {
                   <li><Link to="/Daily_Report" onClick={closeSidebar}><SidebarIcon><HiCalendarDays /></SidebarIcon>Daily Report</Link></li>
                   <li><Link to="/PersonWise_Report" onClick={closeSidebar}><SidebarIcon><HiUserCircle /></SidebarIcon>Person Wise Report</Link></li>
                   <li><Link to="/Sales_Report" onClick={closeSidebar}><SidebarIcon><HiChartBar /></SidebarIcon>Sales Report</Link></li>
+                  <li><Link to="/StateWise_Report" onClick={closeSidebar}><SidebarIcon><HiMap /></SidebarIcon>State Wise Report</Link></li>
                   
                 </ul>
               )}

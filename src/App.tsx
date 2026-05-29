@@ -13,6 +13,7 @@ import Order_Status_Tracking from "./pages/Order_Status_Tracking";
 import Daily_Report from "./pages/Daily_Report";
 import PersonWise_Report from "./pages/PersonWise_Report";
 import Sales_Report from "./pages/Sales_Report";
+import StateWise_Report from "./pages/StateWise_Report";
 import Order_Tracking from "./pages/Order_Tracking";
 import "./styles/AppShell.css";
 import "./styles/UIConsistency.css";
@@ -158,6 +159,14 @@ function App() {
           element={
             <Sidebar>
               <Sales_Report />
+            </Sidebar>}
+        />
+
+        <Route
+          path="/StateWise_Report"
+          element={
+            <Sidebar>
+              <StateWise_Report />
             </Sidebar>}
         />
 
