@@ -19,6 +19,7 @@ export type SalesOrderLine = {
   LineNum: number;
   ItemCode: string;
   Dscription: string;
+  Quantity?: number;
   OpenQty: number;
   Price: number;
   PriceBefDi?: number;
@@ -28,6 +29,7 @@ export type SalesOrderLine = {
   VatGroup?: string;
   WhsCode?: string;
   OcrCode?: string;
+  ShipDate?: string;
   [key: string]: unknown;
 };
 
@@ -39,6 +41,7 @@ export type SalesOrder = {
   SlpCode?: number;
   ShipToCode?: string;
   PayToCode?: string;
+  BPL_Id?: number;
   DocTotal?: number;
   lines?: SalesOrderLine[];
   Lines?: SalesOrderLine[];
@@ -95,6 +98,7 @@ const normalizeLine = (line: SalesOrderLine, index: number): SalesOrderLine => (
   LineNum: toNumber(pick(line, ["LineNum", "LineNo", "Line_No", "VisOrder"], index)),
   ItemCode: String(pick(line, ["ItemCode", "Item_Code", "item_code"], "")),
   Dscription: String(pick(line, ["Dscription", "Description", "ItemName", "Item_Name", "item_name"], "")),
+  Quantity: toNumber(pick(line, ["Quantity", "Qty", "OrderQty", "Order_Qty"], 0)),
   OpenQty: toNumber(pick(line, ["OpenQty", "OpenQuantity", "Open_Qty", "OpenQuantity"], 0)),
   Price: toNumber(pick(line, ["Price", "UnitPrice", "Unit_Price"], 0)),
   PriceBefDi: toNumber(pick(line, ["PriceBefDi", "PriceBeforeDiscount", "Price_Bef_Di", "Price"], 0)),
@@ -104,6 +108,7 @@ const normalizeLine = (line: SalesOrderLine, index: number): SalesOrderLine => (
   VatGroup: String(pick(line, ["VatGroup", "TaxCode"], "")),
   WhsCode: String(pick(line, ["WhsCode", "WarehouseCode", "Warehouse_Code"], "")),
   OcrCode: String(pick(line, ["OcrCode", "CostingCode"], "")),
+  ShipDate: String(pick(line, ["ShipDate", "Ship_Date", "ship_date"], "")),
 });
 
 const getRawOrderLines = (order: SalesOrder) => {
@@ -125,6 +130,7 @@ const normalizeOrder = (order: SalesOrder): SalesOrder => {
     SlpCode: toNumber(pick(source, ["SlpCode", "SalesPersonCode", "Slp_Code"], 0)),
     ShipToCode: String(pick(source, ["ShipToCode", "Ship_To_Code", "ship_to_code"], "")),
     PayToCode: String(pick(source, ["PayToCode", "Pay_To_Code", "pay_to_code"], "")),
+    BPL_Id: toNumber(pick(source, ["BPL_Id", "BPLId", "BPL_ID", "BPL_IDAssignedToInvoice"], 0)),
     DocTotal: toNumber(pick(source, ["DocTotal", "Doc_Total", "doc_total"], 0)),
     lines,
   };
@@ -353,6 +359,7 @@ export function useSalesInvoice() {
     SlpCode: order.SlpCode,
     ShipToCode: order.ShipToCode,
     PayToCode: order.PayToCode,
+    BPL_Id: order.BPL_Id,
     LineNum: line.LineNum,
     ItemCode: line.ItemCode,
     Dscription: line.Dscription,
@@ -364,6 +371,7 @@ export function useSalesInvoice() {
     TaxCode: line.TaxCode || line.VatGroup || "",
     WhsCode: line.WhsCode || "",
     OcrCode: line.OcrCode || "",
+    ShipDate: line.ShipDate || "",
     invoiceQty: toNumber(line.OpenQty),
   });
 
@@ -398,6 +406,9 @@ export function useSalesInvoice() {
       if (!line) return current;
       const next = { ...line, ...patch };
       next.invoiceQty = Math.min(Math.max(toNumber(next.invoiceQty), 1), toNumber(next.OpenQty));
+      if (next.BatchNumbers?.length) {
+        next.BatchNumbers = next.BatchNumbers.map((batch) => ({ ...batch, Quantity: next.invoiceQty }));
+      }
       return { ...current, [key]: next };
     });
   };
@@ -468,6 +479,10 @@ export function useSalesInvoice() {
 
     return `${mismatchedFields.join(" and ")} must be same for selected sales orders (${orderLabels}).`;
   }, [selectedLineList]);
+  const selectedLineBatchError = useMemo(
+    () => (selectedLineList.some((line) => !line.BatchNumbers?.length) ? "Choose batch for every selected line." : ""),
+    [selectedLineList],
+  );
   const totals = useMemo(
     () => calculateTotals(selectedLineList, form.discountPercent, freightRows),
     [form.discountPercent, freightRows, selectedLineList],
@@ -626,6 +641,11 @@ export function useSalesInvoice() {
       return;
     }
 
+    if (selectedLineBatchError) {
+      setPostError(selectedLineBatchError);
+      return;
+    }
+
     const invalidLine = selectedLineList.find(
       (line) => toNumber(line.invoiceQty) < 1 || toNumber(line.invoiceQty) > toNumber(line.OpenQty),
     );
@@ -659,6 +679,7 @@ export function useSalesInvoice() {
     selectedLines,
     selectedLineList,
     selectedOrderAddressError,
+    selectedLineBatchError,
     freightOptions,
     vendorStates,
     freightRows,

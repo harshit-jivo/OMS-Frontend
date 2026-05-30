@@ -32,6 +32,7 @@ export type SelectedLine = {
   SlpCode?: number;
   ShipToCode?: string;
   PayToCode?: string;
+  BPL_Id?: number;
   LineNum: number;
   ItemCode: string;
   Dscription: string;
@@ -43,7 +44,13 @@ export type SelectedLine = {
   TaxCode: string;
   WhsCode: string;
   OcrCode?: string;
+  ShipDate?: string;
   invoiceQty: number;
+  BatchNumbers?: Array<{
+    BatchNumber: string;
+    SystemSerialNumber?: number;
+    Quantity: number;
+  }>;
 };
 
 export type InvoiceForm = {
@@ -155,17 +162,10 @@ export const buildInvoicePayload = (
   party: Party | null,
   selectedLines: Record<string, SelectedLine>,
   form: InvoiceForm,
-  freightRows: FreightRow[] = [],
+  _freightRows: FreightRow[] = [],
 ) => {
   const lines = Object.values(selectedLines);
   const firstLine = lines[0];
-  const additionalExpenses = freightRows
-    .filter((row) => row.expenseCode && toNumber(row.lineTotal) > 0)
-    .map((row) => ({
-      ExpenseCode: toNumber(row.expenseCode),
-      LineTotal: toNumber(row.lineTotal),
-      Remarks: "",
-    }));
 
   return {
     CardCode: party?.CardCode || "",
@@ -174,24 +174,26 @@ export const buildInvoicePayload = (
     TaxDate: form.documentDate,
     NumAtCard: form.billNumber,
     SalesPersonCode: firstLine?.SlpCode ?? null,
-    Comments: "",
-    U_Driver_Name: form.driverName,
-    U_Vehicle_No: form.vehicleNumber,
-    U_Driver_Mobile: form.driverMobile,
-    U_LR_No: form.lrGrNumber,
-    U_EWay_Bill: form.ewayBillNo,
     ShipToCode: form.shipTo,
     PayToCode: form.payTo,
+    ...(firstLine?.BPL_Id ? { BPL_IDAssignedToInvoice: firstLine.BPL_Id } : {}),
     DocumentLines: lines.map((line) => ({
       BaseType: 17,
       BaseEntry: line.DocEntry,
       BaseLine: line.LineNum,
-      Quantity: toNumber(line.invoiceQty),
-      UnitPrice: toNumber(line.Price),
-      DiscountPercent: toNumber(line.DiscPrcnt),
+      ...(line.ShipDate ? { ShipDate: normalizeDateInput(line.ShipDate) } : {}),
+      ItemCode: line.ItemCode,
       WarehouseCode: line.WhsCode,
-      TaxCode: line.TaxCode,
+      Quantity: toNumber(line.invoiceQty),
+      ...(line.BatchNumbers?.length
+        ? {
+            BatchNumbers: line.BatchNumbers.map((batch) => ({
+              BatchNumber: batch.BatchNumber,
+              ...(batch.SystemSerialNumber !== undefined ? { SystemSerialNumber: batch.SystemSerialNumber } : {}),
+              Quantity: toNumber(batch.Quantity),
+            })),
+          }
+        : {}),
     })),
-    DocumentAdditionalExpenses: additionalExpenses,
   };
 };

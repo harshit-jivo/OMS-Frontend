@@ -22,11 +22,39 @@ type FinishedGoodItem = {
   U_SKU?: string | null;
 };
 
+type InventoryWarehouse = {
+  WhsCode: string;
+  "SUM(Quantity)"?: number;
+};
+
+type BatchDetail = {
+  SysNumber?: number;
+  BatchNum: string;
+  ItemCode: string;
+  ItemName: string;
+  WhsCode: string;
+  PrdDate?: string | null;
+  ExpDate?: string | null;
+  InDate?: string | null;
+  Quantity: number;
+  BaseType?: number;
+  BaseNum?: number;
+  BaseEntry?: number;
+  SystemSerialNumber?: number;
+  AbsEntry?: number;
+};
+
+type SelectedBatch = {
+  warehouseCode: string;
+  warehouseQuantity: number;
+  batch: BatchDetail;
+};
+
 type ItemInvoiceRow = {
   id: number;
   type: "Item";
   item: FinishedGoodItem | null;
-  qty: number;
+  batch: SelectedBatch | null;
 };
 
 const formatPartyAddressOption = (address: { Address: string; GSTRegnNo?: string | null }) =>
@@ -309,7 +337,7 @@ type SkeletonInvoiceProps = {
   onOpenItems: () => void;
   itemRows: ItemInvoiceRow[];
   onOpenItemPicker: (rowId: number) => void;
-  onUpdateItemQty: (rowId: number, qty: number) => void;
+  onOpenBatchPicker: (rowId: number) => void;
   onAddItemRow: () => void;
   onReset: () => void;
 };
@@ -382,12 +410,12 @@ function InvoiceSourceChoice({
 function ItemInvoiceLines({
   rows,
   onOpenItemPicker,
-  onUpdateQty,
+  onOpenBatchPicker,
   onAddRow,
 }: {
   rows: ItemInvoiceRow[];
   onOpenItemPicker: (rowId: number) => void;
-  onUpdateQty: (rowId: number, qty: number) => void;
+  onOpenBatchPicker: (rowId: number) => void;
   onAddRow: () => void;
 }) {
   return (
@@ -410,7 +438,7 @@ function ItemInvoiceLines({
               <th>Type</th>
               <th>Item No.</th>
               <th>Description</th>
-              <th>Qty</th>
+              <th>Batch</th>
               <th>Brand</th>
               <th>Variety</th>
               <th>SKU</th>
@@ -434,12 +462,24 @@ function ItemInvoiceLines({
                   <input value={row.item?.ItemName || ""} placeholder="Description" readOnly />
                 </td>
                 <td>
-                  <input
-                    min="1"
-                    type="number"
-                    value={row.qty}
-                    onChange={(event) => onUpdateQty(row.id, Number(event.target.value))}
-                  />
+                  <button
+                    className="si-batch-select-btn"
+                    type="button"
+                    disabled={!row.item}
+                    onClick={() => onOpenBatchPicker(row.id)}
+                  >
+                    {row.batch
+                      ? `${row.batch.batch.BatchNum} / ${row.batch.warehouseCode}`
+                      : row.item
+                        ? "Choose Batch"
+                        : "Select item first"}
+                  </button>
+                  {row.batch && (
+                    <span className="si-batch-line-meta">
+                      Whs Qty: {row.batch.warehouseQuantity.toLocaleString("en-IN")} | Batch Qty:{" "}
+                      {Number(row.batch.batch.Quantity || 0).toLocaleString("en-IN")}
+                    </span>
+                  )}
                 </td>
                 <td>{row.item?.U_Brand || "-"}</td>
                 <td>{row.item?.U_Variety || "-"}</td>
@@ -727,6 +767,207 @@ function ItemPickerModal({
   );
 }
 
+const formatBatchDate = (value?: string | null) => {
+  if (!value) return "-";
+  const dateOnly = value.split("T")[0]?.split(" ")[0] || value;
+  const [year, month, day] = dateOnly.split("-");
+  return year && month && day ? `${day}-${month}-${year}` : value;
+};
+
+function BatchPickerModal({
+  item,
+  selectedBatch,
+  onClose,
+  onSelect,
+}: {
+  item: FinishedGoodItem;
+  selectedBatch: SelectedBatch | null;
+  onClose: () => void;
+  onSelect: (batch: SelectedBatch) => void;
+}) {
+  const [warehouses, setWarehouses] = useState<InventoryWarehouse[]>([]);
+  const [selectedWhsCode, setSelectedWhsCode] = useState(selectedBatch?.warehouseCode || "");
+  const [batches, setBatches] = useState<BatchDetail[]>([]);
+  const [loadingWarehouses, setLoadingWarehouses] = useState(false);
+  const [loadingBatches, setLoadingBatches] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+
+    const loadWarehouses = async () => {
+      setLoadingWarehouses(true);
+      setError("");
+      try {
+        const data = await apiFetch<InventoryWarehouse[]>(
+          `/api/hana/inventory-details/?item_code=${encodeURIComponent(item.ItemCode)}`,
+        );
+        const nextWarehouses = Array.isArray(data) ? data : [];
+        if (!active) return;
+        setWarehouses(nextWarehouses);
+        setSelectedWhsCode((current) =>
+          current && nextWarehouses.some((warehouse) => warehouse.WhsCode === current) ? current : "",
+        );
+      } catch (err) {
+        console.error(err);
+        if (active) {
+          setWarehouses([]);
+          setError("Unable to load warehouse quantities.");
+        }
+      } finally {
+        if (active) setLoadingWarehouses(false);
+      }
+    };
+
+    loadWarehouses();
+    return () => {
+      active = false;
+    };
+  }, [item.ItemCode]);
+
+  useEffect(() => {
+    if (!selectedWhsCode) {
+      setBatches([]);
+      return;
+    }
+
+    let active = true;
+
+    const loadBatches = async () => {
+      setLoadingBatches(true);
+      setError("");
+      try {
+        const data = await apiFetch<BatchDetail[]>(
+          `/api/hana/batch-details/?item_code=${encodeURIComponent(item.ItemCode)}&whs_code=${encodeURIComponent(selectedWhsCode)}`,
+        );
+        if (active) setBatches(Array.isArray(data) ? data : []);
+      } catch (err) {
+        console.error(err);
+        if (active) {
+          setBatches([]);
+          setError("Unable to load batches for this warehouse.");
+        }
+      } finally {
+        if (active) setLoadingBatches(false);
+      }
+    };
+
+    loadBatches();
+    return () => {
+      active = false;
+    };
+  }, [item.ItemCode, selectedWhsCode]);
+
+  const selectedWarehouse = warehouses.find((warehouse) => warehouse.WhsCode === selectedWhsCode) || null;
+  const selectedWarehouseQuantity = Number(selectedWarehouse?.["SUM(Quantity)"] || 0);
+
+  return (
+    <div className="si-modal-backdrop" role="presentation">
+      <section className="si-so-modal si-batch-modal" role="dialog" aria-modal="true" aria-label="Choose item batch">
+        <header className="si-so-modal-head">
+          <div>
+            <span className="si-eyebrow">Batch Selection</span>
+            <h2>{item.ItemCode}</h2>
+            <p>{item.ItemName}</p>
+          </div>
+          <div className="si-modal-head-actions">
+            <button className="si-btn si-btn-outline" type="button" onClick={onClose}>
+              Close
+            </button>
+          </div>
+        </header>
+
+        <div className="si-batch-picker-body">
+          <aside className="si-batch-warehouse-panel">
+            <div className="si-batch-panel-title">
+              <span>Warehouse Stock</span>
+              <strong>{loadingWarehouses ? "Loading..." : `${warehouses.length} warehouses`}</strong>
+            </div>
+            {loadingWarehouses ? (
+              <div className="si-loader">Loading warehouse quantities...</div>
+            ) : warehouses.length === 0 ? (
+              <div className="si-empty">No warehouse stock found.</div>
+            ) : (
+              <div className="si-batch-warehouse-list">
+                {warehouses.map((warehouse) => {
+                  const quantity = Number(warehouse["SUM(Quantity)"] || 0);
+                  return (
+                    <button
+                      className={`si-warehouse-option${selectedWhsCode === warehouse.WhsCode ? " is-active" : ""}`}
+                      type="button"
+                      key={warehouse.WhsCode}
+                      onClick={() => setSelectedWhsCode(warehouse.WhsCode)}
+                    >
+                      <span>{warehouse.WhsCode}</span>
+                      <strong>{quantity.toLocaleString("en-IN")}</strong>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </aside>
+
+          <section className="si-batch-list-panel">
+            <div className="si-batch-panel-title">
+              <span>Batches</span>
+              <strong>{selectedWhsCode || "Select warehouse"}</strong>
+            </div>
+            {error && <div className="si-inline-error">{error}</div>}
+            {!selectedWhsCode ? (
+              <div className="si-empty">Select a warehouse to view batches.</div>
+            ) : loadingBatches ? (
+              <div className="si-loader">Loading batches...</div>
+            ) : batches.length === 0 ? (
+              <div className="si-empty">No batches found for this warehouse.</div>
+            ) : (
+              <div className="si-table-wrap">
+                <table className="si-lines-table si-batch-table">
+                  <thead>
+                    <tr>
+                      <th aria-label="Select batch" />
+                      <th>Batch No.</th>
+                      <th>Batch Qty</th>
+                      <th>Production</th>
+                      <th>Expiry</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {batches.map((batch) => (
+                      <tr key={`${batch.BatchNum}-${batch.BaseEntry || ""}-${batch.InDate || ""}`}>
+                        <td>
+                          <input
+                            type="checkbox"
+                            checked={
+                              selectedBatch?.warehouseCode === selectedWhsCode
+                              && selectedBatch.batch.BatchNum === batch.BatchNum
+                            }
+                            onChange={() =>
+                              onSelect({
+                                warehouseCode: selectedWhsCode,
+                                warehouseQuantity: selectedWarehouseQuantity,
+                                batch,
+                              })
+                            }
+                            aria-label={`Select batch ${batch.BatchNum}`}
+                          />
+                        </td>
+                        <td>{batch.BatchNum}</td>
+                        <td>{Number(batch.Quantity || 0).toLocaleString("en-IN")}</td>
+                        <td>{formatBatchDate(batch.PrdDate)}</td>
+                        <td>{formatBatchDate(batch.ExpDate)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function SkeletonInvoice({
   state,
   onOpenParty,
@@ -735,7 +976,7 @@ function SkeletonInvoice({
   onOpenItems,
   itemRows,
   onOpenItemPicker,
-  onUpdateItemQty,
+  onOpenBatchPicker,
   onAddItemRow,
   onReset,
 }: SkeletonInvoiceProps) {
@@ -880,7 +1121,7 @@ function SkeletonInvoice({
           <ItemInvoiceLines
             rows={itemRows}
             onOpenItemPicker={onOpenItemPicker}
-            onUpdateQty={onUpdateItemQty}
+            onOpenBatchPicker={onOpenBatchPicker}
             onAddRow={onAddItemRow}
           />
         )}
@@ -895,8 +1136,9 @@ export default function SalesInvoiceWizard() {
   const [partyModalOpen, setPartyModalOpen] = useState(false);
   const [sourceModalOpen, setSourceModalOpen] = useState(false);
   const [itemPickerRowId, setItemPickerRowId] = useState<number | null>(null);
+  const [batchPickerRowId, setBatchPickerRowId] = useState<number | null>(null);
   const [sourceMode, setSourceMode] = useState<InvoiceSourceMode | null>(null);
-  const [itemRows, setItemRows] = useState<ItemInvoiceRow[]>([{ id: 1, type: "Item", item: null, qty: 1 }]);
+  const [itemRows, setItemRows] = useState<ItemInvoiceRow[]>([{ id: 1, type: "Item", item: null, batch: null }]);
 
   useEffect(() => {
     if (sourceMode === "sales-order" && state.selectedParty && state.step === 2 && !state.customerDetails) {
@@ -909,6 +1151,7 @@ export default function SalesInvoiceWizard() {
     setSourceMode("sales-order");
     setSourceModalOpen(false);
     setItemPickerRowId(null);
+    setBatchPickerRowId(null);
     setOrdersModalOpen(true);
   };
 
@@ -938,6 +1181,10 @@ export default function SalesInvoiceWizard() {
     setItemPickerRowId(null);
   };
 
+  const closeBatchPicker = () => {
+    setBatchPickerRowId(null);
+  };
+
   const openPartyModal = () => {
     setPartyModalOpen(true);
   };
@@ -951,8 +1198,9 @@ export default function SalesInvoiceWizard() {
     closeOrdersModal();
     closeSourceModal();
     closeItemPicker();
+    closeBatchPicker();
     setSourceMode(null);
-    setItemRows([{ id: 1, type: "Item", item: null, qty: 1 }]);
+    setItemRows([{ id: 1, type: "Item", item: null, batch: null }]);
     state.changeParty();
     setPartyModalOpen(true);
   };
@@ -966,6 +1214,7 @@ export default function SalesInvoiceWizard() {
     closeOrdersModal();
     closeSourceModal();
     closeItemPicker();
+    closeBatchPicker();
     setSourceMode(null);
     setPartyModalOpen(true);
   };
@@ -973,25 +1222,35 @@ export default function SalesInvoiceWizard() {
   const addItemRow = () => {
     setItemRows((current) => [
       ...current,
-      { id: Math.max(0, ...current.map((row) => row.id)) + 1, type: "Item", item: null, qty: 1 },
+      { id: Math.max(0, ...current.map((row) => row.id)) + 1, type: "Item", item: null, batch: null },
     ]);
   };
 
-  const updateItemQty = (rowId: number, qty: number) => {
-    setItemRows((current) =>
-      current.map((row) => (row.id === rowId ? { ...row, qty: Math.max(1, Number.isFinite(qty) ? qty : 1) } : row)),
-    );
+  const openBatchPicker = (rowId: number) => {
+    const row = itemRows.find((itemRow) => itemRow.id === rowId);
+    if (!row?.item) return;
+    setBatchPickerRowId(rowId);
   };
 
   const selectItemForRow = (item: FinishedGoodItem) => {
     if (itemPickerRowId === null) return;
-    setItemRows((current) => current.map((row) => (row.id === itemPickerRowId ? { ...row, item } : row)));
+    const rowId = itemPickerRowId;
+    setItemRows((current) => current.map((row) => (row.id === rowId ? { ...row, item, batch: null } : row)));
     closeItemPicker();
+    setBatchPickerRowId(rowId);
+  };
+
+  const selectBatchForRow = (batch: SelectedBatch) => {
+    if (batchPickerRowId === null) return;
+    setItemRows((current) => current.map((row) => (row.id === batchPickerRowId ? { ...row, batch } : row)));
+    closeBatchPicker();
   };
 
   const showOrdersModal = Boolean(state.selectedParty) && ordersModalOpen;
   const showSourceModal = Boolean(state.selectedParty) && sourceModalOpen;
   const showItemPickerModal = Boolean(state.selectedParty) && itemPickerRowId !== null;
+  const batchPickerRow = itemRows.find((row) => row.id === batchPickerRowId) || null;
+  const showBatchPickerModal = Boolean(state.selectedParty && batchPickerRow?.item);
   const showDraft = Boolean(state.selectedParty && state.customerDetails);
   const openSalesOrderCount = state.salesOrders.length;
 
@@ -1013,7 +1272,7 @@ export default function SalesInvoiceWizard() {
           onOpenItems={openItemsModal}
           itemRows={itemRows}
           onOpenItemPicker={setItemPickerRowId}
-          onUpdateItemQty={updateItemQty}
+          onOpenBatchPicker={openBatchPicker}
           onAddItemRow={addItemRow}
           onReset={resetInvoiceFlow}
         />
@@ -1099,6 +1358,15 @@ export default function SalesInvoiceWizard() {
           onBack={closeItemPicker}
           onClose={closeItemPicker}
           onSelect={selectItemForRow}
+        />
+      )}
+
+      {showBatchPickerModal && batchPickerRow?.item && (
+        <BatchPickerModal
+          item={batchPickerRow.item}
+          selectedBatch={batchPickerRow.batch}
+          onClose={closeBatchPicker}
+          onSelect={selectBatchForRow}
         />
       )}
     </div>
