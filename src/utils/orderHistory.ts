@@ -60,7 +60,7 @@ export const loadManagerOrders = async () => {
       }
     }),
   );
-  return loadDetailedOrders(ordersByManager.flat());
+  return sortOrders(uniqueOrders(ordersByManager.flat()) as Order[]);
 };
 
 

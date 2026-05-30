@@ -362,7 +362,7 @@ export default function Daily_Report() {
 
               {/* Main Group */}
               <div className="dr-field">
-                {/* <label className="dr-label">Main Group</label> */}
+                <label className="dr-label">Main Group</label>
                 <div className="dr-dropdown" ref={groupRef}>
                   <div className="dr-dropdown-trigger" onClick={() => setMgDropdownOpen((v) => !v)}>
                     {selectedGroups.length === 1 ? mainGroup.find((g) => g.id === selectedGroups[0])?.name || "1 selected" : selectedGroups.length > 1 ? `${selectedGroups.length} selected` : "Select Main Group"}

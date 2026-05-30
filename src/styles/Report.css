@@ -70,6 +70,10 @@
   z-index: 90;
 }
 
+.dr-dropdown.open {
+  z-index: 180;
+}
+
 .dr-dropdown-trigger,
 .dr-select,
 .dr-date-input {
@@ -228,7 +232,7 @@
   top: calc(100% + 8px);
   left: 0;
   right: 0;
-  z-index: 120;
+  z-index: 190;
   overflow: hidden;
   max-height: 220px;
   overflow-y: auto;

@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { HiMap } from "react-icons/hi2";
 import api from "../services/api";
 import "../styles/Report.css";
 
@@ -182,35 +181,18 @@ export default function StateWise_Report() {
   return (
     <div className="dr-page">
       <div className="dr-header">
-        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-          <span
-            style={{
-              width: "38px",
-              height: "38px",
-              borderRadius: "10px",
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              background: "#eff6ff",
-              color: "#2563eb",
-              border: "1px solid #bfdbfe",
-            }}
-          >
-            <HiMap size={22} />
-          </span>
-          <h1
-            className="dr-title"
-            style={{
-              margin: "0 0 4px",
-              fontSize: "24px",
-              fontWeight: 800,
-              color: "#0f172a",
-              letterSpacing: "-0.02em",
-            }}
-          >
-            State Wise Report
-          </h1>
-        </div>
+        <h1
+          className="dr-title"
+          style={{
+            margin: "0 0 4px",
+            fontSize: "24px",
+            fontWeight: 800,
+            color: "#0f172a",
+            letterSpacing: "-0.02em",
+          }}
+        >
+          State Wise Report
+        </h1>
       </div>
 
       <div className="dr-filter-card">

@@ -597,7 +597,7 @@ export default function Dashboard() {
       volumeTitle: `Monthly Order Volume (${year})`,
       volumeSubtitle: "How order count moves across the year",
       categoryTitle: `Category Sales (${year})`,
-      categorySubtitle: "Revenue split by product category",
+      categorySubtitle: "Completed order sales by product category",
     },
     auditor: {
       salesTitle: `Monthly Audit Value (${year})`,

@@ -517,7 +517,7 @@ export default function Sales_Report() {
               {/* Main Group */}
               <div className="dr-field">
                 <label className="dr-label">Main Group</label>
-                <div className="dr-dropdown" ref={groupRef}>
+                <div className={`dr-dropdown${mgDropdownOpen ? " open" : ""}`} ref={groupRef}>
                   <div
                     className="dr-dropdown-trigger"
                     onClick={() => setMgDropdownOpen((v) => !v)}
