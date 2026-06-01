@@ -55,10 +55,6 @@ export type FreightMaster = {
   ExpnsName: string;
 };
 
-export type VendorState = {
-  State1: string | null;
-};
-
 export type NextDocNumber = {
   NextNumber: number | string | null;
 };
@@ -221,7 +217,6 @@ export function useSalesInvoice() {
   const [salesOrders, setSalesOrders] = useState<SalesOrder[]>([]);
   const [selectedLines, setSelectedLines] = useState<Record<string, SelectedLine>>({});
   const [freightOptions, setFreightOptions] = useState<FreightMaster[]>([]);
-  const [vendorStates, setVendorStates] = useState<string[]>([]);
   const [nextDocNumber, setNextDocNumber] = useState("");
   const [freightRows, setFreightRows] = useState<FreightRow[]>([]);
   const [customerDetails, setCustomerDetails] = useState<CustomerDetails | null>(null);
@@ -256,22 +251,6 @@ export function useSalesInvoice() {
     };
 
     loadParties();
-  }, []);
-
-  useEffect(() => {
-    const loadVendorStates = async () => {
-      try {
-        const data = await apiFetch<VendorState[]>("/api/hana/vendor-states");
-        const states = Array.isArray(data)
-          ? [...new Set(data.map((item) => String(item.State1 || "").trim()).filter(Boolean))].sort()
-          : [];
-        setVendorStates(states);
-      } catch (error) {
-        console.error("Unable to load vendor states:", error);
-      }
-    };
-
-    loadVendorStates();
   }, []);
 
   useEffect(() => {
@@ -310,6 +289,7 @@ export function useSalesInvoice() {
       CardCode: party.CardCode,
       CardName: party.CardName,
       State1: party.State1,
+      U_Main_Group: party.U_Main_Group,
       U_Chain: party.U_Chain,
     });
     setStep(2);
@@ -351,29 +331,34 @@ export function useSalesInvoice() {
     setForm(emptyForm());
   };
 
-  const makeSelectedLine = (order: SalesOrder, line: SalesOrderLine): SelectedLine => ({
-    DocEntry: order.DocEntry,
-    DocNum: order.DocNum,
-    DocDate: order.DocDate,
-    DocDueDate: order.DocDueDate,
-    SlpCode: order.SlpCode,
-    ShipToCode: order.ShipToCode,
-    PayToCode: order.PayToCode,
-    BPL_Id: order.BPL_Id,
-    LineNum: line.LineNum,
-    ItemCode: line.ItemCode,
-    Dscription: line.Dscription,
-    OpenQty: toNumber(line.OpenQty),
-    Price: toNumber(line.Price),
-    PriceBefDi: toNumber(line.PriceBefDi ?? line.Price),
-    DiscPrcnt: toNumber(line.DiscPrcnt),
-    VatPrcnt: toNumber(line.VatPrcnt),
-    TaxCode: line.TaxCode || line.VatGroup || "",
-    WhsCode: line.WhsCode || "",
-    OcrCode: line.OcrCode || "",
-    ShipDate: line.ShipDate || "",
-    invoiceQty: toNumber(line.OpenQty),
-  });
+  const makeSelectedLine = (order: SalesOrder, line: SalesOrderLine): SelectedLine => {
+    const salesOrderWhsCode = line.WhsCode || "";
+
+    return {
+      DocEntry: order.DocEntry,
+      DocNum: order.DocNum,
+      DocDate: order.DocDate,
+      DocDueDate: order.DocDueDate,
+      SlpCode: order.SlpCode,
+      ShipToCode: order.ShipToCode,
+      PayToCode: order.PayToCode,
+      BPL_Id: order.BPL_Id,
+      LineNum: line.LineNum,
+      ItemCode: line.ItemCode,
+      Dscription: line.Dscription,
+      OpenQty: toNumber(line.OpenQty),
+      Price: toNumber(line.Price),
+      PriceBefDi: toNumber(line.PriceBefDi ?? line.Price),
+      DiscPrcnt: toNumber(line.DiscPrcnt),
+      VatPrcnt: toNumber(line.VatPrcnt),
+      TaxCode: line.TaxCode || line.VatGroup || "",
+      WhsCode: salesOrderWhsCode,
+      SalesOrderWhsCode: salesOrderWhsCode,
+      OcrCode: line.OcrCode || "",
+      ShipDate: line.ShipDate || "",
+      invoiceQty: toNumber(line.OpenQty),
+    };
+  };
 
   const toggleLine = (order: SalesOrder, line: SalesOrderLine) => {
     const key = lineKey(order.DocEntry, line.LineNum);
@@ -407,7 +392,17 @@ export function useSalesInvoice() {
       const next = { ...line, ...patch };
       next.invoiceQty = Math.min(Math.max(toNumber(next.invoiceQty), 1), toNumber(next.OpenQty));
       if (next.BatchNumbers?.length) {
-        next.BatchNumbers = next.BatchNumbers.map((batch) => ({ ...batch, Quantity: next.invoiceQty }));
+        if (patch.invoiceQty !== undefined) {
+          let remainingQty = next.invoiceQty;
+          next.BatchNumbers = next.BatchNumbers
+            .map((batch, index) => {
+              const isLastBatch = index === next.BatchNumbers!.length - 1;
+              const quantity = isLastBatch ? remainingQty : Math.min(toNumber(batch.Quantity), remainingQty);
+              remainingQty = Math.max(remainingQty - quantity, 0);
+              return { ...batch, Quantity: quantity };
+            })
+            .filter((batch) => toNumber(batch.Quantity) > 0);
+        }
       }
       return { ...current, [key]: next };
     });
@@ -480,7 +475,13 @@ export function useSalesInvoice() {
     return `${mismatchedFields.join(" and ")} must be same for selected sales orders (${orderLabels}).`;
   }, [selectedLineList]);
   const selectedLineBatchError = useMemo(
-    () => (selectedLineList.some((line) => !line.BatchNumbers?.length) ? "Choose batch for every selected line." : ""),
+    () =>
+      selectedLineList.some((line) => {
+        const batchQty = line.BatchNumbers?.reduce((sum, batch) => sum + toNumber(batch.Quantity), 0) || 0;
+        return !line.BatchNumbers?.length || Math.abs(batchQty - toNumber(line.invoiceQty)) >= 0.0001;
+      })
+        ? "Choose matching batch quantity for every selected line."
+        : "",
     [selectedLineList],
   );
   const totals = useMemo(
@@ -681,7 +682,6 @@ export function useSalesInvoice() {
     selectedOrderAddressError,
     selectedLineBatchError,
     freightOptions,
-    vendorStates,
     freightRows,
     customerDetails,
     salespersonDetails,

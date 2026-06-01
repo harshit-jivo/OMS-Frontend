@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { HiArchiveBox, HiArrowRight, HiDocumentText } from "react-icons/hi2";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { HiArchiveBox, HiArrowRight, HiDocumentText, HiTrash } from "react-icons/hi2";
 import DraftStep from "./DraftStep";
 import OrdersStep from "./OrdersStep";
 import { apiFetch, useSalesInvoice, type SalesInvoiceState } from "./useSalesInvoice";
@@ -12,6 +12,7 @@ type PartyPickerModalProps = {
 };
 
 type InvoiceSourceMode = "sales-order" | "items";
+type ItemFilterModal = "brand" | "subGroup" | "variety" | "packSize";
 
 type FinishedGoodItem = {
   ItemCode: string;
@@ -20,6 +21,12 @@ type FinishedGoodItem = {
   U_Variety?: string | null;
   U_Sub_Group?: string | null;
   U_SKU?: string | null;
+  Quantity?: number | string | null;
+  OnHand?: number | string | null;
+  InStock?: number | string | null;
+  AvailableQty?: number | string | null;
+  AvailableQuantity?: number | string | null;
+  "SUM(Quantity)"?: number | string | null;
 };
 
 type InventoryWarehouse = {
@@ -47,21 +54,18 @@ type BatchDetail = {
 type SelectedBatch = {
   warehouseCode: string;
   warehouseQuantity: number;
-  batch: BatchDetail;
+  batches: Array<{
+    batch: BatchDetail;
+    quantity: number;
+  }>;
 };
 
 type ItemInvoiceRow = {
   id: number;
   type: "Item";
   item: FinishedGoodItem | null;
+  invoiceQty: number;
   batch: SelectedBatch | null;
-};
-
-const formatPartyAddressOption = (address: { Address: string; GSTRegnNo?: string | null }) =>
-  [address.Address, address.GSTRegnNo ? `GST: ${address.GSTRegnNo}` : ""].filter(Boolean).join(" | ");
-
-type ChainOption = {
-  U_Chain: string | null;
 };
 
 const stateNameByCode: Record<string, string> = {
@@ -119,101 +123,140 @@ const getChainValue = (chain?: string | null) => {
 
 const formatChainName = (chainValue: string) => chainValue === nullChainValue ? "No Chain" : chainValue;
 
-const fetchStateChains = async (stateCode: string) => {
-  const token = localStorage.getItem("access");
-  const url = stateCode
-    ? `/api/hana/state-chain/?state_code=${encodeURIComponent(stateCode)}`
-    : "/api/hana/state-chain/";
-  const response = await fetch(url, {
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
+const getPartyOpenOrders = (party: { OpenOrders?: number; Num_of_Open_SalesOrder?: number }) =>
+  Number(party.OpenOrders ?? party.Num_of_Open_SalesOrder ?? 0);
 
-  if (!response.ok) throw new Error(`Unable to load chains: ${response.status}`);
-  const data = await response.json() as ChainOption[];
-  return Array.isArray(data)
-    ? [...new Set(data.map((item) => getChainValue(item.U_Chain)))].sort((a, b) =>
-        formatChainName(a).localeCompare(formatChainName(b)),
-      )
-    : [];
+const stateFilterOrder = [
+  "PB", "HR", "DL", "UP", "AP", "GJ", "MH", "WB", "JK", "TE", "KT", "RJ", "GO", "AS", "HP", "UK",
+  "BH", "MP", "TN", "CT", "DB", "MN",
+];
+
+const chainFilterOrder = [
+  "DISTRIBUTOR", "D MART", "SUPER STOCKIST", "RETAILER", nullChainValue, "WALMART", "INDIVIDUALS",
+  "BIG BASKET", "GT", "SINGLE SHOPS", "RELIANCE FRESH", "ARY SHOPS", "GURUDWARA", "METRO CASH & CARRY",
+  "ABRL", "RAJ MANDIR", "AMAZON", "BULK", "STAFF",
+];
+
+const mainGroupFilterOrder = [
+  "GT", "MT", "ROI", "E-COMMERCE", "BRANCH", "CSD", "CORPORATE", "HORECA", "STAFF", "REFERENCE",
+  "SANGAT", "CALL CENTER", "BULK OIL", "EXPORT", "EVENTS & EXHIBITIONS", "PURCHASE OIL",
+];
+
+const sortByFilterOrder = (order: string[]) => (optionA: string, optionB: string) => {
+  const indexA = order.indexOf(optionA);
+  const indexB = order.indexOf(optionB);
+  if (indexA !== -1 || indexB !== -1) {
+    if (indexA === -1) return 1;
+    if (indexB === -1) return -1;
+    return indexA - indexB;
+  }
+  return optionA.localeCompare(optionB);
 };
 
 function PartyPickerModal({ state, onClose, onSelect }: PartyPickerModalProps) {
   const [selectedState, setSelectedState] = useState("");
-  const [showAllStates, setShowAllStates] = useState(false);
-  const [chainOptions, setChainOptions] = useState<string[]>([]);
+  const [selectedMainGroup, setSelectedMainGroup] = useState("");
   const [selectedChain, setSelectedChain] = useState("");
-  const [showAllChains, setShowAllChains] = useState(false);
-  const [loadingChains, setLoadingChains] = useState(false);
+  const [partyQuery, setPartyQuery] = useState("");
+  const [filterModal, setFilterModal] = useState<"state" | "mainGroup" | "chain" | null>(null);
+  const stateOptions = useMemo(() => {
+    return [...new Set(state.parties.map((party) => String(party.State1 || "").trim()).filter(Boolean))]
+      .sort(sortByFilterOrder(stateFilterOrder));
+  }, [state.parties]);
+  const mainGroupOptions = useMemo(() => {
+    const groups = state.parties
+      .filter((party) => !selectedState || party.State1 === selectedState)
+      .map((party) => String(party.U_Main_Group || "").trim())
+      .filter(Boolean);
+    return [...new Set(groups)].sort(sortByFilterOrder(mainGroupFilterOrder));
+  }, [selectedState, state.parties]);
+  const chainOptions = useMemo(() => {
+    const chains = state.parties
+      .filter((party) => !selectedState || party.State1 === selectedState)
+      .filter((party) => !selectedMainGroup || party.U_Main_Group === selectedMainGroup)
+      .map((party) => getChainValue(party.U_Chain));
+    const uniqueChains = [...new Set(chains)].sort((chainA, chainB) =>
+      formatChainName(chainA).localeCompare(formatChainName(chainB)),
+    );
+    return uniqueChains.sort(sortByFilterOrder(chainFilterOrder));
+  }, [selectedMainGroup, selectedState, state.parties]);
   const filteredParties = useMemo(() => {
+    const normalizedQuery = partyQuery.trim().toLowerCase();
     return state.parties.filter((party) => {
       const stateMatches = !selectedState || party.State1 === selectedState;
+      const mainGroupMatches = !selectedMainGroup || party.U_Main_Group === selectedMainGroup;
       const chainMatches = !selectedChain || getChainValue(party.U_Chain) === selectedChain;
-      return stateMatches && chainMatches;
+      const queryMatches = !normalizedQuery
+        || [party.CardName, party.CardCode, formatStateName(party.State1), party.U_Main_Group, party.U_Chain]
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase().includes(normalizedQuery));
+      return stateMatches && mainGroupMatches && chainMatches && queryMatches;
     });
-  }, [selectedChain, selectedState, state.parties]);
+  }, [partyQuery, selectedChain, selectedMainGroup, selectedState, state.parties]);
 
   useEffect(() => {
-    let active = true;
+    setSelectedMainGroup((current) => (current && !mainGroupOptions.includes(current) ? "" : current));
+  }, [mainGroupOptions]);
 
-    const loadChains = async () => {
-      setLoadingChains(true);
-      try {
-        const chains = await fetchStateChains(selectedState);
-        if (!active) return;
-        setChainOptions(chains);
-        setSelectedChain((current) => (current && !chains.includes(current) ? "" : current));
-      } catch (error) {
-        console.error(error);
-        if (active) setChainOptions([]);
-      } finally {
-        if (active) setLoadingChains(false);
-      }
-    };
+  useEffect(() => {
+    setSelectedChain((current) => (current && !chainOptions.includes(current) ? "" : current));
+  }, [chainOptions]);
 
-    loadChains();
-    return () => {
-      active = false;
-    };
-  }, [selectedState]);
-
-  const preferredStates = ["DL", "HR", "PB", "MH"];
   const visibleStates = useMemo(() => {
-    const availablePreferredStates = preferredStates.filter((stateCode) => state.vendorStates.includes(stateCode));
-    const remainingStates = state.vendorStates.filter((stateCode) => !preferredStates.includes(stateCode));
-    const orderedStates = [...availablePreferredStates, ...remainingStates];
     const selectedFirstStates = selectedState
-      ? [selectedState, ...orderedStates.filter((stateCode) => stateCode !== selectedState)]
-      : orderedStates;
-    return showAllStates ? selectedFirstStates : selectedFirstStates.slice(0, Math.max(4, selectedState ? 5 : 4));
-  }, [selectedState, showAllStates, state.vendorStates]);
-  const hiddenStateCount = Math.max(state.vendorStates.length - visibleStates.length, 0);
-  const preferredChains = ["D MART", "DISTRIBUTOR", "GT", "RETAILER"];
+      ? [selectedState, ...stateOptions.filter((stateCode) => stateCode !== selectedState)]
+      : stateOptions;
+    return selectedFirstStates.slice(0, Math.max(4, selectedState ? 5 : 4));
+  }, [selectedState, stateOptions]);
+  const hiddenStateCount = Math.max(stateOptions.length - visibleStates.length, 0);
+  const visibleMainGroups = useMemo(() => {
+    const selectedFirstGroups = selectedMainGroup
+      ? [selectedMainGroup, ...mainGroupOptions.filter((group) => group !== selectedMainGroup)]
+      : mainGroupOptions;
+    return selectedFirstGroups.slice(0, 6);
+  }, [mainGroupOptions, selectedMainGroup]);
+  const hiddenMainGroupCount = Math.max(mainGroupOptions.length - visibleMainGroups.length, 0);
   const visibleChains = useMemo(() => {
-    const availablePreferredChains = preferredChains.filter((chain) => chainOptions.includes(chain));
-    const remainingChains = chainOptions.filter((chain) => !preferredChains.includes(chain));
-    const orderedChains = [...availablePreferredChains, ...remainingChains];
     const selectedFirstChains = selectedChain
-      ? [selectedChain, ...orderedChains.filter((chain) => chain !== selectedChain)]
-      : orderedChains;
-    return showAllChains ? selectedFirstChains : selectedFirstChains.slice(0, 6);
-  }, [chainOptions, selectedChain, showAllChains]);
+      ? [selectedChain, ...chainOptions.filter((chain) => chain !== selectedChain)]
+      : chainOptions;
+    return selectedFirstChains.slice(0, 6);
+  }, [chainOptions, selectedChain]);
   const hiddenChainCount = Math.max(chainOptions.length - visibleChains.length, 0);
   const clearPartyFilters = () => {
     setSelectedState("");
+    setSelectedMainGroup("");
     setSelectedChain("");
   };
+  const modalOptions = filterModal === "state" ? stateOptions : filterModal === "mainGroup" ? mainGroupOptions : chainOptions;
+  const modalTitle = filterModal === "state" ? "Select State" : filterModal === "mainGroup" ? "Select Main Group" : "Select Chain";
+  const modalAllLabel = filterModal === "state" ? "All states" : filterModal === "mainGroup" ? "All main groups" : "All chains";
+  const isModalAllActive = filterModal === "state" ? !selectedState : filterModal === "mainGroup" ? !selectedMainGroup : !selectedChain;
+  const isModalOptionActive = (option: string) => (
+    filterModal === "state" ? selectedState === option : filterModal === "mainGroup" ? selectedMainGroup === option : selectedChain === option
+  );
+  const selectModalOption = (option: string) => {
+    if (filterModal === "state") setSelectedState(option);
+    else if (filterModal === "mainGroup") setSelectedMainGroup(option);
+    else setSelectedChain(option);
+    setFilterModal(null);
+  };
+  const clearModalOption = () => {
+    if (filterModal === "state") setSelectedState("");
+    else if (filterModal === "mainGroup") setSelectedMainGroup("");
+    else setSelectedChain("");
+    setFilterModal(null);
+  };
+  const formatModalOption = (option: string) => (
+    filterModal === "state" ? formatStateName(option) : filterModal === "mainGroup" ? option : formatChainName(option)
+  );
 
   return (
     <div className="si-modal-backdrop" role="presentation">
       <section className="si-party-modal" role="dialog" aria-modal="true" aria-label="Select party">
         <header className="si-so-modal-head">
           <div>
-            <span className="si-eyebrow">Party</span>
-            <h2>Select Party</h2>
-            <p>Choose a customer to start the sales invoice header.</p>
+            <h2>Select party</h2>
           </div>
           <button className="si-btn si-btn-outline" type="button" onClick={onClose}>
             Close
@@ -222,6 +265,7 @@ function PartyPickerModal({ state, onClose, onSelect }: PartyPickerModalProps) {
 
         <div className="si-party-modal-body">
           <aside className="si-party-filter-panel">
+            <span className="si-party-filter-label">State</span>
             <div className="si-party-state-filters" aria-label="State filters">
               <button
                 className={`si-state-chip${!selectedState ? " is-active" : ""}`}
@@ -241,17 +285,39 @@ function PartyPickerModal({ state, onClose, onSelect }: PartyPickerModalProps) {
                 </button>
               ))}
               {hiddenStateCount > 0 && (
-                <button className="si-state-chip si-state-chip-more" type="button" onClick={() => setShowAllStates(true)}>
+                <button className="si-state-chip si-state-chip-more" type="button" onClick={() => setFilterModal("state")}>
                   More +{hiddenStateCount}
-                </button>
-              )}
-              {showAllStates && (
-                <button className="si-state-chip si-state-chip-less" type="button" onClick={() => setShowAllStates(false)}>
-                  Less
                 </button>
               )}
             </div>
 
+            <span className="si-party-filter-label">Main Group</span>
+            <div className="si-party-state-filters" aria-label="Main group filters">
+              <button
+                className={`si-state-chip${!selectedMainGroup ? " is-active" : ""}`}
+                type="button"
+                onClick={() => setSelectedMainGroup("")}
+              >
+                All main groups
+              </button>
+              {visibleMainGroups.map((mainGroup) => (
+                <button
+                  className={`si-state-chip${selectedMainGroup === mainGroup ? " is-active" : ""}`}
+                  type="button"
+                  key={mainGroup}
+                  onClick={() => setSelectedMainGroup(mainGroup)}
+                >
+                  {mainGroup}
+                </button>
+              ))}
+              {hiddenMainGroupCount > 0 && (
+                <button className="si-state-chip si-state-chip-more" type="button" onClick={() => setFilterModal("mainGroup")}>
+                  More +{hiddenMainGroupCount}
+                </button>
+              )}
+            </div>
+
+            <span className="si-party-filter-label">Chain</span>
             <div className="si-party-state-filters" aria-label="Chain filters">
               <button
                 className={`si-state-chip${!selectedChain ? " is-active" : ""}`}
@@ -260,35 +326,24 @@ function PartyPickerModal({ state, onClose, onSelect }: PartyPickerModalProps) {
               >
                 All chains
               </button>
-              {loadingChains ? (
-                <span className="si-filter-loading">Loading chains...</span>
-              ) : (
-                <>
-                  {visibleChains.map((chain) => (
-                    <button
-                      className={`si-state-chip${selectedChain === chain ? " is-active" : ""}`}
-                      type="button"
-                      key={chain}
-                      onClick={() => setSelectedChain(chain)}
-                    >
-                      {formatChainName(chain)}
-                    </button>
-                  ))}
-                  {hiddenChainCount > 0 && (
-                    <button className="si-state-chip si-state-chip-more" type="button" onClick={() => setShowAllChains(true)}>
-                      More +{hiddenChainCount}
-                    </button>
-                  )}
-                  {showAllChains && (
-                    <button className="si-state-chip si-state-chip-less" type="button" onClick={() => setShowAllChains(false)}>
-                      Less
-                    </button>
-                  )}
-                </>
+              {visibleChains.map((chain) => (
+                <button
+                  className={`si-state-chip${selectedChain === chain ? " is-active" : ""}`}
+                  type="button"
+                  key={chain}
+                  onClick={() => setSelectedChain(chain)}
+                >
+                  {formatChainName(chain)}
+                </button>
+              ))}
+              {hiddenChainCount > 0 && (
+                <button className="si-state-chip si-state-chip-more" type="button" onClick={() => setFilterModal("chain")}>
+                  More +{hiddenChainCount}
+                </button>
               )}
             </div>
 
-            {(selectedState || selectedChain) && (
+            {(selectedState || selectedMainGroup || selectedChain) && (
               <button className="si-btn si-btn-outline si-party-clear-filters" type="button" onClick={clearPartyFilters}>
                 Clear filters
               </button>
@@ -296,6 +351,13 @@ function PartyPickerModal({ state, onClose, onSelect }: PartyPickerModalProps) {
           </aside>
 
           <section className="si-party-results-panel">
+            <input
+              className="si-search-input si-party-search-input"
+              value={partyQuery}
+              onChange={(event) => setPartyQuery(event.target.value)}
+              placeholder="Search party, code, state, main group or chain"
+              autoFocus
+            />
             {state.partyError && <div className="si-inline-error">{state.partyError}</div>}
 
             <div className="si-party-modal-results">
@@ -307,7 +369,7 @@ function PartyPickerModal({ state, onClose, onSelect }: PartyPickerModalProps) {
               filteredParties.map((party) => (
                 <button
                   className="si-party-row"
-                  key={party.CardCode}
+                  key={`${party.CardCode}-${party.State1 || ""}-${party.U_Main_Group || ""}-${party.U_Chain || ""}`}
                   type="button"
                   onClick={() => {
                     state.selectParty(party);
@@ -316,14 +378,53 @@ function PartyPickerModal({ state, onClose, onSelect }: PartyPickerModalProps) {
                 >
                   <span>
                     <strong>{party.CardName}</strong>
-                    <small>{party.CardCode}</small>
                   </span>
+                  <small className="si-party-so-count">
+                    {getPartyOpenOrders(party).toLocaleString("en-IN")} open SO
+                  </small>
                 </button>
               ))
             )}
             </div>
           </section>
         </div>
+
+        {filterModal && (
+          <div className="si-nested-modal-backdrop" role="presentation">
+            <section
+              className="si-filter-options-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-label={`${modalTitle} filter`}
+            >
+              <header className="si-filter-options-head">
+                <h3>{modalTitle}</h3>
+                <button className="si-btn si-btn-outline" type="button" onClick={() => setFilterModal(null)}>
+                  Close
+                </button>
+              </header>
+              <div className="si-filter-options-grid">
+                <button
+                  className={`si-state-chip${isModalAllActive ? " is-active" : ""}`}
+                  type="button"
+                  onClick={clearModalOption}
+                >
+                  {modalAllLabel}
+                </button>
+                {modalOptions.map((option) => (
+                  <button
+                    className={`si-state-chip${isModalOptionActive(option) ? " is-active" : ""}`}
+                    type="button"
+                    key={option}
+                    onClick={() => selectModalOption(option)}
+                  >
+                    {formatModalOption(option)}
+                  </button>
+                ))}
+              </div>
+            </section>
+          </div>
+        )}
       </section>
     </div>
   );
@@ -339,6 +440,7 @@ type SkeletonInvoiceProps = {
   onOpenItemPicker: (rowId: number) => void;
   onOpenBatchPicker: (rowId: number) => void;
   onAddItemRow: () => void;
+  onRemoveItemRow: (rowId: number) => void;
   onReset: () => void;
 };
 
@@ -412,11 +514,13 @@ function ItemInvoiceLines({
   onOpenItemPicker,
   onOpenBatchPicker,
   onAddRow,
+  onRemoveRow,
 }: {
   rows: ItemInvoiceRow[];
   onOpenItemPicker: (rowId: number) => void;
   onOpenBatchPicker: (rowId: number) => void;
   onAddRow: () => void;
+  onRemoveRow: (rowId: number) => void;
 }) {
   return (
     <div className="si-item-lines-panel">
@@ -426,70 +530,121 @@ function ItemInvoiceLines({
           <h2>Invoice Lines</h2>
           <p>Select finished goods directly for this invoice.</p>
         </div>
-        <button className="si-btn si-btn-outline" type="button" onClick={onAddRow}>
-          Add Row
+        <button className="si-item-add-btn" type="button" onClick={onAddRow}>
+          Add Item
         </button>
       </header>
-      <div className="si-table-wrap">
-        <table className="si-lines-table si-item-entry-table">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Type</th>
-              <th>Item No.</th>
-              <th>Description</th>
-              <th>Batch</th>
-              <th>Brand</th>
-              <th>Variety</th>
-              <th>SKU</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, index) => (
-              <tr key={row.id}>
-                <td>{index + 1}</td>
-                <td>
-                  <select value={row.type} disabled>
-                    <option>Item</option>
-                  </select>
-                </td>
-                <td>
-                  <button className="si-item-select-btn" type="button" onClick={() => onOpenItemPicker(row.id)}>
-                    {row.item?.ItemCode || "Click to Select..."}
-                  </button>
-                </td>
-                <td>
-                  <input value={row.item?.ItemName || ""} placeholder="Description" readOnly />
-                </td>
-                <td>
-                  <button
-                    className="si-batch-select-btn"
-                    type="button"
-                    disabled={!row.item}
-                    onClick={() => onOpenBatchPicker(row.id)}
-                  >
-                    {row.batch
-                      ? `${row.batch.batch.BatchNum} / ${row.batch.warehouseCode}`
-                      : row.item
-                        ? "Choose Batch"
-                        : "Select item first"}
-                  </button>
-                  {row.batch && (
-                    <span className="si-batch-line-meta">
-                      Whs Qty: {row.batch.warehouseQuantity.toLocaleString("en-IN")} | Batch Qty:{" "}
-                      {Number(row.batch.batch.Quantity || 0).toLocaleString("en-IN")}
-                    </span>
+      <div className="si-invoice-line-grid si-individual-item-card-grid">
+        {rows.map((row) => {
+          const batchQty = row.batch?.batches.reduce((sum, batch) => sum + batch.quantity, 0) || 0;
+          const invoiceQty = toFiniteQuantity(row.invoiceQty);
+          const batchQtyMismatch = Boolean(row.item) && Math.abs(batchQty - invoiceQty) >= 0.0001;
+
+          return (
+            <article className="si-invoice-line-card" key={row.id}>
+              <button
+                className="si-invoice-line-remove"
+                type="button"
+                onClick={() => onRemoveRow(row.id)}
+                aria-label={`Remove ${row.item?.ItemName || "item row"}`}
+              >
+                <HiTrash aria-hidden="true" />
+              </button>
+              <div className="si-invoice-item-visual" aria-hidden="true">
+                <span />
+              </div>
+              <div className="si-invoice-item-copy">
+                <strong>{row.item?.ItemName || "Select an item"}</strong>
+                <button className="si-item-card-select-btn" type="button" onClick={() => onOpenItemPicker(row.id)}>
+                  {row.item?.ItemCode || "Click to Select Item"}
+                </button>
+                <dl>
+                  <div>
+                    <dt>Quantity</dt>
+                    <dd>
+                      <input value={row.item ? row.invoiceQty : ""} placeholder="Qty" readOnly />
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Pack Size</dt>
+                    <dd>{row.item?.U_SKU || "-"}</dd>
+                  </div>
+                </dl>
+                <button
+                  className={`si-batch-select-btn${batchQtyMismatch ? " has-error" : ""}`}
+                  type="button"
+                  disabled={!row.item}
+                  onClick={() => onOpenBatchPicker(row.id)}
+                >
+                  {row.batch ? (
+                    <>
+                      <span>Warehouse: {row.batch.warehouseCode}</span>
+                      <em>
+                        Batches: {row.batch.batches.length} | Qty: {batchQty.toLocaleString("en-IN")}/
+                        {invoiceQty.toLocaleString("en-IN")}
+                      </em>
+                    </>
+                  ) : (
+                    <>
+                      <span>{row.item ? "Warehouse: -" : "Select item first"}</span>
+                      <em>Batches: 0 | Qty: {row.item ? invoiceQty.toLocaleString("en-IN") : "-"}</em>
+                    </>
                   )}
-                </td>
-                <td>{row.item?.U_Brand || "-"}</td>
-                <td>{row.item?.U_Variety || "-"}</td>
-                <td>{row.item?.U_SKU || "-"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                  {batchQtyMismatch && (
+                    <strong className="si-batch-select-warning">
+                      Batch quantity does not match invoice quantity.
+                    </strong>
+                  )}
+                </button>
+              </div>
+            </article>
+          );
+        })}
       </div>
     </div>
+  );
+}
+
+function InvoicePageHeader() {
+  return (
+    <header className="si-page-head">
+      <div>
+        <span className="si-eyebrow">SAP Billing</span>
+        <h1>Sales Invoice</h1>
+      </div>
+    </header>
+  );
+}
+
+function InvoiceDocumentStrip({ state }: { state: SalesInvoiceState }) {
+  const [postingDateEditable, setPostingDateEditable] = useState(false);
+  const updatePostingDate = (postingDate: string) => {
+    state.updateForm({
+      postingDate,
+      dueDate: postingDate,
+      documentDate: postingDate,
+    });
+  };
+
+  return (
+    <label className="si-draft-summary-date">
+      <span>Posting Date</span>
+      <input
+        type="date"
+        value={state.form.postingDate}
+        readOnly={!postingDateEditable}
+        className={postingDateEditable ? "si-date-editable" : ""}
+        onDoubleClick={(event) => {
+          setPostingDateEditable(true);
+          window.requestAnimationFrame(() => {
+            event.currentTarget.focus();
+            event.currentTarget.showPicker?.();
+          });
+        }}
+        onBlur={() => setPostingDateEditable(false)}
+        onChange={(event) => updatePostingDate(event.target.value)}
+      />
+    </label>
   );
 }
 
@@ -508,10 +663,7 @@ function ItemPickerModal({
   const [selectedSubGroup, setSelectedSubGroup] = useState("");
   const [selectedVariety, setSelectedVariety] = useState("");
   const [selectedPackSize, setSelectedPackSize] = useState("");
-  const [showAllBrands, setShowAllBrands] = useState(false);
-  const [showAllSubGroups, setShowAllSubGroups] = useState(false);
-  const [showAllVarieties, setShowAllVarieties] = useState(false);
-  const [showAllPackSizes, setShowAllPackSizes] = useState(false);
+  const [filterModal, setFilterModal] = useState<ItemFilterModal | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -615,16 +767,61 @@ function ItemPickerModal({
     setSelectedPackSize("");
   };
 
+  const itemFilterConfig: Record<ItemFilterModal, {
+    allLabel: string;
+    options: string[];
+    selectedValue: string;
+    setSelectedValue: (value: string) => void;
+    title: string;
+  }> = {
+    brand: {
+      allLabel: "All brands",
+      options: brandOptions,
+      selectedValue: selectedBrand,
+      setSelectedValue: setSelectedBrand,
+      title: "Select Brand",
+    },
+    subGroup: {
+      allLabel: "All sub groups",
+      options: subGroupOptions,
+      selectedValue: selectedSubGroup,
+      setSelectedValue: setSelectedSubGroup,
+      title: "Select Sub Group",
+    },
+    variety: {
+      allLabel: "All varieties",
+      options: varietyOptions,
+      selectedValue: selectedVariety,
+      setSelectedValue: setSelectedVariety,
+      title: "Select Variety",
+    },
+    packSize: {
+      allLabel: "All pack sizes",
+      options: packSizeOptions,
+      selectedValue: selectedPackSize,
+      setSelectedValue: setSelectedPackSize,
+      title: "Select Pack Size",
+    },
+  };
+  const activeFilterConfig = filterModal ? itemFilterConfig[filterModal] : null;
+  const selectItemFilterModalOption = (option: string) => {
+    activeFilterConfig?.setSelectedValue(option);
+    setFilterModal(null);
+  };
+  const clearItemFilterModalOption = () => {
+    activeFilterConfig?.setSelectedValue("");
+    setFilterModal(null);
+  };
+
   const renderFilterChips = (
+    filterKey: ItemFilterModal,
     label: string,
     allLabel: string,
     options: string[],
     selectedValue: string,
     setSelectedValue: (value: string) => void,
-    showAll: boolean,
-    setShowAll: (value: boolean) => void,
   ) => {
-    const visibleOptions = showAll ? options : options.slice(0, 6);
+    const visibleOptions = options.slice(0, 6);
     const hiddenCount = Math.max(options.length - visibleOptions.length, 0);
 
     return (
@@ -648,13 +845,8 @@ function ItemPickerModal({
           </button>
         ))}
         {hiddenCount > 0 && (
-          <button className="si-state-chip" type="button" onClick={() => setShowAll(true)}>
+          <button className="si-state-chip si-state-chip-more" type="button" onClick={() => setFilterModal(filterKey)}>
             More +{hiddenCount}
-          </button>
-        )}
-        {showAll && options.length > 6 && (
-          <button className="si-state-chip" type="button" onClick={() => setShowAll(false)}>
-            Less
           </button>
         )}
       </div>
@@ -663,7 +855,7 @@ function ItemPickerModal({
 
   return (
     <div className="si-modal-backdrop" role="presentation">
-      <section className="si-so-modal" role="dialog" aria-modal="true" aria-label="Select finished good item">
+      <section className="si-so-modal si-item-modal" role="dialog" aria-modal="true" aria-label="Select finished good item">
         <header className="si-so-modal-head">
           <div>
             <span className="si-eyebrow">Finished Goods</span>
@@ -680,88 +872,108 @@ function ItemPickerModal({
           </div>
         </header>
         <div className="si-item-picker-body">
-          <input
-            className="si-search-input"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search item code, name, brand, variety, group or SKU"
-            autoFocus
-          />
-          <div className="si-item-chip-filters">
-            {renderFilterChips("Brand", "All brands", brandOptions, selectedBrand, setSelectedBrand, showAllBrands, setShowAllBrands)}
+          <aside className="si-item-filter-panel">
+            {renderFilterChips("brand", "Brand", "All brands", brandOptions, selectedBrand, setSelectedBrand)}
             {renderFilterChips(
+              "subGroup",
               "Sub Group",
               "All sub groups",
               subGroupOptions,
               selectedSubGroup,
               setSelectedSubGroup,
-              showAllSubGroups,
-              setShowAllSubGroups,
             )}
             {renderFilterChips(
+              "variety",
               "Variety",
               "All varieties",
               varietyOptions,
               selectedVariety,
               setSelectedVariety,
-              showAllVarieties,
-              setShowAllVarieties,
             )}
             {renderFilterChips(
+              "packSize",
               "Pack Size",
               "All pack sizes",
               packSizeOptions,
               selectedPackSize,
               setSelectedPackSize,
-              showAllPackSizes,
-              setShowAllPackSizes,
             )}
             {(selectedBrand || selectedSubGroup || selectedVariety || selectedPackSize) && (
               <button className="si-btn si-btn-outline" type="button" onClick={clearItemFilters}>
                 Clear filters
               </button>
             )}
-          </div>
-          {error && <div className="si-inline-error">{error}</div>}
-          {loading ? (
-            <div className="si-loader">Loading finished goods...</div>
-          ) : filteredItems.length === 0 ? (
-            <div className="si-empty">No items found.</div>
-          ) : (
-            <div className="si-table-wrap">
-              <table className="si-lines-table si-item-picker-table">
-                <thead>
-                  <tr>
-                    <th>Item No.</th>
-                    <th>Description</th>
-                    <th>Brand</th>
-                    <th>Variety</th>
-                    <th>Group</th>
-                    <th>SKU</th>
-                    <th>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredItems.map((item) => (
-                    <tr key={item.ItemCode}>
-                      <td>{item.ItemCode}</td>
-                      <td>{item.ItemName}</td>
-                      <td>{item.U_Brand || "-"}</td>
-                      <td>{item.U_Variety || "-"}</td>
-                      <td>{item.U_Sub_Group || "-"}</td>
-                      <td>{item.U_SKU || "-"}</td>
-                      <td>
-                        <button className="si-btn si-btn-primary" type="button" onClick={() => onSelect(item)}>
-                          Select
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          </aside>
+
+          <section className="si-item-results-panel">
+            <input
+              className="si-search-input si-item-search-input"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search item name, code, brand, variety, group or SKU"
+              autoFocus
+            />
+            {error && <div className="si-inline-error">{error}</div>}
+            {loading ? (
+              <div className="si-loader">Loading finished goods...</div>
+            ) : filteredItems.length === 0 ? (
+              <div className="si-empty">No items found.</div>
+            ) : (
+              <div className="si-item-picker-results" aria-label="Finished goods">
+                {filteredItems.map((item) => (
+                  <button
+                    className="si-item-picker-row"
+                    key={item.ItemCode}
+                    type="button"
+                    onClick={() => onSelect(item)}
+                  >
+                    <strong>{item.ItemName}</strong>
+                    <span>
+                      Quantity: {item.U_SKU || "-"}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
         </div>
+
+        {activeFilterConfig && (
+          <div className="si-nested-modal-backdrop" role="presentation">
+            <section
+              className="si-filter-options-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-label={`${activeFilterConfig.title} filter`}
+            >
+              <header className="si-filter-options-head">
+                <h3>{activeFilterConfig.title}</h3>
+                <button className="si-btn si-btn-outline" type="button" onClick={() => setFilterModal(null)}>
+                  Close
+                </button>
+              </header>
+              <div className="si-filter-options-grid">
+                <button
+                  className={`si-state-chip${!activeFilterConfig.selectedValue ? " is-active" : ""}`}
+                  type="button"
+                  onClick={clearItemFilterModalOption}
+                >
+                  {activeFilterConfig.allLabel}
+                </button>
+                {activeFilterConfig.options.map((option) => (
+                  <button
+                    className={`si-state-chip${activeFilterConfig.selectedValue === option ? " is-active" : ""}`}
+                    type="button"
+                    key={option}
+                    onClick={() => selectItemFilterModalOption(option)}
+                  >
+                    {option}
+                  </button>
+                ))}
+              </div>
+            </section>
+          </div>
+        )}
       </section>
     </div>
   );
@@ -774,16 +986,53 @@ const formatBatchDate = (value?: string | null) => {
   return year && month && day ? `${day}-${month}-${year}` : value;
 };
 
+const toFiniteQuantity = (value: unknown, fallback = 1) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+const getBatchSortTime = (batch: BatchDetail) => {
+  const expTime = batch.ExpDate ? new Date(batch.ExpDate).getTime() : Number.POSITIVE_INFINITY;
+  if (Number.isFinite(expTime)) return expTime;
+  const inTime = batch.InDate ? new Date(batch.InDate).getTime() : Number.POSITIVE_INFINITY;
+  return Number.isFinite(inTime) ? inTime : Number.POSITIVE_INFINITY;
+};
+
+const allocateFefoBatches = (batches: BatchDetail[], requiredQty: number) => {
+  let remainingQty = toFiniteQuantity(requiredQty);
+  const allocations: SelectedBatch["batches"] = [];
+
+  [...batches]
+    .filter((batch) => Number(batch.Quantity || 0) > 0)
+    .sort((batchA, batchB) => getBatchSortTime(batchA) - getBatchSortTime(batchB))
+    .some((batch) => {
+      const quantity = Math.min(remainingQty, Number(batch.Quantity || 0));
+      if (quantity > 0) {
+        allocations.push({ batch, quantity });
+        remainingQty -= quantity;
+      }
+      return remainingQty <= 0;
+    });
+
+  return allocations;
+};
+
 function BatchPickerModal({
   item,
+  invoiceQty,
   selectedBatch,
+  onBack,
   onClose,
   onSelect,
+  onQuantityChange,
 }: {
   item: FinishedGoodItem;
+  invoiceQty: number;
   selectedBatch: SelectedBatch | null;
+  onBack: () => void;
   onClose: () => void;
   onSelect: (batch: SelectedBatch) => void;
+  onQuantityChange: (quantity: number) => void;
 }) {
   const [warehouses, setWarehouses] = useState<InventoryWarehouse[]>([]);
   const [selectedWhsCode, setSelectedWhsCode] = useState(selectedBatch?.warehouseCode || "");
@@ -791,6 +1040,7 @@ function BatchPickerModal({
   const [loadingWarehouses, setLoadingWarehouses] = useState(false);
   const [loadingBatches, setLoadingBatches] = useState(false);
   const [error, setError] = useState("");
+  const lastAppliedBatchSignature = useRef("");
 
   useEffect(() => {
     let active = true;
@@ -860,6 +1110,23 @@ function BatchPickerModal({
 
   const selectedWarehouse = warehouses.find((warehouse) => warehouse.WhsCode === selectedWhsCode) || null;
   const selectedWarehouseQuantity = Number(selectedWarehouse?.["SUM(Quantity)"] || 0);
+  const allocations = allocateFefoBatches(batches, invoiceQty);
+  const allocatedQty = allocations.reduce((sum, allocation) => sum + allocation.quantity, 0);
+  const quantityMatches = Math.abs(allocatedQty - invoiceQty) < 0.0001;
+  const batchSignature = `${selectedWhsCode}|${invoiceQty}|${allocations
+    .map((allocation) => `${allocation.batch.BatchNum}:${allocation.quantity}`)
+    .join("|")}`;
+
+  useEffect(() => {
+    if (!selectedWhsCode || loadingBatches || batches.length === 0) return;
+    if (lastAppliedBatchSignature.current === batchSignature) return;
+    lastAppliedBatchSignature.current = batchSignature;
+    onSelect({
+      warehouseCode: selectedWhsCode,
+      warehouseQuantity: selectedWarehouseQuantity,
+      batches: allocations,
+    });
+  }, [batchSignature, batches.length, loadingBatches, selectedWarehouseQuantity, selectedWhsCode]);
 
   return (
     <div className="si-modal-backdrop" role="presentation">
@@ -871,6 +1138,9 @@ function BatchPickerModal({
             <p>{item.ItemName}</p>
           </div>
           <div className="si-modal-head-actions">
+            <button className="si-btn si-btn-outline" type="button" onClick={onBack}>
+              Back
+            </button>
             <button className="si-btn si-btn-outline" type="button" onClick={onClose}>
               Close
             </button>
@@ -912,6 +1182,21 @@ function BatchPickerModal({
               <span>Batches</span>
               <strong>{selectedWhsCode || "Select warehouse"}</strong>
             </div>
+            <label className="si-batch-quantity-field">
+              <span>Invoice Quantity</span>
+              <input
+                type="number"
+                min="1"
+                value={invoiceQty}
+                onChange={(event) => onQuantityChange(toFiniteQuantity(event.target.value))}
+              />
+            </label>
+            <div className={`si-batch-match-status${quantityMatches ? " is-match" : " has-error"}`}>
+              <span>
+                Invoice Qty: {invoiceQty.toLocaleString("en-IN")} | Batch Qty: {allocatedQty.toLocaleString("en-IN")}
+              </span>
+              <strong>{quantityMatches ? "FEFO batches auto selected" : "Available FEFO quantity is short"}</strong>
+            </div>
             {error && <div className="si-inline-error">{error}</div>}
             {!selectedWhsCode ? (
               <div className="si-empty">Select a warehouse to view batches.</div>
@@ -924,7 +1209,7 @@ function BatchPickerModal({
                 <table className="si-lines-table si-batch-table">
                   <thead>
                     <tr>
-                      <th aria-label="Select batch" />
+                      <th>Status</th>
                       <th>Batch No.</th>
                       <th>Batch Qty</th>
                       <th>Production</th>
@@ -932,35 +1217,30 @@ function BatchPickerModal({
                     </tr>
                   </thead>
                   <tbody>
-                    {batches.map((batch) => (
-                      <tr key={`${batch.BatchNum}-${batch.BaseEntry || ""}-${batch.InDate || ""}`}>
-                        <td>
-                          <input
-                            type="checkbox"
-                            checked={
-                              selectedBatch?.warehouseCode === selectedWhsCode
-                              && selectedBatch.batch.BatchNum === batch.BatchNum
-                            }
-                            onChange={() =>
-                              onSelect({
-                                warehouseCode: selectedWhsCode,
-                                warehouseQuantity: selectedWarehouseQuantity,
-                                batch,
-                              })
-                            }
-                            aria-label={`Select batch ${batch.BatchNum}`}
-                          />
-                        </td>
-                        <td>{batch.BatchNum}</td>
-                        <td>{Number(batch.Quantity || 0).toLocaleString("en-IN")}</td>
-                        <td>{formatBatchDate(batch.PrdDate)}</td>
-                        <td>{formatBatchDate(batch.ExpDate)}</td>
-                      </tr>
-                    ))}
+                    {batches.map((batch) => {
+                      const allocation = allocations.find((itemBatch) => itemBatch.batch.BatchNum === batch.BatchNum);
+                      return (
+                        <tr
+                          className={allocation ? "is-auto-selected" : ""}
+                          key={`${batch.BatchNum}-${batch.BaseEntry || ""}-${batch.InDate || ""}`}
+                        >
+                          <td>{allocation ? "FEFO" : "-"}</td>
+                          <td>{batch.BatchNum}</td>
+                          <td>{Number(allocation?.quantity || batch.Quantity || 0).toLocaleString("en-IN")}</td>
+                          <td>{formatBatchDate(batch.PrdDate)}</td>
+                          <td>{formatBatchDate(batch.ExpDate)}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
             )}
+            <div className="si-batch-modal-actions">
+              <button className="si-btn si-btn-primary" type="button" disabled={!selectedWhsCode || loadingBatches} onClick={onClose}>
+                Confirm
+              </button>
+            </div>
           </section>
         </div>
       </section>
@@ -978,62 +1258,26 @@ function SkeletonInvoice({
   onOpenItemPicker,
   onOpenBatchPicker,
   onAddItemRow,
+  onRemoveItemRow,
   onReset,
 }: SkeletonInvoiceProps) {
   const partyLabel = state.selectedParty
-    ? `${state.selectedParty.CardName} - ${state.selectedParty.CardCode}`
+    ? state.selectedParty.CardName
     : "Select Party";
-  const updatePostingDate = (postingDate: string) => {
-    state.updateForm({
-      postingDate,
-      dueDate: postingDate > state.form.dueDate ? postingDate : state.form.dueDate,
-    });
-  };
-  const updateDueDate = (dueDate: string) => {
-    state.updateForm({
-      dueDate,
-      postingDate: state.form.postingDate > dueDate ? dueDate : state.form.postingDate,
-    });
-  };
 
   return (
     <div className="si-draft-stage">
-      <section className="si-draft-top-card si-skeleton-invoice-head">
-        <div className="si-draft-document-panel">
-          <div className="si-draft-top-title">
-            <span>Document No.</span>
-            <strong>{state.nextDocNumber || "Pending"}</strong>
-          </div>
-          <div className="si-draft-info-cell">
-            <span>Status</span>
-            <strong className="si-draft-status-pill">DRAFT</strong>
-          </div>
-          <label>
-            Posting Date
-            <input type="date" value={state.form.postingDate} onChange={(event) => updatePostingDate(event.target.value)} />
-          </label>
-          <label>
-            Due Date
-            <input type="date" value={state.form.dueDate} onChange={(event) => updateDueDate(event.target.value)} />
-          </label>
-          <label>
-            Document Date
-            <input
-              type="date"
-              value={state.form.documentDate}
-              onChange={(event) => state.updateForm({ documentDate: event.target.value })}
-            />
-          </label>
-        </div>
-      </section>
-
-      <section className="si-card si-draft-party-card si-skeleton-party-card">
-        <div className="si-draft-customer-panel">
-          <div className="si-skeleton-party-field">
-            <span>Party</span>
-            <button className="si-skeleton-party-button" type="button" onClick={onOpenParty}>
+      <section className="si-card si-draft-party-card si-draft-summary-card si-skeleton-party-card">
+        <div className="si-draft-party-name-cell">
+          <span>Party Name</span>
+          {state.selectedParty ? (
+            <strong>{partyLabel}</strong>
+          ) : (
+            <button className="si-draft-party-select-btn" type="button" onClick={onOpenParty}>
               {partyLabel}
             </button>
+          )}
+          <div className="si-draft-summary-actions">
             {state.selectedParty && sourceMode === "sales-order" && (
               <button className="si-btn si-btn-primary" type="button" onClick={onOpenOrders}>
                 Select Open SO ({state.salesOrders.length})
@@ -1045,54 +1289,13 @@ function SkeletonInvoice({
               </button>
             )}
             {state.selectedParty && (
-              <button className="si-party-reset-btn" type="button" onClick={onReset}>
-                Reset
+              <button className="si-draft-change-party-btn" type="button" onClick={onReset}>
+                Change Party
               </button>
             )}
           </div>
-
-          {sourceMode === "items" ? (
-            <>
-              <label className="si-skeleton-muted-field si-skeleton-address-field">
-                <span>Bill To</span>
-                <select
-                  value={state.form.payTo}
-                  onChange={(event) => state.updateForm({ payTo: event.target.value })}
-                  disabled={state.loadingDraftDetails || state.billToAddresses.length === 0}
-                >
-                  {!state.form.payTo && <option value="">Select billing address</option>}
-                  {state.billToAddresses.map((address, index) => (
-                    <option value={address.Address} key={`${address.Address}-${address.City || ""}-${index}`}>
-                      {formatPartyAddressOption(address)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="si-skeleton-muted-field si-skeleton-address-field">
-                <span>Ship To</span>
-                <select
-                  value={state.form.shipTo}
-                  onChange={(event) => state.updateForm({ shipTo: event.target.value })}
-                  disabled={state.loadingDraftDetails || state.shipToAddresses.length === 0}
-                >
-                  {!state.form.shipTo && <option value="">Select shipping address</option>}
-                  {state.shipToAddresses.map((address, index) => (
-                    <option value={address.Address} key={`${address.Address}-${address.City || ""}-${index}`}>
-                      {formatPartyAddressOption(address)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </>
-          ) : (
-            ["Bill To", "Ship To"].map((label) => (
-              <div className="si-skeleton-muted-field" key={label}>
-                <span>{label}</span>
-                <strong />
-              </div>
-            ))
-          )}
         </div>
+        <InvoiceDocumentStrip state={state} />
       </section>
 
       <section className="si-card si-tabs-card si-skeleton-lines">
@@ -1123,6 +1326,7 @@ function SkeletonInvoice({
             onOpenItemPicker={onOpenItemPicker}
             onOpenBatchPicker={onOpenBatchPicker}
             onAddRow={onAddItemRow}
+            onRemoveRow={onRemoveItemRow}
           />
         )}
       </section>
@@ -1138,7 +1342,7 @@ export default function SalesInvoiceWizard() {
   const [itemPickerRowId, setItemPickerRowId] = useState<number | null>(null);
   const [batchPickerRowId, setBatchPickerRowId] = useState<number | null>(null);
   const [sourceMode, setSourceMode] = useState<InvoiceSourceMode | null>(null);
-  const [itemRows, setItemRows] = useState<ItemInvoiceRow[]>([{ id: 1, type: "Item", item: null, batch: null }]);
+  const [itemRows, setItemRows] = useState<ItemInvoiceRow[]>([{ id: 1, type: "Item", item: null, invoiceQty: 1, batch: null }]);
 
   useEffect(() => {
     if (sourceMode === "sales-order" && state.selectedParty && state.step === 2 && !state.customerDetails) {
@@ -1161,6 +1365,7 @@ export default function SalesInvoiceWizard() {
     setSourceMode("items");
     setSourceModalOpen(false);
     state.loadPartyAddresses();
+    setItemPickerRowId(itemRows[0]?.id || 1);
   };
 
   const openItemsModal = () => {
@@ -1200,7 +1405,7 @@ export default function SalesInvoiceWizard() {
     closeItemPicker();
     closeBatchPicker();
     setSourceMode(null);
-    setItemRows([{ id: 1, type: "Item", item: null, batch: null }]);
+    setItemRows([{ id: 1, type: "Item", item: null, invoiceQty: 1, batch: null }]);
     state.changeParty();
     setPartyModalOpen(true);
   };
@@ -1220,10 +1425,17 @@ export default function SalesInvoiceWizard() {
   };
 
   const addItemRow = () => {
-    setItemRows((current) => [
-      ...current,
-      { id: Math.max(0, ...current.map((row) => row.id)) + 1, type: "Item", item: null, batch: null },
-    ]);
+    const nextRowId = Math.max(0, ...itemRows.map((row) => row.id)) + 1;
+    setItemPickerRowId(nextRowId);
+  };
+
+  const removeItemRow = (rowId: number) => {
+    setItemRows((current) => {
+      const nextRows = current.filter((row) => row.id !== rowId);
+      return nextRows.length > 0 ? nextRows : [{ id: 1, type: "Item", item: null, invoiceQty: 1, batch: null }];
+    });
+    setItemPickerRowId((current) => (current === rowId ? null : current));
+    setBatchPickerRowId((current) => (current === rowId ? null : current));
   };
 
   const openBatchPicker = (rowId: number) => {
@@ -1235,7 +1447,11 @@ export default function SalesInvoiceWizard() {
   const selectItemForRow = (item: FinishedGoodItem) => {
     if (itemPickerRowId === null) return;
     const rowId = itemPickerRowId;
-    setItemRows((current) => current.map((row) => (row.id === rowId ? { ...row, item, batch: null } : row)));
+    setItemRows((current) => {
+      const existingRow = current.find((row) => row.id === rowId);
+      if (!existingRow) return [...current, { id: rowId, type: "Item", item, invoiceQty: 1, batch: null }];
+      return current.map((row) => (row.id === rowId ? { ...row, item, invoiceQty: row.invoiceQty || 1, batch: null } : row));
+    });
     closeItemPicker();
     setBatchPickerRowId(rowId);
   };
@@ -1243,7 +1459,6 @@ export default function SalesInvoiceWizard() {
   const selectBatchForRow = (batch: SelectedBatch) => {
     if (batchPickerRowId === null) return;
     setItemRows((current) => current.map((row) => (row.id === batchPickerRowId ? { ...row, batch } : row)));
-    closeBatchPicker();
   };
 
   const showOrdersModal = Boolean(state.selectedParty) && ordersModalOpen;
@@ -1256,12 +1471,7 @@ export default function SalesInvoiceWizard() {
 
   return (
     <div className="si-page">
-      <header className="si-page-head">
-        <div>
-          <span className="si-eyebrow">SAP Billing</span>
-          <h1>Sales Invoice</h1>
-        </div>
-      </header>
+      <InvoicePageHeader />
 
       {!showDraft && (
         <SkeletonInvoice
@@ -1274,6 +1484,7 @@ export default function SalesInvoiceWizard() {
           onOpenItemPicker={setItemPickerRowId}
           onOpenBatchPicker={openBatchPicker}
           onAddItemRow={addItemRow}
+          onRemoveItemRow={removeItemRow}
           onReset={resetInvoiceFlow}
         />
       )}
@@ -1364,9 +1575,22 @@ export default function SalesInvoiceWizard() {
       {showBatchPickerModal && batchPickerRow?.item && (
         <BatchPickerModal
           item={batchPickerRow.item}
+          invoiceQty={batchPickerRow.invoiceQty}
           selectedBatch={batchPickerRow.batch}
+          onBack={() => {
+            closeBatchPicker();
+            setItemPickerRowId(batchPickerRow.id);
+          }}
           onClose={closeBatchPicker}
           onSelect={selectBatchForRow}
+          onQuantityChange={(quantity) => {
+            const nextQuantity = toFiniteQuantity(quantity);
+            setItemRows((current) =>
+              current.map((row) =>
+                row.id === batchPickerRow.id ? { ...row, invoiceQty: nextQuantity, batch: null } : row,
+              ),
+            );
+          }}
         />
       )}
     </div>

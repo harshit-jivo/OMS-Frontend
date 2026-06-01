@@ -85,10 +85,12 @@ export default function OrdersStep({
                   const selectedCount = openLines.filter((line) => state.selectedLines[lineKey(order.DocEntry, line.LineNum)]).length;
                   const docKey = getDocKey(order, index);
                   const isActive = activeOrderKey === docKey;
+                  const isSelected = selectedCount > 0;
+                  const docNum = order.DocNum || order.DocEntry || index + 1;
 
                   return (
                     <div
-                      className={`si-so-list-row${isActive ? " is-active" : ""}`}
+                      className={`si-so-list-row${isActive ? " is-active" : ""}${isSelected ? " is-selected" : ""}`}
                       role="button"
                       tabIndex={0}
                       key={docKey}
@@ -102,18 +104,17 @@ export default function OrdersStep({
                     >
                       <input
                         type="checkbox"
-                        checked={selectedCount > 0 && selectedCount === openLines.length}
+                        checked={isSelected}
                         disabled={openLines.length === 0}
                         onClick={(event) => event.stopPropagation()}
                         onChange={() => state.toggleOrder(order)}
-                        aria-label={`Select sales order DocEntry ${order.DocEntry || index + 1}`}
+                        aria-label={`Select sales order ${docNum}`}
                       />
                       <span>
-                        <strong>DocEntry {order.DocEntry || index + 1}</strong>
+                        <strong>SO #{docNum}</strong>
                         <small>
                           {formatDateDisplay(order.DocDate)} - Due {formatDateDisplay(order.DocDueDate)}
                         </small>
-                        <small>{selectedCount}/{openLines.length} selected - {formatMoney(toNumber(order.DocTotal))}</small>
                       </span>
                     </div>
                   );
@@ -125,7 +126,7 @@ export default function OrdersStep({
                   <>
                     <header className="si-so-lines-head">
                       <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }} >
-                        <strong>DocEntry {activeOrder.DocEntry || activeOrderIndex + 1}</strong>
+                        <strong>SO #{activeOrder.DocNum || activeOrder.DocEntry || activeOrderIndex + 1}</strong>
                         <span>
                           {formatDateDisplay(activeOrder.DocDate)} - Due {formatDateDisplay(activeOrder.DocDueDate)}
                         </span>
@@ -163,19 +164,6 @@ export default function OrdersStep({
                               </div>
                               <div className="si-visible-line-side">
                                 <span>Open qty: {line.OpenQty}</span>
-                                <span>Price: {formatMoney(toNumber(line.Price))}</span>
-                                <label>
-                                  Invoice qty
-                                  <input
-                                    type="number"
-                                    min="1"
-                                    max={line.OpenQty}
-                                    required={Boolean(selected)}
-                                    disabled={!selected}
-                                    value={selected?.invoiceQty || ""}
-                                    onChange={(event) => state.updateLine(key, { invoiceQty: toNumber(event.target.value) })}
-                                  />
-                                </label>
                               </div>
                             </div>
                           );

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import ContentsTab from "./ContentsTab";
-import { formatDateDisplay, formatMoney, toNumber, type PartyAddress } from "./salesInvoice.utils";
+import { formatDateDisplay, formatMoney, toNumber } from "./salesInvoice.utils";
 import type { SalesInvoiceState } from "./useSalesInvoice";
 
 type Props = {
@@ -8,52 +8,46 @@ type Props = {
   onReset: () => void;
 };
 
-type DraftDateField = "postingDate" | "dueDate" | "documentDate";
-
-const formatAddressOption = (address: PartyAddress) => {
-  return [address.Address, address.GSTRegnNo ? `GST: ${address.GSTRegnNo}` : ""].filter(Boolean).join(" | ");
-};
-
-export default function DraftStep({ state, onReset }: Props) {
-  const [editableDates, setEditableDates] = useState<Record<DraftDateField, boolean>>({
-    postingDate: false,
-    dueDate: false,
-    documentDate: false,
-  });
-  const [footerDrawerOpen, setFooterDrawerOpen] = useState(false);
-  const customerCode = state.customerDetails?.CardCode || state.selectedParty?.CardCode || "-";
-  const customerName = state.customerDetails?.CardName || state.selectedParty?.CardName || "-";
-  const totalBeforeTax = state.totals.taxable + state.totals.freight;
-  const billToDisplay = formatAddressOption(
-    state.billToAddresses.find((address) => address.Address === state.form.payTo) || {
-      Address: state.form.payTo,
-      AdresType: "B",
-      CardCode: customerCode,
-    },
-  ) || "-";
-  const shipToDisplay = formatAddressOption(
-    state.shipToAddresses.find((address) => address.Address === state.form.shipTo) || {
-      Address: state.form.shipTo,
-      AdresType: "S",
-      CardCode: customerCode,
-    },
-  ) || "-";
-
-  const enableDateEdit = (field: DraftDateField, input: HTMLInputElement) => {
-    setEditableDates((current) => ({ ...current, [field]: true }));
-    window.requestAnimationFrame(() => {
-      input.focus();
-      input.showPicker?.();
+function DraftDocumentStrip({ state }: { state: SalesInvoiceState }) {
+  const [postingDateEditable, setPostingDateEditable] = useState(false);
+  const updatePostingDate = (postingDate: string) => {
+    state.updateForm({
+      postingDate,
+      dueDate: postingDate,
+      documentDate: postingDate,
     });
   };
 
-  const disableDateEdit = (field: DraftDateField) => {
-    setEditableDates((current) => ({ ...current, [field]: false }));
-  };
+  return (
+    <label className="si-draft-summary-date">
+      <span>Posting Date</span>
+      <input
+        type="date"
+        value={state.form.postingDate}
+        readOnly={!postingDateEditable}
+        className={postingDateEditable ? "si-date-editable" : ""}
+        onDoubleClick={(event) => {
+          setPostingDateEditable(true);
+          window.requestAnimationFrame(() => {
+            event.currentTarget.focus();
+            event.currentTarget.showPicker?.();
+          });
+        }}
+        onBlur={() => setPostingDateEditable(false)}
+        onChange={(event) => updatePostingDate(event.target.value)}
+      />
+    </label>
+  );
+}
+
+export default function DraftStep({ state, onReset }: Props) {
+  const [totalsModalOpen, setTotalsModalOpen] = useState(false);
+  const customerName = state.customerDetails?.CardName || state.selectedParty?.CardName || "-";
+  const totalBeforeTax = state.totals.taxable + state.totals.freight;
 
   const addFreightRow = () => {
     state.addFreightRow();
-    setFooterDrawerOpen(true);
+    setTotalsModalOpen(true);
   };
 
   return (
@@ -61,73 +55,15 @@ export default function DraftStep({ state, onReset }: Props) {
       {state.loadingDraftDetails && <div className="si-loader">Loading customer and salesperson details...</div>}
       {state.draftError && <div className="si-inline-error">{state.draftError}</div>}
 
-      <section className="si-draft-top-card">
-        <div className="si-draft-document-panel">
-          <div className="si-draft-top-title">
-            <span>Document No.</span>
-            <strong>{state.nextDocNumber || "Pending"}</strong>
-          </div>
-          <div className="si-draft-info-cell">
-            <span>Status</span>
-            <strong className="si-draft-status-pill">DRAFT</strong>
-          </div>
-          <label>
-            Posting Date
-            <input
-              type="date"
-              value={state.form.postingDate}
-              readOnly={!editableDates.postingDate}
-              className={editableDates.postingDate ? "si-date-editable" : ""}
-              onDoubleClick={(event) => enableDateEdit("postingDate", event.currentTarget)}
-              onBlur={() => disableDateEdit("postingDate")}
-              onChange={(event) => state.updateForm({ postingDate: event.target.value })}
-            />
-          </label>
-          <label>
-            Due Date
-            <input
-              type="date"
-              value={state.form.dueDate}
-              readOnly={!editableDates.dueDate}
-              className={editableDates.dueDate ? "si-date-editable" : ""}
-              onDoubleClick={(event) => enableDateEdit("dueDate", event.currentTarget)}
-              onBlur={() => disableDateEdit("dueDate")}
-              onChange={(event) => state.updateForm({ dueDate: event.target.value })}
-            />
-          </label>
-          <label>
-            Document Date
-            <input
-              type="date"
-              value={state.form.documentDate}
-              readOnly={!editableDates.documentDate}
-              className={editableDates.documentDate ? "si-date-editable" : ""}
-              onDoubleClick={(event) => enableDateEdit("documentDate", event.currentTarget)}
-              onBlur={() => disableDateEdit("documentDate")}
-              onChange={(event) => state.updateForm({ documentDate: event.target.value })}
-            />
-          </label>
+      <section className="si-card si-draft-party-card si-draft-summary-card">
+        <div className="si-draft-party-name-cell">
+          <span>Party Name</span>
+          <strong>{customerName}</strong>
+          <button className="si-draft-change-party-btn" type="button" onClick={onReset}>
+            Change Party
+          </button>
         </div>
-      </section>
-
-      <section className="si-card si-draft-party-card">
-        <div className="si-draft-customer-panel">
-          <div className="si-draft-info-cell si-draft-customer-name">
-            <span>Customer Name</span>
-            <strong>{customerCode} - {customerName}</strong>
-            <button className="si-party-reset-btn" type="button" onClick={onReset}>
-              Reset
-            </button>
-          </div>
-          <div className="si-draft-address-field si-draft-address-readonly">
-            <span>Bill To</span>
-            <strong>{billToDisplay}</strong>
-          </div>
-          <div className="si-draft-address-field si-draft-address-readonly">
-            <span>Ship To</span>
-            <strong>{shipToDisplay}</strong>
-          </div>
-        </div>
+        <DraftDocumentStrip state={state} />
       </section>
 
       <section className="si-card si-tabs-card">
@@ -145,9 +81,21 @@ export default function DraftStep({ state, onReset }: Props) {
         </div>
       )}
 
-      <div className={`si-action-bar${footerDrawerOpen ? " is-open" : ""}`}>
-        {footerDrawerOpen && (
-          <div className="si-action-total-panel">
+      {totalsModalOpen && (
+        <div className="si-modal-backdrop" role="presentation">
+          <section className="si-totals-modal" role="dialog" aria-modal="true" aria-label="Invoice totals and freight">
+            <header className="si-so-modal-head">
+              <div>
+                <span className="si-eyebrow">Invoice Total</span>
+                <h2>{formatMoney(state.totals.grandTotal)}</h2>
+                <p>Review totals and freight charges before posting.</p>
+              </div>
+              <button className="si-btn si-btn-outline" type="button" onClick={() => setTotalsModalOpen(false)}>
+                Close
+              </button>
+            </header>
+
+            <div className="si-action-total-panel si-action-total-panel-modal">
             <section className="si-footer-drawer-section">
               <header className="si-footer-drawer-head">
                 <strong>Totals</strong>
@@ -226,21 +174,24 @@ export default function DraftStep({ state, onReset }: Props) {
               )}
             </section>
           </div>
-        )}
+          </section>
+        </div>
+      )}
+
+      <div className="si-action-bar">
         <div className="si-action-bar-row">
           <button
             className="si-action-total-btn"
             type="button"
-            aria-expanded={footerDrawerOpen}
-            onClick={() => setFooterDrawerOpen((current) => !current)}
+            onClick={() => setTotalsModalOpen(true)}
           >
-            <span>{footerDrawerOpen ? "Hide details" : "Total"}</span>
+            <span>Total</span>
             <strong>{formatMoney(state.totals.grandTotal)}</strong>
           </button>
           <div className="si-action-buttons">
-            <button className="si-btn si-btn-outline" type="button" onClick={addFreightRow}>
+            {/* <button className="si-btn si-btn-outline" type="button" onClick={addFreightRow}>
               + Freight
-            </button>
+            </button> */}
             <button className="si-btn si-btn-primary" type="button" disabled={state.posting} onClick={state.postInvoice}>
               {state.posting ? "Posting..." : "Post to SAP HANA"}
             </button>

@@ -43,6 +43,7 @@ export type SelectedLine = {
   VatPrcnt: number;
   TaxCode: string;
   WhsCode: string;
+  SalesOrderWhsCode?: string;
   OcrCode?: string;
   ShipDate?: string;
   invoiceQty: number;
@@ -81,7 +82,9 @@ export type Party = {
   CardCode: string;
   CardName: string;
   State1?: string | null;
+  U_Main_Group?: string | null;
   U_Chain?: string | null;
+  OpenOrders?: number;
   Num_of_Open_SalesOrder?: number;
 };
 
@@ -185,15 +188,11 @@ export const buildInvoicePayload = (
       ItemCode: line.ItemCode,
       WarehouseCode: line.WhsCode,
       Quantity: toNumber(line.invoiceQty),
-      ...(line.BatchNumbers?.length
-        ? {
-            BatchNumbers: line.BatchNumbers.map((batch) => ({
-              BatchNumber: batch.BatchNumber,
-              ...(batch.SystemSerialNumber !== undefined ? { SystemSerialNumber: batch.SystemSerialNumber } : {}),
-              Quantity: toNumber(batch.Quantity),
-            })),
-          }
-        : {}),
+      BatchNumbers: (line.BatchNumbers || []).map((batch) => ({
+        BatchNumber: batch.BatchNumber,
+        ...(batch.SystemSerialNumber !== undefined ? { SystemSerialNumber: batch.SystemSerialNumber } : {}),
+        Quantity: toNumber(batch.Quantity),
+      })),
     })),
   };
 };

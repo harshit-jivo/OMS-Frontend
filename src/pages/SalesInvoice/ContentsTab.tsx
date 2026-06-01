@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { HiTrash } from "react-icons/hi2";
 import { formatMoney, lineKey, toNumber } from "./salesInvoice.utils";
 import { apiFetch, type SalesInvoiceState } from "./useSalesInvoice";
 
@@ -13,6 +14,7 @@ type InventoryWarehouse = {
 
 type BatchDetail = {
   BatchNum: string;
+  BatchNumber?: string;
   WhsCode: string;
   Quantity: number;
   PrdDate?: string | null;
@@ -29,7 +31,12 @@ type BatchPickerContext = {
   itemName: string;
   whsCode: string;
   quantity: number;
-  selectedBatchNumber?: string;
+  maxQuantity: number;
+};
+
+type BatchAllocation = {
+  batch: BatchDetail;
+  quantity: number;
 };
 
 const formatBatchDate = (value?: string | null) => {
@@ -44,21 +51,71 @@ const getSystemSerialNumber = (batch: BatchDetail) => {
   return Number.isFinite(Number(value)) ? Number(value) : undefined;
 };
 
+const getBatchNumber = (batch: BatchDetail) => batch.BatchNum || batch.BatchNumber || "";
+
+const toSapBatchNumbers = (allocations: BatchAllocation[]) =>
+  allocations.map(({ batch, quantity }) => {
+    const systemSerialNumber = getSystemSerialNumber(batch);
+    return {
+      BatchNumber: getBatchNumber(batch),
+      ...(systemSerialNumber !== undefined ? { SystemSerialNumber: systemSerialNumber } : {}),
+      Quantity: quantity,
+    };
+  });
+
+const getBatchSortTime = (batch: BatchDetail) => {
+  const expTime = batch.ExpDate ? new Date(batch.ExpDate).getTime() : Number.POSITIVE_INFINITY;
+  if (Number.isFinite(expTime)) return expTime;
+  const inTime = batch.InDate ? new Date(batch.InDate).getTime() : Number.POSITIVE_INFINITY;
+  return Number.isFinite(inTime) ? inTime : Number.POSITIVE_INFINITY;
+};
+
+const allocateNearestExpiryBatches = (batches: BatchDetail[], requiredQty: number): BatchAllocation[] => {
+  let remainingQty = toNumber(requiredQty);
+  const allocations: BatchAllocation[] = [];
+
+  [...batches]
+    .filter((batch) => toNumber(batch.Quantity) > 0)
+    .sort((a, b) => getBatchSortTime(a) - getBatchSortTime(b))
+    .some((batch) => {
+      const allocatedQty = Math.min(remainingQty, toNumber(batch.Quantity));
+      if (allocatedQty > 0) {
+        allocations.push({ batch, quantity: allocatedQty });
+        remainingQty -= allocatedQty;
+      }
+      return remainingQty <= 0;
+    });
+
+  return allocations;
+};
+
 function BatchPickerModal({
   context,
   onClose,
-  onSelect,
+  onAutoSelect,
+  onQuantityChange,
 }: {
   context: BatchPickerContext;
   onClose: () => void;
-  onSelect: (batch: BatchDetail, whsCode: string) => void;
+  onAutoSelect: (allocations: BatchAllocation[], whsCode: string) => void;
+  onQuantityChange: (quantity: number) => void;
 }) {
   const [warehouses, setWarehouses] = useState<InventoryWarehouse[]>([]);
   const [selectedWhsCode, setSelectedWhsCode] = useState(context.whsCode);
-  const [batches, setBatches] = useState<BatchDetail[]>([]);
+  const [warehouseBatches, setWarehouseBatches] = useState<Record<string, BatchDetail[]>>({});
   const [loadingWarehouses, setLoadingWarehouses] = useState(false);
   const [loadingBatches, setLoadingBatches] = useState(false);
   const [error, setError] = useState("");
+  const lastAppliedSignature = useRef("");
+  const onAutoSelectRef = useRef(onAutoSelect);
+
+  useEffect(() => {
+    onAutoSelectRef.current = onAutoSelect;
+  }, [onAutoSelect]);
+
+  useEffect(() => {
+    lastAppliedSignature.current = "";
+  }, [context.key, context.itemCode, context.quantity]);
 
   useEffect(() => {
     let active = true;
@@ -73,11 +130,16 @@ function BatchPickerModal({
         const nextWarehouses = Array.isArray(data) ? data : [];
         if (!active) return;
         setWarehouses(nextWarehouses);
-        setSelectedWhsCode((current) =>
-          current && nextWarehouses.some((warehouse) => warehouse.WhsCode === current)
-            ? current
-            : nextWarehouses[0]?.WhsCode || "",
-        );
+        setWarehouseBatches({});
+        setSelectedWhsCode((current) => {
+          const contextWhsCode = String(context.whsCode || "").trim();
+          const hasContextWarehouse = nextWarehouses.some((warehouse) => warehouse.WhsCode === contextWhsCode);
+          const hasCurrentWarehouse = nextWarehouses.some((warehouse) => warehouse.WhsCode === current);
+
+          if (contextWhsCode && hasContextWarehouse) return contextWhsCode;
+          if (current && hasCurrentWarehouse) return current;
+          return nextWarehouses[0]?.WhsCode || "";
+        });
       } catch (err) {
         console.error(err);
         if (active) {
@@ -93,11 +155,11 @@ function BatchPickerModal({
     return () => {
       active = false;
     };
-  }, [context.itemCode]);
+  }, [context.itemCode, context.whsCode]);
 
   useEffect(() => {
-    if (!selectedWhsCode) {
-      setBatches([]);
+    if (warehouses.length === 0) {
+      setWarehouseBatches({});
       return;
     }
 
@@ -105,18 +167,24 @@ function BatchPickerModal({
 
     const loadBatches = async () => {
       setLoadingBatches(true);
-      setError("");
       try {
-        const data = await apiFetch<BatchDetail[]>(
-          `/api/hana/batch-details/?item_code=${encodeURIComponent(context.itemCode)}&whs_code=${encodeURIComponent(selectedWhsCode)}`,
+        const entries = await Promise.all(
+          warehouses.map(async (warehouse) => {
+            try {
+              const data = await apiFetch<BatchDetail[]>(
+                `/api/hana/batch-details/?item_code=${encodeURIComponent(context.itemCode)}&whs_code=${encodeURIComponent(warehouse.WhsCode)}`,
+              );
+              return [warehouse.WhsCode, Array.isArray(data) ? data : []] as const;
+            } catch (err) {
+              console.error(err);
+              return [warehouse.WhsCode, []] as const;
+            }
+          }),
         );
-        if (active) setBatches(Array.isArray(data) ? data : []);
+        if (active) setWarehouseBatches(Object.fromEntries(entries));
       } catch (err) {
         console.error(err);
-        if (active) {
-          setBatches([]);
-          setError("Unable to load batches for this warehouse.");
-        }
+        if (active) setError("Unable to load batch quantities.");
       } finally {
         if (active) setLoadingBatches(false);
       }
@@ -126,7 +194,22 @@ function BatchPickerModal({
     return () => {
       active = false;
     };
-  }, [context.itemCode, selectedWhsCode]);
+  }, [context.itemCode, warehouses]);
+
+  const selectedBatches = warehouseBatches[selectedWhsCode] || [];
+  const allocations = allocateNearestExpiryBatches(selectedBatches, context.quantity);
+  const allocatedQty = allocations.reduce((sum, allocation) => sum + toNumber(allocation.quantity), 0);
+  const quantityMatches = Math.abs(allocatedQty - context.quantity) < 0.0001;
+  const allocationSignature = `${context.quantity}|${selectedWhsCode}|${allocations
+    .map(({ batch, quantity }) => `${getBatchNumber(batch)}:${quantity}`)
+    .join("|")}`;
+
+  useEffect(() => {
+    if (!selectedWhsCode || loadingBatches) return;
+    if (lastAppliedSignature.current === allocationSignature) return;
+    lastAppliedSignature.current = allocationSignature;
+    onAutoSelectRef.current(allocations, selectedWhsCode);
+  }, [allocationSignature, allocations, loadingBatches, selectedWhsCode]);
 
   return (
     <div className="si-modal-backdrop" role="presentation">
@@ -145,26 +228,29 @@ function BatchPickerModal({
         <div className="si-batch-picker-body">
           <aside className="si-batch-warehouse-panel">
             <div className="si-batch-panel-title">
-              <span>Warehouse Stock</span>
-              <strong>{loadingWarehouses ? "Loading..." : `${warehouses.length} warehouses`}</strong>
+              <span>Warehouse</span>
+              <strong>{context.quantity.toLocaleString("en-IN")} required</strong>
             </div>
+            {error && <div className="si-inline-error">{error}</div>}
             {loadingWarehouses ? (
               <div className="si-loader">Loading warehouse quantities...</div>
             ) : warehouses.length === 0 ? (
               <div className="si-empty">No warehouse stock found.</div>
             ) : (
-              <div className="si-batch-warehouse-list">
+              <div className="si-batch-warehouse-cards" aria-label="Choose warehouse">
                 {warehouses.map((warehouse) => {
-                  const quantity = Number(warehouse["SUM(Quantity)"] || 0);
+                  const whsBatches = warehouseBatches[warehouse.WhsCode] || [];
+                  const quantity = toNumber(warehouse["SUM(Quantity)"]);
                   return (
                     <button
-                      className={`si-warehouse-option${selectedWhsCode === warehouse.WhsCode ? " is-active" : ""}`}
+                      className={`si-batch-warehouse-card${selectedWhsCode === warehouse.WhsCode ? " is-active" : ""}`}
                       type="button"
                       key={warehouse.WhsCode}
                       onClick={() => setSelectedWhsCode(warehouse.WhsCode)}
                     >
-                      <span>{warehouse.WhsCode}</span>
-                      <strong>{quantity.toLocaleString("en-IN")}</strong>
+                      <strong>{warehouse.WhsCode}</strong>
+                      <span>{loadingBatches ? "..." : whsBatches.length} batches</span>
+                      <em>Qty {quantity.toLocaleString("en-IN")}</em>
                     </button>
                   );
                 })}
@@ -177,46 +263,51 @@ function BatchPickerModal({
               <span>Batches</span>
               <strong>{selectedWhsCode || "Select warehouse"}</strong>
             </div>
-            {error && <div className="si-inline-error">{error}</div>}
-            {!selectedWhsCode ? (
-              <div className="si-empty">Select a warehouse to view batches.</div>
-            ) : loadingBatches ? (
-              <div className="si-loader">Loading batches...</div>
-            ) : batches.length === 0 ? (
-              <div className="si-empty">No batches found for this warehouse.</div>
-            ) : (
-              <div className="si-table-wrap">
-                <table className="si-lines-table si-batch-table">
-                  <thead>
-                    <tr>
-                      <th aria-label="Select batch" />
-                      <th>Batch No.</th>
-                      <th>Batch Qty</th>
-                      <th>Production</th>
-                      <th>Expiry</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {batches.map((batch) => (
-                      <tr key={`${batch.BatchNum}-${batch.WhsCode}-${batch.InDate || ""}`}>
-                        <td>
-                          <input
-                            type="checkbox"
-                            checked={context.selectedBatchNumber === batch.BatchNum && selectedWhsCode === batch.WhsCode}
-                            onChange={() => onSelect(batch, selectedWhsCode)}
-                            aria-label={`Select batch ${batch.BatchNum}`}
-                          />
-                        </td>
-                        <td>{batch.BatchNum}</td>
-                        <td>{Number(batch.Quantity || 0).toLocaleString("en-IN")}</td>
-                        <td>{formatBatchDate(batch.PrdDate)}</td>
-                        <td>{formatBatchDate(batch.ExpDate)}</td>
-                      </tr>
+            <label className="si-batch-quantity-field">
+              <span>Invoice Quantity</span>
+              <input
+                type="number"
+                min="1"
+                max={context.maxQuantity}
+                value={context.quantity}
+                onChange={(event) => onQuantityChange(toNumber(event.target.value))}
+              />
+            </label>
+            {!loadingWarehouses && (
+              selectedWhsCode && loadingBatches ? (
+                <div className="si-loader">Loading batch availability...</div>
+              ) : selectedWhsCode && selectedBatches.length === 0 ? (
+                <div className="si-empty">No batches found for this warehouse.</div>
+              ) : selectedWhsCode ? (
+                <>
+                  <div className={`si-batch-match-status${quantityMatches ? " is-match" : " has-error"}`}>
+                    <span>
+                      Invoice Qty: {context.quantity.toLocaleString("en-IN")} | Batch Qty:{" "}
+                      {allocatedQty.toLocaleString("en-IN")}
+                    </span>
+                    <strong>{quantityMatches ? "Quantity matched" : "Quantity mismatch"}</strong>
+                  </div>
+                  {allocations.length > 0 && (
+                    <div className="si-batch-auto-list">
+                    {allocations.map(({ batch, quantity }) => (
+                      <div className="si-batch-auto-row" key={`${getBatchNumber(batch)}-${batch.WhsCode}-${batch.InDate || ""}`}>
+                        <strong>Exp {formatBatchDate(batch.ExpDate)}</strong>
+                        <em>{quantity.toLocaleString("en-IN")}</em>
+                      </div>
                     ))}
-                  </tbody>
-                </table>
-              </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="si-empty">Select a warehouse.</div>
+              )
             )}
+
+            <div className="si-batch-modal-actions">
+              <button className="si-btn si-btn-outline" type="button" onClick={onClose}>
+                Close
+              </button>
+            </div>
           </section>
         </div>
       </section>
@@ -226,13 +317,24 @@ function BatchPickerModal({
 
 export default function ContentsTab({ state }: Props) {
   const [batchPickerContext, setBatchPickerContext] = useState<BatchPickerContext | null>(null);
+  const applyBatchSelection = (allocations: BatchAllocation[], whsCode: string) => {
+    if (!batchPickerContext) return;
+    state.updateLine(batchPickerContext.key, {
+      WhsCode: whsCode,
+      BatchNumbers: toSapBatchNumbers(allocations),
+    });
+  };
 
   return (
     <div className="si-tab-grid">
       <div className="si-invoice-line-grid" aria-label="Sales invoice lines">
         {state.selectedLineList.map((line) => {
           const key = lineKey(line.DocEntry, line.LineNum);
-          const selectedBatch = line.BatchNumbers?.[0];
+          const selectedBatchCount = line.BatchNumbers?.length || 0;
+          const selectedBatchQty = line.BatchNumbers?.reduce((sum, batch) => sum + toNumber(batch.Quantity), 0) || 0;
+          const invoiceQty = toNumber(line.invoiceQty);
+          const batchQtyMismatch = Math.abs(selectedBatchQty - invoiceQty) >= 0.0001;
+          const batchWarehouse = line.WhsCode || line.SalesOrderWhsCode || "-";
 
           return (
             <article className="si-invoice-line-card" key={key}>
@@ -242,7 +344,7 @@ export default function ContentsTab({ state }: Props) {
                 onClick={() => state.removeLine(key)}
                 aria-label={`Remove ${line.Dscription || line.ItemCode || "item"}`}
               >
-                x
+                <HiTrash aria-hidden="true" />
               </button>
               <div className="si-invoice-item-visual" aria-hidden="true">
                 <span />
@@ -255,7 +357,7 @@ export default function ContentsTab({ state }: Props) {
                     <dd>{formatMoney(line.Price)}</dd>
                   </div>
                   <div>
-                    <dt>Qty</dt>
+                    <dt>Quantity</dt>
                     <dd>
                       <input
                         type="number"
@@ -269,20 +371,38 @@ export default function ContentsTab({ state }: Props) {
                   </div>
                 </dl>
                 <button
-                  className="si-batch-select-btn"
+                  className={`si-batch-select-btn${batchQtyMismatch ? " has-error" : ""}`}
                   type="button"
                   onClick={() =>
                     setBatchPickerContext({
                       key,
                       itemCode: line.ItemCode,
                       itemName: line.Dscription,
-                      whsCode: line.WhsCode,
+                      whsCode: line.SalesOrderWhsCode || line.WhsCode,
                       quantity: toNumber(line.invoiceQty),
-                      selectedBatchNumber: selectedBatch?.BatchNumber,
+                      maxQuantity: toNumber(line.OpenQty),
                     })
                   }
                 >
-                  {selectedBatch ? `${selectedBatch.BatchNumber} / ${line.WhsCode || "-"}` : "Choose Batch"}
+                  {selectedBatchCount ? (
+                    <>
+                      <span>Warehouse: {batchWarehouse}</span>
+                      <em>
+                        Batches: {selectedBatchCount} | Qty: {selectedBatchQty.toLocaleString("en-IN")}/
+                        {invoiceQty.toLocaleString("en-IN")}
+                      </em>
+                    </>
+                  ) : (
+                    <>
+                      <span>Warehouse: {batchWarehouse}</span>
+                      <em>Batches: 0 | Qty: {invoiceQty.toLocaleString("en-IN")}</em>
+                    </>
+                  )}
+                  {batchQtyMismatch && (
+                    <strong className="si-batch-select-warning">
+                      Batch quantity does not match invoice quantity.
+                    </strong>
+                  )}
                 </button>
               </div>
             </article>
@@ -294,19 +414,13 @@ export default function ContentsTab({ state }: Props) {
         <BatchPickerModal
           context={batchPickerContext}
           onClose={() => setBatchPickerContext(null)}
-          onSelect={(batch, whsCode) => {
-            const systemSerialNumber = getSystemSerialNumber(batch);
-            state.updateLine(batchPickerContext.key, {
-              WhsCode: batch.WhsCode || whsCode,
-              BatchNumbers: [
-                {
-                  BatchNumber: batch.BatchNum,
-                  ...(systemSerialNumber !== undefined ? { SystemSerialNumber: systemSerialNumber } : {}),
-                  Quantity: batchPickerContext.quantity,
-                },
-              ],
-            });
-            setBatchPickerContext(null);
+          onAutoSelect={(allocations, whsCode) => {
+            applyBatchSelection(allocations, whsCode);
+          }}
+          onQuantityChange={(quantity) => {
+            const nextQuantity = Math.min(Math.max(toNumber(quantity), 1), batchPickerContext.maxQuantity);
+            setBatchPickerContext((current) => current ? { ...current, quantity: nextQuantity } : current);
+            state.updateLine(batchPickerContext.key, { invoiceQty: nextQuantity, BatchNumbers: [] });
           }}
         />
       )}
