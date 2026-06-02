@@ -3,6 +3,7 @@ import { HiArchiveBox, HiArrowRight, HiDocumentText, HiTrash } from "react-icons
 import DraftStep from "./DraftStep";
 import OrdersStep from "./OrdersStep";
 import { apiFetch, useSalesInvoice, type SalesInvoiceState } from "./useSalesInvoice";
+import { formatMoney, type SelectedLine } from "./salesInvoice.utils";
 import "../../styles/Sales_Invoice.css";
 
 type PartyPickerModalProps = {
@@ -26,8 +27,35 @@ type FinishedGoodItem = {
   InStock?: number | string | null;
   AvailableQty?: number | string | null;
   AvailableQuantity?: number | string | null;
+  TotalQty?: number | string | null;
   "SUM(Quantity)"?: number | string | null;
+  Price?: number | string | null;
+  UnitPrice?: number | string | null;
+  PriceBefDi?: number | string | null;
+  TaxCode?: string | null;
+  VatGroup?: string | null;
+  VatPrcnt?: number | string | null;
+  DiscPrcnt?: number | string | null;
 };
+
+type ItemPriceRecord = {
+  Price?: number | string | null;
+  UnitPrice?: number | string | null;
+  PriceBefDi?: number | string | null;
+  PriceBeforeDiscount?: number | string | null;
+  TaxCode?: string | null;
+  VatGroup?: string | null;
+  VatPrcnt?: number | string | null;
+  TaxPercent?: number | string | null;
+  DiscPrcnt?: number | string | null;
+  DiscountPercent?: number | string | null;
+  [key: string]: unknown;
+};
+
+type ItemPriceApiResponse =
+  | ItemPriceRecord
+  | ItemPriceRecord[]
+  | { data?: ItemPriceRecord[] | ItemPriceRecord; results?: ItemPriceRecord[] | ItemPriceRecord };
 
 type InventoryWarehouse = {
   WhsCode: string;
@@ -37,6 +65,7 @@ type InventoryWarehouse = {
 type BatchDetail = {
   SysNumber?: number;
   BatchNum: string;
+  BatchNumber?: string;
   ItemCode: string;
   ItemName: string;
   WhsCode: string;
@@ -125,6 +154,11 @@ const formatChainName = (chainValue: string) => chainValue === nullChainValue ? 
 
 const getPartyOpenOrders = (party: { OpenOrders?: number; Num_of_Open_SalesOrder?: number }) =>
   Number(party.OpenOrders ?? party.Num_of_Open_SalesOrder ?? 0);
+
+const getItemTotalQty = (item: FinishedGoodItem) => {
+  const qty = Number(item.TotalQty ?? item.AvailableQty ?? item.AvailableQuantity ?? item.Quantity ?? item.OnHand ?? item.InStock ?? 0);
+  return Number.isFinite(qty) ? qty : 0;
+};
 
 const stateFilterOrder = [
   "PB", "HR", "DL", "UP", "AP", "GJ", "MH", "WB", "JK", "TE", "KT", "RJ", "GO", "AS", "HP", "UK",
@@ -441,18 +475,17 @@ type SkeletonInvoiceProps = {
   onOpenBatchPicker: (rowId: number) => void;
   onAddItemRow: () => void;
   onRemoveItemRow: (rowId: number) => void;
+  itemDraftError: string;
   onReset: () => void;
 };
 
 function InvoiceSourceChoice({
-  partyName,
   openSalesOrderCount,
   loadingOrders,
   ordersError,
   onChooseSalesOrder,
   onChooseItems,
 }: {
-  partyName: string;
   openSalesOrderCount: number;
   loadingOrders: boolean;
   ordersError: string;
@@ -465,17 +498,6 @@ function InvoiceSourceChoice({
 
   return (
     <section className="si-source-choice" aria-label="Invoice source">
-      <div className="si-source-banner">
-        <div>
-          <span className="si-eyebrow">Invoice Against</span>
-          <h2>Choose invoice source</h2>
-          <p>{partyName}</p>
-        </div>
-        <div className="si-source-banner-icons" aria-hidden="true">
-          <HiArchiveBox />
-          <HiDocumentText />
-        </div>
-      </div>
       <div className="si-source-choice-grid">
         <button className="si-source-card si-source-card-items" type="button" onClick={onChooseItems}>
           <HiArchiveBox className="si-source-card-watermark" aria-hidden="true" />
@@ -515,12 +537,14 @@ function ItemInvoiceLines({
   onOpenBatchPicker,
   onAddRow,
   onRemoveRow,
+  draftError,
 }: {
   rows: ItemInvoiceRow[];
   onOpenItemPicker: (rowId: number) => void;
   onOpenBatchPicker: (rowId: number) => void;
   onAddRow: () => void;
   onRemoveRow: (rowId: number) => void;
+  draftError: string;
 }) {
   return (
     <div className="si-item-lines-panel">
@@ -530,10 +554,13 @@ function ItemInvoiceLines({
           <h2>Invoice Lines</h2>
           <p>Select finished goods directly for this invoice.</p>
         </div>
-        <button className="si-item-add-btn" type="button" onClick={onAddRow}>
-          Add Item
-        </button>
+        <div className="si-item-source-actions">
+          <button className="si-item-add-btn" type="button" onClick={onAddRow}>
+            Add Items
+          </button>
+        </div>
       </header>
+      {draftError && <div className="si-inline-error">{draftError}</div>}
       <div className="si-invoice-line-grid si-individual-item-card-grid">
         {rows.map((row) => {
           const batchQty = row.batch?.batches.reduce((sum, batch) => sum + batch.quantity, 0) || 0;
@@ -566,8 +593,8 @@ function ItemInvoiceLines({
                     </dd>
                   </div>
                   <div>
-                    <dt>Pack Size</dt>
-                    <dd>{row.item?.U_SKU || "-"}</dd>
+                    <dt>Unit Price</dt>
+                    <dd>{row.item ? formatMoney(pickItemNumber(row.item, ["Price", "UnitPrice", "PriceBefDi"], 0)) : "-"}</dd>
                   </div>
                 </dl>
                 <button
@@ -577,18 +604,16 @@ function ItemInvoiceLines({
                   onClick={() => onOpenBatchPicker(row.id)}
                 >
                   {row.batch ? (
-                    <>
-                      <span>Warehouse: {row.batch.warehouseCode}</span>
-                      <em>
-                        Batches: {row.batch.batches.length} | Qty: {batchQty.toLocaleString("en-IN")}/
-                        {invoiceQty.toLocaleString("en-IN")}
-                      </em>
-                    </>
+                    <span>
+                      Warehouse: {row.batch.warehouseCode} | Batches: {row.batch.batches.length} | Qty:{" "}
+                      {batchQty.toLocaleString("en-IN")}/{invoiceQty.toLocaleString("en-IN")}
+                    </span>
                   ) : (
-                    <>
-                      <span>{row.item ? "Warehouse: -" : "Select item first"}</span>
-                      <em>Batches: 0 | Qty: {row.item ? invoiceQty.toLocaleString("en-IN") : "-"}</em>
-                    </>
+                    <span>
+                      {row.item
+                        ? `Warehouse: - | Batches: 0 | Qty: ${invoiceQty.toLocaleString("en-IN")}`
+                        : "Select item first"}
+                    </span>
                   )}
                   {batchQtyMismatch && (
                     <strong className="si-batch-select-warning">
@@ -652,10 +677,12 @@ function ItemPickerModal({
   onClose,
   onBack,
   onSelect,
+  selectingItemCode,
 }: {
   onClose: () => void;
   onBack: () => void;
-  onSelect: (item: FinishedGoodItem) => void;
+  onSelect: (item: FinishedGoodItem) => void | Promise<void>;
+  selectingItemCode: string;
 }) {
   const [items, setItems] = useState<FinishedGoodItem[]>([]);
   const [query, setQuery] = useState("");
@@ -925,12 +952,15 @@ function ItemPickerModal({
                     className="si-item-picker-row"
                     key={item.ItemCode}
                     type="button"
+                    disabled={selectingItemCode === item.ItemCode}
                     onClick={() => onSelect(item)}
                   >
                     <strong>{item.ItemName}</strong>
-                    <span>
-                      Quantity: {item.U_SKU || "-"}
-                    </span>
+                    <small className="si-item-qty-count">
+                      {selectingItemCode === item.ItemCode
+                        ? "Fetching price..."
+                        : `Qty: ${getItemTotalQty(item).toLocaleString("en-IN")}`}
+                    </small>
                   </button>
                 ))}
               </div>
@@ -1017,6 +1047,140 @@ const allocateFefoBatches = (batches: BatchDetail[], requiredQty: number) => {
   return allocations;
 };
 
+const pickItemNumber = (item: FinishedGoodItem, keys: string[], fallback = 0) => {
+  const source = item as Record<string, unknown>;
+  for (const key of keys) {
+    const value = source[key];
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return fallback;
+};
+
+const pickRecordNumber = (source: Record<string, unknown>, keys: string[], fallback: number | null = null) => {
+  for (const key of keys) {
+    const parsed = Number(source[key]);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return fallback;
+};
+
+const pickRecordText = (source: Record<string, unknown>, keys: string[]) => {
+  for (const key of keys) {
+    const value = source[key];
+    if (value !== undefined && value !== null && String(value).trim()) return String(value).trim();
+  }
+  return "";
+};
+
+const unwrapItemPriceRecord = (data: ItemPriceApiResponse): ItemPriceRecord | null => {
+  if (Array.isArray(data)) return data[0] || null;
+  const wrappedData = data.data;
+  if (Array.isArray(wrappedData)) return wrappedData[0] || null;
+  if (wrappedData && typeof wrappedData === "object") return wrappedData as ItemPriceRecord;
+  const wrappedResults = data.results;
+  if (Array.isArray(wrappedResults)) return wrappedResults[0] || null;
+  if (wrappedResults && typeof wrappedResults === "object") return wrappedResults as ItemPriceRecord;
+  return data as ItemPriceRecord;
+};
+
+const mergeItemPrice = (item: FinishedGoodItem, priceRecord: ItemPriceRecord | null) => {
+  if (!priceRecord) return item;
+  const source = priceRecord as Record<string, unknown>;
+  const price = pickRecordNumber(source, ["Price", "UnitPrice", "Unit_Price", "price", "Rate"]);
+  const priceBeforeDiscount = pickRecordNumber(
+    source,
+    ["PriceBefDi", "PriceBeforeDiscount", "Price_Bef_Di", "Price", "UnitPrice", "price"],
+    price,
+  );
+  const taxCode = pickRecordText(source, ["TaxCode", "VatGroup", "Tax_Code"]);
+  const taxPercent = pickRecordNumber(source, ["VatPrcnt", "TaxPercent", "Tax_Percent"]);
+  const discountPercent = pickRecordNumber(source, ["DiscPrcnt", "DiscountPercent", "Discount_Percent"]);
+
+  return {
+    ...item,
+    ...(price !== null ? { Price: price, UnitPrice: price } : {}),
+    ...(priceBeforeDiscount !== null ? { PriceBefDi: priceBeforeDiscount } : {}),
+    ...(taxCode ? { TaxCode: taxCode, VatGroup: taxCode } : {}),
+    ...(taxPercent !== null ? { VatPrcnt: taxPercent } : {}),
+    ...(discountPercent !== null ? { DiscPrcnt: discountPercent } : {}),
+  };
+};
+
+const pickItemText = (item: FinishedGoodItem, keys: string[]) => {
+  const source = item as Record<string, unknown>;
+  for (const key of keys) {
+    const value = source[key];
+    if (value !== undefined && value !== null && String(value).trim()) return String(value).trim();
+  }
+  return "";
+};
+
+const getBatchNumber = (batch: BatchDetail) => batch.BatchNum || batch.BatchNumber || "";
+
+const getBatchSystemSerialNumber = (batch: BatchDetail) => {
+  const value = batch.SystemSerialNumber ?? batch.SysNumber ?? batch.AbsEntry;
+  return Number.isFinite(Number(value)) ? Number(value) : undefined;
+};
+
+const getItemRowsValidationError = (rows: ItemInvoiceRow[]) => {
+  const selectedRows = rows.filter((row) => row.item);
+  if (selectedRows.length === 0) return "Select at least one item.";
+
+  const rowWithoutBatch = selectedRows.find((row) => !row.batch?.warehouseCode || row.batch.batches.length === 0);
+  if (rowWithoutBatch) return `Choose batches for ${rowWithoutBatch.item?.ItemName || "every selected item"}.`;
+
+  const mismatchedRow = selectedRows.find((row) => {
+    const invoiceQty = toFiniteQuantity(row.invoiceQty);
+    const batchQty = row.batch?.batches.reduce((sum, allocation) => sum + allocation.quantity, 0) || 0;
+    const displayedBatchQty = row.batch?.warehouseQuantity || batchQty;
+    return displayedBatchQty + 0.0001 < invoiceQty || batchQty + 0.0001 < invoiceQty;
+  });
+  if (mismatchedRow) return `Batch quantity must be at least invoice quantity for ${mismatchedRow.item?.ItemName || "each item"}.`;
+
+  return "";
+};
+
+const itemRowsToSelectedLines = (rows: ItemInvoiceRow[]): SelectedLine[] =>
+  rows
+    .filter((row): row is ItemInvoiceRow & { item: FinishedGoodItem; batch: SelectedBatch } =>
+      Boolean(row.item && row.batch),
+    )
+    .map((row) => {
+      const invoiceQty = toFiniteQuantity(row.invoiceQty);
+      const price = pickItemNumber(row.item, ["Price", "UnitPrice", "U_Price", "PriceBefDi"], 0);
+      const priceBeforeDiscount = pickItemNumber(row.item, ["PriceBefDi", "PriceBeforeDiscount", "Price"], price);
+      const taxCode = pickItemText(row.item, ["TaxCode", "VatGroup", "Tax_Code"]);
+      const openQty = Math.max(row.batch.warehouseQuantity || invoiceQty, invoiceQty);
+
+      return {
+        SourceType: "items",
+        DocEntry: -1,
+        DocNum: 0,
+        LineNum: row.id,
+        ItemCode: row.item.ItemCode,
+        Dscription: row.item.ItemName,
+        OpenQty: openQty,
+        Price: price,
+        PriceBefDi: priceBeforeDiscount,
+        DiscPrcnt: pickItemNumber(row.item, ["DiscPrcnt", "DiscountPercent"], 0),
+        VatPrcnt: pickItemNumber(row.item, ["VatPrcnt", "TaxPercent"], 0),
+        TaxCode: taxCode,
+        WhsCode: row.batch.warehouseCode,
+        invoiceQty,
+        BatchNumbers: row.batch.batches
+          .map(({ batch, quantity }) => {
+            const systemSerialNumber = getBatchSystemSerialNumber(batch);
+            return {
+              BatchNumber: getBatchNumber(batch),
+              ...(systemSerialNumber !== undefined ? { SystemSerialNumber: systemSerialNumber } : {}),
+              Quantity: quantity,
+            };
+          })
+          .filter((batch) => batch.BatchNumber && batch.Quantity > 0),
+      };
+    });
+
 function BatchPickerModal({
   item,
   invoiceQty,
@@ -1025,6 +1189,10 @@ function BatchPickerModal({
   onClose,
   onSelect,
   onQuantityChange,
+  onCreateDraft,
+  canCreateDraft,
+  creatingDraft,
+  draftError,
 }: {
   item: FinishedGoodItem;
   invoiceQty: number;
@@ -1033,6 +1201,10 @@ function BatchPickerModal({
   onClose: () => void;
   onSelect: (batch: SelectedBatch) => void;
   onQuantityChange: (quantity: number) => void;
+  onCreateDraft: () => void;
+  canCreateDraft: boolean;
+  creatingDraft: boolean;
+  draftError: string;
 }) {
   const [warehouses, setWarehouses] = useState<InventoryWarehouse[]>([]);
   const [selectedWhsCode, setSelectedWhsCode] = useState(selectedBatch?.warehouseCode || "");
@@ -1110,9 +1282,15 @@ function BatchPickerModal({
 
   const selectedWarehouse = warehouses.find((warehouse) => warehouse.WhsCode === selectedWhsCode) || null;
   const selectedWarehouseQuantity = Number(selectedWarehouse?.["SUM(Quantity)"] || 0);
+  const unitPrice = pickItemNumber(item, ["Price", "UnitPrice", "PriceBefDi"], 0);
   const allocations = allocateFefoBatches(batches, invoiceQty);
   const allocatedQty = allocations.reduce((sum, allocation) => sum + allocation.quantity, 0);
-  const quantityMatches = Math.abs(allocatedQty - invoiceQty) < 0.0001;
+  const displayedBatchQty = selectedWarehouseQuantity || allocatedQty;
+  const batchAllocationMatches = allocatedQty + 0.0001 >= invoiceQty;
+  const quantityMatches = selectedWarehouseQuantity > 0
+    && selectedWarehouseQuantity + 0.0001 >= invoiceQty
+    && batchAllocationMatches;
+  const cannotCreateDraft = !quantityMatches || !canCreateDraft || creatingDraft || loadingBatches || loadingWarehouses;
   const batchSignature = `${selectedWhsCode}|${invoiceQty}|${allocations
     .map((allocation) => `${allocation.batch.BatchNum}:${allocation.quantity}`)
     .join("|")}`;
@@ -1191,13 +1369,17 @@ function BatchPickerModal({
                 onChange={(event) => onQuantityChange(toFiniteQuantity(event.target.value))}
               />
             </label>
+            <div className="si-batch-price-field">
+              <span>Unit Price</span>
+              <strong>{formatMoney(unitPrice)}</strong>
+            </div>
             <div className={`si-batch-match-status${quantityMatches ? " is-match" : " has-error"}`}>
               <span>
-                Invoice Qty: {invoiceQty.toLocaleString("en-IN")} | Batch Qty: {allocatedQty.toLocaleString("en-IN")}
+                Invoice Qty: {invoiceQty.toLocaleString("en-IN")} | Batch Qty: {displayedBatchQty.toLocaleString("en-IN")}
               </span>
-              <strong>{quantityMatches ? "FEFO batches auto selected" : "Available FEFO quantity is short"}</strong>
             </div>
             {error && <div className="si-inline-error">{error}</div>}
+            {draftError && <div className="si-inline-error">{draftError}</div>}
             {!selectedWhsCode ? (
               <div className="si-empty">Select a warehouse to view batches.</div>
             ) : loadingBatches ? (
@@ -1209,26 +1391,18 @@ function BatchPickerModal({
                 <table className="si-lines-table si-batch-table">
                   <thead>
                     <tr>
-                      <th>Status</th>
-                      <th>Batch No.</th>
+                      <th>Expiration Date</th>
                       <th>Batch Qty</th>
-                      <th>Production</th>
-                      <th>Expiry</th>
                     </tr>
                   </thead>
                   <tbody>
                     {batches.map((batch) => {
-                      const allocation = allocations.find((itemBatch) => itemBatch.batch.BatchNum === batch.BatchNum);
                       return (
                         <tr
-                          className={allocation ? "is-auto-selected" : ""}
                           key={`${batch.BatchNum}-${batch.BaseEntry || ""}-${batch.InDate || ""}`}
                         >
-                          <td>{allocation ? "FEFO" : "-"}</td>
-                          <td>{batch.BatchNum}</td>
-                          <td>{Number(allocation?.quantity || batch.Quantity || 0).toLocaleString("en-IN")}</td>
-                          <td>{formatBatchDate(batch.PrdDate)}</td>
                           <td>{formatBatchDate(batch.ExpDate)}</td>
+                          <td>{Number(batch.Quantity || 0).toLocaleString("en-IN")}</td>
                         </tr>
                       );
                     })}
@@ -1236,13 +1410,27 @@ function BatchPickerModal({
                 </table>
               </div>
             )}
-            <div className="si-batch-modal-actions">
-              <button className="si-btn si-btn-primary" type="button" disabled={!selectedWhsCode || loadingBatches} onClick={onClose}>
-                Confirm
-              </button>
-            </div>
           </section>
         </div>
+        <footer className={`si-order-selection-bar si-batch-draft-bar${draftError ? " has-error" : ""}`}>
+          <div>
+            <strong>{item.ItemName}</strong>
+            <span>
+              Warehouse: {selectedWhsCode || "-"} - Invoice Qty: {invoiceQty.toLocaleString("en-IN")} - Batch Qty:{" "}
+              {displayedBatchQty.toLocaleString("en-IN")}
+            </span>
+            {draftError && <span className="si-order-selection-error">{draftError}</span>}
+          </div>
+          <button
+            className="si-btn si-btn-primary si-order-selection-next"
+            type="button"
+            disabled={cannotCreateDraft}
+            onClick={onCreateDraft}
+          >
+            {creatingDraft ? "Creating..." : "Create Draft"}
+            <HiArrowRight aria-hidden="true" />
+          </button>
+        </footer>
       </section>
     </div>
   );
@@ -1259,6 +1447,7 @@ function SkeletonInvoice({
   onOpenBatchPicker,
   onAddItemRow,
   onRemoveItemRow,
+  itemDraftError,
   onReset,
 }: SkeletonInvoiceProps) {
   const partyLabel = state.selectedParty
@@ -1285,7 +1474,7 @@ function SkeletonInvoice({
             )}
             {state.selectedParty && sourceMode === "items" && (
               <button className="si-btn si-btn-primary" type="button" onClick={onOpenItems}>
-                Select Items
+                Add Items
               </button>
             )}
             {state.selectedParty && (
@@ -1327,6 +1516,7 @@ function SkeletonInvoice({
             onOpenBatchPicker={onOpenBatchPicker}
             onAddRow={onAddItemRow}
             onRemoveRow={onRemoveItemRow}
+            draftError={itemDraftError}
           />
         )}
       </section>
@@ -1343,6 +1533,9 @@ export default function SalesInvoiceWizard() {
   const [batchPickerRowId, setBatchPickerRowId] = useState<number | null>(null);
   const [sourceMode, setSourceMode] = useState<InvoiceSourceMode | null>(null);
   const [itemRows, setItemRows] = useState<ItemInvoiceRow[]>([{ id: 1, type: "Item", item: null, invoiceQty: 1, batch: null }]);
+  const [itemDraftError, setItemDraftError] = useState("");
+  const [creatingItemDraft, setCreatingItemDraft] = useState(false);
+  const [pricingItemCode, setPricingItemCode] = useState("");
 
   useEffect(() => {
     if (sourceMode === "sales-order" && state.selectedParty && state.step === 2 && !state.customerDetails) {
@@ -1353,25 +1546,33 @@ export default function SalesInvoiceWizard() {
   const openOrdersModal = () => {
     if (!state.selectedParty) return;
     setSourceMode("sales-order");
+    setItemDraftError("");
     setSourceModalOpen(false);
     setItemPickerRowId(null);
     setBatchPickerRowId(null);
     setOrdersModalOpen(true);
   };
 
+  const getNextAddItemRowId = () => {
+    const emptyRow = itemRows.find((row) => !row.item);
+    return emptyRow?.id || Math.max(0, ...itemRows.map((row) => row.id)) + 1;
+  };
+
   const chooseItems = () => {
     if (!state.selectedParty) return;
     closeOrdersModal();
     setSourceMode("items");
+    setItemDraftError("");
     setSourceModalOpen(false);
     state.loadPartyAddresses();
-    setItemPickerRowId(itemRows[0]?.id || 1);
+    setItemPickerRowId(getNextAddItemRowId());
   };
 
   const openItemsModal = () => {
     if (!state.selectedParty) return;
     setSourceMode("items");
-    setItemPickerRowId(itemRows[0]?.id || 1);
+    setItemDraftError("");
+    setItemPickerRowId(getNextAddItemRowId());
   };
 
   const closeOrdersModal = () => {
@@ -1406,6 +1607,9 @@ export default function SalesInvoiceWizard() {
     closeBatchPicker();
     setSourceMode(null);
     setItemRows([{ id: 1, type: "Item", item: null, invoiceQty: 1, batch: null }]);
+    setItemDraftError("");
+    setCreatingItemDraft(false);
+    setPricingItemCode("");
     state.changeParty();
     setPartyModalOpen(true);
   };
@@ -1425,11 +1629,12 @@ export default function SalesInvoiceWizard() {
   };
 
   const addItemRow = () => {
-    const nextRowId = Math.max(0, ...itemRows.map((row) => row.id)) + 1;
-    setItemPickerRowId(nextRowId);
+    setItemDraftError("");
+    setItemPickerRowId(getNextAddItemRowId());
   };
 
   const removeItemRow = (rowId: number) => {
+    setItemDraftError("");
     setItemRows((current) => {
       const nextRows = current.filter((row) => row.id !== rowId);
       return nextRows.length > 0 ? nextRows : [{ id: 1, type: "Item", item: null, invoiceQty: 1, batch: null }];
@@ -1444,21 +1649,69 @@ export default function SalesInvoiceWizard() {
     setBatchPickerRowId(rowId);
   };
 
-  const selectItemForRow = (item: FinishedGoodItem) => {
-    if (itemPickerRowId === null) return;
+  const fetchItemWithCustomerPrice = async (item: FinishedGoodItem) => {
+    const priceList = toFiniteQuantity(state.selectedParty?.ListNum, 1);
+    const data = await apiFetch<ItemPriceApiResponse>(
+      `/api/hana/item-price/?item_code=${encodeURIComponent(item.ItemCode)}&price_list=${encodeURIComponent(String(priceList))}`,
+    );
+    return mergeItemPrice(item, unwrapItemPriceRecord(data));
+  };
+
+  const selectItemForRow = async (item: FinishedGoodItem) => {
+    if (itemPickerRowId === null || pricingItemCode) return;
     const rowId = itemPickerRowId;
+    setItemDraftError("");
+    setPricingItemCode(item.ItemCode);
+
+    let pricedItem: FinishedGoodItem;
+    try {
+      pricedItem = await fetchItemWithCustomerPrice(item);
+    } catch (err) {
+      console.error(err);
+      setItemDraftError(`Unable to load item price for ${item.ItemCode}.`);
+      setPricingItemCode("");
+      return;
+    }
+
     setItemRows((current) => {
       const existingRow = current.find((row) => row.id === rowId);
-      if (!existingRow) return [...current, { id: rowId, type: "Item", item, invoiceQty: 1, batch: null }];
-      return current.map((row) => (row.id === rowId ? { ...row, item, invoiceQty: row.invoiceQty || 1, batch: null } : row));
+      if (!existingRow) return [...current, { id: rowId, type: "Item", item: pricedItem, invoiceQty: 1, batch: null }];
+      return current.map((row) =>
+        row.id === rowId ? { ...row, item: pricedItem, invoiceQty: row.invoiceQty || 1, batch: null } : row,
+      );
     });
+    setPricingItemCode("");
     closeItemPicker();
     setBatchPickerRowId(rowId);
   };
 
   const selectBatchForRow = (batch: SelectedBatch) => {
     if (batchPickerRowId === null) return;
+    setItemDraftError("");
     setItemRows((current) => current.map((row) => (row.id === batchPickerRowId ? { ...row, batch } : row)));
+  };
+
+  const itemRowsValidationError = getItemRowsValidationError(itemRows);
+  const createDraftFromItems = async () => {
+    const validationError = getItemRowsValidationError(itemRows);
+    if (validationError) {
+      setItemDraftError(validationError);
+      return;
+    }
+
+    setCreatingItemDraft(true);
+    setItemDraftError("");
+    try {
+      const ok = await state.proceedToDraftFromItems(itemRowsToSelectedLines(itemRows));
+      if (ok) {
+        closeItemPicker();
+        closeBatchPicker();
+      } else {
+        setItemDraftError("Unable to create draft from selected items.");
+      }
+    } finally {
+      setCreatingItemDraft(false);
+    }
   };
 
   const showOrdersModal = Boolean(state.selectedParty) && ordersModalOpen;
@@ -1466,7 +1719,7 @@ export default function SalesInvoiceWizard() {
   const showItemPickerModal = Boolean(state.selectedParty) && itemPickerRowId !== null;
   const batchPickerRow = itemRows.find((row) => row.id === batchPickerRowId) || null;
   const showBatchPickerModal = Boolean(state.selectedParty && batchPickerRow?.item);
-  const showDraft = Boolean(state.selectedParty && state.customerDetails);
+  const showDraft = Boolean(state.selectedParty && state.step === 4);
   const openSalesOrderCount = state.salesOrders.length;
 
   return (
@@ -1485,11 +1738,18 @@ export default function SalesInvoiceWizard() {
           onOpenBatchPicker={openBatchPicker}
           onAddItemRow={addItemRow}
           onRemoveItemRow={removeItemRow}
+          itemDraftError={itemDraftError || state.draftError}
           onReset={resetInvoiceFlow}
         />
       )}
 
-      {showDraft && <DraftStep state={state} onReset={resetInvoiceFlow} />}
+      {showDraft && (
+        <DraftStep
+          state={state}
+          onReset={resetInvoiceFlow}
+          onAddItems={sourceMode === "items" ? openItemsModal : undefined}
+        />
+      )}
 
       {partyModalOpen && (
         <PartyPickerModal
@@ -1522,7 +1782,6 @@ export default function SalesInvoiceWizard() {
               </div>
             </header>
             <InvoiceSourceChoice
-              partyName={`${state.selectedParty?.CardName || ""} - ${state.selectedParty?.CardCode || ""}`}
               openSalesOrderCount={openSalesOrderCount}
               loadingOrders={state.loadingOrders}
               ordersError={state.ordersError}
@@ -1569,6 +1828,7 @@ export default function SalesInvoiceWizard() {
           onBack={closeItemPicker}
           onClose={closeItemPicker}
           onSelect={selectItemForRow}
+          selectingItemCode={pricingItemCode}
         />
       )}
 
@@ -1585,12 +1845,17 @@ export default function SalesInvoiceWizard() {
           onSelect={selectBatchForRow}
           onQuantityChange={(quantity) => {
             const nextQuantity = toFiniteQuantity(quantity);
+            setItemDraftError("");
             setItemRows((current) =>
               current.map((row) =>
                 row.id === batchPickerRow.id ? { ...row, invoiceQty: nextQuantity, batch: null } : row,
               ),
             );
           }}
+          onCreateDraft={createDraftFromItems}
+          canCreateDraft={!itemRowsValidationError}
+          creatingDraft={creatingItemDraft}
+          draftError={itemDraftError || state.draftError}
         />
       )}
     </div>

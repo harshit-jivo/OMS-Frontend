@@ -61,6 +61,9 @@ export type NextDocNumber = {
 
 const createFreightRow = (): FreightRow => ({ expenseCode: "", expenseName: "", lineTotal: 0 });
 
+const linesToRecord = (lines: SelectedLine[]) =>
+  Object.fromEntries(lines.map((line) => [lineKey(line.DocEntry, line.LineNum), line]));
+
 export const apiFetch = async <T,>(url: string, init?: RequestInit): Promise<T> => {
   const token = localStorage.getItem("access");
   const response = await fetch(url, {
@@ -291,6 +294,7 @@ export function useSalesInvoice() {
       State1: party.State1,
       U_Main_Group: party.U_Main_Group,
       U_Chain: party.U_Chain,
+      ListNum: party.ListNum,
     });
     setStep(2);
     setSalesOrders([]);
@@ -506,6 +510,15 @@ export function useSalesInvoice() {
       const billingAddresses = normalizeAddresses(addresses, "B");
       const shippingAddresses = normalizeAddresses(addresses, "S");
 
+      setCustomerDetails({
+        CardCode: selectedParty.CardCode,
+        CardName: selectedParty.CardName,
+        State1: selectedParty.State1 || undefined,
+        U_Chain: selectedParty.U_Chain || undefined,
+        BillToDef: billingAddresses[0]?.Address || "",
+        ShipToDef: shippingAddresses[0]?.Address || "",
+      });
+      setSalespersonDetails(null);
       setBillToAddresses(billingAddresses);
       setShipToAddresses(shippingAddresses);
       setForm((current) => ({
@@ -594,6 +607,15 @@ export function useSalesInvoice() {
       return false;
     }
     const ok = await loadDraftDetails();
+    if (ok) setStep(4);
+    return ok;
+  };
+
+  const proceedToDraftFromItems = async (lines: SelectedLine[]) => {
+    if (!selectedParty || lines.length === 0) return false;
+    setDraftError("");
+    setSelectedLines(linesToRecord(lines));
+    const ok = await loadPartyAddresses();
     if (ok) setStep(4);
     return ok;
   };
@@ -712,6 +734,7 @@ export function useSalesInvoice() {
     removeFreightRow,
     createInvoiceDraft,
     proceedToDraft,
+    proceedToDraftFromItems,
     loadPartyAddresses,
     resetStep3Form,
     saveDraft,

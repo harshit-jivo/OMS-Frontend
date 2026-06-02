@@ -384,20 +384,10 @@ export default function ContentsTab({ state }: Props) {
                     })
                   }
                 >
-                  {selectedBatchCount ? (
-                    <>
-                      <span>Warehouse: {batchWarehouse}</span>
-                      <em>
-                        Batches: {selectedBatchCount} | Qty: {selectedBatchQty.toLocaleString("en-IN")}/
-                        {invoiceQty.toLocaleString("en-IN")}
-                      </em>
-                    </>
-                  ) : (
-                    <>
-                      <span>Warehouse: {batchWarehouse}</span>
-                      <em>Batches: 0 | Qty: {invoiceQty.toLocaleString("en-IN")}</em>
-                    </>
-                  )}
+                  <span>
+                    Warehouse: {batchWarehouse} | Batches: {selectedBatchCount} | Qty:{" "}
+                    {selectedBatchQty.toLocaleString("en-IN")}/{invoiceQty.toLocaleString("en-IN")}
+                  </span>
                   {batchQtyMismatch && (
                     <strong className="si-batch-select-warning">
                       Batch quantity does not match invoice quantity.

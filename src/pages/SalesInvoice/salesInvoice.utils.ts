@@ -25,6 +25,7 @@ export const normalizeDateInput = (value?: string) => {
 };
 
 export type SelectedLine = {
+  SourceType?: "sales-order" | "items";
   DocEntry: number;
   DocNum: number;
   DocDate?: string;
@@ -84,6 +85,7 @@ export type Party = {
   State1?: string | null;
   U_Main_Group?: string | null;
   U_Chain?: string | null;
+  ListNum?: number | string | null;
   OpenOrders?: number;
   Num_of_Open_SalesOrder?: number;
 };
@@ -180,19 +182,35 @@ export const buildInvoicePayload = (
     ShipToCode: form.shipTo,
     PayToCode: form.payTo,
     ...(firstLine?.BPL_Id ? { BPL_IDAssignedToInvoice: firstLine.BPL_Id } : {}),
-    DocumentLines: lines.map((line) => ({
-      BaseType: 17,
-      BaseEntry: line.DocEntry,
-      BaseLine: line.LineNum,
-      ...(line.ShipDate ? { ShipDate: normalizeDateInput(line.ShipDate) } : {}),
-      ItemCode: line.ItemCode,
-      WarehouseCode: line.WhsCode,
-      Quantity: toNumber(line.invoiceQty),
-      BatchNumbers: (line.BatchNumbers || []).map((batch) => ({
+    DocumentLines: lines.map((line) => {
+      const batchNumbers = (line.BatchNumbers || []).map((batch) => ({
         BatchNumber: batch.BatchNumber,
         ...(batch.SystemSerialNumber !== undefined ? { SystemSerialNumber: batch.SystemSerialNumber } : {}),
         Quantity: toNumber(batch.Quantity),
-      })),
-    })),
+      }));
+
+      if (line.SourceType === "items") {
+        return {
+          ...(line.ShipDate ? { ShipDate: normalizeDateInput(line.ShipDate) } : {}),
+          ItemCode: line.ItemCode,
+          WarehouseCode: line.WhsCode,
+          Quantity: toNumber(line.invoiceQty),
+          ...(line.Price ? { UnitPrice: toNumber(line.Price) } : {}),
+          ...(line.TaxCode ? { TaxCode: line.TaxCode } : {}),
+          ...(batchNumbers.length ? { BatchNumbers: batchNumbers } : {}),
+        };
+      }
+
+      return {
+        BaseType: 17,
+        BaseEntry: line.DocEntry,
+        BaseLine: line.LineNum,
+        ...(line.ShipDate ? { ShipDate: normalizeDateInput(line.ShipDate) } : {}),
+        ItemCode: line.ItemCode,
+        WarehouseCode: line.WhsCode,
+        Quantity: toNumber(line.invoiceQty),
+        BatchNumbers: batchNumbers,
+      };
+    }),
   };
 };

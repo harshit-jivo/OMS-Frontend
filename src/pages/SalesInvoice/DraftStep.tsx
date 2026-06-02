@@ -6,6 +6,7 @@ import type { SalesInvoiceState } from "./useSalesInvoice";
 type Props = {
   state: SalesInvoiceState;
   onReset: () => void;
+  onAddItems?: () => void;
 };
 
 function DraftDocumentStrip({ state }: { state: SalesInvoiceState }) {
@@ -40,7 +41,7 @@ function DraftDocumentStrip({ state }: { state: SalesInvoiceState }) {
   );
 }
 
-export default function DraftStep({ state, onReset }: Props) {
+export default function DraftStep({ state, onReset, onAddItems }: Props) {
   const [totalsModalOpen, setTotalsModalOpen] = useState(false);
   const customerName = state.customerDetails?.CardName || state.selectedParty?.CardName || "-";
   const totalBeforeTax = state.totals.taxable + state.totals.freight;
@@ -59,9 +60,16 @@ export default function DraftStep({ state, onReset }: Props) {
         <div className="si-draft-party-name-cell">
           <span>Party Name</span>
           <strong>{customerName}</strong>
-          <button className="si-draft-change-party-btn" type="button" onClick={onReset}>
-            Change Party
-          </button>
+          <div className="si-draft-summary-actions">
+            {onAddItems && (
+              <button className="si-draft-change-party-btn" type="button" onClick={onAddItems}>
+                Add Items
+              </button>
+            )}
+            <button className="si-draft-change-party-btn" type="button" onClick={onReset}>
+              Change Party
+            </button>
+          </div>
         </div>
         <DraftDocumentStrip state={state} />
       </section>
