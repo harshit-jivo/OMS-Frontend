@@ -45,13 +45,13 @@ export const loadCurrentUserOrders = async () => {
 
 export const loadManagerOrders = async () => {
   const usersResponse = await userService.getUsers();
-  const managers = ((usersResponse.data || []) as User[]).filter((user) => {
+  const reportUsers = ((usersResponse.data || []) as User[]).filter((user) => {
     const role = user.role_name?.toLowerCase() || user.role?.toLowerCase();
-    return role === "manager";
+    return role === "manager" || role === "billing";
   });
 
   const ordersByManager = await Promise.all(
-    managers.map(async (manager) => {
+    reportUsers.map(async (manager) => {
       try {
         return await ordersService.getOrdersByUser(manager.id);
       } catch (error) {

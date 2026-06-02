@@ -123,7 +123,8 @@ export default function PersonWise_Report() {
 }, []);
 
   const filteredUsers = users.filter((u) => {
-    if (u.role_name?.toLowerCase() !== "manager" && u.role?.toLowerCase() !== "manager") return false;
+    const role = u.role_name?.toLowerCase() || u.role?.toLowerCase();
+    if (role !== "manager" && role !== "billing") return false;
 
     const userGroupIds = (u.main_groups || []).map((g) => g.id);
 

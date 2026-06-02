@@ -1974,151 +1974,134 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
                             </div>
                           </div>
 
-                          <div className="sl-scheme-panel-body">
-                            <div className="sl-scheme-dropdown-field">
-                              <div className="sl-scheme-table-head">
-                                <span>Scheme</span>
-                                <span>Qty</span>
-                                <span>Action</span>
-                              </div>
-                              {(row.schemes.length
-                                ? row.schemes
-                                : [{ scheme: "", schemeQty: "" }]
-                              ).map((schemeRow, schemeIndex) => (
-                                <div
-                                  className="sl-scheme-table-row"
-                                  key={`${index}-${schemeIndex}`}
-                                >
-                                  <select
-                                    value={schemeRow.scheme}
-                                    onChange={(e) =>
-                                      handleSchemeChange(
-                                        index,
-                                        schemeIndex,
-                                        "scheme",
-                                        e.target.value
-                                      )
-                                    }
-                                    disabled={
-                                      (row.confirmed && !isEditMode) ||
-                                      !row.isScheme ||
-                                      !(schemeOptions[index] || []).length
-                                    }
-                                  >
-                                    <option value="">
-                                      {row.isScheme
-                                        ? "Select Scheme..."
-                                        : "Enable scheme first"}
-                                    </option>
-                                    {(schemeOptions[index] || []).map(
-                                      (scheme) => (
-                                        <option
-                                          key={scheme.scheme_id}
-                                          value={scheme.scheme_id}
-                                        >
-                                          {scheme.scheme_name}
-                                        </option>
-                                      )
-                                    )}
-                                  </select>
-                                  <input
-                                    type="text"
-                                    value={schemeRow.schemeQty}
-                                    placeholder="0"
-                                    onChange={(e) =>
-                                      handleSchemeChange(
-                                        index,
-                                        schemeIndex,
-                                        "schemeQty",
-                                        e.target.value
-                                      )
-                                    }
-                                    disabled={
-                                      (row.confirmed && !isEditMode) ||
-                                      !row.isScheme
-                                    }
-                                  />
-                                  <button
-                                    type="button"
-                                    className="sl-remove-scheme-btn"
-                                    onClick={() =>
-                                      handleRemoveScheme(index, schemeIndex)
-                                    }
-                                    disabled={
-                                      (row.confirmed && !isEditMode) ||
-                                      !row.isScheme
-                                    }
-                                    aria-label="Remove scheme"
-                                    title="Remove scheme"
-                                  >
-                                    <svg
-                                      viewBox="0 0 24 24"
-                                      fill="none"
-                                      stroke="currentColor"
-                                      strokeWidth="2"
-                                    >
-                                      <path
-                                        strokeLinecap="round"
-                                        d="M5 12h14"
-                                      />
-                                    </svg>
-                                  </button>
+                          {row.isScheme && (
+                            <div className="sl-scheme-panel-body">
+                              <div className="sl-scheme-dropdown-field">
+                                <div className="sl-scheme-table-head">
+                                  <span>Scheme</span>
+                                  <span>Qty</span>
+                                  <span>Action</span>
                                 </div>
-                              ))}
-                              <button
-                                type="button"
-                                className="sl-add-scheme-btn"
-                                onClick={() => handleAddScheme(index)}
-                                disabled={
-                                  (row.confirmed && !isEditMode) ||
-                                  !row.isScheme
-                                }
-                              >
-                                <svg
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="2"
-                                >
-                                  <path
-                                    strokeLinecap="round"
-                                    d="M12 5v14M5 12h14"
-                                  />
-                                </svg>
-                                Add Scheme
-                              </button>
-                            </div>
-
-                            <div className="sl-scheme-total-card">
-                              <span className="sl-scheme-field-label">
-                                Total Ltrs
-                              </span>
-                              <input
-                                type="text"
-                                name="totalLtrs"
-                                value={
-                                  row.isScheme && row.schemes.length
-                                    ? (
-                                        Number(row.ltrs) +
-                                        row.schemes.reduce(
-                                          (sum, scheme) =>
-                                            sum + Number(scheme.schemeQty || 0),
-                                          0
+                                {(row.schemes.length
+                                  ? row.schemes
+                                  : [{ scheme: "", schemeQty: "" }]
+                                ).map((schemeRow, schemeIndex) => (
+                                  <div
+                                    className="sl-scheme-table-row"
+                                    key={`${index}-${schemeIndex}`}
+                                  >
+                                    <select
+                                      value={schemeRow.scheme}
+                                      onChange={(e) =>
+                                        handleSchemeChange(
+                                          index,
+                                          schemeIndex,
+                                          "scheme",
+                                          e.target.value
                                         )
-                                      ).toFixed(2)
-                                    : Number(row.ltrs).toFixed(2)
-                                }
-                                readOnly
-                              />
-                              <small>
-                                Base ltrs plus selected scheme quantity
-                              </small>
-                            </div>
-                          </div>
+                                      }
+                                      disabled={
+                                        (row.confirmed && !isEditMode) ||
+                                        !(schemeOptions[index] || []).length
+                                      }
+                                    >
+                                      <option value="">Select Scheme...</option>
+                                      {(schemeOptions[index] || []).map(
+                                        (scheme) => (
+                                          <option
+                                            key={scheme.scheme_id}
+                                            value={scheme.scheme_id}
+                                          >
+                                            {scheme.scheme_name}
+                                          </option>
+                                        )
+                                      )}
+                                    </select>
+                                    <input
+                                      type="text"
+                                      value={schemeRow.schemeQty}
+                                      placeholder="0"
+                                      onChange={(e) =>
+                                        handleSchemeChange(
+                                          index,
+                                          schemeIndex,
+                                          "schemeQty",
+                                          e.target.value
+                                        )
+                                      }
+                                      disabled={row.confirmed && !isEditMode}
+                                    />
+                                    <button
+                                      type="button"
+                                      className="sl-remove-scheme-btn"
+                                      onClick={() =>
+                                        handleRemoveScheme(index, schemeIndex)
+                                      }
+                                      disabled={row.confirmed && !isEditMode}
+                                      aria-label="Remove scheme"
+                                      title="Remove scheme"
+                                    >
+                                      <svg
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                      >
+                                        <path
+                                          strokeLinecap="round"
+                                          d="M5 12h14"
+                                        />
+                                      </svg>
+                                    </button>
+                                  </div>
+                                ))}
+                                <button
+                                  type="button"
+                                  className="sl-add-scheme-btn"
+                                  onClick={() => handleAddScheme(index)}
+                                  disabled={row.confirmed && !isEditMode}
+                                >
+                                  <svg
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                  >
+                                    <path
+                                      strokeLinecap="round"
+                                      d="M12 5v14M5 12h14"
+                                    />
+                                  </svg>
+                                  Add Scheme
+                                </button>
+                              </div>
 
-                          {!row.isScheme && (
-                            <div className="sl-scheme-muted-note">
-                              Turn on scheme to select an offer for this item.
+                              <div className="sl-scheme-total-card">
+                                <span className="sl-scheme-field-label">
+                                  Total Ltrs
+                                </span>
+                                <input
+                                  type="text"
+                                  name="totalLtrs"
+                                  value={
+                                    row.schemes.length
+                                      ? (
+                                          Number(row.ltrs) +
+                                          row.schemes.reduce(
+                                            (sum, scheme) =>
+                                              sum +
+                                              Number(scheme.schemeQty || 0),
+                                            0
+                                          )
+                                        ).toFixed(2)
+                                      : Number(row.ltrs).toFixed(2)
+                                  }
+                                  readOnly
+                                />
+                                <small>
+                                  Base ltrs plus selected scheme quantity
+                                </small>
+                              </div>
                             </div>
                           )}
 
