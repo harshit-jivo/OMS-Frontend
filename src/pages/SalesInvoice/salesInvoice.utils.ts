@@ -49,7 +49,7 @@ export type SelectedLine = {
   ShipDate?: string;
   invoiceQty: number;
   BatchNumbers?: Array<{
-    BatchNumber: string;
+    BatchNumber?: string;
     SystemSerialNumber?: number;
     Quantity: number;
   }>;
@@ -183,18 +183,22 @@ export const buildInvoicePayload = (
     PayToCode: form.payTo,
     ...(firstLine?.BPL_Id ? { BPL_IDAssignedToInvoice: firstLine.BPL_Id } : {}),
     DocumentLines: lines.map((line) => {
-      const batchNumbers = (line.BatchNumbers || []).map((batch) => ({
-        BatchNumber: batch.BatchNumber,
-        ...(batch.SystemSerialNumber !== undefined ? { SystemSerialNumber: batch.SystemSerialNumber } : {}),
-        Quantity: toNumber(batch.Quantity),
-      }));
+      const batchNumbers = (line.BatchNumbers || [])
+        .map((batch) => ({
+          ...(batch.BatchNumber ? { BatchNumber: batch.BatchNumber } : {}),
+          ...(batch.SystemSerialNumber !== undefined ? { SystemSerialNumber: batch.SystemSerialNumber } : {}),
+          Quantity: toNumber(batch.Quantity),
+        }))
+        .filter((batch) => (batch.BatchNumber || batch.SystemSerialNumber !== undefined) && batch.Quantity > 0);
+      const batchQuantity = batchNumbers.reduce((sum, batch) => sum + toNumber(batch.Quantity), 0);
+      const invoiceQuantity = toNumber(line.invoiceQty) || batchQuantity;
 
       if (line.SourceType === "items") {
         return {
           ...(line.ShipDate ? { ShipDate: normalizeDateInput(line.ShipDate) } : {}),
           ItemCode: line.ItemCode,
           WarehouseCode: line.WhsCode,
-          Quantity: toNumber(line.invoiceQty),
+          Quantity: invoiceQuantity,
           ...(line.Price ? { UnitPrice: toNumber(line.Price) } : {}),
           ...(line.TaxCode ? { TaxCode: line.TaxCode } : {}),
           ...(batchNumbers.length ? { BatchNumbers: batchNumbers } : {}),
@@ -202,13 +206,14 @@ export const buildInvoicePayload = (
       }
 
       return {
+        LineNum: line.LineNum,
         BaseType: 17,
         BaseEntry: line.DocEntry,
         BaseLine: line.LineNum,
-        ...(line.ShipDate ? { ShipDate: normalizeDateInput(line.ShipDate) } : {}),
         ItemCode: line.ItemCode,
+        Quantity: invoiceQuantity,
         WarehouseCode: line.WhsCode,
-        Quantity: toNumber(line.invoiceQty),
+        ...(line.ShipDate ? { ShipDate: normalizeDateInput(line.ShipDate) } : {}),
         BatchNumbers: batchNumbers,
       };
     }),

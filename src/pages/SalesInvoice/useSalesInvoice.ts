@@ -59,6 +59,17 @@ export type NextDocNumber = {
   NextNumber: number | string | null;
 };
 
+type ApiMessageResponse = {
+  message?: unknown;
+  detail?: unknown;
+  error?: unknown;
+  errors?: unknown;
+  data?: unknown;
+  result?: unknown;
+  DocEntry?: unknown;
+  DocNum?: unknown;
+};
+
 const createFreightRow = (): FreightRow => ({ expenseCode: "", expenseName: "", lineTotal: 0 });
 
 const linesToRecord = (lines: SelectedLine[]) =>
@@ -89,6 +100,46 @@ const pick = <T,>(source: Record<string, unknown>, keys: string[], fallback: T):
     const value = source[key];
     if (value !== undefined && value !== null && value !== "") return value as T;
   }
+  return fallback;
+};
+
+const parsePossibleJson = (value: unknown): unknown => {
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+};
+
+const extractApiMessage = (value: unknown, fallback: string): string => {
+  const parsed = parsePossibleJson(value);
+  if (!parsed) return fallback;
+  if (typeof parsed === "string") return parsed || fallback;
+
+  if (Array.isArray(parsed)) {
+    const messages = parsed.map((item) => extractApiMessage(item, "")).filter(Boolean);
+    return messages.length ? messages.join(" ") : fallback;
+  }
+
+  if (typeof parsed === "object") {
+    const source = parsed as ApiMessageResponse;
+    const directMessage = source.message ?? source.detail ?? source.error ?? source.errors;
+    if (typeof directMessage === "string" && directMessage.trim()) return directMessage.trim();
+    if (directMessage && typeof directMessage === "object") return extractApiMessage(directMessage, fallback);
+
+    const nestedMessage = source.data ?? source.result;
+    if (nestedMessage) {
+      const extracted = extractApiMessage(nestedMessage, "");
+      if (extracted) return extracted;
+    }
+
+    const docNumber = source.DocNum ?? source.DocEntry;
+    if (docNumber !== undefined && docNumber !== null && String(docNumber).trim()) {
+      return `Invoice posted to SAP HANA successfully. Document: ${docNumber}`;
+    }
+  }
+
   return fallback;
 };
 
@@ -680,14 +731,14 @@ export function useSalesInvoice() {
 
     setPosting(true);
     try {
-      await apiFetch("/api/sap/service-layer/invoices/", {
+      const data = await apiFetch<ApiMessageResponse>("/api/service-layer/invoice/", {
         method: "POST",
         body: JSON.stringify(payload),
       });
-      setPostSuccess("Invoice posted to SAP HANA successfully.");
+      setPostSuccess(extractApiMessage(data, "Invoice posted to SAP HANA successfully."));
     } catch (error) {
       console.error(error);
-      setPostError("Unable to post invoice to SAP HANA.");
+      setPostError(extractApiMessage(error instanceof Error ? error.message : error, "Unable to post invoice to SAP HANA."));
     } finally {
       setPosting(false);
     }

@@ -22,6 +22,7 @@ import Party_Product_Assignment from "./pages/Party_Product_Assignment";
 import Add_Scheme from "./pages/Add_Scheme";
 import FOC from "./pages/FOC";
 import SalesInvoice from "./pages/Sales_Invoice";
+import SkuGalleryPage from "./pages/SalesInvoice/SkuGalleryPage";
 import Staff from "./pages/Staff";
 import Staff_Rate_Assignment from "./pages/Staff_Rate_Assignment";
 import Order_Stock_Check from "./pages/Order_Stock_Check";
@@ -79,6 +80,14 @@ function App() {
           element={
             <Sidebar>
               <SalesInvoice />
+            </Sidebar>}
+        />
+
+        <Route
+          path="/Sales_Invoice/SKU_Images"
+          element={
+            <Sidebar>
+              <SkuGalleryPage />
             </Sidebar>}
         />
 

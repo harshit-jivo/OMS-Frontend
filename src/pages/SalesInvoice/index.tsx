@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { HiArchiveBox, HiArrowRight, HiDocumentText, HiTrash } from "react-icons/hi2";
+import { useNavigate } from "react-router-dom";
+import { HiArchiveBox, HiArrowRight, HiChevronLeft, HiDocumentText, HiPhoto, HiTrash, HiXMark } from "react-icons/hi2";
 import DraftStep from "./DraftStep";
 import OrdersStep from "./OrdersStep";
 import { apiFetch, useSalesInvoice, type SalesInvoiceState } from "./useSalesInvoice";
@@ -64,8 +65,18 @@ type InventoryWarehouse = {
 
 type BatchDetail = {
   SysNumber?: number;
-  BatchNum: string;
+  BatchNum?: string;
   BatchNumber?: string;
+  DistNumber?: string;
+  BatchNo?: string;
+  BatchCode?: string;
+  BatchID?: string;
+  BatchId?: string;
+  Batch?: string;
+  LotNumber?: string;
+  MnfSerial?: string;
+  InternalSerialNumber?: string;
+  SerialNumber?: string;
   ItemCode: string;
   ItemName: string;
   WhsCode: string;
@@ -78,6 +89,7 @@ type BatchDetail = {
   BaseEntry?: number;
   SystemSerialNumber?: number;
   AbsEntry?: number;
+  [key: string]: unknown;
 };
 
 type SelectedBatch = {
@@ -286,14 +298,26 @@ function PartyPickerModal({ state, onClose, onSelect }: PartyPickerModalProps) {
   );
 
   return (
-    <div className="si-modal-backdrop" role="presentation">
-      <section className="si-party-modal" role="dialog" aria-modal="true" aria-label="Select party">
+    <div className="si-modal-backdrop" role="presentation" onClick={onClose}>
+      <section
+        className="si-party-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Select party"
+        onClick={(event) => event.stopPropagation()}
+      >
         <header className="si-so-modal-head">
           <div>
             <h2>Select party</h2>
           </div>
-          <button className="si-btn si-btn-outline" type="button" onClick={onClose}>
-            Close
+          <button
+            className="si-modal-icon-btn si-modal-icon-close"
+            type="button"
+            aria-label="Close"
+            title="Close"
+            onClick={onClose}
+          >
+            <HiXMark aria-hidden="true" />
           </button>
         </header>
 
@@ -424,17 +448,31 @@ function PartyPickerModal({ state, onClose, onSelect }: PartyPickerModalProps) {
         </div>
 
         {filterModal && (
-          <div className="si-nested-modal-backdrop" role="presentation">
+          <div
+            className="si-nested-modal-backdrop"
+            role="presentation"
+            onClick={(event) => {
+              event.stopPropagation();
+              setFilterModal(null);
+            }}
+          >
             <section
               className="si-filter-options-modal"
               role="dialog"
               aria-modal="true"
               aria-label={`${modalTitle} filter`}
+              onClick={(event) => event.stopPropagation()}
             >
               <header className="si-filter-options-head">
                 <h3>{modalTitle}</h3>
-                <button className="si-btn si-btn-outline" type="button" onClick={() => setFilterModal(null)}>
-                  Close
+                <button
+                  className="si-modal-icon-btn si-modal-icon-close"
+                  type="button"
+                  aria-label="Close"
+                  title="Close"
+                  onClick={() => setFilterModal(null)}
+                >
+                  <HiXMark aria-hidden="true" />
                 </button>
               </header>
               <div className="si-filter-options-grid">
@@ -565,20 +603,22 @@ function ItemInvoiceLines({
         {rows.map((row) => {
           const batchQty = row.batch?.batches.reduce((sum, batch) => sum + batch.quantity, 0) || 0;
           const invoiceQty = toFiniteQuantity(row.invoiceQty);
+          const batchWarehouse = row.batch?.warehouseCode || "-";
+          const availableQty = row.batch ? row.batch.warehouseQuantity : row.item ? getItemTotalQty(row.item) : 0;
           const batchQtyMismatch = Boolean(row.item) && Math.abs(batchQty - invoiceQty) >= 0.0001;
 
           return (
             <article className="si-invoice-line-card" key={row.id}>
-              <button
-                className="si-invoice-line-remove"
-                type="button"
-                onClick={() => onRemoveRow(row.id)}
-                aria-label={`Remove ${row.item?.ItemName || "item row"}`}
-              >
-                <HiTrash aria-hidden="true" />
-              </button>
-              <div className="si-invoice-item-visual" aria-hidden="true">
+              <div className="si-invoice-item-visual">
                 <span />
+                <button
+                  className="si-invoice-line-remove"
+                  type="button"
+                  onClick={() => onRemoveRow(row.id)}
+                  aria-label={`Remove ${row.item?.ItemName || "item row"}`}
+                >
+                  <HiTrash aria-hidden="true" />
+                </button>
               </div>
               <div className="si-invoice-item-copy">
                 <strong>{row.item?.ItemName || "Select an item"}</strong>
@@ -605,13 +645,12 @@ function ItemInvoiceLines({
                 >
                   {row.batch ? (
                     <span>
-                      Warehouse: {row.batch.warehouseCode} | Batches: {row.batch.batches.length} | Qty:{" "}
-                      {batchQty.toLocaleString("en-IN")}/{invoiceQty.toLocaleString("en-IN")}
+                      Warehouse: {batchWarehouse} | Available Qty: {availableQty.toLocaleString("en-IN")}
                     </span>
                   ) : (
                     <span>
                       {row.item
-                        ? `Warehouse: - | Batches: 0 | Qty: ${invoiceQty.toLocaleString("en-IN")}`
+                        ? `Warehouse: ${batchWarehouse} | Available Qty: ${availableQty.toLocaleString("en-IN")}`
                         : "Select item first"}
                     </span>
                   )}
@@ -630,13 +669,17 @@ function ItemInvoiceLines({
   );
 }
 
-function InvoicePageHeader() {
+function InvoicePageHeader({ onOpenSkuGallery }: { onOpenSkuGallery: () => void }) {
   return (
     <header className="si-page-head">
       <div>
         <span className="si-eyebrow">SAP Billing</span>
         <h1>Sales Invoice</h1>
       </div>
+      <button className="si-header-action-btn" type="button" onClick={onOpenSkuGallery}>
+        <HiPhoto aria-hidden="true" />
+        SKU Gallery
+      </button>
     </header>
   );
 }
@@ -881,8 +924,14 @@ function ItemPickerModal({
   };
 
   return (
-    <div className="si-modal-backdrop" role="presentation">
-      <section className="si-so-modal si-item-modal" role="dialog" aria-modal="true" aria-label="Select finished good item">
+    <div className="si-modal-backdrop" role="presentation" onClick={onClose}>
+      <section
+        className="si-so-modal si-item-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Select finished good item"
+        onClick={(event) => event.stopPropagation()}
+      >
         <header className="si-so-modal-head">
           <div>
             <span className="si-eyebrow">Finished Goods</span>
@@ -890,11 +939,23 @@ function ItemPickerModal({
             <p>{loading ? "Loading items..." : `${filteredItems.length} items`}</p>
           </div>
           <div className="si-modal-head-actions">
-            <button className="si-btn si-btn-outline" type="button" onClick={onBack}>
-              Back
+            <button
+              className="si-modal-icon-btn si-modal-icon-back"
+              type="button"
+              aria-label="Back"
+              title="Back"
+              onClick={onBack}
+            >
+              <HiChevronLeft aria-hidden="true" />
             </button>
-            <button className="si-btn si-btn-outline" type="button" onClick={onClose}>
-              Close
+            <button
+              className="si-modal-icon-btn si-modal-icon-close"
+              type="button"
+              aria-label="Close"
+              title="Close"
+              onClick={onClose}
+            >
+              <HiXMark aria-hidden="true" />
             </button>
           </div>
         </header>
@@ -969,17 +1030,31 @@ function ItemPickerModal({
         </div>
 
         {activeFilterConfig && (
-          <div className="si-nested-modal-backdrop" role="presentation">
+          <div
+            className="si-nested-modal-backdrop"
+            role="presentation"
+            onClick={(event) => {
+              event.stopPropagation();
+              setFilterModal(null);
+            }}
+          >
             <section
               className="si-filter-options-modal"
               role="dialog"
               aria-modal="true"
               aria-label={`${activeFilterConfig.title} filter`}
+              onClick={(event) => event.stopPropagation()}
             >
               <header className="si-filter-options-head">
                 <h3>{activeFilterConfig.title}</h3>
-                <button className="si-btn si-btn-outline" type="button" onClick={() => setFilterModal(null)}>
-                  Close
+                <button
+                  className="si-modal-icon-btn si-modal-icon-close"
+                  type="button"
+                  aria-label="Close"
+                  title="Close"
+                  onClick={() => setFilterModal(null)}
+                >
+                  <HiXMark aria-hidden="true" />
                 </button>
               </header>
               <div className="si-filter-options-grid">
@@ -1116,7 +1191,63 @@ const pickItemText = (item: FinishedGoodItem, keys: string[]) => {
   return "";
 };
 
-const getBatchNumber = (batch: BatchDetail) => batch.BatchNum || batch.BatchNumber || "";
+const getBatchDateTokens = (value?: string | null) => {
+  const text = String(value || "").trim();
+  if (!text) return new Set<string>();
+
+  const tokens = new Set([text.toLowerCase().replace(/[^a-z0-9]/g, "")]);
+  const dateOnly = text.split("T")[0]?.split(" ")[0] || text;
+  const parts = dateOnly.split(/[/-]/).map((part) => part.trim()).filter(Boolean);
+
+  if (parts.length === 3) {
+    const [first, second, third] = parts;
+    const year = first.length === 4 ? first : third;
+    const month = second.padStart(2, "0");
+    const day = first.length === 4 ? third.padStart(2, "0") : first.padStart(2, "0");
+
+    if (year.length === 4) {
+      tokens.add(`${year}${month}${day}`);
+      tokens.add(`${day}${month}${year}`);
+    }
+  }
+
+  return tokens;
+};
+
+const isBatchDateValue = (value: string, batch: BatchDetail) => {
+  const candidateTokens = getBatchDateTokens(value);
+  const dateTokens = [batch.ExpDate, batch.PrdDate, batch.InDate].reduce<Set<string>>((tokens, dateValue) => {
+    getBatchDateTokens(dateValue).forEach((token) => tokens.add(token));
+    return tokens;
+  }, new Set());
+
+  return [...candidateTokens].some((token) => token && dateTokens.has(token));
+};
+
+const getBatchNumber = (batch: BatchDetail) => {
+  const source = batch as Record<string, unknown>;
+  const candidateKeys = [
+    "BatchNumber",
+    "DistNumber",
+    "BatchNo",
+    "BatchCode",
+    "BatchID",
+    "BatchId",
+    "Batch",
+    "LotNumber",
+    "BatchNum",
+    "MnfSerial",
+    "InternalSerialNumber",
+    "SerialNumber",
+  ];
+
+  for (const key of candidateKeys) {
+    const value = String(source[key] ?? "").trim();
+    if (value && !isBatchDateValue(value, batch)) return value;
+  }
+
+  return "";
+};
 
 const getBatchSystemSerialNumber = (batch: BatchDetail) => {
   const value = batch.SystemSerialNumber ?? batch.SysNumber ?? batch.AbsEntry;
@@ -1171,13 +1302,14 @@ const itemRowsToSelectedLines = (rows: ItemInvoiceRow[]): SelectedLine[] =>
         BatchNumbers: row.batch.batches
           .map(({ batch, quantity }) => {
             const systemSerialNumber = getBatchSystemSerialNumber(batch);
+            const batchNumber = getBatchNumber(batch);
             return {
-              BatchNumber: getBatchNumber(batch),
+              ...(batchNumber ? { BatchNumber: batchNumber } : {}),
               ...(systemSerialNumber !== undefined ? { SystemSerialNumber: systemSerialNumber } : {}),
               Quantity: quantity,
             };
           })
-          .filter((batch) => batch.BatchNumber && batch.Quantity > 0),
+          .filter((batch) => (batch.BatchNumber || batch.SystemSerialNumber !== undefined) && batch.Quantity > 0),
       };
     });
 
@@ -1307,8 +1439,14 @@ function BatchPickerModal({
   }, [batchSignature, batches.length, loadingBatches, selectedWarehouseQuantity, selectedWhsCode]);
 
   return (
-    <div className="si-modal-backdrop" role="presentation">
-      <section className="si-so-modal si-batch-modal" role="dialog" aria-modal="true" aria-label="Choose item batch">
+    <div className="si-modal-backdrop" role="presentation" onClick={onClose}>
+      <section
+        className="si-so-modal si-batch-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Choose item batch"
+        onClick={(event) => event.stopPropagation()}
+      >
         <header className="si-so-modal-head">
           <div>
             <span className="si-eyebrow">Batch Selection</span>
@@ -1316,11 +1454,23 @@ function BatchPickerModal({
             <p>{item.ItemName}</p>
           </div>
           <div className="si-modal-head-actions">
-            <button className="si-btn si-btn-outline" type="button" onClick={onBack}>
-              Back
+            <button
+              className="si-modal-icon-btn si-modal-icon-back"
+              type="button"
+              aria-label="Back"
+              title="Back"
+              onClick={onBack}
+            >
+              <HiChevronLeft aria-hidden="true" />
             </button>
-            <button className="si-btn si-btn-outline" type="button" onClick={onClose}>
-              Close
+            <button
+              className="si-modal-icon-btn si-modal-icon-close"
+              type="button"
+              aria-label="Close"
+              title="Close"
+              onClick={onClose}
+            >
+              <HiXMark aria-hidden="true" />
             </button>
           </div>
         </header>
@@ -1526,6 +1676,7 @@ function SkeletonInvoice({
 
 export default function SalesInvoiceWizard() {
   const state = useSalesInvoice();
+  const navigate = useNavigate();
   const [ordersModalOpen, setOrdersModalOpen] = useState(false);
   const [partyModalOpen, setPartyModalOpen] = useState(false);
   const [sourceModalOpen, setSourceModalOpen] = useState(false);
@@ -1724,7 +1875,7 @@ export default function SalesInvoiceWizard() {
 
   return (
     <div className="si-page">
-      <InvoicePageHeader />
+      <InvoicePageHeader onOpenSkuGallery={() => navigate("/Sales_Invoice/SKU_Images")} />
 
       {!showDraft && (
         <SkeletonInvoice
@@ -1764,8 +1915,14 @@ export default function SalesInvoiceWizard() {
       )}
 
       {showSourceModal && (
-        <div className="si-modal-backdrop" role="presentation">
-          <section className="si-source-modal" role="dialog" aria-modal="true" aria-label="Choose invoice source">
+        <div className="si-modal-backdrop" role="presentation" onClick={closeSourceModal}>
+          <section
+            className="si-source-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Choose invoice source"
+            onClick={(event) => event.stopPropagation()}
+          >
             <header className="si-so-modal-head">
               <div>
                 <span className="si-eyebrow">Invoice Against</span>
@@ -1773,11 +1930,23 @@ export default function SalesInvoiceWizard() {
                 <p>{state.selectedParty?.CardCode}</p>
               </div>
               <div className="si-modal-head-actions">
-                <button className="si-btn si-btn-outline" type="button" onClick={backToPartyModal}>
-                  Back
+                <button
+                  className="si-modal-icon-btn si-modal-icon-back"
+                  type="button"
+                  aria-label="Back"
+                  title="Back"
+                  onClick={backToPartyModal}
+                >
+                  <HiChevronLeft aria-hidden="true" />
                 </button>
-                <button className="si-btn si-btn-outline" type="button" onClick={closeSourceModal}>
-                  Close
+                <button
+                  className="si-modal-icon-btn si-modal-icon-close"
+                  type="button"
+                  aria-label="Close"
+                  title="Close"
+                  onClick={closeSourceModal}
+                >
+                  <HiXMark aria-hidden="true" />
                 </button>
               </div>
             </header>
@@ -1793,8 +1962,14 @@ export default function SalesInvoiceWizard() {
       )}
 
       {showOrdersModal && (
-        <div className="si-modal-backdrop" role="presentation">
-          <section className="si-so-modal" role="dialog" aria-modal="true" aria-label="Select open sales orders">
+        <div className="si-modal-backdrop" role="presentation" onClick={closeOrdersModal}>
+          <section
+            className="si-so-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Select open sales orders"
+            onClick={(event) => event.stopPropagation()}
+          >
             <header className="si-so-modal-head">
               <div>
                 <span className="si-eyebrow">Open Sales Orders</span>
@@ -1805,11 +1980,23 @@ export default function SalesInvoiceWizard() {
                 </p>
               </div>
               <div className="si-modal-head-actions">
-                <button className="si-btn si-btn-outline" type="button" onClick={backToPartyModal}>
-                  Back
+                <button
+                  className="si-modal-icon-btn si-modal-icon-back"
+                  type="button"
+                  aria-label="Back"
+                  title="Back"
+                  onClick={backToPartyModal}
+                >
+                  <HiChevronLeft aria-hidden="true" />
                 </button>
-                <button className="si-btn si-btn-outline" type="button" onClick={closeOrdersModal}>
-                  Close
+                <button
+                  className="si-modal-icon-btn si-modal-icon-close"
+                  type="button"
+                  aria-label="Close"
+                  title="Close"
+                  onClick={closeOrdersModal}
+                >
+                  <HiXMark aria-hidden="true" />
                 </button>
               </div>
             </header>
