@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { HiTrash } from "react-icons/hi2";
+import { HiTrash, HiXMark } from "react-icons/hi2";
 import { formatMoney, lineKey, toNumber, type SelectedLine } from "./salesInvoice.utils";
 import { apiFetch, type SalesInvoiceState } from "./useSalesInvoice";
 
@@ -394,9 +394,17 @@ function BatchPickerModal({
             <h2>{context.itemCode}</h2>
             <p>{context.itemName}</p>
           </div>
-          <button className="si-btn si-btn-outline" type="button" onClick={onClose}>
-            Close
-          </button>
+          <div className="si-modal-head-actions">
+            <button
+              className="si-modal-icon-btn si-modal-icon-close"
+              type="button"
+              aria-label="Close"
+              title="Close"
+              onClick={onClose}
+            >
+              <HiXMark aria-hidden="true" />
+            </button>
+          </div>
         </header>
 
         <div className="si-batch-picker-body">
@@ -483,12 +491,6 @@ function BatchPickerModal({
                 <div className="si-empty">Select a warehouse.</div>
               )
             )}
-
-            <div className="si-batch-modal-actions">
-              <button className="si-btn si-btn-outline" type="button" onClick={onClose}>
-                Close
-              </button>
-            </div>
           </section>
         </div>
       </section>

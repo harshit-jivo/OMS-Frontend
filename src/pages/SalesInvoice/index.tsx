@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { HiArchiveBox, HiArrowRight, HiChevronLeft, HiDocumentText, HiPhoto, HiTrash, HiXMark } from "react-icons/hi2";
+import { HiArchiveBox, HiArrowPath, HiArrowRight, HiChevronLeft, HiDocumentText, HiPhoto, HiTrash, HiXMark } from "react-icons/hi2";
 import DraftStep from "./DraftStep";
 import OrdersStep from "./OrdersStep";
 import { apiFetch, useSalesInvoice, type SalesInvoiceState } from "./useSalesInvoice";
@@ -669,17 +669,22 @@ function ItemInvoiceLines({
   );
 }
 
-function InvoicePageHeader({ onOpenSkuGallery }: { onOpenSkuGallery: () => void }) {
+function InvoicePageHeader({ onOpenSkuGallery, onReload }: { onOpenSkuGallery: () => void; onReload: () => void }) {
   return (
     <header className="si-page-head">
       <div>
         <span className="si-eyebrow">SAP Billing</span>
         <h1>Sales Invoice</h1>
       </div>
-      <button className="si-header-action-btn" type="button" onClick={onOpenSkuGallery}>
-        <HiPhoto aria-hidden="true" />
-        SKU Gallery
-      </button>
+      <div className="si-page-head-actions">
+        <button className="si-header-action-btn si-header-action-btn-secondary" type="button" onClick={onReload}>
+          <HiArrowPath aria-hidden="true" />
+        </button>
+        <button className="si-header-action-btn" type="button" onClick={onOpenSkuGallery}>
+          <HiPhoto aria-hidden="true" />
+          SKU Gallery
+        </button>
+      </div>
     </header>
   );
 }
@@ -1875,7 +1880,10 @@ export default function SalesInvoiceWizard() {
 
   return (
     <div className="si-page">
-      <InvoicePageHeader onOpenSkuGallery={() => navigate("/Sales_Invoice/SKU_Images")} />
+      <InvoicePageHeader
+        onReload={() => window.location.reload()}
+        onOpenSkuGallery={() => navigate("/Sales_Invoice/SKU_Images")}
+      />
 
       {!showDraft && (
         <SkeletonInvoice

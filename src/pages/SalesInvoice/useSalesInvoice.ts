@@ -143,6 +143,18 @@ const extractApiMessage = (value: unknown, fallback: string): string => {
   return fallback;
 };
 
+const formatApiErrorMessage = (value: unknown, fallback: string): string => {
+  const parsed = parsePossibleJson(value);
+  if (!parsed) return fallback;
+  if (typeof parsed === "string") return parsed || fallback;
+
+  try {
+    return JSON.stringify(parsed, null, 2);
+  } catch {
+    return extractApiMessage(parsed, fallback);
+  }
+};
+
 const normalizeLine = (line: SalesOrderLine, index: number): SalesOrderLine => ({
   ...line,
   LineNum: toNumber(pick(line, ["LineNum", "LineNo", "Line_No", "VisOrder"], index)),
@@ -738,7 +750,7 @@ export function useSalesInvoice() {
       setPostSuccess(extractApiMessage(data, "Invoice posted to SAP HANA successfully."));
     } catch (error) {
       console.error(error);
-      setPostError(extractApiMessage(error instanceof Error ? error.message : error, "Unable to post invoice to SAP HANA."));
+      setPostError(formatApiErrorMessage(error instanceof Error ? error.message : error, "Unable to post invoice to SAP HANA."));
     } finally {
       setPosting(false);
     }
