@@ -26,12 +26,12 @@ import SkuGalleryPage from "./pages/SalesInvoice/SkuGalleryPage";
 import Staff from "./pages/Staff";
 import Staff_Rate_Assignment from "./pages/Staff_Rate_Assignment";
 import Order_Stock_Check from "./pages/Order_Stock_Check";
+import Product_Stock from "./pages/Product_Stock";
 
 function App() {
   return (
     <BrowserRouter>
-       <Routes>
-      
+      <Routes>
         <Route path="/" element={<Login />} />
 
         <Route
@@ -39,40 +39,44 @@ function App() {
           element={
             <Sidebar>
               <Dashboard />
-              </Sidebar>}
-        />      
+            </Sidebar>
+          }
+        />
 
         <Route
           path="/App_User"
           element={
             <Sidebar>
               <App_User />
-              </Sidebar>}
-        />      
-        
+            </Sidebar>
+          }
+        />
 
         <Route
           path="/Sap_Sync"
           element={
             <Sidebar>
               <Sap_sync />
-              </Sidebar>}
-        />      
+            </Sidebar>
+          }
+        />
 
-       <Route
+        <Route
           path="/Add_Sales"
           element={
             <Sidebar>
               <Add_Sales />
-              </Sidebar>}
-        />     
+            </Sidebar>
+          }
+        />
 
         <Route
           path="/FOC"
           element={
             <Sidebar>
               <FOC />
-            </Sidebar>}
+            </Sidebar>
+          }
         />
 
         <Route
@@ -80,7 +84,8 @@ function App() {
           element={
             <Sidebar>
               <SalesInvoice />
-            </Sidebar>}
+            </Sidebar>
+          }
         />
 
         <Route
@@ -88,15 +93,17 @@ function App() {
           element={
             <Sidebar>
               <SkuGalleryPage />
-            </Sidebar>}
+            </Sidebar>
+          }
         />
 
-         <Route
+        <Route
           path="/View_Orders"
           element={
             <Sidebar>
               <View_Orders />
-              </Sidebar>}
+            </Sidebar>
+          }
         />
 
         <Route
@@ -104,7 +111,8 @@ function App() {
           element={
             <Sidebar>
               <Auditor_orders />
-            </Sidebar>}
+            </Sidebar>
+          }
         />
 
         <Route
@@ -112,7 +120,8 @@ function App() {
           element={
             <Sidebar>
               <Billing_orders />
-            </Sidebar>}
+            </Sidebar>
+          }
         />
 
         <Route
@@ -120,7 +129,8 @@ function App() {
           element={
             <Sidebar>
               <RateApproverOrders />
-            </Sidebar>}
+            </Sidebar>
+          }
         />
 
         <Route
@@ -128,7 +138,8 @@ function App() {
           element={
             <Sidebar>
               <Order_Status_Tracking mode="auditor" />
-            </Sidebar>}
+            </Sidebar>
+          }
         />
 
         <Route
@@ -136,7 +147,8 @@ function App() {
           element={
             <Sidebar>
               <Order_Status_Tracking mode="billing" />
-            </Sidebar>}
+            </Sidebar>
+          }
         />
 
         <Route
@@ -144,23 +156,26 @@ function App() {
           element={
             <Sidebar>
               <Order_Status_Tracking mode="rate_approver" />
-            </Sidebar>}
+            </Sidebar>
+          }
         />
 
-         <Route
+        <Route
           path="/Daily_Report"
           element={
             <Sidebar>
               <Daily_Report />
-            </Sidebar>}
+            </Sidebar>
+          }
         />
 
-         <Route
+        <Route
           path="/PersonWise_Report"
           element={
             <Sidebar>
               <PersonWise_Report />
-            </Sidebar>}
+            </Sidebar>
+          }
         />
 
         <Route
@@ -168,7 +183,8 @@ function App() {
           element={
             <Sidebar>
               <Sales_Report />
-            </Sidebar>}
+            </Sidebar>
+          }
         />
 
         <Route
@@ -176,7 +192,8 @@ function App() {
           element={
             <Sidebar>
               <StateWise_Report />
-            </Sidebar>}
+            </Sidebar>
+          }
         />
 
         <Route
@@ -184,7 +201,8 @@ function App() {
           element={
             <Sidebar>
               <Order_Tracking />
-            </Sidebar>}
+            </Sidebar>
+          }
         />
 
         <Route
@@ -192,15 +210,17 @@ function App() {
           element={
             <Sidebar>
               <Party_Assignment />
-            </Sidebar>}
+            </Sidebar>
+          }
         />
 
-           <Route
+        <Route
           path="/Party_Product_Assignment"
           element={
             <Sidebar>
               <Party_Product_Assignment />
-            </Sidebar>}
+            </Sidebar>
+          }
         />
 
         <Route
@@ -208,7 +228,8 @@ function App() {
           element={
             <Sidebar>
               <Add_Scheme />
-            </Sidebar>}
+            </Sidebar>
+          }
         />
 
         <Route
@@ -216,7 +237,8 @@ function App() {
           element={
             <Sidebar>
               <Staff />
-            </Sidebar>}
+            </Sidebar>
+          }
         />
 
         <Route
@@ -224,7 +246,16 @@ function App() {
           element={
             <Sidebar>
               <Staff_Rate_Assignment />
-            </Sidebar>}
+            </Sidebar>
+          }
+        />
+        <Route
+          path="/Product_Stock"
+          element={
+            <Sidebar>
+              <Product_Stock />
+            </Sidebar>
+          }
         />
 
         <Route
@@ -232,10 +263,10 @@ function App() {
           element={
             <Sidebar>
               <Order_Stock_Check />
-            </Sidebar>}
+            </Sidebar>
+          }
         />
-
-       </Routes>
+      </Routes>
     </BrowserRouter>
   );
 }
