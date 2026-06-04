@@ -352,10 +352,10 @@ export default function Sidebar({ children }: SidebarProps) {
               </Link>
             </li>
 
-            <li className={location.pathname === "/Order_Stock_Check" ? "active" : ""}>
-              <Link to="/Order_Stock_Check" onClick={closeSidebar}>
+            <li className={location.pathname === "/Product_Stock" ? "active" : ""}>
+              <Link to="/Product_Stock" onClick={closeSidebar}>
                 <SidebarIcon><HiClipboardDocumentList /></SidebarIcon>
-                Order Stock Check
+                Stock
               </Link>
             </li>
 

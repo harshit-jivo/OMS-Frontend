@@ -10,6 +10,14 @@ export interface Product  {
   variety?: string;
   staff_rate?: string | number;
   on_hand?: string | number | null;
+  total_on_hand?: string | number | null;
+  warehouse_code?: string;
+  warehouse_name?: string;
+  warehouseName?: string;
+  warehouse_stock?: string | number | null;
+  pending_required_qty?: string | number | null;
+  pendingRequiredQty?: string | number | null;
+  left_over_stock?: string | number | null;
 };
 
 export interface Address {
@@ -112,6 +120,11 @@ export const sapService = {
 
   getProducts: async () => {
     const response = await api.get("/sap/products/");
+    return response.data;
+  },
+
+  getProductStock: async () => {
+    const response = await api.get("/hana/product-stock/");
     return response.data;
   },
 

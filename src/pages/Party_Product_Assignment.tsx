@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import * as XLSX from "xlsx";
 import type { Product } from "../services/ordersService";
 import { sapService, type Party } from "../services/sapService";
 import { userService } from "../services/userService";
@@ -20,8 +21,38 @@ type SearchableParty = Party & {
   CardName?: string | null;
 };
 
+type ImportRow = {
+  card_code: string;
+  party_category: string | null;
+  item_code: string;
+  product_category: string;
+  basic_rate: number;
+};
+
+type ImportPartyRow = {
+  card_code: string;
+  party_category: string | null;
+};
+
+type ImportProductRow = {
+  item_code: string;
+  product_category: string;
+  basic_rate: number;
+};
+
+type ImportSummary = {
+  totalRows: number;
+  imported: number;
+  parties?: number;
+  products?: number;
+  added: number;
+  updated: number;
+  errors: string[];
+};
+
 const asText = (value: unknown) => String(value ?? "").trim();
 const normalizeSearch = (value: unknown) => asText(value).toLowerCase();
+const normalizeHeader = (value: unknown) => normalizeSearch(value).replace(/[^a-z0-9]/g, "");
 
 const getPartyCode = (party: SearchableParty) => asText(party.card_code || party.CardCode);
 const getPartyName = (party: SearchableParty) => asText(party.card_name || party.CardName);
@@ -64,6 +95,25 @@ const getPartyList = (data: unknown): Party[] => {
   return [];
 };
 
+const getImportValue = (row: Record<string, unknown>, aliases: string[]) => {
+  const aliasSet = new Set(aliases.map(normalizeHeader));
+  const match = Object.entries(row).find(([key]) => aliasSet.has(normalizeHeader(key)));
+  return match ? match[1] : "";
+};
+
+const getWorksheetRows = (workbook: XLSX.WorkBook, sheetNames: string[]) => {
+  const normalizedNames = sheetNames.map(normalizeHeader);
+  const sheetName = workbook.SheetNames.find((name) => normalizedNames.includes(normalizeHeader(name)));
+  if (!sheetName) return [];
+  return XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets[sheetName], { defval: "" });
+};
+
+const parseRate = (value: unknown) => {
+  const raw = asText(value).replace(/,/g, "");
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : NaN;
+};
+
 export default function Party_Product_Assignment() {
   const [parties, setParties] = useState<Party[]>([]);
   const [allParties, setAllParties] = useState<Party[]>([]);
@@ -79,8 +129,11 @@ export default function Party_Product_Assignment() {
   const [selectedNewProducts, setSelectedNewProducts] = useState<Product[]>([]);
   const [newProductRates, setNewProductRates] = useState<Record<string, string>>({});
   const [isSaving, setIsSaving] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
 
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
   const partySearchRequestRef = useRef(0);
 
   useEffect(() => {
@@ -213,6 +266,229 @@ export default function Party_Product_Assignment() {
     }
   };
 
+  const handleDownloadTemplate = () => {
+    const partyRows = [
+      {
+        "Party Code": "C001",
+        "Party Category": "",
+      },
+      {
+        "Party Code": "C002",
+        "Party Category": "",
+      },
+    ];
+    const productRows = [
+      {
+        "Item Code": "FG001",
+        "Product Category": "OIL",
+        "Basic Rate": 150.5,
+      },
+      {
+        "Item Code": "FG002",
+        "Product Category": "BEVERAGES",
+        "Basic Rate": 120,
+      },
+    ];
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(partyRows), "Parties");
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(productRows), "Products");
+    XLSX.writeFile(workbook, "party-product-assignment-template.xlsx");
+  };
+
+  const handleImportExcel = async (file: File) => {
+    setIsImporting(true);
+    setImportSummary(null);
+
+    try {
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: "array" });
+      const partyRows = getWorksheetRows(workbook, ["Parties", "Party"]);
+      const productRows = getWorksheetRows(workbook, ["Products", "Product"]);
+      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+      const singleSheetRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet, { defval: "" });
+      const errors: string[] = [];
+      const parsedParties: ImportPartyRow[] = [];
+      const parsedProducts: ImportProductRow[] = [];
+      const parsedRows: ImportRow[] = [];
+      const partyLookup = new Set(partyOptions.map((party) => getPartySelectionKey(party)));
+      const productLookup = new Set(
+        products.map((product) => `${asText(product.item_code)}||${normalizeCategory(product.category)}`)
+      );
+      const hasSeparateSheets = partyRows.length > 0 || productRows.length > 0;
+
+      if (hasSeparateSheets) {
+        partyRows.forEach((row, index) => {
+          const rowNumber = index + 2;
+          const cardCode = asText(getImportValue(row, ["Party Code", "Card Code", "card_code", "CardCode"]));
+          const partyCategory = normalizeCategory(
+            getImportValue(row, ["Party Category", "Party Cat", "Party Type", "party_category"])
+          );
+
+          if (!cardCode) {
+            errors.push(`Parties row ${rowNumber}: Party Code is required.`);
+            return;
+          }
+
+          const partyKey = `${cardCode}||${partyCategory}`;
+          if (partyCategory && partyLookup.size > 0 && !partyLookup.has(partyKey)) {
+            errors.push(`Parties row ${rowNumber}: Party ${cardCode} with category ${partyCategory} was not found.`);
+            return;
+          }
+
+          parsedParties.push({
+            card_code: cardCode,
+            party_category: partyCategory || null,
+          });
+        });
+
+        productRows.forEach((row, index) => {
+          const rowNumber = index + 2;
+          const itemCode = asText(getImportValue(row, ["Item Code", "Product Code", "item_code", "ItemCode"]));
+          const productCategory = normalizeCategory(
+            getImportValue(row, ["Product Category", "Category", "product_category"])
+          );
+          const basicRate = parseRate(getImportValue(row, ["Basic Rate", "Basic Price", "Rate", "basic_rate"]));
+
+          if (!itemCode || !productCategory || Number.isNaN(basicRate)) {
+            errors.push(`Products row ${rowNumber}: Item Code, Product Category and Basic Rate are required.`);
+            return;
+          }
+
+          const productKey = `${itemCode}||${productCategory}`;
+          if (productLookup.size > 0 && !productLookup.has(productKey)) {
+            errors.push(`Products row ${rowNumber}: Product ${itemCode} with category ${productCategory} was not found.`);
+            return;
+          }
+
+          parsedProducts.push({
+            item_code: itemCode,
+            product_category: productCategory,
+            basic_rate: basicRate,
+          });
+        });
+
+        parsedParties.forEach((party) => {
+          parsedProducts.forEach((product) => {
+            parsedRows.push({
+              card_code: party.card_code,
+              party_category: party.party_category,
+              item_code: product.item_code,
+              product_category: product.product_category,
+              basic_rate: product.basic_rate,
+            });
+          });
+        });
+      } else {
+        singleSheetRows.forEach((row, index) => {
+          const rowNumber = index + 2;
+          const cardCode = asText(getImportValue(row, ["Party Code", "Card Code", "card_code", "CardCode"]));
+          const partyCategory = normalizeCategory(
+            getImportValue(row, ["Party Category", "Party Cat", "Party Type", "party_category"])
+          );
+          const itemCode = asText(getImportValue(row, ["Item Code", "Product Code", "item_code", "ItemCode"]));
+          const productCategory = normalizeCategory(
+            getImportValue(row, ["Product Category", "Category", "product_category"])
+          );
+          const basicRate = parseRate(getImportValue(row, ["Basic Rate", "Basic Price", "Rate", "basic_rate"]));
+
+          if (!cardCode || !itemCode || !productCategory || Number.isNaN(basicRate)) {
+            errors.push(`Row ${rowNumber}: Party Code, Item Code, Product Category and Basic Rate are required.`);
+            return;
+          }
+
+          const partyKey = `${cardCode}||${partyCategory}`;
+          if (partyCategory && partyLookup.size > 0 && !partyLookup.has(partyKey)) {
+            errors.push(`Row ${rowNumber}: Party ${cardCode} with category ${partyCategory} was not found.`);
+            return;
+          }
+
+          const productKey = `${itemCode}||${productCategory}`;
+          if (productLookup.size > 0 && !productLookup.has(productKey)) {
+            errors.push(`Row ${rowNumber}: Product ${itemCode} with category ${productCategory} was not found.`);
+            return;
+          }
+
+          parsedRows.push({
+            card_code: cardCode,
+            party_category: partyCategory || null,
+            item_code: itemCode,
+            product_category: productCategory,
+            basic_rate: basicRate,
+          });
+        });
+      }
+
+      if (!parsedRows.length) {
+        setImportSummary({
+          totalRows: hasSeparateSheets ? partyRows.length + productRows.length : singleSheetRows.length,
+          imported: 0,
+          parties: hasSeparateSheets ? parsedParties.length : undefined,
+          products: hasSeparateSheets ? parsedProducts.length : undefined,
+          added: 0,
+          updated: 0,
+          errors,
+        });
+        alert("No valid rows found in the Excel file.");
+        return;
+      }
+
+      const groupedRows = new Map<string, ImportRow[]>();
+      parsedRows.forEach((row) => {
+        const key = `${row.card_code}||${row.party_category || ""}`;
+        groupedRows.set(key, [...(groupedRows.get(key) || []), row]);
+      });
+
+      let added = 0;
+      let updated = 0;
+      const apiErrors = [...errors];
+
+      for (const [key, rows] of groupedRows) {
+        const [cardCode, category = ""] = key.split("||");
+        const response = await api.post("/auth/bulk-party/assign-products/", {
+          card_codes: [cardCode],
+          party_selections: [{ card_code: cardCode, category: category || null }],
+          products: rows.map((row) => ({
+            item_code: row.item_code,
+            category: row.product_category,
+            basic_rate: row.basic_rate,
+          })),
+        });
+
+        const data = response.data?.data || {};
+        added += Number(data.added || 0);
+        updated += Number(data.updated || 0);
+        if (Array.isArray(data.errors)) {
+          apiErrors.push(...data.errors);
+        }
+      }
+
+      setImportSummary({
+        totalRows: hasSeparateSheets ? partyRows.length + productRows.length : singleSheetRows.length,
+        imported: parsedRows.length,
+        parties: hasSeparateSheets ? parsedParties.length : undefined,
+        products: hasSeparateSheets ? parsedProducts.length : undefined,
+        added,
+        updated,
+        errors: apiErrors,
+      });
+
+      if (selectedParties.length === 1) {
+        const selectedParty = getSelectionFromKey(selectedParties[0]);
+        fetchPartyProducts(selectedParty.card_code, selectedParty.category);
+      }
+
+      alert(`Excel import complete. Added: ${added}, Updated: ${updated}`);
+    } catch (error) {
+      console.error("Error importing party products:", error);
+      alert("Failed to import Excel file.");
+    } finally {
+      setIsImporting(false);
+      if (importInputRef.current) {
+        importInputRef.current.value = "";
+      }
+    }
+  };
+
   const handleEditRate = async (product: PartyProduct) => {
     if (selectedParties.length !== 1) return;
     const selectedParty = getSelectionFromKey(selectedParties[0]);
@@ -318,6 +594,102 @@ export default function Party_Product_Assignment() {
             Party Product Assignment
           </h1>
           {/* <p style={{ margin: 0, fontSize: "13px", color: "#64748b" }}>Search &amp; select one or more parties to assign products.</p> */}
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: "16px",
+            flexWrap: "wrap",
+            padding: "16px",
+            marginBottom: "24px",
+            background: "#f8fafc",
+            border: "1px solid #e2e8f0",
+            borderRadius: "8px",
+          }}
+        >
+          <div>
+            <h2 style={{ margin: "0 0 4px", fontSize: "16px", fontWeight: 700, color: "#0f172a" }}>
+              Excel Upload
+            </h2>
+            <p style={{ margin: 0, fontSize: "13px", color: "#64748b" }}>
+              Use separate sheets: Parties has Party Code and optional Party Category; Products has Item Code, Product Category and Basic Rate.
+            </p>
+          </div>
+          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+            <button
+              type="button"
+              onClick={handleDownloadTemplate}
+              style={{
+                padding: "9px 14px",
+                border: "1px solid #cbd5e1",
+                background: "#fff",
+                color: "#334155",
+                borderRadius: "8px",
+                cursor: "pointer",
+                fontWeight: 600,
+              }}
+            >
+              Download Template
+            </button>
+            <button
+              type="button"
+              onClick={() => importInputRef.current?.click()}
+              disabled={isImporting}
+              style={{
+                padding: "9px 14px",
+                border: "none",
+                background: "#16a34a",
+                color: "#fff",
+                borderRadius: "8px",
+                cursor: isImporting ? "not-allowed" : "pointer",
+                fontWeight: 600,
+                opacity: isImporting ? 0.75 : 1,
+              }}
+            >
+              {isImporting ? "Importing..." : "Upload Excel"}
+            </button>
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              style={{ display: "none" }}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) {
+                  handleImportExcel(file);
+                }
+              }}
+            />
+          </div>
+          {importSummary && (
+            <div
+              style={{
+                flexBasis: "100%",
+                paddingTop: "12px",
+                borderTop: "1px solid #e2e8f0",
+                fontSize: "13px",
+                color: "#475569",
+              }}
+            >
+              {importSummary.parties !== undefined && importSummary.products !== undefined
+                ? `Mapped ${importSummary.products} products to ${importSummary.parties} parties. `
+                : `Imported ${importSummary.imported} of ${importSummary.totalRows} rows. `}
+              Assignments processed {importSummary.imported}. Added {importSummary.added}, updated {importSummary.updated}.
+              {importSummary.errors.length > 0 && (
+                <div style={{ marginTop: "8px", color: "#b91c1c" }}>
+                  {importSummary.errors.slice(0, 5).map((error) => (
+                    <div key={error}>{error}</div>
+                  ))}
+                  {importSummary.errors.length > 5 && (
+                    <div>{importSummary.errors.length - 5} more rows had issues.</div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div ref={dropdownRef} style={{ position: "relative", maxWidth: "480px", zIndex: 10 }}>
