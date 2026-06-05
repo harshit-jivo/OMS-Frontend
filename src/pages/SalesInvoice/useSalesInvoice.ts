@@ -75,9 +75,31 @@ const createFreightRow = (): FreightRow => ({ expenseCode: "", expenseName: "", 
 const linesToRecord = (lines: SelectedLine[]) =>
   Object.fromEntries(lines.map((line) => [lineKey(line.DocEntry, line.LineNum), line]));
 
+const apiBaseUrl = String(
+  import.meta.env.VITE_BASE_URL
+    || import.meta.env.VITE_BACKEND_BASE_URL
+    || import.meta.env.VITE_API_BASE_URL
+    || "",
+)
+  .trim()
+  .replace(/\/+$/, "");
+
+export const resolveApiUrl = (url: string) => {
+  if (/^https?:\/\//i.test(url)) return url;
+
+  const normalizedUrl = url.startsWith("/") ? url : `/${url}`;
+  if (!apiBaseUrl) return normalizedUrl;
+
+  const path = /\/api$/i.test(apiBaseUrl)
+    ? normalizedUrl.replace(/^\/api(?=\/|$)/i, "")
+    : normalizedUrl;
+
+  return `${apiBaseUrl}${path}`;
+};
+
 export const apiFetch = async <T,>(url: string, init?: RequestInit): Promise<T> => {
   const token = localStorage.getItem("access");
-  const response = await fetch(url, {
+  const response = await fetch(resolveApiUrl(url), {
     ...init,
     headers: {
       "Content-Type": "application/json",

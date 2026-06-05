@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { HiArrowLeft, HiInformationCircle, HiPencilSquare, HiPhoto, HiPlus, HiTrash, HiXMark } from "react-icons/hi2";
-import { apiFetch } from "./useSalesInvoice";
+import { apiFetch, resolveApiUrl } from "./useSalesInvoice";
 import "../../styles/Sales_Invoice.css";
 
 type SkuRecord = {
@@ -85,8 +85,8 @@ const getSkuImageUrl = (imagePath?: string | null) => {
   return skuImageBaseUrl ? `${skuImageBaseUrl}${normalizedPath}` : normalizedPath;
 };
 
-const SKU_UPLOAD_URL = "http://localhost:8000/api/sku/upload/";
-const skuResourcePath = (itemCode: string) => `/api/sku/${encodeURIComponent(itemCode)}/`;
+const SKU_UPLOAD_URL = resolveApiUrl("/api/sku/upload/");
+const skuResourcePath = (itemCode: string) => resolveApiUrl(`/api/sku/${encodeURIComponent(itemCode)}/`);
 
 const formatSkuDate = (value?: string) => {
   if (!value) return "-";
