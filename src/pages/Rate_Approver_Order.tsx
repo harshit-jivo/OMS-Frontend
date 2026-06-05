@@ -64,7 +64,8 @@ export default function RateApproverOrders() {
   const [showAcceptSuccess, setShowAcceptSuccess] = useState(false);
   const [acceptSuccessInfo, setAcceptSuccessInfo] = useState<{
     orderId: string;
-    receivedBy: string;
+    message: string;
+    nextStatus: string;
   } | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
@@ -121,14 +122,15 @@ export default function RateApproverOrders() {
     setIsProcessing(true);
 
     try {
-      await ordersService.UpdateStatus(
+      const response = await ordersService.UpdateStatus(
         pendingOrderId,
         RATE_APPROVER_APPROVED_STATUS,
         "Approved",
       );
       setAcceptSuccessInfo({
         orderId: pendingOrderNum,
-        receivedBy: "Billing",
+        message: response.message || "Order approved successfully",
+        nextStatus: response.status || "-",
       });
       setShowAcceptSuccess(true);
       fetchOrders();
@@ -617,15 +619,21 @@ export default function RateApproverOrders() {
         <div className="ao-modal-overlay">
           <div className="ao-modal ao-modal-success">
             <div className="ao-success-icon" aria-hidden="true" />
-            <div className="ao-modal-title">Order Approved</div>
+            <div className="ao-modal-title">
+              {acceptSuccessInfo.nextStatus.toLowerCase().includes("completed") ? "Order Completed" : "Order Approved"}
+            </div>
             <div className="ao-success-info">
               <div className="ao-success-row">
                 <span className="ao-success-label">Order Number</span>
                 <strong className="ao-success-value">{acceptSuccessInfo.orderId}</strong>
               </div>
               <div className="ao-success-row">
-                <span className="ao-success-label">Received By</span>
-                <strong className="ao-success-value">{acceptSuccessInfo.receivedBy}</strong>
+                <span className="ao-success-label">Message</span>
+                <strong className="ao-success-value">{acceptSuccessInfo.message}</strong>
+              </div>
+              <div className="ao-success-row">
+                <span className="ao-success-label">Current Status</span>
+                <strong className="ao-success-value">{acceptSuccessInfo.nextStatus}</strong>
               </div>
             </div>
             <div className="ao-modal-actions">

@@ -27,6 +27,35 @@ type StaffProductRemovePayload = {
   category: string;
 };
 
+export type OrderFlowConditionOption = {
+  code: string;
+  label: string;
+};
+
+export type OrderFlowTypeOption = {
+  code: string;
+  label: string;
+};
+
+export type OrderFlowConfig = {
+  flow_type: string;
+  flow_label?: string;
+  flow_options?: OrderFlowTypeOption[];
+  rate_approval_enabled: boolean;
+  billing_enabled: boolean;
+  auditor_enabled: boolean;
+  rate_conditions: string[];
+  condition_options?: OrderFlowConditionOption[];
+  updated_at?: string | null;
+  updated_by?: string | null;
+};
+
+export type OrderStatusUpdateResponse = {
+  message?: string;
+  order_id?: number;
+  status?: string;
+};
+
 export interface PartyProduct {
   item_code: string;
   item_name: string;
@@ -333,6 +362,18 @@ export const ordersService = {
     return response.data || [];
   },
 
+  getOrderFlowConfig: async (flowType = "ASM") => {
+    const response = await api.get("/orders/flow-config/", {
+      params: { flow_type: flowType },
+    });
+    return response.data as OrderFlowConfig;
+  },
+
+  updateOrderFlowConfig: async (config: OrderFlowConfig) => {
+    const response = await api.post("/orders/flow-config/", config);
+    return response.data as { success?: boolean; message?: string; data?: OrderFlowConfig } | OrderFlowConfig;
+  },
+
   saveStaffProductRates: async (
     products: StaffProductRatePayload[],
     removedProducts: StaffProductRemovePayload[] = [],
@@ -425,7 +466,7 @@ export const ordersService = {
       ...(reason ? { reason } : {}),
     });
     window.dispatchEvent(new Event("refreshNotifications"));
-    return response.data;
+    return response.data as OrderStatusUpdateResponse;
   },
 
  createScheme: async (data: {

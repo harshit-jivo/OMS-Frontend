@@ -8,6 +8,7 @@ import {
   HiChartBar,
   HiChevronDown,
   HiClock,
+  HiCog6Tooth,
   HiCurrencyRupee,
   HiClipboardDocumentList,
   HiCube,
@@ -349,6 +350,13 @@ export default function Sidebar({ children }: SidebarProps) {
               <Link to="/Staff_Rate_Assignment" onClick={closeSidebar}>
                 <SidebarIcon><HiCurrencyRupee /></SidebarIcon>
                 Staff Rate Assignment
+              </Link>
+            </li>
+
+            <li className={location.pathname === "/Order_Flow_Settings" ? "active" : ""}>
+              <Link to="/Order_Flow_Settings" onClick={closeSidebar}>
+                <SidebarIcon><HiCog6Tooth /></SidebarIcon>
+                Order Flow Settings
               </Link>
             </li>
 

@@ -70,7 +70,7 @@ export default function Billing_orders() {
   const [pendingOrderId, setPendingOrderId] = useState<number | null>(null);
   const [pendingOrderNum, setPendingOrderNum] = useState<string>("");
   const [showAcceptSuccess, setShowAcceptSuccess] = useState(false);
-  const [acceptSuccessInfo, setAcceptSuccessInfo] = useState<{ orderId: string; receivedBy: string } | null>(null);
+  const [acceptSuccessInfo, setAcceptSuccessInfo] = useState<{ orderId: string; message: string; nextStatus: string } | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
 
   useEffect(() => {
@@ -124,8 +124,12 @@ export default function Billing_orders() {
     setShowConfirmModal(false);
     setIsProcessing(true);
     try {
-      await ordersService.UpdateStatus(pendingOrderId, 10);
-      setAcceptSuccessInfo({ orderId: pendingOrderNum, receivedBy: "Auditor" });
+      const response = await ordersService.UpdateStatus(pendingOrderId, 10);
+      setAcceptSuccessInfo({
+        orderId: pendingOrderNum,
+        message: response.message || "Order accepted successfully",
+        nextStatus: response.status || "-",
+      });
       setShowAcceptSuccess(true);
       fetchOrders();
       window.dispatchEvent(new Event('refresh-notifications'));
@@ -517,15 +521,21 @@ export default function Billing_orders() {
         <div className="bo-modal-overlay">
           <div className="bo-modal bo-modal-success">
             <div className="bo-success-icon" aria-hidden="true" />
-            <div className="bo-modal-title">Order Accepted</div>
+            <div className="bo-modal-title">
+              {acceptSuccessInfo.nextStatus.toLowerCase().includes("completed") ? "Order Completed" : "Order Accepted"}
+            </div>
             <div className="bo-success-info">
               <div className="bo-success-row">
                 <span className="bo-success-label">Order Number</span>
                 <strong className="bo-success-value">{acceptSuccessInfo.orderId}</strong>
               </div>
               <div className="bo-success-row">
-                <span className="bo-success-label">Received By</span>
-                <strong className="bo-success-value">{acceptSuccessInfo.receivedBy}</strong>
+                <span className="bo-success-label">Message</span>
+                <strong className="bo-success-value">{acceptSuccessInfo.message}</strong>
+              </div>
+              <div className="bo-success-row">
+                <span className="bo-success-label">Current Status</span>
+                <strong className="bo-success-value">{acceptSuccessInfo.nextStatus}</strong>
               </div>
             </div>
             <div className="bo-modal-actions">

@@ -47,7 +47,7 @@ export default function Auditor_orders() {
   const [pendingOrderNum, setPendingOrderNum] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
-  const [quotationResult, setQuotationResult] = useState<{ number: string; order_id: string } | null>(null);
+  const [quotationResult, setQuotationResult] = useState<{ number: string; order_id: string; message: string } | null>(null);
   const [fromDate, setFromDate] = useState(firstDay);
   const [toDate, setToDate] = useState(lastDay);
   const [isOrdersLoading, setIsOrdersLoading] = useState(true);
@@ -109,8 +109,12 @@ export default function Auditor_orders() {
       const sapData = salesResponse?.data?.data ?? salesResponse?.data;
       const quotationNumber = sapData?.DocNum ?? sapData?.doc_num ?? sapData?.DocEntry ?? "-";
 
-      await ordersService.UpdateStatus(pendingOrderId, 9);
-      setQuotationResult({ number: String(quotationNumber), order_id: pendingOrderNum });
+      const response = await ordersService.UpdateStatus(pendingOrderId, 9);
+      setQuotationResult({
+        number: String(quotationNumber),
+        order_id: pendingOrderNum,
+        message: response.message || "Order completed successfully",
+      });
       setShowSuccess(true);
       fetchOrders();
       window.dispatchEvent(new Event('refresh-notifications'));
@@ -467,7 +471,7 @@ export default function Auditor_orders() {
         <div className="ao-modal-overlay">
           <div className="ao-modal ao-modal-success">
             <div className="ao-success-icon" aria-hidden="true" />
-            <div className="ao-modal-title">Sales Quotation Created!</div>
+            <div className="ao-modal-title">Order Completed</div>
             <div className="ao-success-info">
               <div className="ao-success-row">
                 <span className="ao-success-label">Quotation No.</span>
@@ -476,6 +480,10 @@ export default function Auditor_orders() {
               <div className="ao-success-row">
                 <span className="ao-success-label">Order Number</span>
                 <strong className="ao-success-value">{quotationResult.order_id}</strong>
+              </div>
+              <div className="ao-success-row">
+                <span className="ao-success-label">Message</span>
+                <strong className="ao-success-value">{quotationResult.message}</strong>
               </div>
             </div>
             <div className="ao-modal-actions">

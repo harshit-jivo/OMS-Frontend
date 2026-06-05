@@ -593,7 +593,7 @@ export default function Dashboard() {
       statusTitle: `Order Status (${year})`,
       statusSubtitle: "Current mix of order stages",
       managerPerformanceTitle: `Top Manager Performance (${year})`,
-      managerPerformanceSubtitle: "Click to view all managers by sales",
+      managerPerformanceSubtitle: "Completed order sales by manager",
       volumeTitle: `Monthly Order Volume (${year})`,
       volumeSubtitle: "How order count moves across the year",
       categoryTitle: `Category Sales (${year})`,
@@ -605,7 +605,7 @@ export default function Dashboard() {
       statusTitle: `Audit Decisions (${year})`,
       statusSubtitle: "Accepted, rejected and in-review mix",
       managerPerformanceTitle: `Manager Performance (${year})`,
-      managerPerformanceSubtitle: "Sales value by manager",
+      managerPerformanceSubtitle: "Completed order sales by manager",
       volumeTitle: `Monthly Orders Received (${year})`,
       volumeSubtitle: "Audit intake across the year",
       categoryTitle: `Category Value Under Review (${year})`,
@@ -617,7 +617,7 @@ export default function Dashboard() {
       statusTitle: `Rate Approval Decisions (${year})`,
       statusSubtitle: "Approved, rejected and pending approval mix",
       managerPerformanceTitle: `Manager Performance (${year})`,
-      managerPerformanceSubtitle: "Sales value by manager",
+      managerPerformanceSubtitle: "Completed order sales by manager",
       volumeTitle: `Monthly Orders Received (${year})`,
       volumeSubtitle: "Rate approval intake across the year",
       categoryTitle: `Category Value Under Approval (${year})`,
@@ -629,7 +629,7 @@ export default function Dashboard() {
       statusTitle: `Order Status (${year})`,
       statusSubtitle: "Current mix of order stages",
       managerPerformanceTitle: `Manager Performance (${year})`,
-      managerPerformanceSubtitle: "Sales value by manager",
+      managerPerformanceSubtitle: "Completed order sales by manager",
       volumeTitle: `Monthly Order Volume (${year})`,
       volumeSubtitle: "How order count moves across the year",
       categoryTitle: `Category Sales (${year})`,
@@ -641,7 +641,7 @@ export default function Dashboard() {
       statusTitle: `Billing Decisions (${year})`,
       statusSubtitle: "Accepted, rejected and queued billing orders",
       managerPerformanceTitle: `Manager Performance (${year})`,
-      managerPerformanceSubtitle: "Sales value by manager",
+      managerPerformanceSubtitle: "Completed order sales by manager",
       volumeTitle: `Monthly Billing Orders (${year})`,
       volumeSubtitle: "Billing-stage order volume across the year",
       categoryTitle: `Category Billing Orders (${year})`,
@@ -1061,7 +1061,7 @@ export default function Dashboard() {
                   {performanceView === "state" ? "State-wise Performance" : "All Managers Performance"}
                 </div>
                 <div className="db-chart-subtitle">
-                  {selectedPeriodLabel} sales by {performanceView === "state" ? "state" : "manager"}
+                  {selectedPeriodLabel} completed order sales by {performanceView === "state" ? "state" : "manager"}
                 </div>
               </div>
               <div className="db-performance-switch" aria-label="Performance view">
@@ -1171,7 +1171,7 @@ export default function Dashboard() {
                     <div className="db-state-item-meta">
                       <div>
                         <span>{item.variety}</span>
-                        <small>Total variety sale</small>
+                        <small>Completed order lines</small>
                       </div>
                       <strong>{fmtCurrency(item.total_sales)}</strong>
                     </div>
@@ -1185,7 +1185,7 @@ export default function Dashboard() {
                       />
                     </div>
                     <small className="db-state-item-foot">
-                      Qty {fmt(item.quantity)} | {fmt(item.count)} order lines
+                      Amount {fmtCurrency(item.total_sales)} | Qty {fmt(item.quantity)} | Items {fmt(item.count)}
                     </small>
                   </div>
                 </button>
@@ -1211,7 +1211,7 @@ export default function Dashboard() {
                       />
                     </div>
                     <small className="db-state-item-foot">
-                      Qty {fmt(item.quantity)} | {fmt(item.count)} order lines
+                      Amount {fmtCurrency(item.total_sales)} | Qty {fmt(item.quantity)} | Items {fmt(item.count)}
                     </small>
                   </div>
                 </div>
@@ -1467,7 +1467,7 @@ export default function Dashboard() {
                       <div className="db-state-item-meta">
                         <div>
                           <span>{item.variety}</span>
-                          <small>Total variety sale</small>
+                          <small>Completed order lines</small>
                         </div>
                         <strong>{fmtCompactCurrency(item.total_sales)}</strong>
                       </div>
@@ -1481,7 +1481,7 @@ export default function Dashboard() {
                         />
                       </div>
                       <small className="db-state-item-foot">
-                        Qty {fmt(item.quantity)} | {fmt(item.count)} order lines
+                        Amount {fmtCompactCurrency(item.total_sales)} | Qty {fmt(item.quantity)} | Items {fmt(item.count)}
                       </small>
                     </div>
                   </button>

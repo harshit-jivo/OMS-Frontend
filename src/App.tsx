@@ -27,6 +27,7 @@ import Staff from "./pages/Staff";
 import Staff_Rate_Assignment from "./pages/Staff_Rate_Assignment";
 import Order_Stock_Check from "./pages/Order_Stock_Check";
 import Product_Stock from "./pages/Product_Stock";
+import Order_Flow_Settings from "./pages/Order_Flow_Settings";
 
 function App() {
   return (
@@ -263,6 +264,15 @@ function App() {
           element={
             <Sidebar>
               <Order_Stock_Check />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Order_Flow_Settings"
+          element={
+            <Sidebar>
+              <Order_Flow_Settings />
             </Sidebar>
           }
         />
