@@ -201,6 +201,7 @@ export default function Party_Product_Assignment() {
       console.error("Error fetching products:", error);
     }
   };
+  console.log("Products:", products);
 
   const fetchPartyProducts = async (card_code: string, category?: string | null) => {
     try {
