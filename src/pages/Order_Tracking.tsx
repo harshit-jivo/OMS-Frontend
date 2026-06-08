@@ -118,6 +118,8 @@ export default function Order_Tracking() {
   }, [logs]);
 
   const visibleLogs = useMemo(() => {
+    const currentStatus = String(selectedOrder?.status_display || "").trim().toLowerCase();
+    const isCurrentRatePending = currentStatus.includes("rate");
     const latestLogByPerformer = new Map<string, OrderLog>();
     const performerLogIds = new Set<number>();
     const getPerformerKey = (log: OrderLog) =>
@@ -131,6 +133,31 @@ export default function Order_Tracking() {
     const isGenericApprovedLog = (log: OrderLog) => {
       const statusName = String(log.status_name || "").trim().toLowerCase();
       return statusName === "approved" || statusName === "accepted";
+    };
+    const hasLaterDuplicateDecision = (log: OrderLog) => {
+      const statusName = String(log.status_name || "").trim().toLowerCase();
+      const performer = getPerformerKey(log);
+      const remarks = String(log.remarks || "").trim().toLowerCase();
+
+      if (!isRealPerformer(performer) || !isDecisionHistoryLog(log)) {
+        return false;
+      }
+
+      return orderedLogs.some((otherLog) => {
+        const otherStatus = String(otherLog.status_name || "").trim().toLowerCase();
+        const otherPerformer = getPerformerKey(otherLog);
+        const otherRemarks = String(otherLog.remarks || "").trim().toLowerCase();
+        const logTime = new Date(log.created_at || "").getTime();
+        const otherTime = new Date(otherLog.created_at || "").getTime();
+
+        return (
+          otherLog.id !== log.id &&
+          otherStatus === statusName &&
+          otherPerformer === performer &&
+          otherRemarks === remarks &&
+          (otherTime > logTime || (otherTime === logTime && otherLog.id > log.id))
+        );
+      });
     };
     const hasLaterSameCycleRateRejection = (log: OrderLog) => {
       const performer = getPerformerKey(log);
@@ -282,6 +309,10 @@ export default function Order_Tracking() {
       const isPendingLog = !isRealPerformer(performer);
 
       if (isPendingLog) {
+        if (isCurrentRatePending && isRateLog(log)) {
+          return true;
+        }
+
         const logTime = new Date(log.created_at || "").getTime();
 
         return !orderedLogs.some((otherLog) => {
@@ -296,15 +327,17 @@ export default function Order_Tracking() {
         });
       }
 
-      if (hasLaterSameCycleRateRejection(log) || hasNearbyRateDecision(log)) {
+      if (hasLaterDuplicateDecision(log) || hasLaterSameCycleRateRejection(log) || hasNearbyRateDecision(log)) {
         return false;
       }
 
       return isDecisionHistoryLog(log) || performerLogIds.has(log.id);
     });
-  }, [orderedLogs]);
+  }, [orderedLogs, selectedOrder?.status_display]);
 
   const displayLogs = useMemo(() => {
+    const currentStatus = String(selectedOrder?.status_display || "").trim().toLowerCase();
+    const isCurrentRatePending = currentStatus.includes("rate");
     const isRealPerformer = (value: string | null) => {
       const normalized = String(value || "").trim().toLowerCase();
       return normalized && normalized !== "pending" && normalized !== "system";
@@ -348,8 +381,8 @@ export default function Order_Tracking() {
         );
       });
     };
-    const findApprovalForRateLog = (rateLog: OrderLog) =>
-      orderedLogs.find((candidate) => {
+    const findApprovalsForRateLog = (rateLog: OrderLog) =>
+      orderedLogs.filter((candidate) => {
         if (
           !isGenericApprovedLog(candidate) ||
           !isRealPerformer(candidate.performed_by_name) ||
@@ -371,20 +404,33 @@ export default function Order_Tracking() {
         return log;
       }
 
-      const approvalLog = findApprovalForRateLog(log);
-
-      if (!approvalLog) {
+      if (isCurrentRatePending && !isRealPerformer(log.performed_by_name)) {
         return log;
       }
 
+      const approvalLogs = findApprovalsForRateLog(log);
+      const approverNames = [
+        ...(isRealPerformer(log.performed_by_name) ? [String(log.performed_by_name)] : []),
+        ...approvalLogs
+          .map((approvalLog) => approvalLog.performed_by_name)
+          .filter((name): name is string => Boolean(name && isRealPerformer(name))),
+      ];
+      const uniqueApproverNames = Array.from(new Set(approverNames));
+
+      if (uniqueApproverNames.length === 0) {
+        return log;
+      }
+
+      const latestApprovalLog = approvalLogs[approvalLogs.length - 1] || log;
+
       return {
         ...log,
-        performed_by_name: approvalLog.performed_by_name,
-        remarks: approvalLog.remarks || log.remarks,
-        created_at: approvalLog.created_at || log.created_at,
+        performed_by_name: uniqueApproverNames.join(", "),
+        remarks: latestApprovalLog.remarks || log.remarks,
+        created_at: latestApprovalLog.created_at || log.created_at,
       };
     });
-  }, [orderedLogs, visibleLogs]);
+  }, [orderedLogs, visibleLogs, selectedOrder?.status_display]);
 
   const timelineLogs = useMemo(() => {
     const currentStatus = String(selectedOrder?.status_display || "").trim();

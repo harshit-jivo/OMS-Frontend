@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { userService } from "../services/userService";
 import type { User, Option, CreateUserData, CategoryOption } from "../services/userService";
+import { sapService } from "../services/sapService";
 import "../styles/App_User.css";
 import {
   HiAtSymbol,
@@ -23,12 +24,14 @@ export default function App_User() {
   const roleRef = useRef<HTMLDivElement>(null);
   const companyRef = useRef<HTMLDivElement>(null);
   const categoryRef = useRef<HTMLDivElement>(null);
+  const varietyRef = useRef<HTMLDivElement>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [mainGroup, setMainGroup] = useState<Option[]>([]);
   const [state, setState] = useState<Option[]>([]);
   const [role, setRole] = useState<Option[]>([]);
   const [company, setCompany] = useState<Option[]>([]);
   const [categories, setCategories] = useState<CategoryOption[]>([]);
+  const [varietyOptions, setVarietyOptions] = useState<string[]>([]);
   const [formData, setFormData] = useState<CreateUserData>({
     name: "",
     username: "",
@@ -42,6 +45,7 @@ export default function App_User() {
     role: 0,
     company: 0,
     category: null,
+    variety: "",
   });
   const [showForm, setShowForm] = useState(false);
   const [showUsers, setShowUsers] = useState(true);
@@ -50,6 +54,8 @@ export default function App_User() {
   const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
   const [companyDropdownOpen, setCompanyDropdownOpen] = useState(false);
   const [categoryDropdownOpen, setCategoryDropdownOpen] = useState(false);
+  const [varietyDropdownOpen, setVarietyDropdownOpen] = useState(false);
+  const [varietySearch, setVarietySearch] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 7;
@@ -64,6 +70,13 @@ export default function App_User() {
     fetchCompany();
     fetchCategories();
   }, []);
+
+  const selectedCategoryName =
+    categories.find((item) => item.id === formData.category)?.category || "";
+
+  useEffect(() => {
+    fetchVarieties(selectedCategoryName);
+  }, [selectedCategoryName]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -100,6 +113,13 @@ export default function App_User() {
         !categoryRef.current.contains(event.target as Node)
       ) {
         setCategoryDropdownOpen(false);
+      }
+
+      if (
+        varietyRef.current &&
+        !varietyRef.current.contains(event.target as Node)
+      ) {
+        setVarietyDropdownOpen(false);
       }
     };
 
@@ -166,6 +186,20 @@ export default function App_User() {
     }
   };
 
+  const fetchVarieties = async (category: string) => {
+    if (!category) {
+      setVarietyOptions([]);
+      return;
+    }
+    try {
+      const data = await sapService.getProductVarieties(category);
+      setVarietyOptions(Array.isArray(data.varieties) ? data.varieties : []);
+    } catch (error) {
+      console.log("Error fetching SAP varieties:", error);
+      setVarietyOptions([]);
+    }
+  };
+
   const toggleMainGroup = (id: number) => {
     setFormData((prev) => {
       const current = prev.mainGroups || [];
@@ -222,10 +256,56 @@ export default function App_User() {
   const getCategoryName = (id: number | null | undefined) =>
     categories.find((item) => item.id === id)?.category || "Select Category";
 
+  const selectedVarieties = String(formData.variety || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const filteredVarietyOptions = varietyOptions.filter((variety) =>
+    variety.toLowerCase().includes(varietySearch.trim().toLowerCase()),
+  );
+  const varietyLabel =
+    selectedVarieties.length === 0
+      ? "Select Variety"
+      : selectedVarieties.length === 1
+        ? selectedVarieties[0]
+        : `${selectedVarieties.length} varieties selected`;
+
+  const toggleVariety = (variety: string) => {
+    setFormData((prev) => {
+      const current = String(prev.variety || "")
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean);
+      const updated = current.includes(variety)
+        ? current.filter((value) => value !== variety)
+        : [...current, variety];
+      return { ...prev, variety: updated.join(", ") };
+    });
+  };
+
+  const allFilteredVarietiesSelected =
+    filteredVarietyOptions.length > 0 &&
+    filteredVarietyOptions.every((variety) => selectedVarieties.includes(variety));
+
+  const toggleAllFilteredVarieties = () => {
+    setFormData((prev) => {
+      const current = String(prev.variety || "")
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean);
+      const updated = allFilteredVarietiesSelected
+        ? current.filter((value) => !filteredVarietyOptions.includes(value))
+        : Array.from(new Set([...current, ...filteredVarietyOptions]));
+
+      return { ...prev, variety: updated.join(", ") };
+    });
+  };
+
   const closeSingleSelects = () => {
     setRoleDropdownOpen(false);
     setCompanyDropdownOpen(false);
     setCategoryDropdownOpen(false);
+    setVarietyDropdownOpen(false);
   };
 
   const handleChange = (
@@ -325,6 +405,7 @@ export default function App_User() {
           role: 0,
           company: 0,
           category: null,
+          variety: "",
         });
 
         setIsEditMode(false);
@@ -362,6 +443,7 @@ export default function App_User() {
       states?: unknown;
       company?: unknown;
       category?: unknown;
+      variety?: string | null;
       role?: unknown;
       role_display?: string;
     };
@@ -388,6 +470,7 @@ export default function App_User() {
       role: roleId,
       company: getId(editableUser.company) || null,
       category: getId(editableUser.category) || null,
+      variety: editableUser.variety || "",
     });
 
     setShowForm(true);
@@ -872,13 +955,85 @@ export default function App_User() {
                           type="button"
                           className={`au-mg-option au-select-option${formData.category === c.id ? " is-selected" : ""}`}
                           onClick={() => {
-                            setFormData((prev) => ({ ...prev, category: c.id }));
+                            setFormData((prev) => ({ ...prev, category: c.id, variety: "" }));
                             setCategoryDropdownOpen(false);
                           }}
                         >
                           {c.category}
                         </button>
                       ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="au-field au-full">
+                <label className="au-label">Variety</label>
+                <div className="au-mg-dropdown" ref={varietyRef}>
+                  <div
+                    className="au-mg-trigger"
+                    onClick={() => {
+                      closeSingleSelects();
+                      setVarietyDropdownOpen((value) => !value);
+                    }}
+                  >
+                    <span className="au-trigger-label">
+                      <HiTag className="au-field-icon" aria-hidden="true" />
+                      <span>{varietyLabel}</span>
+                    </span>
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                      <path
+                        d="M3 4.5L6 7.5L9 4.5"
+                        stroke="#64748b"
+                        strokeWidth="1.4"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </div>
+                  {varietyDropdownOpen && (
+                    <div className="au-mg-menu">
+                      <div className="au-mg-option" style={{ cursor: "default" }}>
+                        <input
+                          type="text"
+                          value={varietySearch}
+                          onChange={(event) => setVarietySearch(event.target.value)}
+                          placeholder="Search variety..."
+                          style={{
+                            width: "100%",
+                            border: "1px solid #cbd5e1",
+                            borderRadius: "6px",
+                            padding: "8px 10px",
+                            fontSize: "13px",
+                            outline: "none",
+                          }}
+                          onClick={(event) => event.stopPropagation()}
+                        />
+                      </div>
+                      <label className="au-mg-option au-mg-selectall">
+                        <input
+                          type="checkbox"
+                          checked={allFilteredVarietiesSelected}
+                          disabled={filteredVarietyOptions.length === 0}
+                          onChange={toggleAllFilteredVarieties}
+                        />
+                        Select All
+                      </label>
+                      {filteredVarietyOptions.length > 0 ? (
+                        filteredVarietyOptions.map((variety) => (
+                          <label key={variety} className="au-mg-option">
+                            <input
+                              type="checkbox"
+                              checked={selectedVarieties.includes(variety)}
+                              onChange={() => toggleVariety(variety)}
+                            />
+                            {variety}
+                          </label>
+                        ))
+                      ) : (
+                        <div className="au-mg-option">
+                          {selectedCategoryName ? "No varieties found" : "Select category first"}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

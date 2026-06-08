@@ -123,6 +123,13 @@ export const sapService = {
     return response.data;
   },
 
+  getProductVarieties: async (category?: string) => {
+    const response = await api.get("/sap/product-varieties/", {
+      params: category ? { category } : undefined,
+    });
+    return response.data as { category?: string; count?: number; varieties?: string[] };
+  },
+
   getProductStock: async () => {
     const response = await api.get("/hana/product-stock/");
     return response.data;
