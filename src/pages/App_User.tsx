@@ -146,6 +146,7 @@ export default function App_User() {
       console.log("Error fetching User Role:", error);
     }
   };
+  console.log("Roles fetched:", role);
 
   const fetchCompany = async () => {
     try {

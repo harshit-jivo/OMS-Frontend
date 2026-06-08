@@ -65,6 +65,18 @@ const applyFocPricingToRow = (row: SalesRow): SalesRow => ({
       : "",
 });
 
+const normalizeOptionText = (value: unknown) =>
+  String(value ?? "").trim().toLowerCase();
+
+const getUserCategoryText = (user: any) =>
+  String(
+    user?.category?.category ||
+      user?.category?.name ||
+      user?.category_name ||
+      user?.category ||
+      "",
+  ).trim();
+
 type EditOrderLocationState = {
   editOrderId?: number;
   returnTo?: string;
@@ -125,6 +137,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
   const isLoadingFromOrder = isEditMode || isDuplicateMode;
   const isFocMode = focMode && !isLoadingFromOrder;
   const [userRole, setUserRole] = useState("");
+  const [userDefaultCategory, setUserDefaultCategory] = useState("");
   const [parties, setParties] = useState<any[]>([]);
   const [selectedPartyCategory, setSelectedPartyCategory] = useState("");
   const [partySearch, setPartySearch] = useState("");
@@ -198,11 +211,55 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
       const user = await getCurrentUser();
       const role = user?.role_name || user?.role || user?.role_display || "";
       setUserRole(typeof role === "object" ? role.name || "" : String(role));
+      const profileCategory = getUserCategoryText(user);
+      setUserDefaultCategory(profileCategory);
+      if (profileCategory && !isLoadingFromOrder) {
+        setSelectedPartyCategory((current) => current || profileCategory);
+      }
     } catch (error) {
       console.log("Error fetching current user:", error);
       setUserRole("");
+      setUserDefaultCategory("");
     }
   };
+
+  useEffect(() => {
+    if (isLoadingFromOrder || formData.dispatch || branch.length === 0) return;
+    setFormData((prev) => ({
+      ...prev,
+      dispatch: prev.dispatch || String(branch[0]?.bpl_id || ""),
+    }));
+  }, [branch, formData.dispatch, isLoadingFromOrder]);
+
+  useEffect(() => {
+    if (isLoadingFromOrder || formData.company || company.length === 0) return;
+    const jivoCompany = company.find((item) =>
+      normalizeOptionText(item?.name).includes("jivo wellness"),
+    );
+    if (!jivoCompany) return;
+    setFormData((prev) => ({
+      ...prev,
+      company: prev.company || String(jivoCompany.id || ""),
+    }));
+  }, [company, formData.company, isLoadingFromOrder]);
+
+  useEffect(() => {
+    if (isLoadingFromOrder || !userDefaultCategory) return;
+
+    setRows((currentRows) =>
+      currentRows.map((row) => {
+        if (row.category || row.confirmed) return row;
+        const matchedCategory =
+          category.find(
+            (itemCategory) =>
+              normalizeOptionText(itemCategory) ===
+              normalizeOptionText(userDefaultCategory),
+          ) || (category.length === 0 ? userDefaultCategory : "");
+
+        return matchedCategory ? { ...row, category: matchedCategory } : row;
+      }),
+    );
+  }, [category, isLoadingFromOrder, userDefaultCategory]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -619,19 +676,23 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
   const resetOrderForm = () => {
     setFormData({
       parties: "",
-      dispatch: "",
+      dispatch: branch[0]?.bpl_id ? String(branch[0].bpl_id) : "",
       date: formatDateInput(new Date()),
       billAddress: "",
       shipAddress: "",
       Deliverydate: getDefaultDeliveryDate(),
       poNumber: "",
-      company: "",
+      company: String(
+        company.find((item) =>
+          normalizeOptionText(item?.name).includes("jivo wellness"),
+        )?.id || "",
+      ),
     });
 
-    setSelectedPartyCategory("");
+    setSelectedPartyCategory(userDefaultCategory);
     setCategory([]);
     setPartyProducts([]);
-    setRows([createEmptyRow()]);
+    setRows([{ ...createEmptyRow(), category: userDefaultCategory }]);
     setSchemeOptions({});
   };
 
@@ -1131,7 +1192,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
     setShipAddress([]);
     setCategory([]);
     setPartyProducts([]);
-    setRows([createEmptyRow()]);
+    setRows([{ ...createEmptyRow(), category: partyCategory || userDefaultCategory }]);
     setSchemeOptions({});
     setStateCode(nextStateCode || null);
     fetchPartyAddresses(value, partyCategory);

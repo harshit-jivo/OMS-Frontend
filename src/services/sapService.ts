@@ -164,6 +164,13 @@ export const sapService = {
     return (Array.isArray(response.data) ? response.data : []) as SapSalesOrder[];
   },
 
+  getOpenSalesOrdersByProduct: async (itemCode: string) => {
+    const response = await api.get("/hana/product-so/", {
+      params: { item_code: itemCode },
+    });
+    return (Array.isArray(response.data) ? response.data : []) as SapSalesOrder[];
+  },
+
   getBranches: async () => {
     const response = await api.get("/sap/branches/");
     return response.data;

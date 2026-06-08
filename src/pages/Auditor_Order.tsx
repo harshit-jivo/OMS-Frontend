@@ -164,6 +164,8 @@ export default function Auditor_orders() {
         Boxes: item.boxes,
         Liters: item.ltrs,
         "Total Ltrs": getOrderItemTotalLtrs(item).toFixed(2),
+        "Basic Price": item.basic_price,
+        "Market Price": item.market_price,
         "Total Amount": item.total,
       }));
     } else {
@@ -175,6 +177,8 @@ export default function Auditor_orders() {
         Status: order.status_display,
         "Bill To": order.bill_to_address,
         "Ship To": order.ship_to_address,
+        "Basic Price": "",
+        "Market Price": "",
       });
     }
 
@@ -392,6 +396,49 @@ export default function Auditor_orders() {
               <span className="ao-d-items-count">{selectedItems.length}</span>
             </div>
             <div className="ao-d-items-scroll">
+              {selectedItems.length > 0 ? (
+                <div className="order-detail-card-list">
+                  {selectedItems.map((item, i) => {
+                    const schemes = getOrderItemSchemes(item);
+
+                    return (
+                      <article className="order-detail-item-card" key={`${item.item_code}-detail-card-${i}`}>
+                        <div className="order-detail-item-top">
+                          <span className="order-detail-item-index">Item {i + 1}</span>
+                          <span className="order-detail-item-code">{item.item_code}</span>
+                        </div>
+                        <div className="order-detail-item-main">
+                          <div className="order-detail-item-title-wrap">
+                            <span className="order-detail-label">Item Name</span>
+                            <h4 className="order-detail-item-title">{item.item_name}</h4>
+                          </div>
+                          <div className="order-detail-item-tags">
+                            <span className="order-detail-item-category">{item.category || "-"}</span>
+                            {schemes.map((scheme, schemeIndex) => (
+                              <span className="order-detail-scheme-chip" key={`${item.item_code}-scheme-card-${schemeIndex}`}>
+                                <em>Sch</em>{scheme.name || "-"} <strong>Qty {scheme.qty || 0}</strong>
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="order-detail-item-metrics">
+                          <div><span>Qty</span><strong>{item.qty}</strong></div>
+                          <div><span>Pcs</span><strong>{item.pcs}</strong></div>
+                          <div><span>Boxes</span><strong>{Number(item.boxes).toFixed(2)}</strong></div>
+                          <div><span>Ltrs</span><strong>{item.ltrs}</strong></div>
+                          {schemes.length > 0 ? <div><span>Total Ltrs</span><strong>{getOrderItemTotalLtrs(item).toFixed(2)}</strong></div> : null}
+                          <div><span>Basic Price</span><strong>{Number(item.basic_price).toFixed(2)}</strong></div>
+                          <div><span>Market Price</span><strong>{Number(item.market_price).toFixed(2)}</strong></div>
+                          <div><span>Tax %</span><strong>{Number(item.tax_rate).toFixed(2)}</strong></div>
+                          <div className="order-detail-item-amount"><span>Amount</span><strong>{Number(item.total).toFixed(2)}</strong></div>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="order-detail-empty">No items found</div>
+              )}
               <table className="ao-d-tbl">
                 <thead><tr><th>#</th>
                 <th>Item Code</th>
