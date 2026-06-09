@@ -339,19 +339,19 @@ export default function Sidebar({ children }: SidebarProps) {
               </Link>
             </li>
 
-            <li className={location.pathname === "/Staff" ? "active" : ""}>
+            {/* <li className={location.pathname === "/Staff" ? "active" : ""}>
               <Link to="/Staff" onClick={closeSidebar}>
                 <SidebarIcon><HiIdentification /></SidebarIcon>
                 Staff Orders
               </Link>
-            </li>
-
+            </li> */}
+{/* 
             <li className={location.pathname === "/Staff_Rate_Assignment" ? "active" : ""}>
               <Link to="/Staff_Rate_Assignment" onClick={closeSidebar}>
                 <SidebarIcon><HiCurrencyRupee /></SidebarIcon>
                 Staff Rate Assignment
               </Link>
-            </li>
+            </li> */}
 
             <li className={location.pathname === "/Order_Flow_Settings" ? "active" : ""}>
               <Link to="/Order_Flow_Settings" onClick={closeSidebar}>
