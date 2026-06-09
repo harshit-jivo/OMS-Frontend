@@ -70,7 +70,7 @@ type ApiMessageResponse = {
   DocNum?: unknown;
 };
 
-const createFreightRow = (): FreightRow => ({ expenseCode: "", expenseName: "", lineTotal: 0 });
+const createFreightRow = (): FreightRow => ({ expenseCode: "", expenseName: "", lineTotal: 0, taxCode: "" });
 
 const linesToRecord = (lines: SelectedLine[]) =>
   Object.fromEntries(lines.map((line) => [lineKey(line.DocEntry, line.LineNum), line]));
@@ -418,6 +418,8 @@ export function useSalesInvoice() {
     setBillToAddresses([]);
     setShipToAddresses([]);
     setForm(emptyForm());
+    setPostSuccess("");
+    setPostError("");
   };
 
   const makeSelectedLine = (order: SalesOrder, line: SalesOrderLine): SelectedLine => {
@@ -654,14 +656,13 @@ export function useSalesInvoice() {
       setBillToAddresses(billingAddresses);
       setShipToAddresses(shippingAddresses);
       setForm((current) => {
+        const postingDate = normalizeDateInput();
         const dueDate = normalizeDateInput(firstSelectedLine.DocDueDate);
-        const postingDate = normalizeDateInput(firstSelectedLine.DocDate);
-        // Ensure DocDate <= DocDueDate
-        const adjustedPostingDate = postingDate > dueDate ? dueDate : postingDate;
+        const adjustedDueDate = dueDate < postingDate ? postingDate : dueDate;
         return {
           ...current,
-          postingDate: adjustedPostingDate,
-          dueDate,
+          postingDate,
+          dueDate: adjustedDueDate,
           shipTo: resolveDefaultAddress(current.shipTo, selectedShipToCodes[0], customer?.ShipToDef, shippingAddresses),
           payTo: resolveDefaultAddress(current.payTo, selectedPayToCodes[0], customer?.BillToDef, billingAddresses),
         };
@@ -712,14 +713,13 @@ export function useSalesInvoice() {
   }, [customerDetails, loadDraftDetails, loadingDraftDetails, selectedParty, step]);
 
   const resetStep3Form = () => {
+    const postingDate = normalizeDateInput();
     const dueDate = normalizeDateInput(firstSelectedLine?.DocDueDate);
-    const postingDate = normalizeDateInput(firstSelectedLine?.DocDate);
-    // Ensure DocDate <= DocDueDate
-    const adjustedPostingDate = postingDate > dueDate ? dueDate : postingDate;
+    const adjustedDueDate = dueDate < postingDate ? postingDate : dueDate;
     setForm((current) => ({
       ...emptyForm(),
-      postingDate: adjustedPostingDate,
-      dueDate,
+      postingDate,
+      dueDate: adjustedDueDate,
       shipTo: selectedShipToCodes[0] || shipToAddresses[0]?.Address || customerDetails?.ShipToDef || "",
       payTo: selectedPayToCodes[0] || billToAddresses[0]?.Address || customerDetails?.BillToDef || "",
       discountPercent: current.discountPercent,

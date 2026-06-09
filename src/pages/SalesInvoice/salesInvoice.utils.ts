@@ -77,6 +77,7 @@ export type FreightRow = {
   expenseCode: string;
   expenseName: string;
   lineTotal: number;
+  taxCode: string;
 };
 
 export type Party = {
@@ -167,10 +168,18 @@ export const buildInvoicePayload = (
   party: Party | null,
   selectedLines: Record<string, SelectedLine>,
   form: InvoiceForm,
-  _freightRows: FreightRow[] = [],
+  freightRows: FreightRow[] = [],
 ) => {
   const lines = Object.values(selectedLines);
   const firstLine = lines[0];
+
+  const additionalExpenses = freightRows
+    .filter((row) => toNumber(row.expenseCode) > 0 && toNumber(row.lineTotal) > 0)
+    .map((row) => ({
+      ExpenseCode: toNumber(row.expenseCode),
+      LineTotal: toNumber(row.lineTotal),
+      ...(row.taxCode ? { VatGroup: row.taxCode } : {}),
+    }));
 
   return {
     CardCode: party?.CardCode || "",
@@ -186,10 +195,9 @@ export const buildInvoicePayload = (
       const batchNumbers = (line.BatchNumbers || [])
         .map((batch) => ({
           ...(batch.BatchNumber ? { BatchNumber: batch.BatchNumber } : {}),
-          ...(batch.SystemSerialNumber !== undefined ? { SystemSerialNumber: batch.SystemSerialNumber } : {}),
           Quantity: toNumber(batch.Quantity),
         }))
-        .filter((batch) => (batch.BatchNumber || batch.SystemSerialNumber !== undefined) && batch.Quantity > 0);
+        .filter((batch) => batch.BatchNumber && batch.Quantity > 0);
       const batchQuantity = batchNumbers.reduce((sum, batch) => sum + toNumber(batch.Quantity), 0);
       const invoiceQuantity = toNumber(line.invoiceQty) || batchQuantity;
 
@@ -213,9 +221,11 @@ export const buildInvoicePayload = (
         ItemCode: line.ItemCode,
         Quantity: invoiceQuantity,
         WarehouseCode: line.WhsCode,
+        ...(line.TaxCode ? { TaxCode: line.TaxCode } : {}),
         ...(line.ShipDate ? { ShipDate: normalizeDateInput(line.ShipDate) } : {}),
         BatchNumbers: batchNumbers,
       };
     }),
+    ...(additionalExpenses.length ? { DocumentAdditionalExpenses: additionalExpenses } : {}),
   };
 };
