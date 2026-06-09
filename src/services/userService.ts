@@ -49,6 +49,14 @@ export interface PartySelection {
   category?: string | null;
 }
 
+export interface BulkPartyUserAssignmentRow {
+  user_id?: number | string;
+  username?: string;
+  user_name?: string;
+  name?: string;
+  card_code: string;
+}
+
 /* ================= SERVICE ================= */
 
 export const userService = {
@@ -96,6 +104,11 @@ export const userService = {
   };
 
   const response = await api.post(`/auth/assign-parties/`, payload);
+  return response.data;
+},
+
+ bulkAssignPartiesToUsers: async (rows: BulkPartyUserAssignmentRow[]) => {
+  const response = await api.post(`/auth/assign-parties/bulk-upload/`, { rows });
   return response.data;
 },
 

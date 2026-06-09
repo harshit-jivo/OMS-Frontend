@@ -177,6 +177,43 @@ const mergePartyDemand = (target: PartyDemand, source?: PartyDemand) => {
   return target;
 };
 
+const getDemandByItemFromOrders = (orders: SapSalesOrder[]) => {
+  const itemOrderDemand: Record<string, Record<string, { partyCode: string; qty: number }>> = {};
+
+  orders.forEach((order) => {
+    const partyCode = String(order.CardCode || "").trim();
+    if (!partyCode) return;
+
+    order.lines?.forEach((line) => {
+      const itemCode = getOrderLineItemCode(line);
+      if (!itemCode) return;
+
+      const orderKey = getSalesOrderKeyForParty(order, partyCode);
+      const openQty = toStockNumber(line.OpenQty);
+      itemOrderDemand[itemCode] = itemOrderDemand[itemCode] || {};
+      itemOrderDemand[itemCode][orderKey] = {
+        partyCode,
+        qty: Math.max(itemOrderDemand[itemCode][orderKey]?.qty || 0, openQty),
+      };
+    });
+  });
+
+  return Object.entries(itemOrderDemand).reduce<Record<string, PartyDemand>>(
+    (current, [itemCode, orderDemand]) => {
+      current[itemCode] = Object.values(orderDemand).reduce<PartyDemand>(
+        (total, { partyCode, qty }) => {
+          total.qty += qty;
+          total.parties[partyCode] = (total.parties[partyCode] || 0) + qty;
+          return total;
+        },
+        { qty: 0, parties: {} }
+      );
+      return current;
+    },
+    {}
+  );
+};
+
 export default function Product_Stock() {
   const [products, setProducts] = useState<Product[]>([]);
   const [openParties, setOpenParties] = useState<Party[]>([]);
@@ -277,6 +314,12 @@ export default function Product_Stock() {
 
   useEffect(() => {
     const fetchPartyOrders = async () => {
+      if (Object.keys(selectedSalesOrders).length > 0) {
+        setPartyOrderProducts({});
+        setPartyOrdersLoading(false);
+        return;
+      }
+
       if (selectedPartyCodes.length === 0) {
         setPartyOrderProducts({});
         return;
@@ -284,18 +327,9 @@ export default function Product_Stock() {
 
       setPartyOrdersLoading(true);
       try {
-        const hasSelectedOrderFilter = Object.keys(selectedSalesOrders).length > 0;
-        const chosenOrders = Object.values(selectedSalesOrders).filter((order) =>
-          selectedPartyCodes.includes(String(order.CardCode || "").trim())
+        const partyOrderResponses = await Promise.all(
+          selectedPartyCodes.map((partyCode) => sapService.getOpenSalesOrders(partyCode))
         );
-
-        const partyOrderResponses = hasSelectedOrderFilter
-          ? selectedPartyCodes.map((partyCode) =>
-              chosenOrders.filter((order) => String(order.CardCode || "").trim() === partyCode)
-            )
-          : await Promise.all(
-              selectedPartyCodes.map((partyCode) => sapService.getOpenSalesOrders(partyCode))
-            );
 
         const demand = partyOrderResponses.reduce<Record<string, PartyDemand>>((current, orders, index) => {
           const partyCode = selectedPartyCodes[index];
@@ -369,9 +403,17 @@ export default function Product_Stock() {
 
   const filteredWarehouses = useMemo(() => {
     const search = normalizeText(warehouseSearch);
-    if (!search) return warehouses;
-    return warehouses.filter((warehouseCode) => normalizeText(warehouseCode).includes(search));
-  }, [warehouseSearch, warehouses]);
+    const matchingWarehouses = search
+      ? warehouses.filter((warehouseCode) => normalizeText(warehouseCode).includes(search))
+      : warehouses;
+
+    return [...matchingWarehouses].sort((first, second) => {
+      const firstSelected = warehouseFilters.includes(first) ? 0 : 1;
+      const secondSelected = warehouseFilters.includes(second) ? 0 : 1;
+      if (firstSelected !== secondSelected) return firstSelected - secondSelected;
+      return first.localeCompare(second);
+    });
+  }, [warehouseFilters, warehouseSearch, warehouses]);
 
   const warehouseFilterLabel = useMemo(() => {
     if (warehouseFilters.length === 0 || warehouseFilters.length === warehouses.length) return "All Warehouses";
@@ -528,22 +570,35 @@ export default function Product_Stock() {
   };
 
   const clearProductDemand = (resetSearch = true) => {
+    const hasSelectedOrders = Object.keys(selectedSalesOrders).length > 0;
+
     setSelectedProductCode("");
     setProductOrders([]);
     setProductOrderError("");
-    setSelectedPartyCodes([]);
-    setSelectedSalesOrders({});
+    if (!hasSelectedOrders) {
+      setSelectedPartyCodes([]);
+      setSelectedSalesOrders({});
+    }
     setExpandedDemandKey("");
     if (resetSearch) setSearchText("");
   };
 
   const selectProductDemand = async (product: ProductOption) => {
+    const selectedOrders = Object.values(selectedSalesOrders);
+
     setSelectedProductCode(product.item_code);
     setProductOrderError("");
     setProductOrders([]);
+    setSearchText(product.item_code);
+
+    if (selectedOrders.length > 0) {
+      setProductOrders(selectedOrders);
+      setExpandedDemandKey(product.item_code);
+      return;
+    }
+
     setSelectedPartyCodes([]);
     setSelectedSalesOrders({});
-    setSearchText(product.item_code);
     setProductOrdersLoading(true);
 
     try {
@@ -635,8 +690,10 @@ export default function Product_Stock() {
   const filteredProducts = useMemo<StockDisplayProduct[]>(() => {
     const search = normalizeText(searchText);
     const hasSelectedOrderFilter = Object.keys(selectedSalesOrders).length > 0;
+    const hasActiveDemandFilter = hasSelectedOrderFilter || selectedPartyCodes.length > 0;
     const shouldGroupWarehouses = hasSelectedOrderFilter || warehouseFilters.length !== 1;
-    const partyDemandByItemCode = Object.entries(partyOrderProducts).reduce<Record<string, PartyDemand>>(
+    const selectedOrderDemandByItemCode = getDemandByItemFromOrders(Object.values(selectedSalesOrders));
+    const partyWideDemandByItemCode = Object.entries(partyOrderProducts).reduce<Record<string, PartyDemand>>(
       (current, [stockKey, demand]) => {
         const itemCode = getItemCodeFromStockKey(stockKey);
         if (!itemCode) return current;
@@ -645,18 +702,29 @@ export default function Product_Stock() {
       },
       {}
     );
+    const demandByItemCode = hasSelectedOrderFilter
+      ? selectedOrderDemandByItemCode
+      : partyWideDemandByItemCode;
 
     const rowMatches = products
       .filter((product) => {
         const stock = getWarehouseStock(product);
         const productStockKey = getStockKey(product.item_code, product.warehouse_code);
         const partyRequiredQty = partyOrderProducts[productStockKey]?.qty;
-        const itemPartyDemand = partyDemandByItemCode[String(product.item_code || "").trim()];
-        const pendingQty = selectedPartyCodes.length > 0 ? partyRequiredQty : getPendingRequiredQty(product);
-        const leftOverStock = selectedPartyCodes.length > 0 ? stock - toStockNumber(pendingQty) : getLeftOverStock(product);
+        const itemDemand = demandByItemCode[String(product.item_code || "").trim()];
+        const pendingQty = hasSelectedOrderFilter
+          ? itemDemand?.qty
+          : selectedPartyCodes.length > 0
+            ? partyRequiredQty
+            : getPendingRequiredQty(product);
+        const leftOverStock = hasActiveDemandFilter ? stock - toStockNumber(pendingQty) : getLeftOverStock(product);
         const status = getStockStatus(stock, leftOverStock);
-        const matchesPartyOrders = selectedPartyCodes.length === 0 || (
-          shouldGroupWarehouses ? itemPartyDemand !== undefined : partyRequiredQty !== undefined
+        const matchesPartyOrders = !hasActiveDemandFilter || (
+          hasSelectedOrderFilter
+            ? itemDemand !== undefined
+            : shouldGroupWarehouses
+              ? itemDemand !== undefined
+              : partyRequiredQty !== undefined
         );
 
         const matchesSearch =
@@ -685,23 +753,23 @@ export default function Product_Stock() {
             const stock = getWarehouseStock(product);
             const productStockKey = getStockKey(product.item_code, product.warehouse_code);
             const rowPartyDemand = partyOrderProducts[productStockKey];
-            const itemPartyDemand = partyDemandByItemCode[itemCode];
-            const requiredQty = selectedPartyCodes.length > 0 ? 0 : getPendingRequiredQty(product);
+            const itemDemand = demandByItemCode[itemCode];
+            const requiredQty = hasActiveDemandFilter ? 0 : getPendingRequiredQty(product);
             const existing = current.get(groupKey);
 
             if (existing) {
               existing.display_stock += stock;
               existing.display_required_qty += requiredQty;
-              existing.display_required_qty = selectedPartyCodes.length > 0
-                ? itemPartyDemand?.qty || 0
+              existing.display_required_qty = hasActiveDemandFilter
+                ? itemDemand?.qty || 0
                 : existing.display_required_qty;
               existing.display_left_over_stock = existing.display_stock - existing.display_required_qty;
               existing.display_party_demand = mergePartyDemand(
                 existing.display_party_demand || { qty: 0, parties: {} },
                 rowPartyDemand
               );
-              if (selectedPartyCodes.length > 0) {
-                existing.display_party_demand = itemPartyDemand;
+              if (hasActiveDemandFilter) {
+                existing.display_party_demand = itemDemand;
               }
               return current;
             }
@@ -711,10 +779,10 @@ export default function Product_Stock() {
               warehouse_code: "",
               display_key: groupKey,
               display_stock: stock,
-              display_required_qty: selectedPartyCodes.length > 0 ? itemPartyDemand?.qty || 0 : requiredQty,
-              display_left_over_stock: stock - (selectedPartyCodes.length > 0 ? itemPartyDemand?.qty || 0 : requiredQty),
-              display_party_demand: selectedPartyCodes.length > 0
-                ? itemPartyDemand
+              display_required_qty: hasActiveDemandFilter ? itemDemand?.qty || 0 : requiredQty,
+              display_left_over_stock: stock - (hasActiveDemandFilter ? itemDemand?.qty || 0 : requiredQty),
+              display_party_demand: hasActiveDemandFilter
+                ? itemDemand
                 : rowPartyDemand
                   ? mergePartyDemand({ qty: 0, parties: {} }, rowPartyDemand)
                   : undefined,
@@ -726,8 +794,11 @@ export default function Product_Stock() {
           const stock = getWarehouseStock(product);
           const productStockKey = getStockKey(product.item_code, product.warehouse_code);
           const partyDemand = partyOrderProducts[productStockKey];
-          const requiredQty = selectedPartyCodes.length > 0
-            ? partyDemand?.qty || 0
+          const itemDemand = demandByItemCode[String(product.item_code || "").trim()];
+          const requiredQty = hasSelectedOrderFilter
+            ? itemDemand?.qty || 0
+            : selectedPartyCodes.length > 0
+              ? partyDemand?.qty || 0
             : getPendingRequiredQty(product);
 
           return {
@@ -735,10 +806,10 @@ export default function Product_Stock() {
             display_key: `${productStockKey}||${product.category ?? product.id}`,
             display_stock: stock,
             display_required_qty: requiredQty,
-            display_left_over_stock: selectedPartyCodes.length > 0
+            display_left_over_stock: hasActiveDemandFilter
               ? stock - requiredQty
               : getLeftOverStock(product),
-            display_party_demand: partyDemand,
+            display_party_demand: hasSelectedOrderFilter ? itemDemand : partyDemand,
           };
         });
 
@@ -852,8 +923,11 @@ export default function Product_Stock() {
 
       <section className="ps-summary">
         <div className="ps-card ps-card-products">
-          <span>Total Products</span>
+          <span>{selectedPartyCodes.length > 0 ? "Selected Party Items" : "Total Products"}</span>
           <strong>{summary.totalProducts}</strong>
+          {selectedPartyCodes.length > 0 && (
+            <small>{selectedPartyCodes.length} {selectedPartyCodes.length === 1 ? "party" : "parties"} selected</small>
+          )}
         </div>
         <div className="ps-card ps-card-stock">
           <span>Total Stock</span>

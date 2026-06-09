@@ -124,7 +124,7 @@
         /* Detail View */
         .ao-detail { display: flex; flex-direction: column; gap: 14px; }
 
-        .ao-d-nav { display: flex; align-items: center; justify-content: space-between; padding-bottom: 10px; border-bottom: 1px solid #f1f5f9; }
+        .ao-d-nav { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 10px; border-bottom: 1px solid #f1f5f9; }
         .ao-d-back {
           display: inline-flex; align-items: center; gap: 5px; background: none; border: none;
           color: #64748b; font-size: 13px; font-weight: 500; font-family: 'Inter', sans-serif; cursor: pointer; padding: 0;
@@ -137,6 +137,18 @@
           cursor: pointer; transition: all .15s;
         }
         .ao-d-export:hover { background: #dcfce7; border-color: #86efac; box-shadow: 0 1px 3px rgba(22,163,74,.12); }
+        .ao-d-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+        .ao-d-action-btn {
+          display: inline-flex; align-items: center; justify-content: center; height: 36px; width: 36px; padding: 0;
+          border-radius: 8px; background: #fff; font-size: var(--font-ui, 13px); font-weight: 700;
+          font-family: 'Inter', sans-serif; cursor: pointer; transition: all .15s;
+        }
+        .ao-d-action-btn svg { width: 16px; height: 16px; }
+        .ao-d-approve { color: #16a34a; border: 1px solid #bbf7d0; }
+        .ao-d-approve:hover:not(:disabled) { background: #f0fdf4; border-color: #86efac; }
+        .ao-d-reject { color: #dc2626; border: 1px solid #fecaca; }
+        .ao-d-reject:hover:not(:disabled) { background: #fef2f2; border-color: #f87171; }
+        .ao-d-action-btn:disabled { opacity: .65; cursor: not-allowed; }
 
         /* Order Info Card */
         .ao-d-header-card {

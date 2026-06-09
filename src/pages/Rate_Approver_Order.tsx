@@ -391,18 +391,41 @@ export default function RateApproverOrders() {
               </svg>
               Back to Orders
             </button>
-            <button className="ao-d-export" onClick={() => downloadExcel(orderDetails)}>
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <path
-                  d="M7 1v8m0 0L4 6.5M7 9l3-2.5M2.5 12h9"
-                  stroke="currentColor"
-                  strokeWidth="1.4"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-              Export Excel
-            </button>
+            <div className="ao-d-actions">
+              <button
+                className="ao-d-action-btn ao-d-approve"
+                disabled={isProcessing}
+                onClick={() => initiateApprove(orderDetails)}
+                aria-label="Approve order"
+                title="Approve"
+              >
+                <HiCheckCircle />
+              </button>
+              <button
+                className="ao-d-action-btn ao-d-reject"
+                disabled={isProcessing}
+                aria-label="Reject order"
+                title="Reject"
+                onClick={() => {
+                  setSelectedOrderId(orderDetails.id);
+                  setShowRejectModal(true);
+                }}
+              >
+                <HiXCircle />
+              </button>
+              <button className="ao-d-export" onClick={() => downloadExcel(orderDetails)}>
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <path
+                    d="M7 1v8m0 0L4 6.5M7 9l3-2.5M2.5 12h9"
+                    stroke="currentColor"
+                    strokeWidth="1.4"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                Export Excel
+              </button>
+            </div>
           </div>
 
           <div className="ao-d-header-card">

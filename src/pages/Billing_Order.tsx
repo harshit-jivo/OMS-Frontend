@@ -395,10 +395,31 @@ export default function Billing_orders() {
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M10 13L5 8l5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
               Back to Orders
             </button>
-            <button className="bo-d-export" onClick={() => downloadExcel(orderDetails)}>
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1v8m0 0L4 6.5M7 9l3-2.5M2.5 12h9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
-              Export Excel
-            </button>
+            <div className="bo-d-actions">
+              <button
+                className="bo-d-action-btn bo-d-approve"
+                onClick={() => initiateApprove(orderDetails)}
+                aria-label="Approve order"
+                title="Approve"
+              >
+                <HiCheckCircle />
+              </button>
+              <button
+                className="bo-d-action-btn bo-d-reject"
+                aria-label="Reject order"
+                title="Reject"
+                onClick={() => {
+                  setSelectedOrderId(orderDetails.id);
+                  setShowRejectModal(true);
+                }}
+              >
+                <HiXCircle />
+              </button>
+              <button className="bo-d-export" onClick={() => downloadExcel(orderDetails)}>
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1v8m0 0L4 6.5M7 9l3-2.5M2.5 12h9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                Export Excel
+              </button>
+            </div>
           </div>
 
           <div className="bo-d-header-card">
