@@ -58,6 +58,7 @@ export default function StateWise_Report() {
   const [selectedProductType, setSelectedProductType] = useState("");
   const [selectedItemKey, setSelectedItemKey] = useState("");
   const [selectedState, setSelectedState] = useState("");
+  const [orderStatus, setOrderStatus] = useState("completed");
   const [fromDate, setFromDate] = useState(firstDay);
   const [toDate, setToDate] = useState(lastDay);
   const [currentPage, setCurrentPage] = useState(1);
@@ -69,7 +70,7 @@ export default function StateWise_Report() {
 
       try {
         const response = await api.get(
-          `/orders/dashboardW/charts/?line_year=${period.year}&year=${period.year}&month=${period.month}`,
+          `/orders/dashboardW/charts/?line_year=${period.year}&year=${period.year}&month=${period.month}&status=${orderStatus}`,
         );
         setStateItemSales(Array.isArray(response.data?.state_item_sales) ? response.data.state_item_sales : []);
       } catch (error) {
@@ -81,7 +82,7 @@ export default function StateWise_Report() {
     };
 
     fetchDashboardStateData();
-  }, [fromDate, toDate]);
+  }, [fromDate, toDate, orderStatus]);
 
   const allRows = useMemo(() => {
     return stateItemSales.flatMap((stateItem) =>
@@ -170,7 +171,7 @@ export default function StateWise_Report() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [fromDate, selectedItemKey, selectedProductType, selectedState, toDate]);
+  }, [fromDate, selectedItemKey, selectedProductType, selectedState, toDate, orderStatus]);
 
   useEffect(() => {
     if (currentPage > totalPages) {
@@ -242,6 +243,20 @@ export default function StateWise_Report() {
                   {state}
                 </option>
               ))}
+            </select>
+          </div>
+
+          <div className="dr-field">
+            <label className="dr-label">Status</label>
+            <select
+              className="dr-date-input"
+              value={orderStatus}
+              onChange={(event) => setOrderStatus(event.target.value)}
+            >
+              <option value="completed">Completed Orders</option>
+              <option value="pending">Pending Orders</option>
+              <option value="rejected">Rejected Orders</option>
+              <option value="all">All Orders</option>
             </select>
           </div>
 

@@ -141,7 +141,7 @@
         /* Detail View */
         .bo-detail { display: flex; flex-direction: column; gap: 14px; }
 
-        .bo-d-nav { display: flex; align-items: center; justify-content: space-between; padding-bottom: 10px; border-bottom: 1px solid #f1f5f9; }
+        .bo-d-nav { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 10px; border-bottom: 1px solid #f1f5f9; }
         .bo-d-back {
           display: inline-flex; align-items: center; gap: 5px; background: none; border: none;
           color: #64748b; font-size: 13px; font-weight: 500; font-family: 'Inter', sans-serif; cursor: pointer; padding: 0;
@@ -155,6 +155,28 @@
           cursor: pointer; transition: all .15s;
         }
         .bo-d-export:hover { background: #dcfce7; border-color: #86efac; box-shadow: 0 1px 3px rgba(22,163,74,.12); }
+        .bo-d-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
+        .bo-d-action-btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 28px;
+          height: 28px;
+          padding: 0;
+          border-radius: 7px;
+          background: #fff;
+          font-size: 13px;
+          font-weight: 700;
+          font-family: 'Inter', sans-serif;
+          cursor: pointer;
+          box-shadow: 0 1px 2px rgba(15, 23, 42, .08);
+          transition: background-color .15s, border-color .15s, box-shadow .15s, transform .15s;
+        }
+        .bo-d-action-btn svg { width: 15px; height: 15px; }
+        .bo-d-approve { color: #16a34a; border: 1px solid #bfdbfe; background: #fff; }
+        .bo-d-approve:hover { background: #f8fbff; border-color: #93c5fd; box-shadow: 0 2px 5px rgba(15, 23, 42, .12); transform: translateY(-1px); }
+        .bo-d-reject { color: #dc2626; border: 1px solid #bfdbfe; background: #fff; }
+        .bo-d-reject:hover { background: #f8fbff; border-color: #93c5fd; box-shadow: 0 2px 5px rgba(15, 23, 42, .12); transform: translateY(-1px); }
 
         /* Order Info Card */
         .bo-d-header-card {

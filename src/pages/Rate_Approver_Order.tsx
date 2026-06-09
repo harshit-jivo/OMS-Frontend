@@ -110,6 +110,16 @@ export default function RateApproverOrders() {
     }
   };
 
+  const removeHandledOrder = (orderId: number) => {
+    setOrders((current) => current.filter((order) => order.id !== orderId));
+    setSelectedItems([]);
+    setSelectedOrderId(null);
+    if (orderDetails?.id === orderId || pendingOrderId === orderId) {
+      setOrderDetails(null);
+      setShowDetails(false);
+    }
+  };
+
   const initiateApprove = (order: Order) => {
     setPendingOrderId(order.id);
     setPendingOrderNum(order.order_number);
@@ -132,6 +142,7 @@ export default function RateApproverOrders() {
         message: response.message || "Order approved successfully",
         nextStatus: response.status || "-",
       });
+      removeHandledOrder(pendingOrderId);
       setShowAcceptSuccess(true);
       fetchOrders();
       refreshNotifications();
@@ -158,6 +169,7 @@ export default function RateApproverOrders() {
         rejectReason,
       );
       alert("Order Rejected");
+      removeHandledOrder(orderId);
       setShowRejectModal(false);
       setRejectReason("");
       fetchOrders();
@@ -195,6 +207,8 @@ export default function RateApproverOrders() {
         Boxes: item.boxes,
         Liters: item.ltrs,
         "Total Ltrs": getOrderItemTotalLtrs(item).toFixed(2),
+        "Basic Price": item.basic_price,
+        "Market Price": item.market_price,
         "Total Amount": item.total,
       }));
     } else {
@@ -206,6 +220,8 @@ export default function RateApproverOrders() {
         Status: order.status_display,
         "Bill To": order.bill_to_address,
         "Ship To": order.ship_to_address,
+        "Basic Price": "",
+        "Market Price": "",
       });
     }
 
@@ -265,7 +281,6 @@ export default function RateApproverOrders() {
                   <tr>
                     <th>Order ID</th>
                     <th>FOC</th>
-                    <th>Card Code</th>
                     <th>Card Name</th>
                     <th>Created At</th>
                     <th>Delivery Date</th>
@@ -287,7 +302,6 @@ export default function RateApproverOrders() {
                             <span className="ao-foc-empty">-</span>
                           )}
                         </td>
-                        <td>{order.card_code}</td>
                         <td>{order.card_name}</td>
                         <td>{formatCreatedDateTime(order.created_at)}</td>
                         <td>{order.delivery_date}</td>
@@ -389,18 +403,41 @@ export default function RateApproverOrders() {
               </svg>
               Back to Orders
             </button>
-            <button className="ao-d-export" onClick={() => downloadExcel(orderDetails)}>
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <path
-                  d="M7 1v8m0 0L4 6.5M7 9l3-2.5M2.5 12h9"
-                  stroke="currentColor"
-                  strokeWidth="1.4"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-              Export Excel
-            </button>
+            <div className="ao-d-actions">
+              <button
+                className="ao-d-action-btn ao-d-approve"
+                disabled={isProcessing}
+                onClick={() => initiateApprove(orderDetails)}
+                aria-label="Approve order"
+                title="Approve"
+              >
+                <HiCheckCircle />
+              </button>
+              <button
+                className="ao-d-action-btn ao-d-reject"
+                disabled={isProcessing}
+                aria-label="Reject order"
+                title="Reject"
+                onClick={() => {
+                  setSelectedOrderId(orderDetails.id);
+                  setShowRejectModal(true);
+                }}
+              >
+                <HiXCircle />
+              </button>
+              <button className="ao-d-export" onClick={() => downloadExcel(orderDetails)}>
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <path
+                    d="M7 1v8m0 0L4 6.5M7 9l3-2.5M2.5 12h9"
+                    stroke="currentColor"
+                    strokeWidth="1.4"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                Export Excel
+              </button>
+            </div>
           </div>
 
           <div className="ao-d-header-card">
@@ -461,6 +498,49 @@ export default function RateApproverOrders() {
               <span className="ao-d-items-count">{selectedItems.length}</span>
             </div>
             <div className="ao-d-items-scroll">
+              {selectedItems.length > 0 ? (
+                <div className="order-detail-card-list">
+                  {selectedItems.map((item, i) => {
+                    const schemes = getOrderItemSchemes(item);
+
+                    return (
+                      <article className="order-detail-item-card" key={`${item.item_code}-detail-card-${i}`}>
+                        <div className="order-detail-item-top">
+                          <span className="order-detail-item-index">Item {i + 1}</span>
+                          <span className="order-detail-item-code">{item.item_code}</span>
+                        </div>
+                        <div className="order-detail-item-main">
+                          <div className="order-detail-item-title-wrap">
+                            <span className="order-detail-label">Item Name</span>
+                            <h4 className="order-detail-item-title">{item.item_name}</h4>
+                          </div>
+                          <div className="order-detail-item-tags">
+                            <span className="order-detail-item-category">{item.category || "-"}</span>
+                            {schemes.map((scheme, schemeIndex) => (
+                              <span className="order-detail-scheme-chip" key={`${item.item_code}-scheme-card-${schemeIndex}`}>
+                                <em>Sch</em>{scheme.name || "-"} <strong>Qty {scheme.qty || 0}</strong>
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="order-detail-item-metrics">
+                          <div><span>Qty</span><strong>{item.qty}</strong></div>
+                          <div><span>Pcs</span><strong>{item.pcs}</strong></div>
+                          <div><span>Boxes</span><strong>{Number(item.boxes).toFixed(2)}</strong></div>
+                          <div><span>Ltrs</span><strong>{item.ltrs}</strong></div>
+                          {schemes.length > 0 ? <div><span>Total Ltrs</span><strong>{getOrderItemTotalLtrs(item).toFixed(2)}</strong></div> : null}
+                          <div><span>Basic Price</span><strong>{Number(item.basic_price).toFixed(2)}</strong></div>
+                          <div><span>Market Price</span><strong>{Number(item.market_price).toFixed(2)}</strong></div>
+                          <div><span>Tax %</span><strong>{Number(item.tax_rate).toFixed(2)}</strong></div>
+                          <div className="order-detail-item-amount"><span>Amount</span><strong>{Number(item.total).toFixed(2)}</strong></div>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="order-detail-empty">No items found</div>
+              )}
               <table className="ao-d-tbl">
                 <thead>
                   <tr>

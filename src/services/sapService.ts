@@ -123,6 +123,13 @@ export const sapService = {
     return response.data;
   },
 
+  getProductVarieties: async (category?: string) => {
+    const response = await api.get("/sap/product-varieties/", {
+      params: category ? { category } : undefined,
+    });
+    return response.data as { category?: string; count?: number; varieties?: string[] };
+  },
+
   getProductStock: async () => {
     const response = await api.get("/hana/product-stock/");
     return response.data;
@@ -160,6 +167,13 @@ export const sapService = {
   getOpenSalesOrders: async (cardCode: string) => {
     const response = await api.get("/hana/so/", {
       params: { card_code: cardCode },
+    });
+    return (Array.isArray(response.data) ? response.data : []) as SapSalesOrder[];
+  },
+
+  getOpenSalesOrdersByProduct: async (itemCode: string) => {
+    const response = await api.get("/hana/product-so/", {
+      params: { item_code: itemCode },
     });
     return (Array.isArray(response.data) ? response.data : []) as SapSalesOrder[];
   },

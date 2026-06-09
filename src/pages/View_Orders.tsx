@@ -321,6 +321,8 @@ export default function View_Orders() {
         "Boxes": item.boxes,
         "Liters": item.ltrs,
         "Total Ltrs": getOrderItemTotalLtrs(item),
+        "Basic Price": item.basic_price,
+        "Market Price": item.market_price,
         "Total Amount": item.total,
       }));
     } else {
@@ -333,6 +335,8 @@ export default function View_Orders() {
         "Status": order.status_display,
         "Bill To": order.bill_to_address,
         "Ship To": order.ship_to_address,
+        "Basic Price": "",
+        "Market Price": "",
       });
     }
 
@@ -575,6 +579,53 @@ export default function View_Orders() {
               <span className="vo-d-items-count">{selectedItems.length}</span>
             </div>
             <div className="vo-d-items-scroll">
+              {selectedItems.length > 0 ? (
+                <div className="vo-d-item-cards">
+                  {selectedItems.map((item, i) => {
+                    const schemes = getOrderItemSchemes(item);
+
+                    return (
+                      <article className="vo-d-item-card" key={`${item.item_code}-card-${i}`}>
+                        <div className="vo-d-item-card-top">
+                          <span className="vo-d-item-index">Item {i + 1}</span>
+                          <span className="vo-d-item-code">{item.item_code}</span>
+                        </div>
+
+                        <div className="vo-d-item-card-main">
+                          <div className="vo-d-item-title-wrap">
+                            <span className="vo-d-card-label">Item Name</span>
+                            <h4 className="vo-d-item-title">{item.item_name}</h4>
+                          </div>
+                          <div className="vo-d-item-tags">
+                            <span className="vo-d-item-category">{item.category || "-"}</span>
+                            {schemes.map((scheme, schemeIndex) => (
+                              <span className="vo-d-item-scheme-chip" key={`${item.item_code}-scheme-card-${schemeIndex}`}>
+                                <em>Sch</em>{scheme.name || "-"} <strong>Qty {scheme.qty || 0}</strong>
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="vo-d-item-metrics">
+                          <div><span>Qty</span><strong>{item.qty}</strong></div>
+                          <div><span>Pcs</span><strong>{item.pcs}</strong></div>
+                          <div><span>Boxes</span><strong>{Number(item.boxes).toFixed(2)}</strong></div>
+                          <div><span>Ltrs</span><strong>{item.ltrs}</strong></div>
+                          {schemes.length > 0 ? (
+                            <div><span>Total Ltrs</span><strong>{getOrderItemTotalLtrs(item).toFixed(2)}</strong></div>
+                          ) : null}
+                          <div><span>Basic Price</span><strong>{Number(item.basic_price).toFixed(2)}</strong></div>
+                          <div><span>Market Price</span><strong>{Number(item.market_price).toFixed(2)}</strong></div>
+                          <div><span>Tax %</span><strong>{Number(item.tax_rate).toFixed(2)}</strong></div>
+                          <div className="vo-d-item-amount"><span>Amount</span><strong>{Number(item.total).toFixed(2)}</strong></div>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="vo-empty">No items found</div>
+              )}
               <table className="vo-d-tbl">
                 <thead>
                   <tr>

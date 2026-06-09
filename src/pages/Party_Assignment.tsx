@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import * as XLSX from "xlsx";
 import { userService } from "../services/userService";
 import type { User } from "../services/userService";
 import { sapService } from "../services/sapService";
@@ -65,6 +66,33 @@ const getPartyList = (data: unknown): Party[] => {
   return [];
 };
 
+const getImportValue = (row: Record<string, unknown>, keys: string[]) => {
+  const normalizedEntries = Object.entries(row).map(([key, value]) => [
+    normalizeSearch(key),
+    value,
+  ] as const);
+  for (const key of keys) {
+    const normalizedKey = normalizeSearch(key);
+    const match = normalizedEntries.find(([entryKey]) => entryKey === normalizedKey);
+    if (match) return match[1];
+  }
+  return "";
+};
+
+const getWorksheetRows = (workbook: XLSX.WorkBook, sheetNames: string[]) => {
+  const normalizedNames = sheetNames.map(normalizeSearch);
+  const sheetName = workbook.SheetNames.find((name) => normalizedNames.includes(normalizeSearch(name)));
+  if (!sheetName) return [];
+
+  return XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets[sheetName], { defval: "" });
+};
+
+const splitImportList = (value: unknown) =>
+  asText(value)
+    .split(/[,;\n]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
 export default function Party_Assignment() {
   const [users, setUsers] = useState<User[]>([]);
   const [parties, setParties] = useState<Party[]>([]);
@@ -76,6 +104,8 @@ export default function Party_Assignment() {
   const [showDropdown, setShowDropdown] = useState(false);
   // const [showPartyDropdown, setShowPartyDropdown] = useState(false);
   const [selectedParties, setSelectedParties] = useState<string[]>([]);
+  const [isImporting, setIsImporting] = useState(false);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetchUsers();
@@ -212,6 +242,120 @@ const handleDel =  async (partyKey: string) => {
   }
 };
 
+const downloadBulkTemplate = () => {
+  const userRows = [
+    { Username: "manager.username" },
+    { Username: "billing.username" },
+  ];
+  const partyRows = [
+    { "Party Code": "CUST000001" },
+    { "Party Code": "CUST000002" },
+    { "Party Code": "CUST000003" },
+  ];
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(userRows), "Users");
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(partyRows), "Parties");
+  XLSX.writeFile(workbook, "party-user-assignment-template.xlsx");
+};
+
+const handleBulkImport = async (file: File) => {
+  setIsImporting(true);
+  try {
+    const buffer = await file.arrayBuffer();
+    const workbook = XLSX.read(buffer, { type: "array" });
+    const userRows = getWorksheetRows(workbook, ["Users", "User"]);
+    const partyRows = getWorksheetRows(workbook, ["Parties", "Party", "Party Codes", "Party Mapping"]);
+
+    let parsedRows: { user_name: string; name: string; username: string; card_code: string }[] = [];
+
+    if (userRows.length && partyRows.length) {
+      const userIdentifiers = Array.from(new Set(
+        userRows
+          .map((row) =>
+            asText(getImportValue(row, ["Username", "username", "User", "User Name", "User ID", "User Id", "user_id", "Name", "name"])),
+          )
+          .filter(Boolean),
+      ));
+      const partyCodes = Array.from(new Set(
+        partyRows
+          .map((row) =>
+            asText(getImportValue(row, ["Party Code", "Party Codes", "Card Code", "Card Codes", "card_code", "CardCode", "party_code"])),
+          )
+          .filter(Boolean),
+      ));
+
+      parsedRows = userIdentifiers.flatMap((userIdentifier) =>
+        partyCodes.map((cardCode) => ({
+          user_name: userIdentifier,
+          name: userIdentifier,
+          username: userIdentifier,
+          card_code: cardCode,
+        })),
+      );
+    } else {
+      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet, { defval: "" });
+      parsedRows = rows
+        .flatMap((row) => {
+          const userIdentifiers = [
+            ...splitImportList(getImportValue(row, ["Users", "User", "User Name", "Name", "user_name", "name"])),
+            ...splitImportList(getImportValue(row, ["Usernames", "Username", "User ID", "User Id", "user_id", "username"])),
+          ];
+          const uniqueUsers = Array.from(new Set(userIdentifiers));
+          const partyCodes = splitImportList(
+            getImportValue(row, ["Party Codes", "Party Code", "Card Codes", "Card Code", "card_code", "CardCode", "party_code"])
+          );
+
+          return uniqueUsers.flatMap((userIdentifier) =>
+            partyCodes.map((cardCode) => ({
+              user_name: userIdentifier,
+              name: userIdentifier,
+              username: userIdentifier,
+              card_code: cardCode,
+            }))
+          );
+        })
+        .filter((row) => (row.username || row.user_name) && row.card_code);
+    }
+
+    if (!parsedRows.length) {
+      alert("No valid rows found. Use Users and Parties sheets from the template.");
+      return;
+    }
+
+    const response = await userService.bulkAssignPartiesToUsers(parsedRows);
+    const data = response.data || {};
+    const errors = Array.isArray(data.errors) ? data.errors : [];
+    const errorPreview = errors.slice(0, 5).join("\n");
+    alert(
+      [
+        errors.length ? `Import completed with errors.` : `Import complete.`,
+        `Added: ${data.added || 0}`,
+        `Existing/updated: ${data.existing || 0}`,
+        errors.length ? `Errors: ${errors.length}` : "",
+        errorPreview,
+        errors.length > 5 ? `${errors.length - 5} more errors...` : "",
+      ].filter(Boolean).join("\n"),
+    );
+    if (errors.length) {
+      console.warn("Party assignment import errors:", errors);
+    }
+    if (selectedUser) {
+      fetchUserParties(Number(selectedUser));
+    }
+  } catch (error: any) {
+    console.error("Error importing party assignments:", error);
+    const data = error?.response?.data?.data;
+    const errors = Array.isArray(data?.errors) ? data.errors : [];
+    alert(errors.length ? `Import completed with errors: ${errors.slice(0, 3).join("; ")}` : "Failed to import Excel file.");
+  } finally {
+    setIsImporting(false);
+    if (importInputRef.current) {
+      importInputRef.current.value = "";
+    }
+  }
+};
+
   return (
     <div className="pa-page app-page">
 
@@ -229,6 +373,76 @@ const handleDel =  async (partyKey: string) => {
           <div style={{ marginBottom: '24px' }}>
             <h1 style={{ margin: '0 0 4px', fontSize: '24px', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em' }}>Party Assignment</h1>
             {/* <p style={{ margin: 0, fontSize: '13px', color: '#64748b' }}>Search and select a user to manage their assigned parties.</p> */}
+          </div>
+
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: '16px',
+              flexWrap: 'wrap',
+              padding: '16px',
+              marginBottom: '24px',
+              background: '#f8fafc',
+              border: '1px solid #e2e8f0',
+              borderRadius: '8px',
+            }}
+          >
+            <div>
+              <h2 style={{ margin: '0 0 4px', fontSize: '16px', fontWeight: 700, color: '#0f172a' }}>
+                Excel Upload
+              </h2>
+              <p style={{ margin: 0, fontSize: '13px', color: '#64748b' }}>
+                Add usernames in the Users sheet and one party code per row in the Parties sheet; every listed party is assigned to every listed user.
+              </p>
+            </div>
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={downloadBulkTemplate}
+                style={{
+                  padding: '9px 14px',
+                  border: '1px solid #cbd5e1',
+                  background: '#fff',
+                  color: '#334155',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                }}
+              >
+                Download Template
+              </button>
+              <button
+                type="button"
+                disabled={isImporting}
+                onClick={() => importInputRef.current?.click()}
+                style={{
+                  padding: '9px 14px',
+                  border: 'none',
+                  background: '#16a34a',
+                  color: '#fff',
+                  borderRadius: '8px',
+                  fontWeight: 600,
+                  cursor: isImporting ? 'not-allowed' : 'pointer',
+                  opacity: isImporting ? 0.75 : 1,
+                }}
+              >
+                {isImporting ? 'Uploading...' : 'Upload Excel'}
+              </button>
+              <input
+                ref={importInputRef}
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                style={{ display: 'none' }}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) {
+                    handleBulkImport(file);
+                  }
+                }}
+              />
+            </div>
           </div>
 
           <div style={{ position: 'relative', maxWidth: '400px', zIndex: 10 }}>

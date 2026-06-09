@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   HiArrowPath,
   HiCube,
+  HiDocumentText,
   HiExclamationTriangle,
   HiMagnifyingGlass,
+  HiXMark,
 } from "react-icons/hi2";
 import { sapService } from "../services/sapService";
 import type { Product } from "../services/sapService";
@@ -33,6 +35,25 @@ type StockDisplayProduct = Product & {
   display_required_qty: number;
   display_left_over_stock: number;
   display_party_demand?: PartyDemand;
+};
+
+type OrderModalState = {
+  party: Party;
+  orders: SapSalesOrder[];
+  loading: boolean;
+  error: string;
+} | null;
+
+type ProductOption = {
+  item_code: string;
+  item_name: string;
+  category?: string;
+  sal_pack_unit?: string | null;
+};
+
+type ProductDemandRow = {
+  order: SapSalesOrder;
+  line: SapSalesOrder["lines"][number];
 };
 
 const normalizeProducts = (data: unknown): Product[] => {
@@ -86,7 +107,53 @@ const formatQuantity = (value: number) =>
     maximumFractionDigits: 2,
   });
 
+const formatRoundedQuantity = (value: number) =>
+  Math.round(value).toLocaleString("en-IN");
+
+const getPackLtrs = (pack?: string | null) => {
+  const text = String(pack || "").trim();
+  const numericPack = Number(text);
+  if (Number.isFinite(numericPack) && numericPack > 0) return numericPack;
+
+  const match = text.match(/(\d+(?:\.\d+)?)\s*(LTR|L|ML)\b/i);
+  if (!match) return 0;
+
+  const value = Number(match[1]);
+  if (!Number.isFinite(value)) return 0;
+
+  return match[2].toUpperCase() === "ML" ? value / 1000 : value;
+};
+
+const getWarehouseQtyLtrs = (product: StockDisplayProduct) =>
+  product.display_stock * getPackLtrs(product.sal_pack_unit);
+
+const formatOrderDate = (value?: string | null) => {
+  if (!value) return "-";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value.split("T")[0] || value;
+
+  return parsed.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+};
+
 const normalizeText = (value: unknown) => String(value ?? "").trim().toLowerCase();
+const getPartyName = (party: Party) =>
+  String(party.card_name || (party as unknown as { CardName?: string }).CardName || "").trim();
+const getPartyCode = (party: Party) =>
+  String(party.card_code || (party as unknown as { CardCode?: string }).CardCode || "").trim();
+const getPartySearchText = (party: Party) =>
+  normalizeText([
+    getPartyName(party),
+    getPartyCode(party),
+    party.address,
+    party.category,
+    party.state,
+    party.main_group,
+    party.chain,
+  ].filter(Boolean).join(" "));
 const getOrderLineItemCode = (line: { ItemCode?: string }) => String(line.ItemCode || "").trim();
 const getOrderLineWarehouseCode = (line: { WhsCode?: string | null }) => String(line.WhsCode || "").trim();
 const getStockKey = (itemCode: string, warehouseCode?: string | null) =>
@@ -94,6 +161,10 @@ const getStockKey = (itemCode: string, warehouseCode?: string | null) =>
 const getProductGroupKey = (product: Product) =>
   `${String(product.item_code || "").trim()}||${String(product.category || "").trim()}`;
 const getItemCodeFromStockKey = (stockKey: string) => stockKey.split("||")[0] || "";
+const getSalesOrderKey = (order: SapSalesOrder) =>
+  `${String(order.CardCode || "").trim()}||${String(order.DocEntry || order.DocNum || "").trim()}`;
+const getSalesOrderKeyForParty = (order: SapSalesOrder, partyCode: string) =>
+  getSalesOrderKey({ ...order, CardCode: partyCode });
 
 const mergePartyDemand = (target: PartyDemand, source?: PartyDemand) => {
   if (!source) return target;
@@ -106,6 +177,43 @@ const mergePartyDemand = (target: PartyDemand, source?: PartyDemand) => {
   return target;
 };
 
+const getDemandByItemFromOrders = (orders: SapSalesOrder[]) => {
+  const itemOrderDemand: Record<string, Record<string, { partyCode: string; qty: number }>> = {};
+
+  orders.forEach((order) => {
+    const partyCode = String(order.CardCode || "").trim();
+    if (!partyCode) return;
+
+    order.lines?.forEach((line) => {
+      const itemCode = getOrderLineItemCode(line);
+      if (!itemCode) return;
+
+      const orderKey = getSalesOrderKeyForParty(order, partyCode);
+      const openQty = toStockNumber(line.OpenQty);
+      itemOrderDemand[itemCode] = itemOrderDemand[itemCode] || {};
+      itemOrderDemand[itemCode][orderKey] = {
+        partyCode,
+        qty: Math.max(itemOrderDemand[itemCode][orderKey]?.qty || 0, openQty),
+      };
+    });
+  });
+
+  return Object.entries(itemOrderDemand).reduce<Record<string, PartyDemand>>(
+    (current, [itemCode, orderDemand]) => {
+      current[itemCode] = Object.values(orderDemand).reduce<PartyDemand>(
+        (total, { partyCode, qty }) => {
+          total.qty += qty;
+          total.parties[partyCode] = (total.parties[partyCode] || 0) + qty;
+          return total;
+        },
+        { qty: 0, parties: {} }
+      );
+      return current;
+    },
+    {}
+  );
+};
+
 export default function Product_Stock() {
   const [products, setProducts] = useState<Product[]>([]);
   const [openParties, setOpenParties] = useState<Party[]>([]);
@@ -114,6 +222,13 @@ export default function Product_Stock() {
   const [partyDropdownOpen, setPartyDropdownOpen] = useState(false);
   const [partyOrdersLoading, setPartyOrdersLoading] = useState(false);
   const [partyOrderProducts, setPartyOrderProducts] = useState<Record<string, PartyDemand>>({});
+  const [selectedSalesOrders, setSelectedSalesOrders] = useState<Record<string, SapSalesOrder>>({});
+  const [orderModal, setOrderModal] = useState<OrderModalState>(null);
+  const [orderSearch, setOrderSearch] = useState("");
+  const [selectedProductCode, setSelectedProductCode] = useState("");
+  const [productOrders, setProductOrders] = useState<SapSalesOrder[]>([]);
+  const [productOrdersLoading, setProductOrdersLoading] = useState(false);
+  const [productOrderError, setProductOrderError] = useState("");
   const [searchText, setSearchText] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [categoryDropdownOpen, setCategoryDropdownOpen] = useState(false);
@@ -122,6 +237,7 @@ export default function Product_Stock() {
   const [warehouseDropdownOpen, setWarehouseDropdownOpen] = useState(false);
   const [stockFilters, setStockFilters] = useState<StockStatus[]>([]);
   const [stockDropdownOpen, setStockDropdownOpen] = useState(false);
+  const [expandedDemandKey, setExpandedDemandKey] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -198,6 +314,12 @@ export default function Product_Stock() {
 
   useEffect(() => {
     const fetchPartyOrders = async () => {
+      if (Object.keys(selectedSalesOrders).length > 0) {
+        setPartyOrderProducts({});
+        setPartyOrdersLoading(false);
+        return;
+      }
+
       if (selectedPartyCodes.length === 0) {
         setPartyOrderProducts({});
         return;
@@ -208,6 +330,7 @@ export default function Product_Stock() {
         const partyOrderResponses = await Promise.all(
           selectedPartyCodes.map((partyCode) => sapService.getOpenSalesOrders(partyCode))
         );
+
         const demand = partyOrderResponses.reduce<Record<string, PartyDemand>>((current, orders, index) => {
           const partyCode = selectedPartyCodes[index];
           (orders as SapSalesOrder[]).forEach((order) => {
@@ -236,7 +359,7 @@ export default function Product_Stock() {
     };
 
     void fetchPartyOrders();
-  }, [selectedPartyCodes]);
+  }, [selectedPartyCodes, selectedSalesOrders]);
 
   const categories = useMemo(() => {
     const values = products
@@ -245,6 +368,30 @@ export default function Product_Stock() {
 
     return Array.from(new Set(values)).sort();
   }, [products]);
+
+  const productOptions = useMemo<ProductOption[]>(() => {
+    const optionMap = products.reduce<Map<string, ProductOption>>((current, product) => {
+      const itemCode = String(product.item_code || "").trim();
+      if (!itemCode || current.has(itemCode)) return current;
+
+      current.set(itemCode, {
+        item_code: itemCode,
+        item_name: product.item_name || itemCode,
+        category: product.category,
+        sal_pack_unit: product.sal_pack_unit,
+      });
+      return current;
+    }, new Map());
+
+    return Array.from(optionMap.values()).sort((first, second) =>
+      (first.item_name || first.item_code).localeCompare(second.item_name || second.item_code)
+    );
+  }, [products]);
+
+  const selectedProduct = useMemo(
+    () => productOptions.find((product) => product.item_code === selectedProductCode),
+    [productOptions, selectedProductCode],
+  );
 
   const warehouses = useMemo(() => {
     const values = products
@@ -256,9 +403,17 @@ export default function Product_Stock() {
 
   const filteredWarehouses = useMemo(() => {
     const search = normalizeText(warehouseSearch);
-    if (!search) return warehouses;
-    return warehouses.filter((warehouseCode) => normalizeText(warehouseCode).includes(search));
-  }, [warehouseSearch, warehouses]);
+    const matchingWarehouses = search
+      ? warehouses.filter((warehouseCode) => normalizeText(warehouseCode).includes(search))
+      : warehouses;
+
+    return [...matchingWarehouses].sort((first, second) => {
+      const firstSelected = warehouseFilters.includes(first) ? 0 : 1;
+      const secondSelected = warehouseFilters.includes(second) ? 0 : 1;
+      if (firstSelected !== secondSelected) return firstSelected - secondSelected;
+      return first.localeCompare(second);
+    });
+  }, [warehouseFilters, warehouseSearch, warehouses]);
 
   const warehouseFilterLabel = useMemo(() => {
     if (warehouseFilters.length === 0 || warehouseFilters.length === warehouses.length) return "All Warehouses";
@@ -269,15 +424,16 @@ export default function Product_Stock() {
   const filteredOpenParties = useMemo(() => {
     const search = normalizeText(partySearch);
     if (!search) return openParties;
+    const searchTokens = search.split(/\s+/).filter(Boolean);
 
-    return openParties.filter((party) => (
-      normalizeText(party.card_code).includes(search) ||
-      normalizeText(party.card_name).includes(search)
-    ));
+    return openParties.filter((party) => {
+      const partySearchText = getPartySearchText(party);
+      return searchTokens.every((token) => partySearchText.includes(token));
+    });
   }, [openParties, partySearch]);
 
   const selectedParties = useMemo(
-    () => openParties.filter((party) => selectedPartyCodes.includes(party.card_code)),
+    () => openParties.filter((party) => selectedPartyCodes.includes(getPartyCode(party))),
     [openParties, selectedPartyCodes],
   );
 
@@ -286,18 +442,206 @@ export default function Product_Stock() {
     if (openParties.length > 0 && selectedParties.length === openParties.length) return "All Parties";
     if (selectedParties.length === 1) {
       const party = selectedParties[0];
-      return `${party.card_name || party.card_code} (${party.card_code})`;
+      return `${getPartyName(party) || getPartyCode(party)} (${getPartyCode(party)})`;
     }
     return `${selectedParties.length} Parties Selected`;
   }, [openParties.length, selectedParties]);
 
-  const togglePartySelection = (partyCode: string) => {
-    setSelectedPartyCodes((current) =>
-      current.includes(partyCode)
-        ? current.filter((code) => code !== partyCode)
-        : [...current, partyCode]
-    );
+  const closeOrderModal = () => {
+    setOrderModal(null);
+    setOrderSearch("");
   };
+
+  const clearPartyOrders = (partyCode: string) => {
+    setSelectedSalesOrders((current) => {
+      const next = { ...current };
+      Object.keys(next).forEach((key) => {
+        if (String(next[key].CardCode || "").trim() === partyCode) {
+          delete next[key];
+        }
+      });
+      return next;
+    });
+  };
+
+  const openPartyOrderModal = async (party: Party) => {
+    setPartyDropdownOpen(false);
+    setPartySearch("");
+    setOrderSearch("");
+    setOrderModal({ party, orders: [], loading: true, error: "" });
+
+    try {
+      const orders = await sapService.getOpenSalesOrders(getPartyCode(party));
+      setOrderModal({ party, orders, loading: false, error: "" });
+    } catch (err) {
+      console.error("Error fetching party open orders:", err);
+      setOrderModal({
+        party,
+        orders: [],
+        loading: false,
+        error: "Unable to load open sales orders for this party.",
+      });
+    }
+  };
+
+  const handlePartyClick = (party: Party) => {
+    void openPartyOrderModal(party);
+  };
+
+  const toggleSalesOrder = (order: SapSalesOrder) => {
+    const partyCode = String(order.CardCode || (orderModal ? getPartyCode(orderModal.party) : "")).trim();
+    if (!partyCode) return;
+    const normalizedOrder = { ...order, CardCode: partyCode };
+    const orderKey = getSalesOrderKey(normalizedOrder);
+
+    setSelectedSalesOrders((current) => {
+      const next = { ...current };
+      if (next[orderKey]) {
+        delete next[orderKey];
+      } else {
+        next[orderKey] = normalizedOrder;
+      }
+      const partyHasOrders = Object.values(next).some(
+        (selectedOrder) => String(selectedOrder.CardCode || "").trim() === partyCode
+      );
+      setSelectedPartyCodes((currentParties) => {
+        if (partyHasOrders) {
+          return currentParties.includes(partyCode) ? currentParties : [...currentParties, partyCode];
+        }
+        return currentParties.filter((code) => code !== partyCode);
+      });
+      return next;
+    });
+  };
+
+  const selectVisibleSalesOrders = () => {
+    if (!orderModal) return;
+    const partyCode = getPartyCode(orderModal.party);
+    if (!partyCode) return;
+
+    setSelectedPartyCodes((current) =>
+      current.includes(partyCode) ? current : [...current, partyCode]
+    );
+    setSelectedSalesOrders((current) => {
+      const next = { ...current };
+      filteredModalOrders.forEach((order) => {
+        const normalizedOrder = { ...order, CardCode: partyCode };
+        next[getSalesOrderKey(normalizedOrder)] = normalizedOrder;
+      });
+      return next;
+    });
+  };
+
+  const clearModalPartyOrders = () => {
+    if (!orderModal) return;
+    const partyCode = getPartyCode(orderModal.party);
+    clearPartyOrders(partyCode);
+    setSelectedPartyCodes((current) => current.filter((code) => code !== partyCode));
+  };
+
+  const productDemandRows = useMemo<ProductDemandRow[]>(() => {
+    if (!selectedProductCode) return [];
+
+    return productOrders.flatMap((order) =>
+      (order.lines || [])
+        .filter((line) => getOrderLineItemCode(line) === selectedProductCode)
+        .map((line) => ({ order, line }))
+    );
+  }, [productOrders, selectedProductCode]);
+
+  const selectedProductRequiredQty = useMemo(
+    () => productDemandRows.reduce((sum, row) => sum + toStockNumber(row.line.OpenQty), 0),
+    [productDemandRows],
+  );
+
+  const selectedProductPartyCount = useMemo(
+    () => new Set(productDemandRows.map((row) => String(row.order.CardCode || "").trim()).filter(Boolean)).size,
+    [productDemandRows],
+  );
+
+  const getProductLineStock = (line: SapSalesOrder["lines"][number]) => {
+    const stockRow = products.find(
+      (product) =>
+        String(product.item_code || "").trim() === getOrderLineItemCode(line) &&
+        String(product.warehouse_code || "").trim() === getOrderLineWarehouseCode(line)
+    );
+
+    return stockRow ? getWarehouseStock(stockRow) : 0;
+  };
+
+  const clearProductDemand = (resetSearch = true) => {
+    const hasSelectedOrders = Object.keys(selectedSalesOrders).length > 0;
+
+    setSelectedProductCode("");
+    setProductOrders([]);
+    setProductOrderError("");
+    if (!hasSelectedOrders) {
+      setSelectedPartyCodes([]);
+      setSelectedSalesOrders({});
+    }
+    setExpandedDemandKey("");
+    if (resetSearch) setSearchText("");
+  };
+
+  const selectProductDemand = async (product: ProductOption) => {
+    const selectedOrders = Object.values(selectedSalesOrders);
+
+    setSelectedProductCode(product.item_code);
+    setProductOrderError("");
+    setProductOrders([]);
+    setSearchText(product.item_code);
+
+    if (selectedOrders.length > 0) {
+      setProductOrders(selectedOrders);
+      setExpandedDemandKey(product.item_code);
+      return;
+    }
+
+    setSelectedPartyCodes([]);
+    setSelectedSalesOrders({});
+    setProductOrdersLoading(true);
+
+    try {
+      const orders = await sapService.getOpenSalesOrdersByProduct(product.item_code);
+      setProductOrders(orders);
+      setSelectedPartyCodes(
+        Array.from(new Set(orders.map((order) => String(order.CardCode || "").trim()).filter(Boolean)))
+      );
+      setSelectedSalesOrders(
+        orders.reduce<Record<string, SapSalesOrder>>((current, order) => {
+          const partyCode = String(order.CardCode || "").trim();
+          if (!partyCode) return current;
+          current[getSalesOrderKey({ ...order, CardCode: partyCode })] = { ...order, CardCode: partyCode };
+          return current;
+        }, {})
+      );
+    } catch (err) {
+      console.error("Error fetching product open orders:", err);
+      setProductOrderError("Unable to load parties and sales orders for this product.");
+    } finally {
+      setProductOrdersLoading(false);
+    }
+  };
+
+  const filteredModalOrders = useMemo(() => {
+    if (!orderModal) return [];
+    const search = normalizeText(orderSearch);
+    if (!search) return orderModal.orders;
+
+    return orderModal.orders.filter((order) => (
+      normalizeText(order.DocNum).includes(search) ||
+      normalizeText(order.DocEntry).includes(search) ||
+      normalizeText(order.NumAtCard).includes(search)
+    ));
+  }, [orderModal, orderSearch]);
+
+  const selectedModalOrderCount = useMemo(() => {
+    if (!orderModal) return 0;
+    const partyCode = getPartyCode(orderModal.party);
+    return Object.values(selectedSalesOrders).filter(
+      (order) => String(order.CardCode || "").trim() === partyCode
+    ).length;
+  }, [orderModal, selectedSalesOrders]);
 
   const stockFilterLabel = useMemo(() => {
     if (stockFilters.length === 0 || stockFilters.length === STOCK_OPTIONS.length) return "All Stock";
@@ -328,22 +672,28 @@ export default function Product_Stock() {
     );
   };
 
-  const getPartyDemandLabel = (demand?: PartyDemand) => {
-    if (!demand) return "";
+  const getPartyDemandRows = (demand?: PartyDemand) => {
+    if (!demand) return [];
 
     return Object.entries(demand.parties)
       .map(([partyCode, qty]) => {
         const party = openParties.find((item) => item.card_code === partyCode);
-        const partyName = party?.card_name || partyCode;
-        return `${partyName} (${partyCode}): ${formatQuantity(qty)}`;
+        return {
+          partyCode,
+          partyName: party?.card_name || partyCode,
+          qty,
+        };
       })
-      .join(", ");
+      .sort((first, second) => second.qty - first.qty || first.partyName.localeCompare(second.partyName));
   };
 
   const filteredProducts = useMemo<StockDisplayProduct[]>(() => {
     const search = normalizeText(searchText);
-    const shouldGroupWarehouses = warehouseFilters.length !== 1;
-    const partyDemandByItemCode = Object.entries(partyOrderProducts).reduce<Record<string, PartyDemand>>(
+    const hasSelectedOrderFilter = Object.keys(selectedSalesOrders).length > 0;
+    const hasActiveDemandFilter = hasSelectedOrderFilter || selectedPartyCodes.length > 0;
+    const shouldGroupWarehouses = hasSelectedOrderFilter || warehouseFilters.length !== 1;
+    const selectedOrderDemandByItemCode = getDemandByItemFromOrders(Object.values(selectedSalesOrders));
+    const partyWideDemandByItemCode = Object.entries(partyOrderProducts).reduce<Record<string, PartyDemand>>(
       (current, [stockKey, demand]) => {
         const itemCode = getItemCodeFromStockKey(stockKey);
         if (!itemCode) return current;
@@ -352,18 +702,29 @@ export default function Product_Stock() {
       },
       {}
     );
+    const demandByItemCode = hasSelectedOrderFilter
+      ? selectedOrderDemandByItemCode
+      : partyWideDemandByItemCode;
 
     const rowMatches = products
       .filter((product) => {
         const stock = getWarehouseStock(product);
         const productStockKey = getStockKey(product.item_code, product.warehouse_code);
         const partyRequiredQty = partyOrderProducts[productStockKey]?.qty;
-        const itemPartyDemand = partyDemandByItemCode[String(product.item_code || "").trim()];
-        const pendingQty = selectedPartyCodes.length > 0 ? partyRequiredQty : getPendingRequiredQty(product);
-        const leftOverStock = selectedPartyCodes.length > 0 ? stock - toStockNumber(pendingQty) : getLeftOverStock(product);
+        const itemDemand = demandByItemCode[String(product.item_code || "").trim()];
+        const pendingQty = hasSelectedOrderFilter
+          ? itemDemand?.qty
+          : selectedPartyCodes.length > 0
+            ? partyRequiredQty
+            : getPendingRequiredQty(product);
+        const leftOverStock = hasActiveDemandFilter ? stock - toStockNumber(pendingQty) : getLeftOverStock(product);
         const status = getStockStatus(stock, leftOverStock);
-        const matchesPartyOrders = selectedPartyCodes.length === 0 || (
-          shouldGroupWarehouses ? itemPartyDemand !== undefined : partyRequiredQty !== undefined
+        const matchesPartyOrders = !hasActiveDemandFilter || (
+          hasSelectedOrderFilter
+            ? itemDemand !== undefined
+            : shouldGroupWarehouses
+              ? itemDemand !== undefined
+              : partyRequiredQty !== undefined
         );
 
         const matchesSearch =
@@ -387,28 +748,28 @@ export default function Product_Stock() {
     const displayProducts = shouldGroupWarehouses
       ? Array.from(
           rowMatches.reduce<Map<string, StockDisplayProduct>>((current, product) => {
-            const groupKey = getProductGroupKey(product);
             const itemCode = String(product.item_code || "").trim();
+            const groupKey = hasSelectedOrderFilter ? itemCode : getProductGroupKey(product);
             const stock = getWarehouseStock(product);
             const productStockKey = getStockKey(product.item_code, product.warehouse_code);
             const rowPartyDemand = partyOrderProducts[productStockKey];
-            const itemPartyDemand = partyDemandByItemCode[itemCode];
-            const requiredQty = selectedPartyCodes.length > 0 ? 0 : getPendingRequiredQty(product);
+            const itemDemand = demandByItemCode[itemCode];
+            const requiredQty = hasActiveDemandFilter ? 0 : getPendingRequiredQty(product);
             const existing = current.get(groupKey);
 
             if (existing) {
               existing.display_stock += stock;
               existing.display_required_qty += requiredQty;
-              existing.display_required_qty = selectedPartyCodes.length > 0
-                ? itemPartyDemand?.qty || 0
+              existing.display_required_qty = hasActiveDemandFilter
+                ? itemDemand?.qty || 0
                 : existing.display_required_qty;
               existing.display_left_over_stock = existing.display_stock - existing.display_required_qty;
               existing.display_party_demand = mergePartyDemand(
                 existing.display_party_demand || { qty: 0, parties: {} },
                 rowPartyDemand
               );
-              if (selectedPartyCodes.length > 0) {
-                existing.display_party_demand = itemPartyDemand;
+              if (hasActiveDemandFilter) {
+                existing.display_party_demand = itemDemand;
               }
               return current;
             }
@@ -418,10 +779,10 @@ export default function Product_Stock() {
               warehouse_code: "",
               display_key: groupKey,
               display_stock: stock,
-              display_required_qty: selectedPartyCodes.length > 0 ? itemPartyDemand?.qty || 0 : requiredQty,
-              display_left_over_stock: stock - (selectedPartyCodes.length > 0 ? itemPartyDemand?.qty || 0 : requiredQty),
-              display_party_demand: selectedPartyCodes.length > 0
-                ? itemPartyDemand
+              display_required_qty: hasActiveDemandFilter ? itemDemand?.qty || 0 : requiredQty,
+              display_left_over_stock: stock - (hasActiveDemandFilter ? itemDemand?.qty || 0 : requiredQty),
+              display_party_demand: hasActiveDemandFilter
+                ? itemDemand
                 : rowPartyDemand
                   ? mergePartyDemand({ qty: 0, parties: {} }, rowPartyDemand)
                   : undefined,
@@ -433,8 +794,11 @@ export default function Product_Stock() {
           const stock = getWarehouseStock(product);
           const productStockKey = getStockKey(product.item_code, product.warehouse_code);
           const partyDemand = partyOrderProducts[productStockKey];
-          const requiredQty = selectedPartyCodes.length > 0
-            ? partyDemand?.qty || 0
+          const itemDemand = demandByItemCode[String(product.item_code || "").trim()];
+          const requiredQty = hasSelectedOrderFilter
+            ? itemDemand?.qty || 0
+            : selectedPartyCodes.length > 0
+              ? partyDemand?.qty || 0
             : getPendingRequiredQty(product);
 
           return {
@@ -442,10 +806,10 @@ export default function Product_Stock() {
             display_key: `${productStockKey}||${product.category ?? product.id}`,
             display_stock: stock,
             display_required_qty: requiredQty,
-            display_left_over_stock: selectedPartyCodes.length > 0
+            display_left_over_stock: hasActiveDemandFilter
               ? stock - requiredQty
               : getLeftOverStock(product),
-            display_party_demand: partyDemand,
+            display_party_demand: hasSelectedOrderFilter ? itemDemand : partyDemand,
           };
         });
 
@@ -476,7 +840,16 @@ export default function Product_Stock() {
           second.item_name || second.item_code || "",
         );
       });
-  }, [categoryFilter, partyOrderProducts, products, searchText, selectedPartyCodes, stockFilters, warehouseFilters]);
+  }, [
+    categoryFilter,
+    partyOrderProducts,
+    products,
+    searchText,
+    selectedPartyCodes,
+    selectedSalesOrders,
+    stockFilters,
+    warehouseFilters,
+  ]);
 
   const summary = useMemo(() => {
     const uniqueProducts = new Set<string>();
@@ -514,7 +887,8 @@ export default function Product_Stock() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [categoryFilter, searchText, selectedPartyCodes, stockFilters, warehouseFilters]);
+    setExpandedDemandKey("");
+  }, [categoryFilter, searchText, selectedPartyCodes, selectedProductCode, stockFilters, warehouseFilters]);
 
   const totalPages = Math.max(1, Math.ceil(filteredProducts.length / ITEMS_PER_PAGE));
   const pageStart = (currentPage - 1) * ITEMS_PER_PAGE;
@@ -540,17 +914,20 @@ export default function Product_Stock() {
             void fetchProducts();
             void fetchOpenParties();
           }}
-          disabled={loading || partyOrdersLoading}
+          disabled={loading || partyOrdersLoading || productOrdersLoading}
         >
           <HiArrowPath />
-          {loading || partyOrdersLoading ? "Refreshing" : "Refresh"}
+          {loading || partyOrdersLoading || productOrdersLoading ? "Refreshing" : "Refresh"}
         </button>
       </div>
 
       <section className="ps-summary">
         <div className="ps-card ps-card-products">
-          <span>Total Products</span>
+          <span>{selectedPartyCodes.length > 0 ? "Selected Party Items" : "Total Products"}</span>
           <strong>{summary.totalProducts}</strong>
+          {selectedPartyCodes.length > 0 && (
+            <small>{selectedPartyCodes.length} {selectedPartyCodes.length === 1 ? "party" : "parties"} selected</small>
+          )}
         </div>
         <div className="ps-card ps-card-stock">
           <span>Total Stock</span>
@@ -576,7 +953,10 @@ export default function Product_Stock() {
           <input
             type="text"
             value={searchText}
-            onChange={(event) => setSearchText(event.target.value)}
+            onChange={(event) => {
+              setSearchText(event.target.value);
+              if (selectedProductCode) clearProductDemand(false);
+            }}
             placeholder="Search by product, warehouse code, variety or pack"
           />
         </label>
@@ -625,7 +1005,8 @@ export default function Product_Stock() {
                       type="button"
                       className="ps-party-bulk-btn"
                       onClick={() => {
-                        setSelectedPartyCodes(openParties.map((party) => party.card_code));
+                        setSelectedPartyCodes(openParties.map((party) => getPartyCode(party)).filter(Boolean));
+                        setSelectedSalesOrders({});
                       }}
                     >
                       Select All
@@ -635,6 +1016,7 @@ export default function Product_Stock() {
                       className="ps-party-bulk-btn"
                       onClick={() => {
                         setSelectedPartyCodes([]);
+                        setSelectedSalesOrders({});
                         setPartySearch("");
                       }}
                     >
@@ -642,29 +1024,42 @@ export default function Product_Stock() {
                     </button>
                   </div>
                 )}
-                {filteredOpenParties.length > 0 ? (
-                  filteredOpenParties.map((party) => (
+                {filteredOpenParties.length > 0 ? 
+                  ([...filteredOpenParties]
+                    .sort((a, b) => {
+                      const aCode = getPartyCode(a);
+                      const bCode = getPartyCode(b);
+                      const aSel = selectedPartyCodes.includes(aCode) ? 0 : 1;
+                      const bSel = selectedPartyCodes.includes(bCode) ? 0 : 1;
+                      if (aSel !== bSel) return aSel - bSel;
+                      const aName = (getPartyName(a) || aCode).toLowerCase();
+                      const bName = (getPartyName(b) || bCode).toLowerCase();
+                      return aName.localeCompare(bName);
+                    })
+                    .map((party) => {
+                    const partyCode = getPartyCode(party);
+                    const partyName = getPartyName(party);
+
+                    return (
                     <button
                       type="button"
-                      key={party.card_code}
-                      aria-pressed={selectedPartyCodes.includes(party.card_code)}
+                      key={partyCode}
+                      aria-pressed={selectedPartyCodes.includes(partyCode)}
                       className={`ps-party-option ps-warehouse-option${
-                        selectedPartyCodes.includes(party.card_code) ? " is-selected" : ""
+                        selectedPartyCodes.includes(partyCode) ? " is-selected" : ""
                       }`}
-                      onClick={() => {
-                        togglePartySelection(party.card_code);
-                      }}
+                      onClick={() => handlePartyClick(party)}
                     >
                       <span className="ps-party-option-row">
                         <span
                           className={`ps-party-check${
-                            selectedPartyCodes.includes(party.card_code) ? " is-selected" : ""
+                            selectedPartyCodes.includes(partyCode) ? " is-selected" : ""
                           }`}
                         />
                         <span className="ps-party-option-text">
-                          <span className="ps-party-option-main">{party.card_name || party.card_code}</span>
+                          <span className="ps-party-option-main">{partyName || partyCode}</span>
                           <span className="ps-party-option-meta">
-                            {party.card_code}
+                            {partyCode}
                             {party.open_sales_order_count !== undefined
                               ? ` | ${party.open_sales_order_count} open`
                               : ""}
@@ -672,7 +1067,8 @@ export default function Product_Stock() {
                         </span>
                       </span>
                     </button>
-                  ))
+                  );
+                })
                 ) : (
                   <div className="ps-warehouse-empty">No party found</div>
                 )}
@@ -898,11 +1294,87 @@ export default function Product_Stock() {
         </div>
       </section>
 
+      {selectedProductCode && (
+        <section className="ps-product-demand-panel">
+          <div className="ps-product-demand-head">
+            <div>
+              <span className="ps-order-modal-kicker">Product Demand</span>
+              <h2>{selectedProduct?.item_name || selectedProductCode}</h2>
+              <p>
+                {selectedProductCode} | {selectedProductPartyCount} parties | Required{" "}
+                {formatQuantity(selectedProductRequiredQty)}
+              </p>
+            </div>
+            <button type="button" className="ps-order-action-btn" onClick={() => clearProductDemand()}>
+              Clear
+            </button>
+          </div>
+
+          {productOrdersLoading ? (
+            <div className="ps-product-demand-state">
+              <span className="ps-spinner" />
+              Loading parties and sales orders...
+            </div>
+          ) : productOrderError ? (
+            <div className="ps-product-demand-state ps-state-error">
+              <HiExclamationTriangle />
+              {productOrderError}
+            </div>
+          ) : productDemandRows.length === 0 ? (
+            <div className="ps-product-demand-state">
+              <HiDocumentText />
+              No open sales order found for this product.
+            </div>
+          ) : (
+            <div className="ps-product-demand-table-wrap">
+              <table className="ps-order-table ps-product-demand-table">
+                <thead>
+                  <tr>
+                    <th>Party</th>
+                    <th>Sales Order</th>
+                    <th>Due Date</th>
+                    <th>Warehouse</th>
+                    <th>Open Qty</th>
+                    <th>Stock</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {productDemandRows.map((row) => {
+                    const lineStock = getProductLineStock(row.line);
+                    const openQty = toStockNumber(row.line.OpenQty);
+                    const rowKey = `${row.order.CardCode}-${row.order.DocEntry}-${row.line.LineNum}`;
+
+                    return (
+                      <tr key={rowKey}>
+                        <td>
+                          <span className="ps-order-doc">{row.order.CardName || row.order.CardCode}</span>
+                          <span className="ps-order-ref">{row.order.CardCode}</span>
+                        </td>
+                        <td>
+                          <span className="ps-order-doc">SO #{row.order.DocNum || row.order.DocEntry}</span>
+                          {row.order.NumAtCard && <span className="ps-order-ref">Ref: {row.order.NumAtCard}</span>}
+                        </td>
+                        <td>{formatOrderDate(row.order.DocDueDate)}</td>
+                        <td>{getOrderLineWarehouseCode(row.line) || "-"}</td>
+                        <td className="ps-order-qty">{formatQuantity(openQty)}</td>
+                        <td className={`ps-order-qty ${lineStock - openQty < 0 ? "ps-stock-negative" : ""}`}>
+                          {formatQuantity(lineStock)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
+
       <section className="ps-table-card">
-        {loading || partyOrdersLoading ? (
+        {loading || partyOrdersLoading || productOrdersLoading ? (
           <div className="ps-state">
             <span className="ps-spinner" />
-            {partyOrdersLoading ? "Loading party ordered products..." : "Loading stock..."}
+            {partyOrdersLoading || productOrdersLoading ? "Loading ordered products..." : "Loading stock..."}
           </div>
         ) : error ? (
           <div className="ps-state ps-state-error">
@@ -921,10 +1393,10 @@ export default function Product_Stock() {
                 <tr>
                   <th>Item Code</th>
                   <th>Product</th>
-                  <th>Variety</th>
                   <th>Category</th>
                   <th>Pack</th>
                   <th>Warehouse Stock</th>
+                  <th>Warehouse Qty Ltrs</th>
                   <th>Order Required Qty</th>
                   <th>Left Over</th>
                   <th>Status</th>
@@ -937,24 +1409,51 @@ export default function Product_Stock() {
                   const pendingRequiredQty = product.display_required_qty;
                   const leftOverStock = product.display_left_over_stock;
                   const status = getStockStatus(stock, leftOverStock);
-                  const partyDemandLabel = getPartyDemandLabel(partyDemand);
+                  const partyDemandRows = getPartyDemandRows(partyDemand);
+                  const canShowPartyDemand = selectedPartyCodes.length > 0 && partyDemandRows.length > 0;
+                  const isDemandExpanded = expandedDemandKey === product.display_key;
+                  const isProductDemandLoading =
+                    productOrdersLoading && selectedProductCode === String(product.item_code || "").trim();
+                  const warehouseQtyLtrs = getWarehouseQtyLtrs(product);
 
                   return (
+                    <Fragment key={product.display_key}>
                     <tr
                       className={status === "shortage" || status === "out" ? "ps-row-out" : ""}
-                      key={product.display_key}
                     >
                       <td className="ps-code">{product.item_code || "-"}</td>
                       <td>
-                        <div className="ps-product-name">{product.item_name || "-"}</div>
-                        {selectedPartyCodes.length > 0 && partyDemandLabel && (
-                          <div className="ps-party-demand">Ordered by {partyDemandLabel}</div>
-                        )}
+                        <button
+                          type="button"
+                          className={`ps-product-name-btn${product.item_code ? " has-demand" : ""}`}
+                          onClick={() => {
+                            if (!product.item_code) return;
+                            if (!canShowPartyDemand || selectedProductCode !== product.item_code) {
+                              void selectProductDemand(product);
+                              return;
+                            }
+                            setExpandedDemandKey((current) =>
+                              current === product.display_key ? "" : product.display_key
+                            );
+                          }}
+                          disabled={isProductDemandLoading}
+                        >
+                          <span className="ps-product-name">{product.item_name || "-"}</span>
+                          {product.item_code && (
+                            <span className="ps-product-demand-hint">
+                              {isProductDemandLoading
+                                ? "Loading"
+                                : canShowPartyDemand
+                                  ? isDemandExpanded ? "Hide parties" : "View parties"
+                                  : "Check parties"}
+                            </span>
+                          )}
+                        </button>
                       </td>
-                      <td>{product.variety || "-"}</td>
                       <td>{product.category || "-"}</td>
                       <td>{product.sal_pack_unit || "-"}</td>
                       <td className="ps-stock">{formatQuantity(stock)}</td>
+                      <td className="ps-stock">{formatRoundedQuantity(warehouseQtyLtrs)}</td>
                       <td className="ps-stock">
                         <span className="ps-required-qty">{formatQuantity(pendingRequiredQty)}</span>
                       </td>
@@ -967,6 +1466,25 @@ export default function Product_Stock() {
                         </span>
                       </td>
                     </tr>
+                    {canShowPartyDemand && isDemandExpanded && (
+                      <tr className="ps-demand-detail-row">
+                        <td colSpan={9}>
+                          <div className="ps-demand-detail-panel">
+                            <div className="ps-demand-detail-title">Ordered by</div>
+                            <div className="ps-demand-detail-list">
+                              {partyDemandRows.map((row) => (
+                                <span className="ps-demand-party-chip" key={row.partyCode}>
+                                  <strong>{row.partyName}</strong>
+                                  <small>{row.partyCode}</small>
+                                  <em>{formatQuantity(row.qty)}</em>
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
                   );
                 })}
               </tbody>
@@ -1001,6 +1519,150 @@ export default function Product_Stock() {
             >
               Next
             </button>
+          </div>
+        </div>
+      )}
+
+      {orderModal && (
+        <div className="ps-modal-overlay" role="presentation" onMouseDown={closeOrderModal}>
+          <div
+            className="ps-order-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="ps-order-modal-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="ps-order-modal-head">
+              <div>
+                <span className="ps-order-modal-kicker">Open Sales Orders</span>
+                <h2 id="ps-order-modal-title">{getPartyName(orderModal.party) || getPartyCode(orderModal.party)}</h2>
+                <p>{getPartyCode(orderModal.party)}</p>
+              </div>
+              <button type="button" className="ps-modal-close" onClick={closeOrderModal} aria-label="Close">
+                <HiXMark />
+              </button>
+            </div>
+
+            <div className="ps-order-modal-body">
+              {orderModal.loading ? (
+                <div className="ps-state ps-order-modal-state">
+                  <span className="ps-spinner" />
+                  Loading open sales orders...
+                </div>
+              ) : orderModal.error ? (
+                <div className="ps-state ps-state-error ps-order-modal-state">
+                  <HiExclamationTriangle />
+                  {orderModal.error}
+                </div>
+              ) : orderModal.orders.length === 0 ? (
+                <div className="ps-state ps-order-modal-state">
+                  <HiDocumentText />
+                  No open sales orders found.
+                </div>
+              ) : (
+                <>
+                  <label className="ps-order-search">
+                    <HiMagnifyingGlass />
+                    <input
+                      type="text"
+                      value={orderSearch}
+                      onChange={(event) => setOrderSearch(event.target.value)}
+                      placeholder="Search SO number or reference"
+                      autoFocus
+                    />
+                  </label>
+                  <div className="ps-order-modal-actions">
+                    <span>{selectedModalOrderCount} selected for this party</span>
+                    <div>
+                      <button
+                        type="button"
+                        className="ps-order-action-btn"
+                        onClick={selectVisibleSalesOrders}
+                        disabled={filteredModalOrders.length === 0}
+                      >
+                        Select Visible
+                      </button>
+                      <button
+                        type="button"
+                        className="ps-order-action-btn"
+                        onClick={clearModalPartyOrders}
+                        disabled={selectedModalOrderCount === 0}
+                      >
+                        Clear Party
+                      </button>
+                      <button type="button" className="ps-order-action-btn primary" onClick={closeOrderModal}>
+                        Done
+                      </button>
+                    </div>
+                  </div>
+                  {filteredModalOrders.length === 0 ? (
+                    <div className="ps-state ps-order-modal-state">
+                      <HiDocumentText />
+                      No sales order found for this search.
+                    </div>
+              ) : (
+                <div className="ps-order-table-wrap">
+                  <table className="ps-order-table">
+                    <thead>
+                      <tr>
+                        <th>Sales Order</th>
+                        <th>Order Date</th>
+                        <th>Due Date</th>
+                        <th>Items</th>
+                        <th>Open Qty</th>
+                        <th>Select</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredModalOrders.map((order) => {
+                        const totalOpenQty = (order.lines || []).reduce(
+                          (sum, line) => sum + toStockNumber(line.OpenQty),
+                          0,
+                        );
+                        const uniqueItems = new Set(
+                          (order.lines || [])
+                            .map((line) => getOrderLineItemCode(line))
+                            .filter(Boolean),
+                        );
+                        const modalPartyCode = getPartyCode(orderModal.party);
+                        const isSelected = Boolean(
+                          selectedSalesOrders[getSalesOrderKeyForParty(order, modalPartyCode)]
+                        );
+
+                        return (
+                          <tr
+                            className={isSelected ? "is-selected" : ""}
+                            key={getSalesOrderKeyForParty(order, modalPartyCode)}
+                          >
+                            <td>
+                              <span className="ps-order-doc">SO #{order.DocNum || order.DocEntry}</span>
+                              {order.NumAtCard && <span className="ps-order-ref">Ref: {order.NumAtCard}</span>}
+                            </td>
+                            <td>{formatOrderDate(order.DocDate)}</td>
+                            <td>{formatOrderDate(order.DocDueDate)}</td>
+                            <td>
+                              <span className="ps-order-pill">{uniqueItems.size}</span>
+                            </td>
+                            <td className="ps-order-qty">{formatQuantity(totalOpenQty)}</td>
+                            <td>
+                              <button
+                                type="button"
+                                className="ps-order-select-btn"
+                                onClick={() => toggleSalesOrder(order)}
+                              >
+                                {isSelected ? "Remove" : "Add"}
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                  )}
+                </>
+              )}
+            </div>
           </div>
         </div>
       )}
