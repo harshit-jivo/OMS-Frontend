@@ -91,6 +91,16 @@ export default function Auditor_orders() {
   }
 };
 
+  const removeHandledOrder = (orderId: number) => {
+    setOrders((current) => current.filter((order) => order.id !== orderId));
+    setSelectedItems([]);
+    setSelectedOrderId(null);
+    if (orderDetails?.id === orderId || pendingOrderId === orderId) {
+      setOrderDetails(null);
+      setShowDetails(false);
+    }
+  };
+
   const initiateApprove = (order: Order) => {
     setPendingOrderId(order.id);
     setPendingOrderNum(order.order_number);
@@ -115,6 +125,7 @@ export default function Auditor_orders() {
         order_id: pendingOrderNum,
         message: response.message || "Order completed successfully",
       });
+      removeHandledOrder(pendingOrderId);
       setShowSuccess(true);
       fetchOrders();
       window.dispatchEvent(new Event('refresh-notifications'));
@@ -135,6 +146,7 @@ export default function Auditor_orders() {
     try {
       await ordersService.UpdateStatus(orderId, 7, rejectReason);
       alert("Order Rejected");
+      removeHandledOrder(orderId);
       setShowRejectModal(false);
       setRejectReason("");
       fetchOrders();
@@ -347,7 +359,7 @@ export default function Auditor_orders() {
                 onClick={() => {
                   setSelectedOrderId(orderDetails.id);
                   setShowRejectModal(true);
-                }}
+              }}
               >
                 <HiXCircle />
               </button>

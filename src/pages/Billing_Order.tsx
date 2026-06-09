@@ -111,6 +111,16 @@ export default function Billing_orders() {
   }
 };
 
+  const removeHandledOrder = (orderId: number) => {
+    setOrders((current) => current.filter((order) => order.id !== orderId));
+    setSelectedItems([]);
+    setSelectedOrderId(null);
+    if (orderDetails?.id === orderId || pendingOrderId === orderId) {
+      setOrderDetails(null);
+      setShowDetails(false);
+    }
+  };
+
   // Step 1 â€“ open confirm modal
   const initiateApprove = (order: Order) => {
     setPendingOrderId(order.id);
@@ -130,6 +140,7 @@ export default function Billing_orders() {
         message: response.message || "Order accepted successfully",
         nextStatus: response.status || "-",
       });
+      removeHandledOrder(pendingOrderId);
       setShowAcceptSuccess(true);
       fetchOrders();
       window.dispatchEvent(new Event('refresh-notifications'));
@@ -151,6 +162,7 @@ export default function Billing_orders() {
     try {
       await ordersService.UpdateStatus(orderId, 8, rejectReason);
       alert("Order Rejected");
+      removeHandledOrder(orderId);
       setShowRejectModal(false);
       setRejectReason("");
       fetchOrders();

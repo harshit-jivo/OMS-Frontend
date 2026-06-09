@@ -79,6 +79,14 @@ const getImportValue = (row: Record<string, unknown>, keys: string[]) => {
   return "";
 };
 
+const getWorksheetRows = (workbook: XLSX.WorkBook, sheetNames: string[]) => {
+  const normalizedNames = sheetNames.map(normalizeSearch);
+  const sheetName = workbook.SheetNames.find((name) => normalizedNames.includes(normalizeSearch(name)));
+  if (!sheetName) return [];
+
+  return XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets[sheetName], { defval: "" });
+};
+
 const splitImportList = (value: unknown) =>
   asText(value)
     .split(/[,;\n]+/)
@@ -235,12 +243,18 @@ const handleDel =  async (partyKey: string) => {
 };
 
 const downloadBulkTemplate = () => {
-  const rows = [
-    { Users: "manager.username, billing.username, Manager Name", "Party Codes": "CUST000001" },
-    { Users: "manager.username, billing.username, Manager Name", "Party Codes": "CUST000002, CUST000003" },
+  const userRows = [
+    { Username: "manager.username" },
+    { Username: "billing.username" },
+  ];
+  const partyRows = [
+    { "Party Code": "CUST000001" },
+    { "Party Code": "CUST000002" },
+    { "Party Code": "CUST000003" },
   ];
   const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), "Assignments");
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(userRows), "Users");
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(partyRows), "Parties");
   XLSX.writeFile(workbook, "party-user-assignment-template.xlsx");
 };
 
@@ -249,32 +263,63 @@ const handleBulkImport = async (file: File) => {
   try {
     const buffer = await file.arrayBuffer();
     const workbook = XLSX.read(buffer, { type: "array" });
-    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet, { defval: "" });
-    const parsedRows = rows
-      .flatMap((row) => {
-        const userIdentifiers = [
-          ...splitImportList(getImportValue(row, ["Users", "User", "User Name", "Name", "user_name", "name"])),
-          ...splitImportList(getImportValue(row, ["Usernames", "Username", "User ID", "User Id", "user_id", "username"])),
-        ];
-        const uniqueUsers = Array.from(new Set(userIdentifiers));
-        const partyCodes = splitImportList(
-          getImportValue(row, ["Party Codes", "Party Code", "Card Codes", "Card Code", "card_code", "CardCode", "party_code"])
-        );
+    const userRows = getWorksheetRows(workbook, ["Users", "User"]);
+    const partyRows = getWorksheetRows(workbook, ["Parties", "Party", "Party Codes", "Party Mapping"]);
 
-        return uniqueUsers.flatMap((userIdentifier) =>
-          partyCodes.map((cardCode) => ({
-            user_name: userIdentifier,
-            name: userIdentifier,
-            username: userIdentifier,
-            card_code: cardCode,
-          }))
-        );
-      })
-      .filter((row) => (row.username || row.user_name) && row.card_code);
+    let parsedRows: { user_name: string; name: string; username: string; card_code: string }[] = [];
+
+    if (userRows.length && partyRows.length) {
+      const userIdentifiers = Array.from(new Set(
+        userRows
+          .map((row) =>
+            asText(getImportValue(row, ["Username", "username", "User", "User Name", "User ID", "User Id", "user_id", "Name", "name"])),
+          )
+          .filter(Boolean),
+      ));
+      const partyCodes = Array.from(new Set(
+        partyRows
+          .map((row) =>
+            asText(getImportValue(row, ["Party Code", "Party Codes", "Card Code", "Card Codes", "card_code", "CardCode", "party_code"])),
+          )
+          .filter(Boolean),
+      ));
+
+      parsedRows = userIdentifiers.flatMap((userIdentifier) =>
+        partyCodes.map((cardCode) => ({
+          user_name: userIdentifier,
+          name: userIdentifier,
+          username: userIdentifier,
+          card_code: cardCode,
+        })),
+      );
+    } else {
+      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet, { defval: "" });
+      parsedRows = rows
+        .flatMap((row) => {
+          const userIdentifiers = [
+            ...splitImportList(getImportValue(row, ["Users", "User", "User Name", "Name", "user_name", "name"])),
+            ...splitImportList(getImportValue(row, ["Usernames", "Username", "User ID", "User Id", "user_id", "username"])),
+          ];
+          const uniqueUsers = Array.from(new Set(userIdentifiers));
+          const partyCodes = splitImportList(
+            getImportValue(row, ["Party Codes", "Party Code", "Card Codes", "Card Code", "card_code", "CardCode", "party_code"])
+          );
+
+          return uniqueUsers.flatMap((userIdentifier) =>
+            partyCodes.map((cardCode) => ({
+              user_name: userIdentifier,
+              name: userIdentifier,
+              username: userIdentifier,
+              card_code: cardCode,
+            }))
+          );
+        })
+        .filter((row) => (row.username || row.user_name) && row.card_code);
+    }
 
     if (!parsedRows.length) {
-      alert("No valid rows found. Use Users and Party Codes columns.");
+      alert("No valid rows found. Use Users and Parties sheets from the template.");
       return;
     }
 
@@ -349,7 +394,7 @@ const handleBulkImport = async (file: File) => {
                 Excel Upload
               </h2>
               <p style={{ margin: 0, fontSize: '13px', color: '#64748b' }}>
-                Use comma-separated Users and Party Codes to create many assignments from one row.
+                Add usernames in the Users sheet and one party code per row in the Parties sheet; every listed party is assigned to every listed user.
               </p>
             </div>
             <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>

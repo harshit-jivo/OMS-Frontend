@@ -110,6 +110,16 @@ export default function RateApproverOrders() {
     }
   };
 
+  const removeHandledOrder = (orderId: number) => {
+    setOrders((current) => current.filter((order) => order.id !== orderId));
+    setSelectedItems([]);
+    setSelectedOrderId(null);
+    if (orderDetails?.id === orderId || pendingOrderId === orderId) {
+      setOrderDetails(null);
+      setShowDetails(false);
+    }
+  };
+
   const initiateApprove = (order: Order) => {
     setPendingOrderId(order.id);
     setPendingOrderNum(order.order_number);
@@ -132,6 +142,7 @@ export default function RateApproverOrders() {
         message: response.message || "Order approved successfully",
         nextStatus: response.status || "-",
       });
+      removeHandledOrder(pendingOrderId);
       setShowAcceptSuccess(true);
       fetchOrders();
       refreshNotifications();
@@ -158,6 +169,7 @@ export default function RateApproverOrders() {
         rejectReason,
       );
       alert("Order Rejected");
+      removeHandledOrder(orderId);
       setShowRejectModal(false);
       setRejectReason("");
       fetchOrders();
