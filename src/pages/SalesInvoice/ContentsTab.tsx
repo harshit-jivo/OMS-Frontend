@@ -157,12 +157,17 @@ const getBatchNumber = (batch: BatchDetail) => {
     "SerialNumber",
   ];
 
+  let dateLikeFallback = "";
   for (const key of candidateKeys) {
     const value = String(source[key] ?? "").trim();
-    if (value && !isBatchDateValue(value, batch)) return value;
+    if (!value) continue;
+    if (!isBatchDateValue(value, batch)) return value;
+    if (!dateLikeFallback) dateLikeFallback = value;
   }
 
-  return "";
+  // Some batches are legitimately named after a date (e.g. "06/06/2026").
+  // Prefer a non-date identifier, but never drop the batch number entirely.
+  return dateLikeFallback;
 };
 
 const getWarehouseCode = (warehouse: InventoryWarehouse) =>
