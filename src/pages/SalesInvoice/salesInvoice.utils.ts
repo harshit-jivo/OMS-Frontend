@@ -195,9 +195,10 @@ export const buildInvoicePayload = (
       const batchNumbers = (line.BatchNumbers || [])
         .map((batch) => ({
           ...(batch.BatchNumber ? { BatchNumber: batch.BatchNumber } : {}),
+          ...(batch.SystemSerialNumber !== undefined ? { SystemSerialNumber: batch.SystemSerialNumber } : {}),
           Quantity: toNumber(batch.Quantity),
         }))
-        .filter((batch) => batch.BatchNumber && batch.Quantity > 0);
+        .filter((batch) => (batch.BatchNumber || batch.SystemSerialNumber !== undefined) && batch.Quantity > 0);
       const batchQuantity = batchNumbers.reduce((sum, batch) => sum + toNumber(batch.Quantity), 0);
       const invoiceQuantity = toNumber(line.invoiceQty) || batchQuantity;
 
