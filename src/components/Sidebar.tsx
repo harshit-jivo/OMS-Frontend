@@ -7,6 +7,7 @@ import {
   HiCalendarDays,
   HiChartBar,
   HiChevronDown,
+  HiClipboardDocumentCheck,
   HiClock,
   HiCog6Tooth,
   HiCurrencyRupee,
@@ -298,6 +299,15 @@ export default function Sidebar({ children }: SidebarProps) {
               Dashboard
             </Link>
           </li>
+
+          {(userRole?.toLowerCase() === "billing" || userRole?.toLowerCase() === "factory_approver") && (
+            <li className={location.pathname === "/Invoice_Review" ? "active" : ""}>
+              <Link to="/Invoice_Review" onClick={closeSidebar}>
+                <SidebarIcon><HiClipboardDocumentCheck /></SidebarIcon>
+                Invoice Review
+              </Link>
+            </li>
+          )}
 
           {(userRole?.toLowerCase() === "admin") && (
             <li className={location.pathname === "/App_User" ? "active" : ""}>

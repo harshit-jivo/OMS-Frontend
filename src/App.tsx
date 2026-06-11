@@ -23,6 +23,7 @@ import Add_Scheme from "./pages/Add_Scheme";
 import FOC from "./pages/FOC";
 import SalesInvoice from "./pages/Sales_Invoice";
 import SkuGalleryPage from "./pages/SalesInvoice/SkuGalleryPage";
+import InvoiceReview from "./pages/InvoiceReview";
 import Staff from "./pages/Staff";
 import Staff_Rate_Assignment from "./pages/Staff_Rate_Assignment";
 import Order_Stock_Check from "./pages/Order_Stock_Check";
@@ -94,6 +95,15 @@ function App() {
           element={
             <Sidebar>
               <SkuGalleryPage />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Invoice_Review"
+          element={
+            <Sidebar>
+              <InvoiceReview />
             </Sidebar>
           }
         />
