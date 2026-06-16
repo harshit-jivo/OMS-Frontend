@@ -323,8 +323,8 @@ export default function Sales_Report() {
           Boxes: item.boxes,
           Liters: item.ltrs,
           "Total Ltrs": getOrderItemTotalLtrs(item).toFixed(2),
+          "Price List (Basic)": item.price_list_basic,
           "Basic Price": item.basic_price,
-          "Market Price": item.market_price,
           "Tax Rate": item.tax_rate,
           "Total Amount": item.total,
           "Grand Total": (
@@ -371,8 +371,8 @@ export default function Sales_Report() {
       Boxes: "",
       Liters: "",
       "Total Ltrs": "",
+      "Price List (Basic)": "",
       "Basic Price": "",
-      "Market Price": "",
       "Tax Rate": "TOTAL",
       "Total Amount": totalAmount.toFixed(2),
       "Grand Total": grandTotal.toFixed(2),
@@ -415,8 +415,8 @@ export default function Sales_Report() {
             Boxes: item.boxes,
             Liters: item.ltrs,
             "Total Ltrs": getOrderItemTotalLtrs(item).toFixed(2),
+            "Price List (Basic)": item.price_list_basic,
             "Basic Price": item.basic_price,
-            "Market Price": item.market_price,
             "Tax Rate": item.tax_rate,
             "Total Amount": item.total,
             "Grand Total": (
@@ -466,8 +466,8 @@ export default function Sales_Report() {
       Boxes: "",
       Liters: "",
       "Total Ltrs": "",
+      "Price List (Basic)": "",
       "Basic Price": "",
-      "Market Price": "",
       "Tax Rate": "TOTAL",
       "Total Amount": allTotalAmount.toFixed(2),
       "Grand Total": allGrandTotal.toFixed(2),
@@ -1079,8 +1079,8 @@ export default function Sales_Report() {
                           <div><span>Boxes</span><strong>{Number(item.boxes).toFixed(2)}</strong></div>
                           <div><span>Ltrs</span><strong>{item.ltrs}</strong></div>
                           {schemes.length > 0 ? <div><span>Total Ltrs</span><strong>{getOrderItemTotalLtrs(item).toFixed(2)}</strong></div> : null}
+                          <div><span>Price List (Basic)</span><strong>{Number(item.price_list_basic).toFixed(2)}</strong></div>
                           <div><span>Basic Price</span><strong>{Number(item.basic_price).toFixed(2)}</strong></div>
-                          <div><span>Market Price</span><strong>{Number(item.market_price).toFixed(2)}</strong></div>
                           <div><span>Tax %</span><strong>{Number(item.tax_rate).toFixed(2)}</strong></div>
                           <div className="order-detail-item-amount"><span>Amount</span><strong>{Number(item.total).toFixed(2)}</strong></div>
                         </div>
@@ -1107,8 +1107,8 @@ export default function Sales_Report() {
                     <th>Ltrs</th>
                     {/* <th>Scheme Ltrs</th> */}
                     <th>Total Ltrs</th>
+                    <th>Price List (Basic)</th>
                     <th>Basic Price</th>
-                    <th>Market Price</th>
                     <th>Tax %</th>
                     <th style={{ textAlign: "right" }}>Amount</th>
                   </tr>
@@ -1140,10 +1140,10 @@ export default function Sales_Report() {
                           {/* <td style={{ textAlign: "center" }}>{item.scheme_name ? ((item as any).scheme_ltrs || 0) : "-"}</td> */}
                         <td style={{ textAlign: "center" }}>{getOrderItemTotalLtrs(item).toFixed(2)}</td>
                         <td style={{ textAlign: "right" }}>
-                          {Number(item.basic_price).toFixed(2)}
+                          {Number(item.price_list_basic).toFixed(2)}
                         </td>
                         <td style={{ textAlign: "right" }}>
-                          {Number(item.market_price).toFixed(2)}
+                          {Number(item.basic_price).toFixed(2)}
                         </td>
                         <td style={{ textAlign: "center" }}>
                           {Number(item.tax_rate).toFixed(2)}

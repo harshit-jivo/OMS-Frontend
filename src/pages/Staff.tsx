@@ -14,7 +14,7 @@ type StaffRow = {
   boxes: string;
   qty: string;
   ltrs: string;
-  basicPrice: string;
+  priceListBasic: string;
   tax: string;
   amount: string;
   confirmed: boolean;
@@ -28,7 +28,7 @@ const createEmptyRow = (): StaffRow => ({
   boxes: "",
   qty: "",
   ltrs: "",
-  basicPrice: "",
+  priceListBasic: "",
   tax: "",
   amount: "",
   confirmed: false,
@@ -177,8 +177,8 @@ export default function Staff() {
 
     row.ltrs = qty > 0 ? String(packUnit * qty) : "";
     row.amount =
-      qty > 0 && Number(row.basicPrice) > 0
-        ? (qty * Number(row.basicPrice)).toFixed(2)
+      qty > 0 && Number(row.priceListBasic) > 0
+        ? (qty * Number(row.priceListBasic)).toFixed(2)
         : "";
 
     return row;
@@ -202,7 +202,7 @@ export default function Staff() {
           boxes: "",
           qty: "",
           ltrs: "",
-          basicPrice: "",
+          priceListBasic: "",
           tax: "",
           amount: "",
         };
@@ -216,7 +216,7 @@ export default function Staff() {
           boxes: "",
           qty: "",
           ltrs: "",
-          basicPrice: "",
+          priceListBasic: "",
           tax: "",
           amount: "",
         };
@@ -237,7 +237,7 @@ export default function Staff() {
         if (product) {
           row.type = getProductType(product.item_name);
           row.pcs = String(product.sal_factor2 ?? "");
-          row.basicPrice = String(product.staff_rate ?? "");
+          row.priceListBasic = String(product.staff_rate ?? "");
           row.tax = String(product.tax_rate ?? "");
         }
       }
@@ -281,7 +281,7 @@ export default function Staff() {
     row.type &&
     row.item &&
     Number(row.qty) > 0 &&
-    Number(row.basicPrice) >= 0;
+    Number(row.priceListBasic) >= 0;
 
   const handleConfirmRow = (index: number) => {
     if (!isRowValid(rows[index])) {
@@ -417,8 +417,8 @@ export default function Staff() {
           pcs: Number(row.pcs || 0),
           boxes: Number(row.boxes || 0),
           ltrs: Number(row.ltrs || 0),
-          basic_price: Number(row.basicPrice || 0),
-          market_price: 0,
+          price_list_basic: Number(row.priceListBasic || 0),
+          basic_price: 0,
           tax_rate: Number(row.tax || 0),
           total: Number(row.amount || 0),
           schemes: [],
@@ -512,7 +512,7 @@ export default function Staff() {
               <col className="sl-col-boxes" />
               <col className="sl-col-qty" />
               <col className="sl-col-ltrs" />
-              <col className="sl-col-basic-price" />
+              <col className="sl-col-price-list-basic" />
               <col className="sl-col-tax" />
               <col className="sl-col-amount" />
               <col className="sl-col-actions" />
@@ -526,7 +526,7 @@ export default function Staff() {
                 <th>Boxes</th>
                 <th>Qty</th>
                 <th>Ltrs</th>
-                <th>Basic Price</th>
+                <th>Price List (Basic)</th>
                 <th>Tax %</th>
                 <th>Amount</th>
                 <th>X</th>
@@ -782,11 +782,11 @@ export default function Staff() {
                         />
                       </td>
 
-                      <td className="sl-basic-price-cell">
+                      <td className="sl-price-list-basic-cell">
                         <input
                           className="sl-compact-number-input"
                           type="number"
-                          value={row.basicPrice}
+                          value={row.priceListBasic}
                           readOnly
                         />
                       </td>

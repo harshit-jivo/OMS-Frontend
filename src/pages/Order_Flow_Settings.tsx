@@ -17,11 +17,11 @@ import {
 import "../styles/Order_Flow_Settings.css";
 
 const DEFAULT_CONDITIONS: OrderFlowConditionOption[] = [
-  { code: "BASIC_GT_MARKET", label: "Basic Price > Market Price and Market Price != 0" },
-  { code: "BASIC_LT_MARKET", label: "Basic Price < Market Price" },
-  { code: "BASIC_EQ_MARKET", label: "Basic Price = Market Price" },
-  { code: "BASIC_MARKET_ZERO", label: "Basic Price and Market Price = 0" },
-  { code: "BASIC_ZERO_MARKET_GT_ZERO", label: "Basic Price = 0 and Market Price > 0" },
+  { code: "BASIC_GT_MARKET", label: "Price List (Basic) > Basic Price and Basic Price != 0" },
+  { code: "BASIC_LT_MARKET", label: "Price List (Basic) < Basic Price" },
+  { code: "BASIC_EQ_MARKET", label: "Price List (Basic) = Basic Price" },
+  { code: "BASIC_MARKET_ZERO", label: "Price List (Basic) and Basic Price = 0" },
+  { code: "BASIC_ZERO_MARKET_GT_ZERO", label: "Price List (Basic) = 0 and Basic Price > 0" },
 ];
 
 const DEFAULT_FLOW_OPTIONS: OrderFlowTypeOption[] = [

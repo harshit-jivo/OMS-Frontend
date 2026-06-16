@@ -348,7 +348,7 @@ export default function Party_Product_Assignment() {
           const productCategory = normalizeCategory(
             getImportValue(row, ["Product Category", "Category", "product_category"])
           );
-          const basicRate = parseRate(getImportValue(row, ["Basic Rate", "Basic Price", "Rate", "basic_rate"]));
+          const basicRate = parseRate(getImportValue(row, ["Basic Rate", "Price List (Basic)", "Rate", "basic_rate"]));
 
           if (!itemCode || !productCategory || Number.isNaN(basicRate)) {
             errors.push(`Products row ${rowNumber}: Item Code, Product Category and Basic Rate are required.`);
@@ -390,7 +390,7 @@ export default function Party_Product_Assignment() {
           const productCategory = normalizeCategory(
             getImportValue(row, ["Product Category", "Category", "product_category"])
           );
-          const basicRate = parseRate(getImportValue(row, ["Basic Rate", "Basic Price", "Rate", "basic_rate"]));
+          const basicRate = parseRate(getImportValue(row, ["Basic Rate", "Price List (Basic)", "Rate", "basic_rate"]));
 
           if (!cardCode || !itemCode || !productCategory || Number.isNaN(basicRate)) {
             errors.push(`Row ${rowNumber}: Party Code, Item Code, Product Category and Basic Rate are required.`);
@@ -1146,7 +1146,7 @@ export default function Party_Product_Assignment() {
                     }}
                   >
                     <div>
-                      <div style={{ fontSize: "0.75rem", color: "#64748b", textTransform: "uppercase" }}>Basic Rate</div>
+                      <div style={{ fontSize: "0.75rem", color: "#64748b", textTransform: "uppercase" }}>Rate</div>
                       <div style={{ fontSize: "1.1rem", fontWeight: 700, color: "#16a34a" }}>
                         ₹{Number(product.basic_rate || 0).toFixed(2)}
                       </div>
@@ -1326,7 +1326,7 @@ export default function Party_Product_Assignment() {
                                   fontWeight: 500,
                                 }}
                               >
-                                Basic Rate (₹)
+                                Rate (₹)
                               </label>
                               <input
                                 type="number"

@@ -15,6 +15,7 @@ export interface User {
   phone?: string;
   company?: number | null;
   category?: CategoryOption | null;
+  categories?: CategoryOption[];
   variety?: string | null;
 }
 
@@ -41,6 +42,7 @@ export interface CreateUserData {
   state?: number;
   states?: number[];
   category?: number | null;
+  categories?: number[];
   variety?: string | null;
 }
 
@@ -155,6 +157,7 @@ removePartyProduct: async (card_code: string, itemCode: string, category: string
   },
 
   createUser: async (data: CreateUserData) => {
+    const categories = data.categories || (data.category ? [data.category] : []);
 
     const payload = {
       name: data.name,
@@ -168,7 +171,8 @@ removePartyProduct: async (card_code: string, itemCode: string, category: string
       main_groups: data.mainGroups || [],
       state: data.state || null,
       states: data.states || [],
-      category: data.category || null,
+      category: categories[0] || data.category || null,
+      categories,
       variety: data.variety || null
     };
 
@@ -180,6 +184,7 @@ removePartyProduct: async (card_code: string, itemCode: string, category: string
 updateUser: async (id: number, data: CreateUserData) => {
   const mainGroups = data.mainGroups || [];
   const states = data.states || [];
+  const categories = data.categories || (data.category ? [data.category] : []);
 
   const payload = {
     name: data.name,
@@ -193,7 +198,8 @@ updateUser: async (id: number, data: CreateUserData) => {
     main_groups: mainGroups,
     state: states[0] || data.state || null,
     states: states,
-    category: data.category || null,
+    category: categories[0] || data.category || null,
+    categories,
     variety: data.variety || null,
   };
 

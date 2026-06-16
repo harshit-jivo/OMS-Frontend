@@ -93,8 +93,8 @@ export interface RowType {
   qty: string;
   ltrs: string;
   boxes: string;
+  priceListBasic: string;
   basicPrice: string;
-  marketPrice: string;
   tax: string;
   amount: string;
 };
@@ -125,8 +125,8 @@ export interface OrderItem {
   boxes: number;
   ltrs: number;
 
+  price_list_basic: number;
   basic_price: number;
-  market_price: number;
   tax_rate: number;
   total: number;
   scheme_id?: number;
@@ -159,6 +159,16 @@ export interface CreateOrder {
   items: OrderItem[];
 }
 
+export interface RateApproval {
+  id: number;
+  approver: number;
+  approver_name: string;
+  status: string;
+  remarks?: string;
+  approved_at?: string;
+  created_at?: string;
+}
+
 export interface Order {
   id: number;
   status?: number;
@@ -188,7 +198,7 @@ export interface Order {
   created_by_name?: string;
   party_state?: string;
   decision_type?: "accepted" | "rejected";
-
+  rate_approvals?: RateApproval[];
 }
 
 export interface OrderStatus {
@@ -394,8 +404,8 @@ export const ordersService = {
         pcs: Number(item.pcs),
         boxes: Number(item.boxes),
         ltrs: Number(item.ltrs),
+        price_list_basic: Number(item.price_list_basic),
         basic_price: Number(item.basic_price),
-        market_price: Number(item.market_price),
         tax_rate: Number(item.tax_rate),
         total: Number(item.total),
         scheme_id: item.scheme_id ? Number(item.scheme_id) : undefined,
@@ -413,10 +423,11 @@ export const ordersService = {
     return response.data;
   },
 
-  async getOrders(status?: number | string, billing?: boolean) {
+  async getOrders(status?: number | string, billing?: boolean, approvalPending?: boolean) {
     const params: string[] = [];
     if (status !== undefined && status !== null) params.push(`status=${status}`);
     if (billing) params.push('billing=true');
+    if (approvalPending) params.push('approval_pending=true');
     const url = "/orders/list/" + (params.length ? `?${params.join('&')}` : '');
     const response = await api.get(url);
     return Array.isArray(response.data) ? response.data.map(normalizeOrder) : response.data;
