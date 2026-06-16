@@ -44,7 +44,7 @@ interface ChartsData {
   manager_state_performance?: { manager_id: number | null; manager_name: string; state: string; orders: number; sales: number }[];
   status_distribution: { status: string; label: string; count: number }[];
   decision_distribution?: { status: string; label: string; count: number }[];
-  top_parties: { card_code: string; card_name: string; count: number; completed_count?: number; revenue: number }[];
+  top_parties: { card_code: string; card_name: string; category?: string; count: number; completed_count?: number; revenue: number }[];
   category_sales: { category: string; total_sales: number; count: number }[];
   state_item_sales?: StateItemSales[];
   highest_sales_order?: { order_number: string | null; amount: number };
@@ -72,6 +72,7 @@ interface CurrentUser {
 
 type SupportedRole = "admin" | "auditor" | "manager" | "billing" | "approver";
 type TopPartyView = "all" | 5 | 10;
+type TopPartyCategory = "all" | string;
 
 const PALETTE = ["#0f766e", "#2563eb", "#f59e0b", "#dc2626", "#7c3aed", "#0891b2", "#4f46e5", "#ea580c"];
 const TOP_PARTY_VIEW_OPTIONS: Array<{ label: string; value: TopPartyView }> = [
@@ -221,6 +222,7 @@ export default function Dashboard() {
   const [year, setYear] = useState(currentYear);
   const [month, setMonth] = useState(0);
   const [topPartyView, setTopPartyView] = useState<TopPartyView>(5);
+  const [topPartyCategory, setTopPartyCategory] = useState<TopPartyCategory>("all");
   const [showMoreStatuses, setShowMoreStatuses] = useState(false);
   const [showSalesBreakdown, setShowSalesBreakdown] = useState(false);
   const [showManagerPerformance, setShowManagerPerformance] = useState(false);
@@ -375,11 +377,28 @@ export default function Dashboard() {
         .filter((item) => (item.count ?? 0) > 0 || (item.revenue ?? 0) > 0),
     [charts?.top_parties]
   );
-  const visibleTopParties = useMemo(
-    () => (topPartyView === "all" ? topParties : topParties.slice(0, topPartyView)),
-    [topParties, topPartyView]
+  const topPartyCategories = useMemo(
+    () => [...new Set(topParties.map((item) => item.category || "Unknown"))].sort(),
+    [topParties]
   );
-  const topParty = topParties[0];
+  const filteredTopParties = useMemo(
+    () =>
+      topPartyCategory === "all"
+        ? topParties
+        : topParties.filter((item) => (item.category || "Unknown") === topPartyCategory),
+    [topParties, topPartyCategory]
+  );
+  const visibleTopParties = useMemo(
+    () => (topPartyView === "all" ? filteredTopParties : filteredTopParties.slice(0, topPartyView)),
+    [filteredTopParties, topPartyView]
+  );
+  const topParty = filteredTopParties[0];
+
+  useEffect(() => {
+    if (topPartyCategory !== "all" && !topPartyCategories.includes(topPartyCategory)) {
+      setTopPartyCategory("all");
+    }
+  }, [topPartyCategories, topPartyCategory]);
 
   const monthlySales = charts?.monthly_sales ?? [];
   const managerPerformance = useMemo(
@@ -807,11 +826,24 @@ export default function Dashboard() {
                 <div className="db-highlight-label">Top Parties</div>
                 <div className="db-highlight-sub">
                   {topParty
-                    ? `${topParty.card_name} leads with ${fmt(topParty.count)} orders (${fmt(topParty.completed_count ?? 0)} completed)`
+                    ? `${topParty.card_name} (${topParty.category || "Unknown"}) leads with ${fmt(topParty.count)} orders (${fmt(topParty.completed_count ?? 0)} completed)`
                     : "No party data available"}
                 </div>
               </div>
             <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", width: "100%" }}>
+                <select
+                  className="db-party-category-select"
+                  value={topPartyCategory}
+                  onChange={(e) => setTopPartyCategory(e.target.value)}
+                  aria-label="Filter top parties by category"
+                >
+                  <option value="all">All Categories</option>
+                  {topPartyCategories.map((category) => (
+                    <option key={category} value={category}>
+                      {category}
+                    </option>
+                  ))}
+                </select>
                 <div className="db-segmented-control" role="tablist" aria-label="Top parties view">
                   {TOP_PARTY_VIEW_OPTIONS.map((option) => (
                     <button
@@ -828,10 +860,12 @@ export default function Dashboard() {
             </div>
             {topParties.length === 0 ? (
               <div className="db-no-data" style={{ minHeight: 80 }}>No party data for this period</div>
+            ) : filteredTopParties.length === 0 ? (
+              <div className="db-no-data" style={{ minHeight: 80 }}>No party data for this category</div>
             ) : (
               <div className="db-party-list db-party-list--spacious">
                 {visibleTopParties.map((item, index) => (
-                  <div key={item.card_code} className="db-party-list-item db-party-list-item--detailed">
+                  <div key={`${item.card_code}-${item.category || "Unknown"}`} className="db-party-list-item db-party-list-item--detailed">
                     <span
                       className="db-party-list-badge"
                       style={{ background: PALETTE[index % PALETTE.length] }}
@@ -840,7 +874,10 @@ export default function Dashboard() {
                     </span>
                     <div className="db-party-list-details">
                       <span className="db-party-list-name db-party-list-name--wrap">{item.card_name}</span>
-                      <span className="db-party-list-code">{item.card_code}</span>
+                      <span className="db-party-list-code">
+                        {item.card_code}
+                        <span className="db-party-category-chip">{item.category || "Unknown"}</span>
+                      </span>
                     </div>
                     <div style={{ textAlign: "right", lineHeight: 1.4 }}>
                       <span className="db-party-list-count db-party-list-count--detailed">
