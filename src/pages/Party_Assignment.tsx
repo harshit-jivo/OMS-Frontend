@@ -34,8 +34,17 @@ const getUserCategory = (user?: User) => {
   return asText(category.category);
 };
 
-const isPartyInUserCategory = (party: Party, userCategory: string) =>
-  !userCategory || normalizeSearch(party.category) === normalizeSearch(userCategory);
+const getUserCategories = (user?: User) => {
+  const categories = Array.isArray(user?.categories)
+    ? user.categories.map((category) => asText(category.category)).filter(Boolean)
+    : [];
+  const primaryCategory = getUserCategory(user);
+  if (primaryCategory) categories.unshift(primaryCategory);
+  return Array.from(new Set(categories.map(normalizeCategory).filter(Boolean)));
+};
+
+const isPartyInUserCategories = (party: Party, userCategories: string[]) =>
+  userCategories.length === 0 || userCategories.includes(normalizeCategory(party.category));
 
 const getSelectionFromKey = (key: string) => {
   const [cardCode, category = ""] = key.split("||");
@@ -147,9 +156,9 @@ export default function Party_Assignment() {
     try {
       const res = await userService.getUserParties(userId);
 
-      const userCategory = getUserCategory(users.find((user) => user.id === userId));
+      const userCategories = getUserCategories(users.find((user) => user.id === userId));
       const assigned = (res.data?.parties || [])
-        .filter((p: any) => isPartyInUserCategory(p, userCategory))
+        .filter((p: any) => isPartyInUserCategories(p, userCategories))
         .map((p: any) => asText(p.party_key) || getPartySelectionKey(p));
           console.log("Assigned parties for user", userId, assigned);
 
@@ -160,8 +169,9 @@ export default function Party_Assignment() {
   };
 
   const selectedUserRecord = users.find((user) => user.id === selectedUser);
-  const selectedUserCategory = getUserCategory(selectedUserRecord);
-  const partyOptions = parties.filter((party) => isPartyInUserCategory(party, selectedUserCategory));
+  const selectedUserCategories = getUserCategories(selectedUserRecord);
+  const selectedUserCategoryLabel = selectedUserCategories.join(", ");
+  const partyOptions = parties.filter((party) => isPartyInUserCategories(party, selectedUserCategories));
   const partySearchTerm = normalizeSearch(search);
   const visibleParties = partyOptions.filter((party) => {
     if (!partySearchTerm) return true;
@@ -520,7 +530,7 @@ const handleBulkImport = async (file: File) => {
                   <h3 style={{ fontSize: '1.1rem', fontWeight: 600, color: '#0f172a', margin: 0 }}>Assigned Parties</h3>
                   <p style={{ fontSize: '0.875rem', color: '#64748b', margin: '4px 0 0' }}>
                     <strong>{[...new Set(selectedParties)].length}</strong> parties assigned to <strong>{selectedUserRecord?.name}</strong>
-                    {selectedUserCategory && <> in <strong>{selectedUserCategory}</strong></>}
+                    {selectedUserCategoryLabel && <> in <strong>{selectedUserCategoryLabel}</strong></>}
                   </p>
                 </div>
                 <button
@@ -602,7 +612,7 @@ const handleBulkImport = async (file: File) => {
             <div>
               <h2 style={{ margin: '0 0 4px', fontSize: '24px', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em' }}>Assign Parties</h2>
               <p style={{ fontSize: '0.875rem', color: '#64748b', margin: '4px 0 0' }}>
-                Select multiple {selectedUserCategory && <strong>{selectedUserCategory} </strong>}parties to map to <strong>{selectedUserRecord?.name}</strong>
+                Select multiple {selectedUserCategoryLabel && <strong>{selectedUserCategoryLabel} </strong>}parties to map to <strong>{selectedUserRecord?.name}</strong>
               </p>
             </div>
             <button

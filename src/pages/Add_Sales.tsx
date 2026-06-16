@@ -44,8 +44,8 @@ const createEmptyRow = (): SalesRow => ({
   qty: "",
   ltrs: "",
   boxes: "",
+  priceListBasic: "",
   basicPrice: "",
-  marketPrice: "",
   tax: "",
   amount: "",
   confirmed: false,
@@ -58,10 +58,10 @@ const applyFocPricingToRow = (row: SalesRow): SalesRow => ({
   scheme: "",
   schemeQty: "",
   schemes: [],
-  basicPrice: "0",
+  priceListBasic: "0",
   amount:
-    Number(row.qty) > 0 && Number(row.marketPrice) > 0
-      ? (Number(row.qty) * Number(row.marketPrice)).toFixed(2)
+    Number(row.qty) > 0 && Number(row.basicPrice) > 0
+      ? (Number(row.qty) * Number(row.basicPrice)).toFixed(2)
       : "",
 });
 
@@ -423,7 +423,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
             ? String(Number(item.ltrs || 0) / Number(item.qty))
             : "",
         tax_rate: item.tax_rate || "",
-        basic_rate: item.basic_price || "",
+        basic_rate: item.price_list_basic || "",
       });
     });
 
@@ -473,8 +473,8 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
             qty: valueToString(item.qty),
             ltrs: valueToString(item.ltrs),
             boxes: valueToString(item.boxes),
+            priceListBasic: valueToString(item.price_list_basic),
             basicPrice: valueToString(item.basic_price),
-            marketPrice: valueToString(item.market_price),
             tax: valueToString(item.tax_rate),
             amount: valueToString(item.total),
             confirmed: true,
@@ -754,8 +754,8 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
         boxes: Number(row.boxes),
         ltrs: Number(row.ltrs),
 
-        basic_price: isFocOrder ? 0 : Number(row.basicPrice),
-        market_price: Number(row.marketPrice),
+        price_list_basic: isFocOrder ? 0 : Number(row.priceListBasic),
+        basic_price: Number(row.basicPrice),
         tax_rate: Number(row.tax),
         total: Number(row.amount || 0),
         scheme_id: row.isScheme && row.schemes[0]?.scheme ? Number(row.schemes[0].scheme) : undefined,
@@ -980,8 +980,8 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
 
     row.ltrs = qty > 0 ? String(packUnit * qty) : "";
 
-    const basic = Number(row.basicPrice) || 0;
-    const market = Number(row.marketPrice) || 0;
+    const basic = Number(row.priceListBasic) || 0;
+    const market = Number(row.basicPrice) || 0;
     const price = market > 0 ? market : basic;
     row.amount = qty > 0 && price > 0 ? (price * qty).toFixed(2) : "";
 
@@ -1006,7 +1006,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
       row.qty = "";
       row.ltrs = "";
       row.boxes = "";
-      row.marketPrice = "";
+      row.basicPrice = "";
       row.amount = "";
       row.isScheme = false;
       row.scheme = "";
@@ -1034,7 +1034,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
         row.type = match ? `${match[1]} ${match[2].toUpperCase()}` : "Others";
         row.pcs = String(partyProduct.sal_factor2 ?? "");
         row.tax = String(getProductTaxRate(partyProduct));
-        row.basicPrice = isFocOrder ? "0" : String(partyProduct.basic_rate ?? "");
+        row.priceListBasic = isFocOrder ? "0" : String(partyProduct.basic_rate ?? "");
         void fetchSchemesForRow(index, true);
       } else {
         void fetchSchemesForRow(index, false);
@@ -1057,8 +1057,8 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
       row.qty = "";
       row.ltrs = "";
       row.boxes = "";
+      row.priceListBasic = "";
       row.basicPrice = "";
-      row.marketPrice = "";
       row.tax = "";
       row.amount = "";
       setSchemeOptions((prev) => ({ ...prev, [index]: [] }));
@@ -1084,8 +1084,8 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
         row.ltrs = String(Number(product.sal_pack_unit) * qty);
 
         // ✅ amount
-        const basic = Number(row.basicPrice) || 0;
-        const market = Number(row.marketPrice) || 0;
+        const basic = Number(row.priceListBasic) || 0;
+        const market = Number(row.basicPrice) || 0;
         const price = market > 0 ? market : basic;
 
         row.amount = (price * qty).toFixed(2);
@@ -1106,8 +1106,8 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
 
         row.ltrs = String(Number(product.sal_pack_unit) * qty);
 
-        const basic = Number(row.basicPrice) || 0;
-        const market = Number(row.marketPrice) || 0;
+        const basic = Number(row.priceListBasic) || 0;
+        const market = Number(row.basicPrice) || 0;
         const price = market > 0 ? market : basic;
 
         row.amount = (price * qty).toFixed(2);
@@ -1143,7 +1143,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
       row = recalculateRowTotals(row, "qty");
     }
 
-    if (name === "marketPrice") {
+    if (name === "basicPrice") {
       row = recalculateRowTotals(row, "price");
     }
 
@@ -1744,8 +1744,8 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
               <col className="sl-col-boxes" />
               <col className="sl-col-qty" />
               <col className="sl-col-ltrs" />
+              <col className="sl-col-price-list-basic" />
               <col className="sl-col-basic-price" />
-              <col className="sl-col-market-price" />
               <col className="sl-col-tax" />
               <col className="sl-col-amount" />
               <col className="sl-col-actions" />
@@ -1761,8 +1761,8 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
                 <th>Boxes</th>
                 <th>Qty</th>
                 <th>Ltrs</th>
+                <th>Price List (Basic)</th>
                 <th>Basic Price</th>
-                <th>Market Price</th>
                 <th>Tax %</th>
                 <th>Amount</th>
                 <th>X</th>
@@ -1910,15 +1910,15 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
                       <input className="sl-compact-number-input" type="number" value={row.ltrs} readOnly />
                     </td>
 
-                    <td className="sl-basic-price-cell">
-                      <input className="sl-compact-number-input" type="number" value={row.basicPrice} readOnly />
+                    <td className="sl-price-list-basic-cell">
+                      <input className="sl-compact-number-input" type="number" value={row.priceListBasic} readOnly />
                     </td>
 
                     <td>
                       <input
                         type="number"
-                        name="marketPrice"
-                        value={row.marketPrice}
+                        name="basicPrice"
+                        value={row.basicPrice}
                         onChange={(e) => handleRowChange(index, e)}
                         disabled={row.confirmed && !isEditMode}
                       />

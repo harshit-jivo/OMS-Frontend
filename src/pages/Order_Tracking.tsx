@@ -18,6 +18,24 @@ const formatCreatedDateTime = (value?: string | null) => {
   });
 };
 
+const getLogTime = (log: Pick<OrderLog, "created_at">) => {
+  const time = new Date(log.created_at || "").getTime();
+  return Number.isNaN(time) ? Number.POSITIVE_INFINITY : time;
+};
+
+const compareLogsByDisplayOrder = (
+  a: Pick<OrderLog, "created_at" | "id">,
+  b: Pick<OrderLog, "created_at" | "id">,
+) => {
+  const timeDifference = getLogTime(a) - getLogTime(b);
+
+  if (timeDifference !== 0) {
+    return timeDifference;
+  }
+
+  return a.id - b.id;
+};
+
 export default function Order_Tracking() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -102,37 +120,60 @@ export default function Order_Tracking() {
   }, [currentPage, totalPages]);
 
   const orderedLogs = useMemo(() => {
-    return [...logs].sort((a, b) => {
-      const first = new Date(a.created_at || "").getTime();
-      const second = new Date(b.created_at || "").getTime();
-
-      if (Number.isNaN(first) && Number.isNaN(second)) {
-        return a.id - b.id;
-      }
-
-      if (Number.isNaN(first)) return 1;
-      if (Number.isNaN(second)) return -1;
-
-      return first - second;
-    });
+    return [...logs].sort(compareLogsByDisplayOrder);
   }, [logs]);
 
   const visibleLogs = useMemo(() => {
     const currentStatus = String(selectedOrder?.status_display || "").trim().toLowerCase();
     const isCurrentRatePending = currentStatus.includes("rate");
-    const latestLogByPerformer = new Map<string, OrderLog>();
-    const performerLogIds = new Set<number>();
     const getPerformerKey = (log: OrderLog) =>
       String(log.performed_by_name || "").trim().toLowerCase();
-    const isRealPerformer = (value: string) =>
-      value && value !== "pending" && value !== "system";
+    const isRealPerformer = (value: string | null | undefined) =>
+      Boolean(value && value !== "pending" && value !== "system");
     const isRateLog = (log: OrderLog) =>
       String(log.status_name || "").toLowerCase().includes("rate");
     const isRejectedLog = (log: OrderLog) =>
       String(log.status_name || "").toLowerCase().includes("reject");
-    const isGenericApprovedLog = (log: OrderLog) => {
-      const statusName = String(log.status_name || "").trim().toLowerCase();
-      return statusName === "approved" || statusName === "accepted";
+    const isApprovedLog = (log: OrderLog) => {
+      const statusName = String(log.status_name || "").toLowerCase();
+      const remarks = String(log.remarks || "").toLowerCase();
+      return (
+        statusName.includes("approved") ||
+        statusName.includes("accepted") ||
+        remarks.includes("approved") ||
+        remarks.includes("accepted")
+      );
+    };
+    const latestPendingRateLog = isCurrentRatePending
+      ? [...orderedLogs]
+          .reverse()
+          .find((log) => isRateLog(log) && !isRealPerformer(log.performed_by_name))
+      : null;
+    const isWorkflowBoundaryLog = (log: OrderLog) => {
+      const statusName = String(log.status_name || "").toLowerCase();
+      return (
+        statusName.includes("billing") ||
+        statusName.includes("auditor") ||
+        statusName.includes("rate") ||
+        statusName.includes("reject") ||
+        statusName.includes("complete")
+      );
+    };
+    const hasWorkflowBoundaryBetween = (source: OrderLog, target: OrderLog) => {
+      const sourceTime = new Date(source.created_at || "").getTime();
+      const targetTime = new Date(target.created_at || "").getTime();
+
+      return orderedLogs.some((betweenLog) => {
+        const betweenTime = new Date(betweenLog.created_at || "").getTime();
+
+        return (
+          betweenLog.id !== source.id &&
+          betweenLog.id !== target.id &&
+          isWorkflowBoundaryLog(betweenLog) &&
+          (betweenTime > sourceTime || (betweenTime === sourceTime && betweenLog.id > source.id)) &&
+          (betweenTime < targetTime || (betweenTime === targetTime && betweenLog.id < target.id))
+        );
+      });
     };
     const hasLaterDuplicateDecision = (log: OrderLog) => {
       const statusName = String(log.status_name || "").trim().toLowerCase();
@@ -155,6 +196,7 @@ export default function Order_Tracking() {
           otherStatus === statusName &&
           otherPerformer === performer &&
           otherRemarks === remarks &&
+          !hasWorkflowBoundaryBetween(log, otherLog) &&
           (otherTime > logTime || (otherTime === logTime && otherLog.id > log.id))
         );
       });
@@ -163,7 +205,7 @@ export default function Order_Tracking() {
       const performer = getPerformerKey(log);
       const logTime = new Date(log.created_at || "").getTime();
 
-      if (!isRateLog(log) || !isRealPerformer(performer)) {
+      if (!isRateLog(log) || isRejectedLog(log) || !isRealPerformer(performer)) {
         return false;
       }
 
@@ -196,37 +238,40 @@ export default function Order_Tracking() {
         );
       });
     };
-    const hasNearbyRateDecision = (log: OrderLog) => {
+    const hasLaterSameCycleRateApproval = (log: OrderLog) => {
       const performer = getPerformerKey(log);
       const logTime = new Date(log.created_at || "").getTime();
 
-      if (!isGenericApprovedLog(log) || !isRealPerformer(performer)) {
+      if (!isRateLog(log) || isRejectedLog(log) || !isRealPerformer(performer)) {
         return false;
       }
 
-      const hasSamePerformerRateDecision = orderedLogs.some((otherLog) => {
+      return orderedLogs.some((otherLog) => {
         const otherPerformer = getPerformerKey(otherLog);
         const otherTime = new Date(otherLog.created_at || "").getTime();
+        const hasStageBoundaryBetween = orderedLogs.some((betweenLog) => {
+          const betweenTime = new Date(betweenLog.created_at || "").getTime();
+          const betweenStatus = String(betweenLog.status_name || "").toLowerCase();
+
+          return (
+            betweenLog.id !== log.id &&
+            betweenLog.id !== otherLog.id &&
+            (betweenTime > logTime || (betweenTime === logTime && betweenLog.id > log.id)) &&
+            (betweenTime < otherTime || (betweenTime === otherTime && betweenLog.id < otherLog.id)) &&
+            (
+              betweenStatus.includes("billing") ||
+              betweenStatus.includes("auditor") ||
+              betweenStatus.includes("rate")
+            )
+          );
+        });
 
         return (
           otherLog.id !== log.id &&
           otherPerformer === performer &&
-          isRateLog(otherLog) &&
-          Math.abs(otherTime - logTime) <= 10000
-        );
-      });
-
-      if (hasSamePerformerRateDecision) {
-        return true;
-      }
-
-      return orderedLogs.some((otherLog) => {
-        const otherTime = new Date(otherLog.created_at || "").getTime();
-
-        return (
-          otherLog.id !== log.id &&
-          isRateLog(otherLog) &&
-          (otherTime < logTime || (otherTime === logTime && otherLog.id < log.id))
+          isApprovedLog(otherLog) &&
+          !hasStageBoundaryBetween &&
+          (otherTime > logTime || (otherTime === logTime && otherLog.id > log.id))
         );
       });
     };
@@ -277,36 +322,39 @@ export default function Order_Tracking() {
       return isDecision && (pendingStage === "auditor" || pendingStage === "rate");
     };
 
-    orderedLogs.forEach((log) => {
-      const performer = getPerformerKey(log);
-
-      if (!isRealPerformer(performer)) {
-        return;
-      }
-
-      const currentLatest = latestLogByPerformer.get(performer);
-      const currentTime = new Date(log.created_at || "").getTime();
-      const latestTime = currentLatest
-        ? new Date(currentLatest.created_at || "").getTime()
-        : Number.NaN;
-
-      if (
-        !currentLatest ||
-        (Number.isNaN(latestTime) && log.id > currentLatest.id) ||
-        currentTime > latestTime ||
-        (currentTime === latestTime && log.id > currentLatest.id)
-      ) {
-        latestLogByPerformer.set(performer, log);
-      }
-    });
-
-    latestLogByPerformer.forEach((log) => {
-      performerLogIds.add(log.id);
-    });
-
     return orderedLogs.filter((log) => {
       const performer = getPerformerKey(log);
       const isPendingLog = !isRealPerformer(performer);
+
+      if (latestPendingRateLog && !isPendingLog && isApprovedLog(log)) {
+        const logTime = new Date(log.created_at || "").getTime();
+        const pendingRateTime = new Date(latestPendingRateLog.created_at || "").getTime();
+        const hasStageBoundaryBetween = orderedLogs.some((betweenLog) => {
+          const betweenTime = new Date(betweenLog.created_at || "").getTime();
+          const betweenStatus = String(betweenLog.status_name || "").toLowerCase();
+
+          return (
+            betweenLog.id !== log.id &&
+            betweenLog.id !== latestPendingRateLog.id &&
+            (betweenTime > pendingRateTime || (betweenTime === pendingRateTime && betweenLog.id > latestPendingRateLog.id)) &&
+            (betweenTime < logTime || (betweenTime === logTime && betweenLog.id < log.id)) &&
+            (
+              betweenStatus.includes("billing") ||
+              betweenStatus.includes("auditor") ||
+              betweenStatus.includes("rate") ||
+              betweenStatus.includes("reject") ||
+              betweenStatus.includes("complete")
+            )
+          );
+        });
+
+        if (
+          !hasStageBoundaryBetween &&
+          (logTime > pendingRateTime || (logTime === pendingRateTime && log.id > latestPendingRateLog.id))
+        ) {
+          return false;
+        }
+      }
 
       if (isPendingLog) {
         if (isCurrentRatePending && isRateLog(log)) {
@@ -327,110 +375,104 @@ export default function Order_Tracking() {
         });
       }
 
-      if (hasLaterDuplicateDecision(log) || hasLaterSameCycleRateRejection(log) || hasNearbyRateDecision(log)) {
+      if (
+        hasLaterDuplicateDecision(log) ||
+        hasLaterSameCycleRateRejection(log) ||
+        hasLaterSameCycleRateApproval(log)
+      ) {
         return false;
       }
 
-      return isDecisionHistoryLog(log) || performerLogIds.has(log.id);
+      return isDecisionHistoryLog(log);
     });
   }, [orderedLogs, selectedOrder?.status_display]);
 
   const displayLogs = useMemo(() => {
-    const currentStatus = String(selectedOrder?.status_display || "").trim().toLowerCase();
-    const isCurrentRatePending = currentStatus.includes("rate");
-    const isRealPerformer = (value: string | null) => {
+    const isRealPerformer = (value: string | null | undefined) => {
       const normalized = String(value || "").trim().toLowerCase();
-      return normalized && normalized !== "pending" && normalized !== "system";
+      return Boolean(normalized && normalized !== "pending" && normalized !== "system");
     };
     const isRateLog = (log: OrderLog) =>
       String(log.status_name || "").toLowerCase().includes("rate");
     const isRejectedLog = (log: OrderLog) =>
       String(log.status_name || "").toLowerCase().includes("reject");
-    const isGenericApprovedLog = (log: OrderLog) => {
-      const statusName = String(log.status_name || "").trim().toLowerCase();
-      return statusName === "approved" || statusName === "accepted";
-    };
-    const getTime = (log: OrderLog) => new Date(log.created_at || "").getTime();
-    const isAfter = (candidate: OrderLog, source: OrderLog) => {
-      const candidateTime = getTime(candidate);
-      const sourceTime = getTime(source);
-
+    const isApprovedLog = (log: OrderLog) => {
+      const statusName = String(log.status_name || "").toLowerCase();
+      const remarks = String(log.remarks || "").toLowerCase();
       return (
-        candidateTime > sourceTime ||
-        (candidateTime === sourceTime && candidate.id > source.id)
+        statusName.includes("approved") ||
+        statusName.includes("accepted") ||
+        remarks.includes("approved") ||
+        remarks.includes("accepted")
       );
     };
-    const hasStageBoundaryBetween = (source: OrderLog, target: OrderLog) => {
-      const sourceTime = getTime(source);
-      const targetTime = getTime(target);
+    const getPreviousStageName = (log: OrderLog) => {
+      const logTime = new Date(log.created_at || "").getTime();
+      const previousStage = [...orderedLogs]
+        .filter((entry) => {
+          const entryTime = new Date(entry.created_at || "").getTime();
+          return (
+            entry.id !== log.id &&
+            (entryTime < logTime || (entryTime === logTime && entry.id < log.id))
+          );
+        })
+        .reverse()
+        .find((entry) => {
+          const entryStatus = String(entry.status_name || "").toLowerCase();
+          return (
+            entryStatus.includes("rate") ||
+            entryStatus.includes("auditor") ||
+            entryStatus.includes("billing")
+          );
+        });
 
-      return orderedLogs.some((betweenLog) => {
-        const betweenTime = getTime(betweenLog);
-        const betweenStatus = String(betweenLog.status_name || "").toLowerCase();
-
-        return (
-          betweenLog.id !== source.id &&
-          betweenLog.id !== target.id &&
-          (betweenTime > sourceTime || (betweenTime === sourceTime && betweenLog.id > source.id)) &&
-          (betweenTime < targetTime || (betweenTime === targetTime && betweenLog.id < target.id)) &&
-          (
-            betweenStatus.includes("billing") ||
-            betweenStatus.includes("auditor") ||
-            betweenStatus.includes("rate")
-          )
-        );
-      });
+      return String(previousStage?.status_name || "").toLowerCase();
     };
-    const findApprovalsForRateLog = (rateLog: OrderLog) =>
-      orderedLogs.filter((candidate) => {
-        if (
-          !isGenericApprovedLog(candidate) ||
-          !isRealPerformer(candidate.performed_by_name) ||
-          !isAfter(candidate, rateLog) ||
-          hasStageBoundaryBetween(rateLog, candidate)
-        ) {
-          return false;
-        }
-
-        return !orderedLogs.some((betweenLog) => (
-          isRejectedLog(betweenLog) &&
-          isAfter(betweenLog, rateLog) &&
-          isAfter(candidate, betweenLog)
-        ));
-      });
-
-    return visibleLogs.map((log) => {
-      if (!isRateLog(log) || isRejectedLog(log)) {
-        return log;
+    const isAcceptedRateApprovalLog = (log: OrderLog) => {
+      if (isRejectedLog(log) || !isRealPerformer(log.performed_by_name)) {
+        return false;
       }
 
-      if (isCurrentRatePending && !isRealPerformer(log.performed_by_name)) {
-        return log;
+      if (isRateLog(log) && isApprovedLog(log)) {
+        return true;
       }
 
-      const approvalLogs = findApprovalsForRateLog(log);
-      const approverNames = [
-        ...(isRealPerformer(log.performed_by_name) ? [String(log.performed_by_name)] : []),
-        ...approvalLogs
-          .map((approvalLog) => approvalLog.performed_by_name)
-          .filter((name): name is string => Boolean(name && isRealPerformer(name))),
-      ];
-      const uniqueApproverNames = Array.from(new Set(approverNames));
+      return isApprovedLog(log) && getPreviousStageName(log).includes("rate");
+    };
 
-      if (uniqueApproverNames.length === 0) {
-        return log;
+    return [...visibleLogs].sort(compareLogsByDisplayOrder).reduce<OrderLog[]>((mergedLogs, log) => {
+      if (!isAcceptedRateApprovalLog(log)) {
+        mergedLogs.push(log);
+        return mergedLogs;
       }
 
-      const latestApprovalLog = approvalLogs[approvalLogs.length - 1] || log;
+      const previousLog = mergedLogs[mergedLogs.length - 1];
+      if (previousLog && isAcceptedRateApprovalLog(previousLog)) {
+        const names = [
+          ...String(previousLog.performed_by_name || "")
+            .split(",")
+            .map((name) => name.trim())
+            .filter(Boolean),
+          String(log.performed_by_name || "").trim(),
+        ].filter(Boolean);
 
-      return {
+        mergedLogs[mergedLogs.length - 1] = {
+          ...previousLog,
+          performed_by_name: Array.from(new Set(names)).join(", "),
+          created_at: log.created_at || previousLog.created_at,
+          remarks: "Approved",
+        };
+        return mergedLogs;
+      }
+
+      mergedLogs.push({
         ...log,
-        performed_by_name: uniqueApproverNames.join(", "),
-        remarks: latestApprovalLog.remarks || log.remarks,
-        created_at: latestApprovalLog.created_at || log.created_at,
-      };
-    });
-  }, [orderedLogs, visibleLogs, selectedOrder?.status_display]);
+        status_name: "Rate Approval",
+        remarks: "Approved",
+      });
+      return mergedLogs;
+    }, []);
+  }, [orderedLogs, visibleLogs]);
 
   const timelineLogs = useMemo(() => {
     const currentStatus = String(selectedOrder?.status_display || "").trim();
@@ -474,6 +516,26 @@ export default function Order_Tracking() {
     return statusName.includes("billing") && remarks.includes("sent to auditor");
   };
 
+  const isBillingAcceptedLog = (log: OrderLog) => {
+    const statusName = String(log.status_name || "").toLowerCase();
+    const remarks = String(log.remarks || "").toLowerCase();
+
+    return (
+      isSentToAuditorLog(log) ||
+      (
+        statusName.includes("billing") &&
+        (
+          statusName.includes("accepted") ||
+          statusName.includes("approved") ||
+          remarks.includes("accepted") ||
+          remarks.includes("approved")
+        )
+      ) ||
+      remarks.includes("accepted by billing") ||
+      remarks.includes("approved by billing")
+    );
+  };
+
   const getLogDisplayTitle = (log: OrderLog) => {
     const statusName = String(log.status_name || "").toLowerCase();
     const remarks = String(log.remarks || "").toLowerCase();
@@ -481,6 +543,11 @@ export default function Order_Tracking() {
     const hasRealPerformer =
       performer && performer !== "pending" && performer !== "system";
     const isRejected = statusName.includes("reject");
+    const isAccepted =
+      statusName === "approved" ||
+      statusName === "accepted" ||
+      statusName.includes("approved") ||
+      statusName.includes("accepted");
     const logTime = new Date(log.created_at || "").getTime();
     const lastPreviousStage = [...orderedLogs]
       .filter((entry) => {
@@ -505,6 +572,30 @@ export default function Order_Tracking() {
       return "Rate Approval Rejected";
     }
 
+    if (isRejected && lastPreviousStageName.includes("billing")) {
+      return "Billing Rejected";
+    }
+
+    if (isRejected && lastPreviousStageName.includes("auditor")) {
+      return "Auditor Rejected";
+    }
+
+    if (isBillingAcceptedLog(log)) {
+      return "Accepted by Billing";
+    }
+
+    if (isAccepted && lastPreviousStageName.includes("rate")) {
+      return "Accepted by Rate Approver";
+    }
+
+    if (isAccepted && lastPreviousStageName.includes("billing")) {
+      return "Accepted by Billing";
+    }
+
+    if (isAccepted && lastPreviousStageName.includes("auditor")) {
+      return "Accepted by Auditor";
+    }
+
     if (statusName.includes("billing") && !hasRealPerformer) {
       return "Billing Pending";
     }
@@ -527,8 +618,6 @@ export default function Order_Tracking() {
     ) {
       return "Order Edited and Sent Back to Billing";
     }
-
-    if (isSentToAuditorLog(log)) return "Accepted by Billing";
 
     return log.status_name;
   };
@@ -569,6 +658,20 @@ export default function Order_Tracking() {
     }
 
     return "progress";
+  };
+
+  const getRateApprovalStatusRows = () =>
+    (selectedOrder?.rate_approvals || [])
+      .map((approval) => ({
+        name: approval.approver_name,
+        status: String(approval.status || "PENDING").toUpperCase(),
+      }))
+      .filter((approval) => approval.name);
+
+  const formatApprovalStatus = (status: string) => {
+    if (status === "APPROVED") return "Approved";
+    if (status === "REJECTED") return "Rejected";
+    return "Pending";
   };
 
   const handleTrack = async (order: Order) => {
@@ -816,6 +919,7 @@ export default function Order_Tracking() {
               timelineLogs.map((log, index) => {
                 const tone = getLogTone(log.status_name, log.performed_by_name);
                 const displayRemark = getLogDisplayRemark(log);
+                const displayTitle = getLogDisplayTitle(log);
 
                 return (
                   <div key={log.id} className="tracker-timeline-row">
@@ -834,13 +938,80 @@ export default function Order_Tracking() {
 
                     <div className={`tracker-log-card ${tone}`}>
                       <div className="tracker-log-head">
-                        <h6>{getLogDisplayTitle(log)}</h6>
+                        <h6>{displayTitle}</h6>
                         <span>{formatDateTime(log.created_at)}</span>
                       </div>
 
-                      <p className="tracker-log-meta">
-                        Performed By: {log.performed_by_name || "Pending"}
-                      </p>
+                      {(() => {
+                        const isLastLog = index === timelineLogs.length - 1;
+                        const statusLower = (log.status_name || "").toLowerCase();
+                        const isTerminal = statusLower.includes("completed") || statusLower.includes("rejected");
+                        const isPendingLog = isLastLog && !isTerminal;
+
+                        if (isPendingLog) {
+                          const isRateApprovalStatus = statusLower.includes("rate") || statusLower.includes("need approval");
+                          const rateApprovalRows = isRateApprovalStatus ? getRateApprovalStatusRows() : [];
+
+                          let holderName = "";
+                          if (isRateApprovalStatus) {
+                            const pendingApprovers = rateApprovalRows
+                              .filter((ra) => ra.status === "PENDING")
+                              .map((ra) => ra.name);
+                            holderName = pendingApprovers.length > 0 ? pendingApprovers.join(", ") : "";
+                          }
+
+                          if (rateApprovalRows.length > 0) {
+                            return (
+                              <div className="tracker-log-meta" style={{ color: "#475569", fontWeight: 600 }}>
+                                {rateApprovalRows.map((approval) => (
+                                  <div key={`${approval.name}-${approval.status}`}>
+                                    {approval.name}: {formatApprovalStatus(approval.status)}
+                                  </div>
+                                ))}
+                                {holderName ? (
+                                  <span style={{ display: "inline-block", marginTop: 4, background: "#FEF3C7", color: "#D97706", fontSize: "0.72rem", fontWeight: 700, padding: "2px 10px", borderRadius: 20 }}>
+                                    Awaiting Action
+                                  </span>
+                                ) : null}
+                              </div>
+                            );
+                          }
+
+                          return holderName ? (
+                            <div className="tracker-log-meta" style={{ color: "#92400E", fontWeight: 600 }}>
+                              <div>Pending with: {holderName}</div>
+                              <span style={{ display: "inline-block", marginTop: 4, background: "#FEF3C7", color: "#D97706", fontSize: "0.72rem", fontWeight: 700, padding: "2px 10px", borderRadius: 20 }}>
+                                Awaiting Action
+                              </span>
+                            </div>
+                          ) : (
+                            <p className="tracker-log-meta">Performed By: {log.performed_by_name || "Pending"}</p>
+                          );
+                        }
+
+                        if (
+                          displayTitle === "Accepted by Rate Approver" &&
+                          String(log.performed_by_name || "").includes(",")
+                        ) {
+                          return (
+                            <div className="tracker-log-meta">
+                              {String(log.performed_by_name || "")
+                                .split(",")
+                                .map((name) => name.trim())
+                                .filter(Boolean)
+                                .map((name) => (
+                                  <div key={name}>{name}: Approved</div>
+                                ))}
+                            </div>
+                          );
+                        }
+
+                        return (
+                          <p className="tracker-log-meta">
+                            Performed By: {log.performed_by_name || "—"}
+                          </p>
+                        );
+                      })()}
 
                       {displayRemark ? (
                         <p className="tracker-log-remarks">Remark: {displayRemark}</p>

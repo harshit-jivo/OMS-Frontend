@@ -44,7 +44,7 @@ interface ChartsData {
   manager_state_performance?: { manager_id: number | null; manager_name: string; state: string; orders: number; sales: number }[];
   status_distribution: { status: string; label: string; count: number }[];
   decision_distribution?: { status: string; label: string; count: number }[];
-  top_parties: { card_code: string; card_name: string; count: number; revenue: number }[];
+  top_parties: { card_code: string; card_name: string; count: number; completed_count?: number; revenue: number }[];
   category_sales: { category: string; total_sales: number; count: number }[];
   state_item_sales?: StateItemSales[];
   highest_sales_order?: { order_number: string | null; amount: number };
@@ -807,7 +807,7 @@ export default function Dashboard() {
                 <div className="db-highlight-label">Top Parties</div>
                 <div className="db-highlight-sub">
                   {topParty
-                    ? `${topParty.card_name} leads with ${fmt(topParty.count)} orders`
+                    ? `${topParty.card_name} leads with ${fmt(topParty.count)} orders (${fmt(topParty.completed_count ?? 0)} completed)`
                     : "No party data available"}
                 </div>
               </div>
@@ -842,9 +842,16 @@ export default function Dashboard() {
                       <span className="db-party-list-name db-party-list-name--wrap">{item.card_name}</span>
                       <span className="db-party-list-code">{item.card_code}</span>
                     </div>
-                    <span className="db-party-list-count db-party-list-count--detailed">
-                      {fmt(item.count)} orders
-                    </span>
+                    <div style={{ textAlign: "right", lineHeight: 1.4 }}>
+                      <span className="db-party-list-count db-party-list-count--detailed">
+                        {fmt(item.count)} orders
+                      </span>
+                      {item.completed_count != null && (
+                        <div style={{ fontSize: "0.7rem", color: "#16a34a", fontWeight: 600 }}>
+                          {fmt(item.completed_count)} completed
+                        </div>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>

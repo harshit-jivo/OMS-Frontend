@@ -230,8 +230,8 @@ export default function Billing_orders() {
         "Boxes": item.boxes,
         "Liters": item.ltrs,
         "Total Ltrs": getOrderItemTotalLtrs(item).toFixed(2),
+        "Price List (Basic)": item.price_list_basic,
         "Basic Price": item.basic_price,
-        "Market Price": item.market_price,
         "Total Amount": item.total,
       }));
     } else {
@@ -243,8 +243,8 @@ export default function Billing_orders() {
         "Status": order.status_display,
         "Bill To": order.bill_to_address,
         "Ship To": order.ship_to_address,
+        "Price List (Basic)": "",
         "Basic Price": "",
-        "Market Price": "",
       });
     }
     const worksheet = XLSX.utils.json_to_sheet(excelData);
@@ -520,8 +520,8 @@ export default function Billing_orders() {
                           <div><span>Boxes</span><strong>{Number(item.boxes).toFixed(2)}</strong></div>
                           <div><span>Ltrs</span><strong>{item.ltrs}</strong></div>
                           {schemes.length > 0 ? <div><span>Total Ltrs</span><strong>{getOrderItemTotalLtrs(item).toFixed(2)}</strong></div> : null}
+                          <div><span>Price List (Basic)</span><strong>{Number(item.price_list_basic).toFixed(2)}</strong></div>
                           <div><span>Basic Price</span><strong>{Number(item.basic_price).toFixed(2)}</strong></div>
-                          <div><span>Market Price</span><strong>{Number(item.market_price).toFixed(2)}</strong></div>
                           <div><span>Tax %</span><strong>{Number(item.tax_rate).toFixed(2)}</strong></div>
                           <div className="order-detail-item-amount"><span>Amount</span><strong>{Number(item.total).toFixed(2)}</strong></div>
                         </div>
@@ -538,7 +538,7 @@ export default function Billing_orders() {
                   <th>Category</th><th>Scheme</th><th>Scheme Qty</th>
                   <th>Qty</th><th>Pcs</th><th>Boxes</th><th>Ltrs</th>
                   {/* <th>Scheme Ltrs</th> */}
-                  <th>Total Ltrs</th><th>Basic Price</th><th>Market Price</th><th>Tax %</th><th style={{ textAlign: 'right' }}>Amount</th></tr></thead>
+                  <th>Total Ltrs</th><th>Price List (Basic)</th><th>Basic Price</th><th>Tax %</th><th style={{ textAlign: 'right' }}>Amount</th></tr></thead>
                 <tbody>
                   {selectedItems.length > 0 ? selectedItems.map((item, i) => (
                     <tr key={i}>
@@ -553,8 +553,8 @@ export default function Billing_orders() {
                       <td style={{ textAlign: 'center' }}>{item.ltrs}</td>
                       {/* <td style={{textAlign:'center'}}>{item.scheme_name ? ((item as any).scheme_ltrs || 0) : "-"}</td> */}
                       <td style={{ textAlign: 'center' }}>{getOrderItemTotalLtrs(item).toFixed(2)}</td>
+                      <td style={{ textAlign: 'right' }}>{Number(item.price_list_basic).toFixed(2)}</td>
                       <td style={{ textAlign: 'right' }}>{Number(item.basic_price).toFixed(2)}</td>
-                      <td style={{ textAlign: 'right' }}>{Number(item.market_price).toFixed(2)}</td>
                       <td style={{ textAlign: 'center' }}>{Number(item.tax_rate).toFixed(2)}</td>
                       <td style={{ textAlign: 'right', fontWeight: 600, color: '#0f172a' }}>{Number(item.total).toFixed(2)}</td>
                     </tr>

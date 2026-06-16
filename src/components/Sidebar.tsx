@@ -9,14 +9,12 @@ import {
   HiChevronDown,
   HiClock,
   HiCog6Tooth,
-  HiCurrencyRupee,
   HiClipboardDocumentList,
   HiCube,
   HiDocumentText,
   HiEye,
   HiGift,
   HiHome,
-  HiIdentification,
   HiMap,
   HiPlusCircle,
   HiPresentationChartLine,
@@ -328,9 +326,10 @@ export default function Sidebar({ children }: SidebarProps) {
             <li className={location.pathname === "/Party_Product_Assignment" ? "active" : ""}>
               <Link to="/Party_Product_Assignment" onClick={closeSidebar}>
                 <SidebarIcon><HiCube /></SidebarIcon>
-                Party Product Assignment
+                 Party Product Assignment
               </Link>
             </li>
+
 
              <li className={location.pathname === "/Add_Scheme" ? "active" : ""}>
               <Link to="/Add_Scheme" onClick={closeSidebar}>
@@ -339,19 +338,19 @@ export default function Sidebar({ children }: SidebarProps) {
               </Link>
             </li>
 
-            <li className={location.pathname === "/Staff" ? "active" : ""}>
+            {/* <li className={location.pathname === "/Staff" ? "active" : ""}>
               <Link to="/Staff" onClick={closeSidebar}>
                 <SidebarIcon><HiIdentification /></SidebarIcon>
                 Staff Orders
               </Link>
-            </li>
+            </li> */}
 
-            <li className={location.pathname === "/Staff_Rate_Assignment" ? "active" : ""}>
+            {/* <li className={location.pathname === "/Staff_Rate_Assignment" ? "active" : ""}>
               <Link to="/Staff_Rate_Assignment" onClick={closeSidebar}>
                 <SidebarIcon><HiCurrencyRupee /></SidebarIcon>
                 Staff Rate Assignment
               </Link>
-            </li>
+            </li> */}
 
             <li className={location.pathname === "/Order_Flow_Settings" ? "active" : ""}>
               <Link to="/Order_Flow_Settings" onClick={closeSidebar}>
@@ -380,7 +379,7 @@ export default function Sidebar({ children }: SidebarProps) {
               {salesOpen && (
                 <ul className="dropdown-list">
                   <li><Link to="/Add_Sales" onClick={closeSidebar}><SidebarIcon><HiPlusCircle /></SidebarIcon>Add Sales</Link></li>
-                  {userRole?.toLowerCase() === "manager" && (
+                  {(userRole?.toLowerCase() === "manager" || userRole?.toLowerCase() == "billing") && (
                     <li><Link to="/FOC" onClick={closeSidebar}><SidebarIcon><HiGift /></SidebarIcon>FOC</Link></li>
                   )}
                   {userRole?.toLowerCase() === "billing" && (
