@@ -72,7 +72,6 @@ interface CurrentUser {
 
 type SupportedRole = "admin" | "auditor" | "manager" | "billing" | "approver";
 type TopPartyView = "all" | 5 | 10;
-type TopPartyCategory = "all" | string;
 
 const PALETTE = ["#0f766e", "#2563eb", "#f59e0b", "#dc2626", "#7c3aed", "#0891b2", "#4f46e5", "#ea580c"];
 const TOP_PARTY_VIEW_OPTIONS: Array<{ label: string; value: TopPartyView }> = [
@@ -222,7 +221,6 @@ export default function Dashboard() {
   const [year, setYear] = useState(currentYear);
   const [month, setMonth] = useState(0);
   const [topPartyView, setTopPartyView] = useState<TopPartyView>(5);
-  const [topPartyCategory, setTopPartyCategory] = useState<TopPartyCategory>("all");
   const [showMoreStatuses, setShowMoreStatuses] = useState(false);
   const [showSalesBreakdown, setShowSalesBreakdown] = useState(false);
   const [showManagerPerformance, setShowManagerPerformance] = useState(false);
@@ -377,28 +375,11 @@ export default function Dashboard() {
         .filter((item) => (item.count ?? 0) > 0 || (item.revenue ?? 0) > 0),
     [charts?.top_parties]
   );
-  const topPartyCategories = useMemo(
-    () => [...new Set(topParties.map((item) => item.category || "Unknown"))].sort(),
-    [topParties]
-  );
-  const filteredTopParties = useMemo(
-    () =>
-      topPartyCategory === "all"
-        ? topParties
-        : topParties.filter((item) => (item.category || "Unknown") === topPartyCategory),
-    [topParties, topPartyCategory]
-  );
   const visibleTopParties = useMemo(
-    () => (topPartyView === "all" ? filteredTopParties : filteredTopParties.slice(0, topPartyView)),
-    [filteredTopParties, topPartyView]
+    () => (topPartyView === "all" ? topParties : topParties.slice(0, topPartyView)),
+    [topParties, topPartyView]
   );
-  const topParty = filteredTopParties[0];
-
-  useEffect(() => {
-    if (topPartyCategory !== "all" && !topPartyCategories.includes(topPartyCategory)) {
-      setTopPartyCategory("all");
-    }
-  }, [topPartyCategories, topPartyCategory]);
+  const topParty = topParties[0];
 
   const monthlySales = charts?.monthly_sales ?? [];
   const managerPerformance = useMemo(
@@ -831,19 +812,6 @@ export default function Dashboard() {
                 </div>
               </div>
             <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", width: "100%" }}>
-                <select
-                  className="db-party-category-select"
-                  value={topPartyCategory}
-                  onChange={(e) => setTopPartyCategory(e.target.value)}
-                  aria-label="Filter top parties by category"
-                >
-                  <option value="all">All Categories</option>
-                  {topPartyCategories.map((category) => (
-                    <option key={category} value={category}>
-                      {category}
-                    </option>
-                  ))}
-                </select>
                 <div className="db-segmented-control" role="tablist" aria-label="Top parties view">
                   {TOP_PARTY_VIEW_OPTIONS.map((option) => (
                     <button
@@ -860,8 +828,6 @@ export default function Dashboard() {
             </div>
             {topParties.length === 0 ? (
               <div className="db-no-data" style={{ minHeight: 80 }}>No party data for this period</div>
-            ) : filteredTopParties.length === 0 ? (
-              <div className="db-no-data" style={{ minHeight: 80 }}>No party data for this category</div>
             ) : (
               <div className="db-party-list db-party-list--spacious">
                 {visibleTopParties.map((item, index) => (

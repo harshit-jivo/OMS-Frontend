@@ -1368,26 +1368,6 @@
   box-shadow: 0 8px 18px rgba(37, 99, 235, 0.18);
 }
 
-.db-party-category-select {
-  height: 34px;
-  min-width: 150px;
-  max-width: 100%;
-  border: 1px solid rgba(148, 163, 184, 0.42);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.92);
-  color: #334155;
-  padding: 0 34px 0 12px;
-  font-size: 11px;
-  font-weight: 800;
-  outline: none;
-  cursor: pointer;
-}
-
-.db-party-category-select:focus {
-  border-color: rgba(15, 118, 110, 0.55);
-  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
-}
-
 .db-empty-state {
   max-width: 460px;
   margin: 40px auto;

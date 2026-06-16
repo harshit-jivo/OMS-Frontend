@@ -15,7 +15,6 @@ export interface User {
   phone?: string;
   company?: number | null;
   category?: CategoryOption | null;
-  categories?: CategoryOption[];
   variety?: string | null;
 }
 
@@ -42,13 +41,7 @@ export interface CreateUserData {
   state?: number;
   states?: number[];
   category?: number | null;
-  categories?: number[];
   variety?: string | null;
-}
-
-export interface PartySelection {
-  card_code: string;
-  category?: string | null;
 }
 
 export interface BulkPartyUserAssignmentRow {
@@ -98,11 +91,10 @@ export const userService = {
     return response.data;
   },
 
- assignPartiesToUser: async (userId: number, partyCodes: string[], partySelections?: PartySelection[]) => {
+ assignPartiesToUser: async (userId: number, partyCodes: string[]) => {
   const payload = {
     user_id: userId,
     card_codes: partyCodes,   
-    ...(partySelections ? { party_selections: partySelections } : {}),
   };
 
   const response = await api.post(`/auth/assign-parties/`, payload);
@@ -157,8 +149,6 @@ removePartyProduct: async (card_code: string, itemCode: string, category: string
   },
 
   createUser: async (data: CreateUserData) => {
-    const categories = data.categories || (data.category ? [data.category] : []);
-
     const payload = {
       name: data.name,
       username: data.username,
@@ -171,8 +161,7 @@ removePartyProduct: async (card_code: string, itemCode: string, category: string
       main_groups: data.mainGroups || [],
       state: data.state || null,
       states: data.states || [],
-      category: categories[0] || data.category || null,
-      categories,
+      category: data.category || null,
       variety: data.variety || null
     };
 
@@ -184,7 +173,6 @@ removePartyProduct: async (card_code: string, itemCode: string, category: string
 updateUser: async (id: number, data: CreateUserData) => {
   const mainGroups = data.mainGroups || [];
   const states = data.states || [];
-  const categories = data.categories || (data.category ? [data.category] : []);
 
   const payload = {
     name: data.name,
@@ -198,8 +186,7 @@ updateUser: async (id: number, data: CreateUserData) => {
     main_groups: mainGroups,
     state: states[0] || data.state || null,
     states: states,
-    category: categories[0] || data.category || null,
-    categories,
+    category: data.category || null,
     variety: data.variety || null,
   };
 
