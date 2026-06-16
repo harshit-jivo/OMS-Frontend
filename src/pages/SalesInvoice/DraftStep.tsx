@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { HiCheckCircle, HiXMark } from "react-icons/hi2";
 import ContentsTab from "./ContentsTab";
+import InteractiveLoader from "./InteractiveLoader";
 import { formatDateDisplay, formatMoney, toNumber } from "./salesInvoice.utils";
 import type { SalesInvoiceState } from "./useSalesInvoice";
 
@@ -75,6 +76,7 @@ export default function DraftStep({ state, onReset, onAddItems }: Props) {
 
   return (
     <div className="si-draft-stage">
+      {state.posting && <InteractiveLoader />}
       {state.loadingDraftDetails && <div className="si-loader">Loading customer and salesperson details...</div>}
       {state.draftError && <div className="si-inline-error">{state.draftError}</div>}
 
@@ -133,6 +135,14 @@ export default function DraftStep({ state, onReset, onAddItems }: Props) {
             aria-modal="true"
             aria-label="Invoice submitted for review"
           >
+            <button
+              type="button"
+              className="si-success-close"
+              aria-label="Close"
+              onClick={closeSuccessModal}
+            >
+              <HiXMark aria-hidden="true" />
+            </button>
             <span className="si-success-icon" aria-hidden="true">
               <HiCheckCircle />
             </span>

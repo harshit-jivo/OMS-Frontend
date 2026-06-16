@@ -765,25 +765,16 @@ export function useSalesInvoice() {
 
     setPosting(true);
     try {
-      // Store the invoice locally as a PENDING record for review/approval instead of
-      // posting straight to SAP HANA. An approver promotes it to HANA later.
-      const createdBy = Number(localStorage.getItem("user_id"));
-      const pendingPayload = {
-        so_number: String(firstSelectedLine?.DocNum ?? ""),
-        party_name: selectedParty?.CardName || "",
-        total_amount: totals.grandTotal,
-        status: "PENDING",
-        ...(Number.isFinite(createdBy) ? { created_by: createdBy } : {}),
-        invoice_payload: payload,
-      };
-      const data = await apiFetch<ApiMessageResponse>("/api/invoice/pending/", {
+      // Post the invoice straight to SAP's draft table instead of staging a local
+      // PENDING record for review. SAP creates the draft document on success.
+      const data = await apiFetch<ApiMessageResponse>("/api/service-layer/draft/", {
         method: "POST",
-        body: JSON.stringify(pendingPayload),
+        body: JSON.stringify(payload),
       });
-      setPostSuccess(extractApiMessage(data, "Invoice submitted for review and approval."));
+      setPostSuccess(extractApiMessage(data, "Invoice draft created in SAP."));
     } catch (error) {
       console.error(error);
-      setPostError(formatApiErrorMessage(error instanceof Error ? error.message : error, "Unable to submit invoice for review."));
+      setPostError(formatApiErrorMessage(error instanceof Error ? error.message : error, "Unable to create invoice draft in SAP."));
     } finally {
       setPosting(false);
     }
