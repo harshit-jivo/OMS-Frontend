@@ -72,6 +72,19 @@ type ApiMessageResponse = {
 
 const createFreightRow = (): FreightRow => ({ expenseCode: "", expenseName: "", lineTotal: 0, taxCode: "" });
 
+// Unique, time-ordered reference stamped on each invoice post so the resulting SAP
+// document can be traced back to OMS. Capped at 15 characters to fit the SAP UDF:
+// a base-36 millisecond timestamp (~8 chars, keeps refs sortable) plus a random
+// suffix that guarantees uniqueness within the same millisecond.
+const OMS_REF_MAX_LENGTH = 15;
+const generateOmsRef = (): string => {
+  let ref = Date.now().toString(36);
+  while (ref.length < OMS_REF_MAX_LENGTH) {
+    ref += Math.random().toString(36).slice(2);
+  }
+  return ref.slice(0, OMS_REF_MAX_LENGTH);
+};
+
 const linesToRecord = (lines: SelectedLine[]) =>
   Object.fromEntries(lines.map((line) => [lineKey(line.DocEntry, line.LineNum), line]));
 
@@ -174,6 +187,53 @@ const formatApiErrorMessage = (value: unknown, fallback: string): string => {
     return JSON.stringify(parsed, null, 2);
   } catch {
     return extractApiMessage(parsed, fallback);
+  }
+};
+
+// SAP's approval flow frequently rejects the post with code -2028 ("No matching
+// records found") even though the draft was actually created. Detect that code
+// anywhere in the (possibly deeply nested) error payload.
+const isNoMatchingRecordsError = (value: unknown): boolean => {
+  const text = typeof value === "string"
+    ? value
+    : (() => {
+        try {
+          return JSON.stringify(value);
+        } catch {
+          return String(value);
+        }
+      })();
+  return text.includes("-2028");
+};
+
+// Interpret the /draft/verify response: does a draft with this refId exist in SAP?
+// The endpoint returns { data: [ ...matching records ] }, where each record echoes
+// its U_OMS_REF. A non-empty data array means it found the draft; when the row
+// carries U_OMS_REF we confirm it matches the ref we posted to rule out a stray hit.
+const draftExistsForRef = (response: unknown, refId: string): boolean => {
+  const records =
+    response && typeof response === "object" && Array.isArray((response as { data?: unknown }).data)
+      ? ((response as { data: Array<Record<string, unknown>> }).data)
+      : Array.isArray(response)
+        ? (response as Array<Record<string, unknown>>)
+        : [];
+
+  if (records.length === 0) return false;
+  return records.some((row) => {
+    const ref = row?.U_OMS_REF;
+    return ref === undefined || ref === null || String(ref) === refId;
+  });
+};
+
+// Ask SAP whether the draft for this reference id actually landed. A failed/absent
+// verification is treated as "does not exist" so the caller reports failure.
+const verifyDraftExists = async (refId: string): Promise<boolean> => {
+  try {
+    const data = await apiFetch<unknown>(`/api/hana/draft/verify?refId=${encodeURIComponent(refId)}`);
+    return draftExistsForRef(data, refId);
+  } catch (error) {
+    console.error("Draft verification failed:", error);
+    return false;
   }
 };
 
@@ -764,17 +824,67 @@ export function useSalesInvoice() {
     }
 
     setPosting(true);
+    // The reference stamped on the payload doubles as the key we use to verify the
+    // draft actually landed in SAP when the approval flow rejects the post with -2028.
+    const refId = generateOmsRef();
+
+    // Reference data shared by every ref-log entry for this attempt. The outcome
+    // (status + error_message) is filled in per branch below.
+    const refLogBase = {
+      ref_id: refId,
+      card_name: selectedParty?.CardName || "",
+      doc_date: form.postingDate,
+      so_number: uniqueTextValues(selectedLineList.map((line) => (line.DocNum ? String(line.DocNum) : ""))).join(", "),
+      posted_by: Number(localStorage.getItem("user_id")) || null,
+    };
+
+    // Record the final outcome in the local ref log. Best-effort: a logging failure
+    // must never change what the user sees about the actual post.
+    const writeRefLog = async (status: "Success" | "Failed", errorMessage = "") => {
+      try {
+        await apiFetch("/api/invoice/refLogs/", {
+          method: "POST",
+          body: JSON.stringify({ ...refLogBase, status, error_message: errorMessage }),
+        });
+      } catch (logError) {
+        console.error("Unable to write invoice ref log:", logError);
+      }
+    };
+
+    // A post can "fail" two ways: a thrown error (HTTP error) or a 200 with an error
+    // body. Both funnel here. SAP's approval flow commonly returns -2028 ("No matching
+    // records") even though the draft was created, so on that code we re-check SAP by
+    // refId before deciding it failed. Any other error — or a -2028 with nothing in
+    // SAP — is a genuine failure.
+    const resolvePostFailure = async (errorValue: unknown) => {
+      if (isNoMatchingRecordsError(errorValue) && (await verifyDraftExists(refId))) {
+        await writeRefLog("Success");
+        setPostSuccess("Invoice draft created in SAP successfully.");
+        return;
+      }
+      const message = formatApiErrorMessage(errorValue, "Draft creation unsuccessful.");
+      await writeRefLog("Failed", message);
+      setPostError(message);
+    };
+
     try {
-      // Post the invoice straight to SAP's draft table instead of staging a local
-      // PENDING record for review. SAP creates the draft document on success.
-      const data = await apiFetch<ApiMessageResponse>("/api/service-layer/draft/", {
+      // Post the invoice straight to SAP HANA via the service-layer invoice endpoint.
+      // A fresh unique U_OMS_REF is stamped on each attempt so the SAP document can be
+      // cross-referenced back to OMS (and verified after a -2028 response).
+      const data = await apiFetch<ApiMessageResponse>("/api/service-layer/invoice/", {
         method: "POST",
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ ...payload, U_OMS_REF: refId }),
       });
-      setPostSuccess(extractApiMessage(data, "Invoice draft created in SAP."));
+      // The SAP proxy can return HTTP 200 with an error body — run the same failure path.
+      if (data && typeof data === "object" && data.error) {
+        await resolvePostFailure(data);
+        return;
+      }
+      await writeRefLog("Success");
+      setPostSuccess(extractApiMessage(data, "Invoice posted to SAP HANA successfully."));
     } catch (error) {
       console.error(error);
-      setPostError(formatApiErrorMessage(error instanceof Error ? error.message : error, "Unable to create invoice draft in SAP."));
+      await resolvePostFailure(error instanceof Error ? error.message : error);
     } finally {
       setPosting(false);
     }

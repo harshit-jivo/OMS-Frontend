@@ -1,584 +1,231 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  HiArrowPath,
-  HiCheckCircle,
-  HiXCircle,
-  HiXMark,
-  HiEye,
-  HiInbox,
-  HiExclamationTriangle,
-  HiClock,
-  HiPaperAirplane,
-  HiArchiveBox,
-  HiTruck,
-  HiCircleStack,
-} from "react-icons/hi2";
+import { HiArrowPath, HiEye, HiInbox, HiXMark } from "react-icons/hi2";
 import { apiFetch } from "./SalesInvoice/useSalesInvoice";
 import { toNumber } from "./SalesInvoice/salesInvoice.utils";
 import "../styles/InvoiceReview.css";
 
-type InvoiceStatus = "PENDING" | "APPROVED" | "REJECTED" | "ERROR" | "POSTED_TO_SAP";
+// SAP approval (WddStatus) codes the invoice-drafts endpoint filters on:
+// W = pending approval, Y = approved, R = rejected. The response itself does not
+// carry the status, so the active filter determines what's shown.
+type StatusCode = "W" | "Y" | "R";
 
-// Exact status string the backend stores after a successful SAP post.
-// Change this single constant if the backend expects a different value.
-const POSTED_TO_SAP_STATUS: InvoiceStatus = "POSTED_TO_SAP";
+const STATUS_FILTERS: Array<{ code: StatusCode; label: string; badge: string }> = [
+  { code: "W", label: "Pending", badge: "pending" },
+  { code: "Y", label: "Approved", badge: "approved" },
+  { code: "R", label: "Rejected", badge: "rejected" },
+];
 
-// Endpoint that posts the invoice payload straight to SAP HANA (the same one the
-// Sales Invoice page used before the review flow was introduced).
-const SAP_POST_ENDPOINT = "/api/service-layer/invoice/";
-
-type InvoiceBatch = {
-  BatchNumber?: string;
-  SystemSerialNumber?: number;
-  Quantity?: number;
-};
-
-type InvoiceLine = {
-  LineNum?: number;
-  ItemCode?: string;
-  Quantity?: number;
-  WarehouseCode?: string;
-  TaxCode?: string;
-  UnitPrice?: number;
-  BatchNumbers?: InvoiceBatch[];
-  [key: string]: unknown;
-};
-
-type InvoicePayload = {
-  CardCode?: string;
+// The endpoint returns one row per draft *line item*; rows sharing a document are
+// grouped (by DocNum) into a single draft below.
+type DraftRow = {
+  DocEntry?: number;
+  DocNum?: number;
   DocDate?: string;
   DocDueDate?: string;
-  TaxDate?: string;
-  NumAtCard?: string;
+  CardCode?: string;
+  CardName?: string;
+  Address?: string;
+  Address2?: string;
   ShipToCode?: string;
-  PayToCode?: string;
-  DocumentLines?: InvoiceLine[];
+  U_OMS_REF?: string | null;
+  LineNum?: number;
+  BaseRef?: string;
+  ItemCode?: string;
+  Dscription?: string;
+  ShipDate?: string;
+  OpenQty?: number;
+  Price?: number;
+  LineTotal?: number;
+  WhsCode?: string;
   [key: string]: unknown;
 };
 
-type InvoiceRecord = {
-  id?: number | string;
-  so_number?: string;
-  party_name?: string;
-  total_amount?: number | string;
-  status?: string;
-  error_message?: string;
-  rejection_reason?: string;
-  invoice_log?: number | string;
-  created_by?: number | string;
-  created_at?: string;
-  updated_at?: string;
-  invoice_payload?: InvoicePayload | string;
-  [key: string]: unknown;
+type DraftGroup = {
+  key: string;
+  header: DraftRow;
+  lines: DraftRow[];
+  total: number;
+  docEntries: number[];
+  omsRefs: string[];
+  baseRefs: string[];
 };
-
-type ApiMessageResponse = {
-  message?: unknown;
-  detail?: unknown;
-  results?: unknown;
-  data?: unknown;
-  [key: string]: unknown;
-};
-
-const STATUS_FILTERS: Array<{ key: InvoiceStatus | "ALL"; label: string }> = [
-  { key: "PENDING", label: "Pending" },
-  { key: "APPROVED", label: "Approved" },
-  { key: "POSTED_TO_SAP", label: "Posted to SAP" },
-  { key: "REJECTED", label: "Rejected" },
-  { key: "ERROR", label: "Error" },
-  { key: "ALL", label: "All" },
-];
-
-// Human-readable label for a status (e.g. POSTED_TO_SAP -> "POSTED TO SAP").
-const statusLabel = (status: InvoiceStatus) => status.replace(/_/g, " ");
-
-// Animated steps shown while a (slow) SAP post is in flight.
-const POSTING_STEPS = [
-  { label: "Checking stock", detail: "Verifying available quantities.", Icon: HiCircleStack },
-  { label: "Grabbing inventory", detail: "Allocating batches from the warehouse.", Icon: HiArchiveBox },
-  { label: "Loading vehicle", detail: "Preparing the dispatch.", Icon: HiTruck },
-  { label: "Posting to SAP", detail: "Sending the invoice to SAP HANA.", Icon: HiPaperAirplane },
-];
 
 const formatAmount = (value: unknown) => {
   const amount = toNumber(value);
   return `₹${amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
-const formatDateTime = (value?: string) => {
+const formatDate = (value?: string) => {
   if (!value) return "—";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return date.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 };
 
-const normalizeStatus = (status?: string): InvoiceStatus => {
-  const upper = String(status || "").toUpperCase().replace(/\s+/g, "_");
-  if (
-    upper === "APPROVED"
-    || upper === "REJECTED"
-    || upper === "ERROR"
-    || upper === "POSTED_TO_SAP"
-  ) {
-    return upper;
-  }
-  return "PENDING";
+// SAP addresses arrive as carriage-return separated lines ("CITY\rPIN\rIN").
+const formatAddress = (value?: string) =>
+  value
+    ? value
+        .split(/\r\n?/)
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .join(", ")
+    : "—";
+
+const orDash = (value: unknown) =>
+  value === undefined || value === null || String(value).trim() === "" ? "—" : String(value);
+
+// Quantity isn't returned directly, but LineTotal = Price × Qty for these rows.
+const lineQty = (line: DraftRow): string => {
+  const price = toNumber(line.Price);
+  if (price <= 0) return "—";
+  const qty = toNumber(line.LineTotal) / price;
+  return (Math.round(qty * 1000) / 1000).toLocaleString("en-IN");
 };
 
-// Records may arrive as a bare array or wrapped in { results } / { data }.
-const extractRecords = (payload: unknown): InvoiceRecord[] => {
-  if (Array.isArray(payload)) return payload as InvoiceRecord[];
+// The SAP proxy returns rows wrapped as { data: [...] }; tolerate a few shapes.
+const extractRows = (payload: unknown): DraftRow[] => {
+  if (Array.isArray(payload)) return payload as DraftRow[];
   if (payload && typeof payload === "object") {
-    const wrapped = payload as ApiMessageResponse;
-    if (Array.isArray(wrapped.results)) return wrapped.results as InvoiceRecord[];
-    if (Array.isArray(wrapped.data)) return wrapped.data as InvoiceRecord[];
+    const obj = payload as Record<string, unknown>;
+    for (const key of ["data", "results", "value"]) {
+      if (Array.isArray(obj[key])) return obj[key] as DraftRow[];
+    }
   }
   return [];
 };
 
-const parsePayload = (payload: InvoiceRecord["invoice_payload"]): InvoicePayload => {
-  if (!payload) return {};
-  if (typeof payload === "string") {
-    try {
-      return JSON.parse(payload) as InvoicePayload;
-    } catch {
-      return {};
+// Collapse the flat line rows into one entry per draft document. Keyed by DocNum
+// when present (a single invoice number can span several DocEntry rows), otherwise
+// by DocEntry so 0/blank doc numbers don't all merge together.
+const groupDrafts = (rows: DraftRow[]): DraftGroup[] => {
+  const groups = new Map<string, DraftGroup>();
+  const order: string[] = [];
+
+  rows.forEach((row) => {
+    const key = row.DocNum ? `N${row.DocNum}` : `E${row.DocEntry ?? ""}`;
+    let group = groups.get(key);
+    if (!group) {
+      group = { key, header: row, lines: [], total: 0, docEntries: [], omsRefs: [], baseRefs: [] };
+      groups.set(key, group);
+      order.push(key);
     }
-  }
-  return payload;
-};
-
-const extractMessage = (value: unknown, fallback: string) => {
-  if (value instanceof Error && value.message) return value.message;
-  if (typeof value === "string" && value.trim()) return value;
-  if (value && typeof value === "object") {
-    const obj = value as ApiMessageResponse;
-    if (typeof obj.message === "string" && obj.message.trim()) return obj.message;
-    if (typeof obj.detail === "string" && obj.detail.trim()) return obj.detail;
-  }
-  return fallback;
-};
-
-// The complete error, preserved verbatim (full response body / object).
-const stringifyError = (value: unknown): string => {
-  if (value instanceof Error) return value.message;
-  if (typeof value === "string") return value;
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
-};
-
-// Pull the deepest human-readable SAP message out of a raw error string (for UI).
-const readableSapError = (raw: string): string => {
-  try {
-    const parsed = JSON.parse(raw);
-    const deep =
-      (parsed?.details?.error?.message && String(parsed.details.error.message))
-      || (parsed?.error?.message && String(parsed.error.message))
-      || (typeof parsed?.error === "string" && parsed.error)
-      || (typeof parsed?.message === "string" && parsed.message)
-      || (typeof parsed?.detail === "string" && parsed.detail);
-    if (typeof deep === "string" && deep.trim()) return deep;
-  } catch {
-    /* not JSON — fall through to raw */
-  }
-  return raw;
-};
-
-// A SAP service-layer call can return HTTP 200 with an error body; detect it.
-const responseHasError = (data: unknown): boolean =>
-  Boolean(data && typeof data === "object" && (data as ApiMessageResponse).error);
-
-/**
- * Update an invoice record's status. A rejection_reason is required when the
- * status becomes REJECTED, and an error_message is logged when it becomes ERROR.
- */
-const updateInvoiceStatus = (
-  id: InvoiceRecord["id"],
-  status: InvoiceStatus,
-  extra?: { rejection_reason?: string; error_message?: string },
-) =>
-  apiFetch<ApiMessageResponse>(`/api/invoice/${id}/update-status/`, {
-    method: "PATCH",
-    body: JSON.stringify({ status, ...(extra || {}) }),
+    group.lines.push(row);
+    group.total += toNumber(row.LineTotal);
+    if (row.DocEntry !== undefined && row.DocEntry !== null && !group.docEntries.includes(row.DocEntry)) {
+      group.docEntries.push(row.DocEntry);
+    }
+    if (row.U_OMS_REF && !group.omsRefs.includes(String(row.U_OMS_REF))) group.omsRefs.push(String(row.U_OMS_REF));
+    if (row.BaseRef && !group.baseRefs.includes(String(row.BaseRef))) group.baseRefs.push(String(row.BaseRef));
   });
 
-// Post the invoice payload straight to SAP HANA.
-const postPayloadToSap = (record: InvoiceRecord) =>
-  apiFetch<ApiMessageResponse>(SAP_POST_ENDPOINT, {
-    method: "POST",
-    body: JSON.stringify(parsePayload(record.invoice_payload)),
-  });
+  return order.map((key) => groups.get(key) as DraftGroup);
+};
 
 export default function InvoiceReview() {
-  const [statusFilter, setStatusFilter] = useState<InvoiceStatus | "ALL">("PENDING");
-  const [records, setRecords] = useState<InvoiceRecord[]>([]);
+  const [statusCode, setStatusCode] = useState<StatusCode>("W");
+  const [rows, setRows] = useState<DraftRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [selected, setSelected] = useState<InvoiceRecord | null>(null);
-  const [actionId, setActionId] = useState<InvoiceRecord["id"] | null>(null);
-  const [actionError, setActionError] = useState("");
-  const [actionMessage, setActionMessage] = useState("");
-  const [historyFor, setHistoryFor] = useState<InvoiceRecord | null>(null);
-  const [historyRecords, setHistoryRecords] = useState<InvoiceRecord[]>([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
-  const [historyError, setHistoryError] = useState("");
-  const [postingToSap, setPostingToSap] = useState(false);
-  const [postingStepIndex, setPostingStepIndex] = useState(0);
+  const [selected, setSelected] = useState<DraftGroup | null>(null);
 
-  useEffect(() => {
-    if (!postingToSap) {
-      setPostingStepIndex(0);
-      return undefined;
-    }
-    const interval = window.setInterval(() => {
-      setPostingStepIndex((index) => Math.min(index + 1, POSTING_STEPS.length - 1));
-    }, 1400);
-    return () => window.clearInterval(interval);
-  }, [postingToSap]);
+  const activeFilter = STATUS_FILTERS.find((filter) => filter.code === statusCode) ?? STATUS_FILTERS[0];
 
-  // Factory approvers only review (Pending/Approved/Rejected) and cannot post to
-  // SAP — that's the billing role's job.
-  const userRole = (localStorage.getItem("role") || "").toLowerCase();
-  const isFactoryApprover = userRole === "factory_approver";
-  const canPostToSap = !isFactoryApprover;
-  // Only the factory approver approves/rejects; billing just sees "Pending Approval".
-  const canApproveReject = isFactoryApprover;
-  const visibleFilters = isFactoryApprover
-    ? STATUS_FILTERS.filter((f) => f.key === "PENDING" || f.key === "APPROVED" || f.key === "REJECTED")
-    : STATUS_FILTERS;
-
-  const loadInvoices = useCallback(async () => {
+  const loadDrafts = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const query = statusFilter === "ALL" ? "" : `?status=${statusFilter}`;
-      const data = await apiFetch<unknown>(`/api/invoice/all/${query}`);
-      setRecords(extractRecords(data));
+      const data = await apiFetch<unknown>(`/api/hana/invoice-drafts/?statusCode=${statusCode}`);
+      setRows(extractRows(data));
     } catch (err) {
       console.error(err);
-      setRecords([]);
-      setError(extractMessage(err, "Unable to load invoices for review."));
+      setRows([]);
+      setError("Unable to load invoice drafts from SAP HANA.");
     } finally {
       setLoading(false);
     }
-  }, [statusFilter]);
+  }, [statusCode]);
 
   useEffect(() => {
-    loadInvoices();
-  }, [loadInvoices]);
+    loadDrafts();
+  }, [loadDrafts]);
 
-  const selectedPayload = useMemo(
-    () => (selected ? parsePayload(selected.invoice_payload) : {}),
-    [selected],
-  );
-
-  const handleAction = async (record: InvoiceRecord, status: InvoiceStatus) => {
-    if (record.id === undefined || record.id === null) {
-      setActionError("This invoice has no identifier and cannot be updated.");
-      return;
-    }
-    const label = `SO #${record.so_number || record.id}`;
-    let rejectionReason: string | undefined;
-
-    if (status === "REJECTED") {
-      const reason = window.prompt(`Enter a reason for rejecting ${label}:`);
-      if (reason === null) return; // reviewer cancelled
-      if (!reason.trim()) {
-        setActionError("A rejection reason is required to reject an invoice.");
-        return;
-      }
-      rejectionReason = reason.trim();
-    } else if (!window.confirm(`Are you sure you want to approve ${label}?`)) {
-      return;
-    }
-
-    setActionId(record.id);
-    setActionError("");
-    setActionMessage("");
-    try {
-      const data = await updateInvoiceStatus(
-        record.id,
-        status,
-        status === "REJECTED" ? { rejection_reason: rejectionReason ?? "" } : undefined,
-      );
-      setActionMessage(
-        extractMessage(data, status === "APPROVED" ? "Invoice approved." : "Invoice rejected."),
-      );
-      setSelected(null);
-      await loadInvoices();
-    } catch (err) {
-      console.error(err);
-      setActionError(extractMessage(err, `Unable to ${status === "APPROVED" ? "approve" : "reject"} the invoice.`));
-    } finally {
-      setActionId(null);
-    }
-  };
-
-  // Post an approved (or error/retry) invoice to SAP HANA, then record the
-  // outcome: POSTED_TO_SAP on success, or ERROR with the message on failure.
-  const handlePostToSap = async (record: InvoiceRecord) => {
-    if (record.id === undefined || record.id === null) {
-      setActionError("This invoice has no identifier and cannot be posted.");
-      return;
-    }
-    const label = `SO #${record.so_number || record.id}`;
-    if (!window.confirm(`Post ${label} to SAP HANA?`)) return;
-
-    setActionId(record.id);
-    setActionError("");
-    setActionMessage("");
-    setPostingToSap(true);
-
-    // Record an ERROR outcome. Save the readable SAP message (e.g. the
-    // "Credit Limit Exceeded!" text) in the log, overwriting any previous error.
-    const logError = async (rawError: string) => {
-      const message = readableSapError(rawError);
-      try {
-        await updateInvoiceStatus(record.id, "ERROR", { error_message: message });
-      } catch (logErr) {
-        console.error("Unable to log SAP post error:", logErr);
-      }
-      setActionError(message);
-      // Keep an open detail modal in sync with the new error.
-      setSelected((current) =>
-        current && current.id === record.id
-          ? { ...current, status: "ERROR", error_message: message }
-          : current,
-      );
-    };
-
-    try {
-      const data = await postPayloadToSap(record);
-      // The SAP proxy can return a 200 response that still carries an error body.
-      if (responseHasError(data)) {
-        await logError(stringifyError(data));
-        await loadInvoices();
-        return;
-      }
-      await updateInvoiceStatus(record.id, POSTED_TO_SAP_STATUS);
-      setActionMessage(`${label} posted to SAP HANA successfully.`);
-      setSelected(null);
-      await loadInvoices();
-    } catch (err) {
-      console.error(err);
-      await logError(stringifyError(err));
-      await loadInvoices();
-    } finally {
-      setActionId(null);
-      setPostingToSap(false);
-    }
-  };
-
-  const openHistory = async (record: InvoiceRecord) => {
-    // The history endpoint is keyed by the invoice-log id. On a list row that is
-    // the record's invoice_log when present, otherwise its own id.
-    const logId = record.invoice_log ?? record.id;
-    if (logId === undefined || logId === null || logId === "") {
-      setHistoryError("This entry has no log reference to trace history.");
-      setHistoryFor(record);
-      setHistoryRecords([]);
-      return;
-    }
-
-    setHistoryFor(record);
-    setHistoryRecords([]);
-    setHistoryError("");
-    setHistoryLoading(true);
-    try {
-      const data = await apiFetch<unknown>(`/api/invoice/history/${encodeURIComponent(String(logId))}/`);
-      const rows = extractRecords(data).sort(
-        (a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime(),
-      );
-      setHistoryRecords(rows);
-    } catch (err) {
-      console.error(err);
-      setHistoryError(extractMessage(err, "Unable to load history for this entry."));
-    } finally {
-      setHistoryLoading(false);
-    }
-  };
+  const drafts = useMemo(() => groupDrafts(rows), [rows]);
 
   return (
     <div className="ir-page">
-      {postingToSap && (
-        <div className="ir-posting-overlay" role="status" aria-live="polite" aria-label="Posting invoice to SAP HANA">
-          <section className="ir-posting-card">
-            <div className="ir-posting-orbit" aria-hidden="true">
-              <HiTruck />
-              <span />
-            </div>
-            <h2>Posting to SAP HANA…</h2>
-            <p className="ir-posting-detail">{POSTING_STEPS[postingStepIndex].detail}</p>
-            <ol className="ir-posting-steps">
-              {POSTING_STEPS.map((step, index) => {
-                const StepIcon = step.Icon;
-                const isActive = index === postingStepIndex;
-                const isDone = index < postingStepIndex;
-                return (
-                  <li className={`${isActive ? "is-active" : ""}${isDone ? " is-done" : ""}`} key={step.label}>
-                    <span className="ir-posting-step-icon">
-                      {isActive ? <HiArrowPath className="ir-spin" aria-hidden="true" /> : <StepIcon aria-hidden="true" />}
-                    </span>
-                    <span className="ir-posting-step-copy">
-                      <strong>{step.label}</strong>
-                      <small>{step.detail}</small>
-                    </span>
-                  </li>
-                );
-              })}
-            </ol>
-            <p className="ir-posting-foot">This can take a little while — please don’t close this window.</p>
-          </section>
-        </div>
-      )}
-
       <header className="ir-header">
         <div>
           <h1>Invoice Review</h1>
-          {/* <p>Review submitted sales invoices and approve or reject them before they post to SAP HANA.</p> */}
         </div>
-        <button
-          type="button"
-          className="ir-btn ir-btn-ghost"
-          onClick={loadInvoices}
-          disabled={loading}
-        >
+        <button type="button" className="ir-btn ir-btn-ghost" onClick={loadDrafts} disabled={loading}>
           <HiArrowPath className={loading ? "ir-spin" : ""} aria-hidden="true" />
           Refresh
         </button>
       </header>
 
-      <nav className="ir-filters" aria-label="Filter invoices by status">
-        {visibleFilters.map((filter) => (
+      <nav className="ir-filters" aria-label="Filter invoice drafts by approval status">
+        {STATUS_FILTERS.map((filter) => (
           <button
-            key={filter.key}
+            key={filter.code}
             type="button"
-            className={`ir-filter${statusFilter === filter.key ? " is-active" : ""}`}
-            onClick={() => setStatusFilter(filter.key)}
+            className={`ir-filter${statusCode === filter.code ? " is-active" : ""}`}
+            onClick={() => setStatusCode(filter.code)}
           >
             {filter.label}
           </button>
         ))}
       </nav>
 
-      {actionMessage && <div className="ir-banner ir-banner-success">{actionMessage}</div>}
-      {actionError && <div className="ir-banner ir-banner-error">{actionError}</div>}
       {error && <div className="ir-banner ir-banner-error">{error}</div>}
 
       <section className="ir-card">
         {loading ? (
-          <div className="ir-empty">Loading invoices…</div>
-        ) : records.length === 0 ? (
+          <div className="ir-empty">Loading invoice drafts…</div>
+        ) : drafts.length === 0 ? (
           <div className="ir-empty">
             <HiInbox aria-hidden="true" />
-            <span>No invoices found for this status.</span>
+            <span>No invoice drafts found for this status.</span>
           </div>
         ) : (
           <div className="ir-table-wrap">
             <table className="ir-table">
               <thead>
                 <tr>
-                  <th>SO #</th>
+                  <th>Invoice #</th>
                   <th>Party</th>
                   <th className="ir-num">Amount</th>
                   <th>Status</th>
-                  <th>Submitted</th>
+                  <th>Doc Date</th>
+                  <th className="ir-num">Items</th>
                   <th className="ir-actions-col">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {records.map((record, index) => {
-                  const status = normalizeStatus(record.status);
-                  const busy = actionId === record.id;
-                  return (
-                    <tr key={record.id ?? index}>
-                      <td>{record.so_number || "—"}</td>
-                      <td>{record.party_name || "—"}</td>
-                      <td className="ir-num">{formatAmount(record.total_amount)}</td>
-                      <td>
-                        <span className={`ir-badge ir-badge-${status.toLowerCase()}`}>{statusLabel(status)}</span>
-                      </td>
-                      <td>{formatDateTime(record.created_at)}</td>
-                      <td className="ir-actions-col">
-                        <div className="ir-row-actions">
-                          <button
-                            type="button"
-                            className="ir-btn ir-btn-ghost ir-btn-sm"
-                            onClick={() => setSelected(record)}
-                          >
-                            <HiEye aria-hidden="true" />
-                            View
-                          </button>
-                          <button
-                            type="button"
-                            className="ir-btn ir-btn-ghost ir-btn-sm"
-                            onClick={() => openHistory(record)}
-                          >
-                            <HiClock aria-hidden="true" />
-                            History
-                          </button>
-                          {status === "PENDING" && (
-                            canApproveReject ? (
-                              <>
-                                <button
-                                  type="button"
-                                  className="ir-btn ir-btn-approve ir-btn-sm"
-                                  disabled={busy}
-                                  onClick={() => handleAction(record, "APPROVED")}
-                                >
-                                  <HiCheckCircle aria-hidden="true" />
-                                  {busy ? "…" : "Approve"}
-                                </button>
-                                <button
-                                  type="button"
-                                  className="ir-btn ir-btn-reject ir-btn-sm"
-                                  disabled={busy}
-                                  onClick={() => handleAction(record, "REJECTED")}
-                                >
-                                  <HiXCircle aria-hidden="true" />
-                                  {busy ? "…" : "Reject"}
-                                </button>
-                              </>
-                            ) : (
-                              <span className="ir-pending-tag">Pending Approval</span>
-                            )
-                          )}
-                          {status === "APPROVED" && canPostToSap && (
-                            <button
-                              type="button"
-                              className="ir-btn ir-btn-sap ir-btn-sm"
-                              disabled={busy}
-                              onClick={() => handlePostToSap(record)}
-                            >
-                              <HiPaperAirplane aria-hidden="true" />
-                              {busy ? "…" : "Post to SAP"}
-                            </button>
-                          )}
-                          {status === "ERROR" && canPostToSap && (
-                            <button
-                              type="button"
-                              className="ir-btn ir-btn-sap ir-btn-sm"
-                              disabled={busy}
-                              onClick={() => handlePostToSap(record)}
-                            >
-                              <HiArrowPath aria-hidden="true" />
-                              {busy ? "…" : "Repost to SAP"}
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
+                {drafts.map((draft) => (
+                  <tr key={draft.key}>
+                    <td>{draft.header.DocNum ? draft.header.DocNum : `Draft ${orDash(draft.docEntries.join(", "))}`}</td>
+                    <td>{orDash(draft.header.CardName)}</td>
+                    <td className="ir-num">{formatAmount(draft.total)}</td>
+                    <td>
+                      <span className={`ir-badge ir-badge-${activeFilter.badge}`}>{activeFilter.label}</span>
+                    </td>
+                    <td>{formatDate(draft.header.DocDate)}</td>
+                    <td className="ir-num">{draft.lines.length}</td>
+                    <td className="ir-actions-col">
+                      <div className="ir-row-actions">
+                        <button
+                          type="button"
+                          className="ir-btn ir-btn-ghost ir-btn-sm"
+                          onClick={() => setSelected(draft)}
+                        >
+                          <HiEye aria-hidden="true" />
+                          View
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -591,14 +238,14 @@ export default function InvoiceReview() {
             className="ir-modal"
             role="dialog"
             aria-modal="true"
-            aria-label={`Invoice details for SO ${selected.so_number || ""}`}
+            aria-label={`Invoice draft ${selected.header.DocNum ?? selected.key}`}
             onClick={(event) => event.stopPropagation()}
           >
             <header className="ir-modal-head">
               <div>
-                <span className="ir-eyebrow">Invoice Details</span>
-                <h2>SO #{selected.so_number || "—"}</h2>
-                <p>{selected.party_name || "—"}</p>
+                <span className="ir-eyebrow">Invoice Draft</span>
+                <h2>Invoice #{orDash(selected.header.DocNum)}</h2>
+                <p>{orDash(selected.header.CardName)}</p>
               </div>
               <button
                 type="button"
@@ -611,46 +258,25 @@ export default function InvoiceReview() {
             </header>
 
             <div className="ir-modal-body">
-              {selected.error_message && (
-                <div className="ir-error-box" role="alert">
-                  <HiExclamationTriangle aria-hidden="true" />
-                  <span>{selected.error_message}</span>
-                </div>
-              )}
-              {selected.rejection_reason && (
-                <div className="ir-reason-box" role="note">
-                  <HiXCircle aria-hidden="true" />
-                  <span><strong>Rejection reason:</strong> {selected.rejection_reason}</span>
-                </div>
-              )}
               <dl className="ir-meta-grid">
                 <div>
                   <dt>Status</dt>
                   <dd>
-                    <span className={`ir-badge ir-badge-${normalizeStatus(selected.status).toLowerCase()}`}>
-                      {statusLabel(normalizeStatus(selected.status))}
-                    </span>
+                    <span className={`ir-badge ir-badge-${activeFilter.badge}`}>{activeFilter.label}</span>
                   </dd>
                 </div>
-                <div>
-                  <dt>Total Amount</dt>
-                  <dd>{formatAmount(selected.total_amount)}</dd>
-                </div>
-                <div>
-                  <dt>Customer Code</dt>
-                  <dd>{selectedPayload.CardCode || "—"}</dd>
-                </div>
-                <div>
-                  <dt>Doc Date</dt>
-                  <dd>{selectedPayload.DocDate || "—"}</dd>
-                </div>
-                <div>
-                  <dt>Due Date</dt>
-                  <dd>{selectedPayload.DocDueDate || "—"}</dd>
-                </div>
-                <div>
-                  <dt>Submitted</dt>
-                  <dd>{formatDateTime(selected.created_at)}</dd>
+                <div><dt>Invoice No.</dt><dd>{orDash(selected.header.DocNum)}</dd></div>
+                <div><dt>Draft Entry</dt><dd>{orDash(selected.docEntries.join(", "))}</dd></div>
+                <div><dt>Customer Code</dt><dd>{orDash(selected.header.CardCode)}</dd></div>
+                <div><dt>Total Amount</dt><dd>{formatAmount(selected.total)}</dd></div>
+                <div><dt>Doc Date</dt><dd>{formatDate(selected.header.DocDate)}</dd></div>
+                <div><dt>Due Date</dt><dd>{formatDate(selected.header.DocDueDate)}</dd></div>
+                <div><dt>Ship To</dt><dd>{orDash(selected.header.ShipToCode)}</dd></div>
+                <div><dt>OMS Ref</dt><dd>{orDash(selected.omsRefs.join(", "))}</dd></div>
+                <div><dt>Source Ref</dt><dd>{orDash(selected.baseRefs.join(", "))}</dd></div>
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <dt>Address</dt>
+                  <dd>{formatAddress(selected.header.Address)}</dd>
                 </div>
               </dl>
 
@@ -660,33 +286,22 @@ export default function InvoiceReview() {
                   <thead>
                     <tr>
                       <th>Item Code</th>
+                      <th>Description</th>
                       <th>Warehouse</th>
                       <th className="ir-num">Qty</th>
-                      <th>Tax Code</th>
-                      <th>Batches</th>
+                      <th className="ir-num">Price</th>
+                      <th className="ir-num">Line Total</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {(selectedPayload.DocumentLines || []).map((line, index) => (
-                      <tr key={line.LineNum ?? index}>
-                        <td>{line.ItemCode || "—"}</td>
-                        <td>{line.WarehouseCode || "—"}</td>
-                        <td className="ir-num">{toNumber(line.Quantity).toLocaleString("en-IN")}</td>
-                        <td>{line.TaxCode || "—"}</td>
-                        <td>
-                          {(line.BatchNumbers || []).length === 0 ? (
-                            <span className="ir-muted">No batch</span>
-                          ) : (
-                            <ul className="ir-batch-list">
-                              {(line.BatchNumbers || []).map((batch, batchIndex) => (
-                                <li key={batchIndex}>
-                                  {batch.BatchNumber || `Serial ${batch.SystemSerialNumber ?? "?"}`}
-                                  <span className="ir-muted"> × {toNumber(batch.Quantity)}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          )}
-                        </td>
+                    {selected.lines.map((line, index) => (
+                      <tr key={`${line.DocEntry ?? ""}-${line.LineNum ?? index}`}>
+                        <td>{orDash(line.ItemCode)}</td>
+                        <td>{orDash(line.Dscription)}</td>
+                        <td>{orDash(line.WhsCode)}</td>
+                        <td className="ir-num">{lineQty(line)}</td>
+                        <td className="ir-num">{formatAmount(line.Price)}</td>
+                        <td className="ir-num">{formatAmount(line.LineTotal)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -694,129 +309,9 @@ export default function InvoiceReview() {
               </div>
 
               <details className="ir-raw">
-                <summary>Raw payload</summary>
-                <pre>{JSON.stringify(selectedPayload, null, 2)}</pre>
+                <summary>Raw draft</summary>
+                <pre>{JSON.stringify(selected.lines, null, 2)}</pre>
               </details>
-            </div>
-
-            {normalizeStatus(selected.status) === "PENDING" && (
-              <footer className="ir-modal-foot">
-                {canApproveReject ? (
-                  <>
-                    <button
-                      type="button"
-                      className="ir-btn ir-btn-reject"
-                      disabled={actionId === selected.id}
-                      onClick={() => handleAction(selected, "REJECTED")}
-                    >
-                      <HiXCircle aria-hidden="true" />
-                      Reject
-                    </button>
-                    <button
-                      type="button"
-                      className="ir-btn ir-btn-approve"
-                      disabled={actionId === selected.id}
-                      onClick={() => handleAction(selected, "APPROVED")}
-                    >
-                      <HiCheckCircle aria-hidden="true" />
-                      Approve
-                    </button>
-                  </>
-                ) : (
-                  <span className="ir-pending-tag">Pending Approval</span>
-                )}
-              </footer>
-            )}
-
-            {normalizeStatus(selected.status) === "APPROVED" && canPostToSap && (
-              <footer className="ir-modal-foot">
-                <button
-                  type="button"
-                  className="ir-btn ir-btn-sap"
-                  disabled={actionId === selected.id}
-                  onClick={() => handlePostToSap(selected)}
-                >
-                  <HiPaperAirplane aria-hidden="true" />
-                  Post to SAP
-                </button>
-              </footer>
-            )}
-
-            {normalizeStatus(selected.status) === "ERROR" && canPostToSap && (
-              <footer className="ir-modal-foot">
-                <button
-                  type="button"
-                  className="ir-btn ir-btn-sap"
-                  disabled={actionId === selected.id}
-                  onClick={() => handlePostToSap(selected)}
-                >
-                  <HiArrowPath aria-hidden="true" />
-                  Report to SAP
-                </button>
-              </footer>
-            )}
-          </section>
-        </div>
-      )}
-
-      {historyFor && (
-        <div className="ir-modal-backdrop" role="presentation" onClick={() => setHistoryFor(null)}>
-          <section
-            className="ir-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-label={`Status history for SO ${historyFor.so_number || ""}`}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <header className="ir-modal-head">
-              <div>
-                <span className="ir-eyebrow">Status History</span>
-                <h2>SO #{historyFor.so_number || "—"}</h2>
-                <p>{historyFor.party_name || "—"}</p>
-              </div>
-              <button
-                type="button"
-                className="ir-icon-btn"
-                aria-label="Close history"
-                onClick={() => setHistoryFor(null)}
-              >
-                <HiXMark aria-hidden="true" />
-              </button>
-            </header>
-
-            <div className="ir-modal-body">
-              {historyError && <div className="ir-banner ir-banner-error">{historyError}</div>}
-              {historyLoading ? (
-                <div className="ir-empty">Loading history…</div>
-              ) : historyRecords.length === 0 && !historyError ? (
-                <div className="ir-empty">
-                  <HiInbox aria-hidden="true" />
-                  <span>No history available for this entry.</span>
-                </div>
-              ) : (
-                <ol className="ir-timeline">
-                  {historyRecords.map((entry, index) => {
-                    const entryStatus = normalizeStatus(entry.status);
-                    return (
-                      <li className="ir-timeline-item" key={entry.id ?? index}>
-                        <span className={`ir-timeline-dot ir-dot-${entryStatus.toLowerCase()}`} aria-hidden="true" />
-                        <div className="ir-timeline-body">
-                          <div className="ir-timeline-head">
-                            <span className={`ir-badge ir-badge-${entryStatus.toLowerCase()}`}>{statusLabel(entryStatus)}</span>
-                            <time>{formatDateTime(entry.created_at)}</time>
-                          </div>
-                          {entry.rejection_reason && (
-                            <p className="ir-timeline-note">Reason: {entry.rejection_reason}</p>
-                          )}
-                          {entry.error_message && (
-                            <p className="ir-timeline-note ir-timeline-error">{entry.error_message}</p>
-                          )}
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ol>
-              )}
             </div>
           </section>
         </div>

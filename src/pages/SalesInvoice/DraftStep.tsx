@@ -111,7 +111,7 @@ export default function DraftStep({ state, onReset, onAddItems }: Props) {
         <aside className="si-floating-notification si-floating-notification-error" role="alert" aria-live="assertive">
           <header>
             <div>
-              <strong>Unable to submit invoice for review</strong>
+              <strong>Unable to post invoice to SAP HANA</strong>
               <span>Full error message</span>
             </div>
             <button
@@ -133,7 +133,7 @@ export default function DraftStep({ state, onReset, onAddItems }: Props) {
             className="si-success-modal"
             role="alertdialog"
             aria-modal="true"
-            aria-label="Invoice submitted for review"
+            aria-label="Invoice posted to SAP HANA"
           >
             <button
               type="button"
@@ -146,8 +146,8 @@ export default function DraftStep({ state, onReset, onAddItems }: Props) {
             <span className="si-success-icon" aria-hidden="true">
               <HiCheckCircle />
             </span>
-            <span className="si-eyebrow">Invoice Review</span>
-            <h2>Invoice Submitted for Review</h2>
+            <span className="si-eyebrow">Sales Invoice</span>
+            <h2>Invoice Posted to SAP HANA</h2>
             <p className="si-success-message">{state.postSuccess}</p>
             <div className="si-success-actions">
               <button className="si-btn si-btn-primary" type="button" onClick={closeSuccessModal}>
