@@ -24,6 +24,10 @@ const isRealPerformer = (value: string | null | undefined) => {
 const isRateLog = (log: OrderLog) =>
   String(log.status_name || "").toLowerCase().includes("rate");
 
+const isBillingLog = (log: OrderLog) =>
+  String(log.status_name || "").toLowerCase().includes("billing") ||
+  String(log.remarks || "").toLowerCase().includes("billing");
+
 const isRejectedLog = (log: OrderLog) =>
   String(log.status_name || "").toLowerCase().includes("reject");
 
@@ -190,7 +194,7 @@ const getPreviousStageName = (log: OrderLog, contextLogs: OrderLog[]) => {
 };
 
 const isAcceptedRateApprovalLog = (log: OrderLog, contextLogs: OrderLog[]) => {
-  if (isRejectedLog(log) || !isRealPerformer(log.performed_by_name)) {
+  if (isBillingLog(log) || isRejectedLog(log) || !isRealPerformer(log.performed_by_name)) {
     return false;
   }
 

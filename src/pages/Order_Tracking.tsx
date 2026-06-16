@@ -394,6 +394,9 @@ export default function Order_Tracking() {
     };
     const isRateLog = (log: OrderLog) =>
       String(log.status_name || "").toLowerCase().includes("rate");
+    const isBillingLog = (log: OrderLog) =>
+      String(log.status_name || "").toLowerCase().includes("billing") ||
+      String(log.remarks || "").toLowerCase().includes("billing");
     const isRejectedLog = (log: OrderLog) =>
       String(log.status_name || "").toLowerCase().includes("reject");
     const isApprovedLog = (log: OrderLog) => {
@@ -429,7 +432,7 @@ export default function Order_Tracking() {
       return String(previousStage?.status_name || "").toLowerCase();
     };
     const isAcceptedRateApprovalLog = (log: OrderLog) => {
-      if (isRejectedLog(log) || !isRealPerformer(log.performed_by_name)) {
+      if (isBillingLog(log) || isRejectedLog(log) || !isRealPerformer(log.performed_by_name)) {
         return false;
       }
 
