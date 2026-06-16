@@ -45,7 +45,6 @@ export default function App_User() {
     role: 0,
     company: 0,
     category: null,
-    categories: [],
     variety: "",
   });
   const [showForm, setShowForm] = useState(false);
@@ -73,7 +72,7 @@ export default function App_User() {
   }, []);
 
   const selectedCategoryName =
-    categories.find((item) => item.id === (formData.categories?.[0] || formData.category))?.category || "";
+    categories.find((item) => item.id === formData.category)?.category || "";
 
   useEffect(() => {
     fetchVarieties(selectedCategoryName);
@@ -257,41 +256,6 @@ export default function App_User() {
   const getCategoryName = (id: number | null | undefined) =>
     categories.find((item) => item.id === id)?.category || "Select Category";
 
-  const getCategoryLabel = () => {
-    const selected = formData.categories || [];
-    if (selected.length === 0) return getCategoryName(formData.category);
-    if (selected.length === 1) return getCategoryName(selected[0]);
-    return `${selected.length} categories selected`;
-  };
-
-  const toggleCategory = (id: number) => {
-    setFormData((prev) => {
-      const current = prev.categories || [];
-      const updated = current.includes(id)
-        ? current.filter((value) => value !== id)
-        : [...current, id];
-      return {
-        ...prev,
-        category: updated[0] || null,
-        categories: updated,
-        variety: "",
-      };
-    });
-  };
-
-  const toggleAllCategories = () => {
-    setFormData((prev) => {
-      const allSelected = (prev.categories || []).length === categories.length;
-      const updated = allSelected ? [] : categories.map((category) => category.id);
-      return {
-        ...prev,
-        category: updated[0] || null,
-        categories: updated,
-        variety: "",
-      };
-    });
-  };
-
   const selectedVarieties = String(formData.variety || "")
     .split(",")
     .map((value) => value.trim())
@@ -417,7 +381,7 @@ export default function App_User() {
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
-    if (!formData.role || !formData.company || !(formData.categories?.length || formData.category)) {
+    if (!formData.role || !formData.company || !formData.category) {
       alert("Please select role, company and category.");
       return;
     }
@@ -447,7 +411,6 @@ export default function App_User() {
           role: 0,
           company: 0,
           category: null,
-          categories: [],
           variety: "",
         });
 
@@ -486,14 +449,12 @@ export default function App_User() {
       states?: unknown;
       company?: unknown;
       category?: unknown;
-      categories?: unknown;
       variety?: string | null;
       role?: unknown;
       role_display?: string;
     };
     const mainGroupIds = getIds(editableUser.main_groups);
     const stateIds = getIds(editableUser.states);
-    const categoryIds = getIds(editableUser.categories);
     const roleName = String(
       editableUser.role || editableUser.role_name || editableUser.role_display || "",
     ).toLowerCase();
@@ -514,8 +475,7 @@ export default function App_User() {
       states: stateIds,
       role: roleId,
       company: getId(editableUser.company) || null,
-      category: getId(editableUser.category) || categoryIds[0] || null,
-      categories: categoryIds.length > 0 ? categoryIds : (getId(editableUser.category) ? [getId(editableUser.category)] : []),
+      category: getId(editableUser.category) || null,
       variety: editableUser.variety || "",
     });
 
@@ -981,7 +941,7 @@ export default function App_User() {
                   >
                       <span className="au-trigger-label">
                         <HiTag className="au-field-icon" aria-hidden="true" />
-                      <span>{getCategoryLabel()}</span>
+                      <span>{getCategoryName(formData.category)}</span>
                     </span>
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
                       <path
@@ -995,29 +955,18 @@ export default function App_User() {
                   </div>
                   {categoryDropdownOpen && (
                     <div className="au-mg-menu">
-                      <label className="au-mg-option au-mg-selectall">
-                        <input
-                          type="checkbox"
-                          checked={
-                            categories.length > 0 &&
-                            formData.categories?.length === categories.length
-                          }
-                          onChange={toggleAllCategories}
-                        />
-                        Select All
-                      </label>
                       {categories.map((c) => (
-                        <label
+                        <button
                           key={c.id}
-                          className="au-mg-option"
+                          type="button"
+                          className={`au-mg-option au-select-option${formData.category === c.id ? " is-selected" : ""}`}
+                          onClick={() => {
+                            setFormData((prev) => ({ ...prev, category: c.id, variety: "" }));
+                            setCategoryDropdownOpen(false);
+                          }}
                         >
-                          <input
-                            type="checkbox"
-                            checked={formData.categories?.includes(c.id) || false}
-                            onChange={() => toggleCategory(c.id)}
-                          />
                           {c.category}
-                        </label>
+                        </button>
                       ))}
                     </div>
                   )}

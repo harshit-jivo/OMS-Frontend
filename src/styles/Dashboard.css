@@ -1294,9 +1294,31 @@
 }
 
 .db-party-list-code {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
   font-size: 10px;
   color: #64748b;
   font-weight: 600;
+}
+
+.db-party-category-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  max-width: 110px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(15, 118, 110, 0.1);
+  color: #0f766e;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1.2;
+  text-transform: uppercase;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .db-party-list-count {

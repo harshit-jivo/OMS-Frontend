@@ -44,7 +44,7 @@ interface ChartsData {
   manager_state_performance?: { manager_id: number | null; manager_name: string; state: string; orders: number; sales: number }[];
   status_distribution: { status: string; label: string; count: number }[];
   decision_distribution?: { status: string; label: string; count: number }[];
-  top_parties: { card_code: string; card_name: string; count: number; completed_count?: number; revenue: number }[];
+  top_parties: { card_code: string; card_name: string; category?: string; count: number; completed_count?: number; revenue: number }[];
   category_sales: { category: string; total_sales: number; count: number }[];
   state_item_sales?: StateItemSales[];
   highest_sales_order?: { order_number: string | null; amount: number };
@@ -807,7 +807,7 @@ export default function Dashboard() {
                 <div className="db-highlight-label">Top Parties</div>
                 <div className="db-highlight-sub">
                   {topParty
-                    ? `${topParty.card_name} leads with ${fmt(topParty.count)} orders (${fmt(topParty.completed_count ?? 0)} completed)`
+                    ? `${topParty.card_name} (${topParty.category || "Unknown"}) leads with ${fmt(topParty.count)} orders (${fmt(topParty.completed_count ?? 0)} completed)`
                     : "No party data available"}
                 </div>
               </div>
@@ -831,7 +831,7 @@ export default function Dashboard() {
             ) : (
               <div className="db-party-list db-party-list--spacious">
                 {visibleTopParties.map((item, index) => (
-                  <div key={item.card_code} className="db-party-list-item db-party-list-item--detailed">
+                  <div key={`${item.card_code}-${item.category || "Unknown"}`} className="db-party-list-item db-party-list-item--detailed">
                     <span
                       className="db-party-list-badge"
                       style={{ background: PALETTE[index % PALETTE.length] }}
@@ -840,7 +840,10 @@ export default function Dashboard() {
                     </span>
                     <div className="db-party-list-details">
                       <span className="db-party-list-name db-party-list-name--wrap">{item.card_name}</span>
-                      <span className="db-party-list-code">{item.card_code}</span>
+                      <span className="db-party-list-code">
+                        {item.card_code}
+                        <span className="db-party-category-chip">{item.category || "Unknown"}</span>
+                      </span>
                     </div>
                     <div style={{ textAlign: "right", lineHeight: 1.4 }}>
                       <span className="db-party-list-count db-party-list-count--detailed">
