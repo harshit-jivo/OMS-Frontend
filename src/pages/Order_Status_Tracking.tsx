@@ -34,9 +34,11 @@ const ACCEPTED_KEYWORDS: Record<TrackingMode, string[]> = {
 const REJECTED_KEYWORDS = ["rejected", "declined", "cancelled", "canceled"];
 const BILLING_REJECTED_KEYWORDS = ["billing rejected", "rejected by billing", "billing reject"];
 const AUDITOR_REJECTED_CODES = ["REJECTED"];
+const AUDITOR_ACCEPTED_STATUS_CODES = ["BILLING", "BILLING_PENDING", "APPROVED", "COMPLETED"];
 const BILLING_REJECTED_CODES = ["BILLING_REJECTED"];
 const APPROVER_ACCEPTED_STATUS_CODES = ["APPROVED", "BILLING"];
 const RATE_APPROVER_REJECTED_KEYWORDS = ["rate approver rejected", "rate rejected", "rejected"];
+const RATE_APPROVER_TRACKING_FALLBACK_STATUS = "APPROVED";
 
 const normalizeStatusClass = (status: string) => status.toLowerCase().replace(/\s+/g, "-");
 
@@ -68,6 +70,12 @@ const getDecisionType = (order: Order, mode: TrackingMode) => {
     if (AUDITOR_REJECTED_CODES.includes(statusCode) || normalized === "rejected") {
       return "rejected";
     }
+    if (
+      AUDITOR_ACCEPTED_STATUS_CODES.includes(statusCode) ||
+      ["billing", "approved", "accepted", "completed", "quotation"].some((keyword) => normalized.includes(keyword))
+    ) {
+      return "accepted";
+    }
   }
 
   if (mode === "billing") {
@@ -95,6 +103,25 @@ const getDecisionType = (order: Order, mode: TrackingMode) => {
     return "rejected";
   }
   return "other";
+};
+
+const getRateApproverApprovalDecision = (order: Order): Order["decision_type"] => {
+  const approvals = Array.isArray(order.rate_approvals) ? order.rate_approvals : [];
+  if (approvals.some((approval) => String(approval.status || "").toUpperCase() === "REJECTED")) {
+    return "rejected";
+  }
+  if (approvals.some((approval) => String(approval.status || "").toUpperCase() === "APPROVED")) {
+    return "accepted";
+  }
+  return undefined;
+};
+
+const normalizeTrackingOrders = (items: Order[], mode: TrackingMode) => {
+  if (mode !== "rate_approver") return items;
+  return items.map((order) => {
+    const decisionType = getRateApproverApprovalDecision(order);
+    return decisionType ? { ...order, decision_type: decisionType } : order;
+  });
 };
 
 export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps) {
@@ -129,8 +156,11 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
   const fetchOrders = async () => {
     setIsOrdersLoading(true);
     try {
-      const data = await ordersService.getStatusTrackingOrders(mode);
-      setOrders(data || []);
+      let data = await ordersService.getStatusTrackingOrders(mode);
+      if (mode === "rate_approver" && (!Array.isArray(data) || data.length === 0)) {
+        data = await ordersService.getOrders(RATE_APPROVER_TRACKING_FALLBACK_STATUS);
+      }
+      setOrders(normalizeTrackingOrders(Array.isArray(data) ? data : [], mode));
     } catch (error) {
       console.log("Error fetching orders:", error);
     } finally {
