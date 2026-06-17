@@ -142,6 +142,8 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
   const [trackingOrder, setTrackingOrder] = useState<Order | null>(null);
   const [trackingLogs, setTrackingLogs] = useState<OrderLog[]>([]);
   const [trackLogsLoading, setTrackLogsLoading] = useState(false);
+  const showTrackColumn = mode !== "rate_approver";
+  const tableColumnCount = showTrackColumn ? 10 : 9;
   const pageTitle =
     mode === "auditor"
       ? "Auditor Status Tracking"
@@ -469,14 +471,14 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
                   <th>Delivery Date</th>
                   <th>Status</th>
                   <th>Details</th>
-                  <th>Track</th>
+                  {showTrackColumn && <th>Track</th>}
                   <th>Download</th>
                 </tr>
               </thead>
               <tbody>
                 {isOrdersLoading ? (
                   <tr>
-                    <td colSpan={9}>
+                    <td colSpan={tableColumnCount}>
                       <div className="order-loading-state">
                         <span className="order-loading-spinner" />
                         <span>Loading orders...</span>
@@ -515,11 +517,13 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
                          <HiEye size={22} />
                         </button>
                       </td>
-                      <td>
-                        <button type="button" className="ao-btn-icon track" onClick={() => handleTrack(order)} title="Track Order">
-                          <HiArrowPath size={22} />
-                        </button>
-                      </td>
+                      {showTrackColumn && (
+                        <td>
+                          <button type="button" className="ao-btn-icon track" onClick={() => handleTrack(order)} title="Track Order">
+                            <HiArrowPath size={22} />
+                          </button>
+                        </td>
+                      )}
                       <td>
                         <button type="button" className="ao-btn-icon download" onClick={() => downloadExcel(order)}>
                            <HiArrowDownTray size={22} />
@@ -529,7 +533,7 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
                   ))
                 ) : (
                   <tr>
-                <td colSpan={9} className="ot-empty">No accepted or rejected orders found for this filter.</td>
+                <td colSpan={tableColumnCount} className="ot-empty">No accepted or rejected orders found for this filter.</td>
                   </tr>
                 )}
               </tbody>
@@ -768,7 +772,7 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
           </div>
 
           {/* Order Log Timeline */}
-          {orderLogs.length > 0 && (
+          {mode === "billing" && orderLogs.length > 0 && (
             <div className="ot-items-card" style={{ marginTop: 16 }}>
               <div className="ot-items-head">
                 <span className="ot-items-title">Order Log Timeline</span>

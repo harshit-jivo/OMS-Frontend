@@ -400,6 +400,14 @@ export default function Auditor_orders() {
               >
                 <HiXCircle />
               </button>
+              <button
+                className="ao-d-action-btn"
+                aria-label="Track order"
+                title="Track"
+                onClick={() => handleTrack(orderDetails)}
+              >
+                <HiArrowPath />
+              </button>
               <button className="ao-d-export" onClick={() => downloadExcel(orderDetails)}>
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1v8m0 0L4 6.5M7 9l3-2.5M2.5 12h9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
                 Export Excel
