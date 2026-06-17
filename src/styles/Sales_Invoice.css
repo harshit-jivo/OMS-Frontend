@@ -1056,6 +1056,20 @@
   font-weight: 900;
 }
 
+.si-success-docnum {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
 .si-success-message {
   margin: 0;
   max-width: 340px;

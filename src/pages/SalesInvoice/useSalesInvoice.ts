@@ -130,6 +130,38 @@ export const apiFetch = async <T,>(url: string, init?: RequestInit): Promise<T> 
   return response.json() as Promise<T>;
 };
 
+// Local invoice history log. We append one row per lifecycle event (draft created
+// → PENDING, approved → APPROVED, rejected → REJECTED) so the full audit trail is
+// preserved rather than mutating a single record.
+export type InvoiceLogStatus = "PENDING" | "APPROVED" | "REJECTED";
+
+export type InvoiceLogInput = {
+  so_number?: string;
+  party_name?: string;
+  total_amount?: string | number;
+  ref_id?: string;
+  status: InvoiceLogStatus;
+  created_by?: number | null;
+  approved_by?: number | null;
+  rejected_by?: number | null;
+  rejection_reason?: string;
+  invoice_payload?: unknown;
+};
+
+// Best-effort: a logging failure must never disrupt the actual draft/approval flow.
+export const createInvoiceLog = async (input: InvoiceLogInput): Promise<void> => {
+  try {
+    await apiFetch("/api/invoice/log/create/", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  } catch (error) {
+    console.error("Unable to create invoice log:", error);
+  }
+};
+
+export const getCurrentUserId = (): number | null => Number(localStorage.getItem("user_id")) || null;
+
 const pick = <T,>(source: Record<string, unknown>, keys: string[], fallback: T): T => {
   for (const key of keys) {
     const value = source[key];
@@ -206,11 +238,12 @@ const isNoMatchingRecordsError = (value: unknown): boolean => {
   return text.includes("-2028");
 };
 
-// Interpret the /draft/verify response: does a draft with this refId exist in SAP?
-// The endpoint returns { data: [ ...matching records ] }, where each record echoes
-// its U_OMS_REF. A non-empty data array means it found the draft; when the row
-// carries U_OMS_REF we confirm it matches the ref we posted to rule out a stray hit.
-const draftExistsForRef = (response: unknown, refId: string): boolean => {
+// Interpret the /draft/verify response: find the draft record with this refId in
+// SAP. The endpoint returns { data: [ ...matching records ] }, where each record
+// echoes its U_OMS_REF. We return the matching row (so the caller can read its
+// DocEntry/DocNum); when the row carries U_OMS_REF we confirm it matches the ref
+// we posted to rule out a stray hit.
+const findDraftRecordForRef = (response: unknown, refId: string): Record<string, unknown> | null => {
   const records =
     response && typeof response === "object" && Array.isArray((response as { data?: unknown }).data)
       ? ((response as { data: Array<Record<string, unknown>> }).data)
@@ -218,23 +251,40 @@ const draftExistsForRef = (response: unknown, refId: string): boolean => {
         ? (response as Array<Record<string, unknown>>)
         : [];
 
-  if (records.length === 0) return false;
-  return records.some((row) => {
-    const ref = row?.U_OMS_REF;
-    return ref === undefined || ref === null || String(ref) === refId;
-  });
+  if (records.length === 0) return null;
+  return (
+    records.find((row) => {
+      const ref = row?.U_OMS_REF;
+      return ref === undefined || ref === null || String(ref) === refId;
+    }) || null
+  );
 };
 
-// Ask SAP whether the draft for this reference id actually landed. A failed/absent
-// verification is treated as "does not exist" so the caller reports failure.
-const verifyDraftExists = async (refId: string): Promise<boolean> => {
+// Ask SAP whether the draft for this reference id actually landed, returning the
+// matching record (or null). A failed/absent verification yields null so the
+// caller reports failure.
+const verifyDraftRecord = async (refId: string): Promise<Record<string, unknown> | null> => {
   try {
     const data = await apiFetch<unknown>(`/api/hana/draft/verify?refId=${encodeURIComponent(refId)}`);
-    return draftExistsForRef(data, refId);
+    return findDraftRecordForRef(data, refId);
   } catch (error) {
     console.error("Draft verification failed:", error);
-    return false;
+    return null;
   }
+};
+
+// Pull a draft/document number out of an API response, digging into nested
+// data/result wrappers. Prefers DocEntry (the draft key) but falls back to DocNum.
+const extractDocNumber = (value: unknown): string => {
+  const parsed = parsePossibleJson(value);
+  if (!parsed || typeof parsed !== "object") return "";
+  const source = parsed as ApiMessageResponse;
+  const docNumber = source.DocEntry ?? source.DocNum;
+  if (docNumber !== undefined && docNumber !== null && String(docNumber).trim()) {
+    return String(docNumber).trim();
+  }
+  const nested = source.data ?? source.result;
+  return nested ? extractDocNumber(nested) : "";
 };
 
 const normalizeLine = (line: SalesOrderLine, index: number): SalesOrderLine => ({
@@ -381,6 +431,7 @@ export function useSalesInvoice() {
   const [draftError, setDraftError] = useState("");
   const [postError, setPostError] = useState("");
   const [postSuccess, setPostSuccess] = useState("");
+  const [postedDocNum, setPostedDocNum] = useState("");
 
   useEffect(() => {
     const loadParties = async () => {
@@ -479,6 +530,7 @@ export function useSalesInvoice() {
     setShipToAddresses([]);
     setForm(emptyForm());
     setPostSuccess("");
+    setPostedDocNum("");
     setPostError("");
   };
 
@@ -793,6 +845,7 @@ export function useSalesInvoice() {
   const postInvoice = async () => {
     setPostError("");
     setPostSuccess("");
+    setPostedDocNum("");
 
     if (selectedLineList.length === 0) {
       setPostError("Select at least one line before posting.");
@@ -851,16 +904,34 @@ export function useSalesInvoice() {
       }
     };
 
+    // Append a PENDING history log when the draft lands in SAP. Carries the full
+    // invoice payload so the approval screen has the original document on record.
+    const logDraftCreated = () =>
+      createInvoiceLog({
+        so_number: refLogBase.so_number,
+        party_name: selectedParty?.CardName || "",
+        total_amount: String(totals.grandTotal),
+        ref_id: refId,
+        status: "PENDING",
+        created_by: getCurrentUserId(),
+        invoice_payload: { ...payload, U_OMS_REF: refId },
+      });
+
     // A post can "fail" two ways: a thrown error (HTTP error) or a 200 with an error
     // body. Both funnel here. SAP's approval flow commonly returns -2028 ("No matching
     // records") even though the draft was created, so on that code we re-check SAP by
     // refId before deciding it failed. Any other error — or a -2028 with nothing in
     // SAP — is a genuine failure.
     const resolvePostFailure = async (errorValue: unknown) => {
-      if (isNoMatchingRecordsError(errorValue) && (await verifyDraftExists(refId))) {
-        await writeRefLog("Success");
-        setPostSuccess("Invoice draft created in SAP successfully.");
-        return;
+      if (isNoMatchingRecordsError(errorValue)) {
+        const record = await verifyDraftRecord(refId);
+        if (record) {
+          await writeRefLog("Success");
+          await logDraftCreated();
+          setPostedDocNum(extractDocNumber(record));
+          setPostSuccess("Invoice draft created in SAP successfully.");
+          return;
+        }
       }
       const message = formatApiErrorMessage(errorValue, "Draft creation unsuccessful.");
       await writeRefLog("Failed", message);
@@ -881,7 +952,9 @@ export function useSalesInvoice() {
         return;
       }
       await writeRefLog("Success");
-      setPostSuccess(extractApiMessage(data, "Invoice posted to SAP HANA successfully."));
+      await logDraftCreated();
+      setPostedDocNum(extractDocNumber(data));
+      setPostSuccess("Invoice draft created in SAP successfully.");
     } catch (error) {
       console.error(error);
       await resolvePostFailure(error instanceof Error ? error.message : error);
@@ -919,6 +992,7 @@ export function useSalesInvoice() {
     draftError,
     postError,
     postSuccess,
+    postedDocNum,
     selectParty,
     changeParty,
     toggleLine,

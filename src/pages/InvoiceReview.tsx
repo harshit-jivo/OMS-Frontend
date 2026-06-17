@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { HiArrowPath, HiEye, HiInbox, HiXMark } from "react-icons/hi2";
-import { apiFetch } from "./SalesInvoice/useSalesInvoice";
+import {
+  HiArrowPath,
+  HiCheckCircle,
+  HiExclamationTriangle,
+  HiEye,
+  HiInbox,
+  HiMagnifyingGlass,
+  HiXCircle,
+  HiXMark,
+} from "react-icons/hi2";
+import { apiFetch, createInvoiceLog, getCurrentUserId } from "./SalesInvoice/useSalesInvoice";
 import { toNumber } from "./SalesInvoice/salesInvoice.utils";
 import "../styles/InvoiceReview.css";
 
@@ -15,40 +24,27 @@ const STATUS_FILTERS: Array<{ code: StatusCode; label: string; badge: string }> 
   { code: "R", label: "Rejected", badge: "rejected" },
 ];
 
-// The endpoint returns one row per draft *line item*; rows sharing a document are
-// grouped (by DocNum) into a single draft below.
+// The endpoint returns one row per approval request (keyed by WddCode). It is a
+// header-only summary — no line items are included, but DocTotal carries the amount.
 type DraftRow = {
+  WddCode?: number;
+  Status?: string;
+  UserSign?: number;
   DocEntry?: number;
-  DocNum?: number;
-  DocDate?: string;
   DocDueDate?: string;
   CardCode?: string;
   CardName?: string;
   Address?: string;
   Address2?: string;
   ShipToCode?: string;
+  DocTotal?: number;
   U_OMS_REF?: string | null;
-  LineNum?: number;
-  BaseRef?: string;
-  ItemCode?: string;
-  Dscription?: string;
-  ShipDate?: string;
-  OpenQty?: number;
-  Price?: number;
-  LineTotal?: number;
-  WhsCode?: string;
   [key: string]: unknown;
 };
 
-type DraftGroup = {
-  key: string;
-  header: DraftRow;
-  lines: DraftRow[];
-  total: number;
-  docEntries: number[];
-  omsRefs: string[];
-  baseRefs: string[];
-};
+type ToastState = { id: number; message: string; type: "success" | "error" };
+
+/* ── Formatting helpers ─────────────────────────────────────────────── */
 
 const formatAmount = (value: unknown) => {
   const amount = toNumber(value);
@@ -75,13 +71,8 @@ const formatAddress = (value?: string) =>
 const orDash = (value: unknown) =>
   value === undefined || value === null || String(value).trim() === "" ? "—" : String(value);
 
-// Quantity isn't returned directly, but LineTotal = Price × Qty for these rows.
-const lineQty = (line: DraftRow): string => {
-  const price = toNumber(line.Price);
-  if (price <= 0) return "—";
-  const qty = toNumber(line.LineTotal) / price;
-  return (Math.round(qty * 1000) / 1000).toLocaleString("en-IN");
-};
+const statusBadgeMeta = (code: StatusCode) =>
+  STATUS_FILTERS.find((filter) => filter.code === code) ?? STATUS_FILTERS[0];
 
 // The SAP proxy returns rows wrapped as { data: [...] }; tolerate a few shapes.
 const extractRows = (payload: unknown): DraftRow[] => {
@@ -95,48 +86,67 @@ const extractRows = (payload: unknown): DraftRow[] => {
   return [];
 };
 
-// Collapse the flat line rows into one entry per draft document. Keyed by DocNum
-// when present (a single invoice number can span several DocEntry rows), otherwise
-// by DocEntry so 0/blank doc numbers don't all merge together.
-const groupDrafts = (rows: DraftRow[]): DraftGroup[] => {
-  const groups = new Map<string, DraftGroup>();
-  const order: string[] = [];
+const rowKey = (row: DraftRow, index = 0) =>
+  row.WddCode !== undefined && row.WddCode !== null
+    ? `W${row.WddCode}`
+    : `E${row.DocEntry ?? index}`;
 
-  rows.forEach((row) => {
-    const key = row.DocNum ? `N${row.DocNum}` : `E${row.DocEntry ?? ""}`;
-    let group = groups.get(key);
-    if (!group) {
-      group = { key, header: row, lines: [], total: 0, docEntries: [], omsRefs: [], baseRefs: [] };
-      groups.set(key, group);
-      order.push(key);
-    }
-    group.lines.push(row);
-    group.total += toNumber(row.LineTotal);
-    if (row.DocEntry !== undefined && row.DocEntry !== null && !group.docEntries.includes(row.DocEntry)) {
-      group.docEntries.push(row.DocEntry);
-    }
-    if (row.U_OMS_REF && !group.omsRefs.includes(String(row.U_OMS_REF))) group.omsRefs.push(String(row.U_OMS_REF));
-    if (row.BaseRef && !group.baseRefs.includes(String(row.BaseRef))) group.baseRefs.push(String(row.BaseRef));
-  });
+const draftLabel = (row: DraftRow) => orDash(row.DocEntry);
 
-  return order.map((key) => groups.get(key) as DraftGroup);
-};
+/* ── Toast ──────────────────────────────────────────────────────────── */
+
+function Toast({ toast, onClose }: { toast: ToastState; onClose: () => void }) {
+  useEffect(() => {
+    const timer = setTimeout(onClose, 3500);
+    return () => clearTimeout(timer);
+  }, [onClose]);
+
+  return (
+    <div className={`ir-toast ir-toast-${toast.type}`} role="status">
+      {toast.type === "success" ? (
+        <HiCheckCircle aria-hidden="true" />
+      ) : (
+        <HiExclamationTriangle aria-hidden="true" />
+      )}
+      <span>{toast.message}</span>
+      <button type="button" className="ir-toast-close" aria-label="Dismiss" onClick={onClose}>
+        <HiXMark aria-hidden="true" />
+      </button>
+    </div>
+  );
+}
+
+/* ── Page ───────────────────────────────────────────────────────────── */
 
 export default function InvoiceReview() {
   const [statusCode, setStatusCode] = useState<StatusCode>("W");
   const [rows, setRows] = useState<DraftRow[]>([]);
+  const [counts, setCounts] = useState<Partial<Record<StatusCode, number>>>({});
+  const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [selected, setSelected] = useState<DraftGroup | null>(null);
+  const [selected, setSelected] = useState<DraftRow | null>(null);
+  const [confirmApproveRow, setConfirmApproveRow] = useState<DraftRow | null>(null);
+  const [rejectRow, setRejectRow] = useState<DraftRow | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [actionLoading, setActionLoading] = useState(false);
+  const [toast, setToast] = useState<ToastState | null>(null);
 
-  const activeFilter = STATUS_FILTERS.find((filter) => filter.code === statusCode) ?? STATUS_FILTERS[0];
+  const activeFilter = statusBadgeMeta(statusCode);
+  const isPendingTab = statusCode === "W";
+
+  const showToast = useCallback((message: string, type: ToastState["type"]) => {
+    setToast({ id: Date.now(), message, type });
+  }, []);
 
   const loadDrafts = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
       const data = await apiFetch<unknown>(`/api/hana/invoice-drafts/?statusCode=${statusCode}`);
-      setRows(extractRows(data));
+      const nextRows = extractRows(data);
+      setRows(nextRows);
+      setCounts((current) => ({ ...current, [statusCode]: nextRows.length }));
     } catch (err) {
       console.error(err);
       setRows([]);
@@ -150,13 +160,132 @@ export default function InvoiceReview() {
     loadDrafts();
   }, [loadDrafts]);
 
-  const drafts = useMemo(() => groupDrafts(rows), [rows]);
+  const filteredRows = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) return rows;
+    return rows.filter((row) =>
+      [row.DocEntry, row.CardName, row.U_OMS_REF, row.CardCode, row.ShipToCode]
+        .filter((value) => value !== undefined && value !== null)
+        .some((value) => String(value).toLowerCase().includes(query)),
+    );
+  }, [rows, search]);
+
+  const closeDrawer = () => setSelected(null);
+
+  // Approve a draft through the SAP service-layer approval endpoint. The approval
+  // request is keyed by WddCode (passed as approval_id).
+  const approveDraft = async (row: DraftRow) => {
+    if (row.WddCode === undefined || row.WddCode === null) {
+      showToast("Missing approval code for this draft.", "error");
+      return;
+    }
+    setActionLoading(true);
+    try {
+      const response = await apiFetch<unknown>(
+        `/api/service-layer/approve-draft/?approval_id=${encodeURIComponent(String(row.WddCode))}`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            ApprovalRequestDecisions: [{ Status: "ardApproved", Remarks: "Approved via OMS Portal" }],
+          }),
+        },
+      );
+      console.log("Approve draft response:", response);
+      // apiFetch only resolves on a 2xx, so reaching here means the approval landed.
+      const approver = getCurrentUserId();
+      await createInvoiceLog({
+        so_number: "",
+        party_name: row.CardName || "",
+        total_amount: String(toNumber(row.DocTotal)),
+        ref_id: String(row.U_OMS_REF || ""),
+        status: "APPROVED",
+        created_by: approver,
+        approved_by: approver,
+        invoice_payload: row,
+      });
+      setRows((current) => current.filter((item) => rowKey(item) !== rowKey(row)));
+      setCounts((current) => ({
+        ...current,
+        W: Math.max((current.W ?? 1) - 1, 0),
+        Y: (current.Y ?? 0) + 1,
+      }));
+      showToast(`Draft #${draftLabel(row)} approved.`, "success");
+      setConfirmApproveRow(null);
+      if (selected && rowKey(selected) === rowKey(row)) closeDrawer();
+    } catch (err) {
+      console.error(err);
+      showToast("Unable to approve draft. Please try again.", "error");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Reject a draft through the same SAP service-layer approval endpoint, keyed by
+  // WddCode (approval_id). The reason gates the action in the UI; the SAP decision
+  // is posted with a fixed rejection remark.
+  const rejectDraft = async (row: DraftRow, reason: string) => {
+    if (!reason.trim()) return;
+    if (row.WddCode === undefined || row.WddCode === null) {
+      showToast("Missing approval code for this draft.", "error");
+      return;
+    }
+    setActionLoading(true);
+    try {
+      const response = await apiFetch<unknown>(
+        `/api/service-layer/approve-draft/?approval_id=${encodeURIComponent(String(row.WddCode))}`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            ApprovalRequestDecisions: [
+              { Status: "ardRejected", Remarks: "Rejected automatically via OMS Portal" },
+            ],
+          }),
+        },
+      );
+      console.log("Reject draft response:", response);
+      // apiFetch only resolves on a 2xx, so reaching here means the rejection landed.
+      const rejecter = getCurrentUserId();
+      await createInvoiceLog({
+        so_number: "",
+        party_name: row.CardName || "",
+        total_amount: String(toNumber(row.DocTotal)),
+        ref_id: String(row.U_OMS_REF || ""),
+        status: "REJECTED",
+        created_by: rejecter,
+        rejected_by: rejecter,
+        rejection_reason: reason.trim(),
+        invoice_payload: row,
+      });
+      setRows((current) => current.filter((item) => rowKey(item) !== rowKey(row)));
+      setCounts((current) => ({
+        ...current,
+        W: Math.max((current.W ?? 1) - 1, 0),
+        R: (current.R ?? 0) + 1,
+      }));
+      showToast(`Draft #${draftLabel(row)} rejected.`, "success");
+      setRejectRow(null);
+      setRejectReason("");
+      if (selected && rowKey(selected) === rowKey(row)) closeDrawer();
+    } catch (err) {
+      console.error(err);
+      showToast("Unable to reject draft. Please try again.", "error");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const openReject = (row: DraftRow) => {
+    setRejectReason("");
+    setRejectRow(row);
+  };
 
   return (
     <div className="ir-page">
+      {/* Page header */}
       <header className="ir-header">
         <div>
           <h1>Invoice Review</h1>
+          <p>Review, approve, or reject invoice drafts</p>
         </div>
         <button type="button" className="ir-btn ir-btn-ghost" onClick={loadDrafts} disabled={loading}>
           <HiArrowPath className={loading ? "ir-spin" : ""} aria-hidden="true" />
@@ -164,64 +293,127 @@ export default function InvoiceReview() {
         </button>
       </header>
 
+      {/* Pill tabs with counts */}
       <nav className="ir-filters" aria-label="Filter invoice drafts by approval status">
-        {STATUS_FILTERS.map((filter) => (
-          <button
-            key={filter.code}
-            type="button"
-            className={`ir-filter${statusCode === filter.code ? " is-active" : ""}`}
-            onClick={() => setStatusCode(filter.code)}
-          >
-            {filter.label}
-          </button>
-        ))}
+        {STATUS_FILTERS.map((filter) => {
+          const count = counts[filter.code];
+          return (
+            <button
+              key={filter.code}
+              type="button"
+              className={`ir-filter${statusCode === filter.code ? " is-active" : ""}`}
+              onClick={() => setStatusCode(filter.code)}
+            >
+              {filter.label}
+              {count !== undefined && <span className="ir-filter-count">{count}</span>}
+            </button>
+          );
+        })}
       </nav>
 
-      {error && <div className="ir-banner ir-banner-error">{error}</div>}
+      {/* Filter / search bar */}
+      <div className="ir-toolbar">
+        <div className="ir-search">
+          <HiMagnifyingGlass aria-hidden="true" />
+          <input
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search by Draft #, Party, OMS Ref, Customer Code"
+            aria-label="Search invoice drafts"
+          />
+        </div>
+        <span className="ir-toolbar-meta">
+          {loading ? "Loading…" : `${filteredRows.length} ${filteredRows.length === 1 ? "draft" : "drafts"}`}
+        </span>
+      </div>
 
       <section className="ir-card">
         {loading ? (
-          <div className="ir-empty">Loading invoice drafts…</div>
-        ) : drafts.length === 0 ? (
+          <SkeletonTable />
+        ) : error ? (
+          <div className="ir-empty">
+            <HiExclamationTriangle aria-hidden="true" />
+            <span>{error}</span>
+            <button type="button" className="ir-btn ir-btn-ghost ir-btn-sm" onClick={loadDrafts}>
+              <HiArrowPath aria-hidden="true" />
+              Retry
+            </button>
+          </div>
+        ) : filteredRows.length === 0 ? (
           <div className="ir-empty">
             <HiInbox aria-hidden="true" />
-            <span>No invoice drafts found for this status.</span>
+            <span>{search ? "No invoices match your search." : "No invoices found."}</span>
           </div>
         ) : (
           <div className="ir-table-wrap">
             <table className="ir-table">
               <thead>
                 <tr>
-                  <th>Invoice #</th>
+                  <th>Draft #</th>
                   <th>Party</th>
                   <th className="ir-num">Amount</th>
                   <th>Status</th>
-                  <th>Doc Date</th>
-                  <th className="ir-num">Items</th>
+                  <th>Due Date</th>
+                  <th>Ship To</th>
+                  <th>OMS Ref</th>
                   <th className="ir-actions-col">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {drafts.map((draft) => (
-                  <tr key={draft.key}>
-                    <td>{draft.header.DocNum ? draft.header.DocNum : `Draft ${orDash(draft.docEntries.join(", "))}`}</td>
-                    <td>{orDash(draft.header.CardName)}</td>
-                    <td className="ir-num">{formatAmount(draft.total)}</td>
+                {filteredRows.map((row, index) => (
+                  <tr key={rowKey(row, index)}>
+                    <td className="ir-strong">{draftLabel(row)}</td>
+                    <td>
+                      <span className="ir-truncate" title={orDash(row.CardName)}>
+                        {orDash(row.CardName)}
+                      </span>
+                    </td>
+                    <td className="ir-num">{formatAmount(row.DocTotal)}</td>
                     <td>
                       <span className={`ir-badge ir-badge-${activeFilter.badge}`}>{activeFilter.label}</span>
                     </td>
-                    <td>{formatDate(draft.header.DocDate)}</td>
-                    <td className="ir-num">{draft.lines.length}</td>
+                    <td>{formatDate(row.DocDueDate)}</td>
+                    <td>
+                      <span className="ir-truncate" title={orDash(row.ShipToCode)}>
+                        {orDash(row.ShipToCode)}
+                      </span>
+                    </td>
+                    <td>
+                      <span className="ir-truncate ir-truncate-sm" title={orDash(row.U_OMS_REF)}>
+                        {orDash(row.U_OMS_REF)}
+                      </span>
+                    </td>
                     <td className="ir-actions-col">
                       <div className="ir-row-actions">
                         <button
                           type="button"
                           className="ir-btn ir-btn-ghost ir-btn-sm"
-                          onClick={() => setSelected(draft)}
+                          onClick={() => setSelected(row)}
                         >
                           <HiEye aria-hidden="true" />
                           View
                         </button>
+                        {isPendingTab && (
+                          <>
+                            <button
+                              type="button"
+                              className="ir-btn ir-btn-approve ir-btn-sm"
+                              onClick={() => setConfirmApproveRow(row)}
+                            >
+                              <HiCheckCircle aria-hidden="true" />
+                              Approve
+                            </button>
+                            <button
+                              type="button"
+                              className="ir-btn ir-btn-reject ir-btn-sm"
+                              onClick={() => openReject(row)}
+                            >
+                              <HiXCircle aria-hidden="true" />
+                              Reject
+                            </button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -232,90 +424,203 @@ export default function InvoiceReview() {
         )}
       </section>
 
+      {/* Detail drawer */}
       {selected && (
-        <div className="ir-modal-backdrop" role="presentation" onClick={() => setSelected(null)}>
-          <section
-            className="ir-modal"
+        <div className="ir-drawer-backdrop" role="presentation" onClick={closeDrawer}>
+          <aside
+            className="ir-drawer"
             role="dialog"
             aria-modal="true"
-            aria-label={`Invoice draft ${selected.header.DocNum ?? selected.key}`}
+            aria-label={`Invoice draft ${draftLabel(selected)}`}
             onClick={(event) => event.stopPropagation()}
           >
-            <header className="ir-modal-head">
+            <header className="ir-drawer-head">
               <div>
                 <span className="ir-eyebrow">Invoice Draft</span>
-                <h2>Invoice #{orDash(selected.header.DocNum)}</h2>
-                <p>{orDash(selected.header.CardName)}</p>
+                <h2>Draft #{draftLabel(selected)}</h2>
+                <p>{orDash(selected.CardName)}</p>
               </div>
-              <button
-                type="button"
-                className="ir-icon-btn"
-                aria-label="Close details"
-                onClick={() => setSelected(null)}
-              >
+              <button type="button" className="ir-icon-btn" aria-label="Close details" onClick={closeDrawer}>
                 <HiXMark aria-hidden="true" />
               </button>
             </header>
 
-            <div className="ir-modal-body">
-              <dl className="ir-meta-grid">
-                <div>
-                  <dt>Status</dt>
-                  <dd>
-                    <span className={`ir-badge ir-badge-${activeFilter.badge}`}>{activeFilter.label}</span>
-                  </dd>
-                </div>
-                <div><dt>Invoice No.</dt><dd>{orDash(selected.header.DocNum)}</dd></div>
-                <div><dt>Draft Entry</dt><dd>{orDash(selected.docEntries.join(", "))}</dd></div>
-                <div><dt>Customer Code</dt><dd>{orDash(selected.header.CardCode)}</dd></div>
-                <div><dt>Total Amount</dt><dd>{formatAmount(selected.total)}</dd></div>
-                <div><dt>Doc Date</dt><dd>{formatDate(selected.header.DocDate)}</dd></div>
-                <div><dt>Due Date</dt><dd>{formatDate(selected.header.DocDueDate)}</dd></div>
-                <div><dt>Ship To</dt><dd>{orDash(selected.header.ShipToCode)}</dd></div>
-                <div><dt>OMS Ref</dt><dd>{orDash(selected.omsRefs.join(", "))}</dd></div>
-                <div><dt>Source Ref</dt><dd>{orDash(selected.baseRefs.join(", "))}</dd></div>
-                <div style={{ gridColumn: "1 / -1" }}>
-                  <dt>Address</dt>
-                  <dd>{formatAddress(selected.header.Address)}</dd>
-                </div>
-              </dl>
-
-              <h3 className="ir-section-title">Line Items</h3>
-              <div className="ir-table-wrap">
-                <table className="ir-table ir-table-compact">
-                  <thead>
-                    <tr>
-                      <th>Item Code</th>
-                      <th>Description</th>
-                      <th>Warehouse</th>
-                      <th className="ir-num">Qty</th>
-                      <th className="ir-num">Price</th>
-                      <th className="ir-num">Line Total</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selected.lines.map((line, index) => (
-                      <tr key={`${line.DocEntry ?? ""}-${line.LineNum ?? index}`}>
-                        <td>{orDash(line.ItemCode)}</td>
-                        <td>{orDash(line.Dscription)}</td>
-                        <td>{orDash(line.WhsCode)}</td>
-                        <td className="ir-num">{lineQty(line)}</td>
-                        <td className="ir-num">{formatAmount(line.Price)}</td>
-                        <td className="ir-num">{formatAmount(line.LineTotal)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            <div className="ir-drawer-body">
+              <div className="ir-drawer-status">
+                <span className={`ir-badge ir-badge-${activeFilter.badge}`}>{activeFilter.label}</span>
+                <strong>{formatAmount(selected.DocTotal)}</strong>
               </div>
 
-              <details className="ir-raw">
-                <summary>Raw draft</summary>
-                <pre>{JSON.stringify(selected.lines, null, 2)}</pre>
-              </details>
+              <dl className="ir-meta-grid">
+                <div><dt>Party Name</dt><dd>{orDash(selected.CardName)}</dd></div>
+                <div><dt>Draft Entry</dt><dd>{orDash(selected.DocEntry)}</dd></div>
+                <div><dt>Approval Code</dt><dd>{orDash(selected.WddCode)}</dd></div>
+                <div><dt>Customer Code</dt><dd>{orDash(selected.CardCode)}</dd></div>
+                <div><dt>Total Amount</dt><dd>{formatAmount(selected.DocTotal)}</dd></div>
+                <div><dt>Due Date</dt><dd>{formatDate(selected.DocDueDate)}</dd></div>
+                <div><dt>Ship To</dt><dd>{orDash(selected.ShipToCode)}</dd></div>
+                <div><dt>OMS Ref</dt><dd>{orDash(selected.U_OMS_REF)}</dd></div>
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <dt>Address</dt>
+                  <dd>{formatAddress(selected.Address)}</dd>
+                </div>
+              </dl>
+            </div>
+
+            {isPendingTab && (
+              <footer className="ir-drawer-foot">
+                <button
+                  type="button"
+                  className="ir-btn ir-btn-reject"
+                  onClick={() => openReject(selected)}
+                >
+                  <HiXCircle aria-hidden="true" />
+                  Reject
+                </button>
+                <button
+                  type="button"
+                  className="ir-btn ir-btn-approve"
+                  onClick={() => setConfirmApproveRow(selected)}
+                >
+                  <HiCheckCircle aria-hidden="true" />
+                  Approve Invoice
+                </button>
+              </footer>
+            )}
+          </aside>
+        </div>
+      )}
+
+      {/* Approve confirmation */}
+      {confirmApproveRow && (
+        <div className="ir-modal-backdrop" role="presentation" onClick={() => !actionLoading && setConfirmApproveRow(null)}>
+          <section
+            className="ir-confirm"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Confirm approval"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="ir-confirm-icon ir-confirm-icon-approve">
+              <HiCheckCircle aria-hidden="true" />
+            </div>
+            <h3>Approve invoice?</h3>
+            <p>
+              Are you sure you want to approve Draft #{draftLabel(confirmApproveRow)} for{" "}
+              {orDash(confirmApproveRow.CardName)}?
+            </p>
+            <div className="ir-confirm-actions">
+              <button
+                type="button"
+                className="ir-btn ir-btn-ghost"
+                onClick={() => setConfirmApproveRow(null)}
+                disabled={actionLoading}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="ir-btn ir-btn-approve"
+                onClick={() => approveDraft(confirmApproveRow)}
+                disabled={actionLoading}
+              >
+                {actionLoading ? "Approving…" : "Yes, Approve"}
+              </button>
             </div>
           </section>
         </div>
       )}
+
+      {/* Reject reason */}
+      {rejectRow && (
+        <div className="ir-modal-backdrop" role="presentation" onClick={() => !actionLoading && setRejectRow(null)}>
+          <section
+            className="ir-confirm ir-confirm-reject"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Reject invoice"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="ir-confirm-icon ir-confirm-icon-reject">
+              <HiXCircle aria-hidden="true" />
+            </div>
+            <h3>Reject invoice</h3>
+            <p>
+              Provide a reason for rejecting Draft #{draftLabel(rejectRow)} for {orDash(rejectRow.CardName)}.
+            </p>
+            <label className="ir-field-label" htmlFor="ir-reject-reason">
+              Reason for rejection
+            </label>
+            <textarea
+              id="ir-reject-reason"
+              className="ir-textarea"
+              value={rejectReason}
+              onChange={(event) => setRejectReason(event.target.value)}
+              placeholder="e.g. Incorrect pricing, wrong ship-to address…"
+              rows={4}
+              autoFocus
+            />
+            <div className="ir-confirm-actions">
+              <button
+                type="button"
+                className="ir-btn ir-btn-ghost"
+                onClick={() => setRejectRow(null)}
+                disabled={actionLoading}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="ir-btn ir-btn-reject-solid"
+                onClick={() => rejectDraft(rejectRow, rejectReason)}
+                disabled={actionLoading || !rejectReason.trim()}
+              >
+                {actionLoading ? "Rejecting…" : "Reject Invoice"}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {toast && (
+        <div className="ir-toast-wrap">
+          <Toast toast={toast} onClose={() => setToast(null)} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Loading skeleton ───────────────────────────────────────────────── */
+
+function SkeletonTable() {
+  return (
+    <div className="ir-table-wrap">
+      <table className="ir-table">
+        <thead>
+          <tr>
+            <th>Draft #</th>
+            <th>Party</th>
+            <th className="ir-num">Amount</th>
+            <th>Status</th>
+            <th>Due Date</th>
+            <th>Ship To</th>
+            <th>OMS Ref</th>
+            <th className="ir-actions-col">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {Array.from({ length: 6 }).map((_, index) => (
+            <tr key={index} className="ir-skeleton-row">
+              {Array.from({ length: 8 }).map((__, cell) => (
+                <td key={cell}>
+                  <span className="ir-skeleton-bar" />
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

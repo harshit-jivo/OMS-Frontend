@@ -76,7 +76,15 @@ export default function DraftStep({ state, onReset, onAddItems }: Props) {
 
   return (
     <div className="si-draft-stage">
-      {state.posting && <InteractiveLoader />}
+      <InteractiveLoader
+        isOpen={state.posting}
+        summary={{
+          totalItems: state.selectedLineList.length,
+          selectedStation: state.form.shipTo,
+          dispatchType: state.form.shippingType,
+          estimatedTime: "~30 seconds",
+        }}
+      />
       {state.loadingDraftDetails && <div className="si-loader">Loading customer and salesperson details...</div>}
       {state.draftError && <div className="si-inline-error">{state.draftError}</div>}
 
@@ -133,7 +141,7 @@ export default function DraftStep({ state, onReset, onAddItems }: Props) {
             className="si-success-modal"
             role="alertdialog"
             aria-modal="true"
-            aria-label="Invoice posted to SAP HANA"
+            aria-label="Draft posted to SAP HANA"
           >
             <button
               type="button"
@@ -147,7 +155,10 @@ export default function DraftStep({ state, onReset, onAddItems }: Props) {
               <HiCheckCircle />
             </span>
             <span className="si-eyebrow">Sales Invoice</span>
-            <h2>Invoice Posted to SAP HANA</h2>
+            <h2>Draft Posted to SAP HANA</h2>
+            {state.postedDocNum && (
+              <p className="si-success-docnum">Draft #{state.postedDocNum}</p>
+            )}
             <p className="si-success-message">{state.postSuccess}</p>
             <div className="si-success-actions">
               <button className="si-btn si-btn-primary" type="button" onClick={closeSuccessModal}>
