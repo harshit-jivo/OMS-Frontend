@@ -14,14 +14,14 @@ import { toNumber } from "./SalesInvoice/salesInvoice.utils";
 import "../styles/InvoiceReview.css";
 
 // SAP approval (WddStatus) codes the invoice-drafts endpoint filters on:
-// W = pending approval, Y = approved, R = rejected. The response itself does not
+// W = pending approval, Y = approved, N = rejected. The response itself does not
 // carry the status, so the active filter determines what's shown.
-type StatusCode = "W" | "Y" | "R";
+type StatusCode = "W" | "Y" | "N";
 
 const STATUS_FILTERS: Array<{ code: StatusCode; label: string; badge: string }> = [
   { code: "W", label: "Pending", badge: "pending" },
   { code: "Y", label: "Approved", badge: "approved" },
-  { code: "R", label: "Rejected", badge: "rejected" },
+  { code: "N", label: "Rejected", badge: "rejected" },
 ];
 
 // The endpoint returns one row per approval request (keyed by WddCode). It is a
@@ -172,23 +172,18 @@ export default function InvoiceReview() {
 
   const closeDrawer = () => setSelected(null);
 
-  // Approve a draft through the SAP service-layer approval endpoint. The approval
-  // request is keyed by WddCode (passed as approval_id).
+  // Approve a draft through the SAP service-layer draft-action endpoint. The
+  // request is keyed by DocEntry (passed as draft_id) with status=Approved.
   const approveDraft = async (row: DraftRow) => {
-    if (row.WddCode === undefined || row.WddCode === null) {
-      showToast("Missing approval code for this draft.", "error");
+    if (row.DocEntry === undefined || row.DocEntry === null) {
+      showToast("Missing draft id for this draft.", "error");
       return;
     }
     setActionLoading(true);
     try {
       const response = await apiFetch<unknown>(
-        `/api/service-layer/approve-draft/?approval_id=${encodeURIComponent(String(row.WddCode))}`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            ApprovalRequestDecisions: [{ Status: "ardApproved", Remarks: "Approved via OMS Portal" }],
-          }),
-        },
+        `/api/service-layer/draft-action/?draft_id=${encodeURIComponent(String(row.DocEntry))}&status=Approved`,
+        { method: "POST" },
       );
       console.log("Approve draft response:", response);
       // apiFetch only resolves on a 2xx, so reaching here means the approval landed.
@@ -220,27 +215,20 @@ export default function InvoiceReview() {
     }
   };
 
-  // Reject a draft through the same SAP service-layer approval endpoint, keyed by
-  // WddCode (approval_id). The reason gates the action in the UI; the SAP decision
-  // is posted with a fixed rejection remark.
+  // Reject a draft through the same SAP service-layer draft-action endpoint, keyed
+  // by DocEntry (draft_id) with status=NotApproved. The reason gates the action in the
+  // UI and is recorded in the invoice log below.
   const rejectDraft = async (row: DraftRow, reason: string) => {
     if (!reason.trim()) return;
-    if (row.WddCode === undefined || row.WddCode === null) {
-      showToast("Missing approval code for this draft.", "error");
+    if (row.DocEntry === undefined || row.DocEntry === null) {
+      showToast("Missing draft id for this draft.", "error");
       return;
     }
     setActionLoading(true);
     try {
       const response = await apiFetch<unknown>(
-        `/api/service-layer/approve-draft/?approval_id=${encodeURIComponent(String(row.WddCode))}`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            ApprovalRequestDecisions: [
-              { Status: "ardRejected", Remarks: "Rejected automatically via OMS Portal" },
-            ],
-          }),
-        },
+        `/api/service-layer/draft-action/?draft_id=${encodeURIComponent(String(row.DocEntry))}&status=NotApproved`,
+        { method: "POST" },
       );
       console.log("Reject draft response:", response);
       // apiFetch only resolves on a 2xx, so reaching here means the rejection landed.
@@ -260,7 +248,7 @@ export default function InvoiceReview() {
       setCounts((current) => ({
         ...current,
         W: Math.max((current.W ?? 1) - 1, 0),
-        R: (current.R ?? 0) + 1,
+        N: (current.N ?? 0) + 1,
       }));
       showToast(`Draft #${draftLabel(row)} rejected.`, "success");
       setRejectRow(null);
