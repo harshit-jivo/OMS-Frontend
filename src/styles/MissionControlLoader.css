@@ -1,0 +1,819 @@
+/* ──────────────────────────────────────────────────────────────────────────
+ * Mission Control loader — a live "transaction monitor" for posting an invoice
+ * to SAP Business One. Light, enterprise surface that matches the app theme
+ * (white card, #f8fafc inset panels, #e2e8f0 hairlines, #2563eb accent) — built
+ * with plain CSS to match the project's InteractiveLoader.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+.mcl-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 7000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+  animation: mcl-fade 0.22s ease both;
+}
+
+.mcl-console {
+  --accent: #2563eb;
+  --accent-deep: #1d4ed8;
+  --ok: #16a34a;
+  --ok-strong: #15803d;
+  --ok-bg: #f0fdf4;
+  --ok-border: #bbf7d0;
+  --warn: #b45309;
+  --bad: #dc2626;
+  --bad-strong: #b91c1c;
+  --bad-bg: #fef2f2;
+  --bad-border: #fecaca;
+  --idle: #94a3b8;
+  --surface: #ffffff;
+  --surface-2: #f8fafc;
+  --surface-3: #f1f5f9;
+  --line: #e2e8f0;
+  --ink: #0f172a;
+  --strong: #1e293b;
+  --muted: #475569;
+  --faint: #94a3b8;
+
+  width: min(900px, 100%);
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  box-shadow: 0 30px 60px -15px rgba(15, 23, 42, 0.35);
+  color: var(--ink);
+  font-family: "Inter", "Segoe UI", system-ui, sans-serif;
+  animation: mcl-pop 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.mcl-console-error {
+  animation: mcl-pop 0.3s cubic-bezier(0.22, 1, 0.36, 1) both, mcl-shake 0.4s ease 0.3s 1;
+  border-color: var(--bad-border);
+}
+
+.mcl-console-success {
+  border-color: var(--ok-border);
+}
+
+/* ── Header ─────────────────────────────────────────────────────────────── */
+.mcl-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, var(--surface-2), var(--surface));
+}
+
+.mcl-head-id {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.mcl-head-id h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.mcl-head-id p {
+  margin: 2px 0 0;
+  font-size: 0.72rem;
+  color: var(--faint);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.mcl-live-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--accent);
+}
+
+.mcl-live-dot-running {
+  animation: mcl-pulse-ring 1.6s ease-out infinite;
+}
+
+.mcl-live-dot-success {
+  background: var(--ok);
+}
+
+.mcl-live-dot-error {
+  background: var(--bad);
+}
+
+.mcl-head-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mcl-phase {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: #eff6ff;
+  color: var(--accent);
+  border: 1px solid #dbeafe;
+  white-space: nowrap;
+}
+
+.mcl-phase-success {
+  background: var(--ok-bg);
+  color: var(--ok-strong);
+  border-color: var(--ok-border);
+}
+
+.mcl-phase-error {
+  background: var(--bad-bg);
+  color: var(--bad-strong);
+  border-color: var(--bad-border);
+}
+
+.mcl-elapsed {
+  font-variant-numeric: tabular-nums;
+  font-family: "JetBrains Mono", "SFMono-Regular", ui-monospace, monospace;
+  font-size: 0.82rem;
+  color: var(--muted);
+  background: var(--surface-3);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 4px 9px;
+}
+
+.mcl-close {
+  display: inline-flex;
+  border: none;
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+  font-size: 1.3rem;
+  padding: 4px;
+  border-radius: 8px;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.mcl-close:hover {
+  color: var(--ink);
+  background: var(--surface-3);
+}
+
+/* ── Status tiles ───────────────────────────────────────────────────────── */
+.mcl-tiles {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 10px;
+  padding: 18px 22px;
+}
+
+.mcl-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 14px 8px 12px;
+  border-radius: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  transition: border-color 0.25s ease, background 0.25s ease, box-shadow 0.25s ease;
+}
+
+.mcl-tile-icon {
+  display: inline-flex;
+  font-size: 1.25rem;
+  color: var(--idle);
+  transition: color 0.25s ease, transform 0.25s ease;
+}
+
+.mcl-tile-name {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+
+.mcl-tile-dot {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--idle);
+  opacity: 0.45;
+}
+
+.mcl-tile-active {
+  border-color: var(--accent);
+  background: #eff6ff;
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.25), 0 10px 22px -14px rgba(37, 99, 235, 0.6);
+}
+
+.mcl-tile-active .mcl-tile-icon {
+  color: var(--accent);
+  animation: mcl-bob 1.4s ease-in-out infinite;
+}
+
+.mcl-tile-active .mcl-tile-name {
+  color: var(--ink);
+}
+
+.mcl-tile-active .mcl-tile-dot {
+  background: var(--accent);
+  opacity: 1;
+  animation: mcl-pulse-ring 1.4s ease-out infinite;
+}
+
+.mcl-tile-done {
+  background: var(--ok-bg);
+  border-color: var(--ok-border);
+}
+
+.mcl-tile-done .mcl-tile-icon {
+  color: var(--ok);
+}
+
+.mcl-tile-done .mcl-tile-name {
+  color: var(--ok-strong);
+}
+
+.mcl-tile-done .mcl-tile-dot {
+  background: var(--ok);
+  opacity: 1;
+}
+
+.mcl-tile-error {
+  border-color: var(--bad-border);
+  background: var(--bad-bg);
+}
+
+.mcl-tile-error .mcl-tile-icon {
+  color: var(--bad);
+}
+
+.mcl-tile-error .mcl-tile-name {
+  color: var(--bad-strong);
+}
+
+.mcl-tile-error .mcl-tile-dot {
+  background: var(--bad);
+  opacity: 1;
+}
+
+/* ── Body: log feed + panel ─────────────────────────────────────────────── */
+.mcl-body {
+  display: grid;
+  grid-template-columns: 1fr 280px;
+  gap: 14px;
+  padding: 0 22px 18px;
+  min-height: 0;
+}
+
+.mcl-log {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  min-height: 220px;
+}
+
+.mcl-log-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-3);
+}
+
+.mcl-log-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.mcl-log-dot:nth-child(1) {
+  background: #fecaca;
+}
+
+.mcl-log-dot:nth-child(2) {
+  background: #fde68a;
+}
+
+.mcl-log-dot:nth-child(3) {
+  background: #bbf7d0;
+}
+
+.mcl-log-title {
+  margin-left: 8px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.72rem;
+  color: var(--faint);
+  letter-spacing: 0.04em;
+}
+
+.mcl-log-feed {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 14px;
+  font-family: "JetBrains Mono", "SFMono-Regular", ui-monospace, monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+.mcl-log-feed::-webkit-scrollbar {
+  width: 8px;
+}
+
+.mcl-log-feed::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 8px;
+}
+
+.mcl-log-line {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 8px;
+  align-items: baseline;
+  padding: 2px 0;
+  color: var(--muted);
+  animation: mcl-log-in 0.28s ease both;
+}
+
+.mcl-log-time {
+  color: var(--faint);
+  font-size: 0.72rem;
+}
+
+.mcl-log-glyph {
+  font-weight: 700;
+}
+
+.mcl-log-text {
+  color: var(--strong);
+  word-break: break-word;
+}
+
+.mcl-log-info .mcl-log-glyph {
+  color: var(--accent);
+}
+
+.mcl-log-ok .mcl-log-glyph,
+.mcl-log-ok .mcl-log-text {
+  color: var(--ok);
+}
+
+.mcl-log-warn .mcl-log-glyph,
+.mcl-log-warn .mcl-log-text {
+  color: var(--warn);
+}
+
+.mcl-log-error .mcl-log-glyph,
+.mcl-log-error .mcl-log-text {
+  color: var(--bad);
+}
+
+.mcl-log-active .mcl-log-text {
+  color: var(--muted);
+}
+
+.mcl-log-cursor {
+  width: 8px;
+  height: 14px;
+  background: var(--accent);
+  border-radius: 1px;
+  justify-self: center;
+  animation: mcl-blink 1s step-end infinite;
+}
+
+/* ── Transaction panel ──────────────────────────────────────────────────── */
+.mcl-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.mcl-panel-eyebrow {
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--faint);
+}
+
+.mcl-panel-list {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+
+.mcl-panel-list > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.mcl-panel-list dt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.76rem;
+  color: var(--muted);
+}
+
+.mcl-panel-list dt svg {
+  color: var(--faint);
+  font-size: 0.95rem;
+}
+
+.mcl-panel-list dd {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--strong);
+  text-align: right;
+}
+
+.mcl-panel-clamp {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcl-panel-total {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 12px;
+  border-top: 1px dashed var(--line);
+}
+
+.mcl-panel-total span {
+  font-size: 0.76rem;
+  color: var(--muted);
+}
+
+.mcl-panel-total strong {
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.mcl-result {
+  margin-top: 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px;
+  border-radius: 10px;
+  animation: mcl-pop 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.mcl-result-success {
+  background: var(--ok-bg);
+  border: 1px solid var(--ok-border);
+}
+
+.mcl-result-error {
+  background: var(--bad-bg);
+  border: 1px solid var(--bad-border);
+}
+
+.mcl-result-label {
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.mcl-result-value {
+  font-size: 1.4rem;
+  font-weight: 800;
+  color: var(--ok-strong);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+
+.mcl-result-hint {
+  font-size: 0.74rem;
+  color: var(--bad-strong);
+}
+
+/* ── Footer: progress + actions ─────────────────────────────────────────── */
+.mcl-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 22px 20px;
+  border-top: 1px solid var(--line);
+  background: linear-gradient(0deg, var(--surface-2), var(--surface));
+}
+
+.mcl-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.mcl-progress-track {
+  flex: 1;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  overflow: hidden;
+  border: 1px solid var(--line);
+}
+
+.mcl-progress-fill {
+  position: relative;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent-deep), #3b82f6);
+  transition: width 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+  overflow: hidden;
+}
+
+.mcl-progress-success .mcl-progress-fill {
+  background: linear-gradient(90deg, var(--ok-strong), #22c55e);
+}
+
+.mcl-progress-error .mcl-progress-fill {
+  background: linear-gradient(90deg, var(--bad-strong), #ef4444);
+}
+
+.mcl-progress-shimmer {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent);
+  transform: translateX(-100%);
+  animation: mcl-shimmer 1.4s ease-in-out infinite;
+}
+
+.mcl-progress-pct {
+  min-width: 42px;
+  text-align: right;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.82rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.mcl-foot-note {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.mcl-foot-spinner {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  border-radius: 50%;
+  border: 2px solid #cbd5e1;
+  border-top-color: var(--accent);
+  animation: mcl-spin 0.8s linear infinite;
+}
+
+.mcl-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mcl-foot-status {
+  margin: 0;
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  min-width: 0;
+}
+
+.mcl-foot-status svg {
+  flex: none;
+  font-size: 1.1rem;
+}
+
+.mcl-foot-status-ok {
+  color: var(--ok-strong);
+}
+
+.mcl-foot-status-bad {
+  color: var(--bad-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcl-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 9px 18px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+
+.mcl-btn:active {
+  transform: translateY(1px);
+}
+
+.mcl-btn-primary {
+  background: var(--accent-deep);
+  color: #fff;
+}
+
+.mcl-btn-primary:hover {
+  background: var(--accent);
+}
+
+.mcl-console-success .mcl-btn-primary {
+  background: var(--ok);
+}
+
+.mcl-console-success .mcl-btn-primary:hover {
+  background: var(--ok-strong);
+}
+
+.mcl-btn-ghost {
+  background: #fff;
+  border-color: var(--line);
+  color: var(--muted);
+}
+
+.mcl-btn-ghost:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+/* ── Keyframes ──────────────────────────────────────────────────────────── */
+@keyframes mcl-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes mcl-pop {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes mcl-log-in {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes mcl-pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.45);
+  }
+  70% {
+    box-shadow: 0 0 0 7px rgba(37, 99, 235, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0);
+  }
+}
+
+@keyframes mcl-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes mcl-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes mcl-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes mcl-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+@keyframes mcl-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20% {
+    transform: translateX(-7px);
+  }
+  40% {
+    transform: translateX(7px);
+  }
+  60% {
+    transform: translateX(-5px);
+  }
+  80% {
+    transform: translateX(5px);
+  }
+}
+
+/* ── Responsive ─────────────────────────────────────────────────────────── */
+@media (max-width: 720px) {
+  .mcl-tiles {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .mcl-body {
+    grid-template-columns: 1fr;
+  }
+
+  .mcl-panel-clamp {
+    max-width: 60vw;
+  }
+}
+
+/* Respect reduced-motion: kill the looping/decorative animations. */
+@media (prefers-reduced-motion: reduce) {
+  .mcl-backdrop,
+  .mcl-console,
+  .mcl-console-error,
+  .mcl-result,
+  .mcl-log-line {
+    animation: none;
+  }
+
+  .mcl-live-dot-running,
+  .mcl-tile-active .mcl-tile-icon,
+  .mcl-tile-active .mcl-tile-dot,
+  .mcl-progress-shimmer,
+  .mcl-log-cursor,
+  .mcl-foot-spinner {
+    animation: none;
+  }
+}

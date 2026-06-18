@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   HiArrowPath,
   HiCheckCircle,
+  HiCloudArrowUp,
   HiExclamationTriangle,
   HiEye,
   HiInbox,
@@ -10,7 +11,9 @@ import {
   HiXMark,
 } from "react-icons/hi2";
 import { apiFetch, createInvoiceLog, getCurrentUserId } from "./SalesInvoice/useSalesInvoice";
+import { useSapPost } from "./SalesInvoice/useSapPost";
 import { toNumber } from "./SalesInvoice/salesInvoice.utils";
+import MissionControlLoader from "../components/MissionControlLoader";
 import "../styles/InvoiceReview.css";
 
 // SAP approval (WddStatus) codes the invoice-drafts endpoint filters on:
@@ -129,11 +132,14 @@ export default function InvoiceReview() {
   const [confirmApproveRow, setConfirmApproveRow] = useState<DraftRow | null>(null);
   const [rejectRow, setRejectRow] = useState<DraftRow | null>(null);
   const [rejectReason, setRejectReason] = useState("");
+  const [postSapRow, setPostSapRow] = useState<DraftRow | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
+  const sapPost = useSapPost();
 
   const activeFilter = statusBadgeMeta(statusCode);
   const isPendingTab = statusCode === "W";
+  const isApprovedTab = statusCode === "Y";
 
   const showToast = useCallback((message: string, type: ToastState["type"]) => {
     setToast({ id: Date.now(), message, type });
@@ -265,6 +271,36 @@ export default function InvoiceReview() {
   const openReject = (row: DraftRow) => {
     setRejectReason("");
     setRejectRow(row);
+  };
+
+  // Launch the Mission Control loader for an already-approved draft. The loader's
+  // hook (useSapPost) owns the real work — fetch the full draft, transform it into
+  // the lean invoice payload, then POST it to the service-layer invoice endpoint.
+  const launchSapPost = (row: DraftRow) => {
+    if (row.DocEntry === undefined || row.DocEntry === null) {
+      showToast("Missing draft id for this draft.", "error");
+      return;
+    }
+    setPostSapRow(null);
+    if (selected && rowKey(selected) === rowKey(row)) closeDrawer();
+    sapPost.run({
+      draftId: row.DocEntry,
+      doc: {
+        draftNo: draftLabel(row),
+        customer: row.CardName || "",
+        itemCount: null,
+        total: toNumber(row.DocTotal),
+        branch: typeof row.BPLName === "string" ? row.BPLName : "",
+      },
+    });
+  };
+
+  // Dismiss the loader; refresh the list after a successful post so any SAP-side
+  // state change is reflected.
+  const closeSapLoader = () => {
+    const posted = sapPost.state.status === "success";
+    sapPost.close();
+    if (posted) loadDrafts();
   };
 
   return (
@@ -402,6 +438,16 @@ export default function InvoiceReview() {
                             </button>
                           </>
                         )}
+                        {isApprovedTab && (
+                          <button
+                            type="button"
+                            className="ir-btn ir-btn-sap ir-btn-sm"
+                            onClick={() => setPostSapRow(row)}
+                          >
+                            <HiCloudArrowUp aria-hidden="true" />
+                            Post to SAP
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -472,6 +518,19 @@ export default function InvoiceReview() {
                 >
                   <HiCheckCircle aria-hidden="true" />
                   Approve Invoice
+                </button>
+              </footer>
+            )}
+
+            {isApprovedTab && (
+              <footer className="ir-drawer-foot">
+                <button
+                  type="button"
+                  className="ir-btn ir-btn-sap"
+                  onClick={() => setPostSapRow(selected)}
+                >
+                  <HiCloudArrowUp aria-hidden="true" />
+                  Post to SAP
                 </button>
               </footer>
             )}
@@ -569,6 +628,48 @@ export default function InvoiceReview() {
           </section>
         </div>
       )}
+
+      {/* Post to SAP confirmation */}
+      {postSapRow && (
+        <div className="ir-modal-backdrop" role="presentation" onClick={() => !actionLoading && setPostSapRow(null)}>
+          <section
+            className="ir-confirm"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Confirm post to SAP"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="ir-confirm-icon ir-confirm-icon-sap">
+              <HiCloudArrowUp aria-hidden="true" />
+            </div>
+            <h3>Post invoice to SAP?</h3>
+            <p>
+              This will create an invoice in SAP from Draft #{draftLabel(postSapRow)} for{" "}
+              {orDash(postSapRow.CardName)}.
+            </p>
+            <div className="ir-confirm-actions">
+              <button
+                type="button"
+                className="ir-btn ir-btn-ghost"
+                onClick={() => setPostSapRow(null)}
+                disabled={actionLoading}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="ir-btn ir-btn-sap"
+                onClick={() => launchSapPost(postSapRow)}
+              >
+                Yes, Post to SAP
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {/* Mission Control loader — drives the live post-to-SAP transaction */}
+      <MissionControlLoader state={sapPost.state} onClose={closeSapLoader} onRetry={sapPost.retry} />
 
       {toast && (
         <div className="ir-toast-wrap">
