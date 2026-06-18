@@ -193,7 +193,12 @@ export default function App_User() {
     }
     try {
       const data = await sapService.getProductVarieties(category);
-      setVarietyOptions(Array.isArray(data.varieties) ? data.varieties : []);
+      const subGroups = Array.isArray(data.sub_groups)
+        ? data.sub_groups
+        : Array.isArray(data.varieties)
+          ? data.varieties
+          : [];
+      setVarietyOptions(subGroups);
     } catch (error) {
       console.log("Error fetching SAP varieties:", error);
       setVarietyOptions([]);
@@ -271,10 +276,10 @@ export default function App_User() {
   );
   const varietyLabel =
     selectedVarieties.length === 0
-      ? "Select Variety"
+      ? "Select Sub Group"
       : selectedVarieties.length === 1
         ? selectedVarieties[0]
-        : `${selectedVarieties.length} varieties selected`;
+        : `${selectedVarieties.length} sub groups selected`;
 
   const toggleVariety = (variety: string) => {
     setFormData((prev) => {
@@ -450,6 +455,7 @@ export default function App_User() {
       company?: unknown;
       category?: unknown;
       variety?: string | null;
+      sub_group?: string | null;
       role?: unknown;
       role_display?: string;
     };
@@ -476,7 +482,8 @@ export default function App_User() {
       role: roleId,
       company: getId(editableUser.company) || null,
       category: getId(editableUser.category) || null,
-      variety: editableUser.variety || "",
+      // formData.variety is the in-form holder for the user's sub group assignment.
+      variety: editableUser.sub_group || "",
     });
 
     setShowForm(true);
@@ -973,7 +980,7 @@ export default function App_User() {
                 </div>
               </div>
               <div className="au-field au-full">
-                <label className="au-label">Variety</label>
+                <label className="au-label">Sub Group</label>
                 <div className="au-mg-dropdown" ref={varietyRef}>
                   <div
                     className="au-mg-trigger"
@@ -1003,7 +1010,7 @@ export default function App_User() {
                           type="text"
                           value={varietySearch}
                           onChange={(event) => setVarietySearch(event.target.value)}
-                          placeholder="Search variety..."
+                          placeholder="Search sub group..."
                           style={{
                             width: "100%",
                             border: "1px solid #cbd5e1",

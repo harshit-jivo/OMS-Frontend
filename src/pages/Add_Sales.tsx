@@ -1754,7 +1754,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
               <tr>
                 <th>Category</th>
                 <th>Brand</th>
-                <th>Variety</th>
+                <th>Sub Group</th>
                 <th>Type</th>
                 <th>Item</th>
                 <th>Pcs</th>

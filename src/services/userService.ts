@@ -162,7 +162,7 @@ removePartyProduct: async (card_code: string, itemCode: string, category: string
       state: data.state || null,
       states: data.states || [],
       category: data.category || null,
-      variety: data.variety || null
+      sub_group: data.variety || null
     };
 
     const response = await api.post("/auth/users/create/", payload);
@@ -187,7 +187,7 @@ updateUser: async (id: number, data: CreateUserData) => {
     state: states[0] || data.state || null,
     states: states,
     category: data.category || null,
-    variety: data.variety || null,
+    sub_group: data.variety || null,
   };
 
   const response = await api.put(`/auth/users/${id}/`, payload);
