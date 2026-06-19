@@ -140,6 +140,7 @@ export interface OrderItem {
   category: string;
   brand: string;
   variety: string;
+  sub_group?: string;
   item_type: string;
   scheme_name?: string;
   scheme_qty?: number | string;
@@ -452,6 +453,7 @@ export const ordersService = {
       ...formData,
       items: formData.items.map((item) => ({
         ...item,
+        sub_group: item.sub_group ?? item.variety,
         qty: Number(item.qty),
         pcs: Number(item.pcs),
         boxes: Number(item.boxes),
