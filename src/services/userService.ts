@@ -16,6 +16,7 @@ export interface User {
   company?: number | null;
   category?: CategoryOption | null;
   variety?: string | null;
+  extra_pages?: string[];
 }
 
 export interface Option {
@@ -192,6 +193,18 @@ updateUser: async (id: number, data: CreateUserData) => {
 
   const response = await api.put(`/auth/users/${id}/`, payload);
   return response.data;
-}
+},
+
+  getPagePermissions: async (userId: number) => {
+    const response = await api.get(`/auth/users/${userId}/page-permissions/`);
+    return response.data;
+  },
+
+  updatePagePermissions: async (userId: number, extraPages: string[]) => {
+    const response = await api.put(`/auth/users/${userId}/page-permissions/`, {
+      extra_pages: extraPages,
+    });
+    return response.data;
+  }
 
 };
