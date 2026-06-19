@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
+  HiArrowDownTray,
   HiArrowPath,
   HiCube,
   HiDocumentText,
@@ -7,6 +8,8 @@ import {
   HiMagnifyingGlass,
   HiXMark,
 } from "react-icons/hi2";
+import * as XLSX from "xlsx";
+import { saveAs } from "file-saver";
 import { sapService } from "../services/sapService";
 import type { Product } from "../services/sapService";
 import type { Party, SapSalesOrder } from "../services/sapService";
@@ -127,6 +130,9 @@ const getPackLtrs = (pack?: string | null) => {
 const getWarehouseQtyLtrs = (product: StockDisplayProduct) =>
   product.display_stock * getPackLtrs(product.sal_pack_unit);
 
+const getRequiredQtyLtrs = (product: StockDisplayProduct) =>
+  product.display_required_qty * getPackLtrs(product.sal_pack_unit);
+
 const formatOrderDate = (value?: string | null) => {
   if (!value) return "-";
   const parsed = new Date(value);
@@ -232,6 +238,8 @@ export default function Product_Stock() {
   const [searchText, setSearchText] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [categoryDropdownOpen, setCategoryDropdownOpen] = useState(false);
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [typeDropdownOpen, setTypeDropdownOpen] = useState(false);
   const [warehouseFilters, setWarehouseFilters] = useState<string[]>([]);
   const [warehouseSearch, setWarehouseSearch] = useState("");
   const [warehouseDropdownOpen, setWarehouseDropdownOpen] = useState(false);
@@ -243,6 +251,7 @@ export default function Product_Stock() {
   const [error, setError] = useState("");
   const partyDropdownRef = useRef<HTMLDivElement>(null);
   const categoryDropdownRef = useRef<HTMLDivElement>(null);
+  const typeDropdownRef = useRef<HTMLDivElement>(null);
   const warehouseDropdownRef = useRef<HTMLDivElement>(null);
   const stockDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -279,6 +288,12 @@ export default function Product_Stock() {
         !categoryDropdownRef.current.contains(event.target as Node)
       ) {
         setCategoryDropdownOpen(false);
+      }
+      if (
+        typeDropdownRef.current &&
+        !typeDropdownRef.current.contains(event.target as Node)
+      ) {
+        setTypeDropdownOpen(false);
       }
       if (
         warehouseDropdownRef.current &&
@@ -365,6 +380,14 @@ export default function Product_Stock() {
     const values = products
       .map((product) => product.category)
       .filter((value): value is string => Boolean(value));
+
+    return Array.from(new Set(values)).sort();
+  }, [products]);
+
+  const types = useMemo(() => {
+    const values = products
+      .map((product) => product.type)
+      .filter((value): value is string => Boolean(value && value.trim()));
 
     return Array.from(new Set(values)).sort();
   }, [products]);
@@ -656,6 +679,11 @@ export default function Product_Stock() {
     return categories.find((category) => normalizeText(category) === categoryFilter) || "All Categories";
   }, [categories, categoryFilter]);
 
+  const typeFilterLabel = useMemo(() => {
+    if (typeFilter === "all") return "All Types";
+    return types.find((type) => normalizeText(type) === typeFilter) || "All Types";
+  }, [types, typeFilter]);
+
   const toggleStockFilter = (status: StockStatus) => {
     setStockFilters((current) =>
       current.includes(status)
@@ -738,11 +766,13 @@ export default function Product_Stock() {
 
         const matchesCategory =
           categoryFilter === "all" || normalizeText(product.category) === categoryFilter;
+        const matchesType =
+          typeFilter === "all" || normalizeText(product.type) === typeFilter;
         const matchesWarehouse =
           warehouseFilters.length === 0 || warehouseFilters.includes(String(product.warehouse_code || "").trim());
         const matchesStock = shouldGroupWarehouses || stockFilters.length === 0 || stockFilters.includes(status);
 
-        return matchesSearch && matchesPartyOrders && matchesCategory && matchesWarehouse && matchesStock;
+        return matchesSearch && matchesPartyOrders && matchesCategory && matchesType && matchesWarehouse && matchesStock;
       });
 
     const displayProducts = shouldGroupWarehouses
@@ -842,6 +872,7 @@ export default function Product_Stock() {
       });
   }, [
     categoryFilter,
+    typeFilter,
     partyOrderProducts,
     products,
     searchText,
@@ -863,6 +894,7 @@ export default function Product_Stock() {
 
         current.totalStock += stock;
         current.pendingRequired += pendingQty;
+        current.pendingRequiredLtrs += getRequiredQtyLtrs(product);
         current.leftOverStock += leftOverStock;
         current[status] += 1;
         if (product.item_code) uniqueProducts.add(`${product.item_code}-${product.category ?? ""}`);
@@ -871,6 +903,7 @@ export default function Product_Stock() {
       {
         totalStock: 0,
         pendingRequired: 0,
+        pendingRequiredLtrs: 0,
         leftOverStock: 0,
         shortage: 0,
         out: 0,
@@ -888,7 +921,54 @@ export default function Product_Stock() {
   useEffect(() => {
     setCurrentPage(1);
     setExpandedDemandKey("");
-  }, [categoryFilter, searchText, selectedPartyCodes, selectedProductCode, stockFilters, warehouseFilters]);
+  }, [categoryFilter, typeFilter, searchText, selectedPartyCodes, selectedProductCode, stockFilters, warehouseFilters]);
+
+  const hasSelectedSalesOrders = Object.keys(selectedSalesOrders).length > 0;
+
+  const downloadSelectedOrdersExcel = () => {
+    if (!hasSelectedSalesOrders || filteredProducts.length === 0) return;
+
+    const excelData = filteredProducts.map((product) => {
+      const stock = product.display_stock;
+      const leftOverStock = product.display_left_over_stock;
+      return {
+        "Item Code": product.item_code || "",
+        Product: product.item_name || "",
+        Category: product.category || "",
+        Type: product.type || "",
+        Pack: product.sal_pack_unit ?? "",
+        "Warehouse Stock": stock,
+        "Warehouse Qty Ltrs": Math.round(getWarehouseQtyLtrs(product)),
+        "Order Required Qty": product.display_required_qty,
+        "Order Required Qty Ltrs": Math.round(getRequiredQtyLtrs(product)),
+        "Left Over": leftOverStock,
+        Status: getStatusLabel(getStockStatus(stock, leftOverStock)),
+      };
+    });
+
+    excelData.push({
+      "Item Code": "",
+      Product: "",
+      Category: "",
+      Type: "",
+      Pack: "",
+      "Warehouse Stock": summary.totalStock,
+      "Warehouse Qty Ltrs": "" as unknown as number,
+      "Order Required Qty": summary.pendingRequired,
+      "Order Required Qty Ltrs": Math.round(summary.pendingRequiredLtrs),
+      "Left Over": summary.leftOverStock,
+      Status: "TOTAL",
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(excelData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Selected SO Stock");
+    const excelBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+    const file = new Blob([excelBuffer], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    saveAs(file, `Selected_SO_Stock_${new Date().toISOString().split("T")[0]}.xlsx`);
+  };
 
   const totalPages = Math.max(1, Math.ceil(filteredProducts.length / ITEMS_PER_PAGE));
   const pageStart = (currentPage - 1) * ITEMS_PER_PAGE;
@@ -907,18 +987,31 @@ export default function Product_Stock() {
           <p className="ps-subtitle">HANA stock, open order demand, and left-over quantity by warehouse.</p>
         </div>
 
-        <button
-          className="ps-refresh"
-          type="button"
-          onClick={() => {
-            void fetchProducts();
-            void fetchOpenParties();
-          }}
-          disabled={loading || partyOrdersLoading || productOrdersLoading}
-        >
-          <HiArrowPath />
-          {loading || partyOrdersLoading || productOrdersLoading ? "Refreshing" : "Refresh"}
-        </button>
+        <div className="ps-header-actions">
+          {hasSelectedSalesOrders && (
+            <button
+              className="ps-refresh ps-download"
+              type="button"
+              onClick={downloadSelectedOrdersExcel}
+              disabled={loading || partyOrdersLoading || productOrdersLoading || filteredProducts.length === 0}
+            >
+              <HiArrowDownTray />
+              Download Excel
+            </button>
+          )}
+          <button
+            className="ps-refresh"
+            type="button"
+            onClick={() => {
+              void fetchProducts();
+              void fetchOpenParties();
+            }}
+            disabled={loading || partyOrdersLoading || productOrdersLoading}
+          >
+            <HiArrowPath />
+            {loading || partyOrdersLoading || productOrdersLoading ? "Refreshing" : "Refresh"}
+          </button>
+        </div>
       </div>
 
       <section className="ps-summary">
@@ -937,6 +1030,12 @@ export default function Product_Stock() {
           <span>Order Required Qty</span>
           <strong>{formatQuantity(summary.pendingRequired)}</strong>
         </div>
+        {Object.keys(selectedSalesOrders).length > 0 && (
+          <div className="ps-card ps-card-required">
+            <span>Order Required Qty Ltrs</span>
+            <strong>{formatRoundedQuantity(summary.pendingRequiredLtrs)}</strong>
+          </div>
+        )}
         <div className="ps-card ps-card-danger">
           <span>Shortage</span>
           <strong>{summary.shortage}</strong>
@@ -1129,6 +1228,64 @@ export default function Product_Stock() {
                   ))
                 ) : (
                   <div className="ps-warehouse-empty">No category found</div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div
+          className={`ps-warehouse-dropdown${typeDropdownOpen ? " open" : ""}`}
+          ref={typeDropdownRef}
+        >
+          <button
+            type="button"
+            className="ps-warehouse-trigger"
+            onClick={() => setTypeDropdownOpen((open) => !open)}
+          >
+            <span>{typeFilterLabel}</span>
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+              <path
+                d="M3 4.5L6 7.5L9 4.5"
+                stroke="#64748b"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+
+          {typeDropdownOpen && (
+            <div className="ps-warehouse-menu">
+              <div className="ps-warehouse-options">
+                <button
+                  type="button"
+                  className={`ps-warehouse-option${typeFilter === "all" ? " is-selected" : ""}`}
+                  onClick={() => {
+                    setTypeFilter("all");
+                    setTypeDropdownOpen(false);
+                  }}
+                >
+                  All Types
+                </button>
+                {types.length > 0 ? (
+                  types.map((type) => (
+                    <button
+                      type="button"
+                      key={type}
+                      className={`ps-warehouse-option${
+                        normalizeText(type) === typeFilter ? " is-selected" : ""
+                      }`}
+                      onClick={() => {
+                        setTypeFilter(normalizeText(type));
+                        setTypeDropdownOpen(false);
+                      }}
+                    >
+                      {type}
+                    </button>
+                  ))
+                ) : (
+                  <div className="ps-warehouse-empty">No type found</div>
                 )}
               </div>
             </div>
@@ -1398,6 +1555,7 @@ export default function Product_Stock() {
                   <th>Warehouse Stock</th>
                   <th>Warehouse Qty Ltrs</th>
                   <th>Order Required Qty</th>
+                  <th>Order Required Qty Ltrs</th>
                   <th>Left Over</th>
                   <th>Status</th>
                 </tr>
@@ -1415,6 +1573,7 @@ export default function Product_Stock() {
                   const isProductDemandLoading =
                     productOrdersLoading && selectedProductCode === String(product.item_code || "").trim();
                   const warehouseQtyLtrs = getWarehouseQtyLtrs(product);
+                  const requiredQtyLtrs = getRequiredQtyLtrs(product);
 
                   return (
                     <Fragment key={product.display_key}>
@@ -1457,6 +1616,7 @@ export default function Product_Stock() {
                       <td className="ps-stock">
                         <span className="ps-required-qty">{formatQuantity(pendingRequiredQty)}</span>
                       </td>
+                      <td className="ps-stock">{formatRoundedQuantity(requiredQtyLtrs)}</td>
                       <td className={`ps-stock ${leftOverStock < 0 ? "ps-stock-negative" : ""}`}>
                         {formatQuantity(leftOverStock)}
                       </td>
@@ -1468,7 +1628,7 @@ export default function Product_Stock() {
                     </tr>
                     {canShowPartyDemand && isDemandExpanded && (
                       <tr className="ps-demand-detail-row">
-                        <td colSpan={9}>
+                        <td colSpan={10}>
                           <div className="ps-demand-detail-panel">
                             <div className="ps-demand-detail-title">Ordered by</div>
                             <div className="ps-demand-detail-list">
