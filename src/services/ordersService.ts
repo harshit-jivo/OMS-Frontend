@@ -50,6 +50,32 @@ export type OrderFlowConfig = {
   updated_by?: string | null;
 };
 
+export type PartyFlowConfig = {
+  card_code: string;
+  card_name?: string;
+  category: string;
+  flow_type: string;
+  flow_label?: string;
+  rate_approval_enabled: boolean;
+  billing_enabled: boolean;
+  auditor_enabled: boolean;
+  rate_conditions: string[];
+  updated_at?: string | null;
+  updated_by?: string | null;
+};
+
+export type PartyFlowTarget = {
+  card_code: string;
+  category: string;
+};
+
+export type PartyFlowSettings = {
+  rate_approval_enabled: boolean;
+  billing_enabled: boolean;
+  auditor_enabled: boolean;
+  rate_conditions: string[];
+};
+
 export type OrderStatusUpdateResponse = {
   message?: string;
   order_id?: number;
@@ -382,6 +408,32 @@ export const ordersService = {
   updateOrderFlowConfig: async (config: OrderFlowConfig) => {
     const response = await api.post("/orders/flow-config/", config);
     return response.data as { success?: boolean; message?: string; data?: OrderFlowConfig } | OrderFlowConfig;
+  },
+
+  getPartyFlowConfigs: async () => {
+    const response = await api.get("/orders/party-flow-config/");
+    return response.data as {
+      success?: boolean;
+      data: PartyFlowConfig[];
+      flow_options?: OrderFlowTypeOption[];
+      condition_options?: OrderFlowConditionOption[];
+    };
+  },
+
+  savePartyFlowConfig: async (parties: PartyFlowTarget[], flowType: string, settings: PartyFlowSettings) => {
+    const response = await api.post("/orders/party-flow-config/", {
+      parties,
+      flow_type: flowType,
+      ...settings,
+    });
+    return response.data as { success?: boolean; message?: string; data?: PartyFlowConfig[] };
+  },
+
+  deletePartyFlowConfig: async (parties: PartyFlowTarget[], flowType: string) => {
+    const response = await api.delete("/orders/party-flow-config/", {
+      data: { parties, flow_type: flowType },
+    });
+    return response.data as { success?: boolean; message?: string };
   },
 
   saveStaffProductRates: async (
