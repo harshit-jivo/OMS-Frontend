@@ -44,7 +44,7 @@ function ToggleRow({ title, subtitle, checked, disabled, onChange }: ToggleRowPr
 
 export default function Page_Permissions() {
   const [users, setUsers] = useState<User[]>([]);
-  const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
+  const [selectedUserIds, setSelectedUserIds] = useState<number[]>([]);
   const [pages, setPages] = useState<string[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [userSearch, setUserSearch] = useState("");
@@ -83,11 +83,15 @@ export default function Page_Permissions() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const selectedUser = useMemo(
-    () => users.find((user) => user.id === selectedUserId) || null,
-    [users, selectedUserId]
+  const selectedUsers = useMemo(
+    () => users.filter((user) => selectedUserIds.includes(user.id)),
+    [users, selectedUserIds]
   );
-  const selectedIsAdmin = isAdminRole(selectedUser?.role);
+  const nonAdminSelected = useMemo(
+    () => selectedUsers.filter((user) => !isAdminRole(user.role)),
+    [selectedUsers]
+  );
+  const adminSelectedCount = selectedUsers.length - nonAdminSelected.length;
 
   const filteredUsers = useMemo(() => {
     const term = userSearch.trim().toLowerCase();
@@ -99,12 +103,27 @@ export default function Page_Permissions() {
     );
   }, [users, userSearch]);
 
-  const handleSelectUser = (user: User) => {
-    setSelectedUserId(user.id);
-    const granted = Array.isArray(user.extra_pages) ? user.extra_pages : [];
-    setPages(granted.filter((key) => GRANTABLE_PAGE_KEYS.includes(key)));
-    setMenuOpen(false);
-    setUserSearch("");
+  // Page set = union of the selected non-admin users' current grants, so the
+  // admin starts from what those users already have.
+  const computePagesFor = (ids: number[]) => {
+    const granted = new Set<string>();
+    users.forEach((user) => {
+      if (!ids.includes(user.id) || isAdminRole(user.role)) return;
+      (user.extra_pages || []).forEach((key) => {
+        if (GRANTABLE_PAGE_KEYS.includes(key)) granted.add(key);
+      });
+    });
+    return Array.from(granted);
+  };
+
+  const toggleUser = (user: User) => {
+    setSelectedUserIds((current) => {
+      const next = current.includes(user.id)
+        ? current.filter((id) => id !== user.id)
+        : [...current, user.id];
+      setPages(computePagesFor(next));
+      return next;
+    });
     setError("");
   };
 
@@ -118,15 +137,27 @@ export default function Page_Permissions() {
     setPages(grantAll ? [...GRANTABLE_PAGE_KEYS] : []);
   };
 
+  const triggerLabel = () => {
+    if (selectedUsers.length === 0) return "Choose users";
+    if (selectedUsers.length === 1) {
+      const user = selectedUsers[0];
+      return `${user.name || user.username}${user.role ? ` · ${user.role}` : ""}`;
+    }
+    return `${selectedUsers.length} users selected`;
+  };
+
   const handleSave = async () => {
-    if (!selectedUser || selectedIsAdmin) return;
+    if (nonAdminSelected.length === 0) return;
     setSaving(true);
     setError("");
     try {
-      await userService.updatePagePermissions(selectedUser.id, pages);
+      await Promise.all(
+        nonAdminSelected.map((user) => userService.updatePagePermissions(user.id, pages))
+      );
+      const savedIds = nonAdminSelected.map((user) => user.id);
       setUsers((current) =>
         current.map((user) =>
-          user.id === selectedUser.id ? { ...user, extra_pages: pages } : user
+          savedIds.includes(user.id) ? { ...user, extra_pages: pages } : user
         )
       );
       setSuccessVisible(true);
@@ -173,18 +204,14 @@ export default function Page_Permissions() {
         <section className="ofs-card">
           <div className="ofs-card-head">
             <span className="ofs-card-mark" />
-            <h2>Select User</h2>
+            <h2>Select Users</h2>
           </div>
 
           <div className="ofs-flow-select" ref={menuRef}>
             <button type="button" className="ofs-flow-trigger" onClick={() => setMenuOpen((open) => !open)}>
               <span>
-                <small>Selected User</small>
-                <strong>
-                  {selectedUser
-                    ? `${selectedUser.name || selectedUser.username}${selectedUser.role ? ` · ${selectedUser.role}` : ""}`
-                    : "Choose a user"}
-                </strong>
+                <small>Selected Users</small>
+                <strong>{triggerLabel()}</strong>
               </span>
               <HiChevronDown className={menuOpen ? "is-open" : ""} />
             </button>
@@ -204,28 +231,56 @@ export default function Page_Permissions() {
                   {filteredUsers.length === 0 ? (
                     <div className="pp-user-empty">No users found</div>
                   ) : (
-                    filteredUsers.map((user) => (
-                      <button
-                        key={user.id}
-                        type="button"
-                        className={`ofs-flow-option${user.id === selectedUserId ? " is-selected" : ""}`}
-                        onClick={() => handleSelectUser(user)}
-                      >
-                        <span className="pp-user-option-text">
-                          <span>{user.name || user.username}</span>
-                          <small>
-                            {user.username}
-                            {user.role ? ` · ${user.role}` : ""}
-                          </small>
-                        </span>
-                        {user.id === selectedUserId ? <HiCheckCircle /> : null}
-                      </button>
-                    ))
+                    filteredUsers.map((user) => {
+                      const checked = selectedUserIds.includes(user.id);
+                      return (
+                        <button
+                          key={user.id}
+                          type="button"
+                          className={`ofs-flow-option${checked ? " is-selected" : ""}`}
+                          onClick={() => toggleUser(user)}
+                        >
+                          <span className="pp-user-option-text">
+                            <span>{user.name || user.username}</span>
+                            <small>
+                              {user.username}
+                              {user.role ? ` · ${user.role}` : ""}
+                            </small>
+                          </span>
+                          {checked ? <HiCheckCircle /> : null}
+                        </button>
+                      );
+                    })
                   )}
                 </div>
               </div>
             ) : null}
           </div>
+
+          {selectedUsers.length > 0 ? (
+            <div className="pp-chip-wrap">
+              {selectedUsers.map((user) => (
+                <span key={user.id} className="pp-chip">
+                  {user.name || user.username}
+                  <button
+                    type="button"
+                    className="pp-chip-remove"
+                    onClick={() => toggleUser(user)}
+                    aria-label={`Remove ${user.name || user.username}`}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : null}
+
+          {selectedUsers.length > 1 ? (
+            <p className="pp-hint">
+              Saving applies the selected pages to all {selectedUsers.length} users (replacing
+              their current access).
+            </p>
+          ) : null}
         </section>
 
         <section className="ofs-card">
@@ -233,28 +288,36 @@ export default function Page_Permissions() {
             <span className="ofs-card-mark" />
             <h2>Quick Actions</h2>
           </div>
-          {!selectedUser ? (
-            <p className="pp-hint">Select a user to manage their page access.</p>
-          ) : selectedIsAdmin ? (
+          {selectedUsers.length === 0 ? (
+            <p className="pp-hint">Select one or more users to manage their page access.</p>
+          ) : nonAdminSelected.length === 0 ? (
             <div className="pp-admin-note">
               <HiShieldCheck />
               <span>
-                <strong>{selectedUser.name || selectedUser.username}</strong> is an admin and already has full access
-                to every page.
+                Admins already have full access to every page. Select a non-admin user to manage
+                access.
               </span>
             </div>
           ) : (
-            <div className="pp-quick-actions">
-              <button type="button" className="ofs-secondary" onClick={() => setAll(true)}>
-                Grant all pages
-              </button>
-              <button type="button" className="ofs-secondary" onClick={() => setAll(false)}>
-                Clear all
-              </button>
-              <span className="pp-count">
-                {pages.length} / {GRANTABLE_ADMIN_PAGES.length} granted
-              </span>
-            </div>
+            <>
+              {adminSelectedCount > 0 ? (
+                <p className="pp-hint">
+                  {adminSelectedCount} admin{adminSelectedCount > 1 ? "s" : ""} in your selection
+                  will be skipped (they already have full access).
+                </p>
+              ) : null}
+              <div className="pp-quick-actions">
+                <button type="button" className="ofs-secondary" onClick={() => setAll(true)}>
+                  Grant all pages
+                </button>
+                <button type="button" className="ofs-secondary" onClick={() => setAll(false)}>
+                  Clear all
+                </button>
+                <span className="pp-count">
+                  {pages.length} / {GRANTABLE_ADMIN_PAGES.length} granted
+                </span>
+              </div>
+            </>
           )}
         </section>
 
@@ -264,8 +327,8 @@ export default function Page_Permissions() {
             <h2>Allowed Pages</h2>
           </div>
 
-          {!selectedUser ? (
-            <p className="pp-hint">Pick a user from the dropdown above to choose which admin pages they can open.</p>
+          {nonAdminSelected.length === 0 ? (
+            <p className="pp-hint">Pick one or more non-admin users from the dropdown above to choose which admin pages they can open.</p>
           ) : (
             <div className="ofs-condition-grid">
               {GRANTABLE_ADMIN_PAGES.map((page) => (
@@ -273,8 +336,7 @@ export default function Page_Permissions() {
                   key={page.key}
                   title={page.label}
                   subtitle={page.path}
-                  checked={selectedIsAdmin || pages.includes(page.key)}
-                  disabled={selectedIsAdmin}
+                  checked={pages.includes(page.key)}
                   onChange={() => togglePage(page.key)}
                 />
               ))}
@@ -288,7 +350,7 @@ export default function Page_Permissions() {
           type="button"
           className="ofs-save"
           onClick={() => void handleSave()}
-          disabled={saving || !selectedUser || selectedIsAdmin}
+          disabled={saving || nonAdminSelected.length === 0}
         >
           {saving ? "Saving..." : "Save Access"}
         </button>
@@ -301,7 +363,10 @@ export default function Page_Permissions() {
               <HiCheck />
             </div>
             <h2>Access Saved</h2>
-            <p>Page access for {selectedUser?.name || selectedUser?.username} updated successfully.</p>
+            <p>
+              Page access updated successfully for {nonAdminSelected.length} user
+              {nonAdminSelected.length > 1 ? "s" : ""}.
+            </p>
             <div className="ofs-modal-actions">
               <button type="button" className="ofs-primary" onClick={() => setSuccessVisible(false)}>
                 Done

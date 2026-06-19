@@ -71,6 +71,46 @@
   line-height: 1.5;
 }
 
+.pp-chip-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.pp-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  background: #eff6ff;
+  border: 1px solid #dbeafe;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1d4ed8;
+}
+
+.pp-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 9999px;
+  background: transparent;
+  color: #1d4ed8;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.pp-chip-remove:hover {
+  background: #dbeafe;
+}
+
 .pp-quick-actions {
   display: flex;
   flex-wrap: wrap;
