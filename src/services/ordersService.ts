@@ -222,6 +222,7 @@ export interface Order {
   created_by: string | number;
   total_amount: number;
   sap_doc_number?: string;
+  quotation_cancelled?: boolean;
   created_by_name?: string;
   party_state?: string;
   decision_type?: "accepted" | "rejected";
@@ -231,6 +232,14 @@ export interface Order {
 export interface OrderStatus {
   id: number;
   name: string;
+}
+
+export interface QuotationStatus {
+  doc_entry: number | null;
+  doc_num: number | null;
+  doc_status: string | null;
+  canceled: string | null;
+  is_open: boolean;
 }
 
 export interface OrderLog {
@@ -500,6 +509,23 @@ export const ordersService = {
   getOrderLogs: async (orderId: number) => {
     const response = await api.get(`/orders/${orderId}/orderlogs/`);
     return response.data as OrderLog[];
+  },
+
+  // Batch lookup of SAP Sales Quotation status for the given (completed) orders.
+  // Used to show the "Cancel Sales Quotation" button only while the quotation is
+  // still open in SAP. Returns a map keyed by order id (as string).
+  getQuotationStatus: async (orderIds: number[]) => {
+    if (!orderIds.length) return {} as Record<string, QuotationStatus>;
+    const response = await api.get("/orders/quotation-status/", {
+      params: { order_ids: orderIds.join(",") },
+    });
+    return (response.data?.statuses ?? {}) as Record<string, QuotationStatus>;
+  },
+
+  // Cancel the SAP Sales Quotation for a completed order (and mirror it in OMS).
+  cancelSalesQuotation: async (orderId: number) => {
+    const response = await api.post(`/orders/${orderId}/cancel-quotation/`);
+    return response.data as { success: boolean; message: string; doc_num?: number };
   },
 
   getOrderStockCheck: async () => {
