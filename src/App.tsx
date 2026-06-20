@@ -29,6 +29,7 @@ import Order_Stock_Check from "./pages/Order_Stock_Check";
 import Product_Stock from "./pages/Product_Stock";
 import Order_Flow_Settings from "./pages/Order_Flow_Settings";
 import Page_Permissions from "./pages/Page_Permissions";
+import Sales_Quotation from "./pages/Sales_Quotation";
 
 function App() {
   return (
@@ -283,6 +284,15 @@ function App() {
           element={
             <Sidebar>
               <Page_Permissions />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Sales_Quotation"
+          element={
+            <Sidebar>
+              <Sales_Quotation />
             </Sidebar>
           }
         />

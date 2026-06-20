@@ -331,6 +331,15 @@ export default function Sidebar({ children }: SidebarProps) {
             </li>
           )}
 
+          {isAdmin && (
+            <li className={location.pathname === "/Sales_Quotation" ? "active" : ""}>
+              <Link to="/Sales_Quotation" onClick={closeSidebar}>
+                <SidebarIcon><HiReceiptPercent /></SidebarIcon>
+                Sales Quotation
+              </Link>
+            </li>
+          )}
+
           {canSee("Sap_Sync") && (
             <li className={location.pathname === "/Sap_Sync" ? "active" : ""}>
               <Link to="/Sap_Sync" onClick={closeSidebar}>

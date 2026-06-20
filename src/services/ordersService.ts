@@ -242,6 +242,22 @@ export interface QuotationStatus {
   is_open: boolean;
 }
 
+export type QuotationStatusLabel = "CANCELLED" | "OPEN" | "CLOSED" | "UNKNOWN";
+
+export interface QuotationOverviewItem {
+  id: number;
+  order_number: string;
+  card_code: string;
+  card_name: string;
+  created_at: string;
+  doc_num: number | string | null;
+  doc_entry: number | null;
+  quotation_cancelled: boolean;
+  quotation_cancelled_at: string | null;
+  quotation_cancelled_by: string | null;
+  quotation_status: QuotationStatusLabel;
+}
+
 export interface OrderLog {
   id: number;
   status_name: string;
@@ -526,6 +542,12 @@ export const ordersService = {
   cancelSalesQuotation: async (orderId: number) => {
     const response = await api.post(`/orders/${orderId}/cancel-quotation/`);
     return response.data as { success: boolean; message: string; doc_num?: number };
+  },
+
+  // Admin overview: all completed orders with their sales-quotation status.
+  getQuotationOverview: async () => {
+    const response = await api.get("/orders/quotation-overview/");
+    return (response.data?.data ?? []) as QuotationOverviewItem[];
   },
 
   getOrderStockCheck: async () => {
