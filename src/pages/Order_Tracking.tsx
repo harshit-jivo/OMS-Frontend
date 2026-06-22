@@ -909,6 +909,12 @@ export default function Order_Tracking() {
               <p className="tracker-label">PO Number</p>
               <p>{selectedOrder.po_number || "-"}</p>
             </div>
+            {selectedOrder.remarks?.trim() ? (
+              <div>
+                <p className="tracker-label">Comment</p>
+                <p>{selectedOrder.remarks}</p>
+              </div>
+            ) : null}
           </div>
 
           <div className="tracker-timeline">

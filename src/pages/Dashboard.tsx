@@ -1440,6 +1440,12 @@ export default function Dashboard() {
                 <span>Total Amount</span>
                 <strong>{fmtCurrency(detailOrder.total_amount)}</strong>
               </div>
+              {detailOrder.remarks?.trim() ? (
+                <div className="db-order-detail-field">
+                  <span>Comment</span>
+                  <strong>{detailOrder.remarks}</strong>
+                </div>
+              ) : null}
             </div>
 
             <div className="db-order-detail-items-head">
