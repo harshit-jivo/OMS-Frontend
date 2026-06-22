@@ -136,6 +136,107 @@
           color: #991b1b;
           white-space: nowrap;
         }
+        .vo-sq-cancel-btn {
+          margin-top: 2px;
+          padding: 2px 8px;
+          border: 1px solid #fecaca;
+          border-radius: 4px;
+          background: #fef2f2;
+          color: #b91c1c;
+          font-size: 10px;
+          font-weight: 600;
+          line-height: 1.6;
+          cursor: pointer;
+          white-space: nowrap;
+          transition: background .15s, border-color .15s;
+        }
+        .vo-sq-cancel-btn:hover {
+          background: #fee2e2;
+          border-color: #fca5a5;
+        }
+        /* Full-width label variant for the detail header where there's room */
+        .vo-sq-cancel-btn-wide {
+          padding: 4px 12px;
+          font-size: 11px;
+        }
+        .vo-sq-cancelled {
+          font-size: 10px;
+          font-weight: 700;
+          color: #b91c1c;
+          white-space: nowrap;
+        }
+        .vo-modal-overlay {
+          position: fixed;
+          inset: 0;
+          background: rgba(15, 23, 42, .5);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 1000;
+          padding: 16px;
+        }
+        .vo-modal {
+          background: #fff;
+          border-radius: 12px;
+          padding: 24px;
+          width: 100%;
+          max-width: 420px;
+          box-shadow: 0 20px 40px rgba(0, 0, 0, .2);
+        }
+        .vo-modal-title {
+          font-size: 16px;
+          font-weight: 700;
+          color: #0f172a;
+          margin-bottom: 8px;
+        }
+        .vo-modal-msg {
+          font-size: 13px;
+          color: #475569;
+          line-height: 1.5;
+          margin: 0 0 12px;
+        }
+        .vo-modal-error {
+          font-size: 12px;
+          color: #b91c1c;
+          background: #fef2f2;
+          border: 1px solid #fecaca;
+          border-radius: 6px;
+          padding: 8px 10px;
+          margin: 0 0 12px;
+          word-break: break-word;
+        }
+        .vo-modal-actions {
+          display: flex;
+          justify-content: flex-end;
+          gap: 10px;
+          margin-top: 8px;
+        }
+        .vo-modal-btn-secondary,
+        .vo-modal-btn-danger {
+          padding: 8px 16px;
+          border-radius: 8px;
+          font-size: 13px;
+          font-weight: 600;
+          cursor: pointer;
+          border: 1px solid transparent;
+        }
+        .vo-modal-btn-secondary {
+          background: #f1f5f9;
+          color: #334155;
+          border-color: #e2e8f0;
+        }
+        .vo-modal-btn-secondary:disabled,
+        .vo-modal-btn-danger:disabled {
+          opacity: .6;
+          cursor: not-allowed;
+        }
+        .vo-modal-btn-danger {
+          background: #dc2626;
+          color: #fff;
+        }
+        .vo-modal-btn-danger:hover:not(:disabled) {
+          background: #b91c1c;
+        }
         .vo-rejected-by-detail {
           color: #fecaca;
         }
@@ -210,6 +311,28 @@
           transition: all .15s;
         }
         .vo-d-export:hover { background: #dcfce7; border-color: #86efac; box-shadow: 0 1px 3px rgba(22,163,74,.12); }
+
+        .vo-d-nav-actions {
+          display: inline-flex; align-items: center; gap: 10px;
+        }
+        .vo-d-cancel-sq {
+          display: inline-flex; align-items: center; gap: 6px; justify-content: center;
+          background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; border-radius: var(--radius-sm, 8px);
+          height: var(--btn-h, 40px); padding: 0 16px; font-size: var(--font-ui, 13px); font-weight: 600;
+          font-family: 'Inter', sans-serif; cursor: pointer;
+          transition: all .15s;
+        }
+        .vo-d-cancel-sq:hover { background: #fee2e2; border-color: #fca5a5; box-shadow: 0 1px 3px rgba(185,28,28,.12); }
+        .vo-sq-cancelled-nav {
+          font-size: 12px;
+          padding: 0 12px;
+          display: inline-flex;
+          align-items: center;
+          height: var(--btn-h, 40px);
+          border: 1px solid #fecaca;
+          border-radius: var(--radius-sm, 8px);
+          background: #fef2f2;
+        }
 
         /* ── Order Info Card ── */
         .vo-d-header-card {

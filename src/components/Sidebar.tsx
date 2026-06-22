@@ -20,6 +20,7 @@ import {
   HiPlusCircle,
   HiPresentationChartLine,
   HiReceiptPercent,
+  HiShieldCheck,
   HiShoppingCart,
   HiUserCircle,
   HiUserGroup,
@@ -57,6 +58,14 @@ export default function Sidebar({ children }: SidebarProps) {
   );
   const [userRole, setUserRole] = useState(localStorage.getItem("role") || "");
   const [userName, setUserName] = useState(localStorage.getItem("name") || localStorage.getItem("username") || "");
+  const [extraPages, setExtraPages] = useState<string[]>(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem("extra_pages") || "[]");
+      return Array.isArray(stored) ? stored : [];
+    } catch {
+      return [];
+    }
+  });
   const [reportsOpen, setReportsOpen] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const location = useLocation();
@@ -71,6 +80,10 @@ export default function Sidebar({ children }: SidebarProps) {
     normalizedRole === "rate approver" ||
     normalizedRole === "rateapprover" ||
     normalizedRole === "approver";
+  const isAdmin = userRole?.toLowerCase() === "admin";
+  // An admin page link shows for admins, or for any user explicitly granted it
+  // on the Permissions page.
+  const canSee = (pageKey: string) => isAdmin || extraPages.includes(pageKey);
 
   const closeSidebar = () => {
     setMenuOpen(false);
@@ -94,10 +107,13 @@ export default function Sidebar({ children }: SidebarProps) {
       const role = data.role || data.role_name || data.role_display || "";
       const roleName = typeof role === "object" ? role.name : role;
       const name = data.full_name || data.name || data.username || "";
+      const grantedPages = Array.isArray(data.extra_pages) ? data.extra_pages : [];
       setUserRole(roleName);
       setUserName(name);
+      setExtraPages(grantedPages);
       localStorage.setItem("role", roleName);
       localStorage.setItem("name", name);
+      localStorage.setItem("extra_pages", JSON.stringify(grantedPages));
     } catch (error) {
       console.error("Failed to fetch user:", error);
     }
@@ -307,7 +323,7 @@ export default function Sidebar({ children }: SidebarProps) {
             </li>
           )}
 
-          {(userRole?.toLowerCase() === "admin") && (
+          {canSee("App_User") && (
             <li className={location.pathname === "/App_User" ? "active" : ""}>
               <Link to="/App_User" onClick={closeSidebar}>
                 <SidebarIcon><HiUsers /></SidebarIcon>
@@ -316,67 +332,76 @@ export default function Sidebar({ children }: SidebarProps) {
             </li>
           )}
 
-          {(userRole?.toLowerCase() === "admin") && (
+          {isAdmin && (
+            <li className={location.pathname === "/Page_Permissions" ? "active" : ""}>
+              <Link to="/Page_Permissions" onClick={closeSidebar}>
+                <SidebarIcon><HiShieldCheck /></SidebarIcon>
+                Permissions
+              </Link>
+            </li>
+          )}
 
-            <>
+          {isAdmin && (
+            <li className={location.pathname === "/Sales_Quotation" ? "active" : ""}>
+              <Link to="/Sales_Quotation" onClick={closeSidebar}>
+                <SidebarIcon><HiReceiptPercent /></SidebarIcon>
+                Sales Quotation
+              </Link>
+            </li>
+          )}
+
+          {canSee("Sap_Sync") && (
             <li className={location.pathname === "/Sap_Sync" ? "active" : ""}>
               <Link to="/Sap_Sync" onClick={closeSidebar}>
                 <SidebarIcon><HiArrowPath /></SidebarIcon>
                 SAP Sync
               </Link>
             </li>
+          )}
 
-             <li className={location.pathname === "/Party_Assignment" ? "active" : ""}>
+          {canSee("Party_Assignment") && (
+            <li className={location.pathname === "/Party_Assignment" ? "active" : ""}>
               <Link to="/Party_Assignment" onClick={closeSidebar}>
                 <SidebarIcon><HiUserGroup /></SidebarIcon>
                 Party Assignment
               </Link>
             </li>
+          )}
 
+          {canSee("Party_Product_Assignment") && (
             <li className={location.pathname === "/Party_Product_Assignment" ? "active" : ""}>
               <Link to="/Party_Product_Assignment" onClick={closeSidebar}>
                 <SidebarIcon><HiCube /></SidebarIcon>
                  Party Product Assignment
               </Link>
             </li>
+          )}
 
-
-             <li className={location.pathname === "/Add_Scheme" ? "active" : ""}>
+          {canSee("Add_Scheme") && (
+            <li className={location.pathname === "/Add_Scheme" ? "active" : ""}>
               <Link to="/Add_Scheme" onClick={closeSidebar}>
                 <SidebarIcon><HiReceiptPercent /></SidebarIcon>
                 Add Scheme
               </Link>
             </li>
+          )}
 
-            {/* <li className={location.pathname === "/Staff" ? "active" : ""}>
-              <Link to="/Staff" onClick={closeSidebar}>
-                <SidebarIcon><HiIdentification /></SidebarIcon>
-                Staff Orders
-              </Link>
-            </li> */}
-
-            {/* <li className={location.pathname === "/Staff_Rate_Assignment" ? "active" : ""}>
-              <Link to="/Staff_Rate_Assignment" onClick={closeSidebar}>
-                <SidebarIcon><HiCurrencyRupee /></SidebarIcon>
-                Staff Rate Assignment
-              </Link>
-            </li> */}
-
+          {canSee("Order_Flow_Settings") && (
             <li className={location.pathname === "/Order_Flow_Settings" ? "active" : ""}>
               <Link to="/Order_Flow_Settings" onClick={closeSidebar}>
                 <SidebarIcon><HiCog6Tooth /></SidebarIcon>
                 Order Flow Settings
               </Link>
             </li>
+          )}
 
+          {canSee("Product_Stock") && (
             <li className={location.pathname === "/Product_Stock" ? "active" : ""}>
               <Link to="/Product_Stock" onClick={closeSidebar}>
                 <SidebarIcon><HiClipboardDocumentList /></SidebarIcon>
                 Stock
               </Link>
             </li>
-
-            </>
           )}
 
           {(userRole?.toLowerCase() === "manager" || userRole?.toLowerCase() == "billing") && (
@@ -470,7 +495,7 @@ export default function Sidebar({ children }: SidebarProps) {
             </>
           )}
 
-          {(userRole?.toLowerCase() ===  "billing" || userRole?.toLowerCase() === "admin") && (
+          {(userRole?.toLowerCase() ===  "billing" || canSee("Reports")) && (
             <li>
               <div className="dropdown-toggle" onClick={() => setReportsOpen(!reportsOpen)}>
                 <SidebarIcon><HiChartBar /></SidebarIcon>
@@ -563,6 +588,7 @@ export default function Sidebar({ children }: SidebarProps) {
                 localStorage.removeItem("name");
                 localStorage.removeItem("role");
                 localStorage.removeItem("role_display");
+                localStorage.removeItem("extra_pages");
                 localStorage.removeItem("company_id");
                 localStorage.removeItem("company_name");
                 localStorage.removeItem("main_group_id");
