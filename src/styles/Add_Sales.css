@@ -106,7 +106,8 @@ select {
 
 /* ================= INPUT + SELECT ================= */
 .sl-input-wrap input,
-.sl-input-wrap select {
+.sl-input-wrap select,
+.sl-input-wrap textarea {
 width: 100%;
 height: 100%;
 padding: 0;
@@ -116,6 +117,21 @@ font-size: var(--font-ui, 13px);
 background: transparent;
 color: #111827;
 color-scheme: light;
+}
+
+/* ================= TEXTAREA (e.g. Comment) ================= */
+/* The wrap is a fixed single-line height by default; let it grow for a textarea. */
+.sl-input-wrap-textarea {
+height: auto;
+align-items: stretch;
+padding: 8px 12px;
+}
+.sl-input-wrap textarea {
+height: auto;
+min-height: 46px;
+resize: vertical;
+font-family: inherit;
+line-height: 1.5;
 }
 
 .sl-input-wrap select {

@@ -183,6 +183,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
     Deliverydate: getDefaultDeliveryDate(),
     poNumber: "",
     company: "",
+    comment: "",
   });
 
   const [rows, setRows] = useState<SalesRow[]>([createEmptyRow()]);
@@ -578,6 +579,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
           Deliverydate: isDuplicateMode ? getDefaultDeliveryDate() : order.delivery_date || "",
           poNumber: isDuplicateMode ? "" : order.po_number || "",
           company: order.company ? String(order.company) : "",
+          comment: isDuplicateMode ? "" : order.remarks || "",
         });
         const orderStateCode = order.party_state || "";
         setStateCode(orderStateCode || null);
@@ -687,6 +689,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
           normalizeOptionText(item?.name).includes("jivo wellness"),
         )?.id || "",
       ),
+      comment: "",
     });
 
     setSelectedPartyCategory(userDefaultCategory);
@@ -726,6 +729,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
 
       delivery_date: formData.Deliverydate,
       ...(canEditPoNumber ? { po_number: formData.poNumber.trim() } : {}),
+      remarks: formData.comment.trim(),
       is_foc: isFocOrder,
       company: Number(formData.company),
 
@@ -2295,13 +2299,22 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
             </div>
           </div>
 
-          {/* <div className="sl-field sl-full">
-            <label className="sl-label">Comment</label>
-            <div className="sl-input-wrap">
-              <textarea rows={2} placeholder="Add a note..." />
+          <div className="sl-field sl-full">
+            <label className="sl-label" htmlFor="comment">Comment</label>
+            <div className="sl-input-wrap sl-input-wrap-textarea">
+              <textarea
+                id="comment"
+                name="comment"
+                rows={2}
+                placeholder="Add a note..."
+                value={formData.comment}
+                onChange={(e) =>
+                  setFormData((prev) => ({ ...prev, comment: e.target.value }))
+                }
+              />
               <div className="sl-focus-line" />
             </div>
-          </div> */}
+          </div>
         </div>
 
         <div className="sl-actions">

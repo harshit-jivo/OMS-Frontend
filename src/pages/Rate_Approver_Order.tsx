@@ -481,6 +481,12 @@ export default function RateApproverOrders() {
                 <span className="ao-d-hf-label">Ship To</span>
                 <span className="ao-d-hf-value">{orderDetails.ship_to_address || "-"}</span>
               </div>
+              {orderDetails.remarks?.trim() ? (
+                <div className="ao-d-info-field" style={{ gridColumn: "1 / -1" }}>
+                  <span className="ao-d-hf-label">Comment</span>
+                  <span className="ao-d-hf-value">{orderDetails.remarks}</span>
+                </div>
+              ) : null}
             </div>
           </div>
 

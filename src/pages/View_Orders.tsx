@@ -684,6 +684,12 @@ export default function View_Orders() {
                 <span className="vo-d-hf-label">Ship To</span>
                 <span className="vo-d-hf-value">{orderDetails.ship_to_address || "—"}</span>
               </div>
+              {orderDetails.remarks?.trim() ? (
+                <div className="vo-d-info-field vo-d-info-span2">
+                  <span className="vo-d-hf-label">Comment</span>
+                  <span className="vo-d-hf-value">{orderDetails.remarks}</span>
+                </div>
+              ) : null}
             </div>
           </div>
 
