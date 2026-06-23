@@ -418,26 +418,6 @@ export default function InvoiceReview() {
                           <HiEye aria-hidden="true" />
                           View
                         </button>
-                        {isPendingTab && (
-                          <>
-                            <button
-                              type="button"
-                              className="ir-btn ir-btn-approve ir-btn-sm"
-                              onClick={() => setConfirmApproveRow(row)}
-                            >
-                              <HiCheckCircle aria-hidden="true" />
-                              Approve
-                            </button>
-                            <button
-                              type="button"
-                              className="ir-btn ir-btn-reject ir-btn-sm"
-                              onClick={() => openReject(row)}
-                            >
-                              <HiXCircle aria-hidden="true" />
-                              Reject
-                            </button>
-                          </>
-                        )}
                         {isApprovedTab && (
                           <button
                             type="button"

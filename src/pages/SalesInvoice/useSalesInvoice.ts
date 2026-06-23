@@ -939,10 +939,10 @@ export function useSalesInvoice() {
     };
 
     try {
-      // Post the invoice straight to SAP HANA via the service-layer invoice endpoint.
+      // Store the invoice draft in SAP via the service-layer endpoint (type=DRAFT).
       // A fresh unique U_OMS_REF is stamped on each attempt so the SAP document can be
       // cross-referenced back to OMS (and verified after a -2028 response).
-      const data = await apiFetch<ApiMessageResponse>("/api/service-layer/invoice/", {
+      const data = await apiFetch<ApiMessageResponse>("/api/service-layer/invoice/?type=DRAFT", {
         method: "POST",
         body: JSON.stringify({ ...payload, U_OMS_REF: refId }),
       });

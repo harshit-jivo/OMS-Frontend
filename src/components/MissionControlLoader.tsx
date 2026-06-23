@@ -1,283 +1,341 @@
-import { useEffect, useRef, useState } from "react";
-import type { IconType } from "react-icons";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   HiArrowPath,
   HiBuildingOffice2,
   HiCheckCircle,
-  HiCloudArrowUp,
-  HiCpuChip,
-  HiDocumentArrowDown,
-  HiHashtag,
-  HiShieldCheck,
-  HiSignal,
+  HiChevronDown,
+  HiCube,
+  HiExclamationTriangle,
   HiUserCircle,
-  HiXCircle,
   HiXMark,
 } from "react-icons/hi2";
-import {
-  SAP_STEPS,
-  type SapPostState,
-  type SapStepKey,
-} from "../pages/SalesInvoice/useSapPost";
+import type { SapPostState } from "../pages/SalesInvoice/useSapPost";
+import { translateSapError } from "../pages/SalesInvoice/sapErrorTranslator";
 import "../styles/MissionControlLoader.css";
 
-type TileStatus = "pending" | "active" | "done" | "error";
+/* ──────────────────────────────────────────────────────────────────────────
+ * Invoice processing modal
+ *
+ * A calm, human-friendly window over the (otherwise very technical) job of
+ * posting an invoice to SAP. The user never sees sessions, drafts, payloads,
+ * endpoints or JSON — only a reassuring "production line" while we work, a clear
+ * success, or a translated, actionable error. The real SAP work runs untouched
+ * in useSapPost; this component only reflects its high-level status.
+ * ────────────────────────────────────────────────────────────────────────── */
 
-const STEP_ICONS: Record<SapStepKey, IconType> = {
-  session: HiSignal,
-  draft: HiDocumentArrowDown,
-  payload: HiShieldCheck,
-  post: HiCloudArrowUp,
-  sap: HiCpuChip,
-  invoice: HiHashtag,
-};
+// Reassurance copy for the processing state. These deliberately do NOT map to the
+// real backend steps — they simply rotate to show that work is happening.
+const FACTORY_STAGES = [
+  { emoji: "📦", label: "Gathering materials" },
+  { emoji: "🔍", label: "Verifying inventory" },
+  { emoji: "🔧", label: "Assembling your order" },
+  { emoji: "📋", label: "Running quality checks" },
+  { emoji: "🏭", label: "Coordinating production" },
+  { emoji: "📤", label: "Preparing dispatch" },
+  { emoji: "🚚", label: "Dispatch team standing by" },
+];
+
+const ROTATE_MS = 2600;
 
 const formatMoney = (value: number) =>
   `₹${value.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
-const formatClock = (seconds: number) => {
-  const mm = Math.floor(seconds / 60)
-    .toString()
-    .padStart(2, "0");
-  const ss = (seconds % 60).toString().padStart(2, "0");
-  return `${mm}:${ss}`;
-};
 
 const orDash = (value: unknown) =>
   value === undefined || value === null || String(value).trim() === "" ? "—" : String(value);
 
 type Props = {
   state: SapPostState;
-  /** Dismiss the loader (success acknowledged, or error closed). */
+  /** Dismiss the modal (success acknowledged, or error closed). */
   onClose: () => void;
-  /** Re-run the post from the first stage. */
+  /** Re-run the post from the beginning. */
   onRetry: () => void;
 };
 
 export default function MissionControlLoader({ state, onClose, onRetry }: Props) {
-  const { status, activeStep, failedStep, logs, doc, invoiceNumber, errorMessage } = state;
+  const { status, logs, doc, invoiceNumber, errorMessage, rawError } = state;
   const isRunning = status === "running";
   const isSuccess = status === "success";
   const isError = status === "error";
 
-  const activeIndex = SAP_STEPS.findIndex((step) => step.key === activeStep);
-  const failedIndex = SAP_STEPS.findIndex((step) => step.key === failedStep);
-
-  /* Live elapsed timer — restarts whenever a fresh run begins. The start time lives
-   * in a ref (assigned in the effect) so the only setState happens inside the
-   * interval callback, never synchronously in the effect body. */
-  const startRef = useRef(0);
-  const [elapsed, setElapsed] = useState(0);
+  /* Move focus to the primary action when the run settles, and let Esc dismiss a
+   * settled modal (never while a live financial transaction is in flight). */
+  const primaryRef = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
-    if (!isRunning) return;
-    startRef.current = Date.now();
-    const timer = setInterval(() => setElapsed(Math.floor((Date.now() - startRef.current) / 1000)), 250);
-    return () => clearInterval(timer);
-  }, [isRunning]);
+    if (isSuccess || isError) primaryRef.current?.focus();
+  }, [isSuccess, isError]);
 
-  /* Keep the log console pinned to the newest line. */
-  const logEndRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [logs.length, status]);
+    if (isRunning) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isRunning, onClose]);
+
+  const friendly = useMemo(
+    () => (isError ? translateSapError(rawError || errorMessage) : null),
+    [isError, rawError, errorMessage],
+  );
 
   if (status === "idle") return null;
 
-  const tileStatus = (stepKey: SapStepKey, index: number): TileStatus => {
-    if (isError) {
-      if (stepKey === failedStep) return "error";
-      return index < failedIndex ? "done" : "pending";
-    }
-    if (isSuccess) return "done";
-    if (index < activeIndex) return "done";
-    if (stepKey === activeStep) return "active";
-    return "pending";
-  };
-
-  const progressPct = isSuccess
-    ? 100
-    : isError
-      ? Math.max(6, Math.round((Math.max(failedIndex, 0) / SAP_STEPS.length) * 100))
-      : Math.min(94, Math.round(((Math.max(activeIndex, 0) + 0.4) / SAP_STEPS.length) * 100));
-
-  const activeLabel = SAP_STEPS[Math.max(activeIndex, 0)]?.label ?? "Processing";
-  const phaseText = isSuccess ? "Completed" : isError ? "Failed" : activeLabel;
+  const titleId = "mcl-title";
+  const descId = "mcl-desc";
 
   return (
-    <div className="mcl-backdrop" role="presentation">
+    <div
+      className="mcl-backdrop"
+      role="presentation"
+      onClick={() => {
+        if (!isRunning) onClose();
+      }}
+    >
       <section
-        className={`mcl-console mcl-console-${status}`}
+        className={`mcl-card mcl-card-${status}`}
         role="alertdialog"
         aria-modal="true"
         aria-busy={isRunning}
-        aria-live="polite"
-        aria-label="Posting invoice to SAP"
+        aria-labelledby={titleId}
+        aria-describedby={descId}
+        onClick={(event) => event.stopPropagation()}
       >
-        {/* Header / status bar */}
-        <header className="mcl-head">
-          <div className="mcl-head-id">
-            <span className={`mcl-live-dot mcl-live-dot-${status}`} aria-hidden="true" />
-            <div>
-              <h2>SAP Transaction Monitor</h2>
-              <p>Business One · Service Layer</p>
+        {!isRunning && (
+          <button type="button" className="mcl-x" aria-label="Close" onClick={onClose}>
+            <HiXMark aria-hidden="true" />
+          </button>
+        )}
+
+        {/* RunningStage mounts fresh on every run, so its animation always starts
+            from the beginning without resetting state inside an effect. */}
+        {isRunning && <RunningStage doc={doc} titleId={titleId} />}
+
+        {/* ── Success ───────────────────────────────────────────────────── */}
+        {isSuccess && (
+          <div className="mcl-stage">
+            <div className="mcl-badge mcl-badge-ok" aria-hidden="true">
+              <HiCheckCircle />
             </div>
-          </div>
-          <div className="mcl-head-meta">
-            <span className={`mcl-phase mcl-phase-${status}`}>{phaseText}</span>
-            <span className="mcl-elapsed" title="Elapsed time">
-              {formatClock(elapsed)}
-            </span>
-            {!isRunning && (
-              <button type="button" className="mcl-close" aria-label="Close" onClick={onClose}>
-                <HiXMark aria-hidden="true" />
-              </button>
-            )}
-          </div>
-        </header>
-
-        {/* Status tiles */}
-        <div className="mcl-tiles" role="list" aria-label="Transaction stages">
-          {SAP_STEPS.map((step, index) => {
-            const tStatus = tileStatus(step.key, index);
-            const Icon = tStatus === "done" ? HiCheckCircle : tStatus === "error" ? HiXCircle : STEP_ICONS[step.key];
-            return (
-              <div className={`mcl-tile mcl-tile-${tStatus}`} role="listitem" key={step.key}>
-                <span className="mcl-tile-icon">
-                  <Icon aria-hidden="true" />
-                </span>
-                <span className="mcl-tile-name">{step.tile}</span>
-                <span className="mcl-tile-dot" aria-hidden="true" />
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Body: live log feed + transaction panel */}
-        <div className="mcl-body">
-          <div className="mcl-log" aria-label="Live activity log">
-            <div className="mcl-log-bar">
-              <span className="mcl-log-dot" />
-              <span className="mcl-log-dot" />
-              <span className="mcl-log-dot" />
-              <span className="mcl-log-title">activity.log</span>
-            </div>
-            <div className="mcl-log-feed">
-              {logs.map((line) => (
-                <div className={`mcl-log-line mcl-log-${line.level}`} key={line.id}>
-                  <span className="mcl-log-time">{line.time}</span>
-                  <span className="mcl-log-glyph" aria-hidden="true">
-                    {line.level === "ok" ? "✓" : line.level === "error" ? "✕" : line.level === "warn" ? "▲" : "›"}
-                  </span>
-                  <span className="mcl-log-text">{line.text}</span>
-                </div>
-              ))}
-              {isRunning && (
-                <div className="mcl-log-line mcl-log-active">
-                  <span className="mcl-log-time" aria-hidden="true">
-                    ··:··:··
-                  </span>
-                  <span className="mcl-log-cursor" aria-hidden="true" />
-                  <span className="mcl-log-text">{activeLabel}…</span>
-                </div>
-              )}
-              <div ref={logEndRef} />
-            </div>
-          </div>
-
-          <aside className="mcl-panel" aria-label="Transaction details">
-            <span className="mcl-panel-eyebrow">Transaction</span>
-            <dl className="mcl-panel-list">
-              <div>
-                <dt>
-                  <HiDocumentArrowDown aria-hidden="true" /> Draft No.
-                </dt>
-                <dd>{orDash(doc.draftNo)}</dd>
-              </div>
-              <div>
-                <dt>
-                  <HiUserCircle aria-hidden="true" /> Customer
-                </dt>
-                <dd className="mcl-panel-clamp" title={orDash(doc.customer)}>
-                  {orDash(doc.customer)}
-                </dd>
-              </div>
-              <div>
-                <dt>
-                  <HiCpuChip aria-hidden="true" /> Items
-                </dt>
-                <dd>{doc.itemCount === null ? "…" : doc.itemCount}</dd>
-              </div>
-              <div>
-                <dt>
-                  <HiBuildingOffice2 aria-hidden="true" /> Branch
-                </dt>
-                <dd>{doc.branch ? doc.branch : isRunning ? "…" : "—"}</dd>
-              </div>
-            </dl>
-            <div className="mcl-panel-total">
-              <span>Total Amount</span>
-              <strong>{formatMoney(doc.total)}</strong>
-            </div>
-
-            {isSuccess && (
-              <div className="mcl-result mcl-result-success">
-                <span className="mcl-result-label">Invoice Number</span>
-                <strong className="mcl-result-value">{invoiceNumber ? `#${invoiceNumber}` : "Created"}</strong>
-              </div>
-            )}
-            {isError && (
-              <div className="mcl-result mcl-result-error">
-                <span className="mcl-result-label">No invoice was created</span>
-                <span className="mcl-result-hint">It is safe to retry this transaction.</span>
-              </div>
-            )}
-          </aside>
-        </div>
-
-        {/* Footer: progress + actions */}
-        <footer className="mcl-foot">
-          <div className="mcl-progress-row">
-            <div className={`mcl-progress-track mcl-progress-${status}`}>
-              <div className="mcl-progress-fill" style={{ width: `${progressPct}%` }}>
-                {isRunning && <span className="mcl-progress-shimmer" aria-hidden="true" />}
-              </div>
-            </div>
-            <span className="mcl-progress-pct">{progressPct}%</span>
-          </div>
-
-          {isRunning && (
-            <p className="mcl-foot-note">
-              <span className="mcl-foot-spinner" aria-hidden="true" />
-              Processing a live financial transaction — please do not refresh or close this window.
+            <h2 id={titleId} className="mcl-title">
+              Invoice created
+            </h2>
+            <p id={descId} className="mcl-sub" role="status">
+              Your invoice has been created successfully and is ready to go.
             </p>
-          )}
 
-          {isSuccess && (
+            <div className="mcl-invoice-chip">
+              <span>Invoice number</span>
+              <strong>{invoiceNumber ? `#${invoiceNumber}` : "Created"}</strong>
+            </div>
+
+            <SummaryPanel doc={doc} />
+
             <div className="mcl-actions">
-              <p className="mcl-foot-status mcl-foot-status-ok">
-                <HiCheckCircle aria-hidden="true" /> Invoice posted to SAP successfully.
-              </p>
-              <button type="button" className="mcl-btn mcl-btn-primary" onClick={onClose}>
+              <button ref={primaryRef} type="button" className="mcl-btn mcl-btn-ok" onClick={onClose}>
                 Done
               </button>
             </div>
-          )}
+          </div>
+        )}
 
-          {isError && (
-            <div className="mcl-actions">
-              <p className="mcl-foot-status mcl-foot-status-bad" title={errorMessage}>
-                <HiXCircle aria-hidden="true" /> {errorMessage}
+        {/* ── Failure — swaps into the same centred area the loader used ──── */}
+        {isError && friendly && (
+          <div className="mcl-stage">
+            <div className="mcl-badge mcl-badge-warn" aria-hidden="true">
+              <HiExclamationTriangle />
+            </div>
+            <span className="mcl-error-banner">Production Halted</span>
+            <h2 id={titleId} className="mcl-error-title">
+              {friendly.title}
+            </h2>
+
+            <div id={descId} className="mcl-error-body">
+              {friendly.summary && <p className="mcl-error-what">{friendly.summary}</p>}
+
+              {friendly.facts.length > 0 && (
+                <dl className="mcl-error-facts">
+                  {friendly.facts.map((fact) => (
+                    <div key={fact.label}>
+                      <dt>{fact.label}</dt>
+                      <dd>{fact.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              )}
+
+              <p className="mcl-error-do">{friendly.action}</p>
+              <p className="mcl-error-safe">
+                {friendly.transient
+                  ? "This is usually temporary — trying again often works."
+                  : "No invoice was created, so it's safe to fix the details and retry."}
               </p>
+            </div>
+
+            <div className="mcl-actions">
               <button type="button" className="mcl-btn mcl-btn-ghost" onClick={onClose}>
                 Close
               </button>
-              <button type="button" className="mcl-btn mcl-btn-primary" onClick={onRetry}>
+              <button ref={primaryRef} type="button" className="mcl-btn mcl-btn-warn" onClick={onRetry}>
                 <HiArrowPath aria-hidden="true" /> Retry
               </button>
             </div>
-          )}
-        </footer>
+
+            <TechnicalDetails rawError={rawError} errorMessage={errorMessage} logs={logs} />
+          </div>
+        )}
       </section>
     </div>
+  );
+}
+
+/* ── Running: the reassuring "production line" ─────────────────────────────── */
+
+function RunningStage({ doc, titleId }: { doc: SapPostState["doc"]; titleId: string }) {
+  // Rotate the reassurance stage; advance then hold on the last one (looping back
+  // would read as "going backwards"). setState only ever runs in the callbacks.
+  const [stageIndex, setStageIndex] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(
+      () => setStageIndex((prev) => (prev < FACTORY_STAGES.length - 1 ? prev + 1 : prev)),
+      ROTATE_MS,
+    );
+    return () => clearInterval(timer);
+  }, []);
+
+  // Ease an indeterminate bar toward 95% — we can't know SAP's exact finish time,
+  // so we approach the top and hold until the real result lands.
+  const [pct, setPct] = useState(8);
+  useEffect(() => {
+    const timer = setInterval(
+      () => setPct((prev) => (prev >= 95 ? 95 : prev + Math.max(1, Math.round((95 - prev) / 14)))),
+      650,
+    );
+    return () => clearInterval(timer);
+  }, []);
+
+  const stage = FACTORY_STAGES[stageIndex];
+
+  return (
+    <div className="mcl-stage">
+      {/* Persistent, calm status for screen readers (the rotating visual below is
+          decorative and hidden from assistive tech). */}
+      <p className="mcl-sr-only" role="status">
+        Creating your invoice. This usually takes under a minute, please keep this window open.
+      </p>
+
+      <div className="mcl-hero" aria-hidden="true">
+        <span className="mcl-hero-ring" />
+        <span className="mcl-hero-ring mcl-hero-ring-2" />
+        <span key={stageIndex} className="mcl-hero-emoji">
+          {stage.emoji}
+        </span>
+      </div>
+
+      <h2 id={titleId} className="mcl-title">
+        Creating your invoice
+      </h2>
+      <p key={stageIndex} className="mcl-rotating" aria-hidden="true">
+        {stage.label}…
+      </p>
+
+
+      <div className="mcl-progress">
+        <div className="mcl-progress-track">
+          <div className="mcl-progress-fill" style={{ width: `${pct}%` }}>
+            <span className="mcl-progress-shimmer" aria-hidden="true" />
+          </div>
+        </div>
+      </div>
+
+      <div className="mcl-rail" aria-hidden="true">
+        {FACTORY_STAGES.map((_, index) => (
+          <span
+            key={index}
+            className={`mcl-rail-dot${
+              index < stageIndex ? " is-done" : index === stageIndex ? " is-active" : ""
+            }`}
+          />
+        ))}
+      </div>
+
+      <SummaryPanel doc={doc} />
+
+    </div>
+  );
+}
+
+/* ── Business-friendly summary (no SAP terminology) ────────────────────────── */
+
+function SummaryPanel({ doc }: { doc: SapPostState["doc"] }) {
+  return (
+    <dl className="mcl-summary">
+      <div>
+        <dt>
+          <HiCube aria-hidden="true" /> Reference
+        </dt>
+        <dd>{orDash(doc.draftNo)}</dd>
+      </div>
+      <div>
+        <dt>
+          <HiUserCircle aria-hidden="true" /> Customer
+        </dt>
+        <dd className="mcl-clamp" title={orDash(doc.customer)}>
+          {orDash(doc.customer)}
+        </dd>
+      </div>
+      <div>
+        <dt>
+          <HiBuildingOffice2 aria-hidden="true" /> Items
+        </dt>
+        <dd>{doc.itemCount === null ? "…" : doc.itemCount}</dd>
+      </div>
+      <div className="mcl-summary-total">
+        <dt>Total</dt>
+        <dd>{formatMoney(doc.total)}</dd>
+      </div>
+    </dl>
+  );
+}
+
+/* ── Opt-in technical details (collapsed by default) ───────────────────────── */
+
+function TechnicalDetails({
+  rawError,
+  errorMessage,
+  logs,
+}: {
+  rawError: string;
+  errorMessage: string;
+  logs: SapPostState["logs"];
+}) {
+  const raw = (rawError || errorMessage || "").trim();
+  return (
+    <details className="mcl-tech">
+      <summary>
+        <HiChevronDown className="mcl-tech-chevron" aria-hidden="true" />
+        Show technical details
+      </summary>
+      <div className="mcl-tech-body">
+        {raw && (
+          <>
+            <span className="mcl-tech-label">System response</span>
+            <pre className="mcl-tech-pre">{raw}</pre>
+          </>
+        )}
+        {logs.length > 0 && (
+          <>
+            <span className="mcl-tech-label">Activity</span>
+            <div className="mcl-tech-log">
+              {logs.map((line) => (
+                <div className={`mcl-tech-line mcl-tech-${line.level}`} key={line.id}>
+                  <span className="mcl-tech-time">{line.time}</span>
+                  <span>{line.text}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    </details>
   );
 }

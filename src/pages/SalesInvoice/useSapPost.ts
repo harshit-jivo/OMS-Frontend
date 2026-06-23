@@ -107,6 +107,17 @@ export const conciseError = (value: unknown, fallback: string) => {
   return trimmed.length > 220 ? `${trimmed.slice(0, 220)}…` : trimmed;
 };
 
+// Best-effort JSON stringify for capturing a raw SAP error payload verbatim (shown
+// only inside the opt-in "Technical details" panel). Falls back to String().
+const safeStringify = (value: unknown): string => {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+};
+
 // Pull the created invoice's number out of the POST response, digging into nested
 // data/result wrappers. Prefers DocNum (the human invoice number), then DocEntry.
 const extractInvoiceNumber = (value: unknown): string => {
@@ -164,7 +175,10 @@ export type SapPostState = {
   failedStep: SapStepKey | null;
   logs: SapLog[];
   invoiceNumber: string;
+  /** Concise human-readable error text (input to the friendly translator). */
   errorMessage: string;
+  /** Full, untouched SAP / network response — only surfaced under "Technical details". */
+  rawError: string;
   doc: SapDoc;
 };
 
@@ -175,7 +189,7 @@ type Action =
   | { type: "log"; text: string; level: SapLogLevel; time: string }
   | { type: "doc"; patch: Partial<SapDoc> }
   | { type: "success"; invoiceNumber: string }
-  | { type: "error"; failedStep: SapStepKey; message: string };
+  | { type: "error"; failedStep: SapStepKey; message: string; rawError: string };
 
 const emptyDoc: SapDoc = { draftNo: "", customer: "", itemCount: null, total: 0, branch: "" };
 
@@ -186,6 +200,7 @@ const initialState: SapPostState = {
   logs: [],
   invoiceNumber: "",
   errorMessage: "",
+  rawError: "",
   doc: emptyDoc,
 };
 
@@ -207,7 +222,13 @@ function reducer(state: SapPostState, action: Action): SapPostState {
     case "success":
       return { ...state, status: "success", activeStep: "invoice", failedStep: null, invoiceNumber: action.invoiceNumber };
     case "error":
-      return { ...state, status: "error", failedStep: action.failedStep, errorMessage: action.message };
+      return {
+        ...state,
+        status: "error",
+        failedStep: action.failedStep,
+        errorMessage: action.message,
+        rawError: action.rawError,
+      };
     default:
       return state;
   }
@@ -239,6 +260,9 @@ export function useSapPost() {
       if (alive()) dispatch({ type: "log", text, level, time: stamp() });
     };
     let current: SapStepKey = "session";
+    // Holds the verbatim SAP error payload (if any) so the catch can surface it
+    // under "Technical details" without the friendly copy losing the original.
+    let rawErrorText = "";
     const goto = (step: SapStepKey) => {
       current = step;
       if (alive()) dispatch({ type: "step", step });
@@ -289,21 +313,23 @@ export function useSapPost() {
 
       // 4. Submit
       goto("post");
-      log("POST /api/service-layer/invoice/ → submitting document…");
+      log("POST /api/service-layer/invoice/?type=INVOICE → submitting document…");
       await wait(400);
       if (!alive()) return;
 
       // 5. SAP processing (this stage owns the long real await)
       goto("sap");
       log("Awaiting SAP — posting the invoice (this can take 10–30s)…", "warn");
-      const result = await apiFetch<{ error?: unknown }>("/api/service-layer/invoice/", {
+      const result = await apiFetch<{ error?: unknown }>("/api/service-layer/invoice/?type=INVOICE", {
         method: "POST",
         body: JSON.stringify(payload),
       });
       if (!alive()) return;
       // The SAP proxy can answer HTTP 200 with an error body.
       if (result && typeof result === "object" && (result as { error?: unknown }).error) {
-        throw new Error(conciseError((result as { error?: unknown }).error, "SAP rejected the invoice."));
+        const sapError = (result as { error?: unknown }).error;
+        rawErrorText = safeStringify(sapError);
+        throw new Error(conciseError(sapError, "SAP rejected the invoice."));
       }
 
       // 6. Confirm invoice number
@@ -318,8 +344,10 @@ export function useSapPost() {
     } catch (err) {
       if (!alive()) return;
       const message = conciseError(err, "Unable to post the invoice to SAP.");
+      // Prefer the captured SAP payload; otherwise fall back to the thrown message.
+      const rawError = rawErrorText || (err instanceof Error ? err.message : String(err));
       log(message, "error");
-      dispatch({ type: "error", failedStep: current, message });
+      dispatch({ type: "error", failedStep: current, message, rawError });
     }
   }, []);
 
