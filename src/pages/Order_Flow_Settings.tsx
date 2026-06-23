@@ -227,12 +227,17 @@ export default function Order_Flow_Settings() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [parties, partySearch, selectedTargets]);
 
-  const partyNameByCode = useMemo(() => {
+  // Keyed by code||category — the same card_code can belong to different
+  // parties across categories (e.g. OIL vs BEVERAGES), so code alone is ambiguous.
+  const partyNameByKey = useMemo(() => {
     return parties.reduce<Record<string, string>>((current, party) => {
-      current[getPartyCode(party)] = getPartyName(party);
+      current[`${getPartyCode(party)}||${getPartyCat(party)}`] = getPartyName(party);
       return current;
     }, {});
   }, [parties]);
+
+  const lookupPartyName = (code: string, category?: string | null) =>
+    partyNameByKey[`${String(code || "").trim()}||${String(category || "").trim().toUpperCase()}`] || "";
 
   const flowPreview = useMemo(() => {
     const stages = ["Order Created"];
@@ -323,7 +328,7 @@ export default function Order_Flow_Settings() {
       {
         card_code: cfg.card_code,
         category: cfg.category || "",
-        card_name: cfg.card_name || partyNameByCode[cfg.card_code] || cfg.card_code,
+        card_name: lookupPartyName(cfg.card_code, cfg.category) || cfg.card_name || cfg.card_code,
       },
     ]);
     applyPartySettings(cfg);
@@ -645,7 +650,7 @@ export default function Order_Flow_Settings() {
               {partyConfigs.map((cfg) => (
                 <div className="ofp-configured-row" key={`${cfg.card_code}||${cfg.category}||${cfg.flow_type}`}>
                   <div className="ofp-configured-main">
-                    <strong>{cfg.card_name || partyNameByCode[cfg.card_code] || cfg.card_code}</strong>
+                    <strong>{lookupPartyName(cfg.card_code, cfg.category) || cfg.card_name || cfg.card_code}</strong>
                     <small>
                       {cfg.card_code}
                       {cfg.category ? ` · ${cfg.category}` : ""} · {cfg.flow_label || cfg.flow_type}
