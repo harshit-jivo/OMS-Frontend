@@ -1,0 +1,146 @@
+/* Extras layered on top of Order_Flow_Settings.css (ofs-* classes). */
+
+.pp-user-menu {
+  padding: 8px;
+}
+
+.pp-user-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  padding: 0 10px;
+  min-height: 38px;
+  border: 1px solid #d9e4f2;
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
+.pp-user-search svg {
+  width: 16px;
+  height: 16px;
+  color: #64748b;
+  flex: 0 0 auto;
+}
+
+.pp-user-search input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-size: 13px;
+  font-family: inherit;
+  color: #0f172a;
+}
+
+.pp-user-options {
+  max-height: 280px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pp-user-option-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  text-align: left;
+}
+
+.pp-user-option-text small {
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: capitalize;
+}
+
+.pp-user-empty {
+  padding: 16px;
+  text-align: center;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.pp-hint {
+  margin: 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.pp-chip-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.pp-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  background: #eff6ff;
+  border: 1px solid #dbeafe;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1d4ed8;
+}
+
+.pp-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 9999px;
+  background: transparent;
+  color: #1d4ed8;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.pp-chip-remove:hover {
+  background: #dbeafe;
+}
+
+.pp-quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.pp-count {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 800;
+  color: #1d4ed8;
+}
+
+.pp-admin-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #1e3a8a;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.pp-admin-note svg {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  color: #2563eb;
+}

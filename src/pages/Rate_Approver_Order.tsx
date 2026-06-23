@@ -23,14 +23,6 @@ const RATE_APPROVAL_STATUS = "RATE_APPROVAL";
 const RATE_APPROVER_APPROVED_STATUS = 6;
 const RATE_APPROVER_REJECTED_STATUS = 7;
 
-const now = new Date();
-const firstDay = new Date(now.getFullYear(), now.getMonth(), 1)
-  .toISOString()
-  .split("T")[0];
-const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 1)
-  .toISOString()
-  .split("T")[0];
-
 const formatCreatedDateTime = (value?: string | null) => {
   if (!value) return "-";
   const parsed = new Date(value);
@@ -57,8 +49,8 @@ export default function RateApproverOrders() {
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [pendingOrderId, setPendingOrderId] = useState<number | null>(null);
   const [pendingOrderNum, setPendingOrderNum] = useState("");
-  const [fromDate, setFromDate] = useState(firstDay);
-  const [toDate, setToDate] = useState(lastDay);
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
   const [isOrdersLoading, setIsOrdersLoading] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
   const [showAcceptSuccess, setShowAcceptSuccess] = useState(false);
@@ -82,7 +74,7 @@ export default function RateApproverOrders() {
   const fetchOrders = async () => {
     setIsOrdersLoading(true);
     try {
-      const data = await ordersService.getOrders(RATE_APPROVAL_STATUS);
+      const data = await ordersService.getOrders(RATE_APPROVAL_STATUS, false, true);
       const detailedOrders = await loadDetailedOrders(data || []);
       setOrders(detailedOrders);
     } catch (error) {
@@ -207,8 +199,8 @@ export default function RateApproverOrders() {
         Boxes: item.boxes,
         Liters: item.ltrs,
         "Total Ltrs": getOrderItemTotalLtrs(item).toFixed(2),
+        "Price List (Basic)": item.price_list_basic,
         "Basic Price": item.basic_price,
-        "Market Price": item.market_price,
         "Total Amount": item.total,
       }));
     } else {
@@ -220,8 +212,8 @@ export default function RateApproverOrders() {
         Status: order.status_display,
         "Bill To": order.bill_to_address,
         "Ship To": order.ship_to_address,
+        "Price List (Basic)": "",
         "Basic Price": "",
-        "Market Price": "",
       });
     }
 
@@ -489,6 +481,12 @@ export default function RateApproverOrders() {
                 <span className="ao-d-hf-label">Ship To</span>
                 <span className="ao-d-hf-value">{orderDetails.ship_to_address || "-"}</span>
               </div>
+              {orderDetails.remarks?.trim() ? (
+                <div className="ao-d-info-field" style={{ gridColumn: "1 / -1" }}>
+                  <span className="ao-d-hf-label">Comment</span>
+                  <span className="ao-d-hf-value">{orderDetails.remarks}</span>
+                </div>
+              ) : null}
             </div>
           </div>
 
@@ -529,8 +527,8 @@ export default function RateApproverOrders() {
                           <div><span>Boxes</span><strong>{Number(item.boxes).toFixed(2)}</strong></div>
                           <div><span>Ltrs</span><strong>{item.ltrs}</strong></div>
                           {schemes.length > 0 ? <div><span>Total Ltrs</span><strong>{getOrderItemTotalLtrs(item).toFixed(2)}</strong></div> : null}
+                          <div><span>Price List (Basic)</span><strong>{Number(item.price_list_basic).toFixed(2)}</strong></div>
                           <div><span>Basic Price</span><strong>{Number(item.basic_price).toFixed(2)}</strong></div>
-                          <div><span>Market Price</span><strong>{Number(item.market_price).toFixed(2)}</strong></div>
                           <div><span>Tax %</span><strong>{Number(item.tax_rate).toFixed(2)}</strong></div>
                           <div className="order-detail-item-amount"><span>Amount</span><strong>{Number(item.total).toFixed(2)}</strong></div>
                         </div>
@@ -555,8 +553,8 @@ export default function RateApproverOrders() {
                     <th>Boxes</th>
                     <th>Ltrs</th>
                     <th>Total Ltrs</th>
+                    <th>Price List (Basic)</th>
                     <th>Basic Price</th>
-                    <th>Market Price</th>
                     <th>Tax %</th>
                     <th style={{ textAlign: "right" }}>Amount</th>
                   </tr>
@@ -598,10 +596,10 @@ export default function RateApproverOrders() {
                           {getOrderItemTotalLtrs(item).toFixed(2)}
                         </td>
                         <td style={{ textAlign: "right" }}>
-                          {Number(item.basic_price).toFixed(2)}
+                          {Number(item.price_list_basic).toFixed(2)}
                         </td>
                         <td style={{ textAlign: "right" }}>
-                          {Number(item.market_price).toFixed(2)}
+                          {Number(item.basic_price).toFixed(2)}
                         </td>
                         <td style={{ textAlign: "center" }}>
                           {Number(item.tax_rate).toFixed(2)}

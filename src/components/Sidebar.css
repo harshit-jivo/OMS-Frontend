@@ -151,7 +151,6 @@ html, body {
   flex-direction: column;
   justify-content: flex-start;
   box-shadow: 12px 0 30px rgba(15,23,42,.08);
-  white-space: nowrap;
 }
 
 .sidebar.collapsed {
@@ -161,6 +160,7 @@ html, body {
   opacity: 1;
   pointer-events: auto;
   overflow-x: hidden;
+  white-space: nowrap;
 }
 
 .sidebar ul { list-style: none; }
@@ -406,10 +406,23 @@ html, body {
 }
 
 @media (max-width: 1024px) {
-  .content-area {
-    margin-bottom: 1.75rem;
-    padding: 1rem 1rem 2.5rem 0;
+  .menu-btn { display: flex; align-items: center; justify-content: center; }
+  .sidebar-collapse-btn { display: none; }
+  .sidebar {
+    left: -240px;
+    width: 230px;
+    transform: none;
+    opacity: 1;
+    pointer-events: auto;
   }
+  .sidebar.collapsed { left: -240px; transform: none; opacity: 1; pointer-events: auto; }
+  .sidebar.open { left: 0; }
+  .content-area {
+    margin-left: 0;
+    margin-bottom: 1.75rem;
+    padding: 1rem 1rem 2.5rem;
+  }
+  .content-area.sidebar-collapsed { margin-left: 0; }
 }
 
 .sb-modal-cancel {
@@ -485,7 +498,23 @@ html, body {
   }
   .header-profile-role {
     font-size: .52rem;
-  }a/* Add this to your global CSS to sync all pages with the Sidebar */
+  }
+  .sidebar {
+    width: 100%;
+    left: -100%;
+  }
+  .sidebar.collapsed { left: -100%; }
+  .sidebar.open { left: 0; }
+  .header {
+    padding: 0 .85rem;
+  }
+  .content-area {
+    margin-bottom: 1.25rem;
+    padding: .85rem .85rem 2.25rem;
+  }
+}
+
+/* Global CSS variables */
 
 :root {
   --primary-blue: #2563eb;
@@ -528,12 +557,4 @@ body {
   border: 1px solid rgba(226, 232, 240, 0.95);
   box-shadow: 0 6px 20px rgba(15, 23, 42, 0.05);
   padding: 24px;
-}
-  .header {
-    padding: 0 .85rem;
-  }
-  .content-area {
-    margin-bottom: 1.25rem;
-    padding: .85rem .85rem 2.25rem;
-  }
 }

@@ -1,13 +1,20 @@
 import { useEffect, useMemo, useState, useRef } from "react";
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
-import type { Order, OrderItem } from "../services/ordersService";
+import type { Order, OrderItem, OrderLog } from "../services/ordersService";
 import { sapService } from "../services/sapService";
 import { getOrderItemSchemes, getOrderItemTotalLtrs, ordersService } from "../services/ordersService";
-import "../styles/Order_Status_Tracking.css";
 import {
-  HiEye,HiArrowDownTray
-}from "react-icons/hi2";
+  buildOrderTimelineLogs,
+  getOrderLogDisplayRemark,
+  getOrderLogDisplayTitle,
+  getOrderLogTone,
+} from "../utils/orderTrackingTimeline";
+import "../styles/Order_Status_Tracking.css";
+import "../styles/Auditor_Order.css";
+import {
+  HiEye, HiArrowDownTray, HiArrowPath
+} from "react-icons/hi2";
 
 type TrackingMode = "auditor" | "billing" | "rate_approver";
 
@@ -27,9 +34,11 @@ const ACCEPTED_KEYWORDS: Record<TrackingMode, string[]> = {
 const REJECTED_KEYWORDS = ["rejected", "declined", "cancelled", "canceled"];
 const BILLING_REJECTED_KEYWORDS = ["billing rejected", "rejected by billing", "billing reject"];
 const AUDITOR_REJECTED_CODES = ["REJECTED"];
+const AUDITOR_ACCEPTED_STATUS_CODES = ["BILLING", "BILLING_PENDING", "APPROVED", "COMPLETED"];
 const BILLING_REJECTED_CODES = ["BILLING_REJECTED"];
 const APPROVER_ACCEPTED_STATUS_CODES = ["APPROVED", "BILLING"];
 const RATE_APPROVER_REJECTED_KEYWORDS = ["rate approver rejected", "rate rejected", "rejected"];
+const RATE_APPROVER_TRACKING_FALLBACK_STATUS = "APPROVED";
 
 const normalizeStatusClass = (status: string) => status.toLowerCase().replace(/\s+/g, "-");
 
@@ -61,6 +70,12 @@ const getDecisionType = (order: Order, mode: TrackingMode) => {
     if (AUDITOR_REJECTED_CODES.includes(statusCode) || normalized === "rejected") {
       return "rejected";
     }
+    if (
+      AUDITOR_ACCEPTED_STATUS_CODES.includes(statusCode) ||
+      ["billing", "approved", "accepted", "completed", "quotation"].some((keyword) => normalized.includes(keyword))
+    ) {
+      return "accepted";
+    }
   }
 
   if (mode === "billing") {
@@ -90,6 +105,25 @@ const getDecisionType = (order: Order, mode: TrackingMode) => {
   return "other";
 };
 
+const getRateApproverApprovalDecision = (order: Order): Order["decision_type"] => {
+  const approvals = Array.isArray(order.rate_approvals) ? order.rate_approvals : [];
+  if (approvals.some((approval) => String(approval.status || "").toUpperCase() === "REJECTED")) {
+    return "rejected";
+  }
+  if (approvals.some((approval) => String(approval.status || "").toUpperCase() === "APPROVED")) {
+    return "accepted";
+  }
+  return undefined;
+};
+
+const normalizeTrackingOrders = (items: Order[], mode: TrackingMode) => {
+  if (mode !== "rate_approver") return items;
+  return items.map((order) => {
+    const decisionType = getRateApproverApprovalDecision(order);
+    return decisionType ? { ...order, decision_type: decisionType } : order;
+  });
+};
+
 export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps) {
   const [orders, setOrders] = useState<Order[]>([]);
   const [decisionFilter, setDecisionFilter] = useState<"all" | "accepted" | "rejected">("all");
@@ -99,10 +133,17 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
   const [showDetails, setShowDetails] = useState(false);
   const [orderDetails, setOrderDetails] = useState<Order | null>(null);
   const [selectedItems, setSelectedItems] = useState<OrderItem[]>([]);
+  const [orderLogs, setOrderLogs] = useState<OrderLog[]>([]);
   const [isOrdersLoading, setIsOrdersLoading] = useState(true);
   const fetchedQuotationIds = useRef<Set<number>>(new Set());
 
   const itemsPerPage = 10;
+  const [showTrackModal, setShowTrackModal] = useState(false);
+  const [trackingOrder, setTrackingOrder] = useState<Order | null>(null);
+  const [trackingLogs, setTrackingLogs] = useState<OrderLog[]>([]);
+  const [trackLogsLoading, setTrackLogsLoading] = useState(false);
+  const showTrackColumn = mode !== "rate_approver";
+  const tableColumnCount = showTrackColumn ? 10 : 9;
   const pageTitle =
     mode === "auditor"
       ? "Auditor Status Tracking"
@@ -117,8 +158,11 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
   const fetchOrders = async () => {
     setIsOrdersLoading(true);
     try {
-      const data = await ordersService.getStatusTrackingOrders(mode);
-      setOrders(data || []);
+      let data = await ordersService.getStatusTrackingOrders(mode);
+      if (mode === "rate_approver" && (!Array.isArray(data) || data.length === 0)) {
+        data = await ordersService.getOrders(RATE_APPROVER_TRACKING_FALLBACK_STATUS);
+      }
+      setOrders(normalizeTrackingOrders(Array.isArray(data) ? data : [], mode));
     } catch (error) {
       console.log("Error fetching orders:", error);
     } finally {
@@ -207,7 +251,10 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
 
      const fetchOrderDetails = async (orderId: number) => {
   try {
-    const data = await ordersService.getOrderDetails(orderId);
+    const [data, logs] = await Promise.all([
+      ordersService.getOrderDetails(orderId),
+      ordersService.getOrderLogs(orderId).catch(() => []),
+    ]);
 
     const qno = await resolveQuotationNumber(data);
     if (qno) {
@@ -216,6 +263,7 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
 
     setOrderDetails(data);
     setSelectedItems(data.items || []);
+    setOrderLogs(logs || []);
     setShowDetails(true);
   } catch (error) {
     console.log("Error fetching order details:", error);
@@ -235,6 +283,22 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
   const grandTotal = subtotal + taxTotal;
   const hasQuotationNumber = Boolean(String(orderDetails?.sap_doc_number || "").trim());
   const isCompletedOrder = isCompletedStatus(orderDetails);
+
+  const handleTrack = async (order: Order) => {
+    setTrackingOrder(order);
+    setShowTrackModal(true);
+    setTrackingLogs([]);
+    setTrackLogsLoading(true);
+    try {
+      const response = await ordersService.getOrderLogs(order.id);
+      setTrackingLogs(Array.isArray(response) ? response : []);
+    } catch (error) {
+      console.log("Error fetching order logs:", error);
+      setTrackingLogs([]);
+    } finally {
+      setTrackLogsLoading(false);
+    }
+  };
 
   const downloadExcel = async (order: Order) => {
     const quotationNo = await resolveQuotationNumber(order);
@@ -259,8 +323,8 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
         Boxes: item.boxes,
         Liters: item.ltrs,
         "Total Ltrs": getOrderItemTotalLtrs(item).toFixed(2),
+        "Price List (Basic)": item.price_list_basic,
         "Basic Price": item.basic_price,
-        "Market Price": item.market_price,
         "Total Amount": item.total,
         };
         return schemes.length
@@ -277,8 +341,8 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
         ...(String(exportOrder.sap_doc_number || "").trim() ? { "Quotation No": exportOrder.sap_doc_number } : {}),
         "Bill To": exportOrder.bill_to_address,
         "Ship To": exportOrder.ship_to_address,
+        "Price List (Basic)": "",
         "Basic Price": "",
-        "Market Price": "",
       });
     }
 
@@ -407,13 +471,14 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
                   <th>Delivery Date</th>
                   <th>Status</th>
                   <th>Details</th>
+                  {showTrackColumn && <th>Track</th>}
                   <th>Download</th>
                 </tr>
               </thead>
               <tbody>
                 {isOrdersLoading ? (
                   <tr>
-                    <td colSpan={8}>
+                    <td colSpan={tableColumnCount}>
                       <div className="order-loading-state">
                         <span className="order-loading-spinner" />
                         <span>Loading orders...</span>
@@ -452,6 +517,13 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
                          <HiEye size={22} />
                         </button>
                       </td>
+                      {showTrackColumn && (
+                        <td>
+                          <button type="button" className="ao-btn-icon track" onClick={() => handleTrack(order)} title="Track Order">
+                            <HiArrowPath size={22} />
+                          </button>
+                        </td>
+                      )}
                       <td>
                         <button type="button" className="ao-btn-icon download" onClick={() => downloadExcel(order)}>
                            <HiArrowDownTray size={22} />
@@ -461,7 +533,7 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
                   ))
                 ) : (
                   <tr>
-                <td colSpan={8} className="ot-empty">No accepted or rejected orders found for this filter.</td>
+                <td colSpan={tableColumnCount} className="ot-empty">No accepted or rejected orders found for this filter.</td>
                   </tr>
                 )}
               </tbody>
@@ -602,8 +674,8 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
                           <div><span>Boxes</span><strong>{Number(item.boxes).toFixed(2)}</strong></div>
                           <div><span>Ltrs</span><strong>{item.ltrs}</strong></div>
                           {schemes.length > 0 ? <div><span>Total Ltrs</span><strong>{getOrderItemTotalLtrs(item).toFixed(2)}</strong></div> : null}
+                          <div><span>Price List (Basic)</span><strong>{Number(item.price_list_basic).toFixed(2)}</strong></div>
                           <div><span>Basic Price</span><strong>{Number(item.basic_price).toFixed(2)}</strong></div>
-                          <div><span>Market Price</span><strong>{Number(item.market_price).toFixed(2)}</strong></div>
                           <div className="order-detail-item-amount"><span>Amount</span><strong>{Number(item.total).toFixed(2)}</strong></div>
                         </div>
                       </article>
@@ -628,8 +700,8 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
                     <th>Ltrs</th>
                     {/* <th>Scheme Ltrs</th> */}
                     <th>Total Ltrs</th>
+                    <th>Price List (Basic)</th>
                     <th>Basic Price</th>
-                    <th>Market Price</th>
                     <th>Amount</th>
                   </tr>
                 </thead>
@@ -664,8 +736,8 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
                         <td>{item.ltrs}</td>
                         {/* <td>{item.scheme_name ? (item as any).scheme_ltrs || 0 : "—"}</td> */}
                         <td>{getOrderItemTotalLtrs(item).toFixed(2)}</td>
+                        <td>{Number(item.price_list_basic).toFixed(2)}</td>
                         <td>{Number(item.basic_price).toFixed(2)}</td>
-                        <td>{Number(item.market_price).toFixed(2)}</td>
                         <td>{Number(item.total).toFixed(2)}</td>
                       </tr>
                       );
@@ -696,6 +768,154 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
             <div className="ot-summary-row ot-summary-row-grand">
               <span className="ot-summary-label">Grand Total</span>
               <span className="ot-summary-value">{grandTotal.toFixed(2)}</span>
+            </div>
+          </div>
+
+          {/* Order Log Timeline */}
+          {mode === "billing" && orderLogs.length > 0 && (
+            <div className="ot-items-card" style={{ marginTop: 16 }}>
+              <div className="ot-items-head">
+                <span className="ot-items-title">Order Log Timeline</span>
+                <span className="ot-items-count">{buildOrderTimelineLogs(orderLogs, orderDetails).length}</span>
+              </div>
+              <div style={{ padding: "20px 24px" }}>
+                {buildOrderTimelineLogs(orderLogs, orderDetails)
+                  .map((log, index, sortedLogs) => {
+                  const isLast = index === sortedLogs.length - 1;
+                  const tone = getOrderLogTone(log.status_name, log.performed_by_name);
+                  const isPending = tone === "pending" && isLast;
+                  const dotColor =
+                    tone === "approved" ? "#10B981" :
+                    tone === "rejected" ? "#EF4444" :
+                    tone === "pending" ? "#F59E0B" :
+                    "#2563EB";
+                  const displayRemark = getOrderLogDisplayRemark(log);
+
+                  let pendingWithName = "";
+                  if (isPending) {
+                    const statusLower = (log.status_name || "").toLowerCase();
+                    const isRateApprovalStatus = statusLower.includes("rate") || statusLower.includes("need approval");
+                    if (isRateApprovalStatus) {
+                      const pendingApprovers = (orderDetails?.rate_approvals || [])
+                        .filter((ra: any) => (ra.status || "").toUpperCase() === "PENDING")
+                        .map((ra: any) => ra.approver_name)
+                        .filter(Boolean);
+                      pendingWithName = pendingApprovers.length > 0 ? pendingApprovers.join(", ") : "";
+                    }
+                  }
+
+                  return (
+                    <div key={log.id} style={{ display: "flex", gap: 16, position: "relative", paddingBottom: isLast ? 0 : 24 }}>
+                      {!isLast && (
+                        <div style={{ position: "absolute", left: 11, top: 24, bottom: 0, width: 2, background: "#e2e8f0" }} />
+                      )}
+                      <div style={{ width: 24, height: 24, borderRadius: "50%", background: dotColor, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1 }}>
+                        {tone === "approved" ? (
+                          <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 6L5 8.5L9.5 3.5" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                        ) : tone === "rejected" ? (
+                          <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2.5 2.5L7.5 7.5M7.5 2.5L2.5 7.5" stroke="#fff" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                        ) : (
+                          <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#fff" }} />
+                        )}
+                      </div>
+                      <div style={{ flex: 1, background: isPending ? "#FFFBEB" : "#f8fafc", border: `1px solid ${isPending ? "#FDE68A" : "#e2e8f0"}`, borderRadius: 10, padding: "14px 18px" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                          <span style={{ fontWeight: 700, fontSize: "0.9rem", color: "#0f172a" }}>{getOrderLogDisplayTitle(log, sortedLogs, orderLogs)}</span>
+                          <span style={{ fontSize: "0.75rem", color: "#64748b" }}>{formatCreatedDateTime(log.created_at)}</span>
+                        </div>
+                        {isPending && pendingWithName ? (
+                          <div style={{ marginTop: 4 }}>
+                            <div style={{ fontSize: "0.82rem", color: "#92400E", fontWeight: 600 }}>
+                              Pending with: {pendingWithName}
+                            </div>
+                            <span style={{ display: "inline-block", marginTop: 4, background: "#FEF3C7", color: "#D97706", fontSize: "0.72rem", fontWeight: 700, padding: "2px 10px", borderRadius: 20 }}>
+                              Awaiting Action
+                            </span>
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: "0.82rem", color: "#475569" }}>
+                            <span>Performed By: </span>
+                            <strong>{log.performed_by_name || "\u2014"}</strong>
+                          </div>
+                        )}
+                        {displayRemark ? (
+                          <div style={{ marginTop: 8, fontSize: "0.8rem", color: "#64748b", background: "#fff", padding: "8px 12px", borderRadius: 8, border: "1px solid #e2e8f0" }}>
+                            {displayRemark}
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {showTrackModal && trackingOrder && (
+        <div className="ao-modal-overlay">
+          <div className="ao-track-modal">
+            <div className="ao-track-header">
+              <div>
+                <div className="ao-track-title">Order Track</div>
+                <div className="ao-track-subtitle">
+                  {trackingOrder.order_number} &mdash; {trackingOrder.card_name}
+                </div>
+              </div>
+              <button
+                className="ao-track-close"
+                onClick={() => {
+                  setShowTrackModal(false);
+                  setTrackingOrder(null);
+                  setTrackingLogs([]);
+                }}
+              >
+                &times;
+              </button>
+            </div>
+
+            <div className="ao-track-body">
+              {trackLogsLoading ? (
+                <div className="ao-track-loading">
+                  <span className="order-loading-spinner" />
+                  <span>Loading logs...</span>
+                </div>
+              ) : trackingLogs.length === 0 ? (
+                <div className="ao-track-empty">No tracking logs found.</div>
+              ) : (
+                <div className="ao-track-timeline">
+                  {buildOrderTimelineLogs(trackingLogs, trackingOrder)
+                    .map((log, index, arr) => {
+                      const tone = getOrderLogTone(log.status_name, log.performed_by_name);
+                      const displayRemark = getOrderLogDisplayRemark(log);
+                      return (
+                        <div key={log.id} className="ao-track-row">
+                          <div className="ao-track-left">
+                            <div className={`ao-track-dot ${tone}`}>
+                              {tone === "approved" ? "\u2713" : tone === "rejected" ? "\u2715" : "\u2022"}
+                            </div>
+                            {index !== arr.length - 1 && <div className={`ao-track-line ${tone}`} />}
+                          </div>
+                          <div className={`ao-track-card ${tone}`}>
+                            <div className="ao-track-card-head">
+                              <strong>{getOrderLogDisplayTitle(log, arr, trackingLogs)}</strong>
+                              <span>{formatCreatedDateTime(log.created_at)}</span>
+                            </div>
+                            <div className="ao-track-card-meta">
+                              By: {log.performed_by_name || "Pending"}
+                            </div>
+                            {displayRemark && (
+                              <div className="ao-track-card-remark">
+                                Remark: {displayRemark}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
             </div>
           </div>
         </div>

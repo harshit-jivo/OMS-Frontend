@@ -220,6 +220,7 @@
 .au-form-card {
   padding: 24px;
   width: 100%;
+  overflow: visible;
 }
 
 .au-form-head {
@@ -381,6 +382,8 @@
   align-items: center;
   justify-content: space-between;
   height: var(--input-h, 40px);
+  width: 100%;
+  min-width: 0;
   padding: 0 12px;
   border: 1px solid #dbe4ee;
   border-radius: var(--radius-sm, 8px);
@@ -401,8 +404,37 @@
   border-radius: var(--radius-md, 12px);
   box-shadow: 0 16px 28px rgba(15, 23, 42, 0.08);
   z-index: 20;
-  max-height: 200px;
+  max-height: min(320px, calc(100vh - 220px));
   overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.au-variety-menu {
+  max-height: min(420px, calc(100vh - 180px));
+}
+
+.au-variety-search,
+.au-variety-selectall {
+  position: sticky;
+  z-index: 2;
+}
+
+.au-variety-search {
+  top: 0;
+}
+
+.au-variety-selectall {
+  top: 54px;
+}
+
+.au-variety-selected-label {
+  cursor: default;
+  font-weight: 700;
+  color: #0f172a;
+  position: sticky;
+  top: 91px;
+  z-index: 1;
+  border-bottom: 1px solid #edf2f7;
 }
 
 .au-mg-option {
@@ -530,7 +562,11 @@
   }
 
   .au-mg-menu {
-    max-height: 150px;
+    max-height: min(260px, calc(100vh - 180px));
+  }
+
+  .au-variety-menu {
+    max-height: min(340px, calc(100vh - 150px));
   }
 
   .au-submit {
@@ -553,6 +589,12 @@
 
   .au-form-card {
     padding: 14px;
+  }
+
+  .au-mg-menu {
+    left: -2px;
+    right: -2px;
+    max-height: min(240px, calc(100vh - 140px));
   }
 }
     

@@ -22,8 +22,6 @@ const getPartyCode = (party: SearchableParty) => asText(party.card_code || party
 const getPartyName = (party: SearchableParty) => asText(party.card_name || party.CardName);
 const getPartyCategory = (party: SearchableParty) => asText(party.category);
 const normalizeCategory = (value: unknown) => asText(value).toUpperCase();
-const getPartySelectionKey = (party: SearchableParty) =>
-  `${getPartyCode(party)}||${normalizeCategory(getPartyCategory(party))}`;
 const getPartyKey = (party: SearchableParty) =>
   [getPartyCode(party), asText(party.category), asText(party.id)].filter(Boolean).join("-");
 
@@ -35,15 +33,7 @@ const getUserCategory = (user?: User) => {
 };
 
 const isPartyInUserCategory = (party: Party, userCategory: string) =>
-  !userCategory || normalizeSearch(party.category) === normalizeSearch(userCategory);
-
-const getSelectionFromKey = (key: string) => {
-  const [cardCode, category = ""] = key.split("||");
-  return {
-    card_code: cardCode,
-    category: category || null,
-  };
-};
+  !userCategory || normalizeCategory(party.category) === normalizeCategory(userCategory);
 
 const mergeParties = (partyList: Party[]) => {
   const seen = new Set<string>();
@@ -150,7 +140,7 @@ export default function Party_Assignment() {
       const userCategory = getUserCategory(users.find((user) => user.id === userId));
       const assigned = (res.data?.parties || [])
         .filter((p: any) => isPartyInUserCategory(p, userCategory))
-        .map((p: any) => asText(p.party_key) || getPartySelectionKey(p));
+        .map((p: any) => asText(p.card_code));
           console.log("Assigned parties for user", userId, assigned);
 
       setSelectedParties(assigned);
@@ -160,8 +150,8 @@ export default function Party_Assignment() {
   };
 
   const selectedUserRecord = users.find((user) => user.id === selectedUser);
-  const selectedUserCategory = getUserCategory(selectedUserRecord);
-  const partyOptions = parties.filter((party) => isPartyInUserCategory(party, selectedUserCategory));
+  const selectedUserCategoryLabel = getUserCategory(selectedUserRecord);
+  const partyOptions = parties.filter((party) => isPartyInUserCategory(party, selectedUserCategoryLabel));
   const partySearchTerm = normalizeSearch(search);
   const visibleParties = partyOptions.filter((party) => {
     if (!partySearchTerm) return true;
@@ -178,7 +168,7 @@ export default function Party_Assignment() {
       .split(" ")
       .every((term) => searchableText.includes(term));
   });
-  const visiblePartyKeys = visibleParties.map(getPartySelectionKey);
+  const visiblePartyKeys = visibleParties.map(getPartyCode);
 
   const filteredUsers = users.filter((user) =>
     normalizeSearch(user.name).includes(normalizeSearch(userSearch)),
@@ -192,13 +182,11 @@ export default function Party_Assignment() {
     }
 
    
-    const selectedPartySelections = selectedParties.map(getSelectionFromKey);
-    const selectedPartyCodes = [...new Set(selectedPartySelections.map((party) => party.card_code))];
+    const selectedPartyCodes = [...new Set(selectedParties)];
 
     const res = await userService.assignPartiesToUser(
       Number(selectedUser),
       selectedPartyCodes,
-      selectedPartySelections,
     );
 
     console.log("API Response:", res);
@@ -217,19 +205,16 @@ export default function Party_Assignment() {
   }
 };
 
-const handleDel =  async (partyKey: string) => {
+const handleDel =  async (partyCode: string) => {
   try {
     if (!selectedUser) return;
 
-    console.log("Removing party", partyKey, "from user", selectedUser);
+    console.log("Removing party", partyCode, "from user", selectedUser);
 
-    const newParties = selectedParties.filter((p) => p !== partyKey);
-    const selectedPartySelections = newParties.map(getSelectionFromKey);
-    const selectedPartyCodes = [...new Set(selectedPartySelections.map((party) => party.card_code))];
+    const selectedPartyCodes = [...new Set(selectedParties.filter((p) => p !== partyCode))];
     await userService.assignPartiesToUser(
       Number(selectedUser),
       selectedPartyCodes,
-      selectedPartySelections,
     );
 
     alert("Party removed ✅");
@@ -520,7 +505,7 @@ const handleBulkImport = async (file: File) => {
                   <h3 style={{ fontSize: '1.1rem', fontWeight: 600, color: '#0f172a', margin: 0 }}>Assigned Parties</h3>
                   <p style={{ fontSize: '0.875rem', color: '#64748b', margin: '4px 0 0' }}>
                     <strong>{[...new Set(selectedParties)].length}</strong> parties assigned to <strong>{selectedUserRecord?.name}</strong>
-                    {selectedUserCategory && <> in <strong>{selectedUserCategory}</strong></>}
+                    {selectedUserCategoryLabel && <> in <strong>{selectedUserCategoryLabel}</strong></>}
                   </p>
                 </div>
                 <button
@@ -546,8 +531,8 @@ const handleBulkImport = async (file: File) => {
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '16px' }}>
                 {(selectedParties || []).length > 0 ? (
-                  [...new Set(selectedParties)].map((partyKey) => {
-                    const party = partyOptions.find((p) => getPartySelectionKey(p) === partyKey);
+                  [...new Set(selectedParties)].map((partyCode) => {
+                    const party = partyOptions.find((p) => getPartyCode(p) === partyCode);
                     return party ? (
                       <div key={getPartyKey(party)} style={{ 
                         display: 'flex', 
@@ -577,7 +562,7 @@ const handleBulkImport = async (file: File) => {
                           }}
                           onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
                           onMouseLeave={(e) => e.currentTarget.style.opacity = '0.7'}
-                          onClick={() => handleDel(getPartySelectionKey(party))}
+                          onClick={() => handleDel(getPartyCode(party))}
                           title="Remove Party"
                         >
                           ×
@@ -602,7 +587,7 @@ const handleBulkImport = async (file: File) => {
             <div>
               <h2 style={{ margin: '0 0 4px', fontSize: '24px', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em' }}>Assign Parties</h2>
               <p style={{ fontSize: '0.875rem', color: '#64748b', margin: '4px 0 0' }}>
-                Select multiple {selectedUserCategory && <strong>{selectedUserCategory} </strong>}parties to map to <strong>{selectedUserRecord?.name}</strong>
+                Select multiple {selectedUserCategoryLabel && <strong>{selectedUserCategoryLabel} </strong>}parties to map to <strong>{selectedUserRecord?.name}</strong>
               </p>
             </div>
             <button
@@ -688,7 +673,7 @@ const handleBulkImport = async (file: File) => {
               visibleParties.map((party) => {
                 const partyCode = getPartyCode(party);
                 const partyName = getPartyName(party);
-                const partyKey = getPartySelectionKey(party);
+                const partyKey = getPartyCode(party);
 
                 return (
                 <label 

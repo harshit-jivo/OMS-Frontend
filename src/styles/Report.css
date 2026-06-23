@@ -44,10 +44,14 @@
 }
 
 .dr-filter-row {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-  align-items: end;
-  gap: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.dr-filter-row > .dr-field {
+  flex: 1 1 150px;
 }
 
 .dr-field {
@@ -970,7 +974,10 @@
     font-size: 26px;
   }
 
-  .dr-filter-row,
+  .dr-filter-row > .dr-field {
+    flex: 1 1 calc(50% - 12px);
+  }
+
   .dr-report-header,
   .dr-d-nav {
     display: flex;
@@ -983,7 +990,7 @@
   }
 
   .dr-field {
-    min-width: 100%;
+    min-width: 0;
   }
 
   .dr-table-wrap,
@@ -1014,6 +1021,10 @@
 }
 
 @media (max-width: 480px) {
+  .dr-filter-row > .dr-field {
+    flex: 1 1 100%;
+  }
+
   .dr-header,
   .dr-filter-card,
   .dr-report-header,

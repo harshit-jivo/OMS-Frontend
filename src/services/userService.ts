@@ -16,6 +16,7 @@ export interface User {
   company?: number | null;
   category?: CategoryOption | null;
   variety?: string | null;
+  extra_pages?: string[];
 }
 
 export interface Option {
@@ -42,11 +43,6 @@ export interface CreateUserData {
   states?: number[];
   category?: number | null;
   variety?: string | null;
-}
-
-export interface PartySelection {
-  card_code: string;
-  category?: string | null;
 }
 
 export interface BulkPartyUserAssignmentRow {
@@ -96,11 +92,10 @@ export const userService = {
     return response.data;
   },
 
- assignPartiesToUser: async (userId: number, partyCodes: string[], partySelections?: PartySelection[]) => {
+ assignPartiesToUser: async (userId: number, partyCodes: string[]) => {
   const payload = {
     user_id: userId,
     card_codes: partyCodes,   
-    ...(partySelections ? { party_selections: partySelections } : {}),
   };
 
   const response = await api.post(`/auth/assign-parties/`, payload);
@@ -155,7 +150,6 @@ removePartyProduct: async (card_code: string, itemCode: string, category: string
   },
 
   createUser: async (data: CreateUserData) => {
-
     const payload = {
       name: data.name,
       username: data.username,
@@ -169,7 +163,7 @@ removePartyProduct: async (card_code: string, itemCode: string, category: string
       state: data.state || null,
       states: data.states || [],
       category: data.category || null,
-      variety: data.variety || null
+      sub_group: data.variety || null
     };
 
     const response = await api.post("/auth/users/create/", payload);
@@ -194,11 +188,23 @@ updateUser: async (id: number, data: CreateUserData) => {
     state: states[0] || data.state || null,
     states: states,
     category: data.category || null,
-    variety: data.variety || null,
+    sub_group: data.variety || null,
   };
 
   const response = await api.put(`/auth/users/${id}/`, payload);
   return response.data;
-}
+},
+
+  getPagePermissions: async (userId: number) => {
+    const response = await api.get(`/auth/users/${userId}/page-permissions/`);
+    return response.data;
+  },
+
+  updatePagePermissions: async (userId: number, extraPages: string[]) => {
+    const response = await api.put(`/auth/users/${userId}/page-permissions/`, {
+      extra_pages: extraPages,
+    });
+    return response.data;
+  }
 
 };

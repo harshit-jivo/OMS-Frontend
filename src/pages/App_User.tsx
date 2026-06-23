@@ -193,7 +193,12 @@ export default function App_User() {
     }
     try {
       const data = await sapService.getProductVarieties(category);
-      setVarietyOptions(Array.isArray(data.varieties) ? data.varieties : []);
+      const subGroups = Array.isArray(data.sub_groups)
+        ? data.sub_groups
+        : Array.isArray(data.varieties)
+          ? data.varieties
+          : [];
+      setVarietyOptions(subGroups);
     } catch (error) {
       console.log("Error fetching SAP varieties:", error);
       setVarietyOptions([]);
@@ -263,12 +268,18 @@ export default function App_User() {
   const filteredVarietyOptions = varietyOptions.filter((variety) =>
     variety.toLowerCase().includes(varietySearch.trim().toLowerCase()),
   );
+  const selectedVarietyOptions = selectedVarieties.filter((variety) =>
+    variety.toLowerCase().includes(varietySearch.trim().toLowerCase()),
+  );
+  const unselectedVarietyOptions = filteredVarietyOptions.filter(
+    (variety) => !selectedVarieties.includes(variety),
+  );
   const varietyLabel =
     selectedVarieties.length === 0
-      ? "Select Variety"
+      ? "Select Sub Group"
       : selectedVarieties.length === 1
         ? selectedVarieties[0]
-        : `${selectedVarieties.length} varieties selected`;
+        : `${selectedVarieties.length} sub groups selected`;
 
   const toggleVariety = (variety: string) => {
     setFormData((prev) => {
@@ -444,6 +455,7 @@ export default function App_User() {
       company?: unknown;
       category?: unknown;
       variety?: string | null;
+      sub_group?: string | null;
       role?: unknown;
       role_display?: string;
     };
@@ -470,7 +482,8 @@ export default function App_User() {
       role: roleId,
       company: getId(editableUser.company) || null,
       category: getId(editableUser.category) || null,
-      variety: editableUser.variety || "",
+      // formData.variety is the in-form holder for the user's sub group assignment.
+      variety: editableUser.sub_group || "",
     });
 
     setShowForm(true);
@@ -933,8 +946,8 @@ export default function App_User() {
                       setCategoryDropdownOpen((value) => !value);
                     }}
                   >
-                    <span className="au-trigger-label">
-                      <HiTag className="au-field-icon" aria-hidden="true" />
+                      <span className="au-trigger-label">
+                        <HiTag className="au-field-icon" aria-hidden="true" />
                       <span>{getCategoryName(formData.category)}</span>
                     </span>
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
@@ -967,7 +980,7 @@ export default function App_User() {
                 </div>
               </div>
               <div className="au-field au-full">
-                <label className="au-label">Variety</label>
+                <label className="au-label">Sub Group</label>
                 <div className="au-mg-dropdown" ref={varietyRef}>
                   <div
                     className="au-mg-trigger"
@@ -991,13 +1004,13 @@ export default function App_User() {
                     </svg>
                   </div>
                   {varietyDropdownOpen && (
-                    <div className="au-mg-menu">
-                      <div className="au-mg-option" style={{ cursor: "default" }}>
+                    <div className="au-mg-menu au-variety-menu">
+                      <div className="au-mg-option au-variety-search" style={{ cursor: "default" }}>
                         <input
                           type="text"
                           value={varietySearch}
                           onChange={(event) => setVarietySearch(event.target.value)}
-                          placeholder="Search variety..."
+                          placeholder="Search sub group..."
                           style={{
                             width: "100%",
                             border: "1px solid #cbd5e1",
@@ -1009,7 +1022,7 @@ export default function App_User() {
                           onClick={(event) => event.stopPropagation()}
                         />
                       </div>
-                      <label className="au-mg-option au-mg-selectall">
+                      <label className="au-mg-option au-mg-selectall au-variety-selectall">
                         <input
                           type="checkbox"
                           checked={allFilteredVarietiesSelected}
@@ -1018,22 +1031,39 @@ export default function App_User() {
                         />
                         Select All
                       </label>
-                      {filteredVarietyOptions.length > 0 ? (
-                        filteredVarietyOptions.map((variety) => (
+                      {selectedVarietyOptions.length > 0 && (
+                        <>
+                          <div className="au-mg-option au-variety-selected-label">
+                            Selected
+                          </div>
+                          {selectedVarietyOptions.map((variety) => (
+                            <label key={`selected-${variety}`} className="au-mg-option">
+                              <input
+                                type="checkbox"
+                                checked
+                                onChange={() => toggleVariety(variety)}
+                              />
+                              {variety}
+                            </label>
+                          ))}
+                        </>
+                      )}
+                      {unselectedVarietyOptions.length > 0 ? (
+                        unselectedVarietyOptions.map((variety) => (
                           <label key={variety} className="au-mg-option">
                             <input
                               type="checkbox"
-                              checked={selectedVarieties.includes(variety)}
+                              checked={false}
                               onChange={() => toggleVariety(variety)}
                             />
                             {variety}
                           </label>
                         ))
-                      ) : (
+                      ) : selectedVarietyOptions.length === 0 ? (
                         <div className="au-mg-option">
                           {selectedCategoryName ? "No varieties found" : "Select category first"}
                         </div>
-                      )}
+                      ) : null}
                     </div>
                   )}
                 </div>

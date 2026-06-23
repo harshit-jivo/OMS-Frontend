@@ -8,6 +8,7 @@ export interface Product  {
   category?: string;
   sal_pack_unit?: string;
   variety?: string;
+  type?: string;
   staff_rate?: string | number;
   on_hand?: string | number | null;
   total_on_hand?: string | number | null;
@@ -127,7 +128,7 @@ export const sapService = {
     const response = await api.get("/sap/product-varieties/", {
       params: category ? { category } : undefined,
     });
-    return response.data as { category?: string; count?: number; varieties?: string[] };
+    return response.data as { category?: string; count?: number; varieties?: string[]; sub_groups?: string[] };
   },
 
   getProductStock: async () => {

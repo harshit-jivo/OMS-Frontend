@@ -2,16 +2,23 @@
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
 import { getOrderItemSchemeNames, getOrderItemSchemes, getOrderItemSchemeQtyText, getOrderItemTotalLtrs, ordersService } from "../services/ordersService";
-import type { Order, OrderItem } from "../services/ordersService";
+import type { Order, OrderItem, OrderLog } from "../services/ordersService";
 import "../styles/Auditor_Order.css";
 import { useLocation, useNavigate } from "react-router-dom";
 import { loadDetailedOrders } from "../utils/orderHistory";
+import {
+  buildOrderTimelineLogs,
+  getOrderLogDisplayRemark,
+  getOrderLogDisplayTitle,
+  getOrderLogTone,
+} from "../utils/orderTrackingTimeline";
 import api from '../services/api';
-import { 
+import {
   HiCheckCircle,   // Approve
   HiXCircle,       // Reject
   HiEye,           // View
-  HiArrowDownTray  // Download
+  HiArrowDownTray, // Download
+  HiArrowPath      // Track
 } from "react-icons/hi2";
 
 
@@ -53,6 +60,10 @@ export default function Auditor_orders() {
   const [isOrdersLoading, setIsOrdersLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
+  const [showTrackModal, setShowTrackModal] = useState(false);
+  const [trackingOrder, setTrackingOrder] = useState<Order | null>(null);
+  const [trackingLogs, setTrackingLogs] = useState<OrderLog[]>([]);
+  const [trackLogsLoading, setTrackLogsLoading] = useState(false);
 
   useEffect(() => {
     fetchOrders();
@@ -176,8 +187,8 @@ export default function Auditor_orders() {
         Boxes: item.boxes,
         Liters: item.ltrs,
         "Total Ltrs": getOrderItemTotalLtrs(item).toFixed(2),
+        "Price List (Basic)": item.price_list_basic,
         "Basic Price": item.basic_price,
-        "Market Price": item.market_price,
         "Total Amount": item.total,
       }));
     } else {
@@ -189,8 +200,8 @@ export default function Auditor_orders() {
         Status: order.status_display,
         "Bill To": order.bill_to_address,
         "Ship To": order.ship_to_address,
+        "Price List (Basic)": "",
         "Basic Price": "",
-        "Market Price": "",
       });
     }
 
@@ -202,6 +213,22 @@ export default function Auditor_orders() {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     });
     saveAs(file, `Order_${order.order_number}.xlsx`);
+  };
+
+  const handleTrack = async (order: Order) => {
+    setTrackingOrder(order);
+    setShowTrackModal(true);
+    setTrackingLogs([]);
+    setTrackLogsLoading(true);
+    try {
+      const response = await ordersService.getOrderLogs(order.id);
+      setTrackingLogs(Array.isArray(response) ? response : []);
+    } catch (error) {
+      console.log("Error fetching order logs:", error);
+      setTrackingLogs([]);
+    } finally {
+      setTrackLogsLoading(false);
+    }
   };
 
   const filteredOrders = orders.filter((order) => {
@@ -222,7 +249,7 @@ export default function Auditor_orders() {
   return (
     <div className="ao-page">
 
-      {/* â”€â”€ LIST VIEW â”€â”€ */}
+      {/* â"€â"€ LIST VIEW â"€â"€ */}
       {!showDetails && (
         <>
           <div className="ao-toolbar">
@@ -257,6 +284,7 @@ export default function Auditor_orders() {
                     <th>Delivery Date</th>
                     {/* <th>Status</th> */}
                     <th>Details</th>
+                    <th>Track</th>
                     <th>Action</th>
                     <th>Download</th>
                   </tr>
@@ -289,6 +317,15 @@ export default function Auditor_orders() {
                             }}
                           >
                              <HiEye size={22} />
+                          </button>
+                        </td>
+                        <td>
+                          <button
+                            className="ao-btn-icon track"
+                            onClick={() => handleTrack(order)}
+                            title="Track Order"
+                          >
+                            <HiArrowPath size={22} />
                           </button>
                         </td>
                         <td className="ao-action-cell">
@@ -335,7 +372,7 @@ export default function Auditor_orders() {
         </>
       )}
 
-      {/* â”€â”€ DETAIL VIEW â”€â”€ */}
+      {/* â"€â"€ DETAIL VIEW â"€â"€ */}
       {showDetails && orderDetails && (
         <div className="ao-detail">
           <div className="ao-d-nav">
@@ -362,6 +399,14 @@ export default function Auditor_orders() {
               }}
               >
                 <HiXCircle />
+              </button>
+              <button
+                className="ao-d-action-btn"
+                aria-label="Track order"
+                title="Track"
+                onClick={() => handleTrack(orderDetails)}
+              >
+                <HiArrowPath />
               </button>
               <button className="ao-d-export" onClick={() => downloadExcel(orderDetails)}>
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1v8m0 0L4 6.5M7 9l3-2.5M2.5 12h9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
@@ -420,6 +465,12 @@ export default function Auditor_orders() {
                 <span className="ao-d-hf-label">Ship To</span>
                 <span className="ao-d-hf-value">{orderDetails.ship_to_address || "-"}</span>
               </div>
+              {orderDetails.remarks?.trim() ? (
+                <div className="ao-d-info-field" style={{ gridColumn: "1 / -1" }}>
+                  <span className="ao-d-hf-label">Comment</span>
+                  <span className="ao-d-hf-value">{orderDetails.remarks}</span>
+                </div>
+              ) : null}
             </div>
           </div>
 
@@ -460,8 +511,8 @@ export default function Auditor_orders() {
                           <div><span>Boxes</span><strong>{Number(item.boxes).toFixed(2)}</strong></div>
                           <div><span>Ltrs</span><strong>{item.ltrs}</strong></div>
                           {schemes.length > 0 ? <div><span>Total Ltrs</span><strong>{getOrderItemTotalLtrs(item).toFixed(2)}</strong></div> : null}
+                          <div><span>Price List (Basic)</span><strong>{Number(item.price_list_basic).toFixed(2)}</strong></div>
                           <div><span>Basic Price</span><strong>{Number(item.basic_price).toFixed(2)}</strong></div>
-                          <div><span>Market Price</span><strong>{Number(item.market_price).toFixed(2)}</strong></div>
                           <div><span>Tax %</span><strong>{Number(item.tax_rate).toFixed(2)}</strong></div>
                           <div className="order-detail-item-amount"><span>Amount</span><strong>{Number(item.total).toFixed(2)}</strong></div>
                         </div>
@@ -485,8 +536,8 @@ export default function Auditor_orders() {
                 <th>Ltrs</th>
                 {/* <th>Scheme Ltrs</th> */}
                 <th>Total Ltrs</th>
+                <th>Price List (Basic)</th>
                 <th>Basic Price</th>
-                <th>Market Price</th>
                 <th>Tax %</th>
                 <th style={{textAlign:'right'}}>Amount</th>
               </tr>
@@ -505,8 +556,8 @@ export default function Auditor_orders() {
                       <td style={{textAlign:'center'}}>{item.ltrs}</td>
                       {/* <td style={{textAlign:'center'}}>{item.scheme_name ? ((item as any).scheme_ltrs || 0) : "-"}</td> */}
                       <td style={{textAlign:'center'}}>{getOrderItemTotalLtrs(item).toFixed(2)}</td>
+                      <td style={{textAlign:'right'}}>{Number(item.price_list_basic).toFixed(2)}</td>
                       <td style={{textAlign:'right'}}>{Number(item.basic_price).toFixed(2)}</td>
-                      <td style={{textAlign:'right'}}>{Number(item.market_price).toFixed(2)}</td>
                       <td style={{textAlign:'center'}}>{Number(item.tax_rate).toFixed(2)}</td>
                       <td style={{textAlign:'right',fontWeight:600,color:'#0f172a'}}>{Number(item.total).toFixed(2)}</td>
                     </tr>
@@ -573,7 +624,7 @@ export default function Auditor_orders() {
         </div>
       )}
 
-      {/* â”€â”€ REJECT MODAL â”€â”€ */}
+      {/* â"€â"€ REJECT MODAL â"€â"€ */}
       {showRejectModal && (
         <div className="ao-modal-overlay">
           <div className="ao-modal">
@@ -601,6 +652,74 @@ export default function Auditor_orders() {
               >
                 Cancel
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showTrackModal && trackingOrder && (
+        <div className="ao-modal-overlay">
+          <div className="ao-track-modal">
+            <div className="ao-track-header">
+              <div>
+                <div className="ao-track-title">Order Track</div>
+                <div className="ao-track-subtitle">
+                  {trackingOrder.order_number} &mdash; {trackingOrder.card_name}
+                </div>
+              </div>
+              <button
+                className="ao-track-close"
+                onClick={() => {
+                  setShowTrackModal(false);
+                  setTrackingOrder(null);
+                  setTrackingLogs([]);
+                }}
+              >
+                &times;
+              </button>
+            </div>
+
+            <div className="ao-track-body">
+              {trackLogsLoading ? (
+                <div className="ao-track-loading">
+                  <span className="order-loading-spinner" />
+                  <span>Loading logs...</span>
+                </div>
+              ) : trackingLogs.length === 0 ? (
+                <div className="ao-track-empty">No tracking logs found.</div>
+              ) : (
+                <div className="ao-track-timeline">
+                  {buildOrderTimelineLogs(trackingLogs, trackingOrder)
+                    .map((log, index, arr) => {
+                      const tone = getOrderLogTone(log.status_name, log.performed_by_name);
+                      const displayRemark = getOrderLogDisplayRemark(log);
+                      return (
+                        <div key={log.id} className="ao-track-row">
+                          <div className="ao-track-left">
+                            <div className={`ao-track-dot ${tone}`}>
+                              {tone === "approved" ? "\u2713" : tone === "rejected" ? "\u2715" : "\u2022"}
+                            </div>
+                            {index !== arr.length - 1 && <div className={`ao-track-line ${tone}`} />}
+                          </div>
+                          <div className={`ao-track-card ${tone}`}>
+                            <div className="ao-track-card-head">
+                              <strong>{getOrderLogDisplayTitle(log, arr, trackingLogs)}</strong>
+                              <span>{formatCreatedDateTime(log.created_at)}</span>
+                            </div>
+                            <div className="ao-track-card-meta">
+                              By: {log.performed_by_name || "Pending"}
+                            </div>
+                            {displayRemark && (
+                              <div className="ao-track-card-remark">
+                                Remark: {displayRemark}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
             </div>
           </div>
         </div>
