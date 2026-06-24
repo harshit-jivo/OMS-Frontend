@@ -314,14 +314,14 @@ export default function Sidebar({ children }: SidebarProps) {
             </Link>
           </li>
 
-          {(userRole?.toLowerCase() === "billing" || userRole?.toLowerCase() === "factory_approver") && (
+          {/* {(userRole?.toLowerCase() === "billing" || userRole?.toLowerCase() === "factory_approver") && (
             <li className={location.pathname === "/Invoice_Review" ? "active" : ""}>
               <Link to="/Invoice_Review" onClick={closeSidebar}>
                 <SidebarIcon><HiClipboardDocumentCheck /></SidebarIcon>
                 Invoice Review
               </Link>
             </li>
-          )}
+          )} */}
 
           
           {canSee("App_User") && (
@@ -418,9 +418,9 @@ export default function Sidebar({ children }: SidebarProps) {
                   {(userRole?.toLowerCase() === "manager" || userRole?.toLowerCase() == "billing") && (
                     <li><Link to="/FOC" onClick={closeSidebar}><SidebarIcon><HiGift /></SidebarIcon>FOC</Link></li>
                   )}
-                  {userRole?.toLowerCase() === "billing" && (
+                  {/* {userRole?.toLowerCase() === "billing" && (
                     <li><Link to="/Sales_Invoice" onClick={closeSidebar}><SidebarIcon><HiDocumentText /></SidebarIcon>Sales Invoice</Link></li>
-                  )}
+                  )} */}
                
                   <li><Link to="/View_Orders" onClick={closeSidebar}><SidebarIcon><HiEye /></SidebarIcon>View Orders</Link></li>
                 </ul>
