@@ -31,6 +31,7 @@ import Product_Stock from "./pages/Product_Stock";
 import Order_Flow_Settings from "./pages/Order_Flow_Settings";
 import Page_Permissions from "./pages/Page_Permissions";
 import Sales_Quotation from "./pages/Sales_Quotation";
+import LabelChecker from "./pages/Label_Checker";
 
 function App() {
   return (
@@ -303,6 +304,15 @@ function App() {
           element={
             <Sidebar>
               <Sales_Quotation />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Label_Checker"
+          element={
+            <Sidebar>
+              <LabelChecker />
             </Sidebar>
           }
         />
