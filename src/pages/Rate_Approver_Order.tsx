@@ -23,14 +23,6 @@ const RATE_APPROVAL_STATUS = "RATE_APPROVAL";
 const RATE_APPROVER_APPROVED_STATUS = 6;
 const RATE_APPROVER_REJECTED_STATUS = 7;
 
-const now = new Date();
-const firstDay = new Date(now.getFullYear(), now.getMonth(), 1)
-  .toISOString()
-  .split("T")[0];
-const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 1)
-  .toISOString()
-  .split("T")[0];
-
 const formatCreatedDateTime = (value?: string | null) => {
   if (!value) return "-";
   const parsed = new Date(value);
@@ -57,8 +49,8 @@ export default function RateApproverOrders() {
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [pendingOrderId, setPendingOrderId] = useState<number | null>(null);
   const [pendingOrderNum, setPendingOrderNum] = useState("");
-  const [fromDate, setFromDate] = useState(firstDay);
-  const [toDate, setToDate] = useState(lastDay);
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
   const [isOrdersLoading, setIsOrdersLoading] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
   const [showAcceptSuccess, setShowAcceptSuccess] = useState(false);
@@ -489,6 +481,12 @@ export default function RateApproverOrders() {
                 <span className="ao-d-hf-label">Ship To</span>
                 <span className="ao-d-hf-value">{orderDetails.ship_to_address || "-"}</span>
               </div>
+              {orderDetails.remarks?.trim() ? (
+                <div className="ao-d-info-field" style={{ gridColumn: "1 / -1" }}>
+                  <span className="ao-d-hf-label">Comment</span>
+                  <span className="ao-d-hf-value">{orderDetails.remarks}</span>
+                </div>
+              ) : null}
             </div>
           </div>
 

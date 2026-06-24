@@ -18,6 +18,8 @@ import {
   YAxis,
 } from "recharts";
 import { getCurrentUser } from "../services/authService";
+import { ordersService } from "../services/ordersService";
+import type { Order } from "../services/ordersService";
 import api from "../services/api";
 import "../styles/Dashboard.css";
 
@@ -229,6 +231,11 @@ export default function Dashboard() {
   const [showStateItems, setShowStateItems] = useState(false);
   const [selectedItemVariety, setSelectedItemVariety] = useState("ALL");
   const [showAllItemStates, setShowAllItemStates] = useState(false);
+  const [statusOrdersModal, setStatusOrdersModal] = useState<{ status: string; label: string } | null>(null);
+  const [statusOrders, setStatusOrders] = useState<Order[]>([]);
+  const [statusOrdersLoading, setStatusOrdersLoading] = useState(false);
+  const [statusOrdersError, setStatusOrdersError] = useState("");
+  const [detailOrder, setDetailOrder] = useState<Order | null>(null);
 
   const isUnauthorized = (result: PromiseSettledResult<unknown>) =>
     result.status === "rejected" &&
@@ -314,6 +321,8 @@ export default function Dashboard() {
   const isBilling = role === "billing";
   const isReviewRole = role === "auditor" || role === "approver";
   const shouldExpandVolumeChart = role === "billing" || isReviewRole;
+  // Top Parties is only relevant to admin/manager; hide it for auditor, approver and billing.
+  const showTopParties = !(isReviewRole || isBilling);
 
   const activeStatus = useMemo(
     () => (charts?.status_distribution ?? []).filter((item) => item.count > 0),
@@ -513,6 +522,41 @@ export default function Dashboard() {
     );
     return PALETTE[(sourceIndex >= 0 ? sourceIndex : 0) % PALETTE.length];
   };
+
+  // Status slices/legend are only backed by real OrderStatus codes for admin/manager.
+  // Review/billing roles render synthetic decision buckets that can't be fetched by code.
+  const statusClickable = !(isReviewRole || role === "billing");
+
+  const getStatusCodesForItem = (statusItem: { status: string; label: string }) => {
+    // "Rejected" is a merged bucket (synthetic status === "rejected"); expand it back to
+    // every underlying rejected status code so the modal can fetch all of them.
+    if (statusItem.status === "rejected") {
+      const codes = activeStatus
+        .filter((item) => `${item.status} ${item.label}`.toLowerCase().includes("rejected"))
+        .map((item) => item.status);
+      return codes.length > 0 ? codes : [statusItem.status];
+    }
+    return [statusItem.status];
+  };
+
+  const openStatusOrders = async (statusItem: { status: string; label: string }) => {
+    if (!statusClickable) return;
+    setStatusOrdersModal({ status: statusItem.status, label: statusItem.label });
+    setStatusOrders([]);
+    setStatusOrdersError("");
+    setStatusOrdersLoading(true);
+
+    try {
+      const codes = getStatusCodesForItem(statusItem).join(",");
+      const data = await ordersService.getOrders(codes);
+      setStatusOrders(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error("Error fetching status orders:", err);
+      setStatusOrdersError("Unable to load orders for this status.");
+    } finally {
+      setStatusOrdersLoading(false);
+    }
+  };
   const selectedMonthLabel = MONTH_OPTIONS.find((option) => option.value === month)?.label ?? "All Months";
   const selectedPeriodLabel = month === 0 ? `${year}` : `${selectedMonthLabel} ${year}`;
   const orderVolumeMetricLabel = month === 0 ? "Year Total" : `${selectedMonthLabel} Total`;
@@ -570,7 +614,7 @@ export default function Dashboard() {
       { icon: "✅", tone: "db-card--dark", label: "Accepted Orders", value: fmt(reviewAcceptedCount), sub: "Orders accepted by auditor" },
     ],
     approver: [
-      { icon: "📥", tone: "db-card--teal", label: "This Month Orders", value: fmt(kpi?.this_month_orders ?? 0), sub: "Orders assigned for rate approval" },
+      { icon: "📥", tone: "db-card--teal", label: "This Month Orders", value: fmt(totalOrders), sub: "Orders assigned for rate approval" },
       { icon: <HiOutlineClipboardDocumentList aria-hidden="true" />, tone: "db-card--blue", label: "Pending Approval", value: fmt(outstandingOrders), sub: "Orders still awaiting rate decision" },
       { icon: "✅", tone: "db-card--dark", label: "Approved Orders", value: fmt(reviewAcceptedCount), sub: "Orders approved by rate approver" },
     ],
@@ -797,10 +841,11 @@ export default function Dashboard() {
             <div className="db-highlights-subtitle">Quick chart summaries for {roleMeta.focus.toLowerCase()}</div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-            <div className="db-highlights-badge">3 charts</div>
+            <div className="db-highlights-badge">{showTopParties ? "3 charts" : "2 charts"}</div>
           </div>
         </div>
-        <div className="db-overview-grid">
+        <div className={`db-overview-grid${showTopParties ? "" : " db-overview-grid--two"}`}>
+          {showTopParties && (
           <div className="db-overview-card db-overview-card--pulse">
             <div className="db-overview-top db-overview-top--compact">
               <div>
@@ -860,6 +905,7 @@ export default function Dashboard() {
               </div>
             )}
           </div>
+          )}
 
           <div className="db-overview-card db-overview-card--progress">
             <div className="db-overview-top">
@@ -941,20 +987,39 @@ export default function Dashboard() {
                       innerRadius={32}
                     >
                       {statusDisplayItems.map((item) => (
-                        <Cell key={item.status} fill={getStatusColor(item)} />
+                        <Cell
+                          key={item.status}
+                          fill={getStatusColor(item)}
+                          style={{ cursor: statusClickable ? "pointer" : "default", outline: "none" }}
+                          onClick={statusClickable ? () => void openStatusOrders(item) : undefined}
+                        />
                       ))}
                     </Pie>
                     <Tooltip formatter={(value, name) => [value, name]} />
                   </PieChart>
                 </ResponsiveContainer>
                 <div className="db-legend">
-                  {statusDisplayItems.map((item) => (
-                    <div key={item.status} className="db-legend-item">
-                      <span className="db-legend-dot" style={{ background: getStatusColor(item) }} />
-                      <span className="db-legend-label">{item.label}</span>
-                      <span className="db-legend-val">{item.count}</span>
-                    </div>
-                  ))}
+                  {statusDisplayItems.map((item) =>
+                    statusClickable ? (
+                      <button
+                        key={item.status}
+                        type="button"
+                        className="db-legend-item db-legend-item--clickable"
+                        onClick={() => void openStatusOrders(item)}
+                        title={`View ${item.label} orders`}
+                      >
+                        <span className="db-legend-dot" style={{ background: getStatusColor(item) }} />
+                        <span className="db-legend-label">{item.label}</span>
+                        <span className="db-legend-val">{item.count}</span>
+                      </button>
+                    ) : (
+                      <div key={item.status} className="db-legend-item">
+                        <span className="db-legend-dot" style={{ background: getStatusColor(item) }} />
+                        <span className="db-legend-label">{item.label}</span>
+                        <span className="db-legend-val">{item.count}</span>
+                      </div>
+                    )
+                  )}
                 </div>
                 {hiddenStatusCount > 0 ? (
                   <div className="db-status-popover-wrap">
@@ -1044,13 +1109,27 @@ export default function Dashboard() {
               </button>
             </div>
             <div className="db-status-modal-list">
-              {hiddenStatusItems.map((item) => (
-                <div key={item.status} className="db-legend-item">
-                  <span className="db-legend-dot" style={{ background: getStatusColor(item) }} />
-                  <span className="db-legend-label">{item.label}</span>
-                  <span className="db-legend-val">{item.count}</span>
-                </div>
-              ))}
+              {hiddenStatusItems.map((item) =>
+                statusClickable ? (
+                  <button
+                    key={item.status}
+                    type="button"
+                    className="db-legend-item db-legend-item--clickable"
+                    onClick={() => void openStatusOrders(item)}
+                    title={`View ${item.label} orders`}
+                  >
+                    <span className="db-legend-dot" style={{ background: getStatusColor(item) }} />
+                    <span className="db-legend-label">{item.label}</span>
+                    <span className="db-legend-val">{item.count}</span>
+                  </button>
+                ) : (
+                  <div key={item.status} className="db-legend-item">
+                    <span className="db-legend-dot" style={{ background: getStatusColor(item) }} />
+                    <span className="db-legend-label">{item.label}</span>
+                    <span className="db-legend-val">{item.count}</span>
+                  </div>
+                )
+              )}
             </div>
           </div>
         </div>
@@ -1227,6 +1306,228 @@ export default function Dashboard() {
                 </div>
               ))}
             </div>
+          </div>
+        </div>
+      ) : null}
+
+      {statusOrdersModal ? (
+        <div className="db-status-modal-backdrop" onClick={() => setStatusOrdersModal(null)}>
+          <div
+            className="db-status-orders-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`${statusOrdersModal.label} orders`}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="db-status-modal-head">
+              <div>
+                <div className="db-chart-title">{statusOrdersModal.label} Orders</div>
+                <div className="db-chart-subtitle">
+                  {statusOrdersLoading
+                    ? "Loading orders..."
+                    : `${statusOrders.length} ${statusOrders.length === 1 ? "order" : "orders"} with this status`}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="db-status-modal-close"
+                onClick={() => setStatusOrdersModal(null)}
+                aria-label="Close status orders"
+              >
+                <FiChevronUp />
+              </button>
+            </div>
+            {statusOrdersLoading ? (
+              <div className="db-no-data">Loading orders...</div>
+            ) : statusOrdersError ? (
+              <div className="db-no-data">{statusOrdersError}</div>
+            ) : statusOrders.length === 0 ? (
+              <div className="db-no-data">No orders found for this status.</div>
+            ) : (
+              <div className="db-status-orders-list">
+                {statusOrders.map((order) => (
+                  <div className="db-status-order-row" key={order.id}>
+                    <div className="db-status-order-main">
+                      <span className="db-status-order-number">#{order.order_number}</span>
+                      <span className="db-status-order-party">{order.card_name || order.card_code}</span>
+                    </div>
+                    <div className="db-status-order-meta">
+                      <span className="db-status-order-amount">{fmtCurrency(order.total_amount)}</span>
+                      <span className="db-status-order-sub">
+                        {order.items?.length ?? 0} items
+                        {order.created_by ? ` | ${order.created_by}` : ""}
+                        {order.created_at ? ` | ${new Date(order.created_at).toLocaleDateString("en-GB")}` : ""}
+                        {order.po_number ? ` | PO: ${order.po_number}` : ""}
+                        {order.sap_doc_number ? ` | SAP: ${order.sap_doc_number}` : ""}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className="db-status-order-view"
+                      onClick={() => setDetailOrder(order)}
+                    >
+                      View
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
+
+      {detailOrder ? (
+        <div
+          className="db-status-modal-backdrop"
+          style={{ zIndex: 1100 }}
+          onClick={() => setDetailOrder(null)}
+        >
+          <div
+            className="db-order-detail-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Order ${detailOrder.order_number} details`}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="db-status-modal-head">
+              <div>
+                <div className="db-chart-title">Order #{detailOrder.order_number}</div>
+                <div className="db-chart-subtitle">
+                  {detailOrder.status_display}
+                  {detailOrder.is_foc ? " | FOC" : ""}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="db-status-modal-close"
+                onClick={() => setDetailOrder(null)}
+                aria-label="Close order detail"
+              >
+                <FiChevronUp />
+              </button>
+            </div>
+
+            <div className="db-order-detail-grid">
+              <div className="db-order-detail-field">
+                <span>Party</span>
+                <strong>{detailOrder.card_name || "—"}</strong>
+              </div>
+              <div className="db-order-detail-field">
+                <span>Card Code</span>
+                <strong>{detailOrder.card_code || "—"}</strong>
+              </div>
+              <div className="db-order-detail-field">
+                <span>Created By</span>
+                <strong>{detailOrder.created_by || "—"}</strong>
+              </div>
+              <div className="db-order-detail-field">
+                <span>Created At</span>
+                <strong>{detailOrder.created_at ? new Date(detailOrder.created_at).toLocaleString("en-GB") : "—"}</strong>
+              </div>
+              <div className="db-order-detail-field">
+                <span>Delivery Date</span>
+                <strong>{detailOrder.delivery_date || "—"}</strong>
+              </div>
+              <div className="db-order-detail-field">
+                <span>PO Number</span>
+                <strong>{detailOrder.po_number || "—"}</strong>
+              </div>
+              <div className="db-order-detail-field">
+                <span>SAP Doc</span>
+                <strong>{detailOrder.sap_doc_number || "—"}</strong>
+              </div>
+              <div className="db-order-detail-field">
+                <span>Total Amount</span>
+                <strong>{fmtCurrency(detailOrder.total_amount)}</strong>
+              </div>
+              {detailOrder.remarks?.trim() ? (
+                <div className="db-order-detail-field">
+                  <span>Comment</span>
+                  <strong>{detailOrder.remarks}</strong>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="db-order-detail-items-head">
+              <span>Items</span>
+              <span className="db-order-detail-items-count">{detailOrder.items?.length ?? 0}</span>
+            </div>
+            <div className="db-order-detail-items-scroll">
+              {detailOrder.items && detailOrder.items.length > 0 ? (
+                <table className="db-order-detail-table">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Item</th>
+                      <th>Category</th>
+                      <th className="db-num">Qty</th>
+                      <th className="db-num">Pcs</th>
+                      <th className="db-num">Boxes</th>
+                      <th className="db-num">Ltrs</th>
+                      <th className="db-num">Total Ltrs</th>
+                      <th className="db-num">Price List (Basic)</th>
+                      <th className="db-num">Basic Price</th>
+                      <th className="db-num">Tax %</th>
+                      <th className="db-num">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {detailOrder.items.map((item, index) => (
+                      <tr key={`${item.item_code}-${index}`}>
+                        <td>{index + 1}</td>
+                        <td>
+                          <span className="db-order-detail-item-name">{item.item_name}</span>
+                          <span className="db-order-detail-item-code">{item.item_code}</span>
+                        </td>
+                        <td>{item.category || "—"}</td>
+                        <td className="db-num">{item.qty}</td>
+                        <td className="db-num">{item.pcs}</td>
+                        <td className="db-num">{Number(item.boxes).toFixed(2)}</td>
+                        <td className="db-num">{item.ltrs}</td>
+                        <td className="db-num">{Number(item.total_ltrs ?? 0).toFixed(2)}</td>
+                        <td className="db-num">{Number(item.price_list_basic).toFixed(2)}</td>
+                        <td className="db-num">{Number(item.basic_price).toFixed(2)}</td>
+                        <td className="db-num">{Number(item.tax_rate).toFixed(2)}</td>
+                        <td className="db-num db-order-detail-amount">{Number(item.total).toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <div className="db-no-data">No items found for this order.</div>
+              )}
+            </div>
+
+            {detailOrder.items && detailOrder.items.length > 0 ? (
+              (() => {
+                const subtotal = detailOrder.items.reduce((sum, item) => sum + Number(item.total || 0), 0);
+                const tax = detailOrder.items.reduce(
+                  (sum, item) => sum + (Number(item.total || 0) * Number(item.tax_rate || 0)) / 100,
+                  0
+                );
+                const totalLtrs = detailOrder.items.reduce((sum, item) => sum + Number(item.total_ltrs || 0), 0);
+                return (
+                  <div className="db-order-detail-summary">
+                    <div className="db-order-detail-sum-row">
+                      <span>Total Ltrs</span>
+                      <strong>{totalLtrs.toFixed(2)}</strong>
+                    </div>
+                    <div className="db-order-detail-sum-row">
+                      <span>Subtotal</span>
+                      <strong>{fmtCurrency(subtotal)}</strong>
+                    </div>
+                    <div className="db-order-detail-sum-row">
+                      <span>Tax</span>
+                      <strong>{fmtCurrency(tax)}</strong>
+                    </div>
+                    <div className="db-order-detail-sum-row db-order-detail-sum-grand">
+                      <span>Grand Total</span>
+                      <strong>{fmtCurrency(subtotal + tax)}</strong>
+                    </div>
+                  </div>
+                );
+              })()
+            ) : null}
           </div>
         </div>
       ) : null}

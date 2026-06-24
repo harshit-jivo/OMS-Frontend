@@ -8,7 +8,7 @@ import {
   getOrderItemTotalLtrs,
   ordersService,
 } from "../services/ordersService";
-import type { OrderItem, Order, OrderLog, OrderStatus, PartyProduct } from "../services/ordersService";
+import type { OrderItem, Order, OrderLog, OrderStatus, PartyProduct, QuotationStatus } from "../services/ordersService";
 import { loadCurrentUserOrders } from "../utils/orderHistory";
 import "../styles/View_Orders.css";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -55,6 +55,9 @@ const formatCreatedDateTime = (value?: string | null) => {
 const isRejectedOrder = (order: Pick<Order, "status_display">) =>
   String(order.status_display || "").toLowerCase().includes("reject");
 
+const isCompletedOrder = (order: Pick<Order, "status_display">) =>
+  String(order.status_display || "").trim().toLowerCase() === "completed";
+
 const getRejectedByFromLogs = (logs: OrderLog[]) => {
   const isRealPerformer = (value: string | null) => {
     const normalized = String(value || "").trim().toLowerCase();
@@ -92,6 +95,10 @@ export default function View_Orders() {
   const [toDate, setToDate] = useState(lastDay);
   const [currentPage, setCurrentPage] = useState(1);
   const [rejectedByByOrderId, setRejectedByByOrderId] = useState<Record<number, string>>({});
+  const [quotationStatusByOrderId, setQuotationStatusByOrderId] = useState<Record<number, QuotationStatus>>({});
+  const [cancelTarget, setCancelTarget] = useState<Order | null>(null);
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState("");
   const itemsPerPage = 10;
 
   useEffect(() => {
@@ -242,6 +249,88 @@ export default function View_Orders() {
       isCancelled = true;
     };
   }, [orders]);
+
+  // For completed orders that have a SAP quotation, look up whether the quotation
+  // is still open in SAP — the Cancel button only shows while it's open.
+  useEffect(() => {
+    let isCancelled = false;
+
+    const fetchQuotationStatuses = async () => {
+      // The actual quotation DocNum lives in SalesQuotationLog (resolved by the
+      // backend), not on Order.sap_doc_number — so query every completed,
+      // not-yet-cancelled order and let the backend report which have a quotation.
+      const completedIds = orders
+        .filter((order) => isCompletedOrder(order) && !order.quotation_cancelled)
+        .map((order) => order.id);
+
+      if (completedIds.length === 0) {
+        setQuotationStatusByOrderId({});
+        return;
+      }
+
+      try {
+        const statuses = await ordersService.getQuotationStatus(completedIds);
+        if (!isCancelled) {
+          const byId: Record<number, QuotationStatus> = {};
+          Object.entries(statuses).forEach(([orderId, status]) => {
+            byId[Number(orderId)] = status;
+          });
+          setQuotationStatusByOrderId(byId);
+        }
+      } catch (error) {
+        console.log("Error fetching quotation statuses:", error);
+        if (!isCancelled) setQuotationStatusByOrderId({});
+      }
+    };
+
+    void fetchQuotationStatuses();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [orders]);
+
+  const canCancelQuotation = (order: Order) =>
+    isCompletedOrder(order) &&
+    !order.quotation_cancelled &&
+    Boolean(quotationStatusByOrderId[order.id]?.is_open);
+
+  const handleCancelQuotation = async () => {
+    if (!cancelTarget) return;
+    setIsCancelling(true);
+    setCancelError("");
+    try {
+      const result = await ordersService.cancelSalesQuotation(cancelTarget.id);
+      if (!result?.success) {
+        setCancelError(result?.message || "Failed to cancel sales quotation");
+        return;
+      }
+      // Mirror the cancellation locally so the button disappears immediately.
+      const cancelledId = cancelTarget.id;
+      setOrders((prev) =>
+        prev.map((order) =>
+          order.id === cancelledId ? { ...order, quotation_cancelled: true } : order,
+        ),
+      );
+      setOrderDetails((prev) =>
+        prev && prev.id === cancelledId ? { ...prev, quotation_cancelled: true } : prev,
+      );
+      setQuotationStatusByOrderId((prev) => {
+        const next = { ...prev };
+        delete next[cancelledId];
+        return next;
+      });
+      setCancelTarget(null);
+    } catch (error: any) {
+      const detail =
+        error?.response?.data?.message ||
+        error?.response?.data?.details ||
+        "Failed to cancel sales quotation";
+      setCancelError(typeof detail === "string" ? detail : JSON.stringify(detail));
+    } finally {
+      setIsCancelling(false);
+    }
+  };
 
   const itemOptions = useMemo<ItemFilterOption[]>(() => {
     const uniqueItems = new Map<string, ItemFilterOption>();
@@ -471,6 +560,18 @@ export default function View_Orders() {
                                 By: {rejectedByByOrderId[order.id]}
                               </span>
                             ) : null}
+                            {order.quotation_cancelled ? (
+                              <span className="vo-sq-cancelled">SQ Cancelled</span>
+                            ) : canCancelQuotation(order) ? (
+                              <button
+                                type="button"
+                                className="vo-sq-cancel-btn"
+                                title="Cancel Sales Quotation"
+                                onClick={() => { setCancelError(""); setCancelTarget(order); }}
+                              >
+                                Cancel SQ
+                              </button>
+                            ) : null}
                           </div>
                         </td>
                         <td>
@@ -519,10 +620,24 @@ export default function View_Orders() {
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M10 13L5 8l5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
               Back to Orders
             </button>
-            <button className="vo-d-export" onClick={() => downloadExcel(orderDetails)}>
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1v8m0 0L4 6.5M7 9l3-2.5M2.5 12h9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
-              Export Excel
-            </button>
+            <div className="vo-d-nav-actions">
+              {orderDetails.quotation_cancelled ? (
+                <span className="vo-sq-cancelled vo-sq-cancelled-nav">SQ Cancelled</span>
+              ) : canCancelQuotation(orderDetails) ? (
+                <button
+                  type="button"
+                  className="vo-d-cancel-sq"
+                  onClick={() => { setCancelError(""); setCancelTarget(orderDetails); }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>
+                  Cancel Sales Quotation
+                </button>
+              ) : null}
+              <button className="vo-d-export" onClick={() => downloadExcel(orderDetails)}>
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1v8m0 0L4 6.5M7 9l3-2.5M2.5 12h9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                Export Excel
+              </button>
+            </div>
           </div>
 
           {/* Order Info Card */}
@@ -569,6 +684,12 @@ export default function View_Orders() {
                 <span className="vo-d-hf-label">Ship To</span>
                 <span className="vo-d-hf-value">{orderDetails.ship_to_address || "—"}</span>
               </div>
+              {orderDetails.remarks?.trim() ? (
+                <div className="vo-d-info-field vo-d-info-span2">
+                  <span className="vo-d-hf-label">Comment</span>
+                  <span className="vo-d-hf-value">{orderDetails.remarks}</span>
+                </div>
+              ) : null}
             </div>
           </div>
 
@@ -697,6 +818,41 @@ export default function View_Orders() {
           </div>
         </div>
 
+      )}
+
+      {/* ── CANCEL SALES QUOTATION CONFIRM MODAL ── */}
+      {cancelTarget && (
+        <div className="vo-modal-overlay" onClick={() => { if (!isCancelling) setCancelTarget(null); }}>
+          <div className="vo-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="vo-modal-title">Cancel Sales Quotation</div>
+            <p className="vo-modal-msg">
+              Cancel the SAP Sales Quotation
+              {quotationStatusByOrderId[cancelTarget.id]?.doc_num
+                ? ` (No. ${quotationStatusByOrderId[cancelTarget.id]?.doc_num})`
+                : ""}{" "}
+              for order <strong>{cancelTarget.order_number}</strong>? This cancels the quotation in SAP and cannot be undone.
+            </p>
+            {cancelError ? <p className="vo-modal-error">{cancelError}</p> : null}
+            <div className="vo-modal-actions">
+              <button
+                type="button"
+                className="vo-modal-btn-secondary"
+                onClick={() => setCancelTarget(null)}
+                disabled={isCancelling}
+              >
+                Keep Quotation
+              </button>
+              <button
+                type="button"
+                className="vo-modal-btn-danger"
+                onClick={handleCancelQuotation}
+                disabled={isCancelling}
+              >
+                {isCancelling ? "Cancelling..." : "Cancel Quotation"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

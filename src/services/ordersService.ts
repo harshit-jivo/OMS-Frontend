@@ -50,6 +50,32 @@ export type OrderFlowConfig = {
   updated_by?: string | null;
 };
 
+export type PartyFlowConfig = {
+  card_code: string;
+  card_name?: string;
+  category: string;
+  flow_type: string;
+  flow_label?: string;
+  rate_approval_enabled: boolean;
+  billing_enabled: boolean;
+  auditor_enabled: boolean;
+  rate_conditions: string[];
+  updated_at?: string | null;
+  updated_by?: string | null;
+};
+
+export type PartyFlowTarget = {
+  card_code: string;
+  category: string;
+};
+
+export type PartyFlowSettings = {
+  rate_approval_enabled: boolean;
+  billing_enabled: boolean;
+  auditor_enabled: boolean;
+  rate_conditions: string[];
+};
+
 export type OrderStatusUpdateResponse = {
   message?: string;
   order_id?: number;
@@ -114,6 +140,7 @@ export interface OrderItem {
   category: string;
   brand: string;
   variety: string;
+  sub_group?: string;
   item_type: string;
   scheme_name?: string;
   scheme_qty?: number | string;
@@ -195,6 +222,7 @@ export interface Order {
   created_by: string | number;
   total_amount: number;
   sap_doc_number?: string;
+  quotation_cancelled?: boolean;
   created_by_name?: string;
   party_state?: string;
   decision_type?: "accepted" | "rejected";
@@ -204,6 +232,30 @@ export interface Order {
 export interface OrderStatus {
   id: number;
   name: string;
+}
+
+export interface QuotationStatus {
+  doc_entry: number | null;
+  doc_num: number | null;
+  doc_status: string | null;
+  canceled: string | null;
+  is_open: boolean;
+}
+
+export type QuotationStatusLabel = "CANCELLED" | "OPEN" | "CLOSED" | "UNKNOWN";
+
+export interface QuotationOverviewItem {
+  id: number;
+  order_number: string;
+  card_code: string;
+  card_name: string;
+  created_at: string;
+  doc_num: number | string | null;
+  doc_entry: number | null;
+  quotation_cancelled: boolean;
+  quotation_cancelled_at: string | null;
+  quotation_cancelled_by: string | null;
+  quotation_status: QuotationStatusLabel;
 }
 
 export interface OrderLog {
@@ -384,6 +436,32 @@ export const ordersService = {
     return response.data as { success?: boolean; message?: string; data?: OrderFlowConfig } | OrderFlowConfig;
   },
 
+  getPartyFlowConfigs: async () => {
+    const response = await api.get("/orders/party-flow-config/");
+    return response.data as {
+      success?: boolean;
+      data: PartyFlowConfig[];
+      flow_options?: OrderFlowTypeOption[];
+      condition_options?: OrderFlowConditionOption[];
+    };
+  },
+
+  savePartyFlowConfig: async (parties: PartyFlowTarget[], flowType: string, settings: PartyFlowSettings) => {
+    const response = await api.post("/orders/party-flow-config/", {
+      parties,
+      flow_type: flowType,
+      ...settings,
+    });
+    return response.data as { success?: boolean; message?: string; data?: PartyFlowConfig[] };
+  },
+
+  deletePartyFlowConfig: async (parties: PartyFlowTarget[], flowType: string) => {
+    const response = await api.delete("/orders/party-flow-config/", {
+      data: { parties, flow_type: flowType },
+    });
+    return response.data as { success?: boolean; message?: string };
+  },
+
   saveStaffProductRates: async (
     products: StaffProductRatePayload[],
     removedProducts: StaffProductRemovePayload[] = [],
@@ -400,6 +478,7 @@ export const ordersService = {
       ...formData,
       items: formData.items.map((item) => ({
         ...item,
+        sub_group: item.sub_group ?? item.variety,
         qty: Number(item.qty),
         pcs: Number(item.pcs),
         boxes: Number(item.boxes),
@@ -446,6 +525,29 @@ export const ordersService = {
   getOrderLogs: async (orderId: number) => {
     const response = await api.get(`/orders/${orderId}/orderlogs/`);
     return response.data as OrderLog[];
+  },
+
+  // Batch lookup of SAP Sales Quotation status for the given (completed) orders.
+  // Used to show the "Cancel Sales Quotation" button only while the quotation is
+  // still open in SAP. Returns a map keyed by order id (as string).
+  getQuotationStatus: async (orderIds: number[]) => {
+    if (!orderIds.length) return {} as Record<string, QuotationStatus>;
+    const response = await api.get("/orders/quotation-status/", {
+      params: { order_ids: orderIds.join(",") },
+    });
+    return (response.data?.statuses ?? {}) as Record<string, QuotationStatus>;
+  },
+
+  // Cancel the SAP Sales Quotation for a completed order (and mirror it in OMS).
+  cancelSalesQuotation: async (orderId: number) => {
+    const response = await api.post(`/orders/${orderId}/cancel-quotation/`);
+    return response.data as { success: boolean; message: string; doc_num?: number };
+  },
+
+  // Admin overview: all completed orders with their sales-quotation status.
+  getQuotationOverview: async () => {
+    const response = await api.get("/orders/quotation-overview/");
+    return (response.data?.data ?? []) as QuotationOverviewItem[];
   },
 
   getOrderStockCheck: async () => {
