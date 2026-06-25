@@ -15,6 +15,7 @@ export interface User {
   phone?: string;
   company?: number | null;
   category?: CategoryOption | null;
+  categories?: CategoryOption[];
   variety?: string | null;
   extra_pages?: string[];
 }
@@ -42,6 +43,7 @@ export interface CreateUserData {
   state?: number;
   states?: number[];
   category?: number | null;
+  categories?: number[];
   variety?: string | null;
 }
 
@@ -87,15 +89,18 @@ export const userService = {
     return response.data;
   },
 
-  getUserParties: async (userId: number) => {
-    const response = await api.get(`/auth/users/${userId}/parties/`);
+  getUserParties: async (userId: number, category?: string) => {
+    const response = await api.get(`/auth/users/${userId}/parties/`, {
+      params: category ? { category } : undefined,
+    });
     return response.data;
   },
 
- assignPartiesToUser: async (userId: number, partyCodes: string[]) => {
+ assignPartiesToUser: async (userId: number, partyCodes: string[], category?: string) => {
   const payload = {
     user_id: userId,
-    card_codes: partyCodes,   
+    card_codes: partyCodes,
+    ...(category ? { category } : {}),
   };
 
   const response = await api.post(`/auth/assign-parties/`, payload);
@@ -162,7 +167,8 @@ removePartyProduct: async (card_code: string, itemCode: string, category: string
       main_groups: data.mainGroups || [],
       state: data.state || null,
       states: data.states || [],
-      category: data.category || null,
+      category: data.category || (data.categories && data.categories[0]) || null,
+      categories: data.categories || [],
       sub_group: data.variety || null
     };
 
@@ -187,7 +193,8 @@ updateUser: async (id: number, data: CreateUserData) => {
     main_groups: mainGroups,
     state: states[0] || data.state || null,
     states: states,
-    category: data.category || null,
+    category: data.category || (data.categories && data.categories[0]) || null,
+    categories: data.categories || [],
     sub_group: data.variety || null,
   };
 

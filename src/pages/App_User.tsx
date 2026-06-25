@@ -46,6 +46,7 @@ export default function App_User() {
     role: 0,
     company: 0,
     category: null,
+    categories: [],
     variety: "",
   });
   const [showForm, setShowForm] = useState(false);
@@ -265,6 +266,34 @@ export default function App_User() {
     });
   };
 
+  const toggleCategory = (id: number) => {
+    setFormData((prev) => {
+      const current = prev.categories || [];
+      const isSelected = current.includes(id);
+      const updated = isSelected
+        ? current.filter((v) => v !== id)
+        : [...current, id];
+      return {
+        ...prev,
+        // Keep `category` as the primary (first selected) for the Sub Group lookup.
+        category: updated[0] ?? null,
+        categories: updated,
+      };
+    });
+  };
+
+  const toggleAllCategories = () => {
+    setFormData((prev) => {
+      const allSelected = (prev.categories || []).length === categories.length;
+      const updated = allSelected ? [] : categories.map((c) => c.id);
+      return {
+        ...prev,
+        category: updated[0] ?? null,
+        categories: updated,
+      };
+    });
+  };
+
   const getOptionName = (options: Option[], id: number | null | undefined, fallback: string) =>
     options.find((item) => item.id === id)?.name || fallback;
 
@@ -396,8 +425,8 @@ export default function App_User() {
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
-    if (!formData.role || !formData.company || !formData.category) {
-      alert("Please select role, company and category.");
+    if (!formData.role || !formData.company || !(formData.categories && formData.categories.length)) {
+      alert("Please select role, company and at least one category.");
       return;
     }
 
@@ -426,6 +455,7 @@ export default function App_User() {
           role: 0,
           company: 0,
           category: null,
+          categories: [],
           variety: "",
         });
 
@@ -464,6 +494,7 @@ export default function App_User() {
       states?: unknown;
       company?: unknown;
       category?: unknown;
+      categories?: unknown;
       variety?: string | null;
       sub_group?: string | null;
       role?: unknown;
@@ -471,6 +502,13 @@ export default function App_User() {
     };
     const mainGroupIds = getIds(editableUser.main_groups);
     const stateIds = getIds(editableUser.states);
+    const categoryIds = getIds(editableUser.categories);
+    // Fall back to the single primary category for users created before
+    // multi-category support.
+    const resolvedCategoryIds =
+      categoryIds.length > 0
+        ? categoryIds
+        : [getId(editableUser.category)].filter(Boolean);
     const roleName = String(
       editableUser.role || editableUser.role_name || editableUser.role_display || "",
     ).toLowerCase();
@@ -491,7 +529,8 @@ export default function App_User() {
       states: stateIds,
       role: roleId,
       company: getId(editableUser.company) || null,
-      category: getId(editableUser.category) || null,
+      category: resolvedCategoryIds[0] ?? null,
+      categories: resolvedCategoryIds,
       // formData.variety is the in-form holder for the user's sub group assignment.
       variety: editableUser.sub_group || "",
     });
@@ -1018,14 +1057,17 @@ export default function App_User() {
                 <div className="au-mg-dropdown" ref={categoryRef}>
                   <div
                     className="au-mg-trigger"
-                    onClick={() => {
-                      closeSingleSelects();
-                      setCategoryDropdownOpen((value) => !value);
-                    }}
+                    onClick={() => setCategoryDropdownOpen((value) => !value)}
                   >
                       <span className="au-trigger-label">
                         <HiTag className="au-field-icon" aria-hidden="true" />
-                      <span>{getCategoryName(formData.category)}</span>
+                      <span>
+                        {(formData.categories?.length || 0) === 1
+                          ? getCategoryName(formData.categories![0])
+                          : (formData.categories?.length || 0) > 1
+                            ? `${formData.categories!.length} selected`
+                            : "Select Category"}
+                      </span>
                     </span>
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
                       <path
@@ -1039,18 +1081,26 @@ export default function App_User() {
                   </div>
                   {categoryDropdownOpen && (
                     <div className="au-mg-menu">
+                      <label className="au-mg-option au-mg-selectall">
+                        <input
+                          type="checkbox"
+                          checked={
+                            categories.length > 0 &&
+                            formData.categories?.length === categories.length
+                          }
+                          onChange={toggleAllCategories}
+                        />
+                        Select All
+                      </label>
                       {categories.map((c) => (
-                        <button
-                          key={c.id}
-                          type="button"
-                          className={`au-mg-option au-select-option${formData.category === c.id ? " is-selected" : ""}`}
-                          onClick={() => {
-                            setFormData((prev) => ({ ...prev, category: c.id, variety: "" }));
-                            setCategoryDropdownOpen(false);
-                          }}
-                        >
+                        <label key={c.id} className="au-mg-option">
+                          <input
+                            type="checkbox"
+                            checked={formData.categories?.includes(c.id) || false}
+                            onChange={() => toggleCategory(c.id)}
+                          />
                           {c.category}
-                        </button>
+                        </label>
                       ))}
                     </div>
                   )}

@@ -32,6 +32,20 @@ const getUserCategory = (user?: User) => {
   return asText(category.category);
 };
 
+// All categories assigned to a user (OIL / BEVERAGES / MART), falling back to
+// the single primary category for users created before multi-category support.
+const getUserCategories = (user?: User): string[] => {
+  const list = (user as { categories?: Array<{ category?: string } | string> } | undefined)?.categories;
+  const names = Array.isArray(list)
+    ? list
+        .map((c) => asText(typeof c === "string" ? c : c?.category))
+        .filter(Boolean)
+    : [];
+  if (names.length) return Array.from(new Set(names));
+  const single = getUserCategory(user);
+  return single ? [single] : [];
+};
+
 const isPartyInUserCategory = (party: Party, userCategory: string) =>
   !userCategory || normalizeCategory(party.category) === normalizeCategory(userCategory);
 
@@ -88,6 +102,7 @@ export default function Party_Assignment() {
   const [parties, setParties] = useState<Party[]>([]);
   const [isPartiesLoading, setIsPartiesLoading] = useState(false);
   const [selectedUser, setSelectedUser] = useState<number | "">("");
+  const [selectedCategory, setSelectedCategory] = useState("");
   const [showParties, setShowParties] = useState(false);
   const [search, setSearch] = useState("");
   const [userSearch, setUserSearch] = useState("");
@@ -133,15 +148,16 @@ export default function Party_Assignment() {
     }
   };
 
-  const fetchUserParties = async (userId: number) => {
+  const fetchUserParties = async (userId: number, category?: string) => {
     try {
-      const res = await userService.getUserParties(userId);
+      const userRecord = users.find((user) => user.id === userId);
+      // Scope to the chosen category; default to the user's first category.
+      const userCategory = category ?? (getUserCategories(userRecord)[0] || "");
+      const res = await userService.getUserParties(userId, userCategory || undefined);
 
-      const userCategory = getUserCategory(users.find((user) => user.id === userId));
       const assigned = (res.data?.parties || [])
         .filter((p: any) => isPartyInUserCategory(p, userCategory))
         .map((p: any) => asText(p.card_code));
-          console.log("Assigned parties for user", userId, assigned);
 
       setSelectedParties(assigned);
     } catch (err) {
@@ -149,8 +165,16 @@ export default function Party_Assignment() {
     }
   };
 
+  const handleCategoryChange = (category: string) => {
+    setSelectedCategory(category);
+    setSelectedParties([]);
+    if (selectedUser) fetchUserParties(Number(selectedUser), category);
+  };
+
   const selectedUserRecord = users.find((user) => user.id === selectedUser);
-  const selectedUserCategoryLabel = getUserCategory(selectedUserRecord);
+  const selectedUserCategories = getUserCategories(selectedUserRecord);
+  // The category currently being assigned for (defaults to the user's first).
+  const selectedUserCategoryLabel = selectedCategory || selectedUserCategories[0] || "";
   const partyOptions = parties.filter((party) => isPartyInUserCategory(party, selectedUserCategoryLabel));
   const partySearchTerm = normalizeSearch(search);
   const visibleParties = partyOptions.filter((party) => {
@@ -187,6 +211,7 @@ export default function Party_Assignment() {
     const res = await userService.assignPartiesToUser(
       Number(selectedUser),
       selectedPartyCodes,
+      selectedUserCategoryLabel || undefined,
     );
 
     console.log("API Response:", res);
@@ -197,7 +222,7 @@ export default function Party_Assignment() {
     setShowParties(false);
 
     // reload assigned parties
-    fetchUserParties(Number(selectedUser));
+    fetchUserParties(Number(selectedUser), selectedUserCategoryLabel);
 
   } catch (error) {
     console.error("Error saving parties:", error);
@@ -215,11 +240,12 @@ const handleDel =  async (partyCode: string) => {
     await userService.assignPartiesToUser(
       Number(selectedUser),
       selectedPartyCodes,
+      selectedUserCategoryLabel || undefined,
     );
 
     alert("Party removed ✅");
 
-     fetchUserParties(Number(selectedUser));
+     fetchUserParties(Number(selectedUser), selectedUserCategoryLabel);
 
   } catch (error) {
     console.error(error);
@@ -481,10 +507,12 @@ const handleBulkImport = async (file: File) => {
                       onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f8fafc'}
                       onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                       onClick={() => {
+                        const firstCategory = getUserCategories(user)[0] || "";
                         setSelectedUser(user.id);
                         setUserSearch(user.name);
                         setShowDropdown(false);
-                        fetchUserParties(user.id);
+                        setSelectedCategory(firstCategory);
+                        fetchUserParties(user.id, firstCategory);
                       }}
                     >
                       <div style={{ fontWeight: 500, color: '#0f172a' }}>{user.name}</div>
@@ -528,6 +556,34 @@ const handleBulkImport = async (file: File) => {
                   + Assign New Parties
                 </button>
               </div>
+
+              {selectedUserCategories.length > 1 && (
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '20px' }}>
+                  <span style={{ fontSize: '0.8rem', color: '#64748b', alignSelf: 'center', marginRight: '4px' }}>Category:</span>
+                  {selectedUserCategories.map((cat) => {
+                    const active = selectedUserCategoryLabel === cat;
+                    return (
+                      <button
+                        key={cat}
+                        type="button"
+                        onClick={() => handleCategoryChange(cat)}
+                        style={{
+                          padding: '6px 14px',
+                          borderRadius: '999px',
+                          border: active ? '1px solid #2563eb' : '1px solid #cbd5e1',
+                          background: active ? '#eff6ff' : '#fff',
+                          color: active ? '#1d4ed8' : '#475569',
+                          fontWeight: active ? 700 : 500,
+                          fontSize: '0.85rem',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {cat}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '16px' }}>
                 {(selectedParties || []).length > 0 ? (
