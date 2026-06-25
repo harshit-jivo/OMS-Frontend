@@ -25,6 +25,7 @@ export default function App_User() {
   const companyRef = useRef<HTMLDivElement>(null);
   const categoryRef = useRef<HTMLDivElement>(null);
   const varietyRef = useRef<HTMLDivElement>(null);
+  const roleFilterRef = useRef<HTMLDivElement>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [mainGroup, setMainGroup] = useState<Option[]>([]);
   const [state, setState] = useState<Option[]>([]);
@@ -61,6 +62,8 @@ export default function App_User() {
   const itemsPerPage = 7;
   const [isEditMode, setIsEditMode] = useState(false);
   const [editUserId, setEditUserId] = useState<number | null>(null);
+  const [roleFilter, setRoleFilter] = useState<string>("all");
+  const [roleFilterOpen, setRoleFilterOpen] = useState(false);
 
   useEffect(() => {
     fetchUsers();
@@ -120,6 +123,13 @@ export default function App_User() {
         !varietyRef.current.contains(event.target as Node)
       ) {
         setVarietyDropdownOpen(false);
+      }
+
+      if (
+        roleFilterRef.current &&
+        !roleFilterRef.current.contains(event.target as Node)
+      ) {
+        setRoleFilterOpen(false);
       }
     };
 
@@ -490,6 +500,26 @@ export default function App_User() {
     setShowUsers(false);
   };
 
+  // Role-based filter for the users table. `user.role` holds the role's name
+  // (from the serializer), so we match against the selected role name.
+  const filteredUsers =
+    roleFilter === "all"
+      ? users
+      : users.filter(
+          (u) => String(u.role || "").toLowerCase() === roleFilter.toLowerCase(),
+        );
+
+  const totalPages = Math.max(1, Math.ceil(filteredUsers.length / itemsPerPage));
+  const pageUsers = filteredUsers.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage,
+  );
+
+  const handleRoleFilterChange = (value: string) => {
+    setRoleFilter(value);
+    setCurrentPage(1);
+  };
+
   return (
     <div className="au-page app-page">
       {/* ── PAGE HEADER ── */}
@@ -502,8 +532,59 @@ export default function App_User() {
           </p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+            <div
+              className="au-mg-dropdown au-role-filter"
+              ref={roleFilterRef}
+              style={{ minWidth: 180 }}
+            >
+              <div
+                className="au-mg-trigger"
+                onClick={() => setRoleFilterOpen((v) => !v)}
+              >
+                <span className="au-trigger-label">
+                  <HiShieldCheck className="au-field-icon" aria-hidden="true" />
+                  <span>{roleFilter === "all" ? "All Roles" : roleFilter}</span>
+                </span>
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                  <path
+                    d="M3 4.5L6 7.5L9 4.5"
+                    stroke="#64748b"
+                    strokeWidth="1.4"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </div>
+              {roleFilterOpen && (
+                <div className="au-mg-menu">
+                  <button
+                    type="button"
+                    className={`au-mg-option au-select-option${roleFilter === "all" ? " is-selected" : ""}`}
+                    onClick={() => {
+                      handleRoleFilterChange("all");
+                      setRoleFilterOpen(false);
+                    }}
+                  >
+                    All Roles
+                  </button>
+                  {role.map((r) => (
+                    <button
+                      key={r.id}
+                      type="button"
+                      className={`au-mg-option au-select-option${roleFilter === r.name ? " is-selected" : ""}`}
+                      onClick={() => {
+                        handleRoleFilterChange(r.name);
+                        setRoleFilterOpen(false);
+                      }}
+                    >
+                      {r.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <span className="au-table-count" style={{ margin: 0 }}>
-              Total: {users.length}
+              Total: {filteredUsers.length}
             </span>
           <button
             className="au-toggle-btn"
@@ -521,7 +602,7 @@ export default function App_User() {
       {/* ── USERS TABLE ── */}
       {showUsers && (
         <div className="au-table-card">
-            {users.length > 0 ? (
+            {filteredUsers.length > 0 ? (
               <div className="au-table-wrap">
                 <table className="au-table">
                   <thead>
@@ -535,11 +616,7 @@ export default function App_User() {
                     </tr>
                   </thead>
                   <tbody>
-                    {users
-                        .slice(
-                          (currentPage - 1) * itemsPerPage,
-                          currentPage * itemsPerPage,
-                        )
+                    {pageUsers
                         .map((user) => (
                           <tr key={user.id}>
                             <td className="au-muted">{user.id}</td>
@@ -573,10 +650,12 @@ export default function App_User() {
                 </table>
               </div>
             ) : (
-              <div style={{ padding: "40px", textAlign: "center", color: "#64748b", background: "#f8fafc", borderRadius: "8px", border: "1px dashed #cbd5e1", margin: "20px 0" }}>No users found</div>
+              <div style={{ padding: "40px", textAlign: "center", color: "#64748b", background: "#f8fafc", borderRadius: "8px", border: "1px dashed #cbd5e1", margin: "20px 0" }}>
+                {roleFilter === "all" ? "No users found" : `No users found for role "${roleFilter}"`}
+              </div>
             )}
 
-          {users.length > itemsPerPage && (
+          {filteredUsers.length > itemsPerPage && (
             <div className="au-pagination">
               <button
                 className="au-pg-btn"
@@ -587,14 +666,12 @@ export default function App_User() {
               </button>
 
               <span className="au-pg-info">
-                {currentPage} / {Math.ceil(users.length / itemsPerPage)}
+                {currentPage} / {totalPages}
               </span>
 
               <button
                 className="au-pg-btn"
-                disabled={
-                  currentPage === Math.ceil(users.length / itemsPerPage)
-                }
+                disabled={currentPage === totalPages}
                 onClick={() => setCurrentPage((p) => p + 1)}
               >
                 Next →
