@@ -18,6 +18,18 @@ const formatCreatedDateTime = (value?: string | null) => {
   });
 };
 
+const toDateInput = (date: Date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
+    date.getDate(),
+  ).padStart(2, "0")}`;
+
+// Default the tracker to the current month: 1st of this month -> today.
+const currentMonthStart = () => {
+  const now = new Date();
+  return toDateInput(new Date(now.getFullYear(), now.getMonth(), 1));
+};
+const today = () => toDateInput(new Date());
+
 const getLogTime = (log: Pick<OrderLog, "created_at">) => {
   const time = new Date(log.created_at || "").getTime();
   return Number.isNaN(time) ? Number.POSITIVE_INFINITY : time;
@@ -46,6 +58,8 @@ export default function Order_Tracking() {
   const [tracker, setTracker] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [statusFilter, setStatusFilter] = useState("");
+  const [fromDate, setFromDate] = useState(currentMonthStart);
+  const [toDate, setToDate] = useState(today);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
   
@@ -86,10 +100,20 @@ export default function Order_Tracking() {
   }, [orders]);
 
   const filteredOrders = useMemo(() => {
+    // Date range is matched against the order's created date (local day).
+    const fromTime = fromDate ? new Date(`${fromDate}T00:00:00`).getTime() : null;
+    const toTime = toDate ? new Date(`${toDate}T23:59:59.999`).getTime() : null;
+
     return orders
       .filter((order) => {
-        if (statusFilter) {
-          return order.status_display === statusFilter;
+        if (statusFilter && order.status_display !== statusFilter) {
+          return false;
+        }
+        if (fromTime !== null || toTime !== null) {
+          const created = new Date(order.created_at || "").getTime();
+          if (Number.isNaN(created)) return false;
+          if (fromTime !== null && created < fromTime) return false;
+          if (toTime !== null && created > toTime) return false;
         }
         return true;
       })
@@ -105,7 +129,7 @@ export default function Order_Tracking() {
 
         return first - second;
       });
-  }, [orders, statusFilter]);
+  }, [orders, statusFilter, fromDate, toDate]);
 
   const totalPages = Math.max(1, Math.ceil(filteredOrders.length / itemsPerPage));
   const paginatedOrders = useMemo(
@@ -115,7 +139,7 @@ export default function Order_Tracking() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [statusFilter]);
+  }, [statusFilter, fromDate, toDate]);
 
   useEffect(() => {
     if (currentPage > totalPages) {
@@ -292,6 +316,7 @@ export default function Order_Tracking() {
         combined.includes("accepted") ||
         combined.includes("complete") ||
         combined.includes("sent to auditor") ||
+        combined.includes("edited by manager") ||
         (hasRealPerformer && statusName.includes("rate"))
       );
     };
@@ -549,6 +574,11 @@ export default function Order_Tracking() {
     const performer = String(log.performed_by_name || "").trim().toLowerCase();
     const hasRealPerformer =
       performer && performer !== "pending" && performer !== "system";
+    if (remarks.includes("edited by manager")) {
+      return remarks.includes("rejected")
+        ? "Rejected Order Edited by Manager"
+        : "Order Edited by Manager";
+    }
     const isRejected = statusName.includes("reject");
     const isAccepted =
       statusName === "approved" ||
@@ -723,6 +753,7 @@ export default function Order_Tracking() {
       {!tracker && (
         <div>
           <div className="tracker-list-head">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
@@ -747,6 +778,65 @@ export default function Order_Tracking() {
                 </option>
               ))}
             </select>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <label style={{ fontSize: 'var(--font-ui, 13px)', color: '#475569', fontWeight: 500 }}>From</label>
+              <input
+                type="date"
+                value={fromDate}
+                max={toDate || undefined}
+                onChange={(e) => setFromDate(e.target.value)}
+                style={{
+                  height: 'var(--input-h, 40px)',
+                  padding: '0 12px',
+                  borderRadius: 'var(--radius-sm, 8px)',
+                  border: '1px solid #cbd5e1',
+                  backgroundColor: '#fff',
+                  color: '#0f172a',
+                  fontSize: 'var(--font-ui, 13px)',
+                  outline: 'none',
+                }}
+              />
+              <label style={{ fontSize: 'var(--font-ui, 13px)', color: '#475569', fontWeight: 500 }}>To</label>
+              <input
+                type="date"
+                value={toDate}
+                min={fromDate || undefined}
+                onChange={(e) => setToDate(e.target.value)}
+                style={{
+                  height: 'var(--input-h, 40px)',
+                  padding: '0 12px',
+                  borderRadius: 'var(--radius-sm, 8px)',
+                  border: '1px solid #cbd5e1',
+                  backgroundColor: '#fff',
+                  color: '#0f172a',
+                  fontSize: 'var(--font-ui, 13px)',
+                  outline: 'none',
+                }}
+              />
+              {(fromDate || toDate) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFromDate("");
+                    setToDate("");
+                  }}
+                  style={{
+                    height: 'var(--input-h, 40px)',
+                    padding: '0 12px',
+                    borderRadius: 'var(--radius-sm, 8px)',
+                    border: '1px solid #cbd5e1',
+                    backgroundColor: '#fff',
+                    color: '#0f172a',
+                    cursor: 'pointer',
+                    fontSize: 'var(--font-ui, 13px)',
+                    fontWeight: 500,
+                  }}
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            </div>
             {!loading && (
               <span className="tracker-count">Total: {filteredOrders.length}</span>
             )}

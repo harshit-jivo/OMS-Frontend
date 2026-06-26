@@ -1487,7 +1487,14 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
     disabled: boolean,
   ) => {
     const dropdownId = `${rowIndex}-${String(name)}`;
-    const selected = options.find((option) => option.value === value);
+    // Only resolve a selected option when something is actually chosen. Some
+    // products have an empty brand/variety, which produces an option with
+    // value "" (labelled "Unknown"); without this guard an unselected field
+    // would match that option and wrongly show "Unknown" instead of the
+    // "--select--" placeholder.
+    const selected = value
+      ? options.find((option) => option.value === value)
+      : undefined;
     const isOpen = openRowDropdown === dropdownId;
 
     return (
@@ -1518,16 +1525,18 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
             >
               --select--
             </button>
-            {options.map((option) => (
-              <button
-                type="button"
-                key={`${dropdownId}-${option.value}`}
-                className={`sl-row-dropdown-option${option.value === value ? " is-selected" : ""}`}
-                onClick={() => handleRowSelect(rowIndex, String(name), option.value)}
-              >
-                {option.label}
-              </button>
-            ))}
+            {options
+              .filter((option) => option.value !== "")
+              .map((option) => (
+                <button
+                  type="button"
+                  key={`${dropdownId}-${option.value}`}
+                  className={`sl-row-dropdown-option${option.value === value ? " is-selected" : ""}`}
+                  onClick={() => handleRowSelect(rowIndex, String(name), option.value)}
+                >
+                  {option.label}
+                </button>
+              ))}
           </div>
         )}
       </div>
