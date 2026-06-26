@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import Login from "./pages/Login";
 import Sidebar from "./components/Sidebar";
 import Dashboard from "./pages/Dashboard";
@@ -31,6 +31,15 @@ import Order_Flow_Settings from "./pages/Order_Flow_Settings";
 import Page_Permissions from "./pages/Page_Permissions";
 import Sales_Quotation from "./pages/Sales_Quotation";
 import Drafts from "./pages/Drafts";
+
+// Remount the sales form on every navigation so opening "Add Sales" / "FOC"
+// fresh always starts blank, instead of keeping the previously edited draft
+// order in component state. When opened in edit/duplicate mode the new mount
+// reads location.state and loads that order as usual.
+function FreshAddSales({ focMode = false }: { focMode?: boolean }) {
+  const location = useLocation();
+  return focMode ? <FOC key={location.key} /> : <Add_Sales key={location.key} />;
+}
 
 function App() {
   return (
@@ -69,7 +78,7 @@ function App() {
           path="/Add_Sales"
           element={
             <Sidebar>
-              <Add_Sales />
+              <FreshAddSales />
             </Sidebar>
           }
         />
@@ -78,7 +87,7 @@ function App() {
           path="/FOC"
           element={
             <Sidebar>
-              <FOC />
+              <FreshAddSales focMode />
             </Sidebar>
           }
         />
