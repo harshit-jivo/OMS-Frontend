@@ -164,6 +164,7 @@ export default function Sidebar({ children }: SidebarProps) {
   useEffect(() => {
     setSalesOpen(
       location.pathname === "/Add_Sales" ||
+        location.pathname === "/Drafts" ||
         location.pathname === "/View_Orders" ||
         location.pathname === "/FOC" ||
         location.pathname === "/Sales_Invoice"
@@ -404,6 +405,7 @@ export default function Sidebar({ children }: SidebarProps) {
               {salesOpen && (
                 <ul className="dropdown-list">
                   <li><Link to="/Add_Sales" onClick={closeSidebar}><SidebarIcon><HiPlusCircle /></SidebarIcon>Add Sales</Link></li>
+                  <li><Link to="/Drafts" onClick={closeSidebar}><SidebarIcon><HiDocumentText /></SidebarIcon>Drafts</Link></li>
                   {(userRole?.toLowerCase() === "manager" || userRole?.toLowerCase() == "billing") && (
                     <li><Link to="/FOC" onClick={closeSidebar}><SidebarIcon><HiGift /></SidebarIcon>FOC</Link></li>
                   )}

@@ -166,8 +166,11 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
   const [showSaveConfirm, setShowSaveConfirm] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState<OrderSaveSuccess | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [lastSaveWasDraft, setLastSaveWasDraft] = useState(false);
   const [isLoadingEditOrder, setIsLoadingEditOrder] = useState(false);
   const [editOrderIsFoc, setEditOrderIsFoc] = useState(false);
+  const [editOrderIsDraft, setEditOrderIsDraft] = useState(false);
   const partyDropdownRef = useRef<HTMLDivElement>(null);
   const dispatchDropdownRef = useRef<HTMLDivElement>(null);
   const billDropdownRef = useRef<HTMLDivElement>(null);
@@ -204,6 +207,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
   useEffect(() => {
     if (!isLoadingFromOrder) {
       setEditOrderIsFoc(false);
+      setEditOrderIsDraft(false);
     }
   }, [isLoadingFromOrder]);
 
@@ -512,6 +516,9 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
         const loadedOrderIsFoc = Boolean(order.is_foc);
         const orderCategory = getOrderCategory(order);
         setEditOrderIsFoc(loadedOrderIsFoc);
+        setEditOrderIsDraft(
+          String(order.status_display || "").trim().toLowerCase() === "draft",
+        );
         setSelectedPartyCategory(orderCategory);
 
         setEditOrderFallback({
@@ -827,8 +834,111 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
     setShowSaveConfirm(true);
   };
 
+  // Save the order (even if incomplete) as a draft. Drafts skip validation and
+  // the approval flow; they can be resumed later from the Drafts page.
+  const handleSaveDraft = async () => {
+    // Include any row the user has started filling in, not just confirmed ones.
+    const draftRows = rows.filter((row) => row.item || row.category || Number(row.qty) > 0);
+
+    const selectedPartyForDraft = parties.find(
+      (p) =>
+        p.value === formData.parties &&
+        (!selectedPartyCategory ||
+          String(p.category || "").toUpperCase() ===
+            selectedPartyCategory.toUpperCase()),
+    );
+
+    const payload: Record<string, unknown> = {
+      card_code: formData.parties,
+      card_name: selectedPartyForDraft?.label || editOrderFallback.cardName || "",
+      bill_to_id: Number(formData.billAddress) || 0,
+      bill_to_address:
+        billAddress.find((b) => b.id === Number(formData.billAddress))?.address_name || "",
+      ship_to_id: Number(formData.shipAddress) || 0,
+      ship_to_address:
+        shipAddress.find((s) => s.id === Number(formData.shipAddress))?.address_name || "",
+      dispatch_from_id: Number(formData.dispatch) || 0,
+      dispatch_from_name:
+        branch.find((d) => d.bpl_id === Number(formData.dispatch))?.bpl_name || "",
+      delivery_date: formData.Deliverydate || null,
+      ...(canEditPoNumber ? { po_number: formData.poNumber.trim() } : {}),
+      remarks: formData.comment.trim(),
+      is_foc: isFocOrder,
+      company: Number(formData.company) || 0,
+      total_amount: totalAmount,
+      tax_amount: taxAmount,
+      grand_total: grandTotal,
+      items: draftRows.map((row) => ({
+        item_code:
+          partyProducts.find(
+            (p) =>
+              p.item_name === row.item &&
+              p.category === row.category &&
+              (p.brand || "") === (row.brand || "") &&
+              (p.variety || "") === (row.variety || ""),
+          )?.item_code || "",
+        item_name: row.item,
+        category: row.category,
+        brand: row.brand,
+        variety: row.variety,
+        item_type: row.type,
+        qty: Number(row.qty) || 0,
+        pcs: Number(row.pcs) || 0,
+        boxes: Number(row.boxes) || 0,
+        ltrs: Number(row.ltrs) || 0,
+        price_list_basic: isFocOrder ? 0 : Number(row.priceListBasic) || 0,
+        basic_price: Number(row.basicPrice) || 0,
+        tax_rate: Number(row.tax) || 0,
+        total: Number(row.amount) || 0,
+        scheme_id: row.isScheme && row.schemes[0]?.scheme ? Number(row.schemes[0].scheme) : undefined,
+        scheme_qty: row.isScheme
+          ? row.schemes.reduce((sum, scheme) => sum + Number(scheme.schemeQty || 0), 0)
+          : 0,
+        schemes: row.isScheme
+          ? row.schemes
+              .filter((scheme) => scheme.scheme && Number(scheme.schemeQty || 0) > 0)
+              .map((scheme) => ({
+                scheme_id: Number(scheme.scheme),
+                scheme_qty: Number(scheme.schemeQty || 0),
+              }))
+          : [],
+        is_scheme: row.isScheme,
+        total_ltrs:
+          (Number(row.ltrs) || 0) +
+          (row.isScheme
+            ? row.schemes.reduce((sum, scheme) => sum + Number(scheme.schemeQty || 0), 0)
+            : 0),
+      })),
+    };
+
+    // Only update in place when resuming an existing draft. Duplicating a live
+    // order, or starting fresh, creates a brand-new draft.
+    const draftOrderId = editOrderIsDraft && editOrderId ? editOrderId : undefined;
+
+    try {
+      setIsSavingDraft(true);
+      const data = await ordersService.saveDraft(payload as any, draftOrderId);
+      setLastSaveWasDraft(true);
+      setSaveSuccess({
+        orderId: String(data?.order_number || data?.id || draftOrderId || "-"),
+        nextStage: "Saved as Draft",
+        message: "Draft saved successfully",
+      });
+    } catch (error) {
+      console.error("Error saving draft:", error);
+      alert("Error saving draft ❌");
+    } finally {
+      setIsSavingDraft(false);
+    }
+  };
+
   const handleSuccessClose = () => {
     setSaveSuccess(null);
+    if (lastSaveWasDraft) {
+      setLastSaveWasDraft(false);
+      navigate("/Drafts");
+      return;
+    }
     if (isLoadingFromOrder) {
       navigate(returnTo);
     }
@@ -2337,6 +2447,16 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
                     : "Save Order"}
             </span>
           </button>
+          {(!isEditMode || editOrderIsDraft) && (
+            <button
+              type="button"
+              className="sl-btn-draft"
+              onClick={handleSaveDraft}
+              disabled={isSaving || isSavingDraft}
+            >
+              <span>{isSavingDraft ? "Saving Draft..." : "Save as Draft"}</span>
+            </button>
+          )}
           <button
             type="button"
             className="sl-btn-clear"

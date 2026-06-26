@@ -57,7 +57,11 @@ export default function Order_Tracking() {
     try {
       setLoading(true);
       const data = await loadCurrentUserOrders();
-      setOrders(data || []);
+      // Drafts live on the dedicated Drafts page, not in the order tracker.
+      const withoutDrafts = (data || []).filter(
+        (order) => String(order.status_display || "").trim().toLowerCase() !== "draft",
+      );
+      setOrders(withoutDrafts);
     } catch (error) {
       console.log("Error fetching orders:", error);
       setOrders([]);

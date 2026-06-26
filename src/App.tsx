@@ -30,6 +30,7 @@ import Product_Stock from "./pages/Product_Stock";
 import Order_Flow_Settings from "./pages/Order_Flow_Settings";
 import Page_Permissions from "./pages/Page_Permissions";
 import Sales_Quotation from "./pages/Sales_Quotation";
+import Drafts from "./pages/Drafts";
 
 function App() {
   return (
@@ -293,6 +294,15 @@ function App() {
           element={
             <Sidebar>
               <Sales_Quotation />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Drafts"
+          element={
+            <Sidebar>
+              <Drafts />
             </Sidebar>
           }
         />
