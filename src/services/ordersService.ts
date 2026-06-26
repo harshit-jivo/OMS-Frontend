@@ -220,6 +220,7 @@ export interface Order {
   items: OrderItem[];
   created_at: string;
   created_by: string | number;
+  rejected_by?: string | null;
   total_amount: number;
   sap_doc_number?: string;
   quotation_cancelled?: boolean;

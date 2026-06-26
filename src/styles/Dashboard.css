@@ -1209,7 +1209,6 @@
 .db-status-order-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 14px;
   padding: 12px 14px;
   border: 1px solid #e2e8f0;
@@ -1222,6 +1221,7 @@
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+  flex: 1 1 auto;
 }
 
 .db-status-order-number {
@@ -1256,6 +1256,20 @@
 .db-status-order-sub {
   font-size: 11px;
   color: #64748b;
+}
+
+.db-status-order-approver {
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #2563eb;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-status-order-rejected-by {
+  color: #dc2626;
 }
 
 .db-status-order-view {
