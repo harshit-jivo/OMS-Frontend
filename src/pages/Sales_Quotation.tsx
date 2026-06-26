@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import * as XLSX from "xlsx";
+import { saveAs } from "file-saver";
 import { ordersService } from "../services/ordersService";
 import type { QuotationOverviewItem, QuotationStatusLabel } from "../services/ordersService";
 
@@ -103,6 +105,29 @@ export default function Sales_Quotation() {
     [rows],
   );
 
+  // Export the currently filtered rows (respecting search/status/category filters)
+  // as an Excel file matching the columns shown in the table.
+  const downloadExcel = () => {
+    if (filtered.length === 0) return;
+    const excelData = filtered.map((row) => ({
+      "Order ID": row.order_number ?? "",
+      "Card Code": row.card_code ?? "",
+      "Card Name": row.card_name ?? "",
+      "Category": row.category || "",
+      "Created": formatDateTime(row.created_at),
+      "SAP Doc No.": row.doc_num ?? "",
+      "Quotation Status": (STATUS_STYLES[row.quotation_status] || STATUS_STYLES.UNKNOWN).label,
+      "Cancelled By": row.quotation_cancelled_by ?? "",
+      "Cancelled At": row.quotation_cancelled ? formatDateTime(row.quotation_cancelled_at) : "",
+    }));
+    const worksheet = XLSX.utils.json_to_sheet(excelData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Sales Quotations");
+    const excelBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+    const file = new Blob([excelBuffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    saveAs(file, `Sales_Quotation_${new Date().toISOString().split("T")[0]}.xlsx`);
+  };
+
   return (
     <div style={{ padding: "20px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px", marginBottom: "16px" }}>
@@ -141,6 +166,24 @@ export default function Sales_Quotation() {
             onChange={(e) => setSearch(e.target.value)}
             style={{ height: 38, padding: "0 12px", borderRadius: 8, border: "1px solid #cbd5e1", minWidth: 240 }}
           />
+          <button
+            type="button"
+            onClick={downloadExcel}
+            disabled={filtered.length === 0}
+            style={{
+              height: 38,
+              padding: "0 16px",
+              borderRadius: 8,
+              border: "none",
+              background: filtered.length === 0 ? "#94a3b8" : "#16a34a",
+              color: "#fff",
+              fontWeight: 600,
+              cursor: filtered.length === 0 ? "not-allowed" : "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            ⬇ Download Excel
+          </button>
         </div>
       </div>
 
