@@ -662,6 +662,19 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
       return false;
     }
 
+    const invalidQuantityRow = confirmedRows.find(
+      (row) =>
+        Number(row.pcs) <= 0 ||
+        Number(row.boxes) <= 0 ||
+        Number(row.qty) <= 0,
+    );
+    if (invalidQuantityRow) {
+      alert(
+        `${invalidQuantityRow.item || "Each item"} must have PCS, boxes and quantity greater than 0.`,
+      );
+      return false;
+    }
+
     if (rows.some((row) => !row.confirmed && row.item)) {
       alert("Please confirm the current item before submitting the order.");
       return false;
@@ -1367,6 +1380,8 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
     row.variety &&
     row.type &&
     row.item &&
+    Number(row.pcs) > 0 &&
+    Number(row.boxes) > 0 &&
     Number(row.qty) > 0 &&
     (!row.isScheme ||
       row.schemes.every((scheme) => scheme.scheme && Number(scheme.schemeQty || 0) > 0));

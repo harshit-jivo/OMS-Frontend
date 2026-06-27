@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { ordersService } from "../services/ordersService";
 import type { Order, OrderLog } from "../services/ordersService";
 import { loadCurrentUserOrders } from "../utils/orderHistory";
+import { HiPencilSquare } from "react-icons/hi2";
 import "../styles/Order_Tracking.css";
 
 const formatCreatedDateTime = (value?: string | null) => {
@@ -548,6 +549,11 @@ export default function Order_Tracking() {
     return statusName.includes("billing") && remarks.includes("sent to auditor");
   };
 
+  const isEditedLog = (log: OrderLog) => {
+    const remarks = String(log.remarks || "").toLowerCase();
+    return remarks.includes("edited by manager") || remarks.includes("edited by billing");
+  };
+
   const isBillingAcceptedLog = (log: OrderLog) => {
     const statusName = String(log.status_name || "").toLowerCase();
     const remarks = String(log.remarks || "").toLowerCase();
@@ -1033,7 +1039,9 @@ export default function Order_Tracking() {
                   <div key={log.id} className="tracker-timeline-row">
                     <div className="tracker-timeline-left">
                       <div className={`tracker-dot ${tone}`}>
-                        {tone === "approved"
+                        {isEditedLog(log)
+                          ? <HiPencilSquare aria-label="Edited" />
+                          : tone === "approved"
                           ? "✓"
                           : tone === "rejected"
                             ? "✕"

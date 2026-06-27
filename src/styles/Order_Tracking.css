@@ -288,6 +288,11 @@
   box-shadow: 0 10px 18px rgba(15, 23, 42, 0.14);
 }
 
+.tracker-dot svg {
+  width: 16px;
+  height: 16px;
+}
+
 .tracker-line {
   width: 4px;
   flex: 1;
