@@ -387,6 +387,17 @@ export const getOrderLogDisplayTitle = (
     });
   const lastPreviousStageName = String(lastPreviousStage?.status_name || "").toLowerCase();
 
+  if (remarks.includes("edited by")) {
+    const roleMatch = remarks.match(/edited by\s+([a-z_]+)/);
+    const role = roleMatch
+      ? roleMatch[1].charAt(0).toUpperCase() + roleMatch[1].slice(1)
+      : "";
+    const base = remarks.includes("rejected")
+      ? "Rejected Order Edited"
+      : "Order Edited";
+    return role ? `${base} by ${role}` : base;
+  }
+
   if (isRejected && lastPreviousStageName.includes("rate")) return "Rate Approval Rejected";
   if (isRejected && lastPreviousStageName.includes("billing")) return "Billing Rejected";
   if (isRejected && lastPreviousStageName.includes("auditor")) return "Auditor Rejected";

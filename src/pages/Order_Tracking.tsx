@@ -316,7 +316,7 @@ export default function Order_Tracking() {
         combined.includes("accepted") ||
         combined.includes("complete") ||
         combined.includes("sent to auditor") ||
-        combined.includes("edited by manager") ||
+        combined.includes("edited by") ||
         (hasRealPerformer && statusName.includes("rate"))
       );
     };
@@ -574,10 +574,15 @@ export default function Order_Tracking() {
     const performer = String(log.performed_by_name || "").trim().toLowerCase();
     const hasRealPerformer =
       performer && performer !== "pending" && performer !== "system";
-    if (remarks.includes("edited by manager")) {
-      return remarks.includes("rejected")
-        ? "Rejected Order Edited by Manager"
-        : "Order Edited by Manager";
+    if (remarks.includes("edited by")) {
+      const roleMatch = remarks.match(/edited by\s+([a-z_]+)/);
+      const role = roleMatch
+        ? roleMatch[1].charAt(0).toUpperCase() + roleMatch[1].slice(1)
+        : "";
+      const base = remarks.includes("rejected")
+        ? "Rejected Order Edited"
+        : "Order Edited";
+      return role ? `${base} by ${role}` : base;
     }
     const isRejected = statusName.includes("reject");
     const isAccepted =
