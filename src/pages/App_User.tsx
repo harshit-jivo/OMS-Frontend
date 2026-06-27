@@ -8,6 +8,7 @@ import {
   HiBuildingOffice2,
   HiEnvelope,
   HiLockClosed,
+  HiMagnifyingGlass,
   HiMapPin,
   HiPencilSquare,
   HiPhone,
@@ -65,6 +66,7 @@ export default function App_User() {
   const [editUserId, setEditUserId] = useState<number | null>(null);
   const [roleFilter, setRoleFilter] = useState<string>("all");
   const [roleFilterOpen, setRoleFilterOpen] = useState(false);
+  const [userSearch, setUserSearch] = useState("");
 
   useEffect(() => {
     fetchUsers();
@@ -541,12 +543,17 @@ export default function App_User() {
 
   // Role-based filter for the users table. `user.role` holds the role's name
   // (from the serializer), so we match against the selected role name.
-  const filteredUsers =
-    roleFilter === "all"
-      ? users
-      : users.filter(
-          (u) => String(u.role || "").toLowerCase() === roleFilter.toLowerCase(),
-        );
+  const normalizedUserSearch = userSearch.trim().toLowerCase();
+  const filteredUsers = users.filter((user) => {
+    const matchesRole =
+      roleFilter === "all" ||
+      String(user.role || "").toLowerCase() === roleFilter.toLowerCase();
+    const matchesName =
+      !normalizedUserSearch ||
+      String(user.name || "").toLowerCase().includes(normalizedUserSearch);
+
+    return matchesRole && matchesName;
+  });
 
   const totalPages = Math.max(1, Math.ceil(filteredUsers.length / itemsPerPage));
   const pageUsers = filteredUsers.slice(
@@ -570,7 +577,20 @@ export default function App_User() {
             Manage user access, review account status and keep operational roles aligned.
           </p>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+        <div className="au-header-actions">
+            <label className="au-user-search">
+              <HiMagnifyingGlass aria-hidden="true" />
+              <input
+                type="search"
+                value={userSearch}
+                onChange={(event) => {
+                  setUserSearch(event.target.value);
+                  setCurrentPage(1);
+                }}
+                placeholder="Search users by name"
+                aria-label="Search users by name"
+              />
+            </label>
             <div
               className="au-mg-dropdown au-role-filter"
               ref={roleFilterRef}
@@ -690,7 +710,11 @@ export default function App_User() {
               </div>
             ) : (
               <div style={{ padding: "40px", textAlign: "center", color: "#64748b", background: "#f8fafc", borderRadius: "8px", border: "1px dashed #cbd5e1", margin: "20px 0" }}>
-                {roleFilter === "all" ? "No users found" : `No users found for role "${roleFilter}"`}
+                {userSearch.trim()
+                  ? `No users found matching "${userSearch.trim()}"`
+                  : roleFilter === "all"
+                    ? "No users found"
+                    : `No users found for role "${roleFilter}"`}
               </div>
             )}
 
