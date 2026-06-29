@@ -8,6 +8,7 @@ import type { SalesInvoiceState } from "./useSalesInvoice";
 type Props = {
   state: SalesInvoiceState;
   onReset: () => void;
+  onCreateNew: () => void;
   onAddItems?: () => void;
 };
 
@@ -43,7 +44,7 @@ function DraftDocumentStrip({ state }: { state: SalesInvoiceState }) {
   );
 }
 
-export default function DraftStep({ state, onReset, onAddItems }: Props) {
+export default function DraftStep({ state, onReset, onCreateNew, onAddItems }: Props) {
   const [totalsModalOpen, setTotalsModalOpen] = useState(false);
   const [postErrorNotificationOpen, setPostErrorNotificationOpen] = useState(false);
   const [successModalOpen, setSuccessModalOpen] = useState(false);
@@ -67,7 +68,7 @@ export default function DraftStep({ state, onReset, onAddItems }: Props) {
 
   const closeSuccessModal = () => {
     setSuccessModalOpen(false);
-    onReset();
+    onCreateNew();
   };
 
   useEffect(() => {

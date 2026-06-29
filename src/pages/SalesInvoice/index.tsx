@@ -1760,7 +1760,7 @@ export default function SalesInvoiceWizard() {
     setPartyModalOpen(false);
   };
 
-  const resetInvoiceFlow = () => {
+  const resetInvoiceFlow = (openParty = true) => {
     closePartyModal();
     closeOrdersModal();
     closeSourceModal();
@@ -1772,7 +1772,7 @@ export default function SalesInvoiceWizard() {
     setCreatingItemDraft(false);
     setPricingItemCode("");
     state.changeParty();
-    setPartyModalOpen(true);
+    if (openParty) setPartyModalOpen(true);
   };
 
   const createDraftFromSelectedOrders = async () => {
@@ -1911,6 +1911,7 @@ export default function SalesInvoiceWizard() {
         <DraftStep
           state={state}
           onReset={resetInvoiceFlow}
+          onCreateNew={() => resetInvoiceFlow(false)}
           onAddItems={sourceMode === "items" ? openItemsModal : undefined}
         />
       )}

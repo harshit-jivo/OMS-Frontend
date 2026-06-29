@@ -3,10 +3,10 @@ import { HiCheckCircle, HiCube, HiShoppingCart, HiTruck, HiHome } from "react-ic
 import "../../styles/InteractiveLoader.css";
 
 const STEPS = [
-  { label: "Collecting inventory", icon: HiCube },
-  { label: "Adding them to cart", icon: HiShoppingCart },
-  { label: "Docking on the station", icon: HiHome },
-  { label: "Loading dispatch", icon: HiTruck },
+  { label: "Checking Connection", icon: HiCube },
+  { label: "Examining Stock Availability", icon: HiShoppingCart },
+  { label: "Collecting all the Fields", icon: HiHome },
+  { label: "Finalizing Draft", icon: HiTruck },
 ];
 
 const STATUS_MESSAGES = [
