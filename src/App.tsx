@@ -32,6 +32,7 @@ import Order_Flow_Settings from "./pages/Order_Flow_Settings";
 import Page_Permissions from "./pages/Page_Permissions";
 import Sales_Quotation from "./pages/Sales_Quotation";
 import LabelChecker from "./pages/Label_Checker";
+import NutritionManager from "./pages/Nutrition_Manager";
 
 function App() {
   return (
@@ -313,6 +314,15 @@ function App() {
           element={
             <Sidebar>
               <LabelChecker />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Nutrition_Manager"
+          element={
+            <Sidebar>
+              <NutritionManager />
             </Sidebar>
           }
         />

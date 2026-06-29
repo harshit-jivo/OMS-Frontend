@@ -50,6 +50,28 @@ html {
   }
 }
 
+/* ─────────────────────────────────────────────────────────────
+   Large-screen scaling
+   The UI is built almost entirely with fixed px sizes, so it does
+   not grow on big monitors and text looks small. Rather than
+   rewrite every stylesheet, we scale the whole interface up at
+   high resolutions using `zoom`, which enlarges text, spacing and
+   controls together (so fixed-height pills/badges stay balanced).
+   Laptops/normal screens (< 1920px wide) are left untouched.
+   Tune the zoom values below to taste.
+   ───────────────────────────────────────────────────────────── */
+@media (min-width: 1920px) {
+  body { zoom: 1.12; }
+}
+
+@media (min-width: 2560px) {
+  body { zoom: 1.25; }
+}
+
+@media (min-width: 3200px) {
+  body { zoom: 1.4; }
+}
+
 
 #root {
   min-height: 100svh;

@@ -133,7 +133,9 @@ const handleLogin = async () => {
 
     showToast("Login successful. Redirecting...", "success");
 
-    setTimeout(() => navigate("/Dashboard"), 1000);
+    // Legal reviewers land on their own workspace; everyone else on the Dashboard.
+    const landingPath = String(user.role || "").toLowerCase() === "legal" ? "/Label_Checker" : "/Dashboard";
+    setTimeout(() => navigate(landingPath), 1000);
 
   } catch (error) {
     console.error(error);

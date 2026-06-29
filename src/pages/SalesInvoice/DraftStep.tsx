@@ -310,8 +310,7 @@ export default function DraftStep({ state, onReset, onAddItems }: Props) {
                 type="button"
                 disabled={state.posting || Boolean(postDisabledReason)}
                 title={postDisabledReason || undefined}
-                onClick={state.postInvoice}
-              >
+                onClick={state.postInvoice}>
                 {state.posting ? "Submitting..." : "Submit for Review"}
               </button>
             </footer>

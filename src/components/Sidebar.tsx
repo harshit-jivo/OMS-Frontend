@@ -325,12 +325,20 @@ export default function Sidebar({ children }: SidebarProps) {
           )}
 
           {userRole?.toLowerCase() === "legal" && (
-            <li className={location.pathname === "/Label_Checker" ? "active" : ""}>
-              <Link to="/Label_Checker" onClick={closeSidebar}>
-                <SidebarIcon><HiTag /></SidebarIcon>
-                Label Checker
-              </Link>
-            </li>
+            <>
+              <li className={location.pathname === "/Label_Checker" ? "active" : ""}>
+                <Link to="/Label_Checker" onClick={closeSidebar}>
+                  <SidebarIcon><HiTag /></SidebarIcon>
+                  Label Checker
+                </Link>
+              </li>
+              <li className={location.pathname === "/Nutrition_Manager" ? "active" : ""}>
+                <Link to="/Nutrition_Manager" onClick={closeSidebar}>
+                  <SidebarIcon><HiClipboardDocumentList /></SidebarIcon>
+                  Nutrition Manager
+                </Link>
+              </li>
+            </>
           )}
 
           {canSee("App_User") && (
