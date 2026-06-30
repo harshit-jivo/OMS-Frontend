@@ -258,6 +258,54 @@
   font-size: 0.8rem;
 }
 
+.lc-topbar-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-left: auto;
+}
+
+.lc-topbar-item-label {
+  flex: none;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.lc-select {
+  min-height: 38px;
+  max-width: 260px;
+  padding: 0 30px 0 12px;
+  border-radius: 9px;
+  border: 0.5px solid var(--line);
+  background: var(--surface)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%2364748b' stroke-width='1.6'%3E%3Cpath d='M6 8l4 4 4-4'/%3E%3C/svg%3E")
+    no-repeat right 9px center / 16px;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 0.86rem;
+  font-weight: 500;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  text-overflow: ellipsis;
+}
+
+.lc-select:hover:not(:disabled) {
+  border-color: #cbd5e1;
+}
+
+.lc-select:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.lc-select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .lc-topbar-actions {
   display: flex;
   align-items: center;
@@ -686,6 +734,15 @@
   .lc-topbar {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .lc-topbar-item {
+    margin-left: 0;
+  }
+
+  .lc-select {
+    flex: 1;
+    max-width: none;
   }
 
   .lc-topbar-actions {

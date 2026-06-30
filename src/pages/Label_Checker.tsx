@@ -31,12 +31,14 @@ import "../styles/Label_Checker.css";
  * ────────────────────────────────────────────────────────────────────────── */
 
 const UPLOAD_URL = resolveApiUrl("/api/legal/upload/");
+const ITEMS_URL = resolveApiUrl("/api/legal/item/");
 const MAX_BYTES = 20 * 1024 * 1024;
 
 type Confidence = "high" | "medium" | "low" | string;
 type Parameter = { value: unknown; confidence?: Confidence; notes?: string };
 type LegalResult = { file?: string; parameters?: Record<string, Parameter> };
 type Entry = [string, Parameter];
+type LegalItem = { id: number; item_name: string; created_at?: string };
 
 /* ── Labels / formatting (sentence case) ──────────────────────────────────── */
 
@@ -319,6 +321,10 @@ export default function LabelChecker() {
   const [stepIndex, setStepIndex] = useState(0);
   const [openSections, setOpenSections] = useState<Set<string>>(new Set());
   const [activeTab, setActiveTab] = useState("");
+  const [items, setItems] = useState<LegalItem[]>([]);
+  const [itemId, setItemId] = useState("");
+  const [itemsLoading, setItemsLoading] = useState(false);
+  const [itemsError, setItemsError] = useState("");
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const isAnalysing = status === "analysing";
@@ -329,6 +335,32 @@ export default function LabelChecker() {
     const timer = setInterval(() => setStepIndex((prev) => (prev + 1) % ANALYSING_STEPS.length), 2500);
     return () => clearInterval(timer);
   }, [status]);
+
+  // Load the list of items the label can be checked against.
+  useEffect(() => {
+    let cancelled = false;
+    const loadItems = async () => {
+      setItemsLoading(true);
+      setItemsError("");
+      try {
+        const token = localStorage.getItem("access");
+        const response = await fetch(ITEMS_URL, {
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        });
+        if (!response.ok) throw new Error(await readError(response));
+        const data = (await response.json()) as LegalItem[];
+        if (!cancelled) setItems(Array.isArray(data) ? data : []);
+      } catch (err) {
+        if (!cancelled) setItemsError(err instanceof Error ? err.message : "Could not load the item list.");
+      } finally {
+        if (!cancelled) setItemsLoading(false);
+      }
+    };
+    loadItems();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   /* ── Derived data ─────────────────────────────────────────────────────── */
 
@@ -399,6 +431,11 @@ export default function LabelChecker() {
 
   const analyse = async () => {
     if (!file) return;
+    if (!itemId) {
+      setError("Please select the item this label belongs to before analysing.");
+      setStatus("error");
+      return;
+    }
     setStatus("analysing");
     setError("");
     setResult(null);
@@ -406,6 +443,7 @@ export default function LabelChecker() {
       const token = localStorage.getItem("access");
       const body = new FormData();
       body.append("label_file", file);
+      body.append("item_id", itemId);
       const response = await fetch(UPLOAD_URL, {
         method: "POST",
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
@@ -523,13 +561,36 @@ export default function LabelChecker() {
           <strong title={file.name}>{file.name}</strong>
           <span className="lc-topbar-size">{formatBytes(file.size)}</span>
         </div>
+        <label className="lc-topbar-item">
+          <span className="lc-topbar-item-label">Item</span>
+          <select
+            className="lc-select"
+            value={itemId}
+            onChange={(event) => setItemId(event.target.value)}
+            disabled={isAnalysing || itemsLoading || !!itemsError}
+          >
+            <option value="">
+              {itemsLoading ? "Loading items…" : itemsError ? "Couldn’t load items" : "Select an item…"}
+            </option>
+            {items.map((item) => (
+              <option key={item.id} value={String(item.id)}>
+                {item.item_name}
+              </option>
+            ))}
+          </select>
+        </label>
         <div className="lc-topbar-actions">
           {status === "done" ? (
             <button type="button" className="lc-btn lc-btn-ghost" onClick={analyse}>
               <HiArrowPath aria-hidden="true" /> Reanalyze
             </button>
           ) : (
-            <button type="button" className="lc-btn lc-btn-primary" onClick={analyse} disabled={isAnalysing}>
+            <button
+              type="button"
+              className="lc-btn lc-btn-primary"
+              onClick={analyse}
+              disabled={isAnalysing || !itemId}
+            >
               {isAnalysing ? (
                 <>
                   <span className="lc-spinner" aria-hidden="true" /> Analysing…
@@ -562,7 +623,11 @@ export default function LabelChecker() {
         <div className="lc-state">
           <HiSparkles aria-hidden="true" />
           <h2>Ready to analyse</h2>
-          <p>Click “Analyse” and the assistant will read every panel and extract the declarations.</p>
+          <p>
+            {itemId
+              ? "Click “Analyse” and the assistant will read every panel and extract the declarations."
+              : "Select the item this label belongs to, then click “Analyse”."}
+          </p>
         </div>
       )}
 
