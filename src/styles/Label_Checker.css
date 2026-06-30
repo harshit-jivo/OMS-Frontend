@@ -593,6 +593,43 @@
   color: var(--warn);
 }
 
+.lc-row-icon-na {
+  color: var(--faint);
+}
+
+/* Subtle left accent on rows that need attention */
+.lc-row.is-missing,
+.lc-row.is-mismatch {
+  box-shadow: inset 2px 0 0 var(--warn);
+  padding-left: 10px;
+}
+
+/* Status pill shown next to a row label */
+.lc-pill {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 0.5px solid transparent;
+  font-size: 0.66rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+.lc-pill-warn {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: var(--warn-ink);
+}
+
+.lc-pill-muted {
+  background: var(--soft);
+  border-color: var(--line);
+  color: var(--muted);
+}
+
 .lc-row-text {
   min-width: 0;
   flex: 1;
@@ -602,6 +639,9 @@
 }
 
 .lc-row-label {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   font-size: 0.7rem;
   font-weight: 500;
   text-transform: uppercase;
@@ -718,6 +758,44 @@
 
 .lc-nutri tbody tr:hover {
   background: var(--soft);
+}
+
+.lc-nutri tbody tr.is-mismatch {
+  background: #fffbeb;
+}
+
+.lc-nutri tbody tr.is-mismatch:hover {
+  background: #fef3c7;
+}
+
+/* Per-row status flag inside the nutrition table */
+.lc-nutri-flag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 0.5px solid transparent;
+  font-size: 0.7rem;
+  font-weight: 500;
+}
+
+.lc-flag-ok {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+  color: var(--ok-ink);
+}
+
+.lc-flag-mismatch,
+.lc-flag-missing {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: var(--warn-ink);
+}
+
+.lc-flag-na {
+  background: var(--soft);
+  border-color: var(--line);
+  color: var(--muted);
 }
 
 /* ── Responsive ─────────────────────────────────────────────────────────── */

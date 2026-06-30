@@ -14,6 +14,7 @@ import {
   HiDocumentText,
   HiExclamationTriangle,
   HiInformationCircle,
+  HiMinusCircle,
   HiShieldCheck,
   HiSparkles,
 } from "react-icons/hi2";
@@ -35,10 +36,12 @@ const ITEMS_URL = resolveApiUrl("/api/legal/item/");
 const MAX_BYTES = 20 * 1024 * 1024;
 
 type Confidence = "high" | "medium" | "low" | string;
-type Parameter = { value: unknown; confidence?: Confidence; notes?: string };
+type Status = "OK" | "MISSING" | "MISMATCH" | "NOT_APPLICABLE" | string;
+type Parameter = { value: unknown; status?: Status; confidence?: Confidence; notes?: string };
 type LegalResult = { file?: string; parameters?: Record<string, Parameter> };
 type Entry = [string, Parameter];
 type LegalItem = { id: number; item_name: string; created_at?: string };
+type StatusKind = "ok" | "missing" | "mismatch" | "na";
 
 /* ── Labels / formatting (sentence case) ──────────────────────────────────── */
 
@@ -61,6 +64,7 @@ const LABEL_OVERRIDES: Record<string, string> = {
   iso_certification: "ISO certification",
   cost_block: "Pricing & batch details",
   compliance_section: "Certifications & EPR",
+  footnote_signs: "Footnote symbols",
 };
 const ACRONYMS = new Set(["mrp", "fssai", "epr", "iso", "mufa", "pufa", "usp"]);
 
@@ -110,6 +114,27 @@ const confidenceLabel = (value?: Confidence): string | undefined => {
 const isBlank = (value: unknown): boolean =>
   value === null || value === undefined || (typeof value === "string" && value.trim() === "");
 
+// The backend now classifies each parameter with an explicit status. Fall back to
+// the value (blank ⇒ missing) for older payloads that don't send one.
+const statusKind = (param: Parameter): StatusKind => {
+  const s = (param.status ?? "").toString().toUpperCase().replace(/[\s/]+/g, "_");
+  if (s === "OK" || s === "PASS") return "ok";
+  if (s === "MISSING") return "missing";
+  if (s === "MISMATCH") return "mismatch";
+  if (s === "NOT_APPLICABLE" || s === "NA" || s === "N_A") return "na";
+  if (s) return "ok"; // unknown but present status → treat as an informational pass
+  return isBlank(param.value) ? "missing" : "ok";
+};
+
+const isIssue = (kind: StatusKind): boolean => kind === "missing" || kind === "mismatch";
+
+const STATUS_PILL: Record<StatusKind, { label: string; cls: string } | null> = {
+  ok: null,
+  missing: { label: "Missing", cls: "lc-pill-warn" },
+  mismatch: { label: "Mismatch", cls: "lc-pill-warn" },
+  na: { label: "Not applicable", cls: "lc-pill-muted" },
+};
+
 const formatBytes = (bytes: number): string => {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
@@ -141,7 +166,7 @@ const SECTION_DEFS: { title: string; icon: IconType; keys: string[] }[] = [
       "iso_certification",
       "jivo_trademark",
       "illustration_disclaimer",
-      "Disclaimer of any signs",
+      "footnote_signs",
     ],
   },
 ];
@@ -212,15 +237,27 @@ function FieldValue({ value }: { value: unknown }) {
   return <span className="lc-value">{String(value)}</span>;
 }
 
+const ROW_ICON: Record<StatusKind, { cls: string; icon: IconType }> = {
+  ok: { cls: "ok", icon: HiCheckCircle },
+  missing: { cls: "warn", icon: HiExclamationTriangle },
+  mismatch: { cls: "warn", icon: HiExclamationTriangle },
+  na: { cls: "na", icon: HiMinusCircle },
+};
+
 function InfoRow({ fieldKey, param }: { fieldKey: string; param: Parameter }) {
-  const blank = isBlank(param.value);
+  const kind = statusKind(param);
+  const { cls, icon: Icon } = ROW_ICON[kind];
+  const pill = STATUS_PILL[kind];
   return (
-    <div className={`lc-row${blank ? " is-blank" : ""}`} title={confidenceLabel(param.confidence)}>
-      <span className={`lc-row-icon lc-row-icon-${blank ? "warn" : "ok"}`} aria-hidden="true">
-        {blank ? <HiExclamationTriangle /> : <HiCheckCircle />}
+    <div className={`lc-row${kind !== "ok" ? ` is-${kind}` : ""}`} title={confidenceLabel(param.confidence)}>
+      <span className={`lc-row-icon lc-row-icon-${cls}`} aria-hidden="true">
+        <Icon />
       </span>
       <div className="lc-row-text">
-        <span className="lc-row-label">{prettifyKey(fieldKey)}</span>
+        <span className="lc-row-label">
+          {prettifyKey(fieldKey)}
+          {pill && <span className={`lc-pill ${pill.cls}`}>{pill.label}</span>}
+        </span>
         <FieldValue value={param.value} />
         {param.notes && <span className="lc-row-note">{param.notes}</span>}
       </div>
@@ -228,32 +265,79 @@ function InfoRow({ fieldKey, param }: { fieldKey: string; param: Parameter }) {
   );
 }
 
+// Render a numeric nutrition cell; a negative DB value is the backend's sentinel
+// for "no reference figure", so show it as a dash rather than "-1".
+const nutriNum = (value: unknown): string => {
+  if (isBlank(value)) return "—";
+  if (typeof value === "number") return value < 0 ? "—" : String(value);
+  return String(value);
+};
+
+// Read the first present, non-blank key from a row (0 counts as present).
+const pickField = (row: Record<string, unknown>, keys: string[]): unknown => {
+  for (const key of keys) if (key in row && !isBlank(row[key])) return row[key];
+  return undefined;
+};
+
 function NutritionTable({ param }: { param: Parameter }) {
   const rows = (Array.isArray(param.value) ? param.value : []) as Array<Record<string, unknown>>;
+  // Rows now compare the label's figures against a reference database. Show the
+  // comparison columns when DB figures are present; otherwise fall back to a
+  // plain label-only table for older payloads.
+  const hasDb = rows.some((row) => "db_per_100g" in row || "db_per_serving" in row);
+  const columns: { head: string; get: (row: Record<string, unknown>) => string }[] = hasDb
+    ? [
+        { head: "Nutrient", get: (row) => String(pickField(row, ["nutrition_name", "nutrient", "name"]) ?? "—") },
+        { head: "Label / 100g", get: (row) => nutriNum(pickField(row, ["label_per_100g", "per_100g", "per100g"])) },
+        { head: "DB / 100g", get: (row) => nutriNum(pickField(row, ["db_per_100g"])) },
+        { head: "Label / serving", get: (row) => nutriNum(pickField(row, ["label_per_serving", "per_serving"])) },
+        { head: "DB / serving", get: (row) => nutriNum(pickField(row, ["db_per_serving"])) },
+      ]
+    : [
+        { head: "Nutrient", get: (row) => String(pickField(row, ["nutrition_name", "nutrient", "name"]) ?? "—") },
+        { head: "Per serving", get: (row) => nutriNum(pickField(row, ["label_per_serving", "per_serving"])) },
+        { head: "Per 100g", get: (row) => nutriNum(pickField(row, ["label_per_100g", "per_100g", "per100g"])) },
+      ];
+  const hasStatus = rows.some((row) => "status" in row);
+  const kind = statusKind(param);
+  const { cls, icon: Icon } = ROW_ICON[kind];
   return (
-    <div className="lc-row lc-row-nutrition">
-      <span className="lc-row-icon lc-row-icon-ok" aria-hidden="true">
-        <HiCheckCircle />
+    <div className={`lc-row lc-row-nutrition${kind !== "ok" ? ` is-${kind}` : ""}`}>
+      <span className={`lc-row-icon lc-row-icon-${cls}`} aria-hidden="true">
+        <Icon />
       </span>
       <div className="lc-row-text">
-        <span className="lc-row-label">Nutritional facts</span>
+        <span className="lc-row-label">
+          Nutritional facts
+          {STATUS_PILL[kind] && <span className={`lc-pill ${STATUS_PILL[kind]!.cls}`}>{STATUS_PILL[kind]!.label}</span>}
+        </span>
         <div className="lc-nutri-wrap">
           <table className="lc-nutri">
             <thead>
               <tr>
-                <th>Nutrient</th>
-                <th>Per serving</th>
-                <th>Per 100g</th>
+                {columns.map((col) => (
+                  <th key={col.head}>{col.head}</th>
+                ))}
+                {hasStatus && <th>Status</th>}
               </tr>
             </thead>
             <tbody>
-              {rows.map((row, index) => (
-                <tr key={index}>
-                  <td>{String(row.nutrient ?? "—")}</td>
-                  <td>{String(row.per_serving ?? "—")}</td>
-                  <td>{String(row.per_100g ?? row.per100g ?? "—")}</td>
-                </tr>
-              ))}
+              {rows.map((row, index) => {
+                const rowKind = statusKind({ value: row.nutrition_name, status: row.status as Status });
+                const rowPill = STATUS_PILL[rowKind];
+                return (
+                  <tr key={index} className={rowKind === "mismatch" ? "is-mismatch" : undefined} title={String(row.notes ?? "")}>
+                    {columns.map((col) => (
+                      <td key={col.head}>{col.get(row)}</td>
+                    ))}
+                    {hasStatus && (
+                      <td>
+                        <span className={`lc-nutri-flag lc-flag-${rowKind}`}>{rowPill ? rowPill.label : "Pass"}</span>
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -276,9 +360,10 @@ function Section({
   open: boolean;
   onToggle: () => void;
 }) {
-  const total = entries.length;
-  const missing = entries.filter(([, param]) => isBlank(param.value)).length;
-  const passed = total - missing;
+  const kinds = entries.map(([, param]) => statusKind(param));
+  const issues = kinds.filter(isIssue).length;
+  const applicable = kinds.filter((kind) => kind !== "na").length;
+  const passed = kinds.filter((kind) => kind === "ok").length;
   return (
     <section className={`lc-section${open ? " is-open" : ""}`} id={slug(title)}>
       <button type="button" className="lc-section-head" onClick={onToggle} aria-expanded={open}>
@@ -289,8 +374,8 @@ function Section({
           {title}
         </span>
         <span className="lc-section-right">
-          <span className={`lc-badge ${missing > 0 ? "lc-badge-warn" : "lc-badge-ok"}`}>
-            {missing > 0 ? `${missing} missing` : `${passed} / ${total} passed`}
+          <span className={`lc-badge ${issues > 0 ? "lc-badge-warn" : "lc-badge-ok"}`}>
+            {issues > 0 ? `${issues} ${issues === 1 ? "issue" : "issues"}` : `${passed} / ${applicable} passed`}
           </span>
           <HiChevronDown className="lc-section-caret" aria-hidden="true" />
         </span>
@@ -365,10 +450,12 @@ export default function LabelChecker() {
   /* ── Derived data ─────────────────────────────────────────────────────── */
 
   const params = useMemo<Entry[]>(() => (result?.parameters ? Object.entries(result.parameters) : []), [result]);
-  const blankEntries = params.filter(([, param]) => isBlank(param.value));
+  const missingEntries = params.filter(([, param]) => statusKind(param) === "missing");
+  const mismatchEntries = params.filter(([, param]) => statusKind(param) === "mismatch");
+  const issueEntries = params.filter(([, param]) => isIssue(statusKind(param)));
   const total = params.length;
-  const issues = blankEntries.length;
-  const passed = total - issues;
+  const issues = issueEntries.length;
+  const passed = params.filter(([, param]) => statusKind(param) === "ok").length;
   const avgConfidence = useMemo(() => {
     const scored = params.filter(([, param]) => param.confidence);
     if (!scored.length) return 0;
@@ -400,7 +487,8 @@ export default function LabelChecker() {
   }, [status, sections]);
 
   const fileLabel = result?.file ? baseName(result.file) : file?.name ?? "label.pdf";
-  const missingNames = blankEntries.map(([key]) => prettifyKey(key)).join(", ");
+  const missingNames = missingEntries.map(([key]) => prettifyKey(key)).join(", ");
+  const mismatchNames = mismatchEntries.map(([key]) => prettifyKey(key)).join(", ");
 
   /* ── Actions ──────────────────────────────────────────────────────────── */
 
@@ -663,10 +751,19 @@ export default function LabelChecker() {
             <div className="lc-banner" role="alert">
               <HiExclamationTriangle className="lc-banner-icon" aria-hidden="true" />
               <div className="lc-banner-text">
-                <strong>Missing: {missingNames}</strong>
+                {missingEntries.length > 0 && (
+                  <strong>
+                    Missing: {missingNames}
+                  </strong>
+                )}
+                {mismatchEntries.length > 0 && (
+                  <strong>
+                    Mismatched: {mismatchNames}
+                  </strong>
+                )}
                 <span>
-                  {issues === 1 ? "This declaration is" : "These declarations are"} absent from the label and{" "}
-                  {issues === 1 ? "is" : "are"} required under FSSAI packaging rules.
+                  {missingEntries.length > 0 && "Missing declarations are required under FSSAI packaging rules. "}
+                  {mismatchEntries.length > 0 && "Mismatched values differ from the reference database — review them against the label."}
                 </span>
               </div>
             </div>
