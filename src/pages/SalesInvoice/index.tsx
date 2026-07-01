@@ -1246,12 +1246,17 @@ const getBatchNumber = (batch: BatchDetail) => {
     "SerialNumber",
   ];
 
+  let dateLikeFallback = "";
   for (const key of candidateKeys) {
     const value = String(source[key] ?? "").trim();
-    if (value && !isBatchDateValue(value, batch)) return value;
+    if (!value) continue;
+    if (!isBatchDateValue(value, batch)) return value;
+    if (!dateLikeFallback) dateLikeFallback = value;
   }
 
-  return "";
+  // Some batches are legitimately named after a date (e.g. "06/06/2026").
+  // Prefer a non-date identifier, but never drop the batch number entirely.
+  return dateLikeFallback;
 };
 
 const getBatchSystemSerialNumber = (batch: BatchDetail) => {
@@ -1755,7 +1760,7 @@ export default function SalesInvoiceWizard() {
     setPartyModalOpen(false);
   };
 
-  const resetInvoiceFlow = () => {
+  const resetInvoiceFlow = (openParty = true) => {
     closePartyModal();
     closeOrdersModal();
     closeSourceModal();
@@ -1767,7 +1772,7 @@ export default function SalesInvoiceWizard() {
     setCreatingItemDraft(false);
     setPricingItemCode("");
     state.changeParty();
-    setPartyModalOpen(true);
+    if (openParty) setPartyModalOpen(true);
   };
 
   const createDraftFromSelectedOrders = async () => {
@@ -1906,6 +1911,7 @@ export default function SalesInvoiceWizard() {
         <DraftStep
           state={state}
           onReset={resetInvoiceFlow}
+          onCreateNew={() => resetInvoiceFlow(false)}
           onAddItems={sourceMode === "items" ? openItemsModal : undefined}
         />
       )}

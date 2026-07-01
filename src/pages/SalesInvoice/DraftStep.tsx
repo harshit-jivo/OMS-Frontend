@@ -1,37 +1,16 @@
 import { useEffect, useState } from "react";
-import { HiArchiveBox, HiArrowPath, HiCheckCircle, HiClipboardDocumentCheck, HiShoppingCart, HiTruck, HiXMark } from "react-icons/hi2";
+import { HiCheckCircle, HiXMark } from "react-icons/hi2";
 import ContentsTab from "./ContentsTab";
+import InteractiveLoader from "./InteractiveLoader";
 import { formatDateDisplay, formatMoney, toNumber } from "./salesInvoice.utils";
 import type { SalesInvoiceState } from "./useSalesInvoice";
 
 type Props = {
   state: SalesInvoiceState;
   onReset: () => void;
+  onCreateNew: () => void;
   onAddItems?: () => void;
 };
-
-const postingSteps = [
-  {
-    label: "Grabbing inventory",
-    detail: "Checking selected batches and stock.",
-    Icon: HiArchiveBox,
-  },
-  {
-    label: "Preparing cart",
-    detail: "Packing invoice lines for SAP.",
-    Icon: HiShoppingCart,
-  },
-  {
-    label: "Docking",
-    detail: "Connecting to SAP service layer.",
-    Icon: HiClipboardDocumentCheck,
-  },
-  {
-    label: "Loading dispatch",
-    detail: "Posting the invoice and waiting for confirmation.",
-    Icon: HiTruck,
-  },
-];
 
 function DraftDocumentStrip({ state }: { state: SalesInvoiceState }) {
   const [postingDateEditable, setPostingDateEditable] = useState(false);
@@ -65,11 +44,10 @@ function DraftDocumentStrip({ state }: { state: SalesInvoiceState }) {
   );
 }
 
-export default function DraftStep({ state, onReset, onAddItems }: Props) {
+export default function DraftStep({ state, onReset, onCreateNew, onAddItems }: Props) {
   const [totalsModalOpen, setTotalsModalOpen] = useState(false);
   const [postErrorNotificationOpen, setPostErrorNotificationOpen] = useState(false);
   const [successModalOpen, setSuccessModalOpen] = useState(false);
-  const [postingStepIndex, setPostingStepIndex] = useState(0);
   const customerName = state.customerDetails?.CardName || state.selectedParty?.CardName || "-";
   const postDisabledReason = state.selectedLineBatchError;
 
@@ -90,26 +68,24 @@ export default function DraftStep({ state, onReset, onAddItems }: Props) {
 
   const closeSuccessModal = () => {
     setSuccessModalOpen(false);
-    onReset();
+    onCreateNew();
   };
 
   useEffect(() => {
-    if (!state.posting) {
-      setPostingStepIndex(0);
-      return undefined;
-    }
-
-    setTotalsModalOpen(false);
-
-    const interval = window.setInterval(() => {
-      setPostingStepIndex((current) => (current + 1) % postingSteps.length);
-    }, 1450);
-
-    return () => window.clearInterval(interval);
+    if (state.posting) setTotalsModalOpen(false);
   }, [state.posting]);
 
   return (
     <div className="si-draft-stage">
+      <InteractiveLoader
+        isOpen={state.posting}
+        summary={{
+          totalItems: state.selectedLineList.length,
+          selectedStation: state.form.shipTo,
+          dispatchType: state.form.shippingType,
+          estimatedTime: "~30 seconds",
+        }}
+      />
       {state.loadingDraftDetails && <div className="si-loader">Loading customer and salesperson details...</div>}
       {state.draftError && <div className="si-inline-error">{state.draftError}</div>}
 
@@ -144,7 +120,7 @@ export default function DraftStep({ state, onReset, onAddItems }: Props) {
         <aside className="si-floating-notification si-floating-notification-error" role="alert" aria-live="assertive">
           <header>
             <div>
-              <strong>Unable to post to SAP HANA</strong>
+              <strong>Unable to post invoice to SAP HANA</strong>
               <span>Full error message</span>
             </div>
             <button
@@ -159,43 +135,6 @@ export default function DraftStep({ state, onReset, onAddItems }: Props) {
         </aside>
       )}
 
-      {state.posting && (
-        <div className="si-posting-overlay" role="status" aria-live="polite" aria-label="Posting invoice to SAP HANA">
-          <section className="si-posting-card" aria-label="Posting progress">
-            <div className="si-posting-orbit" aria-hidden="true">
-              <HiTruck />
-              <span />
-            </div>
-            <div className="si-posting-copy">
-              <span className="si-eyebrow">SAP HANA Dispatch</span>
-              <h2>Posting invoice...</h2>
-              <p>{postingSteps[postingStepIndex].detail}</p>
-            </div>
-            <div className="si-posting-progress" aria-hidden="true">
-              <span style={{ width: `${((postingStepIndex + 1) / postingSteps.length) * 100}%` }} />
-            </div>
-            <ol className="si-posting-steps">
-              {postingSteps.map((step, index) => {
-                const StepIcon = step.Icon;
-                const isActive = index === postingStepIndex;
-                const isDone = index < postingStepIndex;
-
-                return (
-                  <li className={`${isActive ? "is-active" : ""}${isDone ? " is-done" : ""}`} key={step.label}>
-                    <span className="si-posting-step-icon">
-                      {isActive ? <HiArrowPath aria-hidden="true" /> : <StepIcon aria-hidden="true" />}
-                    </span>
-                    <span>
-                      <strong>{step.label}</strong>
-                      <small>{step.detail}</small>
-                    </span>
-                  </li>
-                );
-              })}
-            </ol>
-          </section>
-        </div>
-      )}
 
       {successModalOpen && (
         <div className="si-modal-backdrop si-success-backdrop" role="presentation">
@@ -203,13 +142,24 @@ export default function DraftStep({ state, onReset, onAddItems }: Props) {
             className="si-success-modal"
             role="alertdialog"
             aria-modal="true"
-            aria-label="Invoice posted to SAP HANA"
+            aria-label="Draft posted to SAP HANA"
           >
+            <button
+              type="button"
+              className="si-success-close"
+              aria-label="Close"
+              onClick={closeSuccessModal}
+            >
+              <HiXMark aria-hidden="true" />
+            </button>
             <span className="si-success-icon" aria-hidden="true">
               <HiCheckCircle />
             </span>
-            <span className="si-eyebrow">SAP HANA Dispatch</span>
-            <h2>Invoice Posted</h2>
+            <span className="si-eyebrow">Sales Invoice</span>
+            <h2>Draft Posted to SAP HANA</h2>
+            {state.postedDocNum && (
+              <p className="si-success-docnum">Draft #{state.postedDocNum}</p>
+            )}
             <p className="si-success-message">{state.postSuccess}</p>
             <div className="si-success-actions">
               <button className="si-btn si-btn-primary" type="button" onClick={closeSuccessModal}>
@@ -361,9 +311,8 @@ export default function DraftStep({ state, onReset, onAddItems }: Props) {
                 type="button"
                 disabled={state.posting || Boolean(postDisabledReason)}
                 title={postDisabledReason || undefined}
-                onClick={state.postInvoice}
-              >
-                {state.posting ? "Posting..." : "Post to SAP HANA"}
+                onClick={state.postInvoice}>
+                {state.posting ? "Submitting..." : "Submit for Review"}
               </button>
             </footer>
           </section>

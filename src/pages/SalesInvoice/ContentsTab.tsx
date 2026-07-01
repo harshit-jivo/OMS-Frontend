@@ -157,12 +157,17 @@ const getBatchNumber = (batch: BatchDetail) => {
     "SerialNumber",
   ];
 
+  let dateLikeFallback = "";
   for (const key of candidateKeys) {
     const value = String(source[key] ?? "").trim();
-    if (value && !isBatchDateValue(value, batch)) return value;
+    if (!value) continue;
+    if (!isBatchDateValue(value, batch)) return value;
+    if (!dateLikeFallback) dateLikeFallback = value;
   }
 
-  return "";
+  // Some batches are legitimately named after a date (e.g. "06/06/2026").
+  // Prefer a non-date identifier, but never drop the batch number entirely.
+  return dateLikeFallback;
 };
 
 const getWarehouseCode = (warehouse: InventoryWarehouse) =>
@@ -501,6 +506,7 @@ function BatchPickerModal({
 export default function ContentsTab({ state }: Props) {
   const [batchPickerContext, setBatchPickerContext] = useState<BatchPickerContext | null>(null);
   const [globalWhsCode, setGlobalWhsCode] = useState("");
+  const autoAllocatedRef = useRef<Set<string>>(new Set());
   const [skuImageByCode, setSkuImageByCode] = useState<Record<string, string>>({});
   const [warehouseQtyByItemAndWhs, setWarehouseQtyByItemAndWhs] = useState<Record<string, number>>({});
   const [batchApplyError, setBatchApplyError] = useState("");
@@ -605,6 +611,48 @@ export default function ContentsTab({ state }: Props) {
       return { allocations: [], failureReason: "error" } as const;
     }
   };
+
+  // Auto-allocate batches for every line from its sales-order warehouse when the
+  // draft loads, so the user doesn't have to open the picker for each line. Lines
+  // the user has already filled (BatchNumbers present) are left untouched.
+  //
+  // The dependency is a stable primitive signature (not the selectedLineList array,
+  // which gets a new identity on every line update) so the effect only re-runs when
+  // a line's warehouse/quantity/batch-state actually changes. The ref tracks lines
+  // already attempted so missing/failed allocations aren't retried in a loop.
+  const autoAllocationSignature = state.selectedLineList
+    .map((line) => {
+      const whsCode = line.WhsCode || line.SalesOrderWhsCode || "";
+      const hasBatches = (line.BatchNumbers?.length || 0) > 0 ? 1 : 0;
+      return `${lineKey(line.DocEntry, line.LineNum)}:${whsCode}:${toNumber(line.invoiceQty)}:${hasBatches}`;
+    })
+    .join("|");
+
+  useEffect(() => {
+    const pending = state.selectedLineList.filter((line) => {
+      const whsCode = line.WhsCode || line.SalesOrderWhsCode || "";
+      if (!whsCode) return false;
+      if ((line.BatchNumbers?.length || 0) > 0) return false;
+      const signature = `${lineKey(line.DocEntry, line.LineNum)}|${whsCode}|${toNumber(line.invoiceQty)}`;
+      return !autoAllocatedRef.current.has(signature);
+    });
+
+    if (pending.length === 0) return;
+
+    pending.forEach(async (line) => {
+      const whsCode = line.WhsCode || line.SalesOrderWhsCode || "";
+      const key = lineKey(line.DocEntry, line.LineNum);
+      // Mark before awaiting so a missing/failed allocation isn't retried in a loop.
+      autoAllocatedRef.current.add(`${key}|${whsCode}|${toNumber(line.invoiceQty)}`);
+      const { allocations } = await loadAllocationsForWarehouse(line, whsCode);
+      if (allocations.length === 0) return;
+      state.updateLine(key, {
+        WhsCode: whsCode,
+        BatchNumbers: toSapBatchNumbers(allocations),
+      });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoAllocationSignature]);
 
   const applyBatchSelection = async (
     allocations: BatchAllocation[],

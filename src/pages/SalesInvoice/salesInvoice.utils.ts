@@ -182,6 +182,8 @@ export const buildInvoicePayload = (
     }));
 
   return {
+    DocObjectCode: "13",
+    Series: 0,
     CardCode: party?.CardCode || "",
     DocDate: form.postingDate,
     DocDueDate: form.dueDate,

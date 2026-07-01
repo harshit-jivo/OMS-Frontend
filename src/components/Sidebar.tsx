@@ -7,6 +7,7 @@ import {
   HiCalendarDays,
   HiChartBar,
   HiChevronDown,
+  HiClipboardDocumentCheck,
   HiClock,
   HiCog6Tooth,
   HiClipboardDocumentList,
@@ -21,6 +22,7 @@ import {
   HiReceiptPercent,
   HiShieldCheck,
   HiShoppingCart,
+  HiTag,
   HiUserCircle,
   HiUserGroup,
   HiUsers,
@@ -313,6 +315,32 @@ export default function Sidebar({ children }: SidebarProps) {
               Dashboard
             </Link>
           </li>
+
+          {(userRole?.toLowerCase() === "billing" || userRole?.toLowerCase() === "factory_approver") && (
+            <li className={location.pathname === "/Invoice_Review" ? "active" : ""}>
+              <Link to="/Invoice_Review" onClick={closeSidebar}>
+                <SidebarIcon><HiClipboardDocumentCheck /></SidebarIcon>
+                Invoice Review
+              </Link>
+            </li>
+          )}
+
+          {userRole?.toLowerCase() === "legal" && (
+            <>
+              <li className={location.pathname === "/Label_Checker" ? "active" : ""}>
+                <Link to="/Label_Checker" onClick={closeSidebar}>
+                  <SidebarIcon><HiTag /></SidebarIcon>
+                  Label Checker
+                </Link>
+              </li>
+              <li className={location.pathname === "/Nutrition_Manager" ? "active" : ""}>
+                <Link to="/Nutrition_Manager" onClick={closeSidebar}>
+                  <SidebarIcon><HiClipboardDocumentList /></SidebarIcon>
+                  Nutrition Manager
+                </Link>
+              </li>
+            </>
+          )}
 
           {canSee("App_User") && (
             <li className={location.pathname === "/App_User" ? "active" : ""}>

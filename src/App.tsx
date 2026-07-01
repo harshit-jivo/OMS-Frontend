@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Login from "./pages/Login";
 import Sidebar from "./components/Sidebar";
 import Dashboard from "./pages/Dashboard";
@@ -23,6 +23,7 @@ import Add_Scheme from "./pages/Add_Scheme";
 import FOC from "./pages/FOC";
 import SalesInvoice from "./pages/Sales_Invoice";
 import SkuGalleryPage from "./pages/SalesInvoice/SkuGalleryPage";
+import InvoiceReview from "./pages/InvoiceReview";
 import Staff from "./pages/Staff";
 import Staff_Rate_Assignment from "./pages/Staff_Rate_Assignment";
 import Order_Stock_Check from "./pages/Order_Stock_Check";
@@ -30,16 +31,8 @@ import Product_Stock from "./pages/Product_Stock";
 import Order_Flow_Settings from "./pages/Order_Flow_Settings";
 import Page_Permissions from "./pages/Page_Permissions";
 import Sales_Quotation from "./pages/Sales_Quotation";
-import Drafts from "./pages/Drafts";
-
-// Remount the sales form on every navigation so opening "Add Sales" / "FOC"
-// fresh always starts blank, instead of keeping the previously edited draft
-// order in component state. When opened in edit/duplicate mode the new mount
-// reads location.state and loads that order as usual.
-function FreshAddSales({ focMode = false }: { focMode?: boolean }) {
-  const location = useLocation();
-  return focMode ? <FOC key={location.key} /> : <Add_Sales key={location.key} />;
-}
+import LabelChecker from "./pages/Label_Checker";
+import NutritionManager from "./pages/Nutrition_Manager";
 
 function App() {
   return (
@@ -78,7 +71,7 @@ function App() {
           path="/Add_Sales"
           element={
             <Sidebar>
-              <FreshAddSales />
+              <Add_Sales />
             </Sidebar>
           }
         />
@@ -87,7 +80,7 @@ function App() {
           path="/FOC"
           element={
             <Sidebar>
-              <FreshAddSales focMode />
+              <FOC />
             </Sidebar>
           }
         />
@@ -106,6 +99,15 @@ function App() {
           element={
             <Sidebar>
               <SkuGalleryPage />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Invoice_Review"
+          element={
+            <Sidebar>
+              <InvoiceReview />
             </Sidebar>
           }
         />
@@ -308,10 +310,19 @@ function App() {
         />
 
         <Route
-          path="/Drafts"
+          path="/Label_Checker"
           element={
             <Sidebar>
-              <Drafts />
+              <LabelChecker />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Nutrition_Manager"
+          element={
+            <Sidebar>
+              <NutritionManager />
             </Sidebar>
           }
         />
