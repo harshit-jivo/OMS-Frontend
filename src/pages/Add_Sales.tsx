@@ -744,8 +744,9 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
           ?.address_name || "",
       dispatch_from_id: Number(formData.dispatch),
       dispatch_from_name:
-        branch.find((d) => d.bpl_id === Number(formData.dispatch))?.bpl_name ||
-        "",
+        branch.find(
+          (d) => String(d.bpl_id) === String(formData.dispatch),
+        )?.bpl_name || "",
 
       delivery_date: formData.Deliverydate,
       ...(canEditPoNumber ? { po_number: formData.poNumber.trim() } : {}),
@@ -872,7 +873,9 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
         shipAddress.find((s) => s.id === Number(formData.shipAddress))?.address_name || "",
       dispatch_from_id: Number(formData.dispatch) || 0,
       dispatch_from_name:
-        branch.find((d) => d.bpl_id === Number(formData.dispatch))?.bpl_name || "",
+        branch.find(
+          (d) => String(d.bpl_id) === String(formData.dispatch),
+        )?.bpl_name || "",
       delivery_date: formData.Deliverydate || null,
       ...(canEditPoNumber ? { po_number: formData.poNumber.trim() } : {}),
       remarks: formData.comment.trim(),
