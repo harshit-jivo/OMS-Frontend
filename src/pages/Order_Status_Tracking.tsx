@@ -13,7 +13,7 @@ import {
 import "../styles/Order_Status_Tracking.css";
 import "../styles/Auditor_Order.css";
 import {
-  HiEye, HiArrowDownTray, HiArrowPath
+  HiEye, HiArrowDownTray, HiArrowPath, HiMagnifyingGlass, HiXMark
 } from "react-icons/hi2";
 
 type TrackingMode = "auditor" | "billing" | "rate_approver";
@@ -129,6 +129,8 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
   const [decisionFilter, setDecisionFilter] = useState<"all" | "accepted" | "rejected">("all");
   const [fromDate, setFromDate] = useState(firstDay);
   const [toDate, setToDate] = useState(lastDay);
+  const [searchInput, setSearchInput] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [showDetails, setShowDetails] = useState(false);
   const [orderDetails, setOrderDetails] = useState<Order | null>(null);
@@ -185,9 +187,13 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
         matchesDate = orderDate >= from && orderDate <= to;
       }
 
-      return matchesDate;
+      const matchesCardName = !appliedSearch || String(order.card_name || "")
+        .toLowerCase()
+        .includes(appliedSearch);
+
+      return matchesDate && matchesCardName;
     });
-  }, [trackedOrders, fromDate, toDate]);
+  }, [trackedOrders, fromDate, toDate, appliedSearch]);
 
   const filteredOrders = useMemo(() => {
     return dateFilteredOrders.filter((order) => {
@@ -411,6 +417,38 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
               >
                 Rejected
               </button>
+              <div className="ot-card-search">
+                <HiMagnifyingGlass className="ot-card-search-icon" aria-hidden="true" />
+                <input
+                  type="text"
+                  className="ot-card-search-input"
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value.toUpperCase())}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter") return;
+                    e.preventDefault();
+                    setAppliedSearch(searchInput.trim().toLowerCase());
+                    setCurrentPage(1);
+                  }}
+                  placeholder="Search e.g. Bachan Singh"
+                  aria-label="Search orders by card name"
+                />
+                {(searchInput || appliedSearch) && (
+                  <button
+                    type="button"
+                    className="ot-card-search-clear"
+                    onClick={() => {
+                      setSearchInput("");
+                      setAppliedSearch("");
+                      setCurrentPage(1);
+                    }}
+                    aria-label="Clear card-name search"
+                    title="Clear search"
+                  >
+                    <HiXMark aria-hidden="true" />
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="ot-filters">

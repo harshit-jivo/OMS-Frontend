@@ -11,6 +11,8 @@ import {
   HiXCircle,       // Reject
   HiEye,           // View
   HiArrowDownTray,  // Download
+  HiMagnifyingGlass,
+  HiXMark,
   // HiEllipsisVertical  
   HiPencilSquare,
 } from "react-icons/hi2";
@@ -61,6 +63,8 @@ export default function Billing_orders() {
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
   const [fromDate, setFromDate] = useState(firstDay);
   const [toDate, setToDate] = useState(lastDay);
+  const [searchInput, setSearchInput] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState("");
   const [isOrdersLoading, setIsOrdersLoading] = useState(true);
 
   const [currentPage, setCurrentPage] = useState(1);
@@ -196,6 +200,8 @@ export default function Billing_orders() {
 
   const filteredOrders = orders.filter((order) => {
     let matchDate = true;
+    const searchableCard = `${order.card_name || ""} ${order.card_code || ""}`.toLowerCase();
+    const matchSearch = !appliedSearch || searchableCard.includes(appliedSearch);
 
     if (fromDate && toDate) {
       const orderDate = new Date(order.created_at);
@@ -206,7 +212,7 @@ export default function Billing_orders() {
       matchDate = orderDate >= from && orderDate <= to;
     }
 
-    return matchDate && !isRejectedBillingOrder(order);
+    return matchDate && matchSearch && !isRejectedBillingOrder(order);
   });
   console.log("Filtered Orders:", filteredOrders);
 
@@ -281,6 +287,38 @@ export default function Billing_orders() {
               <div className="bo-date-wrap">
                 <label className="bo-date-label">To</label>
                 <input type="date" value={toDate} onChange={(e) => { setToDate(e.target.value); setCurrentPage(1); }} className="bo-date-input" />
+              </div>
+              <div className="bo-card-search">
+                <HiMagnifyingGlass className="bo-card-search-icon" aria-hidden="true" />
+                <input
+                  type="text"
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value.toUpperCase())}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter") return;
+                    e.preventDefault();
+                    setAppliedSearch(searchInput.trim().toLowerCase());
+                    setCurrentPage(1);
+                  }}
+                  className="bo-card-search-input"
+                  placeholder="Search e.g. CUSTA000812 or Bachan Singh"
+                  aria-label="Search orders by card name or card code"
+                />
+                {(searchInput || appliedSearch) && (
+                  <button
+                    type="button"
+                    className="bo-card-search-clear"
+                    onClick={() => {
+                      setSearchInput("");
+                      setAppliedSearch("");
+                      setCurrentPage(1);
+                    }}
+                    aria-label="Clear card search"
+                    title="Clear search"
+                  >
+                    <HiXMark aria-hidden="true" />
+                  </button>
+                )}
               </div>
             </div>
             <span className="bo-count">Total: {filteredOrders.length}</span>
