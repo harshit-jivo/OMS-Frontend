@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { HiArchiveBox, HiArrowPath, HiClipboardDocumentCheck, HiShoppingCart, HiTruck, HiXMark } from "react-icons/hi2";
+import { HiArchiveBox, HiArrowPath, HiCheckCircle, HiClipboardDocumentCheck, HiShoppingCart, HiTruck, HiXMark } from "react-icons/hi2";
 import ContentsTab from "./ContentsTab";
 import { formatDateDisplay, formatMoney, toNumber } from "./salesInvoice.utils";
 import type { SalesInvoiceState } from "./useSalesInvoice";
@@ -68,9 +68,9 @@ function DraftDocumentStrip({ state }: { state: SalesInvoiceState }) {
 export default function DraftStep({ state, onReset, onAddItems }: Props) {
   const [totalsModalOpen, setTotalsModalOpen] = useState(false);
   const [postErrorNotificationOpen, setPostErrorNotificationOpen] = useState(false);
+  const [successModalOpen, setSuccessModalOpen] = useState(false);
   const [postingStepIndex, setPostingStepIndex] = useState(0);
   const customerName = state.customerDetails?.CardName || state.selectedParty?.CardName || "-";
-  const totalBeforeTax = state.totals.taxable + state.totals.freight;
   const postDisabledReason = state.selectedLineBatchError;
 
   const addFreightRow = () => {
@@ -83,10 +83,23 @@ export default function DraftStep({ state, onReset, onAddItems }: Props) {
   }, [state.postError]);
 
   useEffect(() => {
+    if (state.postSuccess) {
+      setSuccessModalOpen(true);
+    }
+  }, [state.postSuccess]);
+
+  const closeSuccessModal = () => {
+    setSuccessModalOpen(false);
+    onReset();
+  };
+
+  useEffect(() => {
     if (!state.posting) {
       setPostingStepIndex(0);
       return undefined;
     }
+
+    setTotalsModalOpen(false);
 
     const interval = window.setInterval(() => {
       setPostingStepIndex((current) => (current + 1) % postingSteps.length);
@@ -126,8 +139,6 @@ export default function DraftStep({ state, onReset, onAddItems }: Props) {
         <summary>Draft payload - dates display as {formatDateDisplay(state.form.postingDate)}</summary>
         <pre>{JSON.stringify(state.payload, null, 2)}</pre>
       </details>
-
-      {state.postSuccess && <div className="si-inline-success">{state.postSuccess}</div>}
 
       {state.postError && postErrorNotificationOpen && (
         <aside className="si-floating-notification si-floating-notification-error" role="alert" aria-live="assertive">
@@ -186,6 +197,29 @@ export default function DraftStep({ state, onReset, onAddItems }: Props) {
         </div>
       )}
 
+      {successModalOpen && (
+        <div className="si-modal-backdrop si-success-backdrop" role="presentation">
+          <section
+            className="si-success-modal"
+            role="alertdialog"
+            aria-modal="true"
+            aria-label="Invoice posted to SAP HANA"
+          >
+            <span className="si-success-icon" aria-hidden="true">
+              <HiCheckCircle />
+            </span>
+            <span className="si-eyebrow">SAP HANA Dispatch</span>
+            <h2>Invoice Posted</h2>
+            <p className="si-success-message">{state.postSuccess}</p>
+            <div className="si-success-actions">
+              <button className="si-btn si-btn-primary" type="button" onClick={closeSuccessModal}>
+                Create New Invoice
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
       {totalsModalOpen && (
         <div className="si-modal-backdrop" role="presentation">
           <section className="si-totals-modal" role="dialog" aria-modal="true" aria-label="Invoice totals and freight">
@@ -205,14 +239,38 @@ export default function DraftStep({ state, onReset, onAddItems }: Props) {
               <header className="si-footer-drawer-head">
                 <strong>Totals</strong>
               </header>
-              <dl>
-                <dt>Total Before Tax</dt>
-                <dd>{formatMoney(totalBeforeTax)}</dd>
-                <dt>Tax Amount</dt>
-                <dd>{formatMoney(state.totals.tax)}</dd>
-                <dt>Grand Total</dt>
-                <dd>{formatMoney(state.totals.grandTotal)}</dd>
-              </dl>
+              <div className="si-totals-breakdown">
+                <div className="si-totals-line">
+                  <span>Taxable Amount</span>
+                  <strong>{formatMoney(state.totals.taxable)}</strong>
+                </div>
+                {state.totals.discountAmount > 0 && (
+                  <div className="si-totals-line si-totals-line-muted">
+                    <span>Discount</span>
+                    <strong>- {formatMoney(state.totals.discountAmount)}</strong>
+                  </div>
+                )}
+                {state.totals.freight > 0 && (
+                  <div className="si-totals-line">
+                    <span>Freight</span>
+                    <strong>{formatMoney(state.totals.freight)}</strong>
+                  </div>
+                )}
+                <div className="si-totals-line">
+                  <span>Tax Amount</span>
+                  <strong>{formatMoney(state.totals.tax)}</strong>
+                </div>
+                {Math.abs(state.totals.roundOff) >= 0.005 && (
+                  <div className="si-totals-line si-totals-line-muted">
+                    <span>Round Off</span>
+                    <strong>{formatMoney(state.totals.roundOff)}</strong>
+                  </div>
+                )}
+                <div className="si-totals-line si-totals-grand">
+                  <span>Grand Total</span>
+                  <strong>{formatMoney(state.totals.grandTotal)}</strong>
+                </div>
+              </div>
             </section>
 
             <section className="si-footer-drawer-section">
@@ -265,6 +323,16 @@ export default function DraftStep({ state, onReset, onAddItems }: Props) {
                           />
                         </div>
                       </label>
+                      <label className="si-freight-field si-freight-field-tax">
+                        <span>Tax Code</span>
+                        <input
+                          type="text"
+                          value={row.taxCode}
+                          aria-label={`Freight tax code ${index + 1}`}
+                          placeholder="GST exempt code"
+                          onChange={(event) => state.updateFreightRow(index, { taxCode: event.target.value })}
+                        />
+                      </label>
                       <button
                         className="si-freight-remove"
                         type="button"
@@ -279,6 +347,25 @@ export default function DraftStep({ state, onReset, onAddItems }: Props) {
               )}
             </section>
           </div>
+
+            <footer className="si-totals-modal-foot">
+              <div className="si-totals-modal-foot-summary">
+                <span>Grand Total</span>
+                <strong>{formatMoney(state.totals.grandTotal)}</strong>
+              </div>
+              {postDisabledReason && (
+                <span className="si-totals-modal-foot-hint">{postDisabledReason}</span>
+              )}
+              <button
+                className="si-btn si-btn-primary si-totals-modal-post"
+                type="button"
+                disabled={state.posting || Boolean(postDisabledReason)}
+                title={postDisabledReason || undefined}
+                onClick={state.postInvoice}
+              >
+                {state.posting ? "Posting..." : "Post to SAP HANA"}
+              </button>
+            </footer>
           </section>
         </div>
       )}
@@ -294,17 +381,12 @@ export default function DraftStep({ state, onReset, onAddItems }: Props) {
             <strong>{formatMoney(state.totals.grandTotal)}</strong>
           </button>
           <div className="si-action-buttons">
-            {/* <button className="si-btn si-btn-outline" type="button" onClick={addFreightRow}>
-              + Freight
-            </button> */}
             <button
               className="si-btn si-btn-primary"
               type="button"
-              disabled={state.posting || Boolean(postDisabledReason)}
-              title={postDisabledReason || undefined}
-              onClick={state.postInvoice}
+              onClick={() => setTotalsModalOpen(true)}
             >
-              {state.posting ? "Posting..." : "Post to SAP HANA"}
+              Review &amp; Post
             </button>
           </div>
         </div>
