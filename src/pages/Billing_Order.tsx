@@ -293,11 +293,10 @@ export default function Billing_orders() {
                 <input
                   type="text"
                   value={searchInput}
-                  onChange={(e) => setSearchInput(e.target.value.toUpperCase())}
-                  onKeyDown={(e) => {
-                    if (e.key !== "Enter") return;
-                    e.preventDefault();
-                    setAppliedSearch(searchInput.trim().toLowerCase());
+                  onChange={(e) => {
+                    const value = e.target.value.toUpperCase();
+                    setSearchInput(value);
+                    setAppliedSearch(value.trim().toLowerCase());
                     setCurrentPage(1);
                   }}
                   className="bo-card-search-input"

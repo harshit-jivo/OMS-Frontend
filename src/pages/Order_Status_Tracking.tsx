@@ -423,11 +423,10 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
                   type="text"
                   className="ot-card-search-input"
                   value={searchInput}
-                  onChange={(e) => setSearchInput(e.target.value.toUpperCase())}
-                  onKeyDown={(e) => {
-                    if (e.key !== "Enter") return;
-                    e.preventDefault();
-                    setAppliedSearch(searchInput.trim().toLowerCase());
+                  onChange={(e) => {
+                    const value = e.target.value.toUpperCase();
+                    setSearchInput(value);
+                    setAppliedSearch(value.trim().toLowerCase());
                     setCurrentPage(1);
                   }}
                   placeholder="Search e.g. Bachan Singh"
