@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { ordersService } from "../services/ordersService";
 import type { Order, OrderLog } from "../services/ordersService";
-import { loadCurrentUserOrders } from "../utils/orderHistory";
+import { loadCurrentUserOrderSummaries } from "../utils/orderHistory";
 import "../styles/Order_Tracking.css";
 
 const formatCreatedDateTime = (value?: string | null) => {
@@ -56,7 +56,7 @@ export default function Order_Tracking() {
   const fetchOrders = async () => {
     try {
       setLoading(true);
-      const data = await loadCurrentUserOrders();
+      const data = await loadCurrentUserOrderSummaries();
       setOrders(data || []);
     } catch (error) {
       console.log("Error fetching orders:", error);
@@ -678,13 +678,22 @@ export default function Order_Tracking() {
   };
 
   const handleTrack = async (order: Order) => {
+    // Show the summary immediately; fetch full details (po_number, remarks,
+    // rate_approvals) and logs on demand now that the list load is summary-only.
     setSelectedOrder(order);
     setTracker(true);
     setLogs([]);
     setLogsLoading(true);
 
     try {
-      const response = await ordersService.getOrderLogs(order.id);
+      const [details, response] = await Promise.all([
+        ordersService.getOrderDetails(order.id).catch((error) => {
+          console.log("Error fetching order details:", error);
+          return null;
+        }),
+        ordersService.getOrderLogs(order.id),
+      ]);
+      if (details) setSelectedOrder(details);
       setLogs(Array.isArray(response) ? response : []);
     } catch (error) {
       console.log("Error fetching order logs:", error);

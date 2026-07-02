@@ -5,7 +5,7 @@ import { getOrderItemSchemeNames, getOrderItemSchemes, getOrderItemSchemeQtyText
 import type { Order, OrderItem, OrderLog } from "../services/ordersService";
 import "../styles/Auditor_Order.css";
 import { useLocation, useNavigate } from "react-router-dom";
-import { loadDetailedOrders } from "../utils/orderHistory";
+import { sortOrders } from "../utils/orderHistory";
 import {
   buildOrderTimelineLogs,
   getOrderLogDisplayRemark,
@@ -73,9 +73,7 @@ export default function Auditor_orders() {
     setIsOrdersLoading(true);
     try {
       const data = await ordersService.getOrders('AUDITOR_APPROVAL');
-      const detailedOrders = await loadDetailedOrders(data || []);
-      setOrders(detailedOrders);
-      console.log("Fetched Orders:", detailedOrders);
+      setOrders(sortOrders(data || []));
     } catch (error) {
       console.log("Error fetching orders:", error);
     } finally {
@@ -166,18 +164,28 @@ export default function Auditor_orders() {
     }
   };
 
-  const downloadExcel = (order: Order) => {
+  const downloadExcel = async (order: Order) => {
+    // The list API does not include line items; fetch full details on demand.
+    let full = order;
+    if (!order.items || order.items.length === 0) {
+      try {
+        full = await ordersService.getOrderDetails(order.id);
+      } catch (error) {
+        console.log("Error fetching order details for download:", error);
+      }
+    }
+
     let excelData: object[] = [];
 
-    if (order.items && order.items.length > 0) {
-      excelData = order.items.map((item: OrderItem) => ({
-        "Order Number": order.order_number,
-        "Card Code": order.card_code,
-        "Card Name": order.card_name,
-        "Delivery Date": order.delivery_date,
-        Status: order.status_display,
-        "Bill To": order.bill_to_address,
-        "Ship To": order.ship_to_address,
+    if (full.items && full.items.length > 0) {
+      excelData = full.items.map((item: OrderItem) => ({
+        "Order Number": full.order_number,
+        "Card Code": full.card_code,
+        "Card Name": full.card_name,
+        "Delivery Date": full.delivery_date,
+        Status: full.status_display,
+        "Bill To": full.bill_to_address,
+        "Ship To": full.ship_to_address,
         "Item Code": item.item_code,
         "Item Name": item.item_name,
         Scheme: getOrderItemSchemeNames(item),
@@ -193,13 +201,13 @@ export default function Auditor_orders() {
       }));
     } else {
       excelData.push({
-        "Order Number": order.order_number,
-        "Card Code": order.card_code,
-        "Card Name": order.card_name,
-        "Delivery Date": order.delivery_date,
-        Status: order.status_display,
-        "Bill To": order.bill_to_address,
-        "Ship To": order.ship_to_address,
+        "Order Number": full.order_number,
+        "Card Code": full.card_code,
+        "Card Name": full.card_name,
+        "Delivery Date": full.delivery_date,
+        Status: full.status_display,
+        "Bill To": full.bill_to_address,
+        "Ship To": full.ship_to_address,
         "Price List (Basic)": "",
         "Basic Price": "",
       });
@@ -212,7 +220,7 @@ export default function Auditor_orders() {
     const file = new Blob([excelBuffer], {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     });
-    saveAs(file, `Order_${order.order_number}.xlsx`);
+    saveAs(file, `Order_${full.order_number}.xlsx`);
   };
 
   const handleTrack = async (order: Order) => {

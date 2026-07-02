@@ -5,7 +5,7 @@ import { getOrderItemSchemeNames, getOrderItemSchemes, getOrderItemSchemeQtyText
 import type { Order, OrderItem } from "../services/ordersService";
 import "../styles/Billing_Order.css";
 import { useNavigate, useLocation } from "react-router-dom";
-import { loadDetailedOrders } from "../utils/orderHistory";
+import { sortOrders } from "../utils/orderHistory";
 import {
   HiCheckCircle,   // Approve
   HiXCircle,       // Reject
@@ -81,9 +81,8 @@ export default function Billing_orders() {
     setIsOrdersLoading(true);
     try {
       const data: Order[] = await ordersService.getOrders(undefined, true);
-      const activeOrders = data.filter((order) => !isRejectedBillingOrder(order));
-      const detailedOrders = await loadDetailedOrders(activeOrders);
-      setOrders(detailedOrders.filter((order) => !isRejectedBillingOrder(order)));
+      const activeOrders = (data || []).filter((order) => !isRejectedBillingOrder(order));
+      setOrders(sortOrders(activeOrders));
     } catch (error) {
       console.log("Error fetching orders:", error);
     } finally {
@@ -210,17 +209,27 @@ export default function Billing_orders() {
   });
   console.log("Filtered Orders:", filteredOrders);
 
-  const downloadExcel = (order: Order) => {
+  const downloadExcel = async (order: Order) => {
+    // The list API does not include line items; fetch full details on demand.
+    let full = order;
+    if (!order.items || order.items.length === 0) {
+      try {
+        full = await ordersService.getOrderDetails(order.id);
+      } catch (error) {
+        console.log("Error fetching order details for download:", error);
+      }
+    }
+
     let excelData = [];
-    if (order.items && order.items.length > 0) {
-      excelData = order.items.map((item: OrderItem) => ({
-        "Order Number": order.order_number,
-        "Card Code": order.card_code,
-        "Card Name": order.card_name,
-        "Delivery Date": order.delivery_date,
-        "Status": order.status_display,
-        "Bill To": order.bill_to_address,
-        "Ship To": order.ship_to_address,
+    if (full.items && full.items.length > 0) {
+      excelData = full.items.map((item: OrderItem) => ({
+        "Order Number": full.order_number,
+        "Card Code": full.card_code,
+        "Card Name": full.card_name,
+        "Delivery Date": full.delivery_date,
+        "Status": full.status_display,
+        "Bill To": full.bill_to_address,
+        "Ship To": full.ship_to_address,
         "Item Code": item.item_code,
         "Item Name": item.item_name,
         "Scheme": getOrderItemSchemeNames(item),
@@ -236,13 +245,13 @@ export default function Billing_orders() {
       }));
     } else {
       excelData.push({
-        "Order Number": order.order_number,
-        "Card Code": order.card_code,
-        "Card Name": order.card_name,
-        "Delivery Date": order.delivery_date,
-        "Status": order.status_display,
-        "Bill To": order.bill_to_address,
-        "Ship To": order.ship_to_address,
+        "Order Number": full.order_number,
+        "Card Code": full.card_code,
+        "Card Name": full.card_name,
+        "Delivery Date": full.delivery_date,
+        "Status": full.status_display,
+        "Bill To": full.bill_to_address,
+        "Ship To": full.ship_to_address,
         "Price List (Basic)": "",
         "Basic Price": "",
       });
@@ -252,7 +261,7 @@ export default function Billing_orders() {
     XLSX.utils.book_append_sheet(workbook, worksheet, "Order Details");
     const excelBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
     const file = new Blob([excelBuffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-    saveAs(file, `Order_${order.order_number}.xlsx`);
+    saveAs(file, `Order_${full.order_number}.xlsx`);
   };
 
   const handleEditOrder = (order: Order) => {
