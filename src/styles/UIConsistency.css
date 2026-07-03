@@ -429,7 +429,7 @@
 
 .order-detail-card-list + table,
 .order-detail-empty + table,
-.oia-wrap + table {
+.isec-root + table {
   display: none !important;
 }
 

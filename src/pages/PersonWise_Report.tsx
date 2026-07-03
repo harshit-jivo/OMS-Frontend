@@ -7,7 +7,7 @@ import { formatOrderCreatedAt, getOrderItemSchemeNames, getOrderItemSchemes, get
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
 import "../styles/Report.css";
-import OrderItemsAccordion from "../components/OrderItemsAccordion";
+import ItemSection from "../components/order-items/ItemSection";
 import { 
   HiEye,           // View
   HiArrowDownTray    // Download
@@ -732,7 +732,7 @@ export default function PersonWise_Report() {
               <span className="dr-d-items-count">{selectedItems.length}</span>
             </div>
             <div className="dr-d-items-scroll">
-              <OrderItemsAccordion items={selectedItems} />
+              <ItemSection items={selectedItems} />
               <table className="dr-d-tbl">
                 <thead>
                   <tr>

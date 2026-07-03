@@ -12,7 +12,7 @@ import type { OrderItem, Order, OrderLog, OrderStatus, PartyProduct, QuotationSt
 import { loadCurrentUserOrders } from "../utils/orderHistory";
 import "../styles/View_Orders.css";
 import "../styles/Auditor_Order.css";
-import OrderItemsAccordion from "../components/OrderItemsAccordion";
+import ItemSection from "../components/order-items/ItemSection";
 import { useLocation, useNavigate } from "react-router-dom";
 import { 
   HiEye,           // View
@@ -731,7 +731,7 @@ export default function View_Orders() {
               <span className="ao-d-items-count">{selectedItems.length}</span>
             </div>
             <div className="ao-d-items-scroll">
-              <OrderItemsAccordion items={selectedItems} />
+              <ItemSection items={selectedItems} />
               <table className="vo-d-tbl">
                 <thead>
                   <tr>

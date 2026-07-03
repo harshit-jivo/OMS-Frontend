@@ -6,7 +6,7 @@ import type { Order, OrderItem } from "../services/ordersService";
 import "../styles/Billing_Order.css";
 import { useNavigate, useLocation } from "react-router-dom";
 import { sortOrders } from "../utils/orderHistory";
-import OrderItemsAccordion from "../components/OrderItemsAccordion";
+import ItemSection from "../components/order-items/ItemSection";
 import {
   HiCheckCircle,   // Approve
   HiXCircle,       // Reject
@@ -494,7 +494,7 @@ export default function Billing_orders() {
               <span className="bo-d-items-count">{selectedItems.length}</span>
             </div>
             <div className="bo-d-items-scroll">
-              <OrderItemsAccordion items={selectedItems} />
+              <ItemSection items={selectedItems} />
               <table className="bo-d-tbl">
                 <thead><tr><th>#</th><th>Item Code</th>
                   <th style={{ minWidth: '250px' }}>Item Name</th>

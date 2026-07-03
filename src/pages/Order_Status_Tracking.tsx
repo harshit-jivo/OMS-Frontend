@@ -12,7 +12,7 @@ import {
 } from "../utils/orderTrackingTimeline";
 import "../styles/Order_Status_Tracking.css";
 import "../styles/Auditor_Order.css";
-import OrderItemsAccordion from "../components/OrderItemsAccordion";
+import ItemSection from "../components/order-items/ItemSection";
 import {
   HiEye, HiArrowDownTray, HiArrowPath
 } from "react-icons/hi2";
@@ -633,7 +633,7 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
               </span>
             </div>
             <div className="ao-d-items-scroll">
-              <OrderItemsAccordion items={selectedItems} />
+              <ItemSection items={selectedItems} />
               <table className="ot-items-table">
                 <thead>
                   <tr>

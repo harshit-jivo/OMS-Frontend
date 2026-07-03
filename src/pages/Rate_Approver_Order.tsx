@@ -12,7 +12,7 @@ import type { Order, OrderItem } from "../services/ordersService";
 import "../styles/Auditor_Order.css";
 import { useLocation, useNavigate } from "react-router-dom";
 import { sortOrders } from "../utils/orderHistory";
-import OrderItemsAccordion from "../components/OrderItemsAccordion";
+import ItemSection from "../components/order-items/ItemSection";
 import {
   HiArrowDownTray,
   HiCheckCircle,
@@ -512,7 +512,7 @@ export default function RateApproverOrders() {
               <span className="ao-d-items-count">{selectedItems.length}</span>
             </div>
             <div className="ao-d-items-scroll">
-              <OrderItemsAccordion items={selectedItems} />
+              <ItemSection items={selectedItems} />
               <table className="ao-d-tbl">
                 <thead>
                   <tr>

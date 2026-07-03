@@ -135,6 +135,7 @@ export interface OrderItemScheme {
 }
 
 export interface OrderItem {
+  id?: number;
   item_code: string;
   item_name: string;
   category: string;
@@ -143,6 +144,8 @@ export interface OrderItem {
   variety_type?: string;
   sub_group?: string;
   item_type: string;
+  is_scheme_visible?: boolean;
+  approval_approvers?: { id: number; name: string }[];
   scheme_name?: string;
   scheme_qty?: number | string;
   qty_scheme?: number | string;
