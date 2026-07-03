@@ -13,6 +13,7 @@ import { loadCurrentUserOrders } from "../utils/orderHistory";
 import "../styles/View_Orders.css";
 import "../styles/Auditor_Order.css";
 import ItemSection from "../components/order-items/ItemSection";
+import PartyHeader from "../components/order-items/PartyHeader";
 import { useLocation, useNavigate } from "react-router-dom";
 import { 
   HiEye,           // View
@@ -670,59 +671,16 @@ export default function View_Orders() {
           </div>
 
           {/* Order Info Card */}
-          <div className="ao-d-header-card">
-            <div className="ao-d-top">
-              <div className="ao-d-top-left">
-                <div className="ao-d-party">
-                  <h2 className="ao-d-party-name">{orderDetails.card_name}</h2>
-                  {orderDetails.is_foc ? <span className="ao-foc-badge ao-foc-badge-detail">FOC ORDER</span> : null}
-                  <span className={`vo-badge vo-badge-${(orderDetails.status_display || "").toLowerCase().replace(/\s+/g, "-")}`}>{orderDetails.status_display}</span>
-                  {isRejectedOrder(orderDetails) && rejectedByByOrderId[orderDetails.id] ? (
-                    <span className="vo-rejected-by vo-rejected-by-detail">By: {rejectedByByOrderId[orderDetails.id]}</span>
-                  ) : null}
-                </div>
-                {orderDetails.party_state ? <span className="ao-d-party-sub">{orderDetails.party_state}</span> : null}
-                <span className="ao-d-party-sub">{orderDetails.card_code}</span>
-                <span className="ao-d-party-ordnum">{orderDetails.order_number}</span>
-                <div className="ao-d-addr-grid">
-                  <div className="ao-d-kv">
-                    <span className="ao-d-kv-label">Bill To</span>
-                    <span className="ao-d-kv-value">{orderDetails.bill_to_address || "—"}</span>
-                  </div>
-                  <div className="ao-d-kv">
-                    <span className="ao-d-kv-label">Ship To</span>
-                    <span className="ao-d-kv-value">{orderDetails.ship_to_address || "—"}</span>
-                  </div>
-                </div>
-              </div>
-              <div className="ao-d-top-right">
-                <div className="ao-d-kv">
-                  <span className="ao-d-kv-label">Delivery Date</span>
-                  <span className="ao-d-kv-value">{orderDetails.delivery_date || "—"}</span>
-                </div>
-                <div className="ao-d-kv">
-                  <span className="ao-d-kv-label">Created At</span>
-                  <span className="ao-d-kv-value">{formatCreatedDateTime(orderDetails.created_at)}</span>
-                </div>
-                <div className="ao-d-kv">
-                  <span className="ao-d-kv-label">PO Number</span>
-                  <span className="ao-d-kv-value">{orderDetails.po_number || "—"}</span>
-                </div>
-                {orderDetails.created_by_name ? (
-                  <div className="ao-d-kv">
-                    <span className="ao-d-kv-label">Punched By</span>
-                    <span className="ao-d-kv-value">{orderDetails.created_by_name}</span>
-                  </div>
-                ) : null}
-                {orderDetails.remarks?.trim() ? (
-                  <div className="ao-d-kv">
-                    <span className="ao-d-kv-label">Comment</span>
-                    <span className="ao-d-kv-value">{orderDetails.remarks}</span>
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          </div>
+          <PartyHeader
+            order={orderDetails}
+            statusExtra={
+              isRejectedOrder(orderDetails) && rejectedByByOrderId[orderDetails.id] ? (
+                <span className="vo-rejected-by vo-rejected-by-detail">
+                  By: {rejectedByByOrderId[orderDetails.id]}
+                </span>
+              ) : null
+            }
+          />
 
           {/* Items */}
           <div className="ao-d-items">

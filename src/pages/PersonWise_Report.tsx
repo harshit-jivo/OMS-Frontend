@@ -8,6 +8,7 @@ import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
 import "../styles/Report.css";
 import ItemSection from "../components/order-items/ItemSection";
+import PartyHeader from "../components/order-items/PartyHeader";
 import { 
   HiEye,           // View
   HiArrowDownTray    // Download
@@ -685,46 +686,7 @@ export default function PersonWise_Report() {
             </button>
           </div>
 
-          <div className="dr-d-header-card">
-            <div className="dr-d-info-grid">
-              <div className="dr-d-info-field dr-d-info-span2">
-                <span className="dr-d-hf-label">Order Number</span>
-                <div className="dr-d-ordnum-row">
-                  <span className="dr-d-ordnum">{orderDetails.order_number}</span>
-                  {orderDetails.is_foc ? <span className="dr-foc-badge dr-foc-badge-detail">FOC ORDER</span> : null}
-                  <span className={`dr-badge dr-badge-${(orderDetails.status_display || "").toLowerCase().replace(/\s+/g, "-")}`}>{orderDetails.status_display}</span>
-                </div>
-              </div>
-              <div className="dr-d-info-field">
-                <span className="dr-d-hf-label">Created At</span>
-                <span className="dr-d-hf-value">{formatOrderCreatedAt(orderDetails.created_at)}</span>
-              </div>
-              <div className="dr-d-info-field">
-                <span className="dr-d-hf-label">Delivery Date</span>
-                <span className="dr-d-hf-value">{orderDetails.delivery_date || "-"}</span>
-              </div>
-              <div className="dr-d-info-field">
-                <span className="dr-d-hf-label">PO Number</span>
-                <span className="dr-d-hf-value">{orderDetails.po_number || "-"}</span>
-              </div>
-              <div className="dr-d-info-field">
-                <span className="dr-d-hf-label">Party Name</span>
-                <span className="dr-d-hf-value">{orderDetails.card_name}</span>
-              </div>
-              <div className="dr-d-info-field">
-                <span className="dr-d-hf-label">Card Code</span>
-                <span className="dr-d-hf-value">{orderDetails.card_code}</span>
-              </div>
-              <div className="dr-d-info-field">
-                <span className="dr-d-hf-label">Bill To</span>
-                <span className="dr-d-hf-value">{orderDetails.bill_to_address || "-"}</span>
-              </div>
-              <div className="dr-d-info-field">
-                <span className="dr-d-hf-label">Ship To</span>
-                <span className="dr-d-hf-value">{orderDetails.ship_to_address || "-"}</span>
-              </div>
-            </div>
-          </div>
+          <PartyHeader order={orderDetails} />
 
           <div className="dr-d-items">
             <div className="dr-d-items-head">

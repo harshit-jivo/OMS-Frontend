@@ -7,6 +7,7 @@ import "../styles/Auditor_Order.css";
 import { useLocation, useNavigate } from "react-router-dom";
 import { sortOrders } from "../utils/orderHistory";
 import ItemSection from "../components/order-items/ItemSection";
+import PartyHeader from "../components/order-items/PartyHeader";
 import {
   buildOrderTimelineLogs,
   getOrderLogDisplayRemark,
@@ -423,51 +424,7 @@ export default function Auditor_orders() {
             </div>
           </div>
 
-          <div className="ao-d-header-card">
-            <div className="ao-d-top">
-              <div className="ao-d-top-left">
-                <div className="ao-d-party">
-                  <h2 className="ao-d-party-name">{orderDetails.card_name}</h2>
-                  {orderDetails.is_foc ? (
-                    <span className="ao-foc-badge ao-foc-badge-detail">FOC ORDER</span>
-                  ) : null}
-                </div>
-                <span className="ao-d-party-sub">{orderDetails.party_state || "-"}</span>
-                <span className="ao-d-party-sub">{orderDetails.card_code}</span>
-                <span className="ao-d-party-ordnum">{orderDetails.order_number}</span>
-                <div className="ao-d-addr-grid">
-                  <div className="ao-d-kv">
-                    <span className="ao-d-kv-label">Bill To</span>
-                    <span className="ao-d-kv-value">{orderDetails.bill_to_address || "-"}</span>
-                  </div>
-                  <div className="ao-d-kv">
-                    <span className="ao-d-kv-label">Ship To</span>
-                    <span className="ao-d-kv-value">{orderDetails.ship_to_address || "-"}</span>
-                  </div>
-                </div>
-              </div>
-              <div className="ao-d-top-right">
-                <div className="ao-d-kv">
-                  <span className="ao-d-kv-label">Delivery Date</span>
-                  <span className="ao-d-kv-value">{orderDetails.delivery_date || "-"}</span>
-                </div>
-                <div className="ao-d-kv">
-                  <span className="ao-d-kv-label">Created At</span>
-                  <span className="ao-d-kv-value">{formatCreatedDateTime(orderDetails.created_at)}</span>
-                </div>
-                <div className="ao-d-kv">
-                  <span className="ao-d-kv-label">Punched By</span>
-                  <span className="ao-d-kv-value">{orderDetails.created_by_name || "-"}</span>
-                </div>
-                {orderDetails.remarks?.trim() ? (
-                  <div className="ao-d-kv">
-                    <span className="ao-d-kv-label">Remark</span>
-                    <span className="ao-d-kv-value">{orderDetails.remarks}</span>
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          </div>
+          <PartyHeader order={orderDetails} />
 
           <div className="ao-d-items">
             <div className="ao-d-items-head">

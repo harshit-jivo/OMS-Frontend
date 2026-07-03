@@ -13,6 +13,7 @@ import {
 import "../styles/Order_Status_Tracking.css";
 import "../styles/Auditor_Order.css";
 import ItemSection from "../components/order-items/ItemSection";
+import PartyHeader from "../components/order-items/PartyHeader";
 import {
   HiEye, HiArrowDownTray, HiArrowPath
 } from "react-icons/hi2";
@@ -571,58 +572,7 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
             </div>
           </div>
 
-          <div className="ao-d-header-card">
-            <div className="ao-d-top">
-              <div className="ao-d-top-left">
-                <div className="ao-d-party">
-                  <h2 className="ao-d-party-name">{orderDetails.card_name}</h2>
-                  {orderDetails.is_foc ? <span className="ao-foc-badge ao-foc-badge-detail">FOC ORDER</span> : null}
-                  <span className={`ot-badge ot-badge-${normalizeStatusClass(orderDetails.status_display || "unknown")}`}>
-                    {orderDetails.status_display || "Unknown"}
-                  </span>
-                </div>
-                <span className="ao-d-party-sub">{orderDetails.party_state || "—"}</span>
-                <span className="ao-d-party-sub">{orderDetails.card_code}</span>
-                <span className="ao-d-party-ordnum">{orderDetails.order_number}</span>
-                <div className="ao-d-addr-grid">
-                  <div className="ao-d-kv">
-                    <span className="ao-d-kv-label">Bill To</span>
-                    <span className="ao-d-kv-value">{orderDetails.bill_to_address || "—"}</span>
-                  </div>
-                  <div className="ao-d-kv">
-                    <span className="ao-d-kv-label">Ship To</span>
-                    <span className="ao-d-kv-value">{orderDetails.ship_to_address || "—"}</span>
-                  </div>
-                </div>
-              </div>
-              <div className="ao-d-top-right">
-                <div className="ao-d-kv">
-                  <span className="ao-d-kv-label">Delivery Date</span>
-                  <span className="ao-d-kv-value">{orderDetails.delivery_date || "—"}</span>
-                </div>
-                <div className="ao-d-kv">
-                  <span className="ao-d-kv-label">Created At</span>
-                  <span className="ao-d-kv-value">{formatCreatedDateTime(orderDetails.created_at)}</span>
-                </div>
-                <div className="ao-d-kv">
-                  <span className="ao-d-kv-label">Punched By</span>
-                  <span className="ao-d-kv-value">{orderDetails.created_by_name || "—"}</span>
-                </div>
-                {orderDetails.po_number ? (
-                  <div className="ao-d-kv">
-                    <span className="ao-d-kv-label">PO Number</span>
-                    <span className="ao-d-kv-value">{orderDetails.po_number}</span>
-                  </div>
-                ) : null}
-                {(isCompletedOrder || hasQuotationNumber) && (
-                  <div className="ao-d-kv">
-                    <span className="ao-d-kv-label">Quotation No</span>
-                    <span className="ao-d-kv-value">{String(orderDetails.sap_doc_number || "").trim() || "—"}</span>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
+          <PartyHeader order={orderDetails} />
 
           <div className="ao-d-items">
             <div className="ao-d-items-head">
