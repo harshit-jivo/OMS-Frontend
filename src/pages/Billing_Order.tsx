@@ -6,6 +6,7 @@ import type { Order, OrderItem } from "../services/ordersService";
 import "../styles/Billing_Order.css";
 import { useNavigate, useLocation } from "react-router-dom";
 import { sortOrders } from "../utils/orderHistory";
+import OrderItemsAccordion from "../components/OrderItemsAccordion";
 import {
   HiCheckCircle,   // Approve
   HiXCircle,       // Reject
@@ -281,7 +282,20 @@ export default function Billing_orders() {
       {/* â”€â”€ LIST VIEW â”€â”€ */}
       {!showDetails && (
         <>
+          <div className="bo-page-head">
+            <span className="bo-page-accent" aria-hidden="true" />
+            <div>
+              <h1 className="bo-page-title">Pending Orders</h1>
+              <p className="bo-page-subtitle">Review and action orders awaiting billing.</p>
+            </div>
+          </div>
           <div className="bo-toolbar">
+            <div className="bo-filter-head">
+              <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <path d="M3 5h14M6 10h8M9 15h2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+              </svg>
+              <span>Filters</span>
+            </div>
             <div className="bo-search-wrap">
               <div className="bo-date-wrap">
                 <label className="bo-date-label">From</label>
@@ -291,6 +305,9 @@ export default function Billing_orders() {
                 <label className="bo-date-label">To</label>
                 <input type="date" value={toDate} onChange={(e) => { setToDate(e.target.value); setCurrentPage(1); }} className="bo-date-input" />
               </div>
+              {(fromDate || toDate) && (
+                <button type="button" className="bo-filter-clear" onClick={() => { setFromDate(""); setToDate(""); setCurrentPage(1); }}>Clear</button>
+              )}
             </div>
             <span className="bo-count">Total: {filteredOrders.length}</span>
           </div>
@@ -300,22 +317,18 @@ export default function Billing_orders() {
               <thead>
                 <tr>
                   <th>Order ID</th>
-                  <th>FOC</th>
-                  <th>Card Code</th>
                   <th>Card Name</th>
+                  <th>Items</th>
+                  <th>FOC</th>
                   <th>Created At</th>
                   <th>Delivery Date</th>
-                  {/* <th>Status</th> */}
-                  <th>Details</th>
-                  <th>Action</th>
-                  <th>Edit Order</th>
-                  <th>Download</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {isOrdersLoading ? (
                   <tr>
-                    <td colSpan={10}>
+                    <td colSpan={7}>
                       <div className="order-loading-state">
                         <span className="order-loading-spinner" />
                         <span>Loading orders...</span>
@@ -325,7 +338,9 @@ export default function Billing_orders() {
                 ) : filteredOrders.length > 0 ? (
                   filteredOrders.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((order) => (
                     <tr key={order.id} className={order.is_foc ? "bo-foc-row" : ""}>
-                      <td>{order.order_number}</td>
+                      <td className="ao-cell-id">{order.order_number}</td>
+                      <td className="ao-cell-name">{order.card_name}</td>
+                      <td>{order.items_count ?? order.items?.length ?? 0}</td>
                       <td>
                         {order.is_foc ? (
                           <span className="bo-foc-badge">FOC</span>
@@ -333,65 +348,53 @@ export default function Billing_orders() {
                           <span className="bo-foc-empty">-</span>
                         )}
                       </td>
-                      <td>{order.card_code}</td>
-                      <td>{order.card_name}</td>
                       <td>{formatCreatedDateTime(order.created_at)}</td>
                       <td>{order.delivery_date}</td>
-                      {/* <td>
-                        <span className={`bo-badge bo-badge-${(order.status_display || "").toLowerCase().replace(/\s+/g, "-")}`}>
-                          {order.status_display}
-                        </span>
-                      </td> */}
                       <td>
-                        <button
-                          className="ao-btn-icon view"
-                          onClick={() => {
-                            fetchOrderDetails(order.id);
-                          }}
-                        >
-                          <HiEye size={22} />
-                        </button>
-                      </td>
-                      <td className="bo-action-cell">
-                        <button
-                          className="ao-btn-icon approve"
-                          onClick={() => initiateApprove(order)}
-                        >
-                          <HiCheckCircle size={22} />
-                        </button>
-                        <button
-                          className="ao-btn-icon reject"
-                          onClick={() => {
-                            setSelectedOrderId(order.id);
-                            setShowRejectModal(true);
-                          }}
-                        >
-                          <HiXCircle size={22} />
-                        </button>
-                      </td>
-
-                      <td>
-                        <button
-                          className="ao-btn-icon edit"
-                          onClick={() => handleEditOrder(order)}
-                          title="Edit Order"
-                        >
-                          <HiPencilSquare size={22} />
-                        </button>
-                      </td>
-                      <td>
-                        <button
-                          className="ao-btn-icon download"
-                          onClick={() => downloadExcel(order)}
-                        >
-                          <HiArrowDownTray size={22} />
-                        </button>
+                        <div className="ao-row-actions">
+                          <button
+                            className="ao-btn-icon view"
+                            onClick={() => fetchOrderDetails(order.id)}
+                            title="View Order"
+                          >
+                            <HiEye size={20} />
+                          </button>
+                          <button
+                            className="ao-row-btn ao-row-approve"
+                            onClick={() => initiateApprove(order)}
+                          >
+                            <HiCheckCircle size={18} /> Approve
+                          </button>
+                          <button
+                            className="ao-row-btn ao-row-reject"
+                            onClick={() => {
+                              setSelectedOrderId(order.id);
+                              setShowRejectModal(true);
+                            }}
+                          >
+                            <HiXCircle size={18} /> Reject
+                          </button>
+                          <button
+                            className="ao-btn-icon edit"
+                            onClick={() => handleEditOrder(order)}
+                            title="Edit Order"
+                          >
+                            <HiPencilSquare size={20} />
+                          </button>
+                          <button
+                            className="ao-btn-icon download"
+                            onClick={() => downloadExcel(order)}
+                            title="Download Order"
+                          >
+                            <HiArrowDownTray size={20} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={10} className="bo-empty">No orders found</td>
+                    <td colSpan={7} className="bo-empty">No orders found</td>
                   </tr>
                 )}
               </tbody>
@@ -417,84 +420,71 @@ export default function Billing_orders() {
               Back to Orders
             </button>
             <div className="bo-d-actions">
+              <button className="bo-d-export" onClick={() => downloadExcel(orderDetails)}>
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1v8m0 0L4 6.5M7 9l3-2.5M2.5 12h9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                Export Excel
+              </button>
               <button
                 className="bo-d-action-btn bo-d-approve"
                 onClick={() => initiateApprove(orderDetails)}
-                aria-label="Approve order"
-                title="Approve"
               >
-                <HiCheckCircle />
+                <HiCheckCircle /> Approve
               </button>
               <button
                 className="bo-d-action-btn bo-d-reject"
-                aria-label="Reject order"
-                title="Reject"
                 onClick={() => {
                   setSelectedOrderId(orderDetails.id);
                   setShowRejectModal(true);
                 }}
               >
-                <HiXCircle />
-              </button>
-              <button className="bo-d-export" onClick={() => downloadExcel(orderDetails)}>
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1v8m0 0L4 6.5M7 9l3-2.5M2.5 12h9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                Export Excel
+                <HiXCircle /> Reject
               </button>
             </div>
           </div>
 
           <div className="bo-d-header-card">
-            <div className="bo-d-info-grid">
-              <div className="bo-d-info-field bo-d-info-span2">
-                <span className="bo-d-hf-label">Order Number</span>
-                <div className="bo-d-ordnum-row">
-                  <span className="bo-d-ordnum">{orderDetails.order_number}</span>
-                  {orderDetails.is_foc ? <span className="bo-foc-badge bo-foc-badge-detail">FOC ORDER</span> : null}
-                  {/* <span className={`bo-badge bo-badge-${(orderDetails.status_display || "").toLowerCase().replace(/\s+/g, "-")}`}>{orderDetails.status_display}</span> */}
+            <div className="bo-d-top">
+              <div className="bo-d-top-left">
+                <div className="bo-d-party">
+                  <h2 className="bo-d-party-name">{orderDetails.card_name}</h2>
+                  {orderDetails.is_foc ? (
+                    <span className="bo-foc-badge bo-foc-badge-detail">FOC ORDER</span>
+                  ) : null}
                 </div>
-                <div className="ao-d-info-field">
-                <span className="ao-d-hf-label">Party State</span>
-                <span className="ao-d-hf-value">{orderDetails.party_state || "-"}</span>
-              </div>
-              </div>
-               <div className="bo-d-info-field">
-                <span className="bo-d-hf-label">Created By</span>
-                <span className="bo-d-hf-value">{orderDetails.created_by_name || "-"}</span>
-              </div>
-              <div className="bo-d-info-field">
-                <span className="bo-d-hf-label">Created At</span>
-                <span className="bo-d-hf-value">{formatCreatedDateTime(orderDetails.created_at)}</span>
-              </div>
-              <div className="bo-d-info-field">
-                <span className="bo-d-hf-label">Delivery Date</span>
-                <span className="bo-d-hf-value">{orderDetails.delivery_date || "-"}</span>
-              </div>
-              <div className="bo-d-info-field">
-                <span className="bo-d-hf-label">PO Number</span>
-                <span className="bo-d-hf-value">{orderDetails.po_number || "-"}</span>
-              </div>
-              <div className="bo-d-info-field">
-                <span className="bo-d-hf-label">Party Name</span>
-                <span className="bo-d-hf-value">{orderDetails.card_name}</span>
-              </div>
-              <div className="bo-d-info-field">
-                <span className="bo-d-hf-label">Card Code</span>
-                <span className="bo-d-hf-value">{orderDetails.card_code}</span>
-              </div>
-              <div className="bo-d-info-field">
-                <span className="bo-d-hf-label">Bill To</span>
-                <span className="bo-d-hf-value">{orderDetails.bill_to_address || "-"}</span>
-              </div>
-              <div className="bo-d-info-field">
-                <span className="bo-d-hf-label">Ship To</span>
-                <span className="bo-d-hf-value">{orderDetails.ship_to_address || "-"}</span>
-              </div>
-              {orderDetails.remarks?.trim() ? (
-                <div className="bo-d-info-field" style={{ gridColumn: "1 / -1" }}>
-                  <span className="bo-d-hf-label">Comment</span>
-                  <span className="bo-d-hf-value">{orderDetails.remarks}</span>
+                <span className="bo-d-party-sub">{orderDetails.party_state || "-"}</span>
+                <span className="bo-d-party-sub">{orderDetails.card_code}</span>
+                <span className="bo-d-party-ordnum">{orderDetails.order_number}</span>
+                <div className="bo-d-addr-grid">
+                  <div className="bo-d-kv">
+                    <span className="bo-d-kv-label">Bill To</span>
+                    <span className="bo-d-kv-value">{orderDetails.bill_to_address || "-"}</span>
+                  </div>
+                  <div className="bo-d-kv">
+                    <span className="bo-d-kv-label">Ship To</span>
+                    <span className="bo-d-kv-value">{orderDetails.ship_to_address || "-"}</span>
+                  </div>
                 </div>
-              ) : null}
+              </div>
+              <div className="bo-d-top-right">
+                <div className="bo-d-kv">
+                  <span className="bo-d-kv-label">Delivery Date</span>
+                  <span className="bo-d-kv-value">{orderDetails.delivery_date || "-"}</span>
+                </div>
+                <div className="bo-d-kv">
+                  <span className="bo-d-kv-label">Created At</span>
+                  <span className="bo-d-kv-value">{formatCreatedDateTime(orderDetails.created_at)}</span>
+                </div>
+                <div className="bo-d-kv">
+                  <span className="bo-d-kv-label">Punched By</span>
+                  <span className="bo-d-kv-value">{orderDetails.created_by_name || "-"}</span>
+                </div>
+                {orderDetails.remarks?.trim() ? (
+                  <div className="bo-d-kv">
+                    <span className="bo-d-kv-label">Remark</span>
+                    <span className="bo-d-kv-value">{orderDetails.remarks}</span>
+                  </div>
+                ) : null}
+              </div>
             </div>
           </div>
 
@@ -504,49 +494,7 @@ export default function Billing_orders() {
               <span className="bo-d-items-count">{selectedItems.length}</span>
             </div>
             <div className="bo-d-items-scroll">
-              {selectedItems.length > 0 ? (
-                <div className="order-detail-card-list">
-                  {selectedItems.map((item, i) => {
-                    const schemes = getOrderItemSchemes(item);
-
-                    return (
-                      <article className="order-detail-item-card" key={`${item.item_code}-detail-card-${i}`}>
-                        <div className="order-detail-item-top">
-                          <span className="order-detail-item-index">Item {i + 1}</span>
-                          <span className="order-detail-item-code">{item.item_code}</span>
-                        </div>
-                        <div className="order-detail-item-main">
-                          <div className="order-detail-item-title-wrap">
-                            <span className="order-detail-label">Item Name</span>
-                            <h4 className="order-detail-item-title">{item.item_name}</h4>
-                          </div>
-                          <div className="order-detail-item-tags">
-                            <span className="order-detail-item-category">{item.category || "-"}</span>
-                            {schemes.map((scheme, schemeIndex) => (
-                              <span className="order-detail-scheme-chip" key={`${item.item_code}-scheme-card-${schemeIndex}`}>
-                                <em>Sch</em>{scheme.name || "-"} <strong>Qty {scheme.qty || 0}</strong>
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="order-detail-item-metrics">
-                          <div><span>Qty</span><strong>{item.qty}</strong></div>
-                          <div><span>Pcs</span><strong>{item.pcs}</strong></div>
-                          <div><span>Boxes</span><strong>{Number(item.boxes).toFixed(2)}</strong></div>
-                          <div><span>Ltrs</span><strong>{item.ltrs}</strong></div>
-                          {schemes.length > 0 ? <div><span>Total Ltrs</span><strong>{getOrderItemTotalLtrs(item).toFixed(2)}</strong></div> : null}
-                          <div><span>Price List (Basic)</span><strong>{Number(item.price_list_basic).toFixed(2)}</strong></div>
-                          <div><span>Basic Price</span><strong>{Number(item.basic_price).toFixed(2)}</strong></div>
-                          <div><span>Tax %</span><strong>{Number(item.tax_rate).toFixed(2)}</strong></div>
-                          <div className="order-detail-item-amount"><span>Amount</span><strong>{Number(item.total).toFixed(2)}</strong></div>
-                        </div>
-                      </article>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="order-detail-empty">No items found</div>
-              )}
+              <OrderItemsAccordion items={selectedItems} />
               <table className="bo-d-tbl">
                 <thead><tr><th>#</th><th>Item Code</th>
                   <th style={{ minWidth: '250px' }}>Item Name</th>
@@ -579,11 +527,22 @@ export default function Billing_orders() {
             </div>
           </div>
 
+          <div className="bo-d-bottombar">
           <div className="bo-d-summary">
             <div className="bo-d-sum-row"><span className="bo-d-sum-label">Total Ltrs</span><span className="bo-d-sum-val">{selectedItems.reduce((s, i) => s + getOrderItemTotalLtrs(i), 0).toFixed(2)}</span></div>
             <div className="bo-d-sum-row"><span className="bo-d-sum-label">Subtotal</span><span className="bo-d-sum-val">{selectedItems.reduce((s, i) => s + Number(i.total || 0), 0).toFixed(2)}</span></div>
             <div className="bo-d-sum-row"><span className="bo-d-sum-label">Tax</span><span className="bo-d-sum-val">{selectedItems.reduce((s, i) => s + (Number(i.total || 0) * Number(i.tax_rate || 0) / 100), 0).toFixed(2)}</span></div>
+            {[
+              { label: "Commodity", value: orderDetails.vareity_cost?.commodity_price, cls: "vc-commodity" },
+              { label: "Other", value: orderDetails.vareity_cost?.other_total, cls: "vc-other" },
+              { label: "Premium", value: orderDetails.vareity_cost?.premium_total, cls: "vc-premium" },
+            ]
+              .filter((entry) => Number(entry.value) > 0)
+              .map((entry) => (
+                <div className="bo-d-sum-row" key={entry.label}><span className={`bo-d-sum-label vc-pill ${entry.cls}`}>{entry.label}</span><span className="bo-d-sum-val">{Number(entry.value).toFixed(2)}</span></div>
+              ))}
             <div className="bo-d-sum-row bo-d-sum-grand"><span className="bo-d-sum-label">Grand Total</span><span className="bo-d-sum-val">{(selectedItems.reduce((s, i) => s + Number(i.total || 0), 0) + selectedItems.reduce((s, i) => s + (Number(i.total || 0) * Number(i.tax_rate || 0) / 100), 0)).toFixed(2)}</span></div>
+          </div>
           </div>
         </div>
       )}

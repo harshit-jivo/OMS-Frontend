@@ -7,6 +7,7 @@ import { formatOrderCreatedAt, getOrderItemSchemeNames, getOrderItemSchemes, get
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
 import "../styles/Report.css";
+import OrderItemsAccordion from "../components/OrderItemsAccordion";
 import { 
   HiEye,           // View
   HiArrowDownTray    // Download
@@ -731,49 +732,7 @@ export default function PersonWise_Report() {
               <span className="dr-d-items-count">{selectedItems.length}</span>
             </div>
             <div className="dr-d-items-scroll">
-              {selectedItems.length > 0 ? (
-                <div className="order-detail-card-list">
-                  {selectedItems.map((item, i) => {
-                    const schemes = getOrderItemSchemes(item);
-
-                    return (
-                      <article className="order-detail-item-card" key={`${item.item_code}-detail-card-${i}`}>
-                        <div className="order-detail-item-top">
-                          <span className="order-detail-item-index">Item {i + 1}</span>
-                          <span className="order-detail-item-code">{item.item_code}</span>
-                        </div>
-                        <div className="order-detail-item-main">
-                          <div className="order-detail-item-title-wrap">
-                            <span className="order-detail-label">Item Name</span>
-                            <h4 className="order-detail-item-title">{item.item_name}</h4>
-                          </div>
-                          <div className="order-detail-item-tags">
-                            <span className="order-detail-item-category">{item.category || "-"}</span>
-                            {schemes.map((scheme, schemeIndex) => (
-                              <span className="order-detail-scheme-chip" key={`${item.item_code}-scheme-card-${schemeIndex}`}>
-                                <em>Sch</em>{scheme.name || "-"} <strong>Qty {scheme.qty || 0}</strong>
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="order-detail-item-metrics">
-                          <div><span>Qty</span><strong>{item.qty}</strong></div>
-                          <div><span>Pcs</span><strong>{item.pcs}</strong></div>
-                          <div><span>Boxes</span><strong>{Number(item.boxes).toFixed(2)}</strong></div>
-                          <div><span>Ltrs</span><strong>{item.ltrs}</strong></div>
-                          {schemes.length > 0 ? <div><span>Total Ltrs</span><strong>{getOrderItemTotalLtrs(item).toFixed(2)}</strong></div> : null}
-                          <div><span>Price List (Basic)</span><strong>{Number(item.price_list_basic).toFixed(2)}</strong></div>
-                          <div><span>Basic Price</span><strong>{Number(item.basic_price).toFixed(2)}</strong></div>
-                          <div><span>Tax %</span><strong>{Number(item.tax_rate).toFixed(2)}</strong></div>
-                          <div className="order-detail-item-amount"><span>Amount</span><strong>{Number(item.total).toFixed(2)}</strong></div>
-                        </div>
-                      </article>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="order-detail-empty">No items found</div>
-              )}
+              <OrderItemsAccordion items={selectedItems} />
               <table className="dr-d-tbl">
                 <thead>
                   <tr>
@@ -825,6 +784,18 @@ export default function PersonWise_Report() {
               <span className="dr-d-sum-label">Tax</span>
               <span className="dr-d-sum-val">{selectedItems.reduce((s, i) => s + (Number(i.total || 0) * Number(i.tax_rate || 0) / 100), 0).toFixed(2)}</span>
             </div>
+            {[
+              { label: "Commodity", value: orderDetails.vareity_cost?.commodity_price, cls: "vc-commodity" },
+              { label: "Other", value: orderDetails.vareity_cost?.other_total, cls: "vc-other" },
+              { label: "Premium", value: orderDetails.vareity_cost?.premium_total, cls: "vc-premium" },
+            ]
+              .filter((entry) => Number(entry.value) > 0)
+              .map((entry) => (
+                <div className="dr-d-sum-row" key={entry.label}>
+                  <span className={`dr-d-sum-label vc-pill ${entry.cls}`}>{entry.label}</span>
+                  <span className="dr-d-sum-val">{Number(entry.value).toFixed(2)}</span>
+                </div>
+              ))}
             <div className="dr-d-sum-row dr-d-sum-grand">
               <span className="dr-d-sum-label">Grand Total</span>
               <span className="dr-d-sum-val">{(selectedItems.reduce((s, i) => s + Number(i.total || 0), 0) + selectedItems.reduce((s, i) => s + (Number(i.total || 0) * Number(i.tax_rate || 0) / 100), 0)).toFixed(2)}</span>

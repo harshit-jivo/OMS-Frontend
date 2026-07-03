@@ -58,6 +58,7 @@ export default function App_User() {
   const [varietySearch, setVarietySearch] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+  const [search, setSearch] = useState("");
   const itemsPerPage = 7;
   const [isEditMode, setIsEditMode] = useState(false);
   const [editUserId, setEditUserId] = useState<number | null>(null);
@@ -520,6 +521,16 @@ export default function App_User() {
     setEditUserId(null);
   };
 
+  // Omni search across id, name, username, email and role.
+  const normalizedSearch = search.trim().toLowerCase();
+  const filteredUsers = normalizedSearch
+    ? users.filter((user) =>
+        [user.id, user.name, user.username, user.email, user.role]
+          .map((value) => String(value ?? "").toLowerCase())
+          .some((value) => value.includes(normalizedSearch)),
+      )
+    : users;
+
   return (
     <div className="au-page app-page">
       {/* ── PAGE HEADER ── */}
@@ -531,8 +542,37 @@ export default function App_User() {
           </p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+            <div className="au-search">
+              <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <circle cx="9" cy="9" r="6" stroke="currentColor" strokeWidth="1.6" />
+                <path d="m17 17-3.2-3.2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+              </svg>
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setCurrentPage(1);
+                }}
+                placeholder="Search users…"
+                aria-label="Search users"
+              />
+              {search && (
+                <button
+                  type="button"
+                  className="au-search-clear"
+                  onClick={() => {
+                    setSearch("");
+                    setCurrentPage(1);
+                  }}
+                  aria-label="Clear search"
+                >
+                  &times;
+                </button>
+              )}
+            </div>
             <span className="au-table-count" style={{ margin: 0 }}>
-              Total: {users.length}
+              Total: {filteredUsers.length}
             </span>
           <button className="au-toggle-btn" onClick={openAddForm}>
           <span>+ Add User</span>
@@ -547,7 +587,7 @@ export default function App_User() {
                 <span className="order-loading-spinner" />
                 <span>Loading users...</span>
               </div>
-            ) : users.length > 0 ? (
+            ) : filteredUsers.length > 0 ? (
               <div className="au-table-wrap">
                 <table className="au-table">
                   <thead>
@@ -561,7 +601,7 @@ export default function App_User() {
                     </tr>
                   </thead>
                   <tbody>
-                    {users
+                    {filteredUsers
                         .slice(
                           (currentPage - 1) * itemsPerPage,
                           currentPage * itemsPerPage,
@@ -589,10 +629,12 @@ export default function App_User() {
                 </table>
               </div>
             ) : (
-              <div style={{ padding: "40px", textAlign: "center", color: "#64748b", background: "#f8fafc", borderRadius: "8px", border: "1px dashed #cbd5e1", margin: "20px 0" }}>No users found</div>
+              <div style={{ padding: "40px", textAlign: "center", color: "#64748b", background: "#f8fafc", borderRadius: "8px", border: "1px dashed #cbd5e1", margin: "20px 0" }}>
+                {search ? "No users match your search" : "No users found"}
+              </div>
             )}
 
-          {users.length > itemsPerPage && (
+          {filteredUsers.length > itemsPerPage && (
             <div className="au-pagination">
               <button
                 className="au-pg-btn"
@@ -603,13 +645,13 @@ export default function App_User() {
               </button>
 
               <span className="au-pg-info">
-                {currentPage} / {Math.ceil(users.length / itemsPerPage)}
+                {currentPage} / {Math.ceil(filteredUsers.length / itemsPerPage)}
               </span>
 
               <button
                 className="au-pg-btn"
                 disabled={
-                  currentPage === Math.ceil(users.length / itemsPerPage)
+                  currentPage === Math.ceil(filteredUsers.length / itemsPerPage)
                 }
                 onClick={() => setCurrentPage((p) => p + 1)}
               >

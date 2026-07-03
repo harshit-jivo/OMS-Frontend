@@ -1055,10 +1055,10 @@ export default function Sales_Report() {
 
                     return (
                       <article className="order-detail-item-card" key={`${item.item_code}-detail-card-${i}`}>
-                        <div className="order-detail-item-top">
+                        {/* <div className="order-detail-item-top">
                           <span className="order-detail-item-index">Item {i + 1}</span>
                           <span className="order-detail-item-code">{item.item_code}</span>
-                        </div>
+                        </div> */}
                         <div className="order-detail-item-main">
                           <div className="order-detail-item-title-wrap">
                             <span className="order-detail-label">Item Name</span>

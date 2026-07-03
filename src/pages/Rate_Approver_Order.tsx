@@ -12,6 +12,7 @@ import type { Order, OrderItem } from "../services/ordersService";
 import "../styles/Auditor_Order.css";
 import { useLocation, useNavigate } from "react-router-dom";
 import { sortOrders } from "../utils/orderHistory";
+import OrderItemsAccordion from "../components/OrderItemsAccordion";
 import {
   HiArrowDownTray,
   HiCheckCircle,
@@ -240,7 +241,20 @@ export default function RateApproverOrders() {
     <div className="ao-page">
       {!showDetails && (
         <>
+          <div className="ao-page-head">
+            <span className="ao-page-accent" aria-hidden="true" />
+            <div>
+              <h1 className="ao-page-title">Pending Orders</h1>
+              <p className="ao-page-subtitle">Review and action orders awaiting rate approval.</p>
+            </div>
+          </div>
           <div className="ao-toolbar">
+            <div className="ao-filter-head">
+              <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <path d="M3 5h14M6 10h8M9 15h2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+              </svg>
+              <span>Filters</span>
+            </div>
             <div className="ao-search-wrap">
               <div className="ao-date-wrap">
                 <label className="ao-date-label">From</label>
@@ -266,6 +280,19 @@ export default function RateApproverOrders() {
                   className="ao-date-input"
                 />
               </div>
+              {(fromDate || toDate) && (
+                <button
+                  type="button"
+                  className="ao-filter-clear"
+                  onClick={() => {
+                    setFromDate("");
+                    setToDate("");
+                    setCurrentPage(1);
+                  }}
+                >
+                  Clear
+                </button>
+              )}
             </div>
             <span className="ao-count">Total: {filteredOrders.length}</span>
           </div>
@@ -281,13 +308,12 @@ export default function RateApproverOrders() {
                 <thead>
                   <tr>
                     <th>Order ID</th>
-                    <th>FOC</th>
                     <th>Card Name</th>
+                    <th>Items</th>
+                    <th>FOC</th>
                     <th>Created At</th>
                     <th>Delivery Date</th>
-                    <th>Details</th>
-                    <th>Action</th>
-                    <th>Download</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -295,7 +321,9 @@ export default function RateApproverOrders() {
                     .slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
                     .map((order) => (
                       <tr key={order.id} className={order.is_foc ? "ao-foc-row" : ""}>
-                        <td>{order.order_number}</td>
+                        <td className="ao-cell-id">{order.order_number}</td>
+                        <td className="ao-cell-name">{order.card_name}</td>
+                        <td>{order.items_count ?? order.items?.length ?? 0}</td>
                         <td>
                           {order.is_foc ? (
                             <span className="ao-foc-badge">FOC</span>
@@ -303,45 +331,40 @@ export default function RateApproverOrders() {
                             <span className="ao-foc-empty">-</span>
                           )}
                         </td>
-                        <td>{order.card_name}</td>
                         <td>{formatCreatedDateTime(order.created_at)}</td>
                         <td>{order.delivery_date}</td>
                         <td>
-                          <button
-                            className="ao-btn-icon view"
-                            onClick={() => fetchOrderDetails(order.id)}
-                            title="View Order"
-                          >
-                            <HiEye size={22} />
-                          </button>
-                        </td>
-                        <td className="ao-action-cell">
-                          <button
-                            className="ao-btn-icon approve"
-                            onClick={() => initiateApprove(order)}
-                            title="Approve Order"
-                          >
-                            <HiCheckCircle size={22} />
-                          </button>
-                          <button
-                            className="ao-btn-icon reject"
-                            onClick={() => {
-                              setSelectedOrderId(order.id);
-                              setShowRejectModal(true);
-                            }}
-                            title="Reject Order"
-                          >
-                            <HiXCircle size={22} />
-                          </button>
-                        </td>
-                        <td>
-                          <button
-                            className="ao-btn-icon download"
-                            onClick={() => downloadExcel(order)}
-                            title="Download Order"
-                          >
-                            <HiArrowDownTray size={22} />
-                          </button>
+                          <div className="ao-row-actions">
+                            <button
+                              className="ao-btn-icon view"
+                              onClick={() => fetchOrderDetails(order.id)}
+                              title="View Order"
+                            >
+                              <HiEye size={20} />
+                            </button>
+                            <button
+                              className="ao-row-btn ao-row-approve"
+                              onClick={() => initiateApprove(order)}
+                            >
+                              <HiCheckCircle size={18} /> Approve
+                            </button>
+                            <button
+                              className="ao-row-btn ao-row-reject"
+                              onClick={() => {
+                                setSelectedOrderId(order.id);
+                                setShowRejectModal(true);
+                              }}
+                            >
+                              <HiXCircle size={18} /> Reject
+                            </button>
+                            <button
+                              className="ao-btn-icon download"
+                              onClick={() => downloadExcel(order)}
+                              title="Download Order"
+                            >
+                              <HiArrowDownTray size={20} />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -405,27 +428,6 @@ export default function RateApproverOrders() {
               Back to Orders
             </button>
             <div className="ao-d-actions">
-              <button
-                className="ao-d-action-btn ao-d-approve"
-                disabled={isProcessing}
-                onClick={() => initiateApprove(orderDetails)}
-                aria-label="Approve order"
-                title="Approve"
-              >
-                <HiCheckCircle />
-              </button>
-              <button
-                className="ao-d-action-btn ao-d-reject"
-                disabled={isProcessing}
-                aria-label="Reject order"
-                title="Reject"
-                onClick={() => {
-                  setSelectedOrderId(orderDetails.id);
-                  setShowRejectModal(true);
-                }}
-              >
-                <HiXCircle />
-              </button>
               <button className="ao-d-export" onClick={() => downloadExcel(orderDetails)}>
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
                   <path
@@ -438,64 +440,69 @@ export default function RateApproverOrders() {
                 </svg>
                 Export Excel
               </button>
+              <button
+                className="ao-d-action-btn ao-d-approve"
+                disabled={isProcessing}
+                onClick={() => initiateApprove(orderDetails)}
+              >
+                <HiCheckCircle /> Approve
+              </button>
+              <button
+                className="ao-d-action-btn ao-d-reject"
+                disabled={isProcessing}
+                onClick={() => {
+                  setSelectedOrderId(orderDetails.id);
+                  setShowRejectModal(true);
+                }}
+              >
+                <HiXCircle /> Reject
+              </button>
             </div>
           </div>
 
           <div className="ao-d-header-card">
-            <div className="ao-d-info-grid">
-              <div className="ao-d-info-field ao-d-info-span2">
-                <span className="ao-d-hf-label">Order Number</span>
-                <div className="ao-d-ordnum-row">
-                  <span className="ao-d-ordnum">{orderDetails.order_number}</span>
+            <div className="ao-d-top">
+              <div className="ao-d-top-left">
+                <div className="ao-d-party">
+                  <h2 className="ao-d-party-name">{orderDetails.card_name}</h2>
                   {orderDetails.is_foc ? (
                     <span className="ao-foc-badge ao-foc-badge-detail">FOC ORDER</span>
                   ) : null}
                 </div>
-              </div>
-              <div className="ao-d-info-field">
-                <span className="ao-d-hf-label">Party State</span>
-                <span className="ao-d-hf-value">{orderDetails.party_state || "-"}</span>
-              </div>
-              <div className="ao-d-info-field">
-                <span className="ao-d-hf-label">Punched By</span>
-                <span className="ao-d-hf-value">{orderDetails.created_by_name || "-"}</span>
-              </div>
-              <div className="ao-d-info-field">
-                <span className="ao-d-hf-label">Created At</span>
-                <span className="ao-d-hf-value">
-                  {formatCreatedDateTime(orderDetails.created_at)}
-                </span>
-              </div>
-              <div className="ao-d-info-field">
-                <span className="ao-d-hf-label">Delivery Date</span>
-                <span className="ao-d-hf-value">{orderDetails.delivery_date || "-"}</span>
-              </div>
-              <div className="ao-d-info-field">
-                <span className="ao-d-hf-label">PO Number</span>
-                <span className="ao-d-hf-value">{orderDetails.po_number || "-"}</span>
-              </div>
-              <div className="ao-d-info-field">
-                <span className="ao-d-hf-label">Party Name</span>
-                <span className="ao-d-hf-value">{orderDetails.card_name}</span>
-              </div>
-              <div className="ao-d-info-field">
-                <span className="ao-d-hf-label">Card Code</span>
-                <span className="ao-d-hf-value">{orderDetails.card_code}</span>
-              </div>
-              <div className="ao-d-info-field">
-                <span className="ao-d-hf-label">Bill To</span>
-                <span className="ao-d-hf-value">{orderDetails.bill_to_address || "-"}</span>
-              </div>
-              <div className="ao-d-info-field">
-                <span className="ao-d-hf-label">Ship To</span>
-                <span className="ao-d-hf-value">{orderDetails.ship_to_address || "-"}</span>
-              </div>
-              {orderDetails.remarks?.trim() ? (
-                <div className="ao-d-info-field" style={{ gridColumn: "1 / -1" }}>
-                  <span className="ao-d-hf-label">Comment</span>
-                  <span className="ao-d-hf-value">{orderDetails.remarks}</span>
+                <span className="ao-d-party-sub">{orderDetails.party_state || "-"}</span>
+                <span className="ao-d-party-sub">{orderDetails.card_code}</span>
+                <span className="ao-d-party-ordnum">{orderDetails.order_number}</span>
+                <div className="ao-d-addr-grid">
+                  <div className="ao-d-kv">
+                    <span className="ao-d-kv-label">Bill To</span>
+                    <span className="ao-d-kv-value">{orderDetails.bill_to_address || "-"}</span>
+                  </div>
+                  <div className="ao-d-kv">
+                    <span className="ao-d-kv-label">Ship To</span>
+                    <span className="ao-d-kv-value">{orderDetails.ship_to_address || "-"}</span>
+                  </div>
                 </div>
-              ) : null}
+              </div>
+              <div className="ao-d-top-right">
+                <div className="ao-d-kv">
+                  <span className="ao-d-kv-label">Delivery Date</span>
+                  <span className="ao-d-kv-value">{orderDetails.delivery_date || "-"}</span>
+                </div>
+                <div className="ao-d-kv">
+                  <span className="ao-d-kv-label">Created At</span>
+                  <span className="ao-d-kv-value">{formatCreatedDateTime(orderDetails.created_at)}</span>
+                </div>
+                <div className="ao-d-kv">
+                  <span className="ao-d-kv-label">Punched By</span>
+                  <span className="ao-d-kv-value">{orderDetails.created_by_name || "-"}</span>
+                </div>
+                {orderDetails.remarks?.trim() ? (
+                  <div className="ao-d-kv">
+                    <span className="ao-d-kv-label">Remark</span>
+                    <span className="ao-d-kv-value">{orderDetails.remarks}</span>
+                  </div>
+                ) : null}
+              </div>
             </div>
           </div>
 
@@ -505,49 +512,7 @@ export default function RateApproverOrders() {
               <span className="ao-d-items-count">{selectedItems.length}</span>
             </div>
             <div className="ao-d-items-scroll">
-              {selectedItems.length > 0 ? (
-                <div className="order-detail-card-list">
-                  {selectedItems.map((item, i) => {
-                    const schemes = getOrderItemSchemes(item);
-
-                    return (
-                      <article className="order-detail-item-card" key={`${item.item_code}-detail-card-${i}`}>
-                        <div className="order-detail-item-top">
-                          <span className="order-detail-item-index">Item {i + 1}</span>
-                          <span className="order-detail-item-code">{item.item_code}</span>
-                        </div>
-                        <div className="order-detail-item-main">
-                          <div className="order-detail-item-title-wrap">
-                            <span className="order-detail-label">Item Name</span>
-                            <h4 className="order-detail-item-title">{item.item_name}</h4>
-                          </div>
-                          <div className="order-detail-item-tags">
-                            <span className="order-detail-item-category">{item.category || "-"}</span>
-                            {schemes.map((scheme, schemeIndex) => (
-                              <span className="order-detail-scheme-chip" key={`${item.item_code}-scheme-card-${schemeIndex}`}>
-                                <em>Sch</em>{scheme.name || "-"} <strong>Qty {scheme.qty || 0}</strong>
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="order-detail-item-metrics">
-                          <div><span>Qty</span><strong>{item.qty}</strong></div>
-                          <div><span>Pcs</span><strong>{item.pcs}</strong></div>
-                          <div><span>Boxes</span><strong>{Number(item.boxes).toFixed(2)}</strong></div>
-                          <div><span>Ltrs</span><strong>{item.ltrs}</strong></div>
-                          {schemes.length > 0 ? <div><span>Total Ltrs</span><strong>{getOrderItemTotalLtrs(item).toFixed(2)}</strong></div> : null}
-                          <div><span>Price List (Basic)</span><strong>{Number(item.price_list_basic).toFixed(2)}</strong></div>
-                          <div><span>Basic Price</span><strong>{Number(item.basic_price).toFixed(2)}</strong></div>
-                          <div><span>Tax %</span><strong>{Number(item.tax_rate).toFixed(2)}</strong></div>
-                          <div className="order-detail-item-amount"><span>Amount</span><strong>{Number(item.total).toFixed(2)}</strong></div>
-                        </div>
-                      </article>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="order-detail-empty">No items found</div>
-              )}
+              <OrderItemsAccordion items={selectedItems} />
               <table className="ao-d-tbl">
                 <thead>
                   <tr>
@@ -630,6 +595,7 @@ export default function RateApproverOrders() {
             </div>
           </div>
 
+          <div className="ao-d-bottombar">
           <div className="ao-d-summary">
             <div className="ao-d-sum-row">
               <span className="ao-d-sum-label">Total Ltrs</span>
@@ -651,6 +617,18 @@ export default function RateApproverOrders() {
                   .toFixed(2)}
               </span>
             </div>
+            {[
+              { label: "Commodity", value: orderDetails.vareity_cost?.commodity_price, cls: "vc-commodity" },
+              { label: "Other", value: orderDetails.vareity_cost?.other_total, cls: "vc-other" },
+              { label: "Premium", value: orderDetails.vareity_cost?.premium_total, cls: "vc-premium" },
+            ]
+              .filter((entry) => Number(entry.value) > 0)
+              .map((entry) => (
+                <div className="ao-d-sum-row" key={entry.label}>
+                  <span className={`ao-d-sum-label vc-pill ${entry.cls}`}>{entry.label}</span>
+                  <span className="ao-d-sum-val">{Number(entry.value).toFixed(2)}</span>
+                </div>
+              ))}
             <div className="ao-d-sum-row ao-d-sum-grand">
               <span className="ao-d-sum-label">Grand Total</span>
               <span className="ao-d-sum-val">
@@ -663,6 +641,7 @@ export default function RateApproverOrders() {
                 ).toFixed(2)}
               </span>
             </div>
+          </div>
           </div>
         </div>
       )}

@@ -299,18 +299,18 @@ html, body {
 }
 
 .content-area {
-  margin-left: 246px;
-  margin-top: 58px;
-  margin-bottom: 2rem;
+  margin-left: 220px;
+  padding-top: 75px;
+  /* margin-bottom: 2rem; */
   box-sizing: border-box;
-  padding: 1.25rem 1.25rem 3rem 0;
+  /* padding: 1.25rem 1.25rem 3rem 0; */
   min-height: calc(100vh - 58px);
-  background: transparent;
+  background: white;
   transition: margin-left .28s ease, padding .28s ease;
 }
 
 .content-area.sidebar-collapsed {
-  margin-left: 88px;
+  margin-left: 70px;
   padding-left: 0;
 }
 

@@ -721,9 +721,13 @@ export default function Order_Tracking() {
 
   return (
     <div className="tracker-page">
-      <div className="tracker-head">
-        <h4>Order Tracker</h4>
-      </div>
+      <div className="ao-page-head">
+            <span className="ao-page-accent" aria-hidden="true" />
+            <div>
+              <h1 className="ao-page-title">Order tracker</h1>
+              <p className="ao-page-subtitle">Track History of Orders at various stages.</p>
+            </div>
+          </div>
 
       {!tracker && (
         <div>
@@ -768,19 +772,19 @@ export default function Order_Tracking() {
                 <thead>
                   <tr>
                     <th>Order ID</th>
-                    <th>FOC</th>
-                    <th>Card Code</th>
                     <th>Card Name</th>
+                    <th>FOC</th>
                     <th>Created At</th>
                     <th>Delivery Date</th>
                     <th>Status</th>
-                    <th>Tracker</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {paginatedOrders.map((order) => (
                       <tr key={order.id} className={order.is_foc ? "tracker-foc-row" : ""}>
-                        <td>{order.order_number}</td>
+                        <td className="ao-cell-id">{order.order_number}</td>
+                        <td className="ao-cell-name">{order.card_name}</td>
                         <td>
                           {order.is_foc ? (
                             <span className="tracker-foc-badge">FOC</span>
@@ -788,8 +792,6 @@ export default function Order_Tracking() {
                             <span className="tracker-foc-empty">-</span>
                           )}
                         </td>
-                        <td>{order.card_code}</td>
-                        <td>{order.card_name}</td>
                         <td>{formatCreatedDateTime(order.created_at)}</td>
                         <td>{order.delivery_date}</td>
                         <td>
@@ -804,7 +806,7 @@ export default function Order_Tracking() {
                           </span>
                         </td>
                         <td>
-                          <div style={{ display: "flex", gap: "8px" }}>
+                          <div className="ao-row-actions">
                             <button
                               type="button"
                               className="tracker-btn"
