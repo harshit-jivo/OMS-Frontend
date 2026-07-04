@@ -3,10 +3,13 @@
 .tracker-page {
   min-height: calc(100svh - 64px);
   padding: 10px clamp(12px, 2vw, 20px) 18px;
+  padding-left:30px;
   border-radius: 26px;
-  background:
+  /* background:
     radial-gradient(circle at top right, rgba(37, 99, 235, 0.1), transparent 24%),
     linear-gradient(180deg, #f4f7fb 0%, #edf2f8 100%);
+     */
+  background: #fff;
   color: #0f172a;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -129,6 +132,30 @@
 .tracker-table-wrap .vo-table tbody tr.tracker-foc-row:hover,
 .tracker-table-wrap .vo-table tbody tr.tracker-foc-row:nth-child(even):hover {
   background: #ffedd5;
+}
+
+/* Minimal table styling (matches pending / status-tracking pages) */
+.tracker-table-wrap .vo-table thead {
+  background: #f8fafc;
+}
+.tracker-table-wrap .vo-table th {
+  color: #64748b;
+  font-weight: 600;
+  border-bottom: 1px solid #e5e7eb;
+}
+.tracker-table-wrap .vo-table td {
+  border-bottom: 1px solid #f1f5f9;
+}
+.tracker-table-wrap .vo-table tbody tr:nth-child(even) {
+  background: transparent;
+}
+.tracker-table-wrap .vo-table tbody tr:hover,
+.tracker-table-wrap .vo-table tbody tr:nth-child(even):hover {
+  background: #f8fafc;
+}
+.tracker-table-wrap .vo-table td.ao-cell-id,
+.tracker-table-wrap .vo-table td.ao-cell-name {
+  text-align: left;
 }
 
 .tracker-foc-badge {

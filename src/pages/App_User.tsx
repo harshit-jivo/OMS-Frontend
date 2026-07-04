@@ -26,6 +26,7 @@ export default function App_User() {
   const categoryRef = useRef<HTMLDivElement>(null);
   const varietyRef = useRef<HTMLDivElement>(null);
   const [users, setUsers] = useState<User[]>([]);
+  const [isUsersLoading, setIsUsersLoading] = useState(true);
   const [mainGroup, setMainGroup] = useState<Option[]>([]);
   const [state, setState] = useState<Option[]>([]);
   const [role, setRole] = useState<Option[]>([]);
@@ -48,7 +49,6 @@ export default function App_User() {
     variety: "",
   });
   const [showForm, setShowForm] = useState(false);
-  const [showUsers, setShowUsers] = useState(true);
   const [mgDropdownOpen, setMgDropdownOpen] = useState(false);
   const [stDropdownOpen, setStDropdownOpen] = useState(false);
   const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
@@ -58,6 +58,7 @@ export default function App_User() {
   const [varietySearch, setVarietySearch] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+  const [search, setSearch] = useState("");
   const itemsPerPage = 7;
   const [isEditMode, setIsEditMode] = useState(false);
   const [editUserId, setEditUserId] = useState<number | null>(null);
@@ -131,11 +132,14 @@ export default function App_User() {
   }, []);
 
   const fetchUsers = async () => {
+    setIsUsersLoading(true);
     try {
       const data = await userService.getUsers();
       setUsers(data.data);
     } catch (error) {
       console.error("Error fetching users:", error);
+    } finally {
+      setIsUsersLoading(false);
     }
   };
 
@@ -424,7 +428,6 @@ export default function App_User() {
 
         fetchUsers();
         setShowForm(false);
-        setShowUsers(true);
       } else {
         alert("Error: " + getCreateUserErrorMessage(result));
       }
@@ -487,13 +490,50 @@ export default function App_User() {
     });
 
     setShowForm(true);
-    setShowUsers(false);
   };
+
+  const blankForm: CreateUserData = {
+    name: "",
+    username: "",
+    password: "",
+    email: "",
+    phone: "",
+    mainGroup: 0,
+    mainGroups: [],
+    state: 0,
+    states: [],
+    role: 0,
+    company: 0,
+    category: null,
+    variety: "",
+  };
+
+  const openAddForm = () => {
+    setIsEditMode(false);
+    setEditUserId(null);
+    setFormData(blankForm);
+    setShowForm(true);
+  };
+
+  const closeForm = () => {
+    setShowForm(false);
+    setIsEditMode(false);
+    setEditUserId(null);
+  };
+
+  // Omni search across id, name, username, email and role.
+  const normalizedSearch = search.trim().toLowerCase();
+  const filteredUsers = normalizedSearch
+    ? users.filter((user) =>
+        [user.id, user.name, user.username, user.email, user.role]
+          .map((value) => String(value ?? "").toLowerCase())
+          .some((value) => value.includes(normalizedSearch)),
+      )
+    : users;
 
   return (
     <div className="au-page app-page">
       {/* ── PAGE HEADER ── */}
-      {!showForm && (
       <div className="au-header app-page-head" style={{ marginBottom: '24px', alignItems: 'center' }}>
         <div>
           <h1 className="au-title app-page-title">App Users</h1>
@@ -502,40 +542,66 @@ export default function App_User() {
           </p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+            <div className="au-search">
+              <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <circle cx="9" cy="9" r="6" stroke="currentColor" strokeWidth="1.6" />
+                <path d="m17 17-3.2-3.2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+              </svg>
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setCurrentPage(1);
+                }}
+                placeholder="Search users…"
+                aria-label="Search users"
+              />
+              {search && (
+                <button
+                  type="button"
+                  className="au-search-clear"
+                  onClick={() => {
+                    setSearch("");
+                    setCurrentPage(1);
+                  }}
+                  aria-label="Clear search"
+                >
+                  &times;
+                </button>
+              )}
+            </div>
             <span className="au-table-count" style={{ margin: 0 }}>
-              Total: {users.length}
+              Total: {filteredUsers.length}
             </span>
-          <button
-            className="au-toggle-btn"
-            onClick={() => {
-            setShowForm(!showForm);
-            setShowUsers(showForm);
-          }}
-        >
+          <button className="au-toggle-btn" onClick={openAddForm}>
           <span>+ Add User</span>
           </button>
         </div>
       </div>
-      )}
 
       {/* ── USERS TABLE ── */}
-      {showUsers && (
-        <div className="au-table-card">
-            {users.length > 0 ? (
+      <div className="au-table-card">
+            {isUsersLoading ? (
+              <div className="order-loading-state">
+                <span className="order-loading-spinner" />
+                <span>Loading users...</span>
+              </div>
+            ) : filteredUsers.length > 0 ? (
               <div className="au-table-wrap">
                 <table className="au-table">
                   <thead>
                     <tr>
-                      <th>#</th>
+                      <th>ID</th>
                       <th>Name</th>
+                      <th>Username</th>
                       <th>Email</th>
                       <th>Role</th>
-                      <th>Status</th>
-                      <th>Edit User</th>
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {users
+                    {filteredUsers
                         .slice(
                           (currentPage - 1) * itemsPerPage,
                           currentPage * itemsPerPage,
@@ -544,27 +610,17 @@ export default function App_User() {
                           <tr key={user.id}>
                             <td className="au-muted">{user.id}</td>
                             <td className="au-name">{user.name}</td>
+                            <td>{user.username}</td>
                             <td>{user.email}</td>
                             <td>{user.role}</td>
                             <td>
-                              <span
-                                className={
-                                  user.is_active ? "au-active" : "au-inactive"
-                                }
-                              >
-                                {user.is_active ? "Active" : "Inactive"}
-                              </span>
-                            </td>
-                            <td>
                               <button
-                                className="ao-btn-icon edit"
-                                onClick={() => {
-                                  handleEditUser(user);
-                                  setShowForm(true);
-                                  setShowUsers(false);
-                                }} title="Edit User"
+                                className="au-edit-btn"
+                                onClick={() => handleEditUser(user)}
+                                title="Edit User"
+                                aria-label="Edit user"
                               >
-                                <HiPencilSquare size={22} />
+                                <HiPencilSquare size={16} />
                               </button>
                             </td>
                           </tr>
@@ -573,10 +629,12 @@ export default function App_User() {
                 </table>
               </div>
             ) : (
-              <div style={{ padding: "40px", textAlign: "center", color: "#64748b", background: "#f8fafc", borderRadius: "8px", border: "1px dashed #cbd5e1", margin: "20px 0" }}>No users found</div>
+              <div style={{ padding: "40px", textAlign: "center", color: "#64748b", background: "#f8fafc", borderRadius: "8px", border: "1px dashed #cbd5e1", margin: "20px 0" }}>
+                {search ? "No users match your search" : "No users found"}
+              </div>
             )}
 
-          {users.length > itemsPerPage && (
+          {filteredUsers.length > itemsPerPage && (
             <div className="au-pagination">
               <button
                 className="au-pg-btn"
@@ -587,13 +645,13 @@ export default function App_User() {
               </button>
 
               <span className="au-pg-info">
-                {currentPage} / {Math.ceil(users.length / itemsPerPage)}
+                {currentPage} / {Math.ceil(filteredUsers.length / itemsPerPage)}
               </span>
 
               <button
                 className="au-pg-btn"
                 disabled={
-                  currentPage === Math.ceil(users.length / itemsPerPage)
+                  currentPage === Math.ceil(filteredUsers.length / itemsPerPage)
                 }
                 onClick={() => setCurrentPage((p) => p + 1)}
               >
@@ -602,26 +660,22 @@ export default function App_User() {
             </div>
           )}
         </div>
-      )}
 
-      {/* ── ADD USER FORM ── */}
+      {/* ── ADD / EDIT USER MODAL ── */}
       {showForm && (
-        <div className="au-form-card">
+        <div className="au-modal-overlay" role="dialog" aria-modal="true">
+          <div className="au-modal">
           <div className="au-form-toolbar">
             <h2 className="au-form-heading">
               {isEditMode ? "Update User Details" : "User Details"}
             </h2>
             <button
               type="button"
-              className="au-toggle-btn au-toggle-btn--compact"
-              onClick={() => {
-                setShowForm(false);
-                setShowUsers(true);
-                setIsEditMode(false);
-                setEditUserId(null);
-              }}
+              className="au-modal-close"
+              onClick={closeForm}
+              aria-label="Close"
             >
-              <span>← Back to Users</span>
+              &times;
             </button>
           </div>
           <form onSubmit={handleSubmit}>
@@ -657,19 +711,19 @@ export default function App_User() {
                 </div>
               </div>
               <div className="au-field">
-                <label className="au-label">Password</label>
+                <label className="au-label">{isEditMode ? "Change Password" : "Password"}</label>
                 <div className="au-input-wrap au-has-icon">
                   <HiLockClosed className="au-field-icon" aria-hidden="true" />
                   <input
                     className="au-password-input"
                     type={showPassword ? "text" : "password"}
                     name="password"
-                    placeholder="••••••••"
+                    placeholder={isEditMode ? "Leave blank to keep current" : "••••••••"}
                     value={formData.password}
                     onChange={handleChange}
                     required={!isEditMode}
                   />
-                  <button
+                  {/* <button
                     type="button"
                     className="au-eye-btn"
                     onClick={() => setShowPassword((prev) => !prev)}
@@ -703,7 +757,7 @@ export default function App_User() {
                         <circle cx="12" cy="12" r="3" />
                       </svg>
                     )}
-                  </button>
+                  </button> */}
                   <div className="au-focus-line" />
                 </div>
               </div>
@@ -1094,6 +1148,7 @@ export default function App_User() {
               </button>
             </div>
           </form>
+          </div>
         </div>
       )}
     </div>

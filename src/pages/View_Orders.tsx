@@ -11,6 +11,9 @@ import {
 import type { OrderItem, Order, OrderLog, OrderStatus, PartyProduct, QuotationStatus } from "../services/ordersService";
 import { loadCurrentUserOrders } from "../utils/orderHistory";
 import "../styles/View_Orders.css";
+import "../styles/Auditor_Order.css";
+import ItemSection from "../components/order-items/ItemSection";
+import PartyHeader from "../components/order-items/PartyHeader";
 import { useLocation, useNavigate } from "react-router-dom";
 import { 
   HiEye,           // View
@@ -451,7 +454,20 @@ export default function View_Orders() {
       {/* ── LIST VIEW ── */}
       {!showDetails && (
         <>
+          <div className="vo-page-head">
+            <span className="vo-page-accent" aria-hidden="true" />
+            <div>
+              <h1 className="vo-page-title">View Orders</h1>
+              <p className="vo-page-subtitle">Browse, review and export your order history.</p>
+            </div>
+          </div>
           <div className="vo-toolbar">
+            <div className="vo-filter-head">
+              <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <path d="M3 5h14M6 10h8M9 15h2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+              </svg>
+              <span>Filters</span>
+            </div>
             <div className="vo-search-wrap">
               <select
                 className="vo-status-select"
@@ -510,6 +526,21 @@ export default function View_Orders() {
                 <label className="vo-date-label">To</label>
                 <input type="date" value={toDate} onChange={(e) => { setToDate(e.target.value); setCurrentPage(1); }} className="vo-date-input" />
               </div>
+
+              {(statusFilter || partyFilter || itemFilter) && (
+                <button
+                  type="button"
+                  className="vo-filter-clear"
+                  onClick={() => {
+                    setStatusFilter("");
+                    setPartyFilter("");
+                    setItemFilter("");
+                    setCurrentPage(1);
+                  }}
+                >
+                  Clear
+                </button>
+              )}
             </div>
             <span className="vo-count">Total: {filteredOrders.length}</span>
           </div>
@@ -525,20 +556,21 @@ export default function View_Orders() {
                 <thead>
                   <tr>
                     <th>Order ID</th>
-                    <th>FOC</th>
-                    <th>Card Code</th>
                     <th>Card Name</th>
+                    <th>Items</th>
+                    <th>FOC</th>
                     <th>Created At</th>
                     <th>Delivery Date</th>
                     <th>Status</th>
-                    <th>Details</th>
-                    <th>Download</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {paginatedOrders.map((order) => (
                       <tr key={order.id} className={order.is_foc ? "vo-foc-row" : ""}>
-                        <td>{order.order_number}</td>
+                        <td className="ao-cell-id">{order.order_number}</td>
+                        <td className="ao-cell-name">{order.card_name}</td>
+                        <td>{order.items_count ?? order.items?.length ?? 0}</td>
                         <td>
                           {order.is_foc ? (
                             <span className="vo-foc-badge">FOC</span>
@@ -546,8 +578,6 @@ export default function View_Orders() {
                             <span className="vo-foc-empty">-</span>
                           )}
                         </td>
-                        <td>{order.card_code}</td>
-                        <td>{order.card_name}</td>
                         <td>{formatCreatedDateTime(order.created_at)}</td>
                         <td>{order.delivery_date}</td>
                         <td>
@@ -575,22 +605,22 @@ export default function View_Orders() {
                           </div>
                         </td>
                         <td>
-                          <button
-                            className="ao-btn-icon view" 
-                            onClick={() => {
-                             fetchOrderDetails(order.id);
-                            }}
-                          >
-                           <HiEye size={22} />
-                          </button>
-                        </td>
-                        <td>
-                          <button
-                                  className="ao-btn-icon download"
-                                  onClick={() => downloadExcel(order)}
-                                  >
-                                  <HiArrowDownTray size={22} />
-                             </button>
+                          <div className="ao-row-actions">
+                            <button
+                              className="ao-btn-icon view"
+                              onClick={() => fetchOrderDetails(order.id)}
+                              title="View Order"
+                            >
+                              <HiEye size={20} />
+                            </button>
+                            <button
+                              className="ao-btn-icon download"
+                              onClick={() => downloadExcel(order)}
+                              title="Download Order"
+                            >
+                              <HiArrowDownTray size={20} />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -613,14 +643,14 @@ export default function View_Orders() {
 
       {/* ── DETAIL VIEW ── */}
       {showDetails && orderDetails && (
-        <div className="vo-detail">
+        <div className="ao-detail vo-detail-scope">
           {/* Navigation */}
-          <div className="vo-d-nav">
-            <button className="vo-d-back" onClick={() => setShowDetails(false)}>
+          <div className="ao-d-nav">
+            <button className="ao-d-back" onClick={() => setShowDetails(false)}>
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M10 13L5 8l5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
               Back to Orders
             </button>
-            <div className="vo-d-nav-actions">
+            <div className="ao-d-actions">
               {orderDetails.quotation_cancelled ? (
                 <span className="vo-sq-cancelled vo-sq-cancelled-nav">SQ Cancelled</span>
               ) : canCancelQuotation(orderDetails) ? (
@@ -633,7 +663,7 @@ export default function View_Orders() {
                   Cancel Sales Quotation
                 </button>
               ) : null}
-              <button className="vo-d-export" onClick={() => downloadExcel(orderDetails)}>
+              <button className="ao-d-export" onClick={() => downloadExcel(orderDetails)}>
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1v8m0 0L4 6.5M7 9l3-2.5M2.5 12h9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
                 Export Excel
               </button>
@@ -641,112 +671,25 @@ export default function View_Orders() {
           </div>
 
           {/* Order Info Card */}
-          <div className="vo-d-header-card">
-            <div className="vo-d-info-grid">
-              <div className="vo-d-info-field vo-d-info-span2">
-                <span className="vo-d-hf-label">Order Number</span>
-                <div className="vo-d-ordnum-row">
-                  <span className="vo-d-ordnum">{orderDetails.order_number}</span>
-                  {orderDetails.is_foc ? <span className="vo-foc-badge vo-foc-badge-detail">FOC ORDER</span> : null}
-                  <span className={`vo-badge vo-badge-${(orderDetails.status_display || "").toLowerCase().replace(/\s+/g, "-")}`}>{orderDetails.status_display}</span>
-                  {isRejectedOrder(orderDetails) && rejectedByByOrderId[orderDetails.id] ? (
-                    <span className="vo-rejected-by vo-rejected-by-detail">
-                      By: {rejectedByByOrderId[orderDetails.id]}
-                    </span>
-                  ) : null}
-                </div>
-              </div>
-              <div className="vo-d-info-field">
-                <span className="vo-d-hf-label">Created At</span>
-                <span className="vo-d-hf-value">{formatCreatedDateTime(orderDetails.created_at)}</span>
-              </div>
-              <div className="vo-d-info-field">
-                <span className="vo-d-hf-label">Delivery Date</span>
-                <span className="vo-d-hf-value">{orderDetails.delivery_date || "—"}</span>
-              </div>
-              <div className="vo-d-info-field">
-                <span className="vo-d-hf-label">PO Number</span>
-                <span className="vo-d-hf-value">{orderDetails.po_number || "—"}</span>
-              </div>
-              <div className="vo-d-info-field">
-                <span className="vo-d-hf-label">Party Name</span>
-                <span className="vo-d-hf-value">{orderDetails.card_name}</span>
-              </div>
-              <div className="vo-d-info-field">
-                <span className="vo-d-hf-label">Card Code</span>
-                <span className="vo-d-hf-value">{orderDetails.card_code}</span>
-              </div>
-              <div className="vo-d-info-field">
-                <span className="vo-d-hf-label">Bill To</span>
-                <span className="vo-d-hf-value">{orderDetails.bill_to_address || "—"}</span>
-              </div>
-              <div className="vo-d-info-field">
-                <span className="vo-d-hf-label">Ship To</span>
-                <span className="vo-d-hf-value">{orderDetails.ship_to_address || "—"}</span>
-              </div>
-              {orderDetails.remarks?.trim() ? (
-                <div className="vo-d-info-field vo-d-info-span2">
-                  <span className="vo-d-hf-label">Comment</span>
-                  <span className="vo-d-hf-value">{orderDetails.remarks}</span>
-                </div>
-              ) : null}
-            </div>
-          </div>
+          <PartyHeader
+            order={orderDetails}
+            statusExtra={
+              isRejectedOrder(orderDetails) && rejectedByByOrderId[orderDetails.id] ? (
+                <span className="vo-rejected-by vo-rejected-by-detail">
+                  By: {rejectedByByOrderId[orderDetails.id]}
+                </span>
+              ) : null
+            }
+          />
 
           {/* Items */}
-          <div className="vo-d-items">
-            <div className="vo-d-items-head">
-              <span className="vo-d-items-title">Items</span>
-              <span className="vo-d-items-count">{selectedItems.length}</span>
+          <div className="ao-d-items">
+            <div className="ao-d-items-head">
+              <span className="ao-d-items-title">Items</span>
+              <span className="ao-d-items-count">{selectedItems.length}</span>
             </div>
-            <div className="vo-d-items-scroll">
-              {selectedItems.length > 0 ? (
-                <div className="vo-d-item-cards">
-                  {selectedItems.map((item, i) => {
-                    const schemes = getOrderItemSchemes(item);
-
-                    return (
-                      <article className="vo-d-item-card" key={`${item.item_code}-card-${i}`}>
-                        <div className="vo-d-item-card-top">
-                          <span className="vo-d-item-index">Item {i + 1}</span>
-                          <span className="vo-d-item-code">{item.item_code}</span>
-                        </div>
-
-                        <div className="vo-d-item-card-main">
-                          <div className="vo-d-item-title-wrap">
-                            <span className="vo-d-card-label">Item Name</span>
-                            <h4 className="vo-d-item-title">{item.item_name}</h4>
-                          </div>
-                          <div className="vo-d-item-tags">
-                            <span className="vo-d-item-category">{item.category || "-"}</span>
-                            {schemes.map((scheme, schemeIndex) => (
-                              <span className="vo-d-item-scheme-chip" key={`${item.item_code}-scheme-card-${schemeIndex}`}>
-                                <em>Sch</em>{scheme.name || "-"} <strong>Qty {scheme.qty || 0}</strong>
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-
-                        <div className="vo-d-item-metrics">
-                          <div><span>Qty</span><strong>{item.qty}</strong></div>
-                          <div><span>Pcs</span><strong>{item.pcs}</strong></div>
-                          <div><span>Boxes</span><strong>{Number(item.boxes).toFixed(2)}</strong></div>
-                          <div><span>Ltrs</span><strong>{item.ltrs}</strong></div>
-                          {schemes.length > 0 ? (
-                            <div><span>Total Ltrs</span><strong>{getOrderItemTotalLtrs(item).toFixed(2)}</strong></div>
-                          ) : null}
-                          <div><span>Price List (Basic)</span><strong>{Number(item.price_list_basic).toFixed(2)}</strong></div>
-                          <div><span>Basic Price</span><strong>{Number(item.basic_price).toFixed(2)}</strong></div>
-                          <div><span>Tax %</span><strong>{Number(item.tax_rate).toFixed(2)}</strong></div>
-                          <div className="vo-d-item-amount"><span>Amount</span><strong>{Number(item.total).toFixed(2)}</strong></div>
-                        </div>
-                      </article>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="vo-empty">No items found</div>
-              )}
+            <div className="ao-d-items-scroll">
+              <ItemSection items={selectedItems} />
               <table className="vo-d-tbl">
                 <thead>
                   <tr>
@@ -798,22 +741,34 @@ export default function View_Orders() {
           </div>
 
           {/* Summary */}
-          <div className="vo-d-summary">
-            <div className="vo-d-sum-row">
-              <span className="vo-d-sum-label">Total Ltrs</span>
-              <span className="vo-d-sum-val">{selectedItems.reduce((s, i) => s + getOrderItemTotalLtrs(i), 0).toFixed(2)}</span>
+          <div className="ao-d-summary">
+            <div className="ao-d-sum-row">
+              <span className="ao-d-sum-label">Total Ltrs</span>
+              <span className="ao-d-sum-val">{selectedItems.reduce((s, i) => s + getOrderItemTotalLtrs(i), 0).toFixed(2)}</span>
             </div>
-            <div className="vo-d-sum-row">
-              <span className="vo-d-sum-label">Subtotal</span>
-              <span className="vo-d-sum-val">{selectedItems.reduce((s, i) => s + Number(i.total || 0), 0).toFixed(2)}</span>
+            <div className="ao-d-sum-row">
+              <span className="ao-d-sum-label">Subtotal</span>
+              <span className="ao-d-sum-val">{selectedItems.reduce((s, i) => s + Number(i.total || 0), 0).toFixed(2)}</span>
             </div>
-            <div className="vo-d-sum-row">
-              <span className="vo-d-sum-label">Tax</span>
-              <span className="vo-d-sum-val">{selectedItems.reduce((s, i) => s + (Number(i.total || 0) * Number(i.tax_rate || 0) / 100), 0).toFixed(2)}</span>
+            <div className="ao-d-sum-row">
+              <span className="ao-d-sum-label">Tax</span>
+              <span className="ao-d-sum-val">{selectedItems.reduce((s, i) => s + (Number(i.total || 0) * Number(i.tax_rate || 0) / 100), 0).toFixed(2)}</span>
             </div>
-            <div className="vo-d-sum-row vo-d-sum-grand">
-              <span className="vo-d-sum-label">Grand Total</span>
-              <span className="vo-d-sum-val">{(selectedItems.reduce((s, i) => s + Number(i.total || 0), 0) + selectedItems.reduce((s, i) => s + (Number(i.total || 0) * Number(i.tax_rate || 0) / 100), 0)).toFixed(2)}</span>
+            {[
+              { label: "Commodity", value: orderDetails.vareity_cost?.commodity_price, cls: "vc-commodity" },
+              { label: "Other", value: orderDetails.vareity_cost?.other_total, cls: "vc-other" },
+              { label: "Premium", value: orderDetails.vareity_cost?.premium_total, cls: "vc-premium" },
+            ]
+              .filter((entry) => Number(entry.value) > 0)
+              .map((entry) => (
+                <div className="ao-d-sum-row" key={entry.label}>
+                  <span className={`ao-d-sum-label vc-pill ${entry.cls}`}>{entry.label}</span>
+                  <span className="ao-d-sum-val">{Number(entry.value).toFixed(2)}</span>
+                </div>
+              ))}
+            <div className="ao-d-sum-row ao-d-sum-grand">
+              <span className="ao-d-sum-label">Grand Total</span>
+              <span className="ao-d-sum-val">{(selectedItems.reduce((s, i) => s + Number(i.total || 0), 0) + selectedItems.reduce((s, i) => s + (Number(i.total || 0) * Number(i.tax_rate || 0) / 100), 0)).toFixed(2)}</span>
             </div>
           </div>
         </div>

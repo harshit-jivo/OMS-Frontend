@@ -5,7 +5,9 @@ import { getOrderItemSchemeNames, getOrderItemSchemes, getOrderItemSchemeQtyText
 import type { Order, OrderItem, OrderLog } from "../services/ordersService";
 import "../styles/Auditor_Order.css";
 import { useLocation, useNavigate } from "react-router-dom";
-import { loadDetailedOrders } from "../utils/orderHistory";
+import { sortOrders } from "../utils/orderHistory";
+import ItemSection from "../components/order-items/ItemSection";
+import PartyHeader from "../components/order-items/PartyHeader";
 import {
   buildOrderTimelineLogs,
   getOrderLogDisplayRemark,
@@ -73,9 +75,7 @@ export default function Auditor_orders() {
     setIsOrdersLoading(true);
     try {
       const data = await ordersService.getOrders('AUDITOR_APPROVAL');
-      const detailedOrders = await loadDetailedOrders(data || []);
-      setOrders(detailedOrders);
-      console.log("Fetched Orders:", detailedOrders);
+      setOrders(sortOrders(data || []));
     } catch (error) {
       console.log("Error fetching orders:", error);
     } finally {
@@ -166,18 +166,28 @@ export default function Auditor_orders() {
     }
   };
 
-  const downloadExcel = (order: Order) => {
+  const downloadExcel = async (order: Order) => {
+    // The list API does not include line items; fetch full details on demand.
+    let full = order;
+    if (!order.items || order.items.length === 0) {
+      try {
+        full = await ordersService.getOrderDetails(order.id);
+      } catch (error) {
+        console.log("Error fetching order details for download:", error);
+      }
+    }
+
     let excelData: object[] = [];
 
-    if (order.items && order.items.length > 0) {
-      excelData = order.items.map((item: OrderItem) => ({
-        "Order Number": order.order_number,
-        "Card Code": order.card_code,
-        "Card Name": order.card_name,
-        "Delivery Date": order.delivery_date,
-        Status: order.status_display,
-        "Bill To": order.bill_to_address,
-        "Ship To": order.ship_to_address,
+    if (full.items && full.items.length > 0) {
+      excelData = full.items.map((item: OrderItem) => ({
+        "Order Number": full.order_number,
+        "Card Code": full.card_code,
+        "Card Name": full.card_name,
+        "Delivery Date": full.delivery_date,
+        Status: full.status_display,
+        "Bill To": full.bill_to_address,
+        "Ship To": full.ship_to_address,
         "Item Code": item.item_code,
         "Item Name": item.item_name,
         Scheme: getOrderItemSchemeNames(item),
@@ -193,13 +203,13 @@ export default function Auditor_orders() {
       }));
     } else {
       excelData.push({
-        "Order Number": order.order_number,
-        "Card Code": order.card_code,
-        "Card Name": order.card_name,
-        "Delivery Date": order.delivery_date,
-        Status: order.status_display,
-        "Bill To": order.bill_to_address,
-        "Ship To": order.ship_to_address,
+        "Order Number": full.order_number,
+        "Card Code": full.card_code,
+        "Card Name": full.card_name,
+        "Delivery Date": full.delivery_date,
+        Status: full.status_display,
+        "Bill To": full.bill_to_address,
+        "Ship To": full.ship_to_address,
         "Price List (Basic)": "",
         "Basic Price": "",
       });
@@ -212,7 +222,7 @@ export default function Auditor_orders() {
     const file = new Blob([excelBuffer], {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     });
-    saveAs(file, `Order_${order.order_number}.xlsx`);
+    saveAs(file, `Order_${full.order_number}.xlsx`);
   };
 
   const handleTrack = async (order: Order) => {
@@ -252,7 +262,20 @@ export default function Auditor_orders() {
       {/* â"€â"€ LIST VIEW â"€â"€ */}
       {!showDetails && (
         <>
+          <div className="ao-page-head">
+            <span className="ao-page-accent" aria-hidden="true" />
+            <div>
+              <h1 className="ao-page-title">Pending Orders</h1>
+              <p className="ao-page-subtitle">Review and action orders awaiting auditor approval.</p>
+            </div>
+          </div>
           <div className="ao-toolbar">
+            <div className="ao-filter-head">
+              <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <path d="M3 5h14M6 10h8M9 15h2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+              </svg>
+              <span>Filters</span>
+            </div>
             <div className="ao-search-wrap">
               <div className="ao-date-wrap">
                 <label className="ao-date-label">From</label>
@@ -262,6 +285,9 @@ export default function Auditor_orders() {
                 <label className="ao-date-label">To</label>
                 <input type="date" value={toDate} onChange={(e) => { setToDate(e.target.value); setCurrentPage(1); }} className="ao-date-input" />
               </div>
+              {(fromDate || toDate) && (
+                <button type="button" className="ao-filter-clear" onClick={() => { setFromDate(""); setToDate(""); setCurrentPage(1); }}>Clear</button>
+              )}
             </div>
             <span className="ao-count">Total: {filteredOrders.length}</span>
           </div>
@@ -277,22 +303,20 @@ export default function Auditor_orders() {
                 <thead>
                   <tr>
                     <th>Order ID</th>
-                    <th>FOC</th>
-                    <th>Card Code</th>
                     <th>Card Name</th>
+                    <th>Items</th>
+                    <th>FOC</th>
                     <th>Created At</th>
                     <th>Delivery Date</th>
-                    {/* <th>Status</th> */}
-                    <th>Details</th>
-                    <th>Track</th>
-                    <th>Action</th>
-                    <th>Download</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredOrders.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((order) => (
                       <tr key={order.id} className={order.is_foc ? "ao-foc-row" : ""}>
-                        <td>{order.order_number}</td>
+                        <td className="ao-cell-id">{order.order_number}</td>
+                        <td className="ao-cell-name">{order.card_name}</td>
+                        <td>{order.items_count ?? order.items?.length ?? 0}</td>
                         <td>
                           {order.is_foc ? (
                             <span className="ao-foc-badge">FOC</span>
@@ -300,58 +324,47 @@ export default function Auditor_orders() {
                             <span className="ao-foc-empty">-</span>
                           )}
                         </td>
-                        <td>{order.card_code}</td>
-                        <td>{order.card_name}</td>
                         <td>{formatCreatedDateTime(order.created_at)}</td>
                         <td>{order.delivery_date}</td>
-                        {/* <td>
-                          <span className={`ao-badge ao-badge-${(order.status_display || "").toLowerCase().replace(/\s+/g, "-")}`}>
-                            {order.status_display}
-                          </span>
-                        </td> */}
                         <td>
-                          <button
-                           className="ao-btn-icon view"
-                            onClick={() => {
-                              fetchOrderDetails(order.id);
-                            }}
-                          >
-                             <HiEye size={22} />
-                          </button>
-                        </td>
-                        <td>
-                          <button
-                            className="ao-btn-icon track"
-                            onClick={() => handleTrack(order)}
-                            title="Track Order"
-                          >
-                            <HiArrowPath size={22} />
-                          </button>
-                        </td>
-                        <td className="ao-action-cell">
-                          <button
-                            className="ao-btn-icon approve"
-                            onClick={() => initiateApprove(order)}
-                          >
-                            <HiCheckCircle size={22} />
-                          </button>
-                          <button
-                            className="ao-btn-icon reject"
-                            onClick={() => {
-                              setSelectedOrderId(order.id);
-                              setShowRejectModal(true);
-                            }}
-                          >
-                            <HiXCircle size={22} />
-                          </button>
-                        </td>
-                        <td>
-                          <button
-                             className="ao-btn-icon download"
-                            onClick={() => downloadExcel(order)}
-                          >
-                           <HiArrowDownTray size={22} />
-                          </button>
+                          <div className="ao-row-actions">
+                            <button
+                              className="ao-btn-icon view"
+                              onClick={() => fetchOrderDetails(order.id)}
+                              title="View Order"
+                            >
+                              <HiEye size={20} />
+                            </button>
+                            <button
+                              className="ao-btn-icon track"
+                              onClick={() => handleTrack(order)}
+                              title="Track Order"
+                            >
+                              <HiArrowPath size={20} />
+                            </button>
+                            <button
+                              className="ao-row-btn ao-row-approve"
+                              onClick={() => initiateApprove(order)}
+                            >
+                              <HiCheckCircle size={18} /> Approve
+                            </button>
+                            <button
+                              className="ao-row-btn ao-row-reject"
+                              onClick={() => {
+                                setSelectedOrderId(order.id);
+                                setShowRejectModal(true);
+                              }}
+                            >
+                              <HiXCircle size={18} /> Reject
+                            </button>
+                            <button
+                              className="ao-btn-icon download"
+                              onClick={() => downloadExcel(order)}
+                              title="Download Order"
+                            >
+                              <HiArrowDownTray size={20} />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -382,97 +395,36 @@ export default function Auditor_orders() {
             </button>
             <div className="ao-d-actions">
               <button
-                className="ao-d-action-btn ao-d-approve"
-                onClick={() => initiateApprove(orderDetails)}
-                aria-label="Approve order"
-                title="Approve"
-              >
-                <HiCheckCircle />
-              </button>
-              <button
-                className="ao-d-action-btn ao-d-reject"
-                aria-label="Reject order"
-                title="Reject"
-                onClick={() => {
-                  setSelectedOrderId(orderDetails.id);
-                  setShowRejectModal(true);
-              }}
-              >
-                <HiXCircle />
-              </button>
-              <button
                 className="ao-d-action-btn"
                 aria-label="Track order"
                 title="Track"
                 onClick={() => handleTrack(orderDetails)}
               >
-                <HiArrowPath />
+                <HiArrowPath /> Track
               </button>
               <button className="ao-d-export" onClick={() => downloadExcel(orderDetails)}>
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1v8m0 0L4 6.5M7 9l3-2.5M2.5 12h9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
                 Export Excel
               </button>
+              <button
+                className="ao-d-action-btn ao-d-approve"
+                onClick={() => initiateApprove(orderDetails)}
+              >
+                <HiCheckCircle /> Approve
+              </button>
+              <button
+                className="ao-d-action-btn ao-d-reject"
+                onClick={() => {
+                  setSelectedOrderId(orderDetails.id);
+                  setShowRejectModal(true);
+                }}
+              >
+                <HiXCircle /> Reject
+              </button>
             </div>
           </div>
 
-          <div className="ao-d-header-card">
-            <div className="ao-d-info-grid">
-              <div className="ao-d-info-field ao-d-info-span2">
-                <span className="ao-d-hf-label">Order Number</span>
-                <div className="ao-d-ordnum-row">
-                  <span className="ao-d-ordnum">{orderDetails.order_number}</span>
-                  {orderDetails.is_foc ? <span className="ao-foc-badge ao-foc-badge-detail">FOC ORDER</span> : null}
-                  {/* <span className={`ao-badge ao-badge-${(orderDetails.status_display || "").toLowerCase().replace(/\s+/g, "-")}`}>{orderDetails.status_display}</span> */}
-                </div>
-              </div>
-
-               <div className="ao-d-info-field">
-                <span className="ao-d-hf-label">Party State</span>
-                <span className="ao-d-hf-value">{orderDetails.party_state || "-"}</span>
-              </div>
-
-              <div className="ao-d-info-field">
-                <span className="ao-d-hf-label">Punched By</span>
-                <span className="ao-d-hf-value">{orderDetails.created_by_name || "-"}</span>
-              </div>
-        
-              <div className="ao-d-info-field">
-                <span className="ao-d-hf-label">Created At</span>
-                <span className="ao-d-hf-value">{formatCreatedDateTime(orderDetails.created_at)}</span>
-              </div>
-        
-              <div className="ao-d-info-field">
-                <span className="ao-d-hf-label">Delivery Date</span>
-                <span className="ao-d-hf-value">{orderDetails.delivery_date || "-"}</span>
-              </div>
-              <div className="ao-d-info-field">
-                <span className="ao-d-hf-label">PO Number</span>
-                <span className="ao-d-hf-value">{orderDetails.po_number || "-"}</span>
-              </div>
-              <div className="ao-d-info-field">
-                <span className="ao-d-hf-label">Party Name</span>
-                <span className="ao-d-hf-value">{orderDetails.card_name}</span>
-              </div>
-              <div className="ao-d-info-field">
-                <span className="ao-d-hf-label">Card Code</span>
-                <span className="ao-d-hf-value">{orderDetails.card_code}</span>
-              </div>
-              <div className="ao-d-info-field">
-                <span className="ao-d-hf-label">Bill To</span>
-                <span className="ao-d-hf-value">{orderDetails.bill_to_address || "-"}</span>
-              </div>
-              <div className="ao-d-info-field">
-                <span className="ao-d-hf-label">Ship To</span>
-                <span className="ao-d-hf-value">{orderDetails.ship_to_address || "-"}</span>
-              </div>
-              {orderDetails.remarks?.trim() ? (
-                <div className="ao-d-info-field" style={{ gridColumn: "1 / -1" }}>
-                  <span className="ao-d-hf-label">Comment</span>
-                  <span className="ao-d-hf-value">{orderDetails.remarks}</span>
-                </div>
-              ) : null}
-            </div>
-          </div>
+          <PartyHeader order={orderDetails} />
 
           <div className="ao-d-items">
             <div className="ao-d-items-head">
@@ -480,49 +432,7 @@ export default function Auditor_orders() {
               <span className="ao-d-items-count">{selectedItems.length}</span>
             </div>
             <div className="ao-d-items-scroll">
-              {selectedItems.length > 0 ? (
-                <div className="order-detail-card-list">
-                  {selectedItems.map((item, i) => {
-                    const schemes = getOrderItemSchemes(item);
-
-                    return (
-                      <article className="order-detail-item-card" key={`${item.item_code}-detail-card-${i}`}>
-                        <div className="order-detail-item-top">
-                          <span className="order-detail-item-index">Item {i + 1}</span>
-                          <span className="order-detail-item-code">{item.item_code}</span>
-                        </div>
-                        <div className="order-detail-item-main">
-                          <div className="order-detail-item-title-wrap">
-                            <span className="order-detail-label">Item Name</span>
-                            <h4 className="order-detail-item-title">{item.item_name}</h4>
-                          </div>
-                          <div className="order-detail-item-tags">
-                            <span className="order-detail-item-category">{item.category || "-"}</span>
-                            {schemes.map((scheme, schemeIndex) => (
-                              <span className="order-detail-scheme-chip" key={`${item.item_code}-scheme-card-${schemeIndex}`}>
-                                <em>Sch</em>{scheme.name || "-"} <strong>Qty {scheme.qty || 0}</strong>
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="order-detail-item-metrics">
-                          <div><span>Qty</span><strong>{item.qty}</strong></div>
-                          <div><span>Pcs</span><strong>{item.pcs}</strong></div>
-                          <div><span>Boxes</span><strong>{Number(item.boxes).toFixed(2)}</strong></div>
-                          <div><span>Ltrs</span><strong>{item.ltrs}</strong></div>
-                          {schemes.length > 0 ? <div><span>Total Ltrs</span><strong>{getOrderItemTotalLtrs(item).toFixed(2)}</strong></div> : null}
-                          <div><span>Price List (Basic)</span><strong>{Number(item.price_list_basic).toFixed(2)}</strong></div>
-                          <div><span>Basic Price</span><strong>{Number(item.basic_price).toFixed(2)}</strong></div>
-                          <div><span>Tax %</span><strong>{Number(item.tax_rate).toFixed(2)}</strong></div>
-                          <div className="order-detail-item-amount"><span>Amount</span><strong>{Number(item.total).toFixed(2)}</strong></div>
-                        </div>
-                      </article>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="order-detail-empty">No items found</div>
-              )}
+              <ItemSection items={selectedItems} />
               <table className="ao-d-tbl">
                 <thead><tr><th>#</th>
                 <th>Item Code</th>
@@ -567,11 +477,22 @@ export default function Auditor_orders() {
             </div>
           </div>
 
+          <div className="ao-d-bottombar">
           <div className="ao-d-summary">
             <div className="ao-d-sum-row"><span className="ao-d-sum-label">Total Ltrs</span><span className="ao-d-sum-val">{selectedItems.reduce((s, i) => s + getOrderItemTotalLtrs(i), 0).toFixed(2)}</span></div>
             <div className="ao-d-sum-row"><span className="ao-d-sum-label">Subtotal</span><span className="ao-d-sum-val">{selectedItems.reduce((s, i) => s + Number(i.total || 0), 0).toFixed(2)}</span></div>
             <div className="ao-d-sum-row"><span className="ao-d-sum-label">Tax</span><span className="ao-d-sum-val">{selectedItems.reduce((s, i) => s + (Number(i.total || 0) * Number(i.tax_rate || 0) / 100), 0).toFixed(2)}</span></div>
+            {[
+              { label: "Commodity", value: orderDetails.vareity_cost?.commodity_price, cls: "vc-commodity" },
+              { label: "Other", value: orderDetails.vareity_cost?.other_total, cls: "vc-other" },
+              { label: "Premium", value: orderDetails.vareity_cost?.premium_total, cls: "vc-premium" },
+            ]
+              .filter((entry) => Number(entry.value) > 0)
+              .map((entry) => (
+                <div className="ao-d-sum-row" key={entry.label}><span className={`ao-d-sum-label vc-pill ${entry.cls}`}>{entry.label}</span><span className="ao-d-sum-val">{Number(entry.value).toFixed(2)}</span></div>
+              ))}
             <div className="ao-d-sum-row ao-d-sum-grand"><span className="ao-d-sum-label">Grand Total</span><span className="ao-d-sum-val">{(selectedItems.reduce((s, i) => s + Number(i.total || 0), 0) + selectedItems.reduce((s, i) => s + (Number(i.total || 0) * Number(i.tax_rate || 0) / 100), 0)).toFixed(2)}</span></div>
+          </div>
           </div>
         </div>
       )}

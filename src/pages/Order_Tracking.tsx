@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { ordersService } from "../services/ordersService";
 import type { Order, OrderLog } from "../services/ordersService";
-import { loadCurrentUserOrders } from "../utils/orderHistory";
+import { loadCurrentUserOrderSummaries } from "../utils/orderHistory";
 import "../styles/Order_Tracking.css";
 
 const formatCreatedDateTime = (value?: string | null) => {
@@ -56,7 +56,7 @@ export default function Order_Tracking() {
   const fetchOrders = async () => {
     try {
       setLoading(true);
-      const data = await loadCurrentUserOrders();
+      const data = await loadCurrentUserOrderSummaries();
       setOrders(data || []);
     } catch (error) {
       console.log("Error fetching orders:", error);
@@ -678,13 +678,22 @@ export default function Order_Tracking() {
   };
 
   const handleTrack = async (order: Order) => {
+    // Show the summary immediately; fetch full details (po_number, remarks,
+    // rate_approvals) and logs on demand now that the list load is summary-only.
     setSelectedOrder(order);
     setTracker(true);
     setLogs([]);
     setLogsLoading(true);
 
     try {
-      const response = await ordersService.getOrderLogs(order.id);
+      const [details, response] = await Promise.all([
+        ordersService.getOrderDetails(order.id).catch((error) => {
+          console.log("Error fetching order details:", error);
+          return null;
+        }),
+        ordersService.getOrderLogs(order.id),
+      ]);
+      if (details) setSelectedOrder(details);
       setLogs(Array.isArray(response) ? response : []);
     } catch (error) {
       console.log("Error fetching order logs:", error);
@@ -712,9 +721,13 @@ export default function Order_Tracking() {
 
   return (
     <div className="tracker-page">
-      <div className="tracker-head">
-        <h4>Order Tracker</h4>
-      </div>
+      <div className="ao-page-head">
+            <span className="ao-page-accent" aria-hidden="true" />
+            <div>
+              <h1 className="ao-page-title">Order tracker</h1>
+              <p className="ao-page-subtitle">Track History of Orders at various stages.</p>
+            </div>
+          </div>
 
       {!tracker && (
         <div>
@@ -759,19 +772,19 @@ export default function Order_Tracking() {
                 <thead>
                   <tr>
                     <th>Order ID</th>
-                    <th>FOC</th>
-                    <th>Card Code</th>
                     <th>Card Name</th>
+                    <th>FOC</th>
                     <th>Created At</th>
                     <th>Delivery Date</th>
                     <th>Status</th>
-                    <th>Tracker</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {paginatedOrders.map((order) => (
                       <tr key={order.id} className={order.is_foc ? "tracker-foc-row" : ""}>
-                        <td>{order.order_number}</td>
+                        <td className="ao-cell-id">{order.order_number}</td>
+                        <td className="ao-cell-name">{order.card_name}</td>
                         <td>
                           {order.is_foc ? (
                             <span className="tracker-foc-badge">FOC</span>
@@ -779,8 +792,6 @@ export default function Order_Tracking() {
                             <span className="tracker-foc-empty">-</span>
                           )}
                         </td>
-                        <td>{order.card_code}</td>
-                        <td>{order.card_name}</td>
                         <td>{formatCreatedDateTime(order.created_at)}</td>
                         <td>{order.delivery_date}</td>
                         <td>
@@ -795,7 +806,7 @@ export default function Order_Tracking() {
                           </span>
                         </td>
                         <td>
-                          <div style={{ display: "flex", gap: "8px" }}>
+                          <div className="ao-row-actions">
                             <button
                               type="button"
                               className="tracker-btn"

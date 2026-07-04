@@ -12,6 +12,8 @@ import {
 } from "../utils/orderTrackingTimeline";
 import "../styles/Order_Status_Tracking.css";
 import "../styles/Auditor_Order.css";
+import ItemSection from "../components/order-items/ItemSection";
+import PartyHeader from "../components/order-items/PartyHeader";
 import {
   HiEye, HiArrowDownTray, HiArrowPath
 } from "react-icons/hi2";
@@ -143,7 +145,7 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
   const [trackingLogs, setTrackingLogs] = useState<OrderLog[]>([]);
   const [trackLogsLoading, setTrackLogsLoading] = useState(false);
   const showTrackColumn = mode !== "rate_approver";
-  const tableColumnCount = showTrackColumn ? 10 : 9;
+  const tableColumnCount = 8;
   const pageTitle =
     mode === "auditor"
       ? "Auditor Status Tracking"
@@ -360,10 +362,11 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
     <div className="ot-page">
       {!showDetails && (
         <>
-          <div className="ot-head">
+          <div className="ao-page-head">
+            <span className="ao-page-accent" aria-hidden="true" />
             <div>
-              <h1 className="ot-title">{pageTitle}</h1>
-              {/* <p className="ot-subtitle">{pageSubtitle}</p> */}
+              <h1 className="ao-page-title">{pageTitle}</h1>
+              <p className="ao-page-subtitle">View and Track orders</p>
             </div>
           </div>
 
@@ -463,16 +466,13 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
               <thead>
                 <tr>
                   <th>Order ID</th>
-                  <th>FOC</th>
-              {/* <th>Quotation No</th> */}
-                  <th>Card Code</th>
                   <th>Card Name</th>
+                  <th>Items</th>
+                  <th>FOC</th>
                   <th>Created At</th>
                   <th>Delivery Date</th>
                   <th>Status</th>
-                  <th>Details</th>
-                  {showTrackColumn && <th>Track</th>}
-                  <th>Download</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -488,7 +488,9 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
                 ) : paginatedOrders.length > 0 ? (
                   paginatedOrders.map((order) => (
                     <tr key={order.id} className={order.is_foc ? "ot-foc-row" : ""}>
-                      <td>{order.order_number}</td>
+                      <td className="ao-cell-id">{order.order_number}</td>
+                      <td className="ao-cell-name">{order.card_name}</td>
+                      <td>{order.items_count ?? order.items?.length ?? 0}</td>
                       <td>
                         {order.is_foc ? (
                           <span className="ot-foc-badge">FOC</span>
@@ -496,15 +498,6 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
                           <span className="ot-foc-empty">-</span>
                         )}
                       </td>
-                  {/* <td>
-                    {String(order.sap_doc_number || "").trim() ? (
-                      <span className="ot-badge" style={{ background: "#f8fafc", color: "#475569", border: "1px solid #e2e8f0" }}>
-                        {order.sap_doc_number}
-                      </span>
-                    ) : "—"}
-                  </td> */}
-                      <td>{order.card_code}</td>
-                      <td>{order.card_name}</td>
                       <td>{formatCreatedDateTime(order.created_at)}</td>
                       <td>{order.delivery_date}</td>
                       <td>
@@ -513,21 +506,19 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
                         </span>
                       </td>
                       <td>
-                        <button type="button" className="ao-btn-icon view" onClick={() => fetchOrderDetails(order.id)}>
-                         <HiEye size={22} />
-                        </button>
-                      </td>
-                      {showTrackColumn && (
-                        <td>
-                          <button type="button" className="ao-btn-icon track" onClick={() => handleTrack(order)} title="Track Order">
-                            <HiArrowPath size={22} />
+                        <div className="ao-row-actions">
+                          <button type="button" className="ao-btn-icon view" onClick={() => fetchOrderDetails(order.id)} title="View Order">
+                            <HiEye size={20} />
                           </button>
-                        </td>
-                      )}
-                      <td>
-                        <button type="button" className="ao-btn-icon download" onClick={() => downloadExcel(order)}>
-                           <HiArrowDownTray size={22} />
-                        </button>
+                          {showTrackColumn && (
+                            <button type="button" className="ao-btn-icon track" onClick={() => handleTrack(order)} title="Track Order">
+                              <HiArrowPath size={20} />
+                            </button>
+                          )}
+                          <button type="button" className="ao-btn-icon download" onClick={() => downloadExcel(order)} title="Download Order">
+                            <HiArrowDownTray size={20} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -567,124 +558,32 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
       )}
 
       {showDetails && orderDetails && (
-        <div className="ot-detail">
-          <div className="ot-detail-nav">
-            <button type="button" className="ot-back-btn" onClick={() => setShowDetails(false)}>
+        <div className="ao-detail ot-detail-scope">
+          <div className="ao-d-nav">
+            <button type="button" className="ao-d-back" onClick={() => setShowDetails(false)}>
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M10 13L5 8l5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
               Back to Tracking
             </button>
-            <button type="button" className="ot-export-btn" onClick={() => downloadExcel(orderDetails)}>
-              Export Excel
-            </button>
-          </div>
-
-          <div className="ot-detail-card">
-            <div className="ot-detail-grid">
-              <div className="ot-detail-field ot-detail-span2">
-                <span className="ot-detail-label">Order Number</span>
-                <div className="ot-detail-order-row">
-                  <span className="ot-detail-number">{orderDetails.order_number}</span>
-                  {orderDetails.is_foc ? <span className="ot-foc-badge ot-foc-badge-detail">FOC ORDER</span> : null}
-                  <span className={`ot-badge ot-badge-${normalizeStatusClass(orderDetails.status_display || "unknown")}`}>
-                    {orderDetails.status_display || "Unknown"}
-                  </span>
-                </div>
-              </div>
-              <div className="ot-detail-field">
-                <span className="ot-detail-label">Party State</span>
-                <span className="ot-detail-value">{orderDetails.party_state || "—"}</span>
-              </div>
-              <div className="ot-detail-field">
-                <span className="ot-detail-label">Punched By</span>
-                <span className="ot-detail-value">{orderDetails.created_by_name || "—"}</span>
-              </div>
-              <div className="ot-detail-field">
-                <span className="ot-detail-label">Created At</span>
-                <span className="ot-detail-value">{formatCreatedDateTime(orderDetails.created_at)}</span>
-              </div>
-              <div className="ot-detail-field">
-                <span className="ot-detail-label">Delivery Date</span>
-                <span className="ot-detail-value">{orderDetails.delivery_date || "—"}</span>
-              </div>
-              <div className="ot-detail-field">
-                <span className="ot-detail-label">PO Number</span>
-                <span className="ot-detail-value">{orderDetails.po_number || "—"}</span>
-              </div>
-              <div className="ot-detail-field">
-                <span className="ot-detail-label">Party Name</span>
-                <span className="ot-detail-value">{orderDetails.card_name || "—"}</span>
-              </div>
-              <div className="ot-detail-field">
-                <span className="ot-detail-label">Card Code</span>
-                <span className="ot-detail-value">{orderDetails.card_code || "—"}</span>
-              </div>
-              <div className="ot-detail-field">
-                <span className="ot-detail-label">Bill To</span>
-                <span className="ot-detail-value">{orderDetails.bill_to_address || "—"}</span>
-              </div>
-              <div className="ot-detail-field">
-                <span className="ot-detail-label">Ship To</span>
-                <span className="ot-detail-value">{orderDetails.ship_to_address || "—"}</span>
-              </div>
-              {(isCompletedOrder || hasQuotationNumber) && (
-                <div className="ot-detail-field">
-                  <span className="ot-detail-label">Quotation No</span>
-                  <span className="ot-detail-value">{String(orderDetails.sap_doc_number || "").trim() || "—"}</span>
-                </div>
-              )}
+            <div className="ao-d-actions">
+              <button type="button" className="ao-d-export" onClick={() => downloadExcel(orderDetails)}>
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1v8m0 0L4 6.5M7 9l3-2.5M2.5 12h9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                Export Excel
+              </button>
             </div>
           </div>
 
-          <div className="ot-items-card">
-            <div className="ot-items-head">
-              <span className="ot-items-title">Items</span>
-              <span className="ot-items-count">{selectedItems.length}</span>
-              <span className="ot-items-title" style={{ marginLeft: "auto", marginRight: "16px" }}>
+          <PartyHeader order={orderDetails} />
+
+          <div className="ao-d-items">
+            <div className="ao-d-items-head">
+              <span className="ao-d-items-title">Items</span>
+              <span className="ao-d-items-count">{selectedItems.length}</span>
+              <span className="ao-d-items-title" style={{ marginLeft: "auto", marginRight: "16px" }}>
                 Total Ltrs: {totalLtrs.toFixed(2)}
               </span>
             </div>
-            <div className="ot-items-scroll">
-              {selectedItems.length > 0 ? (
-                <div className="order-detail-card-list">
-                  {selectedItems.map((item, index) => {
-                    const schemes = getOrderItemSchemes(item);
-
-                    return (
-                      <article className="order-detail-item-card" key={`${item.item_code}-detail-card-${index}`}>
-                        <div className="order-detail-item-top">
-                          <span className="order-detail-item-index">Item {index + 1}</span>
-                          <span className="order-detail-item-code">{item.item_code}</span>
-                        </div>
-                        <div className="order-detail-item-main">
-                          <div className="order-detail-item-title-wrap">
-                            <span className="order-detail-label">Item Name</span>
-                            <h4 className="order-detail-item-title">{item.item_name}</h4>
-                          </div>
-                          <div className="order-detail-item-tags">
-                            <span className="order-detail-item-category">{item.category || "-"}</span>
-                            {schemes.map((scheme, schemeIndex) => (
-                              <span className="order-detail-scheme-chip" key={`${item.item_code}-scheme-card-${schemeIndex}`}>
-                                <em>Sch</em>{scheme.name || "-"} <strong>Qty {scheme.qty || 0}</strong>
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="order-detail-item-metrics">
-                          <div><span>Qty</span><strong>{item.qty}</strong></div>
-                          <div><span>Pcs</span><strong>{item.pcs}</strong></div>
-                          <div><span>Boxes</span><strong>{Number(item.boxes).toFixed(2)}</strong></div>
-                          <div><span>Ltrs</span><strong>{item.ltrs}</strong></div>
-                          {schemes.length > 0 ? <div><span>Total Ltrs</span><strong>{getOrderItemTotalLtrs(item).toFixed(2)}</strong></div> : null}
-                          <div><span>Price List (Basic)</span><strong>{Number(item.price_list_basic).toFixed(2)}</strong></div>
-                          <div><span>Basic Price</span><strong>{Number(item.basic_price).toFixed(2)}</strong></div>
-                          <div className="order-detail-item-amount"><span>Amount</span><strong>{Number(item.total).toFixed(2)}</strong></div>
-                        </div>
-                      </article>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="order-detail-empty">No items found.</div>
-              )}
+            <div className="ao-d-items-scroll">
+              <ItemSection items={selectedItems} />
               <table className="ot-items-table">
                 <thead>
                   <tr>
@@ -752,31 +651,43 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
             </div>
           </div>
 
-          <div className="ot-summary-card">
-            <div className="ot-summary-row">
-              <span className="ot-summary-label">Total Ltrs</span>
-              <span className="ot-summary-value">{totalLtrs.toFixed(2)}</span>
+          <div className="ao-d-summary">
+            <div className="ao-d-sum-row">
+              <span className="ao-d-sum-label">Total Ltrs</span>
+              <span className="ao-d-sum-val">{totalLtrs.toFixed(2)}</span>
             </div>
-            <div className="ot-summary-row">
-              <span className="ot-summary-label">Subtotal</span>
-              <span className="ot-summary-value">{subtotal.toFixed(2)}</span>
+            <div className="ao-d-sum-row">
+              <span className="ao-d-sum-label">Subtotal</span>
+              <span className="ao-d-sum-val">{subtotal.toFixed(2)}</span>
             </div>
-            <div className="ot-summary-row">
-              <span className="ot-summary-label">Tax</span>
-              <span className="ot-summary-value">{taxTotal.toFixed(2)}</span>
+            <div className="ao-d-sum-row">
+              <span className="ao-d-sum-label">Tax</span>
+              <span className="ao-d-sum-val">{taxTotal.toFixed(2)}</span>
             </div>
-            <div className="ot-summary-row ot-summary-row-grand">
-              <span className="ot-summary-label">Grand Total</span>
-              <span className="ot-summary-value">{grandTotal.toFixed(2)}</span>
+            {[
+              { label: "Commodity", value: orderDetails.vareity_cost?.commodity_price, cls: "vc-commodity" },
+              { label: "Other", value: orderDetails.vareity_cost?.other_total, cls: "vc-other" },
+              { label: "Premium", value: orderDetails.vareity_cost?.premium_total, cls: "vc-premium" },
+            ]
+              .filter((entry) => Number(entry.value) > 0)
+              .map((entry) => (
+                <div className="ao-d-sum-row" key={entry.label}>
+                  <span className={`ao-d-sum-label vc-pill ${entry.cls}`}>{entry.label}</span>
+                  <span className="ao-d-sum-val">{Number(entry.value).toFixed(2)}</span>
+                </div>
+              ))}
+            <div className="ao-d-sum-row ao-d-sum-grand">
+              <span className="ao-d-sum-label">Grand Total</span>
+              <span className="ao-d-sum-val">{grandTotal.toFixed(2)}</span>
             </div>
           </div>
 
           {/* Order Log Timeline */}
           {mode === "billing" && orderLogs.length > 0 && (
-            <div className="ot-items-card" style={{ marginTop: 16 }}>
-              <div className="ot-items-head">
-                <span className="ot-items-title">Order Log Timeline</span>
-                <span className="ot-items-count">{buildOrderTimelineLogs(orderLogs, orderDetails).length}</span>
+            <div className="ao-d-items" style={{ marginTop: 16 }}>
+              <div className="ao-d-items-head">
+                <span className="ao-d-items-title">Order Log Timeline</span>
+                <span className="ao-d-items-count">{buildOrderTimelineLogs(orderLogs, orderDetails).length}</span>
               </div>
               <div style={{ padding: "20px 24px" }}>
                 {buildOrderTimelineLogs(orderLogs, orderDetails)
