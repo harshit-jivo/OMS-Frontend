@@ -37,6 +37,7 @@ export interface GenerateResponse {
   result?: IrnResult;
   record_id?: number;
   persistence_warning?: string;
+  test_warning?: string;
   error?: string;
   errors?: unknown;
   validation_errors?: ValidationError[];

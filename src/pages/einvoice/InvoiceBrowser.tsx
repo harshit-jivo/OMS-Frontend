@@ -23,6 +23,7 @@ export default function InvoiceBrowser() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [warning, setWarning] = useState("");
   const [busyDoc, setBusyDoc] = useState<number | null>(null);
   const [qrIrn, setQrIrn] = useState<string | null>(null);
 
@@ -62,10 +63,12 @@ export default function InvoiceBrowser() {
     setBusyDoc(docentry);
     setError("");
     setNotice("");
+    setWarning("");
     try {
       const resp = await einvoiceService.generateFromInvoice(docentry, { companyDb: companyDb.trim() || undefined });
       if (resp.result?.Irn) setNotice(`IRN generated for DocEntry ${docentry}.`);
       else if (resp.error) setError(`DocEntry ${docentry}: ${resp.error}`);
+      if (resp.test_warning) setWarning(resp.test_warning);
       await load();
     } catch (err) {
       const e = err as { response?: { data?: { error?: string } } };
@@ -115,6 +118,11 @@ export default function InvoiceBrowser() {
 
       <ErrorAlert>{error}</ErrorAlert>
       <SuccessAlert>{notice}</SuccessAlert>
+      {warning ? (
+        <div className="nic-alert nic-alert--err" style={{ marginTop: 10, fontWeight: 600 }}>
+          <span>{warning}</span>
+        </div>
+      ) : null}
 
       {qrIrn ? (
         <div className="nic-result">

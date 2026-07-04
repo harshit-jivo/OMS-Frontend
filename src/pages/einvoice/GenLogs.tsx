@@ -102,6 +102,11 @@ export default function GenLogs() {
                       {log.irn ? (
                         <span className="nic-mono" title={log.irn}>{log.irn.slice(0, 18)}…</span>
                       ) : null}
+                      {log.outcome === "SUCCESS" && log.error_message ? (
+                        <div className="nic-note" style={{ marginTop: log.irn ? 4 : 0, color: "#dc2626", fontWeight: 600 }}>
+                          {log.error_message}
+                        </div>
+                      ) : null}
                       {log.outcome !== "SUCCESS" && (log.error_code || log.error_message) ? (
                         <div className="nic-note" style={{ marginTop: log.irn ? 4 : 0 }}>
                           {log.error_code ? <code style={{ marginRight: 6 }}>{log.error_code}</code> : null}

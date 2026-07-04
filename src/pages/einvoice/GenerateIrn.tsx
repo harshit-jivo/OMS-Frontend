@@ -133,6 +133,11 @@ export default function GenerateIrn() {
           <SuccessAlert>
             IRN generated successfully{genResp?.company_db ? ` (from ${genResp.company_db})` : ""}.
           </SuccessAlert>
+          {genResp?.test_warning ? (
+            <div className="nic-alert nic-alert--err" style={{ marginTop: 10, fontWeight: 600 }}>
+              <span>{genResp.test_warning}</span>
+            </div>
+          ) : null}
           <KeyValues
             items={[
               ["IRN", <span className="nic-mono">{result.Irn}</span>],
