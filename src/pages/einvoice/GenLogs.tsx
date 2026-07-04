@@ -99,14 +99,15 @@ export default function GenLogs() {
                     <td>{log.attempt_no}</td>
                     <td><StatusBadge tone={tone(log.outcome)}>{log.outcome}</StatusBadge></td>
                     <td>
-                      {log.outcome === "SUCCESS" ? (
-                        <span className="nic-mono">{(log.irn || "").slice(0, 18)}…</span>
-                      ) : (
-                        <span>
+                      {log.irn ? (
+                        <span className="nic-mono" title={log.irn}>{log.irn.slice(0, 18)}…</span>
+                      ) : null}
+                      {log.outcome !== "SUCCESS" && (log.error_code || log.error_message) ? (
+                        <div className="nic-note" style={{ marginTop: log.irn ? 4 : 0 }}>
                           {log.error_code ? <code style={{ marginRight: 6 }}>{log.error_code}</code> : null}
                           {log.error_message}
-                        </span>
-                      )}
+                        </div>
+                      ) : null}
                     </td>
                     <td style={{ whiteSpace: "nowrap" }}>
                       {log.validation_errors?.length ? (
@@ -115,7 +116,7 @@ export default function GenLogs() {
                           Details
                         </button>
                       ) : null}
-                      {log.outcome !== "SUCCESS" ? (
+                      {log.outcome !== "SUCCESS" && !log.irn ? (
                         <button className="ofs-primary" style={{ minHeight: 30, padding: "0 10px", fontSize: 11, marginLeft: 6 }}
                           onClick={() => void retry(log)} disabled={retrying === log.id}>
                           <HiArrowPath style={{ verticalAlign: "-2px", marginRight: 4 }} />
