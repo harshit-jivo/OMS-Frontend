@@ -4,13 +4,14 @@ import { einvoiceService } from "../../services/einvoiceService";
 import type { FromInvoicePreview, GenerateResponse, IrnResult } from "../../services/einvoiceService";
 import {
   NicField, KeyValues, JsonView, ValidationList, ErrorAlert, SuccessAlert,
-  StatusBadge, apiErrorMessage,
+  StatusBadge, apiErrorMessage, CompanyDbSelect,
 } from "../../components/NicUI";
 import QrViewer from "../../components/QrViewer";
 
 export default function GenerateIrn() {
   const [docentry, setDocentry] = useState("");
-  const [companyDb, setCompanyDb] = useState("");
+  const [idType, setIdType] = useState<"docentry" | "docnum">("docentry");
+  const [companyDb, setCompanyDb] = useState("JIVO_OIL_HANADB");
   const [preview, setPreview] = useState<FromInvoicePreview | null>(null);
   const [result, setResult] = useState<IrnResult | null>(null);
   const [genResp, setGenResp] = useState<GenerateResponse | null>(null);
@@ -24,12 +25,14 @@ export default function GenerateIrn() {
     setError("");
   };
 
+  const idLabel = idType === "docnum" ? "Doc Number" : "DocEntry";
+
   const doPreview = async () => {
-    if (!docentry.trim()) return setError("Enter a SAP invoice DocEntry.");
+    if (!docentry.trim()) return setError(`Enter a SAP invoice ${idLabel}.`);
     reset();
     setBusy("preview");
     try {
-      setPreview(await einvoiceService.previewFromInvoice(docentry.trim(), companyDb.trim() || undefined));
+      setPreview(await einvoiceService.previewFromInvoice(docentry.trim(), companyDb.trim() || undefined, idType));
     } catch (err) {
       setError(apiErrorMessage(err));
     } finally {
@@ -38,13 +41,14 @@ export default function GenerateIrn() {
   };
 
   const doGenerate = async () => {
-    if (!docentry.trim()) return setError("Enter a SAP invoice DocEntry.");
+    if (!docentry.trim()) return setError(`Enter a SAP invoice ${idLabel}.`);
     setError("");
     setResult(null);
     setBusy("generate");
     try {
       const resp = await einvoiceService.generateFromInvoice(docentry.trim(), {
         companyDb: companyDb.trim() || undefined,
+        idType,
       });
       setGenResp(resp);
       if (resp.result?.Irn) setResult(resp.result);
@@ -69,18 +73,28 @@ export default function GenerateIrn() {
         <h2>Generate IRN from SAP Invoice</h2>
       </div>
       <p className="nic-note">
-        Enter a SAP invoice <strong>DocEntry</strong> (OINV). Preview maps and validates it without
-        calling NIC; Generate registers the IRN and stores the signed invoice + QR.
+        Look up a SAP invoice by <strong>DocEntry</strong> (internal key) or <strong>Doc Number</strong>
+        (the visible invoice no.). Preview maps and validates it without calling NIC; Generate registers
+        the IRN and stores the signed invoice + QR.
       </p>
 
       <div className="nic-form-grid" style={{ marginTop: 14 }}>
-        <NicField label="Invoice DocEntry" hint="OINV DocEntry (e.g. 76038)">
-          <input className="nic-input" value={docentry} inputMode="numeric"
-            onChange={(e) => setDocentry(e.target.value)} placeholder="76038" />
+        <NicField label="Look up by">
+          <select className="nic-select" value={idType}
+            onChange={(e) => setIdType(e.target.value as "docentry" | "docnum")}>
+            <option value="docentry">DocEntry (internal key)</option>
+            <option value="docnum">Doc Number (visible no.)</option>
+          </select>
         </NicField>
-        <NicField label="Company DB (optional)" hint="Defaults to the server's configured company">
-          <input className="nic-input" value={companyDb}
-            onChange={(e) => setCompanyDb(e.target.value)} placeholder="JIVO_OIL_HANADB" />
+        <NicField label={`Invoice ${idLabel}`}
+          hint={idType === "docnum" ? "Visible invoice no. (e.g. 626070166)" : "OINV DocEntry (e.g. 76038)"}>
+          <input className="nic-input" value={docentry} inputMode="numeric"
+            onChange={(e) => setDocentry(e.target.value)}
+            placeholder={idType === "docnum" ? "626070166" : "76038"} />
+        </NicField>
+        <NicField label="Company DB"
+          hint={idType === "docnum" ? "Tried first; other DBs are searched if not found here" : undefined}>
+          <CompanyDbSelect value={companyDb} onChange={setCompanyDb} />
         </NicField>
       </div>
 
@@ -116,7 +130,9 @@ export default function GenerateIrn() {
       {/* success block */}
       {result ? (
         <div className="nic-result">
-          <SuccessAlert>IRN generated successfully.</SuccessAlert>
+          <SuccessAlert>
+            IRN generated successfully{genResp?.company_db ? ` (from ${genResp.company_db})` : ""}.
+          </SuccessAlert>
           <KeyValues
             items={[
               ["IRN", <span className="nic-mono">{result.Irn}</span>],
@@ -124,6 +140,7 @@ export default function GenerateIrn() {
               ["Ack Date", result.AckDt],
               ["Status", result.Status],
               ["EWB No", result.EwbNo],
+              ["Company DB", genResp?.company_db],
               ["Record ID", genResp?.record_id],
             ]}
           />

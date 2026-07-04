@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { HiMagnifyingGlass, HiBolt } from "react-icons/hi2";
 import { einvoiceService } from "../../services/einvoiceService";
 import type { InvoiceListItem } from "../../services/einvoiceService";
-import { NicField, StatusBadge, ErrorAlert, SuccessAlert, apiErrorMessage } from "../../components/NicUI";
+import { NicField, StatusBadge, ErrorAlert, SuccessAlert, apiErrorMessage, CompanyDbSelect } from "../../components/NicUI";
 import QrViewer from "../../components/QrViewer";
 
 // Session-level cache so the list + filters survive tab switches / revisits.
@@ -94,8 +94,7 @@ export default function InvoiceBrowser() {
 
       <div className="nic-form-grid" style={{ marginTop: 12 }}>
         <NicField label="Company DB">
-          <input className="nic-input" value={companyDb} onChange={(e) => setCompanyDb(e.target.value)}
-            placeholder="JIVO_OIL_HANADB" />
+          <CompanyDbSelect value={companyDb} onChange={setCompanyDb} />
         </NicField>
         <NicField label="Search" hint="DocNum or customer name">
           <input className="nic-input" value={search} onChange={(e) => setSearch(e.target.value)}

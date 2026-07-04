@@ -33,6 +33,7 @@ export interface ValidationError {
 
 export interface GenerateResponse {
   docentry?: number;
+  company_db?: string;
   result?: IrnResult;
   record_id?: number;
   persistence_warning?: string;
@@ -90,20 +91,27 @@ export const einvoiceService = {
   token: async () => (await api.post("einvoice/token/")).data,
   heartbeat: async () => (await api.get("einvoice/heartbeat/")).data,
 
-  /* --- IRN from a SAP invoice (OINV DocEntry) --- */
-  previewFromInvoice: async (docentry: number | string, companyDb?: string) => {
-    const params = companyDb ? { company_db: companyDb } : {};
-    return (await api.get<FromInvoicePreview>(`einvoice/irn/from-invoice/${docentry}/`, { params })).data;
+  /* --- IRN from a SAP invoice (by DocEntry or DocNum) --- */
+  previewFromInvoice: async (
+    identifier: number | string,
+    companyDb?: string,
+    idType: "docentry" | "docnum" = "docentry"
+  ) => {
+    const params: Record<string, string> = {};
+    if (companyDb) params.company_db = companyDb;
+    if (idType === "docnum") params.id_type = "docnum";
+    return (await api.get<FromInvoicePreview>(`einvoice/irn/from-invoice/${identifier}/`, { params })).data;
   },
   generateFromInvoice: async (
-    docentry: number | string,
-    opts: { companyDb?: string; orderId?: number; source?: string } = {}
+    identifier: number | string,
+    opts: { companyDb?: string; orderId?: number; source?: string; idType?: "docentry" | "docnum" } = {}
   ) => {
     const params: Record<string, string | number> = {};
     if (opts.companyDb) params.company_db = opts.companyDb;
     if (opts.orderId) params.order_id = opts.orderId;
     if (opts.source) params.source = opts.source;
-    return (await api.post<GenerateResponse>(`einvoice/irn/from-invoice/${docentry}/`, {}, { params })).data;
+    if (opts.idType === "docnum") params.id_type = "docnum";
+    return (await api.post<GenerateResponse>(`einvoice/irn/from-invoice/${identifier}/`, {}, { params })).data;
   },
 
   /* --- IRN by raw payload --- */

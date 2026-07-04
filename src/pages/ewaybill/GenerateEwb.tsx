@@ -4,6 +4,7 @@ import { ewaybillService } from "../../services/ewaybillService";
 import type { EwbFromInvoicePreview, EwbGenerateResponse, TransportOverrides } from "../../services/ewaybillService";
 import {
   NicField, KeyValues, JsonView, ValidationList, ErrorAlert, SuccessAlert, StatusBadge, apiErrorMessage,
+  CompanyDbSelect,
 } from "../../components/NicUI";
 import DateInput from "../../components/DateInput";
 
@@ -11,7 +12,7 @@ const TRANS_MODES = [["", "—"], ["1", "1 — Road"], ["2", "2 — Rail"], ["3"
 
 export default function GenerateEwb() {
   const [docentry, setDocentry] = useState("");
-  const [companyDb, setCompanyDb] = useState("");
+  const [companyDb, setCompanyDb] = useState("JIVO_OIL_HANADB");
   const [mode, setMode] = useState("auto");
   const [t, setT] = useState<TransportOverrides>({ transDistance: 0, transMode: "1", vehicleType: "R" });
   const [preview, setPreview] = useState<EwbFromInvoicePreview | null>(null);
@@ -81,9 +82,8 @@ export default function GenerateEwb() {
           <input className="nic-input" value={docentry} inputMode="numeric"
             onChange={(e) => setDocentry(e.target.value)} placeholder="76029" />
         </NicField>
-        <NicField label="Company DB (optional)">
-          <input className="nic-input" value={companyDb} onChange={(e) => setCompanyDb(e.target.value)}
-            placeholder="JIVO_OIL_HANADB" />
+        <NicField label="Company DB">
+          <CompanyDbSelect value={companyDb} onChange={setCompanyDb} />
         </NicField>
         <NicField label="Mode">
           <select className="nic-select" value={mode} onChange={(e) => setMode(e.target.value)}>

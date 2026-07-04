@@ -20,6 +20,22 @@ export function NicField({ label, hint, children, full }: FieldProps) {
   );
 }
 
+/* ---- Company DB dropdown (shared across e-Invoice / e-Way Bill) ---- */
+export const COMPANY_DBS = [
+  "Jivo_All_Branches_Live",
+  "JIVO_BEVERAGES_HANADB",
+  "JIVO_OIL_HANADB",
+  "TEST_OIL_15122025",
+] as const;
+
+export function CompanyDbSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <select className="nic-select" value={value} onChange={(e) => onChange(e.target.value)}>
+      {COMPANY_DBS.map((db) => <option key={db} value={db}>{db}</option>)}
+    </select>
+  );
+}
+
 /* ---- Status badge ---- */
 export function StatusBadge({ tone, children }: { tone: "ok" | "err" | "warn" | "muted"; children: ReactNode }) {
   return <span className={`nic-badge nic-badge--${tone}`}>{children}</span>;
