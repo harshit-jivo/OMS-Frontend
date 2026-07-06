@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { loginUser } from "../services/authService";
+import { resolveStartupSession } from "../services/api";
 import "../styles/Login.css";
 
 type ToastProps = {
@@ -86,10 +87,23 @@ export default function Login() {
 
   const navigate = useNavigate();
 
+  // If a valid session already exists (or an expired access token can be
+  // silently refreshed), skip the Login screen and go straight into the app.
+  // We NEVER clear tokens here — opening Login must not affect any tab.
   useEffect(() => {
-    localStorage.removeItem("access");
-    localStorage.removeItem("refresh");
-  }, []);
+    let cancelled = false;
+    (async () => {
+      const outcome = await resolveStartupSession();
+      if (cancelled || outcome !== "authenticated") return;
+      const role = (localStorage.getItem("role") || "").toLowerCase();
+      const landing = role === "legal" ? "/Label_Checker" : "/Dashboard";
+      navigate(landing, { replace: true });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [navigate]);
+
   const [username, setUsername] = useState<string>("");
   const [password, setPassword] = useState<string>("");
   const [showPass, setShowPass] = useState<boolean>(false);
@@ -104,6 +118,16 @@ export default function Login() {
     setToast({ message, type });
 
   const closeToast = () => setToast(null);
+
+  // Surface the "session expired" message set by the API layer when a refresh
+  // fails and the user is bounced back to login (Task 5).
+  useEffect(() => {
+    const expiredMessage = sessionStorage.getItem("session_expired");
+    if (expiredMessage) {
+      sessionStorage.removeItem("session_expired");
+      showToast(expiredMessage, "error");
+    }
+  }, []);
   
 const handleLogin = async () => {
 
