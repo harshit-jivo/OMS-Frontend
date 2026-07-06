@@ -2423,10 +2423,10 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
 
   return (
     <div className="sl-page app-page">
-      <div className="sl-header app-page-head">
-        <div>
-          <h1 className="sl-title app-page-title">
-            {isEditMode
+      <div className="bo-page-head">
+            <span className="bo-page-accent" aria-hidden="true" />
+            <div>
+              <h1 className="bo-page-title"> {isEditMode
               ? isFocOrder
                 ? "Edit FOC Order"
                 : "Edit Sales Order"
@@ -2436,10 +2436,27 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
                   : "Duplicate Sales Order"
                 : isFocMode
                   ? "FOC Order"
-                  : "Add Sales Order"}
-          </h1>
-        </div>
+                  : "Add Sales Order"}</h1>
+              <p className="bo-page-subtitle">Add / Edit Sales Orders.</p>
+            </div>
       </div>
+        {/* <div className="sl-header app-page-head">
+          <div>
+            <h1 className="sl-title app-page-title">
+              {isEditMode
+                ? isFocOrder
+                  ? "Edit FOC Order"
+                  : "Edit Sales Order"
+                : isDuplicateMode
+                  ? isFocOrder
+                    ? "Duplicate FOC Order"
+                    : "Duplicate Sales Order"
+                  : isFocMode
+                    ? "FOC Order"
+                    : "Add Sales Order"}
+            </h1>
+          </div>
+        </div> */}
 
       {isEditMode && isLoadingEditOrder && (
         <div className="sl-section-label">
