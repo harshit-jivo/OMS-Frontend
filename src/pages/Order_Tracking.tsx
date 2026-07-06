@@ -2,8 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { ordersService } from "../services/ordersService";
 import type { Order, OrderLog } from "../services/ordersService";
-import { loadCurrentUserOrders } from "../utils/orderHistory";
-import { HiPencilSquare } from "react-icons/hi2";
+import { loadCurrentUserOrderSummaries } from "../utils/orderHistory";
 import "../styles/Order_Tracking.css";
 
 const formatCreatedDateTime = (value?: string | null) => {
@@ -18,18 +17,6 @@ const formatCreatedDateTime = (value?: string | null) => {
     minute: "2-digit",
   });
 };
-
-const toDateInput = (date: Date) =>
-  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
-    date.getDate(),
-  ).padStart(2, "0")}`;
-
-// Default the tracker to the current month: 1st of this month -> today.
-const currentMonthStart = () => {
-  const now = new Date();
-  return toDateInput(new Date(now.getFullYear(), now.getMonth(), 1));
-};
-const today = () => toDateInput(new Date());
 
 const getLogTime = (log: Pick<OrderLog, "created_at">) => {
   const time = new Date(log.created_at || "").getTime();
@@ -59,8 +46,6 @@ export default function Order_Tracking() {
   const [tracker, setTracker] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [statusFilter, setStatusFilter] = useState("");
-  const [fromDate, setFromDate] = useState(currentMonthStart);
-  const [toDate, setToDate] = useState(today);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
   
@@ -71,12 +56,8 @@ export default function Order_Tracking() {
   const fetchOrders = async () => {
     try {
       setLoading(true);
-      const data = await loadCurrentUserOrders();
-      // Drafts live on the dedicated Drafts page, not in the order tracker.
-      const withoutDrafts = (data || []).filter(
-        (order) => String(order.status_display || "").trim().toLowerCase() !== "draft",
-      );
-      setOrders(withoutDrafts);
+      const data = await loadCurrentUserOrderSummaries();
+      setOrders(data || []);
     } catch (error) {
       console.log("Error fetching orders:", error);
       setOrders([]);
@@ -101,20 +82,10 @@ export default function Order_Tracking() {
   }, [orders]);
 
   const filteredOrders = useMemo(() => {
-    // Date range is matched against the order's created date (local day).
-    const fromTime = fromDate ? new Date(`${fromDate}T00:00:00`).getTime() : null;
-    const toTime = toDate ? new Date(`${toDate}T23:59:59.999`).getTime() : null;
-
     return orders
       .filter((order) => {
-        if (statusFilter && order.status_display !== statusFilter) {
-          return false;
-        }
-        if (fromTime !== null || toTime !== null) {
-          const created = new Date(order.created_at || "").getTime();
-          if (Number.isNaN(created)) return false;
-          if (fromTime !== null && created < fromTime) return false;
-          if (toTime !== null && created > toTime) return false;
+        if (statusFilter) {
+          return order.status_display === statusFilter;
         }
         return true;
       })
@@ -130,7 +101,7 @@ export default function Order_Tracking() {
 
         return first - second;
       });
-  }, [orders, statusFilter, fromDate, toDate]);
+  }, [orders, statusFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filteredOrders.length / itemsPerPage));
   const paginatedOrders = useMemo(
@@ -140,7 +111,7 @@ export default function Order_Tracking() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [statusFilter, fromDate, toDate]);
+  }, [statusFilter]);
 
   useEffect(() => {
     if (currentPage > totalPages) {
@@ -317,7 +288,6 @@ export default function Order_Tracking() {
         combined.includes("accepted") ||
         combined.includes("complete") ||
         combined.includes("sent to auditor") ||
-        combined.includes("edited by") ||
         (hasRealPerformer && statusName.includes("rate"))
       );
     };
@@ -549,11 +519,6 @@ export default function Order_Tracking() {
     return statusName.includes("billing") && remarks.includes("sent to auditor");
   };
 
-  const isEditedLog = (log: OrderLog) => {
-    const remarks = String(log.remarks || "").toLowerCase();
-    return remarks.includes("edited by manager") || remarks.includes("edited by billing");
-  };
-
   const isBillingAcceptedLog = (log: OrderLog) => {
     const statusName = String(log.status_name || "").toLowerCase();
     const remarks = String(log.remarks || "").toLowerCase();
@@ -580,16 +545,6 @@ export default function Order_Tracking() {
     const performer = String(log.performed_by_name || "").trim().toLowerCase();
     const hasRealPerformer =
       performer && performer !== "pending" && performer !== "system";
-    if (remarks.includes("edited by")) {
-      const roleMatch = remarks.match(/edited by\s+([a-z_]+)/);
-      const role = roleMatch
-        ? roleMatch[1].charAt(0).toUpperCase() + roleMatch[1].slice(1)
-        : "";
-      const base = remarks.includes("rejected")
-        ? "Rejected Order Edited"
-        : "Order Edited";
-      return role ? `${base} by ${role}` : base;
-    }
     const isRejected = statusName.includes("reject");
     const isAccepted =
       statusName === "approved" ||
@@ -723,13 +678,22 @@ export default function Order_Tracking() {
   };
 
   const handleTrack = async (order: Order) => {
+    // Show the summary immediately; fetch full details (po_number, remarks,
+    // rate_approvals) and logs on demand now that the list load is summary-only.
     setSelectedOrder(order);
     setTracker(true);
     setLogs([]);
     setLogsLoading(true);
 
     try {
-      const response = await ordersService.getOrderLogs(order.id);
+      const [details, response] = await Promise.all([
+        ordersService.getOrderDetails(order.id).catch((error) => {
+          console.log("Error fetching order details:", error);
+          return null;
+        }),
+        ordersService.getOrderLogs(order.id),
+      ]);
+      if (details) setSelectedOrder(details);
       setLogs(Array.isArray(response) ? response : []);
     } catch (error) {
       console.log("Error fetching order logs:", error);
@@ -757,14 +721,17 @@ export default function Order_Tracking() {
 
   return (
     <div className="tracker-page">
-      <div className="tracker-head">
-        <h4>Order Tracker</h4>
-      </div>
+      <div className="ao-page-head">
+            <span className="ao-page-accent" aria-hidden="true" />
+            <div>
+              <h1 className="ao-page-title">Order tracker</h1>
+              <p className="ao-page-subtitle">Track History of Orders at various stages.</p>
+            </div>
+          </div>
 
       {!tracker && (
         <div>
           <div className="tracker-list-head">
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
@@ -789,65 +756,6 @@ export default function Order_Tracking() {
                 </option>
               ))}
             </select>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <label style={{ fontSize: 'var(--font-ui, 13px)', color: '#475569', fontWeight: 500 }}>From</label>
-              <input
-                type="date"
-                value={fromDate}
-                max={toDate || undefined}
-                onChange={(e) => setFromDate(e.target.value)}
-                style={{
-                  height: 'var(--input-h, 40px)',
-                  padding: '0 12px',
-                  borderRadius: 'var(--radius-sm, 8px)',
-                  border: '1px solid #cbd5e1',
-                  backgroundColor: '#fff',
-                  color: '#0f172a',
-                  fontSize: 'var(--font-ui, 13px)',
-                  outline: 'none',
-                }}
-              />
-              <label style={{ fontSize: 'var(--font-ui, 13px)', color: '#475569', fontWeight: 500 }}>To</label>
-              <input
-                type="date"
-                value={toDate}
-                min={fromDate || undefined}
-                onChange={(e) => setToDate(e.target.value)}
-                style={{
-                  height: 'var(--input-h, 40px)',
-                  padding: '0 12px',
-                  borderRadius: 'var(--radius-sm, 8px)',
-                  border: '1px solid #cbd5e1',
-                  backgroundColor: '#fff',
-                  color: '#0f172a',
-                  fontSize: 'var(--font-ui, 13px)',
-                  outline: 'none',
-                }}
-              />
-              {(fromDate || toDate) && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setFromDate("");
-                    setToDate("");
-                  }}
-                  style={{
-                    height: 'var(--input-h, 40px)',
-                    padding: '0 12px',
-                    borderRadius: 'var(--radius-sm, 8px)',
-                    border: '1px solid #cbd5e1',
-                    backgroundColor: '#fff',
-                    color: '#0f172a',
-                    cursor: 'pointer',
-                    fontSize: 'var(--font-ui, 13px)',
-                    fontWeight: 500,
-                  }}
-                >
-                  Clear
-                </button>
-              )}
-            </div>
-            </div>
             {!loading && (
               <span className="tracker-count">Total: {filteredOrders.length}</span>
             )}
@@ -864,19 +772,19 @@ export default function Order_Tracking() {
                 <thead>
                   <tr>
                     <th>Order ID</th>
-                    <th>FOC</th>
-                    <th>Card Code</th>
                     <th>Card Name</th>
+                    <th>FOC</th>
                     <th>Created At</th>
                     <th>Delivery Date</th>
                     <th>Status</th>
-                    <th>Tracker</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {paginatedOrders.map((order) => (
                       <tr key={order.id} className={order.is_foc ? "tracker-foc-row" : ""}>
-                        <td>{order.order_number}</td>
+                        <td className="ao-cell-id">{order.order_number}</td>
+                        <td className="ao-cell-name">{order.card_name}</td>
                         <td>
                           {order.is_foc ? (
                             <span className="tracker-foc-badge">FOC</span>
@@ -884,8 +792,6 @@ export default function Order_Tracking() {
                             <span className="tracker-foc-empty">-</span>
                           )}
                         </td>
-                        <td>{order.card_code}</td>
-                        <td>{order.card_name}</td>
                         <td>{formatCreatedDateTime(order.created_at)}</td>
                         <td>{order.delivery_date}</td>
                         <td>
@@ -900,7 +806,7 @@ export default function Order_Tracking() {
                           </span>
                         </td>
                         <td>
-                          <div style={{ display: "flex", gap: "8px" }}>
+                          <div className="ao-row-actions">
                             <button
                               type="button"
                               className="tracker-btn"
@@ -1039,9 +945,7 @@ export default function Order_Tracking() {
                   <div key={log.id} className="tracker-timeline-row">
                     <div className="tracker-timeline-left">
                       <div className={`tracker-dot ${tone}`}>
-                        {isEditedLog(log)
-                          ? <HiPencilSquare aria-label="Edited" />
-                          : tone === "approved"
+                        {tone === "approved"
                           ? "✓"
                           : tone === "rejected"
                             ? "✕"

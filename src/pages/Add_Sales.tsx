@@ -173,6 +173,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
   const [editOrderIsDraft, setEditOrderIsDraft] = useState(false);
   const partyDropdownRef = useRef<HTMLDivElement>(null);
   const dispatchDropdownRef = useRef<HTMLDivElement>(null);
+  const dispatchInfoRef = useRef<HTMLDivElement>(null);
   const billDropdownRef = useRef<HTMLDivElement>(null);
   const shipDropdownRef = useRef<HTMLDivElement>(null);
   const companyDropdownRef = useRef<HTMLDivElement>(null);
@@ -190,10 +191,18 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
   });
 
   const [rows, setRows] = useState<SalesRow[]>([createEmptyRow()]);
+  const [currentStep, setCurrentStep] = useState(1);
+  const [dispatchInfoOpen, setDispatchInfoOpen] = useState(false);
+  const [itemModalIndex, setItemModalIndex] = useState<number | null>(null);
+  const [itemModalSnapshot, setItemModalSnapshot] = useState<SalesRow | null>(null);
+  const [itemModalIsNew, setItemModalIsNew] = useState(false);
   const isBillingUser = userRole.toLowerCase() === "billing";
   const isFocOrder = isFocMode || editOrderIsFoc;
   const canEditPoNumber =
     isBillingUser && (!isEditMode || locationState?.allowPoNumber === true);
+  // The guided 4-step wizard is only used for the standard create flow.
+  // Edit, Duplicate and FOC modes keep the original single-page form.
+  const useWizard = mode === "create" && !isFocMode && !isLoadingFromOrder;
 
   // Use Effects
   useEffect(() => {
@@ -285,6 +294,12 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
         !dispatchDropdownRef.current.contains(event.target as Node)
       ) {
         setDispatchDropdownOpen(false);
+      }
+      if (
+        dispatchInfoRef.current &&
+        !dispatchInfoRef.current.contains(event.target as Node)
+      ) {
+        setDispatchInfoOpen(false);
       }
       if (
         shipDropdownRef.current &&
@@ -717,6 +732,11 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
     setPartyProducts([]);
     setRows([{ ...createEmptyRow(), category: userDefaultCategory }]);
     setSchemeOptions({});
+    setCurrentStep(1);
+    setDispatchInfoOpen(false);
+    setItemModalIndex(null);
+    setItemModalSnapshot(null);
+    setItemModalIsNew(false);
   };
 
   const submitOrder = async () => {
@@ -1560,12 +1580,990 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
       </div>
     );
   };
+
+  // ---------------------------------------------------------------------------
+  // Wizard (standard create flow only) — reuses every handler above.
+  // ---------------------------------------------------------------------------
+  const chevronIcon = (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+      <path
+        d="M3 4.5L6 7.5L9 4.5"
+        stroke="#64748b"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+  const trashIcon = (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3 6h18" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M8 6V4.5A1.5 1.5 0 019.5 3h5A1.5 1.5 0 0116 4.5V6" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M19 6l-1 13a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M10 11v6M14 11v6" />
+    </svg>
+  );
+  const pencilIcon = (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4 12.5-12.5z" />
+    </svg>
+  );
+
+  const categoryOptions = category.map((c) => ({ value: c, label: c }));
+  const brandOptionsFor = (row: SalesRow) =>
+    [
+      ...new Set(
+        partyProducts.filter((p) => p.category === row.category).map((p) => p.brand),
+      ),
+    ].map((b) => ({ value: b ?? "", label: b || "Unknown" }));
+  const varietyOptionsFor = (row: SalesRow) =>
+    [
+      ...new Set(
+        partyProducts
+          .filter(
+            (p) =>
+              p.category === row.category && (p.brand || "") === (row.brand || ""),
+          )
+          .map((p) => p.variety),
+      ),
+    ].map((v) => ({ value: v ?? "", label: v || "Unknown" }));
+  const typeOptionsFor = (row: SalesRow) =>
+    [
+      ...new Set(
+        partyProducts
+          .filter(
+            (p) =>
+              p.category === row.category &&
+              (p.brand || "") === (row.brand || "") &&
+              (p.variety || "") === (row.variety || ""),
+          )
+          .map((p) => {
+            const match = p.item_name.match(/(\d+\.?\d*)\s*(LTR|ML|KG|GM|GMS|L)/i);
+            return match ? `${match[1]} ${match[2].toUpperCase()}` : "Others";
+          }),
+      ),
+    ]
+      .sort((a, b) => {
+        if (a === "Others") return 1;
+        if (b === "Others") return -1;
+        return parseFloat(a) - parseFloat(b);
+      })
+      .map((t) => ({ value: t, label: t }));
+  const itemOptionsFor = (row: SalesRow) =>
+    partyProducts
+      .filter(
+        (p) =>
+          p.category === row.category &&
+          (p.brand || "") === (row.brand || "") &&
+          (p.variety || "") === (row.variety || "") &&
+          (row.type ? getProductType(p.item_name) === row.type : true),
+      )
+      .map((p) => ({ value: p.item_name, label: p.item_name }));
+
+  const renderSchemePanel = (row: SalesRow, index: number) => (
+    <div className={`sl-scheme-panel${row.isScheme ? " is-active" : ""}`}>
+      <div className="sl-scheme-panel-head">
+        <div>
+          <div className="sl-scheme-eyebrow">Optional promotion</div>
+          <div className="sl-scheme-title">Add scheme to this item</div>
+        </div>
+        <div className="sl-scheme-toggle-compact">
+          <span className="sl-scheme-toggle-label">
+            {row.isScheme ? "Enabled" : "Disabled"}
+          </span>
+          <label className="sl-switch">
+            <input
+              type="checkbox"
+              checked={row.isScheme}
+              onChange={(e) => handleRowSchemeToggle(index, e.target.checked)}
+              disabled={row.confirmed}
+            />
+            <span className="sl-switch-slider" />
+          </label>
+        </div>
+      </div>
+
+      {row.isScheme && (
+        <div className="sl-scheme-panel-body">
+          <div className="sl-scheme-dropdown-field">
+            <div className="sl-scheme-table-head">
+              <span>Scheme</span>
+              <span>Qty</span>
+              <span>Action</span>
+            </div>
+            {(row.schemes.length ? row.schemes : [{ scheme: "", schemeQty: "" }]).map(
+              (schemeRow, schemeIndex) => (
+                <div className="sl-scheme-table-row" key={`${index}-${schemeIndex}`}>
+                  <select
+                    value={schemeRow.scheme}
+                    onChange={(e) =>
+                      handleSchemeChange(index, schemeIndex, "scheme", e.target.value)
+                    }
+                    disabled={row.confirmed || !(schemeOptions[index] || []).length}
+                  >
+                    <option value="">Select Scheme...</option>
+                    {(schemeOptions[index] || []).map((scheme) => (
+                      <option key={scheme.scheme_id} value={scheme.scheme_id}>
+                        {scheme.scheme_name}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="text"
+                    value={schemeRow.schemeQty}
+                    placeholder="0"
+                    onChange={(e) =>
+                      handleSchemeChange(index, schemeIndex, "schemeQty", e.target.value)
+                    }
+                    disabled={row.confirmed}
+                  />
+                  <button
+                    type="button"
+                    className="sl-remove-scheme-btn"
+                    onClick={() => handleRemoveScheme(index, schemeIndex)}
+                    disabled={row.confirmed}
+                    aria-label="Remove scheme"
+                    title="Remove scheme"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" d="M5 12h14" />
+                    </svg>
+                  </button>
+                </div>
+              ),
+            )}
+            <button
+              type="button"
+              className="sl-add-scheme-btn"
+              onClick={() => handleAddScheme(index)}
+              disabled={row.confirmed}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" d="M12 5v14M5 12h14" />
+              </svg>
+              Add Scheme
+            </button>
+          </div>
+
+          <div className="sl-scheme-total-card">
+            <span className="sl-scheme-field-label">Total Ltrs</span>
+            <input
+              type="text"
+              name="totalLtrs"
+              value={
+                row.schemes.length
+                  ? (
+                      Number(row.ltrs) +
+                      row.schemes.reduce(
+                        (sum, scheme) => sum + Number(scheme.schemeQty || 0),
+                        0,
+                      )
+                    ).toFixed(2)
+                  : Number(row.ltrs).toFixed(2)
+              }
+              readOnly
+            />
+            <small>Base ltrs plus selected scheme quantity</small>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const openAddItem = () => {
+    const existing = rows.findIndex((r) => !r.confirmed);
+    if (existing !== -1) {
+      setItemModalSnapshot(null);
+      setItemModalIsNew(true);
+      setItemModalIndex(existing);
+      return;
+    }
+    setRows((prev) => [
+      ...prev,
+      { ...createEmptyRow(), category: selectedPartyCategory || userDefaultCategory },
+    ]);
+    setItemModalSnapshot(null);
+    setItemModalIsNew(true);
+    setItemModalIndex(rows.length);
+  };
+
+  const openEditItem = (index: number) => {
+    setItemModalSnapshot(rows[index]);
+    setItemModalIsNew(false);
+    handleEditRow(index);
+    setItemModalIndex(index);
+  };
+
+  const confirmItemModal = () => {
+    if (itemModalIndex === null) return;
+    if (!isRowValid(rows[itemModalIndex])) {
+      alert("Please complete this item before confirming it.");
+      return;
+    }
+    handleConfirmRow(itemModalIndex);
+    setItemModalIndex(null);
+    setItemModalSnapshot(null);
+    setOpenRowDropdown(null);
+  };
+
+  const cancelItemModal = () => {
+    if (itemModalIndex === null) return;
+    const index = itemModalIndex;
+    if (itemModalIsNew) {
+      handleDeleteRow(index);
+    } else if (itemModalSnapshot) {
+      const snapshot = itemModalSnapshot;
+      setRows((prev) => prev.map((r, i) => (i === index ? snapshot : r)));
+    }
+    setItemModalIndex(null);
+    setItemModalSnapshot(null);
+    setOpenRowDropdown(null);
+  };
+
+  const renderItemModal = () => {
+    if (itemModalIndex === null) return null;
+    const row = rows[itemModalIndex];
+    if (!row) return null;
+    const index = itemModalIndex;
+
+    return (
+      <div className="sl-modal-overlay">
+        <div
+          className="sl-wiz-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label={itemModalIsNew ? "Add item" : "Edit item"}
+        >
+          <div className="sl-wiz-modal-head">
+            <div>
+              <div className="sl-wiz-eyebrow">{itemModalIsNew ? "Add item" : "Edit item"}</div>
+              <h3 className="sl-wiz-modal-title">{row.item || "Select a product"}</h3>
+            </div>
+            <button
+              type="button"
+              className="sl-wiz-icon-btn"
+              onClick={cancelItemModal}
+              aria-label="Close"
+              title="Close"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" />
+              </svg>
+            </button>
+          </div>
+
+          <div className="sl-wiz-modal-body">
+            <div className="sl-wiz-item-fields">
+              <div className="sl-wiz-input">
+                <label>Category</label>
+                {renderRowDropdown(index, "category", row.category, categoryOptions, false)}
+              </div>
+              <div className="sl-wiz-input">
+                <label>Brand</label>
+                {renderRowDropdown(index, "brand", row.brand, brandOptionsFor(row), false)}
+              </div>
+              <div className="sl-wiz-input">
+                <label>Sub Group</label>
+                {renderRowDropdown(index, "variety", row.variety, varietyOptionsFor(row), false)}
+              </div>
+              <div className="sl-wiz-input">
+                <label>Type</label>
+                {renderRowDropdown(index, "type", row.type, typeOptionsFor(row), false)}
+              </div>
+              <div className="sl-wiz-input sl-wiz-input-wide">
+                <label>Item</label>
+                {renderRowDropdown(index, "item", row.item, itemOptionsFor(row), false)}
+              </div>
+              <div className="sl-wiz-input">
+                <label>Boxes</label>
+                <input
+                  type="number"
+                  name="boxes"
+                  value={row.boxes}
+                  onChange={(e) => handleRowChange(index, e)}
+                />
+              </div>
+              <div className="sl-wiz-input">
+                <label>Qty</label>
+                <input
+                  type="number"
+                  name="qty"
+                  value={row.qty}
+                  onChange={(e) => handleRowChange(index, e)}
+                />
+              </div>
+              <div className="sl-wiz-input">
+                <label>Pcs</label>
+                <input type="number" value={row.pcs ? Number(row.pcs).toFixed(1) : ""} readOnly />
+              </div>
+              <div className="sl-wiz-input">
+                <label>Ltrs</label>
+                <input type="number" value={row.ltrs} readOnly />
+              </div>
+              <div className="sl-wiz-input">
+                <label>Price List</label>
+                <input type="number" value={row.priceListBasic} readOnly />
+              </div>
+              <div className="sl-wiz-input">
+                <label>Basic Price</label>
+                <input
+                  type="number"
+                  name="basicPrice"
+                  value={row.basicPrice}
+                  onChange={(e) => handleRowChange(index, e)}
+                />
+              </div>
+              <div className="sl-wiz-input">
+                <label>Tax %</label>
+                <input type="text" value={Number(row.tax).toFixed(2)} readOnly />
+              </div>
+              <div className="sl-wiz-input">
+                <label>Amount</label>
+                <input type="number" value={row.amount} readOnly />
+              </div>
+            </div>
+            {row.item && !isFocOrder && renderSchemePanel(row, index)}
+          </div>
+
+          <div className="sl-wiz-modal-foot">
+            <button
+              type="button"
+              className="sl-wiz-btn sl-wiz-btn-ghost"
+              onClick={cancelItemModal}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="sl-wiz-btn sl-wiz-btn-primary"
+              onClick={confirmItemModal}
+            >
+              {itemModalIsNew ? "Add Item" : "Save Changes"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderItemSummaryCard = (row: SalesRow, index: number) => (
+    <div className="sl-wiz-item-summary" key={`sum-${index}`}>
+      <div className="sl-wiz-item-summary-main">
+        <span className="sl-wiz-item-summary-name">{row.item || "Item"}</span>
+        <span className="sl-wiz-item-summary-meta">
+          {row.type ? `${row.type} · ` : ""}
+          {row.boxes ? `${row.boxes} box · ` : ""}
+          Qty {row.qty || 0}
+          {row.isScheme && row.schemes.some((s) => s.scheme) ? " · Scheme" : ""}
+        </span>
+      </div>
+      <span className="sl-wiz-item-summary-amount">₹ {Number(row.amount || 0).toFixed(2)}</span>
+      <div className="sl-wiz-item-summary-actions">
+        <button
+          type="button"
+          className="sl-wiz-icon-btn"
+          onClick={() => openEditItem(index)}
+          aria-label="Edit item"
+          title="Edit item"
+        >
+          {pencilIcon}
+        </button>
+        <button
+          type="button"
+          className="sl-wiz-icon-btn sl-wiz-danger"
+          onClick={() => handleDeleteRow(index)}
+          aria-label="Delete item"
+          title="Delete item"
+        >
+          {trashIcon}
+        </button>
+      </div>
+    </div>
+  );
+
+  const renderCombo = (config: {
+    refEl: React.RefObject<HTMLDivElement | null>;
+    open: boolean;
+    setOpen: (value: boolean) => void;
+    search: string;
+    setSearch: (value: string) => void;
+    selectedLabel: string;
+    placeholder: string;
+    children: React.ReactNode;
+  }) => (
+    <div
+      className={`sl-party-dropdown sl-combo${config.open ? " open" : ""}`}
+      ref={config.refEl}
+    >
+      <input
+        type="text"
+        className="sl-combo-input"
+        placeholder={config.placeholder}
+        value={config.open ? config.search : config.selectedLabel}
+        onChange={(e) => {
+          config.setSearch(e.target.value);
+          config.setOpen(true);
+        }}
+        onFocus={() => {
+          config.setOpen(true);
+          config.setSearch("");
+        }}
+      />
+      <span className="sl-combo-caret" aria-hidden="true">
+        {chevronIcon}
+      </span>
+      {config.open && (
+        <div className="sl-party-menu">
+          <div className="sl-party-options">{config.children}</div>
+        </div>
+      )}
+    </div>
+  );
+
+  const renderStepParty = () => (
+    <div className="sl-wiz-step">
+      <div className="sl-wiz-step-intro">
+        <div className="sl-wiz-eyebrow">Step 1</div>
+        <h2 className="sl-wiz-step-title">Party Information</h2>
+        <p className="sl-wiz-step-sub">
+          Choose the party — bill-to and ship-to fill in automatically.
+        </p>
+      </div>
+      <div className="sl-wiz-field-grid">
+        <div className="sl-field sl-wiz-field-full">
+          <label className="sl-label">Party Name</label>
+          {renderCombo({
+            refEl: partyDropdownRef,
+            open: partyDropdownOpen,
+            setOpen: setPartyDropdownOpen,
+            search: partySearch,
+            setSearch: setPartySearch,
+            selectedLabel: selectedPartyLabel,
+            placeholder: "Search party...",
+            children:
+              filteredParties.length > 0 ? (
+                filteredParties.map((party) => (
+                  <button
+                    type="button"
+                    key={`${party.value}-${party.category || ""}`}
+                    className={`sl-party-option${
+                      party.value === formData.parties &&
+                      String(party.category || "").toUpperCase() ===
+                        selectedPartyCategory.toUpperCase()
+                        ? " is-selected"
+                        : ""
+                    }`}
+                    onClick={() =>
+                      handlePartySelect(party.value, party.category || "")
+                    }
+                  >
+                    <span className="sl-party-option-label">{party.label}</span>
+                    <span className="sl-party-option-code">
+                      {[party.value, party.category].filter(Boolean).join(" | ")}
+                    </span>
+                  </button>
+                ))
+              ) : (
+                <div className="sl-party-empty">No parties found</div>
+              ),
+          })}
+        </div>
+
+        <div className="sl-field">
+          <label className="sl-label">Bill To Address</label>
+          {renderCombo({
+            refEl: billDropdownRef,
+            open: billDropdownOpen,
+            setOpen: setBillDropdownOpen,
+            search: billSearch,
+            setSearch: setBillSearch,
+            selectedLabel: selectedBillAddressLabel,
+            placeholder: "Search bill to...",
+            children:
+              filteredBillAddresses.length > 0 ? (
+                filteredBillAddresses.map((b) => (
+                  <button
+                    type="button"
+                    key={b.id}
+                    className={`sl-party-option${
+                      String(b.id) === formData.billAddress ? " is-selected" : ""
+                    }`}
+                    onClick={() => handleBillAddressSelect(String(b.id))}
+                  >
+                    <span className="sl-party-option-label">
+                      {b.address_name || b.full_address || b.address_id}
+                    </span>
+                  </button>
+                ))
+              ) : (
+                <div className="sl-party-empty">No addresses found</div>
+              ),
+          })}
+        </div>
+
+        <div className="sl-field">
+          <label className="sl-label">Ship To Address</label>
+          {renderCombo({
+            refEl: shipDropdownRef,
+            open: shipDropdownOpen,
+            setOpen: setShipDropdownOpen,
+            search: shipSearch,
+            setSearch: setShipSearch,
+            selectedLabel: selectedShipAddressLabel,
+            placeholder: "Search ship to...",
+            children:
+              filteredShipAddresses.length > 0 ? (
+                filteredShipAddresses.map((s) => (
+                  <button
+                    type="button"
+                    key={s.id}
+                    className={`sl-party-option${
+                      String(s.id) === formData.shipAddress ? " is-selected" : ""
+                    }`}
+                    onClick={() => handleShipAddressSelect(String(s.id))}
+                  >
+                    <span className="sl-party-option-label">
+                      {s.address_name || s.full_address || s.address_id}
+                    </span>
+                  </button>
+                ))
+              ) : (
+                <div className="sl-party-empty">No addresses found</div>
+              ),
+          })}
+        </div>
+
+        <div className="sl-field">
+          <label className="sl-label">Dispatch From</label>
+          <div className="sl-wiz-dispatch">
+            <div
+              className={`sl-party-dropdown sl-wiz-dispatch-select${
+                dispatchDropdownOpen ? " open" : ""
+              }`}
+              ref={dispatchDropdownRef}
+            >
+              <button
+                type="button"
+                className="sl-party-trigger"
+                onClick={() => setDispatchDropdownOpen((prev) => !prev)}
+              >
+                <span>{selectedDispatchLabel || "--select--"}</span>
+                {chevronIcon}
+              </button>
+              {dispatchDropdownOpen && (
+                <div className="sl-party-menu">
+                  <div className="sl-party-options">
+                    {branch.length > 0 ? (
+                      branch.map((d) => (
+                        <button
+                          type="button"
+                          key={d.bpl_id}
+                          className={`sl-party-option${
+                            String(d.bpl_id) === formData.dispatch ? " is-selected" : ""
+                          }`}
+                          onClick={() => handleDispatchSelect(String(d.bpl_id))}
+                        >
+                          <span className="sl-party-option-label">{d.bpl_name}</span>
+                        </button>
+                      ))
+                    ) : (
+                      <div className="sl-party-empty">No dispatch locations found</div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="sl-wiz-info" ref={dispatchInfoRef}>
+              <button
+                type="button"
+                className="sl-wiz-info-btn"
+                onClick={() => setDispatchInfoOpen((prev) => !prev)}
+                aria-label="Dispatch location details"
+                title="Dispatch location details"
+              >
+                i
+              </button>
+              {dispatchInfoOpen && (
+                <div className="sl-wiz-info-pop">
+                  <div className="sl-wiz-info-pop-title">Dispatch location</div>
+                  {selectedDispatch ? (
+                    <dl className="sl-wiz-info-list">
+                      <div>
+                        <dt>Name</dt>
+                        <dd>{selectedDispatch.bpl_name || "—"}</dd>
+                      </div>
+                      <div>
+                        <dt>Branch ID</dt>
+                        <dd>{selectedDispatch.bpl_id ?? "—"}</dd>
+                      </div>
+                      {selectedDispatch.address && (
+                        <div>
+                          <dt>Address</dt>
+                          <dd>{selectedDispatch.address}</dd>
+                        </div>
+                      )}
+                    </dl>
+                  ) : (
+                    <p className="sl-wiz-info-empty">
+                      This is the default dispatch branch for your orders.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+            <input type="hidden" name="dispatch" value={formData.dispatch} />
+          </div>
+        </div>
+
+        <div className="sl-field">
+          <label className="sl-label">Date</label>
+          <div className="sl-input-wrap">
+            <input type="date" name="date" value={formData.date} readOnly />
+            <div className="sl-focus-line" />
+          </div>
+        </div>
+
+        <div className="sl-field">
+          <label className="sl-label" htmlFor="wiz-delivery-date">
+            Delivery Date
+          </label>
+          <div className="sl-input-wrap">
+            <input
+              id="wiz-delivery-date"
+              type="date"
+              name="Deliverydate"
+              value={formData.Deliverydate}
+              onChange={handleChange}
+            />
+            <div className="sl-focus-line" />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderStepItems = () => (
+    <div className="sl-wiz-step">
+      <div className="sl-wiz-items-head">
+        <div className="sl-wiz-step-intro">
+          <div className="sl-wiz-eyebrow">Step 2</div>
+          <h2 className="sl-wiz-step-title">Items</h2>
+        </div>
+        <div className="sl-wiz-items-meta">
+          <span>
+            {confirmedRows.length} item{confirmedRows.length === 1 ? "" : "s"}
+          </span>
+          <strong>₹ {totalAmount.toFixed(2)}</strong>
+        </div>
+      </div>
+      {confirmedRows.length > 0 ? (
+        <div className="sl-wiz-item-list">
+          {rows.map((row, index) =>
+            row.confirmed ? renderItemSummaryCard(row, index) : null,
+          )}
+        </div>
+      ) : (
+        <div className="sl-wiz-item-empty">
+          <p>No items added yet.</p>
+          <span>Click “Add Item” to start building this order.</span>
+        </div>
+      )}
+      <button type="button" className="sl-wiz-add-item" onClick={openAddItem}>
+        + Add Item
+      </button>
+    </div>
+  );
+
+  const renderStepSummary = () => (
+    <div className="sl-wiz-step">
+      <div className="sl-wiz-step-intro">
+        <div className="sl-wiz-eyebrow">Step 3</div>
+        <h2 className="sl-wiz-step-title">Order Summary</h2>
+      </div>
+      <div className="sl-wiz-field-grid">
+        {canEditPoNumber && (
+          <div className="sl-field">
+            <label className="sl-label" htmlFor="wiz-po">
+              PO Number
+            </label>
+            <div className="sl-input-wrap">
+              <input
+                type="text"
+                id="wiz-po"
+                name="poNumber"
+                value={formData.poNumber}
+                onChange={handleChange}
+                placeholder="Enter PO number"
+              />
+              <div className="sl-focus-line" />
+            </div>
+          </div>
+        )}
+        <div className="sl-field">
+          <label className="sl-label">Company</label>
+          <div
+            className={`sl-party-dropdown${companyDropdownOpen ? " open" : ""}`}
+            ref={companyDropdownRef}
+          >
+            <button
+              type="button"
+              className="sl-party-trigger"
+              onClick={() => setCompanyDropdownOpen((prev) => !prev)}
+            >
+              <span>{selectedCompanyLabel || "Select Company"}</span>
+              {chevronIcon}
+            </button>
+            {companyDropdownOpen && (
+              <div className="sl-party-menu">
+                <div className="sl-party-options">
+                  {company.length > 0 ? (
+                    company.map((item) => (
+                      <button
+                        type="button"
+                        key={item.id}
+                        className={`sl-party-option${
+                          String(item.id) === formData.company ? " is-selected" : ""
+                        }`}
+                        onClick={() => handleCompanySelect(String(item.id))}
+                      >
+                        <span className="sl-party-option-label">{item.name}</span>
+                      </button>
+                    ))
+                  ) : (
+                    <div className="sl-party-empty">No companies found</div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="sl-wiz-totals">
+        <div className="sl-wiz-total-row">
+          <span>Total</span>
+          <strong>₹ {totalAmount.toFixed(2)}</strong>
+        </div>
+        <div className="sl-wiz-total-row">
+          <span>Tax</span>
+          <strong>₹ {taxAmount.toFixed(2)}</strong>
+        </div>
+        <div className="sl-wiz-total-row sl-wiz-total-grand">
+          <span>Grand Total</span>
+          <strong>₹ {grandTotal.toFixed(2)}</strong>
+        </div>
+      </div>
+
+      <div className="sl-field sl-full">
+        <label className="sl-label" htmlFor="wiz-comment">
+          Comment
+        </label>
+        <div className="sl-input-wrap sl-input-wrap-textarea">
+          <textarea
+            id="wiz-comment"
+            name="comment"
+            rows={3}
+            placeholder="Add a note..."
+            value={formData.comment}
+            onChange={(e) =>
+              setFormData((prev) => ({ ...prev, comment: e.target.value }))
+            }
+          />
+          <div className="sl-focus-line" />
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderStepReview = () => (
+    <div className="sl-wiz-step">
+      <div className="sl-wiz-step-intro">
+        <div className="sl-wiz-eyebrow">Step 4</div>
+        <h2 className="sl-wiz-step-title">Review &amp; Submit</h2>
+        <p className="sl-wiz-step-sub">Confirm the details below before saving.</p>
+      </div>
+      <div className="sl-wiz-review">
+        <div className="sl-wiz-review-hero">
+          <span className="sl-wiz-review-label">Party</span>
+          <strong className="sl-wiz-review-party">{selectedPartyLabel || "—"}</strong>
+        </div>
+        <div className="sl-wiz-review-secondary">
+          <div>
+            <span>Bill To</span>
+            <em>{selectedBillAddressLabel || "—"}</em>
+          </div>
+          <div>
+            <span>Ship To</span>
+            <em>{selectedShipAddressLabel || "—"}</em>
+          </div>
+          <div>
+            <span>Dispatch</span>
+            <em>{selectedDispatchLabel || "—"}</em>
+          </div>
+          <div>
+            <span>Delivery Date</span>
+            <em>{formData.Deliverydate || "—"}</em>
+          </div>
+        </div>
+        <div className="sl-wiz-review-items">
+          <div className="sl-wiz-review-items-head">
+            <span>Items</span>
+            <span>{confirmedRows.length}</span>
+          </div>
+          {confirmedRows.map((row, i) => (
+            <div className="sl-wiz-review-item" key={`rev-${i}`}>
+              <strong>{row.item || "Item"}</strong>
+              <span>Qty {row.qty || 0}</span>
+              <span className="sl-wiz-review-item-amt">
+                ₹ {Number(row.amount || 0).toFixed(2)}
+              </span>
+            </div>
+          ))}
+        </div>
+        <div className="sl-wiz-review-foot">
+          {formData.poNumber && (
+            <div className="sl-wiz-review-kv">
+              <span>PO Number</span>
+              <strong>{formData.poNumber}</strong>
+            </div>
+          )}
+          {formData.comment && (
+            <div className="sl-wiz-review-kv">
+              <span>Comments</span>
+              <strong>{formData.comment}</strong>
+            </div>
+          )}
+          <div className="sl-wiz-review-kv sl-wiz-review-total">
+            <span>Grand Total</span>
+            <strong>₹ {grandTotal.toFixed(2)}</strong>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const wizardSteps = [
+    { n: 1, label: "Party" },
+    { n: 2, label: "Items" },
+    { n: 3, label: "Summary" },
+    { n: 4, label: "Review" },
+  ];
+
+  const canAdvance = (step: number) => {
+    if (step === 1)
+      return Boolean(
+        formData.parties &&
+          formData.dispatch &&
+          formData.billAddress &&
+          formData.shipAddress &&
+          formData.Deliverydate,
+      );
+    if (step === 2)
+      return (
+        confirmedRows.length > 0 && !rows.some((r) => !r.confirmed && r.item)
+      );
+    if (step === 3) return Boolean(formData.company);
+    return true;
+  };
+
+  const handleWizardSubmit = () => {
+    if (!validateBeforeSave()) return;
+    setShowSaveConfirm(true);
+  };
+
+  const renderStepper = () => (
+    <div className="sl-wiz-stepper">
+      {wizardSteps.map((step, i) => (
+        <Fragment key={step.n}>
+          <button
+            type="button"
+            className={`sl-wiz-step-node${currentStep === step.n ? " is-active" : ""}${
+              currentStep > step.n ? " is-complete" : ""
+            }`}
+            onClick={() => {
+              if (step.n < currentStep) setCurrentStep(step.n);
+            }}
+            disabled={step.n > currentStep}
+          >
+            <span className="sl-wiz-step-num">
+              {currentStep > step.n ? "✓" : step.n}
+            </span>
+            <span className="sl-wiz-step-label">{step.label}</span>
+          </button>
+          {i < wizardSteps.length - 1 && (
+            <span
+              className={`sl-wiz-step-line${currentStep > step.n ? " is-complete" : ""}`}
+            />
+          )}
+        </Fragment>
+      ))}
+    </div>
+  );
+
+  const renderWizardFooter = () => (
+    <div className="sl-wiz-footer">
+      {currentStep > 1 ? (
+        <button
+          type="button"
+          className="sl-wiz-btn sl-wiz-btn-ghost"
+          onClick={() => setCurrentStep((s) => Math.max(1, s - 1))}
+        >
+          Back
+        </button>
+      ) : (
+        <button
+          type="button"
+          className="sl-wiz-btn sl-wiz-btn-ghost"
+          onClick={handleClearForm}
+        >
+          Clear
+        </button>
+      )}
+      <div className="sl-wiz-footer-spacer" />
+      {currentStep < 4 ? (
+        <button
+          type="button"
+          className="sl-wiz-btn sl-wiz-btn-primary"
+          disabled={!canAdvance(currentStep)}
+          onClick={() => {
+            if (canAdvance(currentStep)) setCurrentStep((s) => Math.min(4, s + 1));
+          }}
+        >
+          Continue
+        </button>
+      ) : (
+        <button
+          type="button"
+          className="sl-wiz-btn sl-wiz-btn-primary"
+          disabled={isSaving || confirmedRows.length === 0}
+          onClick={handleWizardSubmit}
+        >
+          {isSaving ? "Saving..." : "Save Order"}
+        </button>
+      )}
+    </div>
+  );
+
+  const renderWizard = () => (
+    <div className="sl-wiz">
+      {renderStepper()}
+      <div className="sl-wiz-body">
+        {currentStep === 1 && renderStepParty()}
+        {currentStep === 2 && renderStepItems()}
+        {currentStep === 3 && renderStepSummary()}
+        {currentStep === 4 && renderStepReview()}
+      </div>
+      {renderWizardFooter()}
+      {renderItemModal()}
+    </div>
+  );
+
   return (
     <div className="sl-page app-page">
-      <div className="sl-header app-page-head">
-        <div>
-          <h1 className="sl-title app-page-title">
-            {isEditMode
+      <div className="bo-page-head">
+            <span className="bo-page-accent" aria-hidden="true" />
+            <div>
+              <h1 className="bo-page-title"> {isEditMode
               ? isFocOrder
                 ? "Edit FOC Order"
                 : "Edit Sales Order"
@@ -1575,10 +2573,27 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
                   : "Duplicate Sales Order"
                 : isFocMode
                   ? "FOC Order"
-                  : "Add Sales Order"}
-          </h1>
-        </div>
+                  : "Add Sales Order"}</h1>
+              <p className="bo-page-subtitle">Add / Edit Sales Orders.</p>
+            </div>
       </div>
+        {/* <div className="sl-header app-page-head">
+          <div>
+            <h1 className="sl-title app-page-title">
+              {isEditMode
+                ? isFocOrder
+                  ? "Edit FOC Order"
+                  : "Edit Sales Order"
+                : isDuplicateMode
+                  ? isFocOrder
+                    ? "Duplicate FOC Order"
+                    : "Duplicate Sales Order"
+                  : isFocMode
+                    ? "FOC Order"
+                    : "Add Sales Order"}
+            </h1>
+          </div>
+        </div> */}
 
       {isEditMode && isLoadingEditOrder && (
         <div className="sl-section-label">
@@ -1586,6 +2601,9 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
         </div>
       )}
 
+      {useWizard ? (
+        renderWizard()
+      ) : (
       <form className="sl-form" onSubmit={handleSubmit}>
         {/* Party Name */}
         <div className="sl-section-label">Order Details</div>
@@ -2493,6 +3511,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
           </button>
         </div>
       </form>
+      )}
 
       {showSaveConfirm && (
         <div className="sl-modal-overlay">

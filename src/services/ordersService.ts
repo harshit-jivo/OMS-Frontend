@@ -135,13 +135,17 @@ export interface OrderItemScheme {
 }
 
 export interface OrderItem {
+  id?: number;
   item_code: string;
   item_name: string;
   category: string;
   brand: string;
   variety: string;
+  variety_type?: string;
   sub_group?: string;
   item_type: string;
+  is_scheme_visible?: boolean;
+  approval_approvers?: { id: number; name: string }[];
   scheme_name?: string;
   scheme_qty?: number | string;
   qty_scheme?: number | string;
@@ -218,6 +222,7 @@ export interface Order {
   company?: string | number;
   remarks?: string;
   items: OrderItem[];
+  items_count?: number;
   created_at: string;
   created_by: string | number;
   rejected_by?: string | null;
@@ -228,6 +233,12 @@ export interface Order {
   party_state?: string;
   decision_type?: "accepted" | "rejected";
   rate_approvals?: RateApproval[];
+  // Note: API key is misspelled "vareity_cost".
+  vareity_cost?: {
+    commodity_price?: number;
+    other_total?: number;
+    premium_total?: number;
+  };
 }
 
 export interface OrderStatus {

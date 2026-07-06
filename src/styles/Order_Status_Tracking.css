@@ -387,6 +387,12 @@
   gap: 14px;
 }
 
+/* Reused .ao-detail styling has bottom padding for a fixed footer; this page
+   has no fixed footer, so trim it back. */
+.ot-page .ao-detail {
+  padding-bottom: 24px;
+}
+
 .ot-detail-nav {
   display: flex;
   align-items: center;

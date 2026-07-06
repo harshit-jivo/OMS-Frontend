@@ -2,7 +2,7 @@ import { getCurrentUser } from "../services/authService";
 import { ordersService, type Order } from "../services/ordersService";
 import { userService, type User } from "../services/userService";
 
-const sortOrders = (orders: Order[]) =>
+export const sortOrders = (orders: Order[]) =>
   [...orders].sort((a, b) => {
     const first = new Date(b.created_at || "").getTime();
     const second = new Date(a.created_at || "").getTime();
@@ -41,6 +41,15 @@ export const loadCurrentUserOrders = async () => {
   const currentUser = await getCurrentUser();
   if (!currentUser?.id) return [];
   return loadOrdersForUser(currentUser.id);
+};
+
+// List-only variant: fetches the current user's order summaries without the
+// per-order detail calls. Detail is fetched on demand (e.g. when a row is opened).
+export const loadCurrentUserOrderSummaries = async () => {
+  const currentUser = await getCurrentUser();
+  if (!currentUser?.id) return [];
+  const orders = await ordersService.getOrdersByUser(currentUser.id);
+  return sortOrders(orders || []);
 };
 
 export const loadManagerOrders = async () => {

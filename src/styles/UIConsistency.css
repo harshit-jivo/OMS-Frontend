@@ -34,10 +34,10 @@
 .ot-page {
   min-height: calc(100svh - 64px);
   background:
-    radial-gradient(circle at top right, rgba(37, 99, 235, 0.1), transparent 24%),
-    linear-gradient(180deg, #f4f7fb 0%, #edf2f8 100%);
+    transparent;
   border-radius: 26px 0 0 0;
   padding: 10px clamp(12px, 2vw, 20px) 18px;
+  padding-left: 30px;
   overflow-x: clip;
 }
 
@@ -321,6 +321,78 @@
   background: #eef6ff;
 }
 
+/* ── Minimal list tables (Rate Approver / Auditor / Billing / Status Tracking) ── */
+.ao-table thead,
+.bo-table thead,
+.ot-table thead {
+  background: #f8fafc;
+}
+.ao-table th,
+.bo-table th,
+.ot-table th {
+  color: #64748b;
+  font-weight: 600;
+  border-bottom: 1px solid #e5e7eb;
+}
+.ao-table td,
+.bo-table td,
+.ot-table td {
+  border-bottom: 1px solid #f1f5f9;
+}
+.ao-table tbody tr:nth-child(even),
+.bo-table tbody tr:nth-child(even),
+.ot-table tbody tr:nth-child(even) {
+  background: transparent;
+}
+.ao-table tbody tr:hover,
+.bo-table tbody tr:hover,
+.ot-table tbody tr:hover,
+.ao-table tbody tr:nth-child(even):hover,
+.bo-table tbody tr:nth-child(even):hover,
+.ot-table tbody tr:nth-child(even):hover {
+  background: #f8fafc;
+}
+.ao-table td.ao-cell-id,
+.bo-table td.ao-cell-id,
+.ot-table td.ao-cell-id,
+.ao-table td.ao-cell-name,
+.bo-table td.ao-cell-name,
+.ot-table td.ao-cell-name {
+  text-align: left;
+}
+.ao-cell-id { font-weight: 600; color: #0f172a; white-space: nowrap; }
+.ao-cell-name { font-weight: 500; color: #334155; }
+
+/* Row action cluster (view · Approve · Reject · Track/Edit · Download) */
+.ao-row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-start;
+  white-space: nowrap;
+}
+.ao-row-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 38px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 9px;
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .15s, box-shadow .15s, transform .15s;
+}
+.ao-row-btn svg { width: 18px; height: 18px; }
+.ao-row-approve { background: #16a34a; }
+.ao-row-approve:hover { background: #15803d; box-shadow: 0 4px 12px rgba(22, 163, 74, .3); transform: translateY(-1px); }
+.ao-row-reject { background: #dc2626; }
+.ao-row-reject:hover { background: #b91c1c; box-shadow: 0 4px 12px rgba(220, 38, 38, .3); transform: translateY(-1px); }
+
 .vo-d-header-card,
 .ao-d-header-card,
 .bo-d-header-card {
@@ -356,7 +428,8 @@
 }
 
 .order-detail-card-list + table,
-.order-detail-empty + table {
+.order-detail-empty + table,
+.isec-root + table {
   display: none !important;
 }
 
@@ -380,7 +453,7 @@
   gap: 10px;
   padding: 12px 14px;
   border: 1px solid #dbe4ee;
-  border-top: 3px solid #1e293b;
+  /* border-top: 3px solid #1e293b; */
   border-radius: 10px;
   background: #ffffff;
   box-shadow: 0 10px 20px rgba(15, 23, 42, 0.07);
@@ -759,3 +832,34 @@
     grid-column: span 1;
   }
 }
+
+/* ── Distinct status-badge colours (Order Tracker / Status Tracking / View Orders) ──
+   Each workflow status gets its own hue so they are easy to tell apart at a glance. */
+.vo-badge-rate-approval,
+.ot-badge-rate-approval { background: #e0e7ff; color: #3730a3; }        /* indigo */
+.vo-badge-need-approval,
+.ot-badge-need-approval { background: #f3e8ff; color: #7e22ce; }        /* purple */
+.vo-badge-auditor-approval,
+.ot-badge-auditor-approval { background: #ffedd5; color: #9a3412; }     /* orange */
+.vo-badge-billing,
+.ot-badge-billing { background: #dbeafe; color: #1e40af; }             /* blue */
+.vo-badge-billing-pending,
+.ot-badge-billing-pending { background: #cffafe; color: #155e75; }     /* cyan */
+.vo-badge-approved,
+.ot-badge-approved,
+.vo-badge-accepted,
+.ot-badge-accepted { background: #ccfbf1; color: #0f766e; }            /* teal */
+.vo-badge-completed,
+.ot-badge-completed,
+.vo-badge-billed,
+.ot-badge-billed { background: #dcfce7; color: #166534; }              /* green */
+.vo-badge-rejected,
+.ot-badge-rejected,
+.vo-badge-declined,
+.ot-badge-declined,
+.vo-badge-cancelled,
+.ot-badge-cancelled,
+.vo-badge-canceled,
+.ot-badge-canceled { background: #fee2e2; color: #991b1b; }            /* red */
+.vo-badge-billing-rejected,
+.ot-badge-billing-rejected { background: #ffe4e6; color: #9f1239; }    /* rose */

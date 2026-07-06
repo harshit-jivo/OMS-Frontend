@@ -5,14 +5,14 @@ import { getOrderItemSchemeNames, getOrderItemSchemes, getOrderItemSchemeQtyText
 import type { Order, OrderItem } from "../services/ordersService";
 import "../styles/Billing_Order.css";
 import { useNavigate, useLocation } from "react-router-dom";
-import { loadDetailedOrders } from "../utils/orderHistory";
+import { sortOrders } from "../utils/orderHistory";
+import ItemSection from "../components/order-items/ItemSection";
+import PartyHeader from "../components/order-items/PartyHeader";
 import {
   HiCheckCircle,   // Approve
   HiXCircle,       // Reject
   HiEye,           // View
   HiArrowDownTray,  // Download
-  HiMagnifyingGlass,
-  HiXMark,
   // HiEllipsisVertical  
   HiPencilSquare,
 } from "react-icons/hi2";
@@ -63,8 +63,6 @@ export default function Billing_orders() {
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
   const [fromDate, setFromDate] = useState(firstDay);
   const [toDate, setToDate] = useState(lastDay);
-  const [searchInput, setSearchInput] = useState("");
-  const [appliedSearch, setAppliedSearch] = useState("");
   const [isOrdersLoading, setIsOrdersLoading] = useState(true);
 
   const [currentPage, setCurrentPage] = useState(1);
@@ -85,9 +83,8 @@ export default function Billing_orders() {
     setIsOrdersLoading(true);
     try {
       const data: Order[] = await ordersService.getOrders(undefined, true);
-      const activeOrders = data.filter((order) => !isRejectedBillingOrder(order));
-      const detailedOrders = await loadDetailedOrders(activeOrders);
-      setOrders(detailedOrders.filter((order) => !isRejectedBillingOrder(order)));
+      const activeOrders = (data || []).filter((order) => !isRejectedBillingOrder(order));
+      setOrders(sortOrders(activeOrders));
     } catch (error) {
       console.log("Error fetching orders:", error);
     } finally {
@@ -200,8 +197,6 @@ export default function Billing_orders() {
 
   const filteredOrders = orders.filter((order) => {
     let matchDate = true;
-    const searchableCard = `${order.card_name || ""} ${order.card_code || ""}`.toLowerCase();
-    const matchSearch = !appliedSearch || searchableCard.includes(appliedSearch);
 
     if (fromDate && toDate) {
       const orderDate = new Date(order.created_at);
@@ -212,21 +207,31 @@ export default function Billing_orders() {
       matchDate = orderDate >= from && orderDate <= to;
     }
 
-    return matchDate && matchSearch && !isRejectedBillingOrder(order);
+    return matchDate && !isRejectedBillingOrder(order);
   });
   console.log("Filtered Orders:", filteredOrders);
 
-  const downloadExcel = (order: Order) => {
+  const downloadExcel = async (order: Order) => {
+    // The list API does not include line items; fetch full details on demand.
+    let full = order;
+    if (!order.items || order.items.length === 0) {
+      try {
+        full = await ordersService.getOrderDetails(order.id);
+      } catch (error) {
+        console.log("Error fetching order details for download:", error);
+      }
+    }
+
     let excelData = [];
-    if (order.items && order.items.length > 0) {
-      excelData = order.items.map((item: OrderItem) => ({
-        "Order Number": order.order_number,
-        "Card Code": order.card_code,
-        "Card Name": order.card_name,
-        "Delivery Date": order.delivery_date,
-        "Status": order.status_display,
-        "Bill To": order.bill_to_address,
-        "Ship To": order.ship_to_address,
+    if (full.items && full.items.length > 0) {
+      excelData = full.items.map((item: OrderItem) => ({
+        "Order Number": full.order_number,
+        "Card Code": full.card_code,
+        "Card Name": full.card_name,
+        "Delivery Date": full.delivery_date,
+        "Status": full.status_display,
+        "Bill To": full.bill_to_address,
+        "Ship To": full.ship_to_address,
         "Item Code": item.item_code,
         "Item Name": item.item_name,
         "Scheme": getOrderItemSchemeNames(item),
@@ -242,13 +247,13 @@ export default function Billing_orders() {
       }));
     } else {
       excelData.push({
-        "Order Number": order.order_number,
-        "Card Code": order.card_code,
-        "Card Name": order.card_name,
-        "Delivery Date": order.delivery_date,
-        "Status": order.status_display,
-        "Bill To": order.bill_to_address,
-        "Ship To": order.ship_to_address,
+        "Order Number": full.order_number,
+        "Card Code": full.card_code,
+        "Card Name": full.card_name,
+        "Delivery Date": full.delivery_date,
+        "Status": full.status_display,
+        "Bill To": full.bill_to_address,
+        "Ship To": full.ship_to_address,
         "Price List (Basic)": "",
         "Basic Price": "",
       });
@@ -258,7 +263,7 @@ export default function Billing_orders() {
     XLSX.utils.book_append_sheet(workbook, worksheet, "Order Details");
     const excelBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
     const file = new Blob([excelBuffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-    saveAs(file, `Order_${order.order_number}.xlsx`);
+    saveAs(file, `Order_${full.order_number}.xlsx`);
   };
 
   const handleEditOrder = (order: Order) => {
@@ -278,7 +283,20 @@ export default function Billing_orders() {
       {/* â”€â”€ LIST VIEW â”€â”€ */}
       {!showDetails && (
         <>
+          <div className="bo-page-head">
+            <span className="bo-page-accent" aria-hidden="true" />
+            <div>
+              <h1 className="bo-page-title">Pending Orders</h1>
+              <p className="bo-page-subtitle">Review and action orders awaiting billing.</p>
+            </div>
+          </div>
           <div className="bo-toolbar">
+            <div className="bo-filter-head">
+              <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <path d="M3 5h14M6 10h8M9 15h2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+              </svg>
+              <span>Filters</span>
+            </div>
             <div className="bo-search-wrap">
               <div className="bo-date-wrap">
                 <label className="bo-date-label">From</label>
@@ -288,37 +306,9 @@ export default function Billing_orders() {
                 <label className="bo-date-label">To</label>
                 <input type="date" value={toDate} onChange={(e) => { setToDate(e.target.value); setCurrentPage(1); }} className="bo-date-input" />
               </div>
-              <div className="bo-card-search">
-                <HiMagnifyingGlass className="bo-card-search-icon" aria-hidden="true" />
-                <input
-                  type="text"
-                  value={searchInput}
-                  onChange={(e) => {
-                    const value = e.target.value.toUpperCase();
-                    setSearchInput(value);
-                    setAppliedSearch(value.trim().toLowerCase());
-                    setCurrentPage(1);
-                  }}
-                  className="bo-card-search-input"
-                  placeholder="Search e.g. CUSTA000812 or Bachan Singh"
-                  aria-label="Search orders by card name or card code"
-                />
-                {(searchInput || appliedSearch) && (
-                  <button
-                    type="button"
-                    className="bo-card-search-clear"
-                    onClick={() => {
-                      setSearchInput("");
-                      setAppliedSearch("");
-                      setCurrentPage(1);
-                    }}
-                    aria-label="Clear card search"
-                    title="Clear search"
-                  >
-                    <HiXMark aria-hidden="true" />
-                  </button>
-                )}
-              </div>
+              {(fromDate || toDate) && (
+                <button type="button" className="bo-filter-clear" onClick={() => { setFromDate(""); setToDate(""); setCurrentPage(1); }}>Clear</button>
+              )}
             </div>
             <span className="bo-count">Total: {filteredOrders.length}</span>
           </div>
@@ -328,22 +318,18 @@ export default function Billing_orders() {
               <thead>
                 <tr>
                   <th>Order ID</th>
-                  <th>FOC</th>
-                  <th>Card Code</th>
                   <th>Card Name</th>
+                  <th>Items</th>
+                  <th>FOC</th>
                   <th>Created At</th>
                   <th>Delivery Date</th>
-                  {/* <th>Status</th> */}
-                  <th>Details</th>
-                  <th>Action</th>
-                  <th>Edit Order</th>
-                  <th>Download</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {isOrdersLoading ? (
                   <tr>
-                    <td colSpan={10}>
+                    <td colSpan={7}>
                       <div className="order-loading-state">
                         <span className="order-loading-spinner" />
                         <span>Loading orders...</span>
@@ -353,7 +339,9 @@ export default function Billing_orders() {
                 ) : filteredOrders.length > 0 ? (
                   filteredOrders.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((order) => (
                     <tr key={order.id} className={order.is_foc ? "bo-foc-row" : ""}>
-                      <td>{order.order_number}</td>
+                      <td className="ao-cell-id">{order.order_number}</td>
+                      <td className="ao-cell-name">{order.card_name}</td>
+                      <td>{order.items_count ?? order.items?.length ?? 0}</td>
                       <td>
                         {order.is_foc ? (
                           <span className="bo-foc-badge">FOC</span>
@@ -361,65 +349,53 @@ export default function Billing_orders() {
                           <span className="bo-foc-empty">-</span>
                         )}
                       </td>
-                      <td>{order.card_code}</td>
-                      <td>{order.card_name}</td>
                       <td>{formatCreatedDateTime(order.created_at)}</td>
                       <td>{order.delivery_date}</td>
-                      {/* <td>
-                        <span className={`bo-badge bo-badge-${(order.status_display || "").toLowerCase().replace(/\s+/g, "-")}`}>
-                          {order.status_display}
-                        </span>
-                      </td> */}
                       <td>
-                        <button
-                          className="ao-btn-icon view"
-                          onClick={() => {
-                            fetchOrderDetails(order.id);
-                          }}
-                        >
-                          <HiEye size={22} />
-                        </button>
-                      </td>
-                      <td className="bo-action-cell">
-                        <button
-                          className="ao-btn-icon approve"
-                          onClick={() => initiateApprove(order)}
-                        >
-                          <HiCheckCircle size={22} />
-                        </button>
-                        <button
-                          className="ao-btn-icon reject"
-                          onClick={() => {
-                            setSelectedOrderId(order.id);
-                            setShowRejectModal(true);
-                          }}
-                        >
-                          <HiXCircle size={22} />
-                        </button>
-                      </td>
-
-                      <td>
-                        <button
-                          className="ao-btn-icon edit"
-                          onClick={() => handleEditOrder(order)}
-                          title="Edit Order"
-                        >
-                          <HiPencilSquare size={22} />
-                        </button>
-                      </td>
-                      <td>
-                        <button
-                          className="ao-btn-icon download"
-                          onClick={() => downloadExcel(order)}
-                        >
-                          <HiArrowDownTray size={22} />
-                        </button>
+                        <div className="ao-row-actions">
+                          <button
+                            className="ao-btn-icon view"
+                            onClick={() => fetchOrderDetails(order.id)}
+                            title="View Order"
+                          >
+                            <HiEye size={20} />
+                          </button>
+                          <button
+                            className="ao-row-btn ao-row-approve"
+                            onClick={() => initiateApprove(order)}
+                          >
+                            <HiCheckCircle size={18} /> Approve
+                          </button>
+                          <button
+                            className="ao-row-btn ao-row-reject"
+                            onClick={() => {
+                              setSelectedOrderId(order.id);
+                              setShowRejectModal(true);
+                            }}
+                          >
+                            <HiXCircle size={18} /> Reject
+                          </button>
+                          <button
+                            className="ao-btn-icon edit"
+                            onClick={() => handleEditOrder(order)}
+                            title="Edit Order"
+                          >
+                            <HiPencilSquare size={20} />
+                          </button>
+                          <button
+                            className="ao-btn-icon download"
+                            onClick={() => downloadExcel(order)}
+                            title="Download Order"
+                          >
+                            <HiArrowDownTray size={20} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={10} className="bo-empty">No orders found</td>
+                    <td colSpan={7} className="bo-empty">No orders found</td>
                   </tr>
                 )}
               </tbody>
@@ -445,86 +421,29 @@ export default function Billing_orders() {
               Back to Orders
             </button>
             <div className="bo-d-actions">
+              <button className="bo-d-export" onClick={() => downloadExcel(orderDetails)}>
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1v8m0 0L4 6.5M7 9l3-2.5M2.5 12h9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                Export Excel
+              </button>
               <button
                 className="bo-d-action-btn bo-d-approve"
                 onClick={() => initiateApprove(orderDetails)}
-                aria-label="Approve order"
-                title="Approve"
               >
-                <HiCheckCircle />
+                <HiCheckCircle /> Approve
               </button>
               <button
                 className="bo-d-action-btn bo-d-reject"
-                aria-label="Reject order"
-                title="Reject"
                 onClick={() => {
                   setSelectedOrderId(orderDetails.id);
                   setShowRejectModal(true);
                 }}
               >
-                <HiXCircle />
-              </button>
-              <button className="bo-d-export" onClick={() => downloadExcel(orderDetails)}>
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1v8m0 0L4 6.5M7 9l3-2.5M2.5 12h9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                Export Excel
+                <HiXCircle /> Reject
               </button>
             </div>
           </div>
 
-          <div className="bo-d-header-card">
-            <div className="bo-d-info-grid">
-              <div className="bo-d-info-field bo-d-info-span2">
-                <span className="bo-d-hf-label">Order Number</span>
-                <div className="bo-d-ordnum-row">
-                  <span className="bo-d-ordnum">{orderDetails.order_number}</span>
-                  {orderDetails.is_foc ? <span className="bo-foc-badge bo-foc-badge-detail">FOC ORDER</span> : null}
-                  {/* <span className={`bo-badge bo-badge-${(orderDetails.status_display || "").toLowerCase().replace(/\s+/g, "-")}`}>{orderDetails.status_display}</span> */}
-                </div>
-                <div className="ao-d-info-field">
-                <span className="ao-d-hf-label">Party State</span>
-                <span className="ao-d-hf-value">{orderDetails.party_state || "-"}</span>
-              </div>
-              </div>
-               <div className="bo-d-info-field">
-                <span className="bo-d-hf-label">Created By</span>
-                <span className="bo-d-hf-value">{orderDetails.created_by_name || "-"}</span>
-              </div>
-              <div className="bo-d-info-field">
-                <span className="bo-d-hf-label">Created At</span>
-                <span className="bo-d-hf-value">{formatCreatedDateTime(orderDetails.created_at)}</span>
-              </div>
-              <div className="bo-d-info-field">
-                <span className="bo-d-hf-label">Delivery Date</span>
-                <span className="bo-d-hf-value">{orderDetails.delivery_date || "-"}</span>
-              </div>
-              <div className="bo-d-info-field">
-                <span className="bo-d-hf-label">PO Number</span>
-                <span className="bo-d-hf-value">{orderDetails.po_number || "-"}</span>
-              </div>
-              <div className="bo-d-info-field">
-                <span className="bo-d-hf-label">Party Name</span>
-                <span className="bo-d-hf-value">{orderDetails.card_name}</span>
-              </div>
-              <div className="bo-d-info-field">
-                <span className="bo-d-hf-label">Card Code</span>
-                <span className="bo-d-hf-value">{orderDetails.card_code}</span>
-              </div>
-              <div className="bo-d-info-field">
-                <span className="bo-d-hf-label">Bill To</span>
-                <span className="bo-d-hf-value">{orderDetails.bill_to_address || "-"}</span>
-              </div>
-              <div className="bo-d-info-field">
-                <span className="bo-d-hf-label">Ship To</span>
-                <span className="bo-d-hf-value">{orderDetails.ship_to_address || "-"}</span>
-              </div>
-              {orderDetails.remarks?.trim() ? (
-                <div className="bo-d-info-field" style={{ gridColumn: "1 / -1" }}>
-                  <span className="bo-d-hf-label">Comment</span>
-                  <span className="bo-d-hf-value">{orderDetails.remarks}</span>
-                </div>
-              ) : null}
-            </div>
-          </div>
+          <PartyHeader order={orderDetails} />
 
           <div className="bo-d-items">
             <div className="bo-d-items-head">
@@ -532,49 +451,7 @@ export default function Billing_orders() {
               <span className="bo-d-items-count">{selectedItems.length}</span>
             </div>
             <div className="bo-d-items-scroll">
-              {selectedItems.length > 0 ? (
-                <div className="order-detail-card-list">
-                  {selectedItems.map((item, i) => {
-                    const schemes = getOrderItemSchemes(item);
-
-                    return (
-                      <article className="order-detail-item-card" key={`${item.item_code}-detail-card-${i}`}>
-                        <div className="order-detail-item-top">
-                          <span className="order-detail-item-index">Item {i + 1}</span>
-                          <span className="order-detail-item-code">{item.item_code}</span>
-                        </div>
-                        <div className="order-detail-item-main">
-                          <div className="order-detail-item-title-wrap">
-                            <span className="order-detail-label">Item Name</span>
-                            <h4 className="order-detail-item-title">{item.item_name}</h4>
-                          </div>
-                          <div className="order-detail-item-tags">
-                            <span className="order-detail-item-category">{item.category || "-"}</span>
-                            {schemes.map((scheme, schemeIndex) => (
-                              <span className="order-detail-scheme-chip" key={`${item.item_code}-scheme-card-${schemeIndex}`}>
-                                <em>Sch</em>{scheme.name || "-"} <strong>Qty {scheme.qty || 0}</strong>
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="order-detail-item-metrics">
-                          <div><span>Qty</span><strong>{item.qty}</strong></div>
-                          <div><span>Pcs</span><strong>{item.pcs}</strong></div>
-                          <div><span>Boxes</span><strong>{Number(item.boxes).toFixed(2)}</strong></div>
-                          <div><span>Ltrs</span><strong>{item.ltrs}</strong></div>
-                          {schemes.length > 0 ? <div><span>Total Ltrs</span><strong>{getOrderItemTotalLtrs(item).toFixed(2)}</strong></div> : null}
-                          <div><span>Price List (Basic)</span><strong>{Number(item.price_list_basic).toFixed(2)}</strong></div>
-                          <div><span>Basic Price</span><strong>{Number(item.basic_price).toFixed(2)}</strong></div>
-                          <div><span>Tax %</span><strong>{Number(item.tax_rate).toFixed(2)}</strong></div>
-                          <div className="order-detail-item-amount"><span>Amount</span><strong>{Number(item.total).toFixed(2)}</strong></div>
-                        </div>
-                      </article>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="order-detail-empty">No items found</div>
-              )}
+              <ItemSection items={selectedItems} />
               <table className="bo-d-tbl">
                 <thead><tr><th>#</th><th>Item Code</th>
                   <th style={{ minWidth: '250px' }}>Item Name</th>
@@ -607,11 +484,22 @@ export default function Billing_orders() {
             </div>
           </div>
 
+          <div className="bo-d-bottombar">
           <div className="bo-d-summary">
             <div className="bo-d-sum-row"><span className="bo-d-sum-label">Total Ltrs</span><span className="bo-d-sum-val">{selectedItems.reduce((s, i) => s + getOrderItemTotalLtrs(i), 0).toFixed(2)}</span></div>
             <div className="bo-d-sum-row"><span className="bo-d-sum-label">Subtotal</span><span className="bo-d-sum-val">{selectedItems.reduce((s, i) => s + Number(i.total || 0), 0).toFixed(2)}</span></div>
             <div className="bo-d-sum-row"><span className="bo-d-sum-label">Tax</span><span className="bo-d-sum-val">{selectedItems.reduce((s, i) => s + (Number(i.total || 0) * Number(i.tax_rate || 0) / 100), 0).toFixed(2)}</span></div>
+            {[
+              { label: "Commodity", value: orderDetails.vareity_cost?.commodity_price, cls: "vc-commodity" },
+              { label: "Other", value: orderDetails.vareity_cost?.other_total, cls: "vc-other" },
+              { label: "Premium", value: orderDetails.vareity_cost?.premium_total, cls: "vc-premium" },
+            ]
+              .filter((entry) => Number(entry.value) > 0)
+              .map((entry) => (
+                <div className="bo-d-sum-row" key={entry.label}><span className={`bo-d-sum-label vc-pill ${entry.cls}`}>{entry.label}</span><span className="bo-d-sum-val">{Number(entry.value).toFixed(2)}</span></div>
+              ))}
             <div className="bo-d-sum-row bo-d-sum-grand"><span className="bo-d-sum-label">Grand Total</span><span className="bo-d-sum-val">{(selectedItems.reduce((s, i) => s + Number(i.total || 0), 0) + selectedItems.reduce((s, i) => s + (Number(i.total || 0) * Number(i.tax_rate || 0) / 100), 0)).toFixed(2)}</span></div>
+          </div>
           </div>
         </div>
       )}

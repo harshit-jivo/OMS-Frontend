@@ -8,7 +8,6 @@ import {
   HiBuildingOffice2,
   HiEnvelope,
   HiLockClosed,
-  HiMagnifyingGlass,
   HiMapPin,
   HiPencilSquare,
   HiPhone,
@@ -26,8 +25,8 @@ export default function App_User() {
   const companyRef = useRef<HTMLDivElement>(null);
   const categoryRef = useRef<HTMLDivElement>(null);
   const varietyRef = useRef<HTMLDivElement>(null);
-  const roleFilterRef = useRef<HTMLDivElement>(null);
   const [users, setUsers] = useState<User[]>([]);
+  const [isUsersLoading, setIsUsersLoading] = useState(true);
   const [mainGroup, setMainGroup] = useState<Option[]>([]);
   const [state, setState] = useState<Option[]>([]);
   const [role, setRole] = useState<Option[]>([]);
@@ -47,11 +46,9 @@ export default function App_User() {
     role: 0,
     company: 0,
     category: null,
-    categories: [],
     variety: "",
   });
   const [showForm, setShowForm] = useState(false);
-  const [showUsers, setShowUsers] = useState(true);
   const [mgDropdownOpen, setMgDropdownOpen] = useState(false);
   const [stDropdownOpen, setStDropdownOpen] = useState(false);
   const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
@@ -61,12 +58,10 @@ export default function App_User() {
   const [varietySearch, setVarietySearch] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+  const [search, setSearch] = useState("");
   const itemsPerPage = 7;
   const [isEditMode, setIsEditMode] = useState(false);
   const [editUserId, setEditUserId] = useState<number | null>(null);
-  const [roleFilter, setRoleFilter] = useState<string>("all");
-  const [roleFilterOpen, setRoleFilterOpen] = useState(false);
-  const [userSearch, setUserSearch] = useState("");
 
   useEffect(() => {
     fetchUsers();
@@ -127,13 +122,6 @@ export default function App_User() {
       ) {
         setVarietyDropdownOpen(false);
       }
-
-      if (
-        roleFilterRef.current &&
-        !roleFilterRef.current.contains(event.target as Node)
-      ) {
-        setRoleFilterOpen(false);
-      }
     };
 
     document.addEventListener("mousedown", handleClickOutside);
@@ -144,11 +132,14 @@ export default function App_User() {
   }, []);
 
   const fetchUsers = async () => {
+    setIsUsersLoading(true);
     try {
       const data = await userService.getUsers();
       setUsers(data.data);
     } catch (error) {
       console.error("Error fetching users:", error);
+    } finally {
+      setIsUsersLoading(false);
     }
   };
 
@@ -265,34 +256,6 @@ export default function App_User() {
       const allSelected = (prev.states || []).length === state.length;
       const updated = allSelected ? [] : state.map((s) => s.id);
       return { ...prev, state: updated[0] || 0, states: updated };
-    });
-  };
-
-  const toggleCategory = (id: number) => {
-    setFormData((prev) => {
-      const current = prev.categories || [];
-      const isSelected = current.includes(id);
-      const updated = isSelected
-        ? current.filter((v) => v !== id)
-        : [...current, id];
-      return {
-        ...prev,
-        // Keep `category` as the primary (first selected) for the Sub Group lookup.
-        category: updated[0] ?? null,
-        categories: updated,
-      };
-    });
-  };
-
-  const toggleAllCategories = () => {
-    setFormData((prev) => {
-      const allSelected = (prev.categories || []).length === categories.length;
-      const updated = allSelected ? [] : categories.map((c) => c.id);
-      return {
-        ...prev,
-        category: updated[0] ?? null,
-        categories: updated,
-      };
     });
   };
 
@@ -427,8 +390,8 @@ export default function App_User() {
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
-    if (!formData.role || !formData.company || !(formData.categories && formData.categories.length)) {
-      alert("Please select role, company and at least one category.");
+    if (!formData.role || !formData.company || !formData.category) {
+      alert("Please select role, company and category.");
       return;
     }
 
@@ -457,7 +420,6 @@ export default function App_User() {
           role: 0,
           company: 0,
           category: null,
-          categories: [],
           variety: "",
         });
 
@@ -466,7 +428,6 @@ export default function App_User() {
 
         fetchUsers();
         setShowForm(false);
-        setShowUsers(true);
       } else {
         alert("Error: " + getCreateUserErrorMessage(result));
       }
@@ -496,7 +457,6 @@ export default function App_User() {
       states?: unknown;
       company?: unknown;
       category?: unknown;
-      categories?: unknown;
       variety?: string | null;
       sub_group?: string | null;
       role?: unknown;
@@ -504,13 +464,6 @@ export default function App_User() {
     };
     const mainGroupIds = getIds(editableUser.main_groups);
     const stateIds = getIds(editableUser.states);
-    const categoryIds = getIds(editableUser.categories);
-    // Fall back to the single primary category for users created before
-    // multi-category support.
-    const resolvedCategoryIds =
-      categoryIds.length > 0
-        ? categoryIds
-        : [getId(editableUser.category)].filter(Boolean);
     const roleName = String(
       editableUser.role || editableUser.role_name || editableUser.role_display || "",
     ).toLowerCase();
@@ -531,45 +484,56 @@ export default function App_User() {
       states: stateIds,
       role: roleId,
       company: getId(editableUser.company) || null,
-      category: resolvedCategoryIds[0] ?? null,
-      categories: resolvedCategoryIds,
+      category: getId(editableUser.category) || null,
       // formData.variety is the in-form holder for the user's sub group assignment.
       variety: editableUser.sub_group || "",
     });
 
     setShowForm(true);
-    setShowUsers(false);
   };
 
-  // Role-based filter for the users table. `user.role` holds the role's name
-  // (from the serializer), so we match against the selected role name.
-  const normalizedUserSearch = userSearch.trim().toLowerCase();
-  const filteredUsers = users.filter((user) => {
-    const matchesRole =
-      roleFilter === "all" ||
-      String(user.role || "").toLowerCase() === roleFilter.toLowerCase();
-    const matchesName =
-      !normalizedUserSearch ||
-      String(user.name || "").toLowerCase().includes(normalizedUserSearch);
-
-    return matchesRole && matchesName;
-  });
-
-  const totalPages = Math.max(1, Math.ceil(filteredUsers.length / itemsPerPage));
-  const pageUsers = filteredUsers.slice(
-    (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage,
-  );
-
-  const handleRoleFilterChange = (value: string) => {
-    setRoleFilter(value);
-    setCurrentPage(1);
+  const blankForm: CreateUserData = {
+    name: "",
+    username: "",
+    password: "",
+    email: "",
+    phone: "",
+    mainGroup: 0,
+    mainGroups: [],
+    state: 0,
+    states: [],
+    role: 0,
+    company: 0,
+    category: null,
+    variety: "",
   };
+
+  const openAddForm = () => {
+    setIsEditMode(false);
+    setEditUserId(null);
+    setFormData(blankForm);
+    setShowForm(true);
+  };
+
+  const closeForm = () => {
+    setShowForm(false);
+    setIsEditMode(false);
+    setEditUserId(null);
+  };
+
+  // Omni search across id, name, username, email and role.
+  const normalizedSearch = search.trim().toLowerCase();
+  const filteredUsers = normalizedSearch
+    ? users.filter((user) =>
+        [user.id, user.name, user.username, user.email, user.role]
+          .map((value) => String(value ?? "").toLowerCase())
+          .some((value) => value.includes(normalizedSearch)),
+      )
+    : users;
 
   return (
     <div className="au-page app-page">
       {/* ── PAGE HEADER ── */}
-      {!showForm && (
       <div className="au-header app-page-head" style={{ marginBottom: '24px', alignItems: 'center' }}>
         <div>
           <h1 className="au-title app-page-title">App Users</h1>
@@ -577,130 +541,86 @@ export default function App_User() {
             Manage user access, review account status and keep operational roles aligned.
           </p>
         </div>
-        <div className="au-header-actions">
-            <label className="au-user-search">
-              <HiMagnifyingGlass aria-hidden="true" />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+            <div className="au-search">
+              <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <circle cx="9" cy="9" r="6" stroke="currentColor" strokeWidth="1.6" />
+                <path d="m17 17-3.2-3.2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+              </svg>
               <input
-                type="search"
-                value={userSearch}
-                onChange={(event) => {
-                  setUserSearch(event.target.value);
+                type="text"
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
                   setCurrentPage(1);
                 }}
-                placeholder="Search users by name"
-                aria-label="Search users by name"
+                placeholder="Search users…"
+                aria-label="Search users"
               />
-            </label>
-            <div
-              className="au-mg-dropdown au-role-filter"
-              ref={roleFilterRef}
-              style={{ minWidth: 180 }}
-            >
-              <div
-                className="au-mg-trigger"
-                onClick={() => setRoleFilterOpen((v) => !v)}
-              >
-                <span className="au-trigger-label">
-                  <HiShieldCheck className="au-field-icon" aria-hidden="true" />
-                  <span>{roleFilter === "all" ? "All Roles" : roleFilter}</span>
-                </span>
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                  <path
-                    d="M3 4.5L6 7.5L9 4.5"
-                    stroke="#64748b"
-                    strokeWidth="1.4"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </div>
-              {roleFilterOpen && (
-                <div className="au-mg-menu">
-                  <button
-                    type="button"
-                    className={`au-mg-option au-select-option${roleFilter === "all" ? " is-selected" : ""}`}
-                    onClick={() => {
-                      handleRoleFilterChange("all");
-                      setRoleFilterOpen(false);
-                    }}
-                  >
-                    All Roles
-                  </button>
-                  {role.map((r) => (
-                    <button
-                      key={r.id}
-                      type="button"
-                      className={`au-mg-option au-select-option${roleFilter === r.name ? " is-selected" : ""}`}
-                      onClick={() => {
-                        handleRoleFilterChange(r.name);
-                        setRoleFilterOpen(false);
-                      }}
-                    >
-                      {r.name}
-                    </button>
-                  ))}
-                </div>
+              {search && (
+                <button
+                  type="button"
+                  className="au-search-clear"
+                  onClick={() => {
+                    setSearch("");
+                    setCurrentPage(1);
+                  }}
+                  aria-label="Clear search"
+                >
+                  &times;
+                </button>
               )}
             </div>
             <span className="au-table-count" style={{ margin: 0 }}>
               Total: {filteredUsers.length}
             </span>
-          <button
-            className="au-toggle-btn"
-            onClick={() => {
-            setShowForm(!showForm);
-            setShowUsers(showForm);
-          }}
-        >
+          <button className="au-toggle-btn" onClick={openAddForm}>
           <span>+ Add User</span>
           </button>
         </div>
       </div>
-      )}
 
       {/* ── USERS TABLE ── */}
-      {showUsers && (
-        <div className="au-table-card">
-            {filteredUsers.length > 0 ? (
+      <div className="au-table-card">
+            {isUsersLoading ? (
+              <div className="order-loading-state">
+                <span className="order-loading-spinner" />
+                <span>Loading users...</span>
+              </div>
+            ) : filteredUsers.length > 0 ? (
               <div className="au-table-wrap">
                 <table className="au-table">
                   <thead>
                     <tr>
-                      <th>#</th>
+                      <th>ID</th>
                       <th>Name</th>
+                      <th>Username</th>
                       <th>Email</th>
                       <th>Role</th>
-                      <th>Status</th>
-                      <th>Edit User</th>
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {pageUsers
+                    {filteredUsers
+                        .slice(
+                          (currentPage - 1) * itemsPerPage,
+                          currentPage * itemsPerPage,
+                        )
                         .map((user) => (
                           <tr key={user.id}>
                             <td className="au-muted">{user.id}</td>
                             <td className="au-name">{user.name}</td>
+                            <td>{user.username}</td>
                             <td>{user.email}</td>
                             <td>{user.role}</td>
                             <td>
-                              <span
-                                className={
-                                  user.is_active ? "au-active" : "au-inactive"
-                                }
-                              >
-                                {user.is_active ? "Active" : "Inactive"}
-                              </span>
-                            </td>
-                            <td>
                               <button
-                                className="ao-btn-icon edit"
-                                onClick={() => {
-                                  handleEditUser(user);
-                                  setShowForm(true);
-                                  setShowUsers(false);
-                                }} title="Edit User"
+                                className="au-edit-btn"
+                                onClick={() => handleEditUser(user)}
+                                title="Edit User"
+                                aria-label="Edit user"
                               >
-                                <HiPencilSquare size={22} />
+                                <HiPencilSquare size={16} />
                               </button>
                             </td>
                           </tr>
@@ -710,11 +630,7 @@ export default function App_User() {
               </div>
             ) : (
               <div style={{ padding: "40px", textAlign: "center", color: "#64748b", background: "#f8fafc", borderRadius: "8px", border: "1px dashed #cbd5e1", margin: "20px 0" }}>
-                {userSearch.trim()
-                  ? `No users found matching "${userSearch.trim()}"`
-                  : roleFilter === "all"
-                    ? "No users found"
-                    : `No users found for role "${roleFilter}"`}
+                {search ? "No users match your search" : "No users found"}
               </div>
             )}
 
@@ -729,12 +645,14 @@ export default function App_User() {
               </button>
 
               <span className="au-pg-info">
-                {currentPage} / {totalPages}
+                {currentPage} / {Math.ceil(filteredUsers.length / itemsPerPage)}
               </span>
 
               <button
                 className="au-pg-btn"
-                disabled={currentPage === totalPages}
+                disabled={
+                  currentPage === Math.ceil(filteredUsers.length / itemsPerPage)
+                }
                 onClick={() => setCurrentPage((p) => p + 1)}
               >
                 Next →
@@ -742,26 +660,22 @@ export default function App_User() {
             </div>
           )}
         </div>
-      )}
 
-      {/* ── ADD USER FORM ── */}
+      {/* ── ADD / EDIT USER MODAL ── */}
       {showForm && (
-        <div className="au-form-card">
+        <div className="au-modal-overlay" role="dialog" aria-modal="true">
+          <div className="au-modal">
           <div className="au-form-toolbar">
             <h2 className="au-form-heading">
               {isEditMode ? "Update User Details" : "User Details"}
             </h2>
             <button
               type="button"
-              className="au-toggle-btn au-toggle-btn--compact"
-              onClick={() => {
-                setShowForm(false);
-                setShowUsers(true);
-                setIsEditMode(false);
-                setEditUserId(null);
-              }}
+              className="au-modal-close"
+              onClick={closeForm}
+              aria-label="Close"
             >
-              <span>← Back to Users</span>
+              &times;
             </button>
           </div>
           <form onSubmit={handleSubmit}>
@@ -797,19 +711,19 @@ export default function App_User() {
                 </div>
               </div>
               <div className="au-field">
-                <label className="au-label">Password</label>
+                <label className="au-label">{isEditMode ? "Change Password" : "Password"}</label>
                 <div className="au-input-wrap au-has-icon">
                   <HiLockClosed className="au-field-icon" aria-hidden="true" />
                   <input
                     className="au-password-input"
                     type={showPassword ? "text" : "password"}
                     name="password"
-                    placeholder="••••••••"
+                    placeholder={isEditMode ? "Leave blank to keep current" : "••••••••"}
                     value={formData.password}
                     onChange={handleChange}
                     required={!isEditMode}
                   />
-                  <button
+                  {/* <button
                     type="button"
                     className="au-eye-btn"
                     onClick={() => setShowPassword((prev) => !prev)}
@@ -843,7 +757,7 @@ export default function App_User() {
                         <circle cx="12" cy="12" r="3" />
                       </svg>
                     )}
-                  </button>
+                  </button> */}
                   <div className="au-focus-line" />
                 </div>
               </div>
@@ -1081,17 +995,14 @@ export default function App_User() {
                 <div className="au-mg-dropdown" ref={categoryRef}>
                   <div
                     className="au-mg-trigger"
-                    onClick={() => setCategoryDropdownOpen((value) => !value)}
+                    onClick={() => {
+                      closeSingleSelects();
+                      setCategoryDropdownOpen((value) => !value);
+                    }}
                   >
                       <span className="au-trigger-label">
                         <HiTag className="au-field-icon" aria-hidden="true" />
-                      <span>
-                        {(formData.categories?.length || 0) === 1
-                          ? getCategoryName(formData.categories![0])
-                          : (formData.categories?.length || 0) > 1
-                            ? `${formData.categories!.length} selected`
-                            : "Select Category"}
-                      </span>
+                      <span>{getCategoryName(formData.category)}</span>
                     </span>
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
                       <path
@@ -1105,26 +1016,18 @@ export default function App_User() {
                   </div>
                   {categoryDropdownOpen && (
                     <div className="au-mg-menu">
-                      <label className="au-mg-option au-mg-selectall">
-                        <input
-                          type="checkbox"
-                          checked={
-                            categories.length > 0 &&
-                            formData.categories?.length === categories.length
-                          }
-                          onChange={toggleAllCategories}
-                        />
-                        Select All
-                      </label>
                       {categories.map((c) => (
-                        <label key={c.id} className="au-mg-option">
-                          <input
-                            type="checkbox"
-                            checked={formData.categories?.includes(c.id) || false}
-                            onChange={() => toggleCategory(c.id)}
-                          />
+                        <button
+                          key={c.id}
+                          type="button"
+                          className={`au-mg-option au-select-option${formData.category === c.id ? " is-selected" : ""}`}
+                          onClick={() => {
+                            setFormData((prev) => ({ ...prev, category: c.id, variety: "" }));
+                            setCategoryDropdownOpen(false);
+                          }}
+                        >
                           {c.category}
-                        </label>
+                        </button>
                       ))}
                     </div>
                   )}
@@ -1245,6 +1148,7 @@ export default function App_User() {
               </button>
             </div>
           </form>
+          </div>
         </div>
       )}
     </div>

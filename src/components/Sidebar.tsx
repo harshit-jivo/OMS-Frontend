@@ -7,12 +7,12 @@ import {
   HiCalendarDays,
   HiChartBar,
   HiChevronDown,
-  HiClipboardDocumentCheck,
+  // HiClipboardDocumentCheck,
   HiClock,
   HiCog6Tooth,
   HiClipboardDocumentList,
   HiCube,
-  HiDocumentText,
+  // HiDocumentText,
   HiEye,
   HiGift,
   HiHome,
@@ -26,6 +26,7 @@ import {
   HiUserCircle,
   HiUserGroup,
   HiUsers,
+  HiClipboardDocumentCheck
 } from "react-icons/hi2";
 import { getCurrentUser } from "../services/authService";
 import api from "../services/api";
@@ -601,7 +602,7 @@ export default function Sidebar({ children }: SidebarProps) {
                 Invoice Review
               </Link>
             </li>
-          )}
+          )} 
 
           {userRole?.toLowerCase() === "legal" && (
             <>
@@ -715,9 +716,9 @@ export default function Sidebar({ children }: SidebarProps) {
                   {(userRole?.toLowerCase() === "manager" || userRole?.toLowerCase() == "billing") && (
                     <li><Link to="/FOC" onClick={closeSidebar}><SidebarIcon><HiGift /></SidebarIcon>FOC</Link></li>
                   )}
-                  {userRole?.toLowerCase() === "billing" && (
+                  {/* {userRole?.toLowerCase() === "billing" && (
                     <li><Link to="/Sales_Invoice" onClick={closeSidebar}><SidebarIcon><HiDocumentText /></SidebarIcon>Sales Invoice</Link></li>
-                  )}
+                  )} */}
                
                   <li><Link to="/View_Orders" onClick={closeSidebar}><SidebarIcon><HiEye /></SidebarIcon>View Orders</Link></li>
                 </ul>
