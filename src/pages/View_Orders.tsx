@@ -9,7 +9,7 @@ import {
   ordersService,
 } from "../services/ordersService";
 import type { OrderItem, Order, OrderLog, OrderStatus, PartyProduct, QuotationStatus } from "../services/ordersService";
-import { loadCurrentUserOrders } from "../utils/orderHistory";
+import { loadCurrentUserOrderSummaries } from "../utils/orderHistory";
 import "../styles/View_Orders.css";
 import "../styles/Auditor_Order.css";
 import ItemSection from "../components/order-items/ItemSection";
@@ -108,7 +108,7 @@ export default function View_Orders() {
     const fetchOrders = async () => {
       setIsOrdersLoading(true);
       try {
-        const data = await loadCurrentUserOrders();
+        const data = await loadCurrentUserOrderSummaries();
         setOrders(data);
       } catch (error) {
         console.log("Error fetching orders:", error);
@@ -389,20 +389,31 @@ export default function View_Orders() {
     pageNumber * itemsPerPage,
   );
 
-  const downloadExcel = (order: Order) => {
+  const downloadExcel = async (order: Order) => {
     let excelData = [];
 
-    // If items exist → flatten data
-    if (order.items && order.items.length > 0) {
-      excelData = order.items.map((item: OrderItem) => ({
-        "Order Number": order.order_number,
-        "Card Code": order.card_code,
-        "Card Name": order.card_name,
-        "Delivery Date": order.delivery_date,
-        "Status": order.status_display,
+    // List rows now load as summaries (no line items), so fetch full details
+    // on demand before exporting. Detail-view orders already carry their items.
+    let exportOrder = order;
+    if (!exportOrder.items || exportOrder.items.length === 0) {
+      try {
+        exportOrder = await ordersService.getOrderDetails(order.id);
+      } catch (error) {
+        console.log("Error fetching order details for export:", error);
+      }
+    }
 
-        "Bill To": order.bill_to_address,
-        "Ship To": order.ship_to_address,
+    // If items exist → flatten data
+    if (exportOrder.items && exportOrder.items.length > 0) {
+      excelData = exportOrder.items.map((item: OrderItem) => ({
+        "Order Number": exportOrder.order_number,
+        "Card Code": exportOrder.card_code,
+        "Card Name": exportOrder.card_name,
+        "Delivery Date": exportOrder.delivery_date,
+        "Status": exportOrder.status_display,
+
+        "Bill To": exportOrder.bill_to_address,
+        "Ship To": exportOrder.ship_to_address,
 
         "Item Code": item.item_code,
         "Item Name": item.item_name,
@@ -420,13 +431,13 @@ export default function View_Orders() {
     } else {
       // If no items → still export order
       excelData.push({
-        "Order Number": order.order_number,
-        "Card Code": order.card_code,
-        "Card Name": order.card_name,
-        "Delivery Date": order.delivery_date,
-        "Status": order.status_display,
-        "Bill To": order.bill_to_address,
-        "Ship To": order.ship_to_address,
+        "Order Number": exportOrder.order_number,
+        "Card Code": exportOrder.card_code,
+        "Card Name": exportOrder.card_name,
+        "Delivery Date": exportOrder.delivery_date,
+        "Status": exportOrder.status_display,
+        "Bill To": exportOrder.bill_to_address,
+        "Ship To": exportOrder.ship_to_address,
         "Price List (Basic)": "",
         "Basic Price": "",
       });
@@ -446,7 +457,7 @@ export default function View_Orders() {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     });
 
-    saveAs(file, `Order_${order.order_number}.xlsx`);
+    saveAs(file, `Order_${exportOrder.order_number}.xlsx`);
   };
   return (
     <div className="vo-page">

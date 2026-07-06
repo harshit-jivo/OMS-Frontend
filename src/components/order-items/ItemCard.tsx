@@ -43,6 +43,10 @@ function ItemCard({ item }: { item: OrderItem }) {
   const approvers = Array.isArray(item.approval_approvers) ? item.approval_approvers : [];
   const schemes = getOrderItemSchemes(item);
   const showScheme = Boolean(item.is_scheme_visible) && schemes.length > 0;
+  const hasLastPurchasePrice =
+    item.last_purchase_price !== null &&
+    item.last_purchase_price !== undefined &&
+    item.last_purchase_price !== "";
 
   return (
     <article className="isec-card">
@@ -59,6 +63,13 @@ function ItemCard({ item }: { item: OrderItem }) {
             <span className="isec-card__code">{item.item_code}</span>
           </div>
         </div>
+
+        {hasLastPurchasePrice && (
+          <div className="isec-card__lpp" title="Last purchase price for this item">
+            <span className="isec-card__lpp-label">Last Purchase</span>
+            <span className="isec-card__lpp-value">{formatCurrency(item.last_purchase_price)}</span>
+          </div>
+        )}
 
         {/* <div className="isec-card__actions">
           <span className="isec-card__chip" title={item.item_code}>

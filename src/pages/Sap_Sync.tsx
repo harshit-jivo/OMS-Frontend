@@ -34,6 +34,13 @@ export default function Sap_sync() {
 
   return (
     <div className="sap-page app-page">
+      <div className="bo-page-head">
+            <span className="bo-page-accent" aria-hidden="true" />
+            <div>
+              <h1 className="bo-page-title">SAP Sync</h1>
+              <p className="bo-page-subtitle">Sync data directly from SAP</p>
+            </div>
+      </div>
 
       {/* ── TABS ── */}
       <div className="sap-tabs">
