@@ -12,7 +12,7 @@ import {
   HiCog6Tooth,
   HiClipboardDocumentList,
   HiCube,
-  // HiDocumentText,
+  HiDocumentText,
   HiEye,
   HiGift,
   HiHome,
@@ -468,6 +468,19 @@ export default function Sidebar({ children }: SidebarProps) {
   };
 
   const handleLogout = async () => {
+    // Invalidate the refresh token server-side (blacklist) so it can't be
+    // reused after sign-out. Awaited with a short timeout so a slow/offline
+    // network never blocks logout, and before we navigate (which would cancel
+    // an in-flight request). Best-effort — failure must never block sign-out.
+    try {
+      const refresh = localStorage.getItem("refresh");
+      if (refresh) {
+        await api.post("/auth/logout/", { refresh }, { timeout: 3000 });
+      }
+    } catch {
+      /* best-effort */
+    }
+
     // Remove this browser's web-push subscription while the token is still
     // present, so we stop pushing to a signed-out device.
     try {

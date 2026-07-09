@@ -11,6 +11,10 @@
 let audioContext: AudioContext | null = null;
 let userHasInteracted = false;
 let lastPlayedAt = 0;
+// Guard so the one-time unlock listeners are attached ONCE, not re-added on
+// every Sidebar remount (each route wraps its own <Sidebar>, so navigation
+// would otherwise leak 3 window listeners per page change).
+let soundInitialized = false;
 
 const MIN_INTERVAL_MS = 1500;
 
@@ -42,7 +46,8 @@ const markInteracted = () => {
 
 /** Attach one-time listeners so the first user gesture unlocks audio. */
 export const initNotificationSound = () => {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined" || soundInitialized) return;
+  soundInitialized = true;
   const opts = { once: false, passive: true } as AddEventListenerOptions;
   window.addEventListener("pointerdown", markInteracted, opts);
   window.addEventListener("keydown", markInteracted, opts);

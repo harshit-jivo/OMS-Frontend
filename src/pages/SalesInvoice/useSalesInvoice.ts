@@ -14,6 +14,7 @@ import {
   type SalespersonDetails,
   type SelectedLine,
 } from "./salesInvoice.utils";
+import api from "../../services/api";
 
 export type SalesOrderLine = {
   LineNum: number;
@@ -110,24 +111,98 @@ export const resolveApiUrl = (url: string) => {
   return `${apiBaseUrl}${path}`;
 };
 
-export const apiFetch = async <T,>(url: string, init?: RequestInit): Promise<T> => {
-  const token = localStorage.getItem("access");
-  const response = await fetch(resolveApiUrl(url), {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(init?.headers || {}),
-    },
-  });
+// Map an app URL to the shared axios instance (baseURL "/api"). Reuses the
+// existing resolveApiUrl so behaviour is identical for both the relative-proxy
+// setup and an absolute VITE_API_BASE_URL; absolute URLs bypass the baseURL.
+const toAxiosRequest = (url: string): { url: string; baseURL?: string } => {
+  const resolved = resolveApiUrl(url);
+  if (/^https?:\/\//i.test(resolved)) return { url: resolved, baseURL: "" };
+  return { url: resolved.replace(/^\/api(?=\/|$)/i, "") || "/" };
+};
 
-  if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || `Request failed with ${response.status}`);
+// Normalise an axios error into the same Error(message) contract the previous
+// fetch()-based helpers threw (never logs tokens).
+const toRequestError = (error: any): Error => {
+  const status = error?.response?.status;
+  const data = error?.response?.data;
+  let message: string | undefined;
+  if (typeof data === "string") message = data;
+  else if (data?.detail) message = String(data.detail);
+  else if (data?.message) message = String(data.message);
+  else if (data && typeof data === "object") {
+    message = Object.entries(data)
+      .map(([field, value]) => `${field}: ${Array.isArray(value) ? value.join(", ") : String(value)}`)
+      .join(" ");
   }
+  return new Error(
+    message || error?.message || `Request failed with ${status ?? ""}`.trim(),
+  );
+};
 
-  if (response.status === 204) return undefined as T;
-  return response.json() as Promise<T>;
+/**
+ * JSON request through the ONE shared axios instance (services/api.ts), so it
+ * automatically gets the Authorization header, JWT refresh + retry, and central
+ * error handling. Signature/behaviour preserved: 204 → undefined, otherwise the
+ * parsed body; throws Error(message) on failure.
+ */
+export const apiFetch = async <T,>(url: string, init?: RequestInit): Promise<T> => {
+  const { url: axiosUrl, baseURL } = toAxiosRequest(url);
+  try {
+    const response = await api.request<T>({
+      url: axiosUrl,
+      method: (init?.method || "GET") as any,
+      ...(baseURL !== undefined ? { baseURL } : {}),
+      // Pass the already-serialized JSON body straight through.
+      ...(init?.body !== undefined ? { data: init.body } : {}),
+      ...(init?.headers ? { headers: init.headers as Record<string, string> } : {}),
+    });
+    if (response.status === 204) return undefined as T;
+    return response.data as T;
+  } catch (error) {
+    throw toRequestError(error);
+  }
+};
+
+/**
+ * Multipart upload (FormData) through the shared axios instance. Returns the
+ * parsed body, or null on 204. Setting Content-Type to multipart/form-data lets
+ * axios' browser adapter attach the correct boundary.
+ */
+export const apiUpload = async <T,>(
+  url: string,
+  formData: FormData,
+  method: "POST" | "PUT" | "PATCH" = "POST",
+): Promise<T | null> => {
+  const { url: axiosUrl, baseURL } = toAxiosRequest(url);
+  try {
+    const response = await api.request<T>({
+      url: axiosUrl,
+      method,
+      data: formData,
+      ...(baseURL !== undefined ? { baseURL } : {}),
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+    if (response.status === 204) return null;
+    return response.data as T;
+  } catch (error) {
+    throw toRequestError(error);
+  }
+};
+
+/** DELETE through the shared axios instance. Returns null on 204, else body. */
+export const apiDelete = async <T,>(url: string): Promise<T | null> => {
+  const { url: axiosUrl, baseURL } = toAxiosRequest(url);
+  try {
+    const response = await api.request<T>({
+      url: axiosUrl,
+      method: "DELETE",
+      ...(baseURL !== undefined ? { baseURL } : {}),
+    });
+    if (response.status === 204) return null;
+    return response.data as T;
+  } catch (error) {
+    throw toRequestError(error);
+  }
 };
 
 // Local invoice history log. We append one row per lifecycle event (draft created
