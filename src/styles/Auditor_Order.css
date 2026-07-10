@@ -412,6 +412,59 @@
   margin-bottom: 8px;
 }
 
+.ao-loading-overlay {
+  background: rgba(15, 23, 42, 0.68);
+  backdrop-filter: blur(3px);
+}
+
+.ao-modal-loading {
+  max-width: 420px;
+  padding: 36px 32px 30px;
+  text-align: center;
+  border: 1px solid rgba(191, 219, 254, 0.8);
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.3);
+}
+
+.ao-modal-loading .ao-modal-title {
+  margin: 20px 0 8px;
+  color: #0f172a;
+}
+
+.ao-spinner {
+  width: 58px;
+  height: 58px;
+  margin: 0 auto;
+  border: 5px solid #dbeafe;
+  border-top-color: #2563eb;
+  border-right-color: #60a5fa;
+  border-radius: 50%;
+  animation: ao-spinner-rotate 0.8s linear infinite;
+}
+
+.ao-loading-text {
+  margin: 0;
+  color: #475569;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.ao-loading-hint {
+  margin: 14px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid #e2e8f0;
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+@keyframes ao-spinner-rotate {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ao-spinner { animation-duration: 1.6s; }
+}
+
 .ao-modal-actions {
   display: flex;
   justify-content: center;
@@ -690,4 +743,3 @@
     gap: 2px;
   }
 }
-
