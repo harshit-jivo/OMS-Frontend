@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { HiArrowLeft, HiInformationCircle, HiPencilSquare, HiPhoto, HiPlus, HiTrash, HiXMark } from "react-icons/hi2";
+import { API_ORIGIN } from "../../services/api";
 import { apiDelete, apiFetch, apiUpload, resolveApiUrl } from "./useSalesInvoice";
 import "../../styles/Sales_Invoice.css";
 
@@ -68,21 +69,12 @@ const normalizePendingSkuItem = (item: PendingSkuItem): FinishedGoodItem | null 
   };
 };
 
-const skuImageBaseUrl = String(
-  import.meta.env.VITE_BASE_URL
-    || import.meta.env.VITE_BACKEND_BASE_URL
-    || import.meta.env.VITE_API_BASE_URL
-    || "",
-)
-  .replace(/\/+$/, "")
-  .replace(/\/api$/i, "");
-
 const getSkuImageUrl = (imagePath?: string | null) => {
   const path = String(imagePath || "").trim();
   if (!path) return "";
   if (/^https?:\/\//i.test(path)) return path;
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-  return skuImageBaseUrl ? `${skuImageBaseUrl}${normalizedPath}` : normalizedPath;
+  return `${API_ORIGIN}${normalizedPath}`;
 };
 
 const SKU_UPLOAD_URL = resolveApiUrl("/api/sku/upload/");

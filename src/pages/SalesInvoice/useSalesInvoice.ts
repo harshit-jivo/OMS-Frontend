@@ -14,7 +14,7 @@ import {
   type SalespersonDetails,
   type SelectedLine,
 } from "./salesInvoice.utils";
-import api from "../../services/api";
+import api, { API_BASE_URL } from "../../services/api";
 
 export type SalesOrderLine = {
   LineNum: number;
@@ -89,31 +89,19 @@ const generateOmsRef = (): string => {
 const linesToRecord = (lines: SelectedLine[]) =>
   Object.fromEntries(lines.map((line) => [lineKey(line.DocEntry, line.LineNum), line]));
 
-const apiBaseUrl = String(
-  import.meta.env.VITE_BASE_URL
-    || import.meta.env.VITE_BACKEND_BASE_URL
-    || import.meta.env.VITE_API_BASE_URL
-    || "",
-)
-  .trim()
-  .replace(/\/+$/, "");
-
 export const resolveApiUrl = (url: string) => {
   if (/^https?:\/\//i.test(url)) return url;
 
   const normalizedUrl = url.startsWith("/") ? url : `/${url}`;
-  if (!apiBaseUrl) return normalizedUrl;
-
-  const path = /\/api$/i.test(apiBaseUrl)
+  const path = /\/api$/i.test(API_BASE_URL)
     ? normalizedUrl.replace(/^\/api(?=\/|$)/i, "")
     : normalizedUrl;
 
-  return `${apiBaseUrl}${path}`;
+  return `${API_BASE_URL}${path}`;
 };
 
-// Map an app URL to the shared axios instance (baseURL "/api"). Reuses the
-// existing resolveApiUrl so behaviour is identical for both the relative-proxy
-// setup and an absolute VITE_API_BASE_URL; absolute URLs bypass the baseURL.
+// Map an app URL to the shared axios instance. Absolute URLs bypass Axios'
+// baseURL so sale-invoice calls use the exact same configured API endpoint.
 const toAxiosRequest = (url: string): { url: string; baseURL?: string } => {
   const resolved = resolveApiUrl(url);
   if (/^https?:\/\//i.test(resolved)) return { url: resolved, baseURL: "" };
