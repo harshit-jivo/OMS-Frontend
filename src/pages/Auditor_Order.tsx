@@ -124,7 +124,7 @@ export default function Auditor_orders() {
     setIsCreating(true);
 
     try {
-      const salesResponse = await api.post('/sap/approve-order/', {
+      const salesResponse = await api.post('/sap/approve-sales-order/', {
         order_id: pendingOrderId,
       });
       const sapData = salesResponse?.data?.data ?? salesResponse?.data;

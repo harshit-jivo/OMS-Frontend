@@ -38,7 +38,10 @@ const BILLING_REJECTED_KEYWORDS = ["billing rejected", "rejected by billing", "b
 const AUDITOR_REJECTED_CODES = ["REJECTED"];
 const AUDITOR_ACCEPTED_STATUS_CODES = ["BILLING", "BILLING_PENDING", "APPROVED", "COMPLETED"];
 const BILLING_REJECTED_CODES = ["BILLING_REJECTED"];
-const APPROVER_ACCEPTED_STATUS_CODES = ["APPROVED", "BILLING"];
+const APPROVER_ACCEPTED_STATUS_CODES = ["APPROVED", "BILLING", "BILLING_PENDING", "BILLED", "COMPLETED"];
+// An order can only progress past rate approval if it was approved, so any
+// downstream status counts as accepted for the rate approver view.
+const APPROVER_ACCEPTED_KEYWORDS = ["billing", "billed", "audit", "completed", "quotation"];
 const RATE_APPROVER_REJECTED_KEYWORDS = ["rate approver rejected", "rate rejected", "rejected"];
 const RATE_APPROVER_TRACKING_FALLBACK_STATUS = "APPROVED";
 
@@ -93,7 +96,10 @@ const getDecisionType = (order: Order, mode: TrackingMode) => {
     if (RATE_APPROVER_REJECTED_KEYWORDS.some((keyword) => normalized.includes(keyword))) {
       return "rejected";
     }
-    if (APPROVER_ACCEPTED_STATUS_CODES.includes(statusCode) || normalized.includes("billing")) {
+    if (
+      APPROVER_ACCEPTED_STATUS_CODES.includes(statusCode) ||
+      APPROVER_ACCEPTED_KEYWORDS.some((keyword) => normalized.includes(keyword))
+    ) {
       return "accepted";
     }
   }
