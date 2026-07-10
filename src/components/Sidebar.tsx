@@ -12,6 +12,7 @@ import {
   HiCog6Tooth,
   HiClipboardDocumentList,
   HiCube,
+  HiDocumentCheck,
   HiDocumentText,
   HiEye,
   HiGift,
@@ -23,6 +24,7 @@ import {
   HiShieldCheck,
   HiShoppingCart,
   HiTag,
+  HiTruck,
   HiUserCircle,
   HiUserGroup,
   HiUsers,
@@ -711,6 +713,24 @@ export default function Sidebar({ children }: SidebarProps) {
               <Link to="/Product_Stock" onClick={closeSidebar}>
                 <SidebarIcon><HiClipboardDocumentList /></SidebarIcon>
                 Stock
+              </Link>
+            </li>
+          )}
+
+          {canSee("Einvoice") && (
+            <li className={location.pathname === "/Einvoice" ? "active" : ""}>
+              <Link to="/Einvoice" onClick={closeSidebar}>
+                <SidebarIcon><HiDocumentCheck /></SidebarIcon>
+                e-Invoice
+              </Link>
+            </li>
+          )}
+
+          {canSee("Ewaybill") && (
+            <li className={location.pathname === "/Ewaybill" ? "active" : ""}>
+              <Link to="/Ewaybill" onClick={closeSidebar}>
+                <SidebarIcon><HiTruck /></SidebarIcon>
+                e-Way Bill
               </Link>
             </li>
           )}

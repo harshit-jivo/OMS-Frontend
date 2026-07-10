@@ -35,6 +35,8 @@ import Page_Permissions from "./pages/Page_Permissions";
 import Sales_Quotation from "./pages/Sales_Quotation";
 import LabelChecker from "./pages/Label_Checker";
 import NutritionManager from "./pages/Nutrition_Manager";
+import Einvoice from "./pages/Einvoice";
+import Ewaybill from "./pages/Ewaybill";
 
 function App() {
   return (
@@ -341,6 +343,23 @@ function App() {
 
         {/* Any unknown path falls back to the dashboard instead of a blank page. */}
         <Route path="*" element={<Navigate to="/Dashboard" replace />} />
+        <Route
+          path="/Einvoice"
+          element={
+            <Sidebar>
+              <Einvoice />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Ewaybill"
+          element={
+            <Sidebar>
+              <Ewaybill />
+            </Sidebar>
+          }
+        />
       </Routes>
       </ErrorBoundary>
     </BrowserRouter>

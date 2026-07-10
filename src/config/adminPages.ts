@@ -16,6 +16,8 @@ export const GRANTABLE_ADMIN_PAGES: GrantablePage[] = [
   { key: "Order_Flow_Settings", label: "Order Flow Settings", path: "/Order_Flow_Settings" },
   { key: "Product_Stock", label: "Stock", path: "/Product_Stock" },
   { key: "Reports", label: "Reports", path: "/Daily_Report" },
+  { key: "Einvoice", label: "e-Invoice (IRN)", path: "/Einvoice" },
+  { key: "Ewaybill", label: "e-Way Bill", path: "/Ewaybill" },
 ];
 
 export const GRANTABLE_PAGE_KEYS = GRANTABLE_ADMIN_PAGES.map((page) => page.key);
