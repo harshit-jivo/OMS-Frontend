@@ -18,7 +18,7 @@ import {
   HiShieldCheck,
   HiSparkles,
 } from "react-icons/hi2";
-import { resolveApiUrl } from "./SalesInvoice/useSalesInvoice";
+import { apiFetch, apiUpload, resolveApiUrl } from "./SalesInvoice/useSalesInvoice";
 import "../styles/Label_Checker.css";
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -185,21 +185,6 @@ const ANALYSING_STEPS = [
   "Checking nutritional information…",
   "Compiling the compliance report…",
 ];
-
-async function readError(response: Response): Promise<string> {
-  try {
-    const contentType = response.headers.get("content-type") ?? "";
-    if (contentType.includes("application/json")) {
-      const data = await response.json();
-      if (typeof data === "string") return data;
-      return (data?.detail || data?.error || data?.message || `Upload failed (${response.status}).`) as string;
-    }
-    const text = await response.text();
-    return text.trim() || `Upload failed (${response.status}).`;
-  } catch {
-    return `Upload failed (${response.status}).`;
-  }
-}
 
 /* ── Value + rows ─────────────────────────────────────────────────────────── */
 
@@ -428,12 +413,7 @@ export default function LabelChecker() {
       setItemsLoading(true);
       setItemsError("");
       try {
-        const token = localStorage.getItem("access");
-        const response = await fetch(ITEMS_URL, {
-          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-        });
-        if (!response.ok) throw new Error(await readError(response));
-        const data = (await response.json()) as LegalItem[];
+        const data = await apiFetch<LegalItem[]>(ITEMS_URL);
         if (!cancelled) setItems(Array.isArray(data) ? data : []);
       } catch (err) {
         if (!cancelled) setItemsError(err instanceof Error ? err.message : "Could not load the item list.");
@@ -528,17 +508,10 @@ export default function LabelChecker() {
     setError("");
     setResult(null);
     try {
-      const token = localStorage.getItem("access");
       const body = new FormData();
       body.append("label_file", file);
       body.append("item_id", itemId);
-      const response = await fetch(UPLOAD_URL, {
-        method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-        body,
-      });
-      if (!response.ok) throw new Error(await readError(response));
-      const data = (await response.json()) as LegalResult;
+      const data = await apiUpload<LegalResult>(UPLOAD_URL, body, "POST");
       setResult(data);
       setStatus("done");
     } catch (err) {

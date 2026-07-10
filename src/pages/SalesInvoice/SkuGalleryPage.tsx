@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { HiArrowLeft, HiInformationCircle, HiPencilSquare, HiPhoto, HiPlus, HiTrash, HiXMark } from "react-icons/hi2";
-import { apiFetch, resolveApiUrl } from "./useSalesInvoice";
+import { apiDelete, apiFetch, apiUpload, resolveApiUrl } from "./useSalesInvoice";
 import "../../styles/Sales_Invoice.css";
 
 type SkuRecord = {
@@ -101,29 +101,6 @@ const formatSkuDate = (value?: string) => {
   });
 };
 
-const getBackendValidationMessage = async (response: Response) => {
-  const contentType = response.headers.get("content-type") || "";
-
-  if (contentType.includes("application/json")) {
-    const data = await response.json();
-    if (typeof data === "string") return data;
-    if (data?.detail) return String(data.detail);
-    if (data?.message) return String(data.message);
-
-    const fieldErrors = Object.entries(data || {})
-      .map(([field, value]) => {
-        const message = Array.isArray(value) ? value.join(", ") : String(value);
-        return `${field}: ${message}`;
-      })
-      .join(" ");
-
-    return fieldErrors || `Request failed with ${response.status}`;
-  }
-
-  const message = await response.text();
-  return message || `Request failed with ${response.status}`;
-};
-
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
 export const cropImageToSquare = async (
@@ -184,19 +161,7 @@ async function uploadSkuImage(itemCode: string, itemName: string, imageFile: Fil
   formData.append("item_code", itemCode);
   formData.append("item_name", itemName);
   formData.append("item_image", imageFile);
-
-  const token = localStorage.getItem("access");
-  const response = await fetch(SKU_UPLOAD_URL, {
-    method: "POST",
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-    body: formData,
-  });
-
-  if (!response.ok) {
-    throw new Error(await getBackendValidationMessage(response));
-  }
-
-  return response.json();
+  return apiUpload<any>(SKU_UPLOAD_URL, formData, "POST");
 }
 
 async function updateSkuImage(originalItemCode: string, itemCode: string, itemName: string, imageFile?: File | null) {
@@ -204,34 +169,11 @@ async function updateSkuImage(originalItemCode: string, itemCode: string, itemNa
   formData.append("item_code", itemCode);
   formData.append("item_name", itemName);
   if (imageFile) formData.append("item_image", imageFile);
-
-  const token = localStorage.getItem("access");
-  const response = await fetch(skuResourcePath(originalItemCode), {
-    method: "PATCH",
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-    body: formData,
-  });
-
-  if (!response.ok) {
-    throw new Error(await getBackendValidationMessage(response));
-  }
-
-  if (response.status === 204) return null;
-  return response.json();
+  return apiUpload<any>(skuResourcePath(originalItemCode), formData, "PATCH");
 }
 
 async function deleteSkuImage(itemCode: string) {
-  const token = localStorage.getItem("access");
-  const response = await fetch(skuResourcePath(itemCode), {
-    method: "DELETE",
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-  });
-
-  if (!response.ok) {
-    throw new Error(await getBackendValidationMessage(response));
-  }
-
-  return response.status === 204 ? null : response.text();
+  return apiDelete<any>(skuResourcePath(itemCode));
 }
 
 export default function SkuGalleryPage() {

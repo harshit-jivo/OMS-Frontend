@@ -1,10 +1,12 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import ErrorBoundary from "./components/ErrorBoundary";
 import Login from "./pages/Login";
 import Sidebar from "./components/Sidebar";
 import Dashboard from "./pages/Dashboard";
 import App_User from "./pages/App_User";
 import Sap_sync from "./pages/Sap_Sync";
 import Add_Sales from "./pages/Add_Sales";
+import Drafts from "./pages/Drafts";
 import View_Orders from "./pages/View_Orders";
 import Auditor_orders from "./pages/Auditor_Order";
 import Billing_orders from "./pages/Billing_Order";
@@ -37,6 +39,7 @@ import NutritionManager from "./pages/Nutrition_Manager";
 function App() {
   return (
     <BrowserRouter>
+      <ErrorBoundary>
       <Routes>
         <Route path="/" element={<Login />} />
 
@@ -72,6 +75,15 @@ function App() {
           element={
             <Sidebar>
               <Add_Sales />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Drafts"
+          element={
+            <Sidebar>
+              <Drafts />
             </Sidebar>
           }
         />
@@ -326,7 +338,11 @@ function App() {
             </Sidebar>
           }
         />
+
+        {/* Any unknown path falls back to the dashboard instead of a blank page. */}
+        <Route path="*" element={<Navigate to="/Dashboard" replace />} />
       </Routes>
+      </ErrorBoundary>
     </BrowserRouter>
   );
 }

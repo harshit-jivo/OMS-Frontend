@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import * as XLSX from "xlsx";
+import { saveAs } from "file-saver";
 import { ordersService } from "../services/ordersService";
 import type { QuotationOverviewItem, QuotationStatusLabel } from "../services/ordersService";
 
@@ -29,6 +31,7 @@ export default function Sales_Quotation() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<QuotationStatusLabel | "">("");
+  const [categoryFilter, setCategoryFilter] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 12;
 
@@ -49,10 +52,37 @@ export default function Sales_Quotation() {
     }
   };
 
+  // Distinct categories present across all orders (OIL / BEVERAGES / MART), used
+  // to populate the category filter dropdown.
+  const categoryOptions = useMemo(() => {
+    const set = new Set<string>();
+    rows.forEach((row) => {
+      const cats =
+        row.categories && row.categories.length
+          ? row.categories
+          : String(row.category || "").split(",");
+      cats.forEach((c) => {
+        const value = String(c || "").trim().toUpperCase();
+        if (value) set.add(value);
+      });
+    });
+    return Array.from(set).sort();
+  }, [rows]);
+
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
     return rows.filter((row) => {
       if (statusFilter && row.quotation_status !== statusFilter) return false;
+      if (categoryFilter) {
+        const cats =
+          row.categories && row.categories.length
+            ? row.categories.map((c) => String(c).trim().toUpperCase())
+            : String(row.category || "")
+                .split(",")
+                .map((c) => c.trim().toUpperCase())
+                .filter(Boolean);
+        if (!cats.includes(categoryFilter)) return false;
+      }
       if (!term) return true;
       return (
         String(row.order_number || "").toLowerCase().includes(term) ||
@@ -61,19 +91,42 @@ export default function Sales_Quotation() {
         String(row.doc_num ?? "").toLowerCase().includes(term)
       );
     });
-  }, [rows, search, statusFilter]);
+  }, [rows, search, statusFilter, categoryFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / itemsPerPage));
   const paginated = filtered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [search, statusFilter]);
+  }, [search, statusFilter, categoryFilter]);
 
   const cancelledCount = useMemo(
     () => rows.filter((r) => r.quotation_status === "CANCELLED").length,
     [rows],
   );
+
+  // Export the currently filtered rows (respecting search/status/category filters)
+  // as an Excel file matching the columns shown in the table.
+  const downloadExcel = () => {
+    if (filtered.length === 0) return;
+    const excelData = filtered.map((row) => ({
+      "Order ID": row.order_number ?? "",
+      "Card Code": row.card_code ?? "",
+      "Card Name": row.card_name ?? "",
+      "Category": row.category || "",
+      "Created": formatDateTime(row.created_at),
+      "SAP Doc No.": row.doc_num ?? "",
+      "Quotation Status": (STATUS_STYLES[row.quotation_status] || STATUS_STYLES.UNKNOWN).label,
+      "Cancelled By": row.quotation_cancelled_by ?? "",
+      "Cancelled At": row.quotation_cancelled ? formatDateTime(row.quotation_cancelled_at) : "",
+    }));
+    const worksheet = XLSX.utils.json_to_sheet(excelData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Sales Quotations");
+    const excelBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+    const file = new Blob([excelBuffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    saveAs(file, `Sales_Quotation_${new Date().toISOString().split("T")[0]}.xlsx`);
+  };
 
   return (
     <div style={{ padding: "20px" }}>
@@ -83,6 +136,18 @@ export default function Sales_Quotation() {
           <span style={{ fontSize: "0.85rem", color: "#64748b" }}>
             Total: {filtered.length} &nbsp;|&nbsp; Cancelled: {cancelledCount}
           </span>
+          <select
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+            style={{ height: 38, padding: "0 12px", borderRadius: 8, border: "1px solid #cbd5e1", background: "#fff", color: "#0f172a", cursor: "pointer" }}
+          >
+            <option value="">All Categories</option>
+            {categoryOptions.map((value) => (
+              <option key={value} value={value}>
+                {value}
+              </option>
+            ))}
+          </select>
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as QuotationStatusLabel | "")}
@@ -101,6 +166,24 @@ export default function Sales_Quotation() {
             onChange={(e) => setSearch(e.target.value)}
             style={{ height: 38, padding: "0 12px", borderRadius: 8, border: "1px solid #cbd5e1", minWidth: 240 }}
           />
+          <button
+            type="button"
+            onClick={downloadExcel}
+            disabled={filtered.length === 0}
+            style={{
+              height: 38,
+              padding: "0 16px",
+              borderRadius: 8,
+              border: "none",
+              background: filtered.length === 0 ? "#94a3b8" : "#16a34a",
+              color: "#fff",
+              fontWeight: 600,
+              cursor: filtered.length === 0 ? "not-allowed" : "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            ⬇ Download Excel
+          </button>
         </div>
       </div>
 
@@ -118,6 +201,7 @@ export default function Sales_Quotation() {
                 <th>Order ID</th>
                 <th>Card Code</th>
                 <th>Card Name</th>
+                <th>Category</th>
                 <th>Created</th>
                 <th>SAP Doc No.</th>
                 <th>Quotation Status</th>
@@ -133,6 +217,7 @@ export default function Sales_Quotation() {
                     <td>{row.order_number}</td>
                     <td>{row.card_code}</td>
                     <td>{row.card_name}</td>
+                    <td>{row.category || "-"}</td>
                     <td>{formatDateTime(row.created_at)}</td>
                     <td>{row.doc_num ?? "-"}</td>
                     <td>

@@ -557,6 +557,29 @@ export default function Dashboard() {
       setStatusOrdersLoading(false);
     }
   };
+  // Names of the rate approver(s) still holding an order (status PENDING).
+  // Only relevant while the order is actually at the rate-approval stage —
+  // once it moves on (e.g. to billing) it can keep stale PENDING rows, which
+  // we must not show as "with the rate approver".
+  const getPendingRateApprovers = (order: Order) => {
+    const isAtRateApproval = String(order.status_display || "")
+      .toLowerCase()
+      .includes("rate");
+    if (!isAtRateApproval) return [];
+    return (order.rate_approvals || [])
+      .filter((approval) => String(approval.status || "").toUpperCase() === "PENDING")
+      .map((approval) => approval.approver_name)
+      .filter(Boolean);
+  };
+
+  // Name of the user who rejected the order — only relevant for rejected orders.
+  const getRejectedByName = (order: Order) => {
+    const isRejected = String(order.status_display || "")
+      .toLowerCase()
+      .includes("reject");
+    return isRejected ? order.rejected_by || "" : "";
+  };
+
   const selectedMonthLabel = MONTH_OPTIONS.find((option) => option.value === month)?.label ?? "All Months";
   const selectedPeriodLabel = month === 0 ? `${year}` : `${selectedMonthLabel} ${year}`;
   const orderVolumeMetricLabel = month === 0 ? "Year Total" : `${selectedMonthLabel} Total`;
@@ -1345,11 +1368,24 @@ export default function Dashboard() {
               <div className="db-no-data">No orders found for this status.</div>
             ) : (
               <div className="db-status-orders-list">
-                {statusOrders.map((order) => (
+                {statusOrders.map((order) => {
+                  const pendingApprovers = getPendingRateApprovers(order);
+                  const rejectedBy = getRejectedByName(order);
+                  return (
                   <div className="db-status-order-row" key={order.id}>
                     <div className="db-status-order-main">
                       <span className="db-status-order-number">#{order.order_number}</span>
                       <span className="db-status-order-party">{order.card_name || order.card_code}</span>
+                      {pendingApprovers.length > 0 ? (
+                        <span className="db-status-order-approver">
+                          Rate Approver: {pendingApprovers.join(", ")}
+                        </span>
+                      ) : null}
+                      {rejectedBy ? (
+                        <span className="db-status-order-approver db-status-order-rejected-by">
+                          Rejected by: {rejectedBy}
+                        </span>
+                      ) : null}
                     </div>
                     <div className="db-status-order-meta">
                       <span className="db-status-order-amount">{fmtCurrency(order.total_amount)}</span>
@@ -1369,7 +1405,8 @@ export default function Dashboard() {
                       View
                     </button>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

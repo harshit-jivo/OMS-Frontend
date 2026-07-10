@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import type { ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
@@ -12,7 +12,7 @@ import {
   HiCog6Tooth,
   HiClipboardDocumentList,
   HiCube,
-  // HiDocumentText,
+  HiDocumentText,
   HiEye,
   HiGift,
   HiHome,
@@ -30,6 +30,32 @@ import {
 } from "react-icons/hi2";
 import { getCurrentUser } from "../services/authService";
 import api from "../services/api";
+import NotificationToaster, { showToast } from "./NotificationToaster";
+import {
+  initNotificationBus,
+  onNotificationEvent,
+  broadcastNotificationEvent,
+} from "../services/notificationBus";
+import type { NotificationPayload } from "../services/notificationBus";
+import {
+  initNotificationSound,
+  playNotificationSound,
+} from "../utils/notificationSound";
+import {
+  getCurrentPermission,
+  isWebPushSupported,
+  persistSubscription,
+  registerServiceWorker,
+  requestPermission,
+  subscribeToPush,
+  unsubscribeFromPush,
+} from "../services/webPushClient";
+import {
+  getPromptState,
+  savePromptState,
+  shouldShowPrompt,
+} from "../utils/notificationPermission";
+import NotificationPermissionModal from "./NotificationPermissionModal";
 import "./Sidebar.css";
 
 
@@ -50,6 +76,33 @@ const SidebarIcon = ({ children }: { children: ReactNode }) => (
     {children}
   </span>
 );
+
+// Bucket a notification's timestamp into Today / Yesterday / Older (Task 9).
+const dateGroupLabel = (isoDate: string): "Today" | "Yesterday" | "Older" => {
+  const date = new Date(isoDate);
+  if (Number.isNaN(date.getTime())) return "Older";
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const startOfYesterday = new Date(startOfToday);
+  startOfYesterday.setDate(startOfYesterday.getDate() - 1);
+  if (date >= startOfToday) return "Today";
+  if (date >= startOfYesterday) return "Yesterday";
+  return "Older";
+};
+
+const groupNotifications = (items: Notification[]) => {
+  const groups: { label: string; items: Notification[] }[] = [
+    { label: "Today", items: [] },
+    { label: "Yesterday", items: [] },
+    { label: "Older", items: [] },
+  ];
+  for (const item of items) {
+    const label = dateGroupLabel(item.created_at);
+    const bucket = groups.find((g) => g.label === label);
+    if (bucket) bucket.items.push(item);
+  }
+  return groups.filter((g) => g.items.length > 0);
+};
 
 export default function Sidebar({ children }: SidebarProps) {
 
@@ -74,9 +127,26 @@ export default function Sidebar({ children }: SidebarProps) {
   const navigate = useNavigate();
   const roleLabel = userRole ? userRole.toUpperCase() : "USER";
   const displayName = userName || "User";
-  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [showNotificationsModal, setShowNotificationsModal] = useState(false);
+  // Web Push + real-time state (Phase 3).
+  const [showPushPrompt, setShowPushPrompt] = useState(false);
+  const [permissionSubmitting, setPermissionSubmitting] = useState(false);
+  // OS permission for the Settings section: "default" | "granted" | "denied" | "unsupported".
+  const [notifPermission, setNotifPermission] = useState<string>(() =>
+    getCurrentPermission(),
+  );
+  // Full history (modal): grouped/paginated, not just unread.
+  const [historyItems, setHistoryItems] = useState<Notification[]>([]);
+  const [historyFilter, setHistoryFilter] = useState<"all" | "unread">("all");
+  const [historyOffset, setHistoryOffset] = useState(0);
+  const [historyHasMore, setHistoryHasMore] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  // Latest order-navigation fn, so long-lived bus handlers always route with
+  // the current role without needing to re-subscribe.
+  const goToOrderRef = useRef<(orderId?: number | string | null) => void>(
+    () => {},
+  );
   const normalizedRole = userRole?.toLowerCase().replace(/[_-]+/g, " ").trim() || "";
   const isRateApprover =
     normalizedRole === "rate approver" ||
@@ -121,52 +191,253 @@ export default function Sidebar({ children }: SidebarProps) {
     }
   };
 
-  const fetchNotifications = async () => {
+  const authConfig = () => {
+    const token = localStorage.getItem("access");
+    return token ? { headers: { Authorization: `Bearer ${token}` } } : {};
+  };
+
+  // Lightweight unread snapshot for the bell badge (also the polling fallback).
+  const fetchNotifications = useCallback(async () => {
     try {
-      const token = localStorage.getItem("access");
-      const config = token ? { headers: { Authorization: `Bearer ${token}` } } : {};
-      const response = await api.get('/orders/notifications/', config);
+      const response = await api.get("/orders/notifications/", authConfig());
       let data = response.data ?? response;
-      
       if (data && !Array.isArray(data)) {
         if (Array.isArray(data.data)) data = data.data;
         else if (Array.isArray(data.results)) data = data.results;
         else if (Array.isArray(data.notifications)) data = data.notifications;
       }
-
       if (Array.isArray(data)) {
         const unreadOnly = data.filter((n: any) => !n.is_read);
-        setNotifications(unreadOnly);
         setUnreadCount(unreadOnly.length);
       }
     } catch (error) {
       console.error("Error fetching notifications:", error);
     }
-  };
+  }, []);
+
+  // Resolve the correct role route for a Sales Order deep-link (unchanged
+  // routing — reused by clicks, toasts, and service-worker taps).
+  const routeForRole = useCallback((): string => {
+    if (normalizedRole === "auditor") return "/Auditor_orders";
+    if (normalizedRole === "billing") return "/Billing_orders";
+    if (isRateApprover) return "/Rate_Approver_orders";
+    if (normalizedRole === "manager") return "/Order_Tracking";
+    return "/View_Orders";
+  }, [normalizedRole, isRateApprover]);
+
+  const goToOrder = useCallback(
+    (orderId?: number | string | null) => {
+      const navState = orderId
+        ? { state: { openOrderId: Number(orderId) } }
+        : {};
+      navigate(routeForRole(), navState as any);
+    },
+    [navigate, routeForRole],
+  );
 
   useEffect(() => {
-    const token = localStorage.getItem("access");
+    goToOrderRef.current = goToOrder;
+  }, [goToOrder]);
 
+  // Apply a single read to the badge + history list. Called only from the bus
+  // listener so there is exactly one update path (no double-decrement).
+  const applyRead = useCallback((id: number) => {
+    setUnreadCount((c) => Math.max(0, c - 1));
+    setHistoryItems((prev) =>
+      prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)),
+    );
+  }, []);
+
+  // Marks read on the server, then broadcasts so THIS tab and every other tab
+  // update through the single bus path. Only call for a currently-unread item.
+  const markNotificationRead = useCallback(async (id: number) => {
+    try {
+      await api.patch(`/orders/notifications/${id}/`, {}, authConfig());
+    } catch (error) {
+      console.error("Error marking as read:", error);
+    }
+    broadcastNotificationEvent({ type: "read", id });
+  }, []);
+
+  // Paginated history for the modal (Task 9): unread/read + Today/Yesterday/
+  // Older grouping (grouped client-side), with "load more".
+  const fetchHistory = useCallback(
+    async (reset: boolean, filterOverride?: "all" | "unread") => {
+      setHistoryLoading(true);
+      try {
+        const offset = reset ? 0 : historyOffset;
+        const filter = filterOverride ?? historyFilter;
+        const response = await api.get("/orders/notifications/history/", {
+          ...authConfig(),
+          params: { limit: 20, offset, filter },
+        });
+        const payload = response.data ?? response;
+        const results: Notification[] = Array.isArray(payload.results)
+          ? payload.results
+          : [];
+        setHistoryItems((prev) => (reset ? results : [...prev, ...results]));
+        setHistoryOffset(offset + results.length);
+        setHistoryHasMore(payload.next_offset != null);
+        if (typeof payload.unread_count === "number") {
+          setUnreadCount(payload.unread_count);
+        }
+      } catch (error) {
+        console.error("Error loading notification history:", error);
+      } finally {
+        setHistoryLoading(false);
+      }
+    },
+    [historyOffset, historyFilter],
+  );
+
+  // --- Real-time wiring (replaces 30s polling) ------------------------------
+  useEffect(() => {
+    const token = localStorage.getItem("access");
     if (!token) {
       window.location.href = "/";
+      return;
     }
 
-    const timer = setTimeout(() => fetchNotifications(), 500);
-    const interval = setInterval(() => fetchNotifications(), 30000); 
-    
-    const handleRefresh = () => fetchNotifications();
-    window.addEventListener("refreshNotifications", handleRefresh);
+    initNotificationBus();
+    initNotificationSound();
+    fetchNotifications();
 
-    return () => { 
-      clearTimeout(timer); 
-      clearInterval(interval); 
-      window.removeEventListener("refreshNotifications", handleRefresh);
+    let interval: number | undefined;
+    const startFallbackPolling = () => {
+      if (interval) return;
+      interval = window.setInterval(() => fetchNotifications(), 30000);
     };
+
+    const off = onNotificationEvent((event) => {
+      if (event.type === "push") {
+        const data: NotificationPayload = event.data || {};
+        fetchNotifications();
+        playNotificationSound();
+        showToast({
+          title: data.title || "New notification",
+          message: data.message || data.body || "",
+          orderNumber:
+            (data as any).order_number != null
+              ? String((data as any).order_number)
+              : data.order_id != null
+                ? String(data.order_id)
+                : null,
+          onAction: () => goToOrderRef.current(data.order_id ?? null),
+        });
+      } else if (event.type === "click") {
+        goToOrderRef.current(event.data?.order_id ?? null);
+      } else if (event.type === "read") {
+        applyRead(event.id);
+      } else if (event.type === "read-all" || event.type === "cleared") {
+        setUnreadCount(0);
+        setHistoryItems((prev) => prev.map((n) => ({ ...n, is_read: true })));
+      } else if (event.type === "resubscribe") {
+        persistSubscription(event.subscription).catch(() => undefined);
+      }
+    });
+
+    const handleRefresh = () => fetchNotifications();
+    const handleFocus = () => fetchNotifications();
+    window.addEventListener("refreshNotifications", handleRefresh);
+    window.addEventListener("focus", handleFocus);
+
+    (async () => {
+      if (isWebPushSupported()) {
+        await registerServiceWorker();
+        if (getCurrentPermission() === "granted") {
+          // Already granted (incl. existing users): subscribe silently and
+          // record it so our modal is never shown.
+          savePromptState({ status: "granted" });
+          const ok = await subscribeToPush();
+          if (!ok) startFallbackPolling();
+        } else {
+          startFallbackPolling();
+        }
+      } else {
+        // Insecure http (non-localhost) or unsupported browser: only here do we
+        // fall back to polling.
+        startFallbackPolling();
+      }
+    })();
+
+    return () => {
+      off();
+      window.removeEventListener("refreshNotifications", handleRefresh);
+      window.removeEventListener("focus", handleFocus);
+      if (interval) window.clearInterval(interval);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Handle a cold open from a service-worker notification tap (new tab carries
+  // ?openOrderId=). Focused-tab taps arrive via the bus "click" event instead.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const openOrderId = params.get("openOrderId");
+    const notificationId = params.get("notificationId");
+    if (!openOrderId) return;
+
+    if (notificationId) markNotificationRead(Number(notificationId));
+    goToOrder(openOrderId);
+
+    params.delete("openOrderId");
+    params.delete("notificationId");
+    const clean =
+      window.location.pathname + (params.toString() ? `?${params}` : "");
+    window.history.replaceState({}, "", clean);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Show OUR modal a few seconds after login (never on first paint / splash),
+  // and only when appropriate: never asked, or 7 days since last dismissal.
+  // Already-granted and denied users are skipped by shouldShowPrompt().
+  useEffect(() => {
+    if (!isWebPushSupported()) return;
+    const eligible =
+      ["auditor", "billing", "manager"].includes(normalizedRole) ||
+      isRateApprover;
+    if (!eligible) return;
+    if (!shouldShowPrompt(getCurrentPermission())) return;
+
+    const timer = window.setTimeout(() => setShowPushPrompt(true), 3000);
+    return () => window.clearTimeout(timer);
+  }, [normalizedRole, isRateApprover]);
+
+  // "Allow Notifications" → request the OS permission, then subscribe. Persists
+  // the outcome so we never prompt again once granted, and back off if denied.
+  const enablePush = async () => {
+    setPermissionSubmitting(true);
+    try {
+      const permission = await requestPermission();
+      setNotifPermission(permission);
+      if (permission === "granted") {
+        savePromptState({ status: "granted", lastPromptAt: Date.now() });
+        await subscribeToPush();
+      } else if (permission === "denied") {
+        savePromptState({ status: "denied", lastPromptAt: Date.now() });
+      } else {
+        savePromptState({ lastPromptAt: Date.now() });
+      }
+    } finally {
+      setPermissionSubmitting(false);
+      setShowPushPrompt(false);
+    }
+  };
+
+  const dismissPushPrompt = () => {
+    setShowPushPrompt(false);
+    const current = getPromptState();
+    savePromptState({
+      status: "dismissed",
+      lastPromptAt: Date.now(),
+      dismissCount: current.dismissCount + 1,
+    });
+  };
 
   useEffect(() => {
     setSalesOpen(
       location.pathname === "/Add_Sales" ||
+        location.pathname === "/Drafts" ||
         location.pathname === "/View_Orders" ||
         location.pathname === "/FOC" ||
         location.pathname === "/Sales_Invoice"
@@ -179,52 +450,73 @@ export default function Sidebar({ children }: SidebarProps) {
     );
   }, [location.pathname]);
 
+  const handleOpenNotifications = () => {
+    setShowNotificationsModal(true);
+    fetchHistory(true);
+  };
+
   const handleCloseNotifications = () => {
     setShowNotificationsModal(false);
   };
 
-  const handleClearAllNotifications = async () => {
-    if (unreadCount > 0) {
-      try {
-        const token = localStorage.getItem("access");
-        const config = token ? { headers: { Authorization: `Bearer ${token}` } } : {};
-        await api.post('/orders/notifications/', {}, config);
-        setUnreadCount(0);
-        setNotifications([]);
-      } catch (error) {
-        console.error("Error clearing notifications:", error);
+  const clearSessionStorage = () => {
+    [
+      "access", "refresh", "user_id", "username", "name", "role",
+      "role_display", "extra_pages", "company_id", "company_name",
+      "main_group_id", "main_group_name",
+    ].forEach((key) => localStorage.removeItem(key));
+  };
+
+  const handleLogout = async () => {
+    // Invalidate the refresh token server-side (blacklist) so it can't be
+    // reused after sign-out. Awaited with a short timeout so a slow/offline
+    // network never blocks logout, and before we navigate (which would cancel
+    // an in-flight request). Best-effort — failure must never block sign-out.
+    try {
+      const refresh = localStorage.getItem("refresh");
+      if (refresh) {
+        await api.post("/auth/logout/", { refresh }, { timeout: 3000 });
       }
+    } catch {
+      /* best-effort */
     }
+
+    // Remove this browser's web-push subscription while the token is still
+    // present, so we stop pushing to a signed-out device.
+    try {
+      await unsubscribeFromPush();
+    } catch {
+      /* best-effort */
+    }
+    clearSessionStorage();
+    window.location.href = "/";
+  };
+
+  const changeHistoryFilter = (filter: "all" | "unread") => {
+    setHistoryFilter(filter);
+    setHistoryOffset(0);
+    fetchHistory(true, filter);
+  };
+
+  const handleMarkAllRead = async () => {
+    if (unreadCount <= 0) return;
+    try {
+      await api.post("/orders/notifications/", {}, authConfig());
+    } catch (error) {
+      console.error("Error marking all as read:", error);
+    }
+    // Single update path: the bus listener updates this tab and every other.
+    broadcastNotificationEvent({ type: "read-all" });
   };
 
   const handleNotificationClick = async (notification: Notification) => {
-    const role = normalizedRole;
-    const isActionableRole = role === "auditor" || role === "billing" || isRateApprover;
-
-    if (!isActionableRole) {
-      if (!notification.is_read) {
-        try {
-          const token = localStorage.getItem("access");
-          const config = token ? { headers: { Authorization: `Bearer ${token}` } } : {};
-          await api.patch(`/orders/notifications/${notification.id}/`, {}, config);
-          setNotifications((prev) => prev.filter(n => n.id !== notification.id));
-          setUnreadCount((prev) => Math.max(0, prev - 1));
-        } catch (error) {
-          console.error("Error marking as read:", error);
-        }
-      } else {
-        setNotifications((prev) => prev.filter(n => n.id !== notification.id));
-      }
+    if (!notification.is_read) {
+      // Always mark read on open — regardless of role (fixes the bug where
+      // actionable roles left notifications unread).
+      await markNotificationRead(notification.id);
     }
-
     setShowNotificationsModal(false);
-    
-    const navState = notification.order_id ? { state: { openOrderId: notification.order_id } } : {};
-    if (role === "auditor") navigate("/Auditor_orders", navState);
-    else if (role === "billing") navigate("/Billing_orders", navState);
-    else if (isRateApprover) navigate("/Rate_Approver_orders", navState);
-    else if (role === "manager") navigate("/Order_Tracking", navState);
-    else navigate("/View_Orders", navState);
+    goToOrder(notification.order_id);
   };
 
   return (
@@ -260,7 +552,7 @@ export default function Sidebar({ children }: SidebarProps) {
           {(["auditor", "billing", "manager"].includes(normalizedRole) || isRateApprover) && (
             <button 
               className="header-bell-btn" 
-              onClick={() => setShowNotificationsModal(true)}
+              onClick={handleOpenNotifications}
               style={{
                 background: 'none',
                 border: 'none',
@@ -433,6 +725,7 @@ export default function Sidebar({ children }: SidebarProps) {
               {salesOpen && (
                 <ul className="dropdown-list">
                   <li><Link to="/Add_Sales" onClick={closeSidebar}><SidebarIcon><HiPlusCircle /></SidebarIcon>Add Sales</Link></li>
+                  <li><Link to="/Drafts" onClick={closeSidebar}><SidebarIcon><HiDocumentText /></SidebarIcon>Drafts</Link></li>
                   {(userRole?.toLowerCase() === "manager" || userRole?.toLowerCase() == "billing") && (
                     <li><Link to="/FOC" onClick={closeSidebar}><SidebarIcon><HiGift /></SidebarIcon>FOC</Link></li>
                   )}
@@ -551,35 +844,126 @@ export default function Sidebar({ children }: SidebarProps) {
       {showNotificationsModal && (
         <div className="sb-modal-overlay" onClick={handleCloseNotifications} style={{ zIndex: 1000, position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div className="sb-modal" onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: '420px', padding: '24px', backgroundColor: '#fff', borderRadius: '12px', boxShadow: '0 10px 25px rgba(0,0,0,0.1)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
               <h3 className="sb-modal-title" style={{ margin: 0, fontSize: '1.25rem', color: '#0f172a' }}>Notifications</h3>
               <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                {notifications.length > 0 && (
-                  <button onClick={handleClearAllNotifications} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.85rem', color: '#3b82f6', fontWeight: '500', padding: 0 }}>Clear All</button>
+                {unreadCount > 0 && (
+                  <button onClick={handleMarkAllRead} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.85rem', color: '#3b82f6', fontWeight: '500', padding: 0 }}>Mark all read</button>
                 )}
                 <button onClick={handleCloseNotifications} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '24px', color: '#64748b', lineHeight: 1, padding: 0 }}>&times;</button>
               </div>
             </div>
+
+            {/* Unread / All filter (Task 9) */}
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '14px' }}>
+              {(["all", "unread"] as const).map((f) => (
+                <button
+                  key={f}
+                  onClick={() => changeHistoryFilter(f)}
+                  style={{
+                    border: '1px solid',
+                    borderColor: historyFilter === f ? '#2563eb' : '#e2e8f0',
+                    background: historyFilter === f ? '#2563eb' : '#fff',
+                    color: historyFilter === f ? '#fff' : '#475569',
+                    borderRadius: '999px',
+                    padding: '6px 14px',
+                    fontSize: '0.8rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {f === "all" ? "All" : `Unread${unreadCount > 0 ? ` (${unreadCount})` : ""}`}
+                </button>
+              ))}
+            </div>
+
+            {/* ── NOTIFICATION SETTINGS (status + enable) ── */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', marginBottom: '12px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px' }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: notifPermission === 'granted' ? '#22c55e' : '#94a3b8', flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ margin: 0, fontSize: '0.82rem', fontWeight: 600, color: '#0f172a' }}>
+                  Desktop notifications: {notifPermission === 'granted' ? 'Enabled' : 'Disabled'}
+                </p>
+                {notifPermission === 'denied' && (
+                  <p style={{ margin: '2px 0 0', fontSize: '0.72rem', color: '#64748b', lineHeight: 1.4 }}>
+                    Blocked in this browser. Click the lock icon in the address bar → Notifications → Allow, then reload.
+                  </p>
+                )}
+                {notifPermission === 'unsupported' && (
+                  <p style={{ margin: '2px 0 0', fontSize: '0.72rem', color: '#64748b', lineHeight: 1.4 }}>
+                    Requires HTTPS (or localhost) to enable desktop notifications.
+                  </p>
+                )}
+              </div>
+              {notifPermission === 'default' && isWebPushSupported() && (
+                <button
+                  onClick={enablePush}
+                  disabled={permissionSubmitting}
+                  style={{ background: '#2563eb', color: '#fff', border: 'none', borderRadius: '8px', padding: '7px 12px', fontSize: '0.78rem', fontWeight: 700, cursor: 'pointer', flexShrink: 0 }}
+                >
+                  {permissionSubmitting ? '…' : 'Enable'}
+                </button>
+              )}
+            </div>
+
             <div style={{ maxHeight: '60vh', overflowY: 'auto', paddingRight: '4px' }}>
-              {notifications.length === 0 ? (
-                <p style={{ textAlign: 'center', color: '#64748b', padding: '30px 0', margin: 0 }}>No new notifications.</p>
+              {historyItems.length === 0 ? (
+                <p style={{ textAlign: 'center', color: '#64748b', padding: '30px 0', margin: 0 }}>
+                  {historyLoading ? "Loading..." : "No notifications."}
+                </p>
               ) : (
-                notifications.map((item) => (
-                  <div 
-                    key={item.id} 
-                    onClick={() => handleNotificationClick(item)}
-                    style={{
-                      padding: '14px',
-                      borderRadius: '10px',
-                      backgroundColor: !item.is_read ? '#f0f9ff' : '#f8fafc',
-                      border: `1px solid ${!item.is_read ? '#bae6fd' : '#e2e8f0'}`,
-                      marginBottom: '10px',
-                      cursor: 'pointer'
-                    }}>
-                    <p style={{ margin: '0 0 8px 0', fontSize: '0.9rem', color: '#0f172a', lineHeight: '1.5' }}>{item.message}</p>
-                    <span style={{ fontSize: '0.75rem', color: '#64748b' }}>{new Date(item.created_at).toLocaleString()}</span>
-                  </div>
-                ))
+                <>
+                  {groupNotifications(historyItems).map((group) => (
+                    <div key={group.label} style={{ marginBottom: '8px' }}>
+                      <p style={{ margin: '8px 4px', fontSize: '0.72rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{group.label}</p>
+                      {group.items.map((item) => (
+                        <div
+                          key={item.id}
+                          onClick={() => handleNotificationClick(item)}
+                          style={{
+                            padding: '14px',
+                            borderRadius: '10px',
+                            backgroundColor: !item.is_read ? '#f0f9ff' : '#f8fafc',
+                            border: `1px solid ${!item.is_read ? '#bae6fd' : '#e2e8f0'}`,
+                            marginBottom: '10px',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            gap: '10px',
+                            alignItems: 'flex-start',
+                          }}>
+                          {!item.is_read && (
+                            <span style={{ marginTop: '6px', flexShrink: 0, width: '8px', height: '8px', borderRadius: '50%', background: '#2563eb' }} />
+                          )}
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <p style={{ margin: '0 0 8px 0', fontSize: '0.9rem', color: '#0f172a', lineHeight: '1.5' }}>{item.message}</p>
+                            <span style={{ fontSize: '0.75rem', color: '#64748b' }}>{new Date(item.created_at).toLocaleString()}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+
+                  {historyHasMore && (
+                    <button
+                      onClick={() => fetchHistory(false)}
+                      disabled={historyLoading}
+                      style={{
+                        width: '100%',
+                        marginTop: '6px',
+                        padding: '10px',
+                        borderRadius: '8px',
+                        border: '1px solid #e2e8f0',
+                        background: '#f8fafc',
+                        color: '#2563eb',
+                        fontWeight: 600,
+                        fontSize: '0.85rem',
+                        cursor: historyLoading ? 'default' : 'pointer',
+                      }}
+                    >
+                      {historyLoading ? "Loading..." : "Load more"}
+                    </button>
+                  )}
+                </>
               )}
             </div>
           </div>
@@ -599,25 +983,21 @@ export default function Sidebar({ children }: SidebarProps) {
             <p className="sb-modal-msg">Are you sure you want to logout?</p>
             <div className="sb-modal-actions">
               <button className="sb-modal-cancel" onClick={() => setShowLogoutModal(false)}>Cancel</button>
-              <button className="sb-modal-confirm" onClick={() => {
-                localStorage.removeItem("access");
-                localStorage.removeItem("refresh");
-                localStorage.removeItem("user_id");
-                localStorage.removeItem("username");
-                localStorage.removeItem("name");
-                localStorage.removeItem("role");
-                localStorage.removeItem("role_display");
-                localStorage.removeItem("extra_pages");
-                localStorage.removeItem("company_id");
-                localStorage.removeItem("company_name");
-                localStorage.removeItem("main_group_id");
-                localStorage.removeItem("main_group_name");
-                window.location.href = "/";
-              }}>Yes, Logout</button>
+              <button className="sb-modal-confirm" onClick={handleLogout}>Yes, Logout</button>
             </div>
           </div>
         </div>
       )}
+
+      {/* ── CUSTOM PERMISSION MODAL (explain first, then OS prompt) ── */}
+      <NotificationPermissionModal
+        open={showPushPrompt}
+        submitting={permissionSubmitting}
+        onAllow={enablePush}
+        onDismiss={dismissPushPrompt}
+      />
+
+      <NotificationToaster />
 
       <main className={`content-area ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>{children}</main>
     </>
