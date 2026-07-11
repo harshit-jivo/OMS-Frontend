@@ -65,6 +65,8 @@ type ApiMessageResponse = {
   detail?: unknown;
   error?: unknown;
   errors?: unknown;
+  // SAP Service Layer nests the human text as message: { lang, value }.
+  value?: unknown;
   data?: unknown;
   result?: unknown;
   DocEntry?: unknown;
@@ -108,23 +110,50 @@ const toAxiosRequest = (url: string): { url: string; baseURL?: string } => {
   return { url: resolved.replace(/^\/api(?=\/|$)/i, "") || "/" };
 };
 
+// Best-effort stringify that never throws (circular refs fall back to String()).
+const safeJsonStringify = (value: unknown): string => {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+};
+
+// Error thrown by the api* helpers. Carries the raw response body so callers
+// that need to inspect the payload (e.g. SAP error-code detection) aren't
+// limited to the flattened message string.
+export class RequestError extends Error {
+  status?: number;
+  data?: unknown;
+}
+
 // Normalise an axios error into the same Error(message) contract the previous
 // fetch()-based helpers threw (never logs tokens).
-const toRequestError = (error: any): Error => {
+const toRequestError = (error: any): RequestError => {
   const status = error?.response?.status;
   const data = error?.response?.data;
   let message: string | undefined;
   if (typeof data === "string") message = data;
-  else if (data?.detail) message = String(data.detail);
-  else if (data?.message) message = String(data.message);
+  else if (typeof data?.detail === "string" && data.detail) message = data.detail;
+  else if (typeof data?.message === "string" && data.message) message = data.message;
   else if (data && typeof data === "object") {
     message = Object.entries(data)
-      .map(([field, value]) => `${field}: ${Array.isArray(value) ? value.join(", ") : String(value)}`)
+      .map(([field, value]) => {
+        const text = Array.isArray(value)
+          ? value.join(", ")
+          : value !== null && typeof value === "object"
+            ? safeJsonStringify(value)
+            : String(value);
+        return `${field}: ${text}`;
+      })
       .join(" ");
   }
-  return new Error(
+  const requestError = new RequestError(
     message || error?.message || `Request failed with ${status ?? ""}`.trim(),
   );
+  requestError.status = status;
+  requestError.data = data;
+  return requestError;
 };
 
 /**
@@ -254,7 +283,7 @@ const extractApiMessage = (value: unknown, fallback: string): string => {
 
   if (typeof parsed === "object") {
     const source = parsed as ApiMessageResponse;
-    const directMessage = source.message ?? source.detail ?? source.error ?? source.errors;
+    const directMessage = source.message ?? source.detail ?? source.error ?? source.errors ?? source.value;
     if (typeof directMessage === "string" && directMessage.trim()) return directMessage.trim();
     if (directMessage && typeof directMessage === "object") return extractApiMessage(directMessage, fallback);
 
@@ -287,18 +316,12 @@ const formatApiErrorMessage = (value: unknown, fallback: string): string => {
 
 // SAP's approval flow frequently rejects the post with code -2028 ("No matching
 // records found") even though the draft was actually created. Detect that code
-// anywhere in the (possibly deeply nested) error payload.
+// anywhere in the (possibly deeply nested) error payload. Proxies sometimes
+// report the code without the minus sign, so match 2028 either way — but only
+// as a standalone number, not as part of a longer one (e.g. a DocEntry 12028).
 const isNoMatchingRecordsError = (value: unknown): boolean => {
-  const text = typeof value === "string"
-    ? value
-    : (() => {
-        try {
-          return JSON.stringify(value);
-        } catch {
-          return String(value);
-        }
-      })();
-  return text.includes("-2028");
+  const text = typeof value === "string" ? value : safeJsonStringify(value);
+  return /(^|\D)-?2028(\D|$)/.test(text);
 };
 
 // Interpret the /draft/verify response: find the draft record with this refId in
@@ -996,7 +1019,11 @@ export function useSalesInvoice() {
           return;
         }
       }
-      const message = formatApiErrorMessage(errorValue, "Draft creation unsuccessful.");
+      // Surface the human-readable message from the (possibly nested) error
+      // payload; only fall back to the raw JSON dump when none can be found.
+      const message =
+        extractApiMessage(errorValue, "") ||
+        formatApiErrorMessage(errorValue, "Draft creation unsuccessful.");
       await writeRefLog("Failed", message);
       setPostError(message);
     };
@@ -1020,7 +1047,15 @@ export function useSalesInvoice() {
       setPostSuccess("Invoice draft created in SAP successfully.");
     } catch (error) {
       console.error(error);
-      await resolvePostFailure(error instanceof Error ? error.message : error);
+      // Prefer the raw response body over the flattened message so nested SAP
+      // error codes (e.g. -2028) survive for the verification check above.
+      const errorValue =
+        error instanceof RequestError && error.data !== undefined && error.data !== null
+          ? error.data
+          : error instanceof Error
+            ? error.message
+            : error;
+      await resolvePostFailure(errorValue);
     } finally {
       setPosting(false);
     }
