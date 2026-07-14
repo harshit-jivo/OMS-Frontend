@@ -143,7 +143,20 @@ export default function Tracker_Entry() {
       setShowForm(false);
       refresh();
     } catch (err: any) {
-      flash(err?.response?.data?.detail || "Save failed");
+      const data = err?.response?.data;
+      // Surface DRF field errors (e.g. duplicate invoice number), not just detail.
+      let msg = data?.detail;
+      if (!msg && data && typeof data === "object") {
+        if (data.invoice_number) {
+          msg = Array.isArray(data.invoice_number) ? data.invoice_number[0] : data.invoice_number;
+          setShowReview(false);   // send them back to the form to fix it
+          setErrors((e) => ({ ...e, invoice_number: msg }));
+        } else {
+          const first = Object.values(data)[0] as any;
+          msg = Array.isArray(first) ? first[0] : first;
+        }
+      }
+      flash(msg || "Save failed");
     } finally {
       setSaving(false);
     }
