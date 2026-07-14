@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { isTrackerRole, trackerLandingPath, trackerPagesFor } from "../config/pageAccess";
 import { loginUser } from "../services/authService";
 import "../styles/Login.css";
 
@@ -133,8 +134,14 @@ const handleLogin = async () => {
 
     showToast("Login successful. Redirecting...", "success");
 
-    // Legal reviewers land on their own workspace; everyone else on the Dashboard.
-    const landingPath = String(user.role || "").toLowerCase() === "legal" ? "/Label_Checker" : "/Dashboard";
+    // Landing: tracker users go to their first tracker page (they have no
+    // Dashboard); legal reviewers to their workspace; everyone else Dashboard.
+    let landingPath = "/Dashboard";
+    if (isTrackerRole(user.role)) {
+      landingPath = trackerLandingPath(trackerPagesFor(user.role)) || "/Tracker_Queue";
+    } else if (String(user.role || "").toLowerCase() === "legal") {
+      landingPath = "/Label_Checker";
+    }
     setTimeout(() => navigate(landingPath), 1000);
 
   } catch (error) {
