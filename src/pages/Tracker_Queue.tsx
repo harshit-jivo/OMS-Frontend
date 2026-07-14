@@ -36,10 +36,10 @@ const RETURN_STATUSES = new Set(["RETURN", "REJECTED"]);
 const REASON_STATUSES = new Set(["RETURN", "REJECTED", "HOLD", "DEBIT"]);
 
 const EMPTY_PAYMENT: Partial<PaymentDetail> = {
-  discount_amount: "0",
-  tds_amount: "0",
-  paid_amount: "0",
-  open_balance: "0",
+  discount_amount: "",
+  tds_amount: "",
+  paid_amount: "",
+  open_balance: "",
   status: "OPEN",
 };
 
@@ -51,6 +51,8 @@ export default function Tracker_Queue() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [remarks, setRemarks] = useState("");
   const [statusPick, setStatusPick] = useState("");
+  const [holdType, setHoldType] = useState("");   // FULL | PARTIAL
+  const [amount, setAmount] = useState("");        // hold / debit amount
   const [toast, setToast] = useState("");
   const [subTab, setSubTab] = useState<"current" | "returned" | "advanced">("current");
   const [advancedRows, setAdvancedRows] = useState<Invoice[]>([]);
@@ -114,7 +116,8 @@ export default function Tracker_Queue() {
 
   // Reset sub-tab + selection whenever the stage changes.
   useEffect(() => {
-    setSelected(new Set()); setRemarks(""); setStatusPick(""); setSubTab("current");
+    setSelected(new Set()); setRemarks(""); setStatusPick("");
+    setHoldType(""); setAmount(""); setSubTab("current");
   }, [activeStage]);
   // Reset selection when the sub-tab changes; lazy-load the advanced history.
   useEffect(() => {
@@ -130,6 +133,7 @@ export default function Tracker_Queue() {
 
   const runBulk = async (payload: {
     action?: "ADVANCE" | "RETURN"; stage_status?: string; remarks?: string;
+    hold_type?: string; amount?: string;
   }) => {
     if (selected.size === 0) { flash("Select at least one invoice"); return; }
     try {
@@ -138,7 +142,7 @@ export default function Tracker_Queue() {
         `${res.processed_count} processed` +
         (res.errors.length ? `, ${res.errors.length} failed: ${res.errors[0]?.error}` : "")
       );
-      setRemarks(""); setStatusPick("");
+      setRemarks(""); setStatusPick(""); setHoldType(""); setAmount("");
       load();
     } catch (err: any) {
       flash(err?.response?.data?.detail || "Action failed");
@@ -155,7 +159,19 @@ export default function Tracker_Queue() {
     if (REASON_STATUSES.has(statusPick) && !remarks.trim()) {
       flash("Remarks are mandatory for this status"); return;
     }
-    runBulk({ stage_status: statusPick, remarks });
+    if (statusPick === "HOLD" && !holdType) {
+      flash("Choose a hold type (full or partial)"); return;
+    }
+    // Partial-hold amount may be waived for RM-PM; let the server decide, but
+    // nudge for a debit amount which is always required.
+    if (statusPick === "DEBIT" && !amount.trim()) {
+      flash("Enter the debit amount"); return;
+    }
+    runBulk({
+      stage_status: statusPick, remarks,
+      ...(statusPick === "HOLD" ? { hold_type: holdType } : {}),
+      ...(amount.trim() ? { amount } : {}),
+    });
   };
 
   const openTimeline = async (id: number) => {
@@ -167,13 +183,33 @@ export default function Tracker_Queue() {
     try {
       const full = await trackerService.getInvoice(inv.id);
       setPayInv(full);
-      setPayForm(full.payment ? { ...full.payment } : { ...EMPTY_PAYMENT });
+      if (full.payment) {
+        // Show blanks (with a placeholder) instead of a pre-filled 0.00.
+        const blankZero = (v: string) => (Number(v) === 0 ? "" : v);
+        setPayForm({
+          discount_amount: blankZero(full.payment.discount_amount),
+          tds_amount: blankZero(full.payment.tds_amount),
+          paid_amount: blankZero(full.payment.paid_amount),
+          open_balance: blankZero(full.payment.open_balance),
+          status: full.payment.status,
+        });
+      } else {
+        setPayForm({ ...EMPTY_PAYMENT });
+      }
     } catch { flash("Failed to load payment"); }
   };
   const savePayment = async () => {
     if (!payInv) return;
+    // Blank amounts save as 0.
+    const payload = {
+      ...payForm,
+      discount_amount: payForm.discount_amount || "0",
+      tds_amount: payForm.tds_amount || "0",
+      paid_amount: payForm.paid_amount || "0",
+      open_balance: payForm.open_balance || "0",
+    };
     try {
-      await trackerService.updatePayment(payInv.id, payForm);
+      await trackerService.updatePayment(payInv.id, payload);
       flash(payForm.status === "PAID" ? "Payment saved — invoice completed" : "Payment saved");
       setPayInv(null);
       load();
@@ -231,12 +267,24 @@ export default function Tracker_Queue() {
               <span className="trk-count">{selected.size} selected</span>
               {stageCfg.requires_status ? (
                 <>
-                  <select value={statusPick} onChange={(e) => setStatusPick(e.target.value)}>
+                  <select value={statusPick} onChange={(e) => { setStatusPick(e.target.value); setHoldType(""); setAmount(""); }}>
                     <option value="">Status…</option>
                     {stageCfg.status_choices.map((s) => (
                       <option key={s} value={s}>{s}</option>
                     ))}
                   </select>
+                  {statusPick === "HOLD" && (
+                    <select value={holdType} onChange={(e) => setHoldType(e.target.value)}>
+                      <option value="">Hold type…</option>
+                      <option value="FULL">Full hold (stays here)</option>
+                      <option value="PARTIAL">Partial hold (advances)</option>
+                    </select>
+                  )}
+                  {(statusPick === "DEBIT" || (statusPick === "HOLD" && holdType === "PARTIAL")) && (
+                    <input type="number" step="0.01" style={{ width: 130 }}
+                      placeholder={statusPick === "DEBIT" ? "Debit amount" : "Hold amount"}
+                      value={amount} onChange={(e) => setAmount(e.target.value)} />
+                  )}
                   <input className="trk-remarks"
                     placeholder={
                       REASON_STATUSES.has(statusPick) ? "Remarks (required)" : "Remarks (optional)"
@@ -244,8 +292,13 @@ export default function Tracker_Queue() {
                     value={remarks} onChange={(e) => setRemarks(e.target.value)} />
                   <button className="trk-btn trk-btn-primary" onClick={onApplyStatus}
                     disabled={selected.size === 0}>
-                    {RETURN_STATUSES.has(statusPick) ? <><HiArrowUturnLeft /> Return</> : <><HiArrowRight /> Apply</>}
+                    {RETURN_STATUSES.has(statusPick) ? <><HiArrowUturnLeft /> Return</>
+                      : statusPick === "HOLD" && holdType === "FULL" ? <>⏸ Hold</>
+                      : <><HiArrowRight /> Apply</>}
                   </button>
+                  {statusPick === "HOLD" && holdType === "PARTIAL" && (
+                    <span className="trk-sub" style={{ fontSize: 11 }}>Amount required (except RM-PM)</span>
+                  )}
                 </>
               ) : (
                 <>
@@ -387,7 +440,8 @@ export default function Tracker_Queue() {
                   <li key={ev.id}>
                     <div className="tl-stage">
                       {ev.stage_name}
-                      {ev.stage_status && <span className="trk-badge trk-badge-muted" style={{ marginLeft: 8 }}>{ev.stage_status}</span>}
+                      {ev.stage_status && <span className="trk-badge trk-badge-muted" style={{ marginLeft: 8 }}>{ev.stage_status}{ev.hold_type ? ` · ${ev.hold_type}` : ""}</span>}
+                      {ev.amount && <span className="trk-badge trk-badge-warn" style={{ marginLeft: 6 }}>₹{money(ev.amount)}</span>}
                       {ev.receiving_note === "LATE" && <span className="trk-badge trk-badge-late" style={{ marginLeft: 6 }}>Late (after 6 PM)</span>}
                     </div>
                     <div className="tl-meta">
@@ -420,7 +474,8 @@ export default function Tracker_Queue() {
                 {(["discount_amount", "tds_amount", "paid_amount", "open_balance"] as const).map((k) => (
                   <div className="trk-field" key={k}>
                     <label>{k.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}</label>
-                    <input type="number" step="0.01" value={payForm[k] as string}
+                    <input type="number" step="0.01" placeholder="0.00"
+                      value={(payForm[k] as string) ?? ""}
                       onChange={(e) => setPayForm((f) => ({ ...f, [k]: e.target.value }))} />
                   </div>
                 ))}

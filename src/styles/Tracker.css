@@ -262,6 +262,32 @@
 .trk-timeline .tl-meta { font-size: 12px; color: #6b7280; }
 .trk-timeline .tl-remark { font-size: 12px; color: #374151; margin-top: 3px; font-style: italic; }
 
+/* Searchable vendor combobox */
+.trk-combo { position: relative; }
+.trk-combo-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  box-shadow: 0 8px 20px rgba(16, 24, 40, 0.12);
+  z-index: 50;
+}
+.trk-combo-item {
+  padding: 8px 11px;
+  cursor: pointer;
+  font-size: 13px;
+  border-bottom: 1px solid #f3f4f6;
+}
+.trk-combo-item:hover, .trk-combo-item.active { background: #eef2ff; }
+.trk-combo-item .code { font-size: 11px; color: #6b7280; }
+.trk-combo-item .gst { font-size: 11px; color: #059669; }
+.trk-combo-empty { padding: 10px 11px; color: #9ca3af; font-size: 13px; }
+
 .trk-empty {
   text-align: center;
   color: #9ca3af;

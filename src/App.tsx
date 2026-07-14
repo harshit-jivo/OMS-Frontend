@@ -36,6 +36,7 @@ import Tracker_Queue from "./pages/Tracker_Queue";
 import Tracker_Admin from "./pages/Tracker_Admin";
 import Tracker_Reports from "./pages/Tracker_Reports";
 import Tracker_Alerts from "./pages/Tracker_Alerts";
+import Tracker_Invoices from "./pages/Tracker_Invoices";
 
 function App() {
   return (
@@ -359,6 +360,15 @@ function App() {
           element={
             <Sidebar>
               <Tracker_Alerts />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Tracker_Invoices"
+          element={
+            <Sidebar>
+              <Tracker_Invoices />
             </Sidebar>
           }
         />

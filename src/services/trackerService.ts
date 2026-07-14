@@ -31,6 +31,13 @@ export interface Stage {
   is_active: boolean;
 }
 
+export interface Vendor {
+  card_code: string;
+  card_name: string;
+  gstin: string;
+  state: string;
+}
+
 export interface Lookups {
   categories: Lookup[];
   units: Lookup[];
@@ -48,6 +55,8 @@ export interface StageEvent {
   stage_code: string;
   event_type: "RECEIVE" | "ADVANCE" | "RETURN";
   stage_status: string;
+  hold_type: "" | "FULL" | "PARTIAL";
+  amount: string | null;
   receiving_note: "" | "ON_TIME" | "LATE";
   remarks: string;
   acted_by: number | null;
@@ -70,12 +79,18 @@ export interface Invoice {
   id: number;
   invoice_date: string;
   party_name: string;
+  party_code: string;
+  party_gstin: string;
   invoice_number: string;
   taxable_value: string;
   gst_type: number;
   gst_type_name: string;
   gst_rate: number;
   gst_rate_label: string;
+  gst_amount: string;
+  additional_charge_type: string;
+  additional_charge_type_display: string | null;
+  additional_charge_amount: string;
   invoice_value: string;
   category: number;
   category_name: string;
@@ -113,16 +128,25 @@ export interface Invoice {
 export interface InvoiceWrite {
   invoice_date: string;
   party_name: string;
+  party_code: string;
+  party_gstin: string;
   invoice_number: string;
   taxable_value: string;
   gst_type: number;
   gst_rate: number;
-  invoice_value: string;
+  additional_charge_type: string;   // "" | DEMURRAGE | LABOUR_COST | POINT_VALUE
+  additional_charge_amount: string;
   category: number;
   unit: number;
   branch: number;
   mode: number;
 }
+
+export const ADDITIONAL_CHARGE_TYPES: { value: string; label: string }[] = [
+  { value: "DEMURRAGE", label: "Demurrage" },
+  { value: "LABOUR_COST", label: "Labour Cost" },
+  { value: "POINT_VALUE", label: "Point Value" },
+];
 
 export interface QueueStage {
   code: string;
@@ -153,12 +177,28 @@ export interface InvoiceFilters {
   overdue?: boolean;
 }
 
+export interface AllInvoiceFilters {
+  party?: string;
+  invoice_number?: string;
+  category?: number;
+  branch?: number;
+  unit?: number;
+  status?: string;      // IN_PROGRESS | COMPLETED
+  stage?: string;       // current_stage code
+  overdue?: "true" | "false";
+}
+
 // ---------------------------------------------------------------------------
 // API
 // ---------------------------------------------------------------------------
 export const trackerService = {
   async getLookups(): Promise<Lookups> {
     const { data } = await api.get("/tracker/lookups/");
+    return data;
+  },
+
+  async getVendors(): Promise<Vendor[]> {
+    const { data } = await api.get("/tracker/vendors/");
     return data;
   },
 
@@ -203,6 +243,8 @@ export const trackerService = {
     action?: "ADVANCE" | "RETURN";
     stage_status?: string;
     remarks?: string;
+    hold_type?: string;   // FULL | PARTIAL (HOLD only)
+    amount?: string;      // hold / debit amount
   }): Promise<BulkResult> {
     const { data } = await api.post("/tracker/actions/bulk/", payload);
     return data;
@@ -256,8 +298,52 @@ export const trackerService = {
     await api.put(`/tracker/admin/users/${userId}/stages/`, { stage_ids: stageIds });
   },
 
+  // --- Tracker user CRUD (tracker users only) ---
+  async adminListTrackerUsers(): Promise<TrackerUser[]> {
+    const { data } = await api.get("/tracker/admin/tracker-users/");
+    return data;
+  },
+  async adminCreateTrackerUser(payload: {
+    username: string; password: string; name?: string;
+    role: string; email?: string; phone?: string;
+  }): Promise<TrackerUser> {
+    const { data } = await api.post("/tracker/admin/tracker-users/", payload);
+    return data;
+  },
+  async adminUpdateTrackerUser(id: number, payload: {
+    name?: string; role?: string; email?: string; phone?: string;
+    is_active?: boolean; password?: string;
+  }): Promise<TrackerUser> {
+    const { data } = await api.patch(`/tracker/admin/tracker-users/${id}/`, payload);
+    return data;
+  },
+  async adminDeleteTrackerUser(id: number): Promise<{ deactivated?: boolean }> {
+    const { data } = await api.delete(`/tracker/admin/tracker-users/${id}/`);
+    return data || {};
+  },
+
   async getAlerts(): Promise<StuckAlert[]> {
     const { data } = await api.get("/tracker/alerts/");
+    return data;
+  },
+
+  async adminAllInvoices(filters: AllInvoiceFilters = {}): Promise<Invoice[]> {
+    const params: Record<string, string> = {};
+    Object.entries(filters).forEach(([k, v]) => {
+      if (v !== undefined && v !== "" && v !== false) params[k] = String(v);
+    });
+    const { data } = await api.get("/tracker/all-invoices/", { params });
+    return data;
+  },
+
+  async exportAllInvoices(filters: AllInvoiceFilters = {}): Promise<Blob> {
+    const params: Record<string, string> = {};
+    Object.entries(filters).forEach(([k, v]) => {
+      if (v !== undefined && v !== "" && v !== false) params[k] = String(v);
+    });
+    const { data } = await api.get("/tracker/all-invoices/export/", {
+      params, responseType: "blob",
+    });
     return data;
   },
 
@@ -327,6 +413,17 @@ export interface AdminUser {
   name: string;
   role: string | null;
   stage_ids: number[];
+}
+
+export interface TrackerUser {
+  id: number;
+  username: string;
+  name: string;
+  email: string;
+  phone: string;
+  role: string;
+  role_display: string | null;
+  is_active: boolean;
 }
 
 export interface StuckAlert {
