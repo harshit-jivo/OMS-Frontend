@@ -16,6 +16,8 @@ export const GRANTABLE_ADMIN_PAGES: GrantablePage[] = [
   { key: "Order_Flow_Settings", label: "Order Flow Settings", path: "/Order_Flow_Settings" },
   { key: "Product_Stock", label: "Stock", path: "/Product_Stock" },
   { key: "Reports", label: "Reports", path: "/Daily_Report" },
+  // Tracker pages are gated centrally by role (see config/pageAccess.ts),
+  // not by per-user extra_pages, so they are intentionally not listed here.
 ];
 
 export const GRANTABLE_PAGE_KEYS = GRANTABLE_ADMIN_PAGES.map((page) => page.key);

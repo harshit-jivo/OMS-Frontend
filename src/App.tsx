@@ -31,6 +31,11 @@ import Product_Stock from "./pages/Product_Stock";
 import Order_Flow_Settings from "./pages/Order_Flow_Settings";
 import Page_Permissions from "./pages/Page_Permissions";
 import Sales_Quotation from "./pages/Sales_Quotation";
+import Tracker_Entry from "./pages/Tracker_Entry";
+import Tracker_Queue from "./pages/Tracker_Queue";
+import Tracker_Admin from "./pages/Tracker_Admin";
+import Tracker_Reports from "./pages/Tracker_Reports";
+import Tracker_Alerts from "./pages/Tracker_Alerts";
 
 function App() {
   return (
@@ -303,6 +308,57 @@ function App() {
           element={
             <Sidebar>
               <Sales_Quotation />
+            </Sidebar>
+          }
+        />
+
+       
+
+       
+        
+       
+
+        <Route
+          path="/Tracker_Entry"
+          element={
+            <Sidebar>
+              <Tracker_Entry />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Tracker_Queue"
+          element={
+            <Sidebar>
+              <Tracker_Queue />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Tracker_Admin"
+          element={
+            <Sidebar>
+              <Tracker_Admin />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Tracker_Reports"
+          element={
+            <Sidebar>
+              <Tracker_Reports />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Tracker_Alerts"
+          element={
+            <Sidebar>
+              <Tracker_Alerts />
             </Sidebar>
           }
         />
