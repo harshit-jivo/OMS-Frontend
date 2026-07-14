@@ -470,6 +470,15 @@ export default function Sidebar({ children }: SidebarProps) {
             </li>
           )}
 
+          {canSeeTracker("Tracker_Invoices") && (
+            <li className={location.pathname === "/Tracker_Invoices" ? "active" : ""}>
+              <Link to="/Tracker_Invoices" onClick={closeSidebar}>
+                <SidebarIcon><HiClipboardDocumentList /></SidebarIcon>
+                All Invoices
+              </Link>
+            </li>
+          )}
+
           {canSeeTracker("Tracker_Alerts") && (
             <li className={location.pathname === "/Tracker_Alerts" ? "active" : ""}>
               <Link to="/Tracker_Alerts" onClick={closeSidebar}>

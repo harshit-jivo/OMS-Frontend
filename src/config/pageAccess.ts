@@ -7,16 +7,25 @@
 export const TRACKER_PAGES: Record<string, { path: string; label: string }> = {
   Tracker_Entry: { path: "/Tracker_Entry", label: "Invoice Entry" },
   Tracker_Queue: { path: "/Tracker_Queue", label: "My Stage Queue" },
+  Tracker_Invoices: { path: "/Tracker_Invoices", label: "All Invoices" },
   Tracker_Alerts: { path: "/Tracker_Alerts", label: "Stuck Alerts" },
   Tracker_Reports: { path: "/Tracker_Reports", label: "Tracker Reports" },
   Tracker_Admin: { path: "/Tracker_Admin", label: "Tracker Config" },
 };
 
 // The three tracker sub-roles -> the pages each one sees.
+// Stuck Alerts and All Invoices are admin-only.
 export const TRACKER_ROLE_PAGES: Record<string, string[]> = {
-  tracker_admin: ["Tracker_Queue", "Tracker_Alerts", "Tracker_Reports", "Tracker_Admin"],
-  tracker_entry: ["Tracker_Entry", "Tracker_Queue", "Tracker_Alerts"],
-  tracker_user: ["Tracker_Queue", "Tracker_Alerts"],
+  tracker_admin: ["Tracker_Entry", "Tracker_Queue", "Tracker_Invoices", "Tracker_Alerts", "Tracker_Reports", "Tracker_Admin"],
+  tracker_entry: ["Tracker_Entry", "Tracker_Queue"],
+  tracker_user: ["Tracker_Queue"],
+};
+
+// Display labels for the three sub-roles (for the user-management dropdown).
+export const TRACKER_ROLE_LABELS: Record<string, string> = {
+  tracker_admin: "Tracker Admin",
+  tracker_entry: "Invoice Entry",
+  tracker_user: "Tracker User",
 };
 
 const ALL_TRACKER_PAGES = Object.keys(TRACKER_PAGES);

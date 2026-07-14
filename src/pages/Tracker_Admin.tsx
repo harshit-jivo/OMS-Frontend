@@ -6,10 +6,11 @@ import {
   HiPencilSquare,
 } from "react-icons/hi2";
 import trackerService from "../services/trackerService";
-import type { AdminUser, LookupKind, Stage } from "../services/trackerService";
+import type { AdminUser, LookupKind, Stage, TrackerUser } from "../services/trackerService";
+import { TRACKER_ROLE_LABELS } from "../config/pageAccess";
 import "../styles/Tracker.css";
 
-type Tab = "stages" | "lookups" | "access";
+type Tab = "stages" | "lookups" | "access" | "users";
 
 const LOOKUP_KINDS: { kind: LookupKind; label: string }[] = [
   { kind: "categories", label: "Categories" },
@@ -47,7 +48,7 @@ export default function Tracker_Admin() {
       </div>
 
       <div className="trk-tabs">
-        {([["stages", "Stages"], ["lookups", "Lookups"], ["access", "Stage Access"]] as const).map(
+        {([["stages", "Stages"], ["lookups", "Lookups"], ["access", "Stage Access"], ["users", "Tracker Users"]] as const).map(
           ([t, label]) => (
             <button key={t} className={"trk-tab" + (tab === t ? " active" : "")}
               onClick={() => setTab(t as Tab)}>{label}</button>
@@ -58,6 +59,7 @@ export default function Tracker_Admin() {
       {tab === "stages" && <StagesTab flash={flash} />}
       {tab === "lookups" && <LookupsTab flash={flash} />}
       {tab === "access" && <AccessTab flash={flash} />}
+      {tab === "users" && <UsersTab flash={flash} />}
 
       {toast && <div className="trk-toast">{toast}</div>}
     </div>
@@ -189,18 +191,25 @@ function LookupsTab({ flash }: { flash: (m: string) => void }) {
   const [kind, setKind] = useState<LookupKind>("categories");
   const [rows, setRows] = useState<any[]>([]);
   const [draft, setDraft] = useState<any>({});
+  const [showAdd, setShowAdd] = useState(false);
   const isRate = kind === "gst_rates";
+  const kindLabel = LOOKUP_KINDS.find((k) => k.kind === kind)?.label || "value";
 
   const load = () =>
     trackerService.adminGetLookup(kind).then(setRows).catch(() => flash("Failed to load"));
-  useEffect(() => { load(); setDraft({}); }, [kind]);
+  useEffect(() => { load(); setDraft({}); setShowAdd(false); }, [kind]);
 
   const blankDraft = () =>
     isRate ? { label: "", rate: "", sort_order: rows.length, is_active: true }
            : { name: "", sort_order: rows.length, is_active: true };
 
+  const openAdd = () => { setDraft(blankDraft()); setShowAdd(true); };
+
   const add = async () => {
-    try { await trackerService.adminCreateLookup(kind, draft); setDraft({}); flash("Added"); load(); }
+    if (isRate ? (!draft.label || draft.rate === "") : !draft.name) {
+      flash("Fill in the value first"); return;
+    }
+    try { await trackerService.adminCreateLookup(kind, draft); setDraft({}); setShowAdd(false); flash("Added"); load(); }
     catch (err: any) { flash(err?.response?.data?.detail || JSON.stringify(err?.response?.data) || "Add failed"); }
   };
   const update = async (row: any) => {
@@ -217,12 +226,58 @@ function LookupsTab({ flash }: { flash: (m: string) => void }) {
 
   return (
     <div className="trk-card">
-      <div className="trk-tabs" style={{ marginBottom: 14 }}>
-        {LOOKUP_KINDS.map((k) => (
-          <button key={k.kind} className={"trk-tab" + (kind === k.kind ? " active" : "")}
-            onClick={() => setKind(k.kind)}>{k.label}</button>
-        ))}
+      <div className="trk-header" style={{ marginBottom: 14 }}>
+        <div className="trk-tabs" style={{ margin: 0 }}>
+          {LOOKUP_KINDS.map((k) => (
+            <button key={k.kind} className={"trk-tab" + (kind === k.kind ? " active" : "")}
+              onClick={() => setKind(k.kind)}>{k.label}</button>
+          ))}
+        </div>
+        <button className="trk-btn trk-btn-primary" onClick={openAdd}>
+          <HiPlusCircle /> Add {kindLabel.replace(/s$/, "")}
+        </button>
       </div>
+
+      {showAdd && (
+        <div className="trk-modal-overlay" onClick={() => setShowAdd(false)}>
+          <div className="trk-modal" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+            <div className="trk-modal-head"><h3>Add {kindLabel.replace(/s$/, "")}</h3></div>
+            <div className="trk-modal-body">
+              <div className="trk-form-grid">
+                {isRate ? (
+                  <>
+                    <div className="trk-field">
+                      <label>Label</label>
+                      <input placeholder="e.g. 18%" value={draft.label || ""}
+                        onChange={(e) => setDraft({ ...draft, label: e.target.value })} />
+                    </div>
+                    <div className="trk-field">
+                      <label>Rate (%)</label>
+                      <input type="number" step="0.01" placeholder="18" value={draft.rate || ""}
+                        onChange={(e) => setDraft({ ...draft, rate: e.target.value })} />
+                    </div>
+                  </>
+                ) : (
+                  <div className="trk-field">
+                    <label>Name</label>
+                    <input placeholder="New value…" value={draft.name || ""}
+                      onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+                  </div>
+                )}
+                <div className="trk-field">
+                  <label>Sort order</label>
+                  <input type="number" value={draft.sort_order ?? rows.length}
+                    onChange={(e) => setDraft({ ...draft, sort_order: Number(e.target.value) })} />
+                </div>
+              </div>
+            </div>
+            <div className="trk-modal-foot">
+              <button className="trk-btn trk-btn-ghost" onClick={() => setShowAdd(false)}>Cancel</button>
+              <button className="trk-btn trk-btn-primary" onClick={add}><HiPlusCircle /> Add</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="trk-table-wrap">
         <table className="trk-table">
@@ -251,20 +306,9 @@ function LookupsTab({ flash }: { flash: (m: string) => void }) {
                 </td>
               </tr>
             ))}
-            {/* New row */}
-            <tr>
-              {isRate ? (
-                <>
-                  <td><input placeholder="e.g. 18%" value={draft.label || ""} onChange={(e) => setDraft({ ...blankDraft(), ...draft, label: e.target.value })} /></td>
-                  <td><input type="number" step="0.01" placeholder="18" value={draft.rate || ""} onChange={(e) => setDraft({ ...blankDraft(), ...draft, rate: e.target.value })} style={{ width: 80 }} /></td>
-                </>
-              ) : (
-                <td><input placeholder="New value…" value={draft.name || ""} onChange={(e) => setDraft({ ...blankDraft(), ...draft, name: e.target.value })} /></td>
-              )}
-              <td><input type="number" value={draft.sort_order ?? rows.length} onChange={(e) => setDraft({ ...blankDraft(), ...draft, sort_order: Number(e.target.value) })} style={{ width: 64 }} /></td>
-              <td>—</td>
-              <td><button className="trk-btn trk-btn-primary" style={{ padding: "5px 9px" }} onClick={add}><HiPlusCircle /> Add</button></td>
-            </tr>
+            {rows.length === 0 && (
+              <tr><td colSpan={isRate ? 5 : 4}><div className="trk-empty">No values yet — use “Add”.</div></td></tr>
+            )}
           </tbody>
         </table>
       </div>
@@ -349,6 +393,191 @@ function AccessTab({ flash }: { flash: (m: string) => void }) {
             ))}
             {users.length === 0 && (
               <tr><td colSpan={orderedStages.length + 3}><div className="trk-empty">No users.</div></td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Tracker Users — create / delete tracker users (tracker roles only)
+// ---------------------------------------------------------------------------
+const EMPTY_NEW_USER = {
+  username: "", password: "", name: "", email: "", phone: "", role: "tracker_user",
+};
+
+function UsersTab({ flash }: { flash: (m: string) => void }) {
+  const [users, setUsers] = useState<TrackerUser[]>([]);
+  const [draft, setDraft] = useState({ ...EMPTY_NEW_USER, is_active: true });
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [showModal, setShowModal] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const load = () => trackerService.adminListTrackerUsers().then(setUsers).catch(() => flash("Failed to load users"));
+  useEffect(() => { load(); }, []);
+
+  const resetForm = () => {
+    setEditingId(null);
+    setDraft({ ...EMPTY_NEW_USER, is_active: true });
+    setShowModal(false);
+  };
+
+  const openCreate = () => {
+    setEditingId(null);
+    setDraft({ ...EMPTY_NEW_USER, is_active: true });
+    setShowModal(true);
+  };
+
+  const startEdit = (u: TrackerUser) => {
+    setEditingId(u.id);
+    setDraft({
+      username: u.username, password: "", name: u.name, email: u.email,
+      phone: u.phone, role: u.role, is_active: u.is_active,
+    });
+    setShowModal(true);
+  };
+
+  const save = async () => {
+    if (!editingId && (!draft.username.trim() || !draft.password.trim())) {
+      flash("Username and password are required"); return;
+    }
+    setSaving(true);
+    try {
+      if (editingId) {
+        await trackerService.adminUpdateTrackerUser(editingId, {
+          name: draft.name, role: draft.role, email: draft.email,
+          phone: draft.phone, is_active: draft.is_active,
+          ...(draft.password.trim() ? { password: draft.password } : {}),
+        });
+        flash(`User "${draft.username}" updated`);
+      } else {
+        await trackerService.adminCreateTrackerUser(draft);
+        flash(`User "${draft.username}" created`);
+      }
+      resetForm();
+      load();
+    } catch (err: any) {
+      flash(err?.response?.data?.detail || "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async (u: TrackerUser) => {
+    if (!window.confirm(`Delete tracker user "${u.username}"? This cannot be undone.`)) return;
+    try {
+      const res = await trackerService.adminDeleteTrackerUser(u.id);
+      flash(res.deactivated ? `"${u.username}" had history — deactivated instead` : `"${u.username}" deleted`);
+      if (editingId === u.id) resetForm();
+      load();
+    } catch (err: any) {
+      flash(err?.response?.data?.detail || "Delete failed");
+    }
+  };
+
+  const roleOptions = Object.entries(TRACKER_ROLE_LABELS);
+
+  return (
+    <div className="trk-card">
+      <div className="trk-header" style={{ marginBottom: 12 }}>
+        <h3 style={{ margin: 0 }}>Tracker users ({users.length})</h3>
+        <button className="trk-btn trk-btn-primary" onClick={openCreate}>
+          <HiPlusCircle /> Add User
+        </button>
+      </div>
+
+      {showModal && (
+        <div className="trk-modal-overlay" onClick={resetForm}>
+          <div className="trk-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="trk-modal-head">
+              <h3>{editingId ? `Edit user "${draft.username}"` : "Add a tracker user"}</h3>
+            </div>
+            <div className="trk-modal-body">
+              <div className="trk-form-grid">
+                <div className="trk-field">
+                  <label>Username</label>
+                  <input value={draft.username} disabled={!!editingId}
+                    onChange={(e) => setDraft({ ...draft, username: e.target.value })} />
+                </div>
+                <div className="trk-field">
+                  <label>Full name</label>
+                  <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+                </div>
+                <div className="trk-field">
+                  <label>{editingId ? "New password (leave blank to keep)" : "Password"}</label>
+                  <input type="password" value={draft.password}
+                    placeholder={editingId ? "Leave blank to keep current" : ""}
+                    onChange={(e) => setDraft({ ...draft, password: e.target.value })} />
+                </div>
+                <div className="trk-field">
+                  <label>Role</label>
+                  <select value={draft.role} onChange={(e) => setDraft({ ...draft, role: e.target.value })}>
+                    {roleOptions.map(([val, label]) => <option key={val} value={val}>{label}</option>)}
+                  </select>
+                </div>
+                <div className="trk-field">
+                  <label>Email (optional)</label>
+                  <input value={draft.email} onChange={(e) => setDraft({ ...draft, email: e.target.value })} />
+                </div>
+                <div className="trk-field">
+                  <label>Phone (optional)</label>
+                  <input value={draft.phone} onChange={(e) => setDraft({ ...draft, phone: e.target.value })} />
+                </div>
+                {editingId && (
+                  <div className="trk-field">
+                    <label>Status</label>
+                    <select value={draft.is_active ? "1" : "0"}
+                      onChange={(e) => setDraft({ ...draft, is_active: e.target.value === "1" })}>
+                      <option value="1">Active</option>
+                      <option value="0">Inactive</option>
+                    </select>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="trk-modal-foot">
+              <button className="trk-btn trk-btn-ghost" onClick={resetForm}>Cancel</button>
+              <button className="trk-btn trk-btn-primary" onClick={save} disabled={saving}>
+                {editingId ? <><HiCheck /> {saving ? "Saving…" : "Save changes"}</>
+                  : <><HiPlusCircle /> {saving ? "Creating…" : "Create user"}</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="trk-table-wrap">
+        <table className="trk-table">
+          <thead>
+            <tr><th>Username</th><th>Name</th><th>Role</th><th>Email</th><th>Phone</th><th>Status</th><th></th></tr>
+          </thead>
+          <tbody>
+            {users.map((u) => (
+              <tr key={u.id} className={u.is_active ? "" : "trk-row-locked"}>
+                <td>{u.username}</td>
+                <td>{u.name}</td>
+                <td><span className="trk-badge trk-badge-stage">{u.role_display || TRACKER_ROLE_LABELS[u.role] || u.role}</span></td>
+                <td>{u.email || "-"}</td>
+                <td>{u.phone || "-"}</td>
+                <td>
+                  {u.is_active
+                    ? <span className="trk-badge trk-badge-ok">Active</span>
+                    : <span className="trk-badge trk-badge-muted">Inactive</span>}
+                </td>
+                <td style={{ display: "flex", gap: 6 }}>
+                  <button className="trk-btn trk-btn-ghost" style={{ padding: "5px 9px" }} onClick={() => startEdit(u)}>
+                    <HiPencilSquare /> Edit
+                  </button>
+                  <button className="trk-btn trk-btn-danger" style={{ padding: "5px 9px" }} onClick={() => remove(u)}>
+                    <HiTrash /> Delete
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {users.length === 0 && (
+              <tr><td colSpan={7}><div className="trk-empty">No tracker users yet.</div></td></tr>
             )}
           </tbody>
         </table>
