@@ -18,6 +18,8 @@ export const GRANTABLE_ADMIN_PAGES: GrantablePage[] = [
   { key: "Reports", label: "Reports", path: "/Daily_Report" },
   { key: "Einvoice", label: "e-Invoice (IRN)", path: "/Einvoice" },
   { key: "Ewaybill", label: "e-Way Bill", path: "/Ewaybill" },
+  // Tracker pages are gated centrally by role (see config/pageAccess.ts),
+  // not by per-user extra_pages, so they are intentionally not listed here.
 ];
 
 export const GRANTABLE_PAGE_KEYS = GRANTABLE_ADMIN_PAGES.map((page) => page.key);
