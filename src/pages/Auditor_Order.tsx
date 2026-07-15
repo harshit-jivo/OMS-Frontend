@@ -1,8 +1,7 @@
 ﻿import { useState, useEffect } from "react";
-import * as XLSX from "xlsx";
-import { saveAs } from "file-saver";
 import { getOrderItemSchemeNames, getOrderItemSchemes, getOrderItemSchemeQtyText, getOrderItemTotalLtrs, ordersService } from "../services/ordersService";
 import type { Order, OrderItem, OrderLog } from "../services/ordersService";
+import { exportToExcel } from "../utils/excelExport";
 import "../styles/Auditor_Order.css";
 import { useLocation, useNavigate } from "react-router-dom";
 import { sortOrders } from "../utils/orderHistory";
@@ -177,7 +176,9 @@ export default function Auditor_orders() {
       }
     }
 
-    let excelData: object[] = [];
+    // Raw values only — exportToExcel infers the Excel type per column, so dates
+    // stay dates and money stays numeric and summable.
+    let excelData: Record<string, unknown>[] = [];
 
     if (full.items && full.items.length > 0) {
       excelData = full.items.map((item: OrderItem) => ({
@@ -196,7 +197,7 @@ export default function Auditor_orders() {
         Qty: item.qty,
         Boxes: item.boxes,
         Liters: item.ltrs,
-        "Total Ltrs": getOrderItemTotalLtrs(item).toFixed(2),
+        "Total Ltrs": getOrderItemTotalLtrs(item),
         "Price List (Basic)": item.price_list_basic,
         "Basic Price": item.basic_price,
         "Total Amount": item.total,
@@ -215,14 +216,10 @@ export default function Auditor_orders() {
       });
     }
 
-    const worksheet = XLSX.utils.json_to_sheet(excelData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Order Details");
-    const excelBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
-    const file = new Blob([excelBuffer], {
-      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    await exportToExcel(excelData, {
+      fileName: `Order_${full.order_number}.xlsx`,
+      sheetName: "Order Details",
     });
-    saveAs(file, `Order_${full.order_number}.xlsx`);
   };
 
   const handleTrack = async (order: Order) => {

@@ -1,7 +1,7 @@
 import axios from "axios";
 import type { AxiosRequestConfig } from "axios";
 
-const API_BASE_URL = "http://192.168.1.145:8000/api";
+const API_BASE_URL = "https://oms.jivo.in/api";
 // const API_BASE_URL = "/api";
 
 const api = axios.create({

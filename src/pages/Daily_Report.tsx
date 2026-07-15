@@ -4,8 +4,7 @@ import type { User } from "../services/userService";
 import type { Order, OrderItem } from "../services/ordersService";
 import { loadManagerOrders } from "../utils/orderHistory";
 import { formatOrderCreatedAt, getOrderItemSchemeNames, getOrderItemSchemes, getOrderItemSchemeQtyText, getOrderItemTotalLtrs, ordersService } from "../services/ordersService";
-import * as XLSX from "xlsx";
-import { saveAs } from "file-saver";
+import { startExcelExport, exportDateStamp } from "../utils/excelExport";
 import "../styles/Report.css";
 import { 
   HiEye,           // View
@@ -197,161 +196,91 @@ export default function Daily_Report() {
   //   setShowDetails(true);
   // };
 
-  const downloadExcel = (order: Order) => {
-    const excelData: Record<string, unknown>[] = [];
-    if (order.items && order.items.length > 0) {
-      order.items.forEach((item: OrderItem) => {
-        excelData.push({
+  // Raw values only — exportToExcel infers the Excel type per column, so dates
+  // stay dates and money stays numeric and summable.
+  const buildOrderRows = (order: Order): Record<string, unknown>[] => {
+    if (!order.items || order.items.length === 0) {
+      return [
+        {
           "Order Number": order.order_number,
           "Card Code": order.card_code,
           "Card Name": order.card_name,
-          "Created At": formatOrderCreatedAt(order.created_at),
+          "Created At": order.created_at,
           "Bill To": order.bill_to_address,
           "Ship To": order.ship_to_address,
           "Delivery Date": order.delivery_date,
-          "Status": order.status_display,
-          "FOC": order.is_foc ? "Yes" : "No",
-          "Item Code": item.item_code,
-          "Item Name": item.item_name,
-          "Scheme": getOrderItemSchemeNames(item),
-          "Scheme Qty": getOrderItemSchemeQtyText(item),
-          // "Scheme Ltrs": (item as any).scheme_ltrs || "",
-          "Qty": item.qty,
-          "Boxes": item.boxes,
-          "Liters": item.ltrs,
-          "Total Ltrs": getOrderItemTotalLtrs(item).toFixed(2),
-          "Price List (Basic)": item.price_list_basic,
-          "Basic Price": item.basic_price,
-          "Tax Rate": item.tax_rate,
-          "Total Amount": item.total,
-          "Grand Total": (Number(item.total || 0) + (Number(item.total || 0) * Number(item.tax_rate || 0) / 100)).toFixed(2),
-        });
-      });
-    } else {
-      excelData.push({
+          Status: order.status_display,
+          FOC: Boolean(order.is_foc),
+          // Item columns are held open so an order with no line items still
+          // produces the same sheet layout as every other export.
+          "Item Code": null,
+          "Item Name": null,
+          Scheme: null,
+          "Scheme Qty": null,
+          Qty: null,
+          Boxes: null,
+          Liters: null,
+          "Total Ltrs": null,
+          "Price List (Basic)": null,
+          "Basic Price": null,
+          "Tax Rate": null,
+          "Total Amount": null,
+          "Grand Total": null,
+        },
+      ];
+    }
+
+    return order.items.map((item: OrderItem) => {
+      const total = Number(item.total || 0);
+      const taxRate = Number(item.tax_rate || 0);
+      return {
         "Order Number": order.order_number,
         "Card Code": order.card_code,
         "Card Name": order.card_name,
-        "Created At": formatOrderCreatedAt(order.created_at),
+        "Created At": order.created_at,
+        "Bill To": order.bill_to_address,
+        "Ship To": order.ship_to_address,
         "Delivery Date": order.delivery_date,
-        "Status": order.status_display,
-        "FOC": order.is_foc ? "Yes" : "No",
-      });
-    }
-    const totalAmount = excelData.reduce((s, r) => s + Number(r["Total Amount"] || 0), 0);
-    const grandTotal = excelData.reduce((s, r) => s + Number(r["Grand Total"] || 0), 0);
-    excelData.push({
-      "Order Number": "",
-      "Card Code": "",
-      "Card Name": "",
-      "Created At": "",
-      "Bill To": "",
-      "Ship To": "",
-      "Delivery Date": "",
-      "Status": "",
-      "FOC": "",
-      "Item Code": "",
-      "Item Name": "",
-      "Scheme": "",
-      "Scheme Qty": "",
-      // "Scheme Ltrs": "",
-      "Qty": "",
-      "Boxes": "",
-      "Liters": "",
-      "Total Ltrs": "",
-      "Price List (Basic)": "",
-      "Basic Price": "",
-      "Tax Rate": "TOTAL",
-      "Total Amount": totalAmount.toFixed(2),
-      "Grand Total": grandTotal.toFixed(2),
+        Status: order.status_display,
+        FOC: Boolean(order.is_foc),
+        "Item Code": item.item_code,
+        "Item Name": item.item_name,
+        Scheme: getOrderItemSchemeNames(item),
+        "Scheme Qty": getOrderItemSchemeQtyText(item),
+        Qty: item.qty,
+        Boxes: item.boxes,
+        Liters: item.ltrs,
+        "Total Ltrs": getOrderItemTotalLtrs(item),
+        "Price List (Basic)": item.price_list_basic,
+        "Basic Price": item.basic_price,
+        "Tax Rate": taxRate,
+        "Total Amount": total,
+        "Grand Total": total + (total * taxRate) / 100,
+      };
     });
-    const worksheet = XLSX.utils.json_to_sheet(excelData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Order Details");
-    const excelBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
-    const file = new Blob([excelBuffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-    saveAs(file, `Order_${order.order_number}.xlsx`);
+  };
+
+  const ORDER_TOTALS = {
+    sum: ["Total Amount", "Grand Total"],
+    labelColumn: "Tax Rate",
+    label: "TOTAL",
+  };
+
+  const downloadExcel = (order: Order) => {
+    startExcelExport(buildOrderRows(order), {
+      fileName: `Order_${order.order_number}.xlsx`,
+      sheetName: "Order Details",
+      totalsRow: ORDER_TOTALS,
+    });
   };
 
   const downloadAllExcel = () => {
     if (filteredOrders.length === 0) return;
-    const excelData: Record<string, unknown>[] = [];
-    filteredOrders.forEach((order) => {
-      if (order.items && order.items.length > 0) {
-        order.items.forEach((item: OrderItem) => {
-          excelData.push({
-            "Order Number": order.order_number,
-            "Card Code": order.card_code,
-            "Card Name": order.card_name,
-            "Created At": formatOrderCreatedAt(order.created_at),
-            "Bill To": order.bill_to_address,
-        "Ship To": order.ship_to_address,
-        "Delivery Date": order.delivery_date,
-        "Status": order.status_display,
-        "FOC": order.is_foc ? "Yes" : "No",
-        "Item Code": item.item_code,
-        "Item Name": item.item_name,
-        "Scheme": getOrderItemSchemeNames(item),
-        "Scheme Qty": getOrderItemSchemeQtyText(item),
-        // "Scheme Ltrs": (item as any).scheme_ltrs || "",
-        "Qty": item.qty,
-        "Boxes": item.boxes,
-        "Liters": item.ltrs,
-        "Total Ltrs": getOrderItemTotalLtrs(item).toFixed(2),
-        "Price List (Basic)": item.price_list_basic,
-        "Basic Price": item.basic_price,
-        "Tax Rate": item.tax_rate,
-        "Total Amount": item.total,
-        "Grand Total": (Number(item.total || 0) + (Number(item.total || 0) * Number(item.tax_rate || 0) / 100)).toFixed(2),
-          });
-        });
-      } else {
-        excelData.push({
-          "Order Number": order.order_number,
-          "Card Code": order.card_code,
-          "Card Name": order.card_name,
-          "Created At": formatOrderCreatedAt(order.created_at),
-          "Delivery Date": order.delivery_date,
-          "Status": order.status_display,
-          "FOC": order.is_foc ? "Yes" : "No",
-          "Bill To": order.bill_to_address,
-          "Ship To": order.ship_to_address,
-        });
-      }
+    startExcelExport(filteredOrders.flatMap(buildOrderRows), {
+      fileName: `Daily_Report_${selectedUser}_${exportDateStamp()}.xlsx`,
+      sheetName: "All Orders",
+      totalsRow: ORDER_TOTALS,
     });
-    const allTotalAmount = excelData.reduce((s, r) => s + Number(r["Total Amount"] || 0), 0);
-    const allGrandTotal = excelData.reduce((s, r) => s + Number(r["Grand Total"] || 0), 0);
-    excelData.push({
-      "Order Number": "",
-      "Card Code": "",
-      "Card Name": "",
-      "Created At": "",
-      "Bill To": "",
-      "Ship To": "",
-      "Delivery Date": "",
-      "Status": "",
-      "FOC": "",
-      "Item Code": "",
-      "Item Name": "",
-      "Scheme": "",
-      "Scheme Qty": "",
-      // "Scheme Ltrs": "",
-      "Qty": "",
-      "Boxes": "",
-      "Liters": "",
-      "Total Ltrs": "",
-      "Price List (Basic)": "",
-      "Basic Price": "",
-      "Tax Rate": "TOTAL",
-      "Total Amount": allTotalAmount.toFixed(2),
-      "Grand Total": allGrandTotal.toFixed(2),
-    });
-    const worksheet = XLSX.utils.json_to_sheet(excelData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "All Orders");
-    const excelBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
-    const file = new Blob([excelBuffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-    saveAs(file, `Daily_Report_${selectedUser}_${new Date().toISOString().split("T")[0]}.xlsx`);
   };
 
   const isFilterReady = selectedGroups.length > 0;

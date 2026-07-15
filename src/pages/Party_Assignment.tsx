@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import * as XLSX from "xlsx";
+import * as XLSX from "xlsx"; // reading uploaded workbooks only; writing goes through excelExport
+import { startSheetsExport } from "../utils/excelExport";
 import { userService } from "../services/userService";
 import type { User } from "../services/userService";
 import { sapService } from "../services/sapService";
@@ -263,10 +264,13 @@ const downloadBulkTemplate = () => {
     { "Party Code": "CUST000002" },
     { "Party Code": "CUST000003" },
   ];
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(userRows), "Users");
-  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(partyRows), "Parties");
-  XLSX.writeFile(workbook, "party-user-assignment-template.xlsx");
+  startSheetsExport(
+    [
+      { sheetName: "Users", rows: userRows },
+      { sheetName: "Parties", rows: partyRows },
+    ],
+    "party-user-assignment-template.xlsx",
+  );
 };
 
 const handleBulkImport = async (file: File) => {

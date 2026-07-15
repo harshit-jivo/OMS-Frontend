@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import * as XLSX from "xlsx";
-import { saveAs } from "file-saver";
+import { startExcelExport, exportDateStamp } from "../utils/excelExport";
 import { ordersService } from "../services/ordersService";
 import type { QuotationOverviewItem, QuotationStatusLabel } from "../services/ordersService";
 
@@ -114,18 +113,16 @@ export default function Sales_Quotation() {
       "Card Code": row.card_code ?? "",
       "Card Name": row.card_name ?? "",
       "Category": row.category || "",
-      "Created": formatDateTime(row.created_at),
+      "Created": row.created_at,
       "SAP Doc No.": row.doc_num ?? "",
       "Quotation Status": (STATUS_STYLES[row.quotation_status] || STATUS_STYLES.UNKNOWN).label,
       "Cancelled By": row.quotation_cancelled_by ?? "",
-      "Cancelled At": row.quotation_cancelled ? formatDateTime(row.quotation_cancelled_at) : "",
+      "Cancelled At": row.quotation_cancelled ? row.quotation_cancelled_at : null,
     }));
-    const worksheet = XLSX.utils.json_to_sheet(excelData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Sales Quotations");
-    const excelBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
-    const file = new Blob([excelBuffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-    saveAs(file, `Sales_Quotation_${new Date().toISOString().split("T")[0]}.xlsx`);
+    startExcelExport(excelData, {
+      fileName: `Sales_Quotation_${exportDateStamp()}.xlsx`,
+      sheetName: "Sales Quotations",
+    });
   };
 
   return (

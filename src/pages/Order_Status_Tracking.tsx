@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState, useRef } from "react";
-import * as XLSX from "xlsx";
-import { saveAs } from "file-saver";
+import { exportToExcel } from "../utils/excelExport";
 import type { Order, OrderItem, OrderLog } from "../services/ordersService";
 import { sapService } from "../services/sapService";
 import { getOrderItemSchemes, getOrderItemTotalLtrs, ordersService } from "../services/ordersService";
@@ -317,7 +316,7 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
   const downloadExcel = async (order: Order) => {
     const quotationNo = await resolveQuotationNumber(order);
     const exportOrder = applyQuotationNumber(order, quotationNo);
-    let excelData: object[] = [];
+    let excelData: Record<string, unknown>[] = [];
 
     if (exportOrder.items && exportOrder.items.length > 0) {
       excelData = exportOrder.items.flatMap((item: OrderItem) => {
@@ -336,7 +335,7 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
         Qty: item.qty,
         Boxes: item.boxes,
         Liters: item.ltrs,
-        "Total Ltrs": getOrderItemTotalLtrs(item).toFixed(2),
+        "Total Ltrs": getOrderItemTotalLtrs(item),
         "Price List (Basic)": item.price_list_basic,
         "Basic Price": item.basic_price,
         "Total Amount": item.total,
@@ -360,14 +359,10 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
       });
     }
 
-    const worksheet = XLSX.utils.json_to_sheet(excelData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Status Tracking");
-    const excelBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
-    const file = new Blob([excelBuffer], {
-      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    await exportToExcel(excelData, {
+      fileName: `Tracked_Order_${exportOrder.order_number}.xlsx`,
+      sheetName: "Status Tracking",
     });
-    saveAs(file, `Tracked_Order_${exportOrder.order_number}.xlsx`);
   };
 
   return (

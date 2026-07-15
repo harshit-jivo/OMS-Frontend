@@ -1,6 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import * as XLSX from "xlsx";
-import { saveAs } from "file-saver";
+import { startExcelExport } from "../utils/excelExport";
 import {
   getOrderItemSchemeNames,
   getOrderItemSchemes,
@@ -389,64 +388,53 @@ export default function View_Orders() {
     pageNumber * itemsPerPage,
   );
 
-  const downloadExcel = (order: Order) => {
-    let excelData = [];
-
-    // If items exist → flatten data
-    if (order.items && order.items.length > 0) {
-      excelData = order.items.map((item: OrderItem) => ({
-        "Order Number": order.order_number,
-        "Card Code": order.card_code,
-        "Card Name": order.card_name,
-        "Delivery Date": order.delivery_date,
-        "Status": order.status_display,
-
-        "Bill To": order.bill_to_address,
-        "Ship To": order.ship_to_address,
-
-        "Item Code": item.item_code,
-        "Item Name": item.item_name,
-        "Scheme": getOrderItemSchemeNames(item),
-        "Scheme Qty": getOrderItemSchemeQtyText(item),
-        // "Scheme Ltrs": (item as any).scheme_ltrs || "",
-        "Qty": item.qty,
-        "Boxes": item.boxes,
-        "Liters": item.ltrs,
-        "Total Ltrs": getOrderItemTotalLtrs(item),
-        "Price List (Basic)": item.price_list_basic,
-        "Basic Price": item.basic_price,
-        "Total Amount": item.total,
-      }));
-    } else {
-      // If no items → still export order
-      excelData.push({
-        "Order Number": order.order_number,
-        "Card Code": order.card_code,
-        "Card Name": order.card_name,
-        "Delivery Date": order.delivery_date,
-        "Status": order.status_display,
-        "Bill To": order.bill_to_address,
-        "Ship To": order.ship_to_address,
-        "Price List (Basic)": "",
-        "Basic Price": "",
-      });
+  // Raw values only — exportToExcel infers the Excel type per column, so dates
+  // stay dates and money stays numeric and summable.
+  const buildOrderRows = (order: Order): Record<string, unknown>[] => {
+    // If no items → still export the order header on its own.
+    if (!order.items || order.items.length === 0) {
+      return [
+        {
+          "Order Number": order.order_number,
+          "Card Code": order.card_code,
+          "Card Name": order.card_name,
+          "Delivery Date": order.delivery_date,
+          Status: order.status_display,
+          "Bill To": order.bill_to_address,
+          "Ship To": order.ship_to_address,
+          "Price List (Basic)": "",
+          "Basic Price": "",
+        },
+      ];
     }
 
-    const worksheet = XLSX.utils.json_to_sheet(excelData);
-    const workbook = XLSX.utils.book_new();
+    return order.items.map((item: OrderItem) => ({
+      "Order Number": order.order_number,
+      "Card Code": order.card_code,
+      "Card Name": order.card_name,
+      "Delivery Date": order.delivery_date,
+      Status: order.status_display,
+      "Bill To": order.bill_to_address,
+      "Ship To": order.ship_to_address,
+      "Item Code": item.item_code,
+      "Item Name": item.item_name,
+      Scheme: getOrderItemSchemeNames(item),
+      "Scheme Qty": getOrderItemSchemeQtyText(item),
+      Qty: item.qty,
+      Boxes: item.boxes,
+      Liters: item.ltrs,
+      "Total Ltrs": getOrderItemTotalLtrs(item),
+      "Price List (Basic)": item.price_list_basic,
+      "Basic Price": item.basic_price,
+      "Total Amount": item.total,
+    }));
+  };
 
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Order Details");
-
-    const excelBuffer = XLSX.write(workbook, {
-      bookType: "xlsx",
-      type: "array",
+  const downloadExcel = (order: Order) => {
+    startExcelExport(buildOrderRows(order), {
+      fileName: `Order_${order.order_number}.xlsx`,
+      sheetName: "Order Details",
     });
-
-    const file = new Blob([excelBuffer], {
-      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    });
-
-    saveAs(file, `Order_${order.order_number}.xlsx`);
   };
   return (
     <div className="vo-page">
