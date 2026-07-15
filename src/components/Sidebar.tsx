@@ -796,6 +796,12 @@ export default function Sidebar({ children }: SidebarProps) {
                   Order Tracker
                 </Link>
               </li>
+              <li className={location.pathname === "/Invoice_Report" ? "active" : ""}>
+                <Link to="/Invoice_Report" onClick={closeSidebar}>
+                  <SidebarIcon><HiDocumentText /></SidebarIcon>
+                  Invoice Report
+                </Link>
+              </li>
             </>
           )}
 

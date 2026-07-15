@@ -63,6 +63,7 @@ export type NextDocNumber = {
 type ApiMessageResponse = {
   message?: unknown;
   detail?: unknown;
+  details?: unknown;
   error?: unknown;
   errors?: unknown;
   // SAP Service Layer nests the human text as message: { lang, value }.
@@ -283,14 +284,25 @@ const extractApiMessage = (value: unknown, fallback: string): string => {
 
   if (typeof parsed === "object") {
     const source = parsed as ApiMessageResponse;
-    const directMessage = source.message ?? source.detail ?? source.error ?? source.errors ?? source.value;
-    if (typeof directMessage === "string" && directMessage.trim()) return directMessage.trim();
-    if (directMessage && typeof directMessage === "object") return extractApiMessage(directMessage, fallback);
 
-    const nestedMessage = source.data ?? source.result;
-    if (nestedMessage) {
-      const extracted = extractApiMessage(nestedMessage, "");
-      if (extracted) return extracted;
+    // Direct human-readable text wins outright.
+    for (const candidate of [source.message, source.detail, source.value]) {
+      if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+    }
+
+    // Dig into nested wrappers for the most specific message. The top-level
+    // `error` is often just a generic label ("SAP Error") while the real text
+    // sits deeper, e.g. { error: "SAP Error", details: { error: { message } } }.
+    for (const nested of [source.message, source.detail, source.details, source.error, source.errors, source.data, source.result]) {
+      if (nested && typeof nested === "object") {
+        const extracted = extractApiMessage(nested, "");
+        if (extracted) return extracted;
+      }
+    }
+
+    // Generic string labels only as a last resort.
+    for (const candidate of [source.error, source.errors]) {
+      if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
     }
 
     const docNumber = source.DocNum ?? source.DocEntry;

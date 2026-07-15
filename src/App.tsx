@@ -37,6 +37,7 @@ import LabelChecker from "./pages/Label_Checker";
 import NutritionManager from "./pages/Nutrition_Manager";
 import Einvoice from "./pages/Einvoice";
 import Ewaybill from "./pages/Ewaybill";
+import Invoice_Report from "./pages/Invoice_Report";
 
 function App() {
   return (
@@ -122,6 +123,15 @@ function App() {
           element={
             <Sidebar>
               <InvoiceReview />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Invoice_Report"
+          element={
+            <Sidebar>
+              <Invoice_Report />
             </Sidebar>
           }
         />
