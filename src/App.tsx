@@ -37,6 +37,12 @@ import LabelChecker from "./pages/Label_Checker";
 import NutritionManager from "./pages/Nutrition_Manager";
 import Einvoice from "./pages/Einvoice";
 import Ewaybill from "./pages/Ewaybill";
+import Tracker_Entry from "./pages/Tracker_Entry";
+import Tracker_Queue from "./pages/Tracker_Queue";
+import Tracker_Admin from "./pages/Tracker_Admin";
+import Tracker_Reports from "./pages/Tracker_Reports";
+import Tracker_Alerts from "./pages/Tracker_Alerts";
+import Tracker_Invoices from "./pages/Tracker_Invoices";
 import Invoice_Report from "./pages/Invoice_Report";
 
 function App() {
@@ -367,6 +373,60 @@ function App() {
           element={
             <Sidebar>
               <Ewaybill />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Tracker_Entry"
+          element={
+            <Sidebar>
+              <Tracker_Entry />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Tracker_Queue"
+          element={
+            <Sidebar>
+              <Tracker_Queue />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Tracker_Admin"
+          element={
+            <Sidebar>
+              <Tracker_Admin />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Tracker_Reports"
+          element={
+            <Sidebar>
+              <Tracker_Reports />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Tracker_Alerts"
+          element={
+            <Sidebar>
+              <Tracker_Alerts />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Tracker_Invoices"
+          element={
+            <Sidebar>
+              <Tracker_Invoices />
             </Sidebar>
           }
         />

@@ -58,6 +58,7 @@ import {
   shouldShowPrompt,
 } from "../utils/notificationPermission";
 import NotificationPermissionModal from "./NotificationPermissionModal";
+import { isTrackerRole, trackerPagesFor } from "../config/pageAccess";
 import "./Sidebar.css";
 
 
@@ -158,6 +159,13 @@ export default function Sidebar({ children }: SidebarProps) {
   // An admin page link shows for admins, or for any user explicitly granted it
   // on the Permissions page.
   const canSee = (pageKey: string) => isAdmin || extraPages.includes(pageKey);
+
+  // Tracker access is centralized by role (see config/pageAccess.ts).
+  const trackerPages = trackerPagesFor(userRole, isAdmin);
+  const canSeeTracker = (pageKey: string) => trackerPages.has(pageKey);
+  // Pure tracker users (the three tracker sub-roles) get a trimmed sidebar —
+  // no OMS Dashboard.
+  const trackerOnly = isTrackerRole(userRole);
 
   const closeSidebar = () => {
     setMenuOpen(false);
@@ -603,12 +611,14 @@ export default function Sidebar({ children }: SidebarProps) {
 
       <aside className={`sidebar ${menuOpen ? "open" : ""} ${sidebarCollapsed ? "collapsed" : ""}`}>
         <ul>
-          <li className={location.pathname === "/Dashboard" ? "active" : ""}>
-            <Link to="/Dashboard" onClick={closeSidebar}>
-              <SidebarIcon><HiHome /></SidebarIcon>
-              Dashboard
-            </Link>
-          </li>
+          {!trackerOnly && (
+            <li className={location.pathname === "/Dashboard" ? "active" : ""}>
+              <Link to="/Dashboard" onClick={closeSidebar}>
+                <SidebarIcon><HiHome /></SidebarIcon>
+                Dashboard
+              </Link>
+            </li>
+          )}
 
           {(userRole?.toLowerCase() === "billing" || userRole?.toLowerCase() === "factory_approver") && (
             <li className={location.pathname === "/Invoice_Review" ? "active" : ""}>
@@ -731,6 +741,60 @@ export default function Sidebar({ children }: SidebarProps) {
               <Link to="/Ewaybill" onClick={closeSidebar}>
                 <SidebarIcon><HiTruck /></SidebarIcon>
                 e-Way Bill
+              </Link>
+            </li>
+          )}
+
+          {canSeeTracker("Tracker_Entry") && (
+            <li className={location.pathname === "/Tracker_Entry" ? "active" : ""}>
+              <Link to="/Tracker_Entry" onClick={closeSidebar}>
+                <SidebarIcon><HiDocumentText /></SidebarIcon>
+                Invoice Entry
+              </Link>
+            </li>
+          )}
+
+          {canSeeTracker("Tracker_Queue") && (
+            <li className={location.pathname === "/Tracker_Queue" ? "active" : ""}>
+              <Link to="/Tracker_Queue" onClick={closeSidebar}>
+                <SidebarIcon><HiClipboardDocumentCheck /></SidebarIcon>
+                My Stage Queue
+              </Link>
+            </li>
+          )}
+
+          {canSeeTracker("Tracker_Invoices") && (
+            <li className={location.pathname === "/Tracker_Invoices" ? "active" : ""}>
+              <Link to="/Tracker_Invoices" onClick={closeSidebar}>
+                <SidebarIcon><HiClipboardDocumentList /></SidebarIcon>
+                All Invoices
+              </Link>
+            </li>
+          )}
+
+          {canSeeTracker("Tracker_Alerts") && (
+            <li className={location.pathname === "/Tracker_Alerts" ? "active" : ""}>
+              <Link to="/Tracker_Alerts" onClick={closeSidebar}>
+                <SidebarIcon><HiClock /></SidebarIcon>
+                Stuck Alerts
+              </Link>
+            </li>
+          )}
+
+          {canSeeTracker("Tracker_Reports") && (
+            <li className={location.pathname === "/Tracker_Reports" ? "active" : ""}>
+              <Link to="/Tracker_Reports" onClick={closeSidebar}>
+                <SidebarIcon><HiChartBar /></SidebarIcon>
+                Tracker Reports
+              </Link>
+            </li>
+          )}
+
+          {canSeeTracker("Tracker_Admin") && (
+            <li className={location.pathname === "/Tracker_Admin" ? "active" : ""}>
+              <Link to="/Tracker_Admin" onClick={closeSidebar}>
+                <SidebarIcon><HiCog6Tooth /></SidebarIcon>
+                Tracker Config
               </Link>
             </li>
           )}
