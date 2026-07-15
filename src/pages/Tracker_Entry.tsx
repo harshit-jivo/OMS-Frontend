@@ -7,7 +7,6 @@ import {
 } from "react-icons/hi2";
 import trackerService, { ADDITIONAL_CHARGE_TYPES } from "../services/trackerService";
 import type { Invoice, InvoiceWrite, Lookups, Vendor } from "../services/trackerService";
-import { getCurrentUser } from "../services/authService";
 import "../styles/Tracker.css";
 
 const EMPTY: InvoiceWrite = {
@@ -49,7 +48,6 @@ export default function Tracker_Entry() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [advRemarks, setAdvRemarks] = useState("");
   const [toast, setToast] = useState("");
-  const [myId, setMyId] = useState<number | null>(null);
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [vendorOpen, setVendorOpen] = useState(false);
 
@@ -61,9 +59,6 @@ export default function Tracker_Entry() {
   useEffect(() => {
     trackerService.getLookups().then(setLookups).catch(() => flash("Failed to load lookups"));
     trackerService.getVendors().then(setVendors).catch(() => {/* SAP down -> free text */});
-    getCurrentUser()
-      .then((u) => setMyId(u?.id ?? null))
-      .catch(() => {});
     refresh();
   }, []);
 
@@ -91,10 +86,11 @@ export default function Tracker_Entry() {
     }
   };
 
-  // Only my own creations belong on the entry desk.
+  // The head-office / entry desk is shared: show every invoice currently at the
+  // entry stage (freshly created or returned back), regardless of creator.
   const mine = useMemo(
-    () => (myId ? myInvoices.filter((i) => i.created_by === myId) : myInvoices),
-    [myInvoices, myId]
+    () => myInvoices.filter((i) => i.current_stage_code === "entry"),
+    [myInvoices]
   );
 
   const setField = (k: keyof InvoiceWrite, v: string | number) =>
@@ -387,10 +383,13 @@ export default function Tracker_Entry() {
         </div>
       )}
 
-      {/* ---- My invoices ---- */}
+      {/* ---- Head office / entry queue (shared across entry users) ---- */}
       <div className="trk-card">
         <div className="trk-header" style={{ marginBottom: 12 }}>
-          <h3 style={{ margin: 0 }}>My Invoices</h3>
+          <div>
+            <h3 style={{ margin: 0 }}>Head Office Queue</h3>
+            <div className="trk-sub">All invoices at the entry stage — created here or returned back — from any user.</div>
+          </div>
         </div>
 
         {selected.size > 0 && (
@@ -420,7 +419,7 @@ export default function Tracker_Entry() {
                 <th>Value</th>
                 <th>GST</th>
                 <th>Category</th>
-                <th>Stage</th>
+                <th>Created By</th>
                 <th>Days</th>
                 <th>State</th>
                 <th></th>
@@ -447,19 +446,17 @@ export default function Tracker_Entry() {
                   <td>₹{money(inv.invoice_value)}</td>
                   <td>{inv.gst_type_name} {inv.gst_rate_label}</td>
                   <td>{inv.category_name}</td>
-                  <td><span className="trk-badge trk-badge-stage">{inv.current_stage_name}</span></td>
+                  <td>{inv.created_by_name}</td>
                   <td>
                     <span className={"trk-badge " + (inv.is_overdue ? "trk-badge-danger" : "trk-badge-muted")}>
                       {inv.days_at_stage}
                     </span>
                   </td>
                   <td>
-                    {inv.status === "COMPLETED" ? (
-                      <span className="trk-badge trk-badge-ok">Completed</span>
-                    ) : inv.editable ? (
+                    {inv.editable ? (
                       <span className="trk-badge trk-badge-warn">Editable</span>
                     ) : (
-                      <span className="trk-badge trk-badge-muted">Read-only</span>
+                      <span className="trk-badge trk-badge-muted">Locked</span>
                     )}
                   </td>
                   <td>
