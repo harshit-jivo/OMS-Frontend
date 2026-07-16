@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { HiTrash, HiXMark } from "react-icons/hi2";
+import { API_ORIGIN } from "../../services/api";
 import { formatMoney, lineKey, toNumber, type SelectedLine } from "./salesInvoice.utils";
 import { apiFetch, type SalesInvoiceState } from "./useSalesInvoice";
 
@@ -71,21 +72,12 @@ type SkuImageRecord = {
 
 type SkuImageApiResponse = SkuImageRecord[] | { data?: SkuImageRecord[]; results?: SkuImageRecord[] };
 
-const skuImageBaseUrl = String(
-  import.meta.env.VITE_BASE_URL
-    || import.meta.env.VITE_BACKEND_BASE_URL
-    || import.meta.env.VITE_API_BASE_URL
-    || "",
-)
-  .replace(/\/+$/, "")
-  .replace(/\/api$/i, "");
-
 const getSkuImageUrl = (imagePath?: string | null) => {
   const path = String(imagePath || "").trim();
   if (!path) return "";
   if (/^https?:\/\//i.test(path)) return path;
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-  return skuImageBaseUrl ? `${skuImageBaseUrl}${normalizedPath}` : normalizedPath;
+  return `${API_ORIGIN}${normalizedPath}`;
 };
 
 const getSkuCodeKey = (itemCode?: string | null) => String(itemCode || "").trim().toUpperCase();

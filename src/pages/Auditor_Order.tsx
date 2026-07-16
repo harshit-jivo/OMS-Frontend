@@ -497,8 +497,8 @@ export default function Auditor_orders() {
       {showConfirmModal && (
         <div className="ao-modal-overlay">
           <div className="ao-modal">
-            <div className="ao-modal-title">Create Sales Quotation</div>
-            <p className="ao-modal-msg">Do you want to create a Sales Quotation for order {pendingOrderNum}?</p>
+            <div className="ao-modal-title">Create Sales Order</div>
+            <p className="ao-modal-msg">Do you want to push order {pendingOrderNum} to SAP as a Sales Order?</p>
             <div className="ao-modal-actions">
               <button className="ao-btn-approve" onClick={confirmApprove}>Confirm</button>
               <button className="ao-btn-cancel" onClick={() => { setShowConfirmModal(false); setPendingOrderId(null); }}>Cancel</button>
@@ -508,10 +508,19 @@ export default function Auditor_orders() {
       )}
 
       {isCreating && (
-        <div className="ao-modal-overlay">
-          <div className="ao-modal ao-modal-loading">
-            <div className="ao-spinner" />
-            <p className="ao-loading-text">Creating Sales Quotation...</p>
+        <div className="ao-modal-overlay ao-loading-overlay" aria-hidden="false">
+          <div
+            className="ao-modal ao-modal-loading"
+            role="status"
+            aria-live="polite"
+            aria-busy="true"
+          >
+            <div className="ao-spinner" aria-hidden="true" />
+            <div className="ao-modal-title">Creating Sales Order</div>
+            <p className="ao-loading-text">
+              Sending order {pendingOrderNum} to SAP. This may take a little while.
+            </p>
+            <p className="ao-loading-hint">Please do not refresh or close this window.</p>
           </div>
         </div>
       )}
@@ -523,7 +532,7 @@ export default function Auditor_orders() {
             <div className="ao-modal-title">Order Completed</div>
             <div className="ao-success-info">
               <div className="ao-success-row">
-                <span className="ao-success-label">Quotation No.</span>
+                <span className="ao-success-label">Sales Order No.</span>
                 <strong className="ao-success-value">{quotationResult.number}</strong>
               </div>
               <div className="ao-success-row">
@@ -645,6 +654,5 @@ export default function Auditor_orders() {
     </div>
   );
 }
-
 
 

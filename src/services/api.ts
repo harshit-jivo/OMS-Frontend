@@ -1,8 +1,16 @@
 import axios from "axios";
 import type { AxiosRequestConfig } from "axios";
 
-const API_BASE_URL = "https://oms.jivo.in/api";
-// const API_BASE_URL = "/api";
+export const API_BASE_URL = String(import.meta.env.VITE_API_BASE_URL || "")
+  .trim()
+  .replace(/\/+$/, "");
+
+if (!API_BASE_URL) {
+  throw new Error("VITE_API_BASE_URL is not configured. Add it to your .env file.");
+}
+
+// Used for backend-served media paths (for example, sale-invoice SKU images).
+export const API_ORIGIN = API_BASE_URL.replace(/\/api$/i, "");
 
 const api = axios.create({
   baseURL: API_BASE_URL,
