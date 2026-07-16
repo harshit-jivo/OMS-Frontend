@@ -37,6 +37,10 @@ import LabelChecker from "./pages/Label_Checker";
 import NutritionManager from "./pages/Nutrition_Manager";
 import Einvoice from "./pages/Einvoice";
 import Ewaybill from "./pages/Ewaybill";
+import Profile from "./pages/Profile";
+import Device_Management from "./pages/Device_Management";
+import Device_Activity from "./pages/Device_Activity";
+import Version_Management from "./pages/Version_Management";
 
 function App() {
   return (
@@ -50,6 +54,43 @@ function App() {
           element={
             <Sidebar>
               <Dashboard />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Profile"
+          element={
+            <Sidebar>
+              <Profile />
+            </Sidebar>
+          }
+        />
+
+        {/* System — Device & Version Management (admin) */}
+        <Route
+          path="/Device_Management"
+          element={
+            <Sidebar>
+              <Device_Management />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Device_Activity"
+          element={
+            <Sidebar>
+              <Device_Activity />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Version_Management"
+          element={
+            <Sidebar>
+              <Version_Management />
             </Sidebar>
           }
         />

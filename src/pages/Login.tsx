@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { loginUser } from "../services/authService";
 import { resolveStartupSession } from "../services/api";
+import { webDeviceService } from "../services/webDeviceService";
 import "../styles/Login.css";
 
 type ToastProps = {
@@ -158,6 +159,11 @@ const handleLogin = async () => {
     localStorage.setItem("company_name", user.company?.name || "");
     localStorage.setItem("main_group_id", String(user.main_group?.id || ""));
     localStorage.setItem("main_group_name", user.main_group?.name || "");
+
+    // Register this browser with the backend. Fire-and-forget: best-effort
+    // telemetry that must never block, delay or fail login. Retries by itself
+    // on the next authenticated session if it fails now.
+    void webDeviceService.onAuthenticated("login");
 
     showToast("Login successful. Redirecting...", "success");
 

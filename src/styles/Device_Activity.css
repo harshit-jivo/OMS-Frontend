@@ -1,0 +1,283 @@
+/* Device Activity — live device status. Prefix `da-`, matching the per-page
+   prefix convention. Geometry/colours mirror Device Management so the two admin
+   pages read as one system. */
+
+.da-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+.da-head h1 {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: #0f172a;
+}
+.da-head p {
+  margin: 4px 0 0;
+  font-size: 0.82rem;
+  color: #64748b;
+  max-width: 70ch;
+  line-height: 1.5;
+}
+.da-refresh {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.da-refresh-info {
+  font-size: 0.72rem;
+  color: #94a3b8;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- cards ---- */
+.da-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.da-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-left: 3px solid #cbd5e1;
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+.da-card:disabled { cursor: default; }
+.da-card:not(:disabled):hover { background: #f8fafc; }
+.da-card-active {
+  outline: 2px solid #0f766e33;
+  border-color: #0f766e;
+}
+.da-card-online { border-left-color: #16a34a; }
+.da-card-idle { border-left-color: #f59e0b; }
+.da-card-offline { border-left-color: #cbd5e1; }
+.da-card-inactive { border-left-color: #dc2626; }
+.da-card-value {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+}
+.da-card-label {
+  font-size: 0.75rem;
+  color: #64748b;
+  font-weight: 600;
+}
+
+/* ---- filters ---- */
+.da-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.da-input {
+  border: 1px solid #d7dee8;
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 0.8rem;
+  color: #0f172a;
+  background: #fff;
+  min-width: 110px;
+}
+.da-input:focus {
+  outline: 2px solid #2563eb33;
+  border-color: #2563eb;
+}
+.da-search { flex: 1 1 280px; min-width: 220px; }
+.da-date {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: #64748b;
+}
+.da-btn {
+  border: 1px solid #d7dee8;
+  background: #f8fafc;
+  color: #334155;
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.da-btn:hover:not(:disabled) { background: #eef2f7; }
+.da-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* ---- toolbar / sorting ---- */
+.da-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.da-count { font-size: 0.8rem; color: #64748b; font-weight: 600; }
+.da-sorts {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 0.72rem;
+  color: #94a3b8;
+}
+.da-sort {
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #475569;
+  cursor: pointer;
+}
+.da-sort:hover { background: #f1f5f9; }
+.da-sort-on {
+  border-color: #0f766e;
+  color: #0f766e;
+  background: #f0fdfa;
+}
+.da-error {
+  color: #92400e;
+  background: #fef3c7;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  padding: 7px 12px;
+  font-size: 0.8rem;
+  margin: 0 0 8px;
+}
+
+/* ---- table ---- */
+.da-table-wrap {
+  overflow-x: auto;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+}
+.da-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+.da-table th,
+.da-table td {
+  text-align: left;
+  padding: 9px 12px;
+  border-bottom: 1px solid #f1f5f9;
+}
+.da-table th {
+  background: #f8fafc;
+  color: #475569;
+  font-weight: 700;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.da-th-sort { cursor: pointer; user-select: none; }
+.da-th-sort:hover { color: #0f766e; }
+.da-table tbody tr:last-child td { border-bottom: none; }
+.da-row { cursor: pointer; }
+.da-row:hover { background: #f8fafc; }
+.da-rel { color: #64748b; font-variant-numeric: tabular-nums; }
+.da-empty {
+  text-align: center;
+  color: #94a3b8;
+  padding: 28px 0;
+}
+
+/* ---- pagination ---- */
+.da-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 14px;
+}
+.da-pg-btn {
+  border: 1px solid #d7dee8;
+  background: #fff;
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #334155;
+  cursor: pointer;
+}
+.da-pg-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.da-pg-info { font-size: 0.78rem; color: #64748b; font-variant-numeric: tabular-nums; }
+
+/* ---- details drawer ---- */
+.da-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  justify-content: flex-end;
+  z-index: 1000;
+}
+.da-drawer {
+  background: #fff;
+  width: min(460px, 100%);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  box-shadow: -8px 0 24px rgba(15, 23, 42, 0.12);
+}
+.da-drawer-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid #e2e8f0;
+}
+.da-drawer-head h2 {
+  margin: 0 0 6px;
+  font-size: 1rem;
+  font-weight: 800;
+  color: #0f172a;
+}
+.da-drawer-body { padding: 16px 20px 28px; overflow-y: auto; }
+.da-drawer-body h4 {
+  margin: 18px 0 6px;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #64748b;
+}
+.da-drawer-body h4:first-child { margin-top: 0; }
+.da-dl {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  gap: 6px 12px;
+  margin: 0;
+}
+.da-dl dt { font-size: 0.76rem; color: #64748b; }
+.da-dl dd {
+  margin: 0;
+  font-size: 0.76rem;
+  color: #0f172a;
+  font-weight: 600;
+  word-break: break-all;
+}
+.da-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+@media (prefers-reduced-motion: reduce) {
+  .da-drawer { transition: none; }
+}

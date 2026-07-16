@@ -1,0 +1,271 @@
+/* Device Management — admin inventory + version analytics.
+   Prefix `dm-`, matching the per-page prefix convention used across the app. */
+
+.dm-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+.dm-head h1 {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: #0f172a;
+}
+.dm-head p {
+  margin: 4px 0 0;
+  font-size: 0.85rem;
+  color: #64748b;
+}
+.dm-latest {
+  font-size: 0.75rem;
+  color: #334155;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* ---- cards ---- */
+.dm-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.dm-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-left: 3px solid #cbd5e1;
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dm-card-ok { border-left-color: #0f766e; }
+.dm-card-warn { border-left-color: #f59e0b; }
+.dm-card-value {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+}
+.dm-card-label {
+  font-size: 0.75rem;
+  color: #64748b;
+  font-weight: 600;
+}
+
+/* ---- charts ---- */
+.dm-charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+  margin-bottom: 22px;
+}
+.dm-chart {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 16px;
+  min-width: 0;
+}
+.dm-chart-head h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+.dm-chart-head p {
+  margin: 4px 0 0;
+  font-size: 0.72rem;
+  color: #94a3b8;
+  line-height: 1.4;
+}
+.dm-chart-body { margin-top: 10px; min-width: 0; }
+.dm-empty-sm {
+  color: #94a3b8;
+  font-size: 0.8rem;
+  text-align: center;
+  padding: 40px 0;
+}
+
+/* ---- filters ---- */
+.dm-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.dm-input {
+  border: 1px solid #d7dee8;
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 0.8rem;
+  color: #0f172a;
+  background: #fff;
+  min-width: 110px;
+}
+.dm-input:focus {
+  outline: 2px solid #2563eb33;
+  border-color: #2563eb;
+}
+.dm-search { flex: 1 1 280px; min-width: 220px; }
+.dm-date {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: #64748b;
+}
+.dm-btn {
+  border: 1px solid #d7dee8;
+  background: #f8fafc;
+  color: #334155;
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.dm-btn:hover { background: #eef2f7; }
+
+/* ---- toolbar ---- */
+.dm-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.dm-count { font-size: 0.8rem; color: #64748b; font-weight: 600; }
+.dm-error {
+  color: #dc2626;
+  font-size: 0.82rem;
+  margin: 0 0 8px;
+}
+
+/* ---- table (wide -> scrolls inside its own container) ---- */
+.dm-table-wrap {
+  overflow-x: auto;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+}
+.dm-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+.dm-table th,
+.dm-table td {
+  text-align: left;
+  padding: 9px 12px;
+  border-bottom: 1px solid #f1f5f9;
+}
+.dm-table th {
+  background: #f8fafc;
+  color: #475569;
+  font-weight: 700;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  position: sticky;
+  top: 0;
+}
+.dm-table tbody tr:last-child td { border-bottom: none; }
+.dm-row { cursor: pointer; }
+.dm-row:hover { background: #f8fafc; }
+.dm-empty {
+  text-align: center;
+  color: #94a3b8;
+  padding: 28px 0;
+}
+.dm-badge-ok,
+.dm-badge-off {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+.dm-badge-ok { background: #dcfce7; color: #166534; }
+.dm-badge-off { background: #fee2e2; color: #991b1b; }
+
+/* ---- pagination ---- */
+.dm-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 14px;
+}
+.dm-pg-btn {
+  border: 1px solid #d7dee8;
+  background: #fff;
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #334155;
+  cursor: pointer;
+}
+.dm-pg-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.dm-pg-info { font-size: 0.78rem; color: #64748b; font-variant-numeric: tabular-nums; }
+
+/* ---- detail modal ---- */
+.dm-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 1000;
+}
+.dm-modal {
+  background: #fff;
+  border-radius: 14px;
+  width: min(640px, 100%);
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+}
+.dm-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid #e2e8f0;
+}
+.dm-modal-head h2 { margin: 0; font-size: 1rem; font-weight: 800; color: #0f172a; }
+.dm-modal-body { padding: 16px 20px 22px; overflow-y: auto; }
+.dm-modal-body h4 {
+  margin: 16px 0 6px;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #64748b;
+}
+.dm-modal-body h4:first-child { margin-top: 0; }
+.dm-dl {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: 6px 12px;
+  margin: 0;
+}
+.dm-dl dt { font-size: 0.78rem; color: #64748b; }
+.dm-dl dd {
+  margin: 0;
+  font-size: 0.78rem;
+  color: #0f172a;
+  font-weight: 600;
+  word-break: break-all;
+}
+.dm-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }

@@ -17,6 +17,11 @@ const isAuthPath = (url?: string) =>
   !!url && AUTH_PATHS.some((p) => url.includes(p));
 
 // localStorage keys cleared on session end (mirror of what Login sets).
+//
+// NOTE: `device_id` (and `device_last_sync`) are deliberately ABSENT from this
+// list and must stay that way. One browser must keep ONE device id across
+// logins — clearing it would mint a brand-new "device" on every logout/login
+// and fill the backend with phantom rows. See webDeviceService.
 const AUTH_STORAGE_KEYS = [
   "access",
   "refresh",
@@ -33,11 +38,48 @@ const AUTH_STORAGE_KEYS = [
 ];
 
 /* ------------------------------------------------------------------ *
+ * Device/version metadata hooks (inversion of control).
+ *
+ * webDeviceService registers a synchronous header provider here, so version
+ * and device headers ride on EVERY request from the single interceptor below.
+ * This file never imports webDeviceService — that would be a cycle (the service
+ * imports this module to POST) and would drag device concerns into the API
+ * layer. Same shape is used for the post-refresh hook.
+ * ------------------------------------------------------------------ */
+let deviceHeaderProvider: (() => Record<string, string>) | null = null;
+export const setDeviceHeaderProvider = (
+  fn: (() => Record<string, string>) | null,
+) => {
+  deviceHeaderProvider = fn;
+};
+
+// Fired after a SUCCESSFUL token refresh, letting device registration retry on
+// the next authenticated event without this layer knowing what it is.
+let authenticatedHandler: (() => void) | null = null;
+export const setAuthenticatedHandler = (fn: (() => void) | null) => {
+  authenticatedHandler = fn;
+};
+
+/* ------------------------------------------------------------------ *
  * Request interceptor — attach the CURRENT access token to every
  * authenticated request. Reading localStorage on every request means a
  * token refreshed in this (or another) tab is picked up automatically.
  * ------------------------------------------------------------------ */
 api.interceptors.request.use((config) => {
+  // Attach device/version metadata to every request from this one place.
+  // Applied BEFORE the token so a provider can never clobber Authorization,
+  // and guarded so metadata can never break a real request.
+  if (deviceHeaderProvider) {
+    try {
+      const metadata = deviceHeaderProvider();
+      Object.entries(metadata).forEach(([key, value]) => {
+        config.headers.set(key, value);
+      });
+    } catch {
+      /* metadata headers are best-effort only */
+    }
+  }
+
   const token = localStorage.getItem("access");
   if (token && config.url !== "/auth/login/") {
     config.headers.Authorization = `Bearer ${token}`;
@@ -96,6 +138,13 @@ const doRefresh = async (): Promise<RefreshResult> => {
     if (!newAccess) return { ok: false, reason: "invalid" };
     localStorage.setItem("access", newAccess);
     if (newRefresh) localStorage.setItem("refresh", newRefresh); // rotation
+    // Successful (re)authentication — let device registration retry if an
+    // earlier attempt hadn't succeeded. Fire-and-forget; never affects refresh.
+    try {
+      authenticatedHandler?.();
+    } catch {
+      /* the device hook must never impact the auth path */
+    }
     return { ok: true, access: newAccess };
   } catch (error: any) {
     const status = error?.response?.status;

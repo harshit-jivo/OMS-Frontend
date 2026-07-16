@@ -18,6 +18,10 @@ export const GRANTABLE_ADMIN_PAGES: GrantablePage[] = [
   { key: "Reports", label: "Reports", path: "/Daily_Report" },
   { key: "Einvoice", label: "e-Invoice (IRN)", path: "/Einvoice" },
   { key: "Ewaybill", label: "e-Way Bill", path: "/Ewaybill" },
+  // System — device inventory, live activity, and release policy.
+  { key: "Device_Management", label: "Device Management", path: "/Device_Management" },
+  { key: "Device_Activity", label: "Device Activity", path: "/Device_Activity" },
+  { key: "Version_Management", label: "Version Management", path: "/Version_Management" },
 ];
 
 export const GRANTABLE_PAGE_KEYS = GRANTABLE_ADMIN_PAGES.map((page) => page.key);

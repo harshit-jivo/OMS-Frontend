@@ -12,6 +12,9 @@ import {
   HiCog6Tooth,
   HiClipboardDocumentList,
   HiCube,
+  HiDevicePhoneMobile,
+  HiRocketLaunch,
+  HiSignal,
   HiDocumentCheck,
   HiDocumentText,
   HiEye,
@@ -32,6 +35,7 @@ import {
 } from "react-icons/hi2";
 import { getCurrentUser } from "../services/authService";
 import api from "../services/api";
+import { webDeviceService } from "../services/webDeviceService";
 import NotificationToaster, { showToast } from "./NotificationToaster";
 import {
   initNotificationBus,
@@ -300,6 +304,11 @@ export default function Sidebar({ children }: SidebarProps) {
       return;
     }
 
+    // An authenticated session is active on this page load (fresh login or a
+    // restored session). Register/refresh this browser in the background — a
+    // no-op if it already succeeded, so route changes don't re-POST.
+    void webDeviceService.onAuthenticated("startup");
+
     initNotificationBus();
     initNotificationSound();
     fetchNotifications();
@@ -461,12 +470,17 @@ export default function Sidebar({ children }: SidebarProps) {
     setShowNotificationsModal(false);
   };
 
+  // NOTE: `device_id` / `device_last_sync` are deliberately ABSENT from this
+  // list and must stay that way — one browser keeps ONE device id across
+  // logins. Clearing it would create a phantom device on every logout/login.
   const clearSessionStorage = () => {
     [
       "access", "refresh", "user_id", "username", "name", "role",
       "role_display", "extra_pages", "company_id", "company_name",
       "main_group_id", "main_group_name",
     ].forEach((key) => localStorage.removeItem(key));
+    // Per-session device state only; the persistent id above is untouched.
+    webDeviceService.reset();
   };
 
   const handleLogout = async () => {
@@ -592,10 +606,15 @@ export default function Sidebar({ children }: SidebarProps) {
               )}
             </button>
           )}
-          <div className="header-profile" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', marginRight: '16px' }}>
+          <Link
+            to="/Profile"
+            className="header-profile"
+            title="View profile and application information"
+            style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', marginRight: '16px', textDecoration: 'none' }}
+          >
             <span className="header-profile-name" style={{ fontWeight: '600', fontSize: '0.9rem', color: '#0f172a' }}>{displayName}</span>
             <span className="header-profile-role" style={{ fontSize: '0.75rem', color: '#64748b' }}>{roleLabel}</span>
-          </div>
+          </Link>
         </div>
       </header>
 
@@ -659,6 +678,41 @@ export default function Sidebar({ children }: SidebarProps) {
               <Link to="/Sales_Quotation" onClick={closeSidebar}>
                 <SidebarIcon><HiReceiptPercent /></SidebarIcon>
                 Sales Quotation
+              </Link>
+            </li>
+          )}
+
+          {/* System — device inventory and release policy. Gated by the same
+              canSee() grant mechanism as every other admin page. */}
+          {(canSee("Device_Management") ||
+            canSee("Device_Activity") ||
+            canSee("Version_Management")) && (
+            <li className="sidebar-section">System</li>
+          )}
+
+          {canSee("Device_Management") && (
+            <li className={location.pathname === "/Device_Management" ? "active" : ""}>
+              <Link to="/Device_Management" onClick={closeSidebar}>
+                <SidebarIcon><HiDevicePhoneMobile /></SidebarIcon>
+                Device Management
+              </Link>
+            </li>
+          )}
+
+          {canSee("Device_Activity") && (
+            <li className={location.pathname === "/Device_Activity" ? "active" : ""}>
+              <Link to="/Device_Activity" onClick={closeSidebar}>
+                <SidebarIcon><HiSignal /></SidebarIcon>
+                Device Activity
+              </Link>
+            </li>
+          )}
+
+          {canSee("Version_Management") && (
+            <li className={location.pathname === "/Version_Management" ? "active" : ""}>
+              <Link to="/Version_Management" onClick={closeSidebar}>
+                <SidebarIcon><HiRocketLaunch /></SidebarIcon>
+                Version Management
               </Link>
             </li>
           )}
