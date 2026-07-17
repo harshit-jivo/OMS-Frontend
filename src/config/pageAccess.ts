@@ -19,8 +19,6 @@ export const TRACKER_ROLE_PAGES: Record<string, string[]> = {
   tracker_user: ["Tracker_Queue", "Tracker_Alerts"],
 };
 
-const ALL_TRACKER_PAGES = Object.keys(TRACKER_PAGES);
-
 export function normalizeRole(role?: string | null): string {
   return (role || "").toLowerCase().trim();
 }
@@ -30,11 +28,11 @@ export function isTrackerRole(role?: string | null): boolean {
   return normalizeRole(role) in TRACKER_ROLE_PAGES;
 }
 
-/** The set of tracker page keys a user may see. Superusers / OMS admins see all. */
-export function trackerPagesFor(role?: string | null, isAdmin = false): Set<string> {
-  const r = normalizeRole(role);
-  if (isAdmin || r === "admin") return new Set(ALL_TRACKER_PAGES);
-  return new Set(TRACKER_ROLE_PAGES[r] || []);
+/** The set of tracker page keys a user may see. Purely role-driven — only the
+ *  three tracker sub-roles get tracker pages; OMS admin/other roles see none.
+ *  (`_isAdmin` kept for call-site compatibility; intentionally unused.) */
+export function trackerPagesFor(role?: string | null, _isAdmin = false): Set<string> {
+  return new Set(TRACKER_ROLE_PAGES[normalizeRole(role)] || []);
 }
 
 // Where a tracker user lands after login, by priority of what they can access.
