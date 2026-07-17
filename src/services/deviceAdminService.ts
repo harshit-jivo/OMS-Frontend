@@ -1,7 +1,7 @@
 /**
- * deviceAdminService — API calls for the Device & Version Management admin
- * pages. Uses the shared axios instance, so auth, refresh-on-401 and the
- * version/device headers all come for free.
+ * deviceAdminService — API calls for the Device Management admin page. Uses the
+ * shared axios instance, so auth, refresh-on-401 and the version/device headers
+ * all come for free.
  *
  * All list endpoints are server-paginated/filtered/searched: the device table
  * grows one row per user per device, so the browser never receives all of it.
@@ -70,13 +70,6 @@ export type DeviceFilters = {
   ordering?: string;
 };
 
-export type LatestRelease = {
-  platform: string;
-  app_type: string;
-  version: string;
-  build_number: number;
-};
-
 export type StatusCounts = Record<DeviceStatus, number>;
 
 export type StatusThresholds = {
@@ -95,9 +88,6 @@ export type AnalyticsCards = {
   ios_devices: number;
   desktop_browsers: number;
   devices_active_today: number;
-  outdated_devices: number;
-  on_latest_devices: number;
-  latest_releases: LatestRelease[];
   /** Derived activity buckets; always sum to total_devices. */
   status_counts: StatusCounts;
   /** The server's rule set, so the UI can explain itself without hardcoding. */
@@ -116,36 +106,6 @@ export type AnalyticsCharts = {
 };
 
 export type Analytics = { cards: AnalyticsCards; charts: AnalyticsCharts };
-
-export type Release = {
-  id: number;
-  platform: string;
-  app_type: string;
-  version: string;
-  build_number: number;
-  release_notes: string;
-  is_latest: boolean;
-  is_force_update: boolean;
-  min_supported_version: string;
-  min_supported_build: number | null;
-  store_url: string;
-  released_at: string;
-  is_active: boolean;
-  created_at: string;
-  updated_at: string;
-};
-
-export type ReleaseDetail = {
-  release: Release;
-  adoption: {
-    device_count: number;
-    user_count: number;
-    adoption_percent: number;
-    total_devices_for_product: number;
-  };
-  previous_release: { id: number; version: string; build_number: number; released_at: string } | null;
-  next_release: { id: number; version: string; build_number: number; released_at: string } | null;
-};
 
 /** Drop empty values so we never send `?platform=` and filter on "". */
 const clean = (params: Record<string, unknown>) => {
@@ -175,34 +135,6 @@ export const deviceAdminService = {
     const res = await api.get("/admin/devices/analytics/", {
       params: clean({ days }),
     });
-    return res.data.data;
-  },
-
-  async listReleases(
-    params: { platform?: string; app_type?: string; is_active?: string; page?: number; page_size?: number } = {},
-  ): Promise<{ results: Release[]; pagination: Pagination }> {
-    const res = await api.get("/admin/releases/", { params: clean(params) });
-    return res.data.data;
-  },
-
-  async getRelease(id: number): Promise<ReleaseDetail> {
-    const res = await api.get(`/admin/releases/${id}/`);
-    return res.data.data;
-  },
-
-  async createRelease(payload: Partial<Release>): Promise<Release> {
-    const res = await api.post("/admin/releases/", payload);
-    return res.data.data;
-  },
-
-  async updateRelease(id: number, payload: Partial<Release>): Promise<Release> {
-    const res = await api.put(`/admin/releases/${id}/`, payload);
-    return res.data.data;
-  },
-
-  /** Archive/restore — a PATCH of is_active. There is no destructive delete. */
-  async setReleaseActive(id: number, isActive: boolean): Promise<Release> {
-    const res = await api.patch(`/admin/releases/${id}/`, { is_active: isActive });
     return res.data.data;
   },
 };

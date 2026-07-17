@@ -15,7 +15,6 @@
 .au-page,
 .db-root,
 .dm-page,
-.vm-page,
 .da-page,
 .ot-page {
   color: #0f172a;
@@ -35,7 +34,6 @@
 .sl-page,
 .au-page,
 .dm-page,
-.vm-page,
 .da-page,
 .ot-page {
   min-height: calc(100svh - 64px);

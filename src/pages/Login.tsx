@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { isTrackerRole, trackerLandingPath, trackerPagesFor } from "../config/pageAccess";
+import { landingPathFor } from "../config/pageAccess";
 import { loginUser } from "../services/authService";
 import { resolveStartupSession } from "../services/api";
 import { webDeviceService } from "../services/webDeviceService";
@@ -97,8 +97,9 @@ export default function Login() {
     (async () => {
       const outcome = await resolveStartupSession();
       if (cancelled || outcome !== "authenticated") return;
-      const role = (localStorage.getItem("role") || "").toLowerCase();
-      const landing = role === "legal" ? "/Label_Checker" : "/Dashboard";
+      // Same landing rule as a fresh login (see handleLogin) — one shared helper,
+      // so a restored session can never land somewhere a new login wouldn't.
+      const landing = landingPathFor(localStorage.getItem("role"));
       // Preserve any notification deep-link params (openOrderId / notificationId)
       // that a service-worker "openWindow" put on the "/" URL, so the Sidebar's
       // openOrderId effect on the landing route can open the exact Sales Order
@@ -168,22 +169,14 @@ const handleLogin = async () => {
 
     showToast("Login successful. Redirecting...", "success");
 
-    // Legal reviewers land on their own workspace; everyone else on the Dashboard.
-    const landingPath = String(user.role || "").toLowerCase() === "legal" ? "/Label_Checker" : "/Dashboard";
+    // Landing: tracker users go to their first tracker page (they have no
+    // Dashboard); legal reviewers to their workspace; everyone else Dashboard.
+    const landingPath = landingPathFor(user.role);
     // Carry any notification deep-link params (openOrderId / notificationId) so
     // a notification tapped while logged out still opens the exact order after
     // login instead of dropping the user on the dashboard.
     const deepLink = window.location.search;
     setTimeout(() => navigate(`${landingPath}${deepLink}`), 1000);
-    // Landing: tracker users go to their first tracker page (they have no
-    // Dashboard); legal reviewers to their workspace; everyone else Dashboard.
-    let landingPath = "/Dashboard";
-    if (isTrackerRole(user.role)) {
-      landingPath = trackerLandingPath(trackerPagesFor(user.role)) || "/Tracker_Queue";
-    } else if (String(user.role || "").toLowerCase() === "legal") {
-      landingPath = "/Label_Checker";
-    }
-    setTimeout(() => navigate(landingPath), 1000);
 
   } catch (error) {
     console.error(error);

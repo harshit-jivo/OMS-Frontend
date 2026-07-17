@@ -389,7 +389,6 @@ export const webDeviceService = {
 
   // ---- Future extension points (intentionally not implemented in Phase 4) ----
   // These belong HERE so no future feature needs to touch the auth flow again:
-  //   • checkForUpdate()   -> GET /app/version/ + compare (force/optional UI)
   //   • trackSession()     -> heartbeat / last-active pings
   //   • reportAnalytics()  -> screen/viewport/UA are already collected above
 };

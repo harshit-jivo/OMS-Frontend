@@ -18,10 +18,11 @@ export const GRANTABLE_ADMIN_PAGES: GrantablePage[] = [
   { key: "Reports", label: "Reports", path: "/Daily_Report" },
   { key: "Einvoice", label: "e-Invoice (IRN)", path: "/Einvoice" },
   { key: "Ewaybill", label: "e-Way Bill", path: "/Ewaybill" },
-  // System — device inventory, live activity, and release policy.
+  // System — one page carrying live device activity and version analytics.
+  // "Device_Activity" and "Version_Management" are deliberately no longer
+  // grantable: the pages they gated are gone, so offering those permissions
+  // would grant nothing. Any stored grant with those keys is simply ignored.
   { key: "Device_Management", label: "Device Management", path: "/Device_Management" },
-  { key: "Device_Activity", label: "Device Activity", path: "/Device_Activity" },
-  { key: "Version_Management", label: "Version Management", path: "/Version_Management" },
 ];
 
 export const GRANTABLE_PAGE_KEYS = GRANTABLE_ADMIN_PAGES.map((page) => page.key);

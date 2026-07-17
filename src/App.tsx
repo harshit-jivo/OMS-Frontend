@@ -43,6 +43,8 @@ import Tracker_Admin from "./pages/Tracker_Admin";
 import Tracker_Reports from "./pages/Tracker_Reports";
 import Tracker_Alerts from "./pages/Tracker_Alerts";
 import Tracker_Invoices from "./pages/Tracker_Invoices";
+import Profile from "./pages/Profile";
+import Device_Management from "./pages/Device_Management";
 import Invoice_Report from "./pages/Invoice_Report";
 
 function App() {
@@ -76,24 +78,6 @@ function App() {
           element={
             <Sidebar>
               <Device_Management />
-            </Sidebar>
-          }
-        />
-
-        <Route
-          path="/Device_Activity"
-          element={
-            <Sidebar>
-              <Device_Activity />
-            </Sidebar>
-          }
-        />
-
-        <Route
-          path="/Version_Management"
-          element={
-            <Sidebar>
-              <Version_Management />
             </Sidebar>
           }
         />

@@ -11,7 +11,14 @@ node_modules
 dist
 dist-ssr
 *.local
-.env
+# Env files are ignored by default — they hold machine-specific values.
+.env*
+# ...except these two, which are release/setup artifacts and carry no secrets.
+# .env.production holds VITE_BUILD_NUMBER: the build number must be reviewable
+# in the diff and present on a fresh clone, or `npm run build` fails there.
+# See "OMS Backend/docs/RELEASE.md" -> "React web release process".
+!.env.example
+!.env.production
 
 # Editor directories and files
 .vscode/*

@@ -1,18 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Bar,
-  BarChart,
-  CartesianGrid,
   Cell,
   Legend,
   Pie,
   PieChart,
   ResponsiveContainer,
   Tooltip,
-  XAxis,
-  YAxis,
-  Area,
-  AreaChart,
 } from "recharts";
 import {
   deviceAdminService,
@@ -22,40 +15,50 @@ import {
   type DeviceRow,
   type Pagination,
 } from "../services/deviceAdminService";
+import { HiXMark } from "react-icons/hi2";
+import StatusBadge from "../components/StatusBadge";
+import relativeTime from "../utils/relativeTime";
 import "../styles/Device_Management.css";
 
 /**
- * Device Management — searchable inventory of every registered device plus
- * fleet-level version analytics.
+ * Device Management — the single System screen: live device activity and fleet
+ * version analytics.
+ *
+ * Absorbed the former /Device_Activity page. The two device tables it implied
+ * are deliberately ONE table: both read the same endpoint, so a second copy
+ * would double the requests and split the search.
  *
  * Reads the existing devices_user_device table via the admin API. Pagination,
- * filtering and search are ALL server-side; this page never holds the full
- * table in memory.
+ * filtering, search and sorting are ALL server-side; this page never holds the
+ * full table in memory.
+ *
+ * Status (online / idle / offline / inactive) is derived by the SERVER from
+ * last_active and returned per row, so the badge, the status cards and the
+ * ?status= filter can never disagree — and a skewed browser clock cannot change
+ * what a badge says.
  */
 
 // The app's established categorical chart palette (see Dashboard.tsx). Reused
 // rather than redefined so every chart in the product reads as one system.
 // Hues are assigned by fixed index and never cycled.
 const PALETTE = ["#0f766e", "#2563eb", "#f59e0b", "#dc2626", "#7c3aed", "#0891b2", "#4f46e5", "#ea580c"];
-const GRID = "#dbe4ea";
 const MAX_SLICES = 8; // a 9th category folds into "Other" — never a new hue
 
-const PLATFORMS = ["ANDROID", "IOS", "WEB", "DESKTOP"];
-const APP_TYPES = ["MOBILE", "TABLET", "WEB", "ADMIN_WEB", "PARTNER_WEB", "DESKTOP"];
+// Activity status keeps the colours this page already uses for it: the table's
+// Active/Inactive badges are green/red, so the chart must not invent a second
+// visual language for the same fact. Identity is carried by the legend and the
+// on-slice labels too — never by colour alone.
+const ACTIVE_COLOR = PALETTE[0];
+const INACTIVE_COLOR = PALETTE[3];
+
 const PAGE_SIZE = 25;
+const DEFAULT_ORDERING = "-last_active";
+const REFRESH_MS = 60_000;
 
 const EMPTY_FILTERS: DeviceFilters = {
   search: "",
-  platform: "",
-  app_type: "",
-  app_version: "",
   build_number: "",
-  browser_name: "",
-  os_name: "",
-  is_active: "",
-  user_id: "",
-  date_from: "",
-  date_to: "",
+  status: "",
 };
 
 const formatDateTime = (value?: string | null): string => {
@@ -67,18 +70,6 @@ const formatDateTime = (value?: string | null): string => {
       year: "numeric",
       hour: "2-digit",
       minute: "2-digit",
-    });
-  } catch {
-    return String(value);
-  }
-};
-
-const formatDate = (value?: string | null): string => {
-  if (!value) return "-";
-  try {
-    return new Date(value).toLocaleDateString(undefined, {
-      day: "2-digit",
-      month: "short",
     });
   } catch {
     return String(value);
@@ -98,12 +89,49 @@ const topSlices = (rows: CountRow[], key: string) => {
   return head;
 };
 
-function Card({ label, value, tone }: { label: string; value: number | string; tone?: "warn" | "ok" }) {
-  return (
-    <div className={`dm-card ${tone ? `dm-card-${tone}` : ""}`}>
+type CardTone = "warn" | "ok" | "online" | "idle" | "offline";
+
+/**
+ * A summary tile. With `onClick` it becomes a filter toggle (the status tiles);
+ * without one it is a plain read-out and is rendered as a div, so only the
+ * genuinely interactive tiles are focusable.
+ */
+function Card({
+  label,
+  value,
+  tone,
+  active,
+  onClick,
+}: {
+  label: string;
+  value: number | string;
+  tone?: CardTone;
+  active?: boolean;
+  onClick?: () => void;
+}) {
+  const className = `dm-card ${tone ? `dm-card-${tone}` : ""} ${
+    onClick ? "dm-card-btn" : ""
+  } ${active ? "dm-card-on" : ""}`;
+
+  const body = (
+    <>
       <span className="dm-card-value">{value}</span>
       <span className="dm-card-label">{label}</span>
-    </div>
+    </>
+  );
+
+  if (!onClick) return <div className={className}>{body}</div>;
+
+  return (
+    <button
+      type="button"
+      className={className}
+      onClick={onClick}
+      aria-pressed={!!active}
+      title={active ? `Showing ${label} only — click to clear` : `Show ${label} only`}
+    >
+      {body}
+    </button>
   );
 }
 
@@ -119,278 +147,400 @@ function ChartBox({ title, subtitle, children }: { title: string; subtitle?: str
   );
 }
 
-/** Pie with a legend — identity is never conveyed by colour alone. */
-function DistributionPie({ data }: { data: { name: string; count: number }[] }) {
-  if (!data.length) return <p className="dm-empty-sm">No data</p>;
+/**
+ * Outside slice label: "<name> <pct>%".
+ *
+ * Rendered by hand rather than via Recharts' string label because that paints
+ * the text in the slice's own colour. Labels are ink; the arc beside them
+ * carries the identity. The radius also stays inside the box so the topmost
+ * label cannot clip against the chart's edge.
+ */
+const renderSliceLabel = ({
+  cx,
+  cy,
+  midAngle,
+  outerRadius,
+  name,
+  percent,
+}: {
+  cx?: number;
+  cy?: number;
+  midAngle?: number;
+  outerRadius?: number;
+  name?: string;
+  percent?: number;
+}) => {
+  const RADIAN = Math.PI / 180;
+  const radius = (outerRadius ?? 0) + 16;
+  const x = (cx ?? 0) + radius * Math.cos(-(midAngle ?? 0) * RADIAN);
+  const y = (cy ?? 0) + radius * Math.sin(-(midAngle ?? 0) * RADIAN);
   return (
-    <ResponsiveContainer width="100%" height={240}>
-      <PieChart>
-        <Pie data={data} dataKey="count" nameKey="name" innerRadius={45} outerRadius={80} paddingAngle={2}>
+    <text
+      x={x}
+      y={y}
+      fill="#475569"
+      fontSize={11}
+      fontWeight={600}
+      textAnchor={x > (cx ?? 0) ? "start" : "end"}
+      dominantBaseline="central"
+    >
+      {`${name} ${Math.round((percent ?? 0) * 100)}%`}
+    </text>
+  );
+};
+
+/** Pie with a legend — identity is never conveyed by colour alone. */
+function DistributionPie({
+  data,
+  colors,
+}: {
+  data: { name: string; count: number }[];
+  /** Fixed hue per slice. Defaults to the categorical order. */
+  colors?: string[];
+}) {
+  if (!data.length) return <p className="dm-empty-sm">No data</p>;
+  const total = data.reduce((sum, item) => sum + item.count, 0);
+  return (
+    <ResponsiveContainer width="100%" height={260}>
+      <PieChart margin={{ top: 12, right: 8, bottom: 0, left: 8 }}>
+        <Pie
+          data={data}
+          dataKey="count"
+          nameKey="name"
+          innerRadius={40}
+          outerRadius={64}
+          paddingAngle={2}
+          // Labelled directly so the value never depends on reading a hue.
+          label={renderSliceLabel}
+          labelLine={false}
+          // Off so the arcs are drawn on first paint. The mount animation adds
+          // nothing to a two-slice status donut and leaves it briefly blank.
+          isAnimationActive={false}
+        >
           {data.map((entry, index) => (
-            <Cell key={entry.name} fill={PALETTE[index % PALETTE.length]} stroke="#ffffff" strokeWidth={2} />
+            <Cell
+              key={entry.name}
+              fill={colors?.[index] ?? PALETTE[index % PALETTE.length]}
+              stroke="#ffffff"
+              strokeWidth={2}
+            />
           ))}
         </Pie>
-        <Tooltip />
+        <Tooltip
+          formatter={(value) => {
+            const count = Number(value) || 0;
+            return total ? `${count} (${Math.round((count / total) * 100)}%)` : String(count);
+          }}
+        />
         <Legend iconType="circle" wrapperStyle={{ fontSize: "0.75rem" }} />
       </PieChart>
     </ResponsiveContainer>
   );
 }
 
+/** One sortable column header. Sorting is server-side (allow-listed fields). */
+function SortHeader({
+  label,
+  field,
+  ordering,
+  onSort,
+}: {
+  label: string;
+  field: string;
+  ordering: string;
+  onSort: (field: string) => void;
+}) {
+  const direction = ordering === field ? "asc" : ordering === `-${field}` ? "desc" : null;
+  return (
+    <th
+      className={`dm-th-sort ${direction ? "dm-th-active" : ""}`}
+      onClick={() => onSort(field)}
+      aria-sort={direction === "asc" ? "ascending" : direction === "desc" ? "descending" : "none"}
+      title={`Sort by ${label}`}
+    >
+      <span className="dm-th-inner">
+        {label}
+        <span className="dm-sort-icon" aria-hidden="true">
+          {direction === "asc" ? "▲" : direction === "desc" ? "▼" : "↕"}
+        </span>
+      </span>
+    </th>
+  );
+}
+
 export default function Device_Management() {
   const [filters, setFilters] = useState<DeviceFilters>(EMPTY_FILTERS);
   const [searchInput, setSearchInput] = useState("");
+  const [ordering, setOrdering] = useState(DEFAULT_ORDERING);
   const [page, setPage] = useState(1);
   const [rows, setRows] = useState<DeviceRow[]>([]);
   const [pagination, setPagination] = useState<Pagination | null>(null);
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
+  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const [selected, setSelected] = useState<DeviceRow | null>(null);
 
-  // Debounce the search box so typing doesn't fire a request per keystroke.
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setFilters((current) => ({ ...current, search: searchInput }));
-      setPage(1);
-    }, 400);
-    return () => window.clearTimeout(timer);
-  }, [searchInput]);
+  /**
+   * Devices and analytics load together: the status tiles count the same rows
+   * the table lists, so fetching them apart would let the tiles and the badges
+   * drift for a moment after a refresh.
+   *
+   * `silent` distinguishes an auto-refresh from a user-driven load — a silent
+   * pass leaves the current rows on screen (no "Loading…" flash) and swaps them
+   * only once the new data lands.
+   */
+  const load = useCallback(
+    async (silent = false) => {
+      if (silent) setRefreshing(true);
+      else setLoading(true);
+      try {
+        const [list, stats] = await Promise.all([
+          deviceAdminService.listDevices({
+            ...filters,
+            ordering,
+            page,
+            page_size: PAGE_SIZE,
+          }),
+          deviceAdminService.getAnalytics(),
+        ]);
+        setRows(list.results);
+        setPagination(list.pagination);
+        setAnalytics(stats);
+        setLastRefreshed(new Date());
+        setError("");
+      } catch (err) {
+        console.error("Failed to load device data", err);
+        // A failed background refresh must not blank a table someone is
+        // reading — keep the last good rows and surface a quiet message.
+        setError("Could not refresh devices. Showing the last known data.");
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [filters, ordering, page],
+  );
 
-  const loadDevices = useCallback(async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const data = await deviceAdminService.listDevices({
-        ...filters,
-        page,
-        page_size: PAGE_SIZE,
-      });
-      setRows(data.results);
-      setPagination(data.pagination);
-    } catch (err) {
-      console.error("Failed to load devices", err);
-      setError("Could not load devices. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  }, [filters, page]);
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  // A ref holds the latest `load` so the interval never closes over stale
+  // filters/page/ordering, and the interval is created ONCE — so an auto
+  // refresh never resets what the admin has selected.
+  const loadRef = useRef(load);
+  useEffect(() => {
+    loadRef.current = load;
+  }, [load]);
 
   useEffect(() => {
-    loadDevices();
-  }, [loadDevices]);
-
-  useEffect(() => {
-    deviceAdminService
-      .getAnalytics()
-      .then(setAnalytics)
-      .catch((err) => console.error("Failed to load analytics", err));
+    const timer = window.setInterval(() => {
+      // Don't burn requests refreshing a tab nobody is looking at.
+      if (document.hidden) return;
+      loadRef.current(true);
+    }, REFRESH_MS);
+    return () => window.clearInterval(timer);
   }, []);
 
-  const setFilter = (key: keyof DeviceFilters, value: string) => {
-    setFilters((current) => ({ ...current, [key]: value }));
+  // Escape closes the detail drawer — the expected way out of a panel, and the
+  // only one available without moving the mouse to the corner.
+  useEffect(() => {
+    if (!selected) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSelected(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selected]);
+
+  /**
+   * One search box covering name, version and build.
+   *
+   * The API has no single param that spans all three: its `search` matches the
+   * user's name and app_version (among other text fields) but never the numeric
+   * build_number, and combining `search` with `build_number` would AND them.
+   * So a purely numeric term is routed to the build filter and anything else to
+   * the text search — which is also how people actually type these: "131" means
+   * a build, "1.0.4" a version, "Rohit" a person.
+   */
+  const runSearch = () => {
+    const term = searchInput.trim();
+    const isBuild = /^\d+$/.test(term);
+    setFilters((current) => ({
+      // Keep any status the tiles have set — searching within "Online" should
+      // stay within Online.
+      status: current.status,
+      search: isBuild ? "" : term,
+      build_number: isBuild ? term : "",
+    }));
     setPage(1);
   };
 
-  const resetFilters = () => {
-    setFilters(EMPTY_FILTERS);
+  /**
+   * Clear the box AND the applied search in one click.
+   *
+   * Sets the filters directly rather than calling runSearch(): the state update
+   * above is async, so runSearch() would still read the old term. The status
+   * filter is preserved, exactly as a normal search does.
+   */
+  const clearSearch = () => {
     setSearchInput("");
+    setFilters((current) => ({ status: current.status, search: "", build_number: "" }));
+    setPage(1);
+  };
+
+  /** Status tiles are a toggle: clicking the active one clears the filter. */
+  const toggleStatus = (status: string) => {
+    setFilters((current) => ({
+      ...current,
+      status: current.status === status ? "" : status,
+    }));
+    setPage(1);
+  };
+
+  const toggleSort = (field: string) => {
+    // First click on a new column sorts ascending; clicking the active one flips.
+    setOrdering((current) => (current === field ? `-${field}` : field));
     setPage(1);
   };
 
   const cards = analytics?.cards;
   const charts = analytics?.charts;
+  const statusCounts = cards?.status_counts;
+  const rules = cards?.status_thresholds;
 
-  const versionBars = useMemo(() => {
-    if (!charts) return [];
-    return (charts.version_distribution || [])
-      .slice(0, 10)
-      .map((row) => ({
-        name: `${row.app_version} (${row.build_number})`,
-        platform: String(row.platform),
-        count: Number(row.count) || 0,
-      }));
-  }, [charts]);
-
-  const latestText = cards?.latest_releases?.length
-    ? cards.latest_releases
-        .map((release) => `${release.platform}/${release.app_type} v${release.version} (${release.build_number})`)
-        .join("  ·  ")
-    : "No release configured";
+  /** Active vs Inactive — the same two numbers the cards above report. */
+  const activityData = useMemo(() => {
+    if (!cards) return [];
+    return [
+      { name: "Active", count: cards.active_devices },
+      { name: "Inactive", count: cards.inactive_devices },
+    ].filter((slice) => slice.count > 0);
+  }, [cards]);
 
   return (
     <div className="dm-page">
       <header className="dm-head">
         <div>
           <h1>Device Management</h1>
-          <p>Registered devices and version adoption across mobile and web.</p>
+          <p>
+            Live device activity and version adoption.
+            {rules
+              ? ` Online = active within ${rules.online_within_minutes} min · Idle = within ${rules.idle_within_minutes} min · Inactive = quiet for ${rules.inactive_after_days}+ days.`
+              : ""}
+          </p>
         </div>
-        <span className="dm-latest" title="Latest release per platform / app type">
-          {latestText}
-        </span>
+        <div className="dm-head-side">
+          <div className="dm-refresh">
+            <span className="dm-refresh-info">
+              {refreshing
+                ? "Refreshing…"
+                : lastRefreshed
+                  ? `Updated ${relativeTime(lastRefreshed.toISOString())}`
+                  : ""}
+            </span>
+            <button type="button" className="dm-btn" onClick={() => load(true)} disabled={refreshing}>
+              Refresh
+            </button>
+          </div>
+        </div>
       </header>
 
-      {/* ---- summary cards ---- */}
+      {/* ---- summary cards ----
+          Live status first (clicking one filters the table), then the fleet
+          totals. Both read the same analytics payload as the table below. */}
       {cards && (
         <section className="dm-cards">
+          <Card
+            label="Online"
+            value={statusCounts?.online ?? "–"}
+            tone="online"
+            active={filters.status === "online"}
+            onClick={() => toggleStatus("online")}
+          />
+          <Card
+            label="Idle"
+            value={statusCounts?.idle ?? "–"}
+            tone="idle"
+            active={filters.status === "idle"}
+            onClick={() => toggleStatus("idle")}
+          />
+          <Card
+            label="Offline"
+            value={statusCounts?.offline ?? "–"}
+            tone="offline"
+            active={filters.status === "offline"}
+            onClick={() => toggleStatus("offline")}
+          />
           <Card label="Total Devices" value={cards.total_devices} />
           <Card label="Active" value={cards.active_devices} tone="ok" />
           <Card label="Inactive" value={cards.inactive_devices} />
           <Card label="Mobile" value={cards.mobile_devices} />
           <Card label="Web" value={cards.web_devices} />
-          <Card label="Android" value={cards.android_devices} />
-          <Card label="iOS" value={cards.ios_devices} />
-          <Card label="Desktop Browsers" value={cards.desktop_browsers} />
-          <Card label="Active Today" value={cards.devices_active_today} tone="ok" />
-          <Card label="On Latest Build" value={cards.on_latest_devices} tone="ok" />
-          <Card label="Outdated" value={cards.outdated_devices} tone="warn" />
         </section>
       )}
 
       {/* ---- charts ---- */}
       {charts && (
         <section className="dm-charts">
-          <ChartBox title="Version Distribution" subtitle="Top 10 builds by device count">
-            {versionBars.length ? (
-              <ResponsiveContainer width="100%" height={260}>
-                <BarChart data={versionBars} margin={{ top: 8, right: 8, left: -18, bottom: 46 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
-                  <XAxis
-                    dataKey="name"
-                    angle={-35}
-                    textAnchor="end"
-                    interval={0}
-                    height={60}
-                    tick={{ fontSize: 11, fill: "#64748b" }}
-                  />
-                  <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "#64748b" }} />
-                  <Tooltip />
-                  {/* Single series -> the title names it; no legend box needed.
-                      Values are labelled on the bars so the reading never
-                      depends on colour alone. */}
-                  <Bar dataKey="count" radius={[4, 4, 0, 0]} maxBarSize={38} label={{ position: "top", fontSize: 10, fill: "#475569" }}>
-                    {versionBars.map((entry, index) => (
-                      <Cell key={entry.name} fill={PALETTE[index % PALETTE.length]} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <p className="dm-empty-sm">No data</p>
-            )}
-          </ChartBox>
-
-          <ChartBox title="Platform Distribution">
-            <DistributionPie data={topSlices(charts.platform_distribution, "platform")} />
+          <ChartBox title="Active vs Inactive Users" subtitle="Share of all registered devices by activity status">
+            <DistributionPie data={activityData} colors={[ACTIVE_COLOR, INACTIVE_COLOR]} />
           </ChartBox>
 
           <ChartBox title="App Type Distribution">
             <DistributionPie data={topSlices(charts.app_type_distribution, "app_type")} />
           </ChartBox>
-
-          <ChartBox title="Browser Distribution">
-            <DistributionPie data={topSlices(charts.browser_distribution, "browser_name")} />
-          </ChartBox>
-
-          <ChartBox title="Operating System Distribution">
-            <DistributionPie data={topSlices(charts.os_distribution, "os_name")} />
-          </ChartBox>
-
-          <ChartBox
-            title="Devices by Last Seen"
-            subtitle="Devices whose last activity fell on each day (last 14 days). Not a true daily-active count — last_active is a single timestamp."
-          >
-            <ResponsiveContainer width="100%" height={240}>
-              <AreaChart data={charts.devices_by_last_seen} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="dmSeen" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={PALETTE[0]} stopOpacity={0.35} />
-                    <stop offset="100%" stopColor={PALETTE[0]} stopOpacity={0.02} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
-                <XAxis dataKey="date" tickFormatter={formatDate} tick={{ fontSize: 11, fill: "#64748b" }} />
-                <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "#64748b" }} />
-                <Tooltip labelFormatter={(value) => formatDate(String(value))} />
-                <Area
-                  type="monotone"
-                  dataKey="count"
-                  stroke={PALETTE[0]}
-                  strokeWidth={2}
-                  fill="url(#dmSeen)"
-                  dot={{ r: 3, fill: PALETTE[0] }}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </ChartBox>
         </section>
       )}
 
-      {/* ---- filters ---- */}
-      <section className="dm-filters">
-        <input
-          className="dm-input dm-search"
-          placeholder="Search name, username, email, device ID, browser, version…"
-          value={searchInput}
-          onChange={(event) => setSearchInput(event.target.value)}
-        />
-        <select className="dm-input" value={filters.platform} onChange={(e) => setFilter("platform", e.target.value)}>
-          <option value="">All platforms</option>
-          {PLATFORMS.map((item) => (
-            <option key={item} value={item}>{item}</option>
-          ))}
-        </select>
-        <select className="dm-input" value={filters.app_type} onChange={(e) => setFilter("app_type", e.target.value)}>
-          <option value="">All app types</option>
-          {APP_TYPES.map((item) => (
-            <option key={item} value={item}>{item}</option>
-          ))}
-        </select>
-        <input
-          className="dm-input"
-          placeholder="Version"
-          value={filters.app_version}
-          onChange={(e) => setFilter("app_version", e.target.value)}
-        />
-        <input
-          className="dm-input"
-          placeholder="Build"
-          inputMode="numeric"
-          value={filters.build_number}
-          onChange={(e) => setFilter("build_number", e.target.value)}
-        />
-        <input
-          className="dm-input"
-          placeholder="Browser"
-          value={filters.browser_name}
-          onChange={(e) => setFilter("browser_name", e.target.value)}
-        />
-        <input
-          className="dm-input"
-          placeholder="OS"
-          value={filters.os_name}
-          onChange={(e) => setFilter("os_name", e.target.value)}
-        />
-        <select className="dm-input" value={filters.is_active} onChange={(e) => setFilter("is_active", e.target.value)}>
-          <option value="">Any status</option>
-          <option value="true">Active</option>
-          <option value="false">Inactive</option>
-        </select>
-        <label className="dm-date">
-          From
-          <input type="date" className="dm-input" value={filters.date_from} onChange={(e) => setFilter("date_from", e.target.value)} />
-        </label>
-        <label className="dm-date">
-          To
-          <input type="date" className="dm-input" value={filters.date_to} onChange={(e) => setFilter("date_to", e.target.value)} />
-        </label>
-        <button type="button" className="dm-btn" onClick={resetFilters}>Reset</button>
-      </section>
+      {/* ---- devices (absorbed the former /Device_Activity page) ----
+          Headed explicitly so the search box states what it searches. */}
+      <div className="dm-section-head">
+        <h2>Devices</h2>
+        <p>Every registered device and its live status. Search by name, version or build.</p>
+      </div>
+
+      <form
+        className="dm-filters"
+        onSubmit={(event) => {
+          event.preventDefault();
+          runSearch();
+        }}
+      >
+        {/* The clear button sits inside the field, so it reads as part of the
+            input rather than as a second action next to Search. */}
+        <div className="dm-search-wrap">
+          <input
+            className="dm-input dm-search"
+            placeholder="Search by name, version or build…"
+            value={searchInput}
+            onChange={(event) => setSearchInput(event.target.value)}
+            aria-label="Search devices by name, version or build"
+          />
+          {searchInput && (
+            <button
+              type="button"
+              className="dm-search-clear"
+              onClick={clearSearch}
+              aria-label="Clear search"
+              title="Clear search"
+            >
+              <HiXMark />
+            </button>
+          )}
+        </div>
+        <button type="submit" className="dm-btn dm-btn-primary">Search</button>
+      </form>
 
       {/* ---- table ---- */}
       <div className="dm-toolbar">
         <span className="dm-count">
           {pagination ? `${pagination.total} device${pagination.total === 1 ? "" : "s"}` : "…"}
+          {/* Name the active status filter — the tile highlight is the only
+              other cue, and it is off-screen once the table is scrolled to. */}
+          {filters.status ? ` · ${filters.status}` : ""}
         </span>
       </div>
 
@@ -400,58 +550,38 @@ export default function Device_Management() {
         <table className="dm-table">
           <thead>
             <tr>
-              <th>User</th>
-              <th>Username</th>
-              <th>Platform</th>
-              <th>App Type</th>
-              <th>Version</th>
-              <th>Build</th>
-              <th>Device</th>
-              <th>Manufacturer</th>
-              <th>Model</th>
-              <th>Browser</th>
-              <th>OS</th>
-              <th>Language</th>
-              <th>Timezone</th>
-              <th>First Login</th>
-              <th>Last Login</th>
-              <th>Last Active</th>
+              {/* Sortable columns are exactly the API's allow-listed ordering
+                  fields. Status is derived from last_active rather than stored,
+                  so it is not one of them — it stays a plain header rather than
+                  offering a sort that would silently do nothing. Relative sorts
+                  by last_active, the timestamp it renders. */}
               <th>Status</th>
-              <th>Created</th>
-              <th>Updated</th>
+              <SortHeader label="Name" field="user__name" ordering={ordering} onSort={toggleSort} />
+              <SortHeader label="App Type" field="app_type" ordering={ordering} onSort={toggleSort} />
+              <SortHeader label="Version" field="app_version" ordering={ordering} onSort={toggleSort} />
+              <SortHeader label="Build" field="build_number" ordering={ordering} onSort={toggleSort} />
+              <SortHeader label="Relative" field="last_active" ordering={ordering} onSort={toggleSort} />
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={19} className="dm-empty">Loading devices…</td></tr>
+              <tr><td colSpan={6} className="dm-empty">Loading devices…</td></tr>
             ) : rows.length === 0 ? (
-              <tr><td colSpan={19} className="dm-empty">No devices match these filters</td></tr>
+              <tr><td colSpan={6} className="dm-empty">No devices match this search</td></tr>
             ) : (
               rows.map((row) => (
                 <tr key={row.id} onClick={() => setSelected(row)} className="dm-row" title="View device details">
+                  {/* The server-derived four-state status, matching what the
+                      Online/Idle/Offline tiles count — not the binary
+                      is_active registration flag, which would contradict them. */}
+                  <td><StatusBadge status={row.status} /></td>
                   <td>{row.user_name || "-"}</td>
-                  <td>{row.username}</td>
-                  <td>{row.platform}</td>
                   <td>{row.app_type}</td>
                   <td>{row.app_version}</td>
-                  <td>{row.build_number}</td>
-                  <td>{row.device_name || "-"}</td>
-                  <td>{row.manufacturer || "-"}</td>
-                  <td>{row.device_model || "-"}</td>
-                  <td>{row.browser_name ? `${row.browser_name} ${row.browser_version}` : "-"}</td>
-                  <td>{row.os_name ? `${row.os_name} ${row.os_version}` : "-"}</td>
-                  <td>{row.language || "-"}</td>
-                  <td>{row.timezone || "-"}</td>
-                  <td>{formatDateTime(row.first_login)}</td>
-                  <td>{formatDateTime(row.last_login)}</td>
-                  <td>{formatDateTime(row.last_active)}</td>
-                  <td>
-                    <span className={row.is_active ? "dm-badge-ok" : "dm-badge-off"}>
-                      {row.is_active ? "Active" : "Inactive"}
-                    </span>
+                  <td className="dm-num">{row.build_number}</td>
+                  <td className="dm-rel" title={formatDateTime(row.last_active)}>
+                    {relativeTime(row.last_active)}
                   </td>
-                  <td>{formatDateTime(row.created_at)}</td>
-                  <td>{formatDateTime(row.updated_at)}</td>
                 </tr>
               ))
             )}
@@ -473,15 +603,33 @@ export default function Device_Management() {
         </div>
       )}
 
-      {/* ---- device detail ---- */}
+      {/* ---- device detail (right-side drawer) ---- */}
       {selected && (
-        <div className="dm-modal-backdrop" onClick={() => setSelected(null)}>
-          <div className="dm-modal" onClick={(event) => event.stopPropagation()}>
-            <div className="dm-modal-head">
-              <h2>Device Details</h2>
-              <button type="button" className="dm-btn" onClick={() => setSelected(null)}>Close</button>
+        <div className="dm-drawer-backdrop" onClick={() => setSelected(null)}>
+          <aside
+            className="dm-drawer"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Device details"
+          >
+            <div className="dm-drawer-head">
+              <div>
+                <h2>Device Details</h2>
+                {/* The same derived status the row's badge shows. */}
+                <StatusBadge status={selected.status} />
+              </div>
+              <button
+                type="button"
+                className="dm-icon-btn"
+                onClick={() => setSelected(null)}
+                aria-label="Close device details"
+                title="Close"
+              >
+                <HiXMark />
+              </button>
             </div>
-            <div className="dm-modal-body">
+            <div className="dm-drawer-body">
               <h4>User</h4>
               <dl className="dm-dl">
                 <dt>Name</dt><dd>{selected.user_name || "-"}</dd>
@@ -512,12 +660,18 @@ export default function Device_Management() {
                 <dt>First Login</dt><dd>{formatDateTime(selected.first_login)}</dd>
                 <dt>Last Login</dt><dd>{formatDateTime(selected.last_login)}</dd>
                 <dt>Last Active</dt><dd>{formatDateTime(selected.last_active)}</dd>
-                <dt>Status</dt><dd>{selected.is_active ? "Active" : "Inactive"}</dd>
+                <dt>Last Seen</dt><dd>{relativeTime(selected.last_active)}</dd>
+                {/* "Status" here used to read is_active as Active/Inactive,
+                    which contradicted the row badge: is_active is the
+                    registration flag, not the live activity status. Both are
+                    now named for what they actually are. */}
+                <dt>Current Status</dt><dd><StatusBadge status={selected.status} /></dd>
+                <dt>Registration</dt><dd>{selected.is_active ? "Active" : "Deactivated"}</dd>
                 <dt>Created</dt><dd>{formatDateTime(selected.created_at)}</dd>
                 <dt>Updated</dt><dd>{formatDateTime(selected.updated_at)}</dd>
               </dl>
             </div>
-          </div>
+          </aside>
         </div>
       )}
     </div>

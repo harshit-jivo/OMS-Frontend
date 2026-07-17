@@ -13,8 +13,6 @@ import {
   HiClipboardDocumentList,
   HiCube,
   HiDevicePhoneMobile,
-  HiRocketLaunch,
-  HiSignal,
   HiDocumentCheck,
   HiDocumentText,
   HiEye,
@@ -692,11 +690,10 @@ export default function Sidebar({ children }: SidebarProps) {
             </li>
           )}
 
-          {/* System — device inventory and release policy. Gated by the same
-              canSee() grant mechanism as every other admin page. */}
-          {(canSee("Device_Management") ||
-            canSee("Device_Activity") ||
-            canSee("Version_Management")) && (
+          {/* System — one screen: live device activity and version analytics.
+              Gated by the same canSee() grant mechanism as every other admin
+              page. */}
+          {canSee("Device_Management") && (
             <li className="sidebar-section">System</li>
           )}
 
@@ -704,25 +701,7 @@ export default function Sidebar({ children }: SidebarProps) {
             <li className={location.pathname === "/Device_Management" ? "active" : ""}>
               <Link to="/Device_Management" onClick={closeSidebar}>
                 <SidebarIcon><HiDevicePhoneMobile /></SidebarIcon>
-                Device Management
-              </Link>
-            </li>
-          )}
-
-          {canSee("Device_Activity") && (
-            <li className={location.pathname === "/Device_Activity" ? "active" : ""}>
-              <Link to="/Device_Activity" onClick={closeSidebar}>
-                <SidebarIcon><HiSignal /></SidebarIcon>
-                Device Activity
-              </Link>
-            </li>
-          )}
-
-          {canSee("Version_Management") && (
-            <li className={location.pathname === "/Version_Management" ? "active" : ""}>
-              <Link to="/Version_Management" onClick={closeSidebar}>
-                <SidebarIcon><HiRocketLaunch /></SidebarIcon>
-                Version Management
+                Devices
               </Link>
             </li>
           )}

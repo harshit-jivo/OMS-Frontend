@@ -294,8 +294,6 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
     0,
   );
   const grandTotal = subtotal + taxTotal;
-  const hasQuotationNumber = Boolean(String(orderDetails?.sap_doc_number || "").trim());
-  const isCompletedOrder = isCompletedStatus(orderDetails);
 
   const handleTrack = async (order: Order) => {
     setTrackingOrder(order);

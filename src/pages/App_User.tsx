@@ -56,7 +56,10 @@ export default function App_User() {
   const [categoryDropdownOpen, setCategoryDropdownOpen] = useState(false);
   const [varietyDropdownOpen, setVarietyDropdownOpen] = useState(false);
   const [varietySearch, setVarietySearch] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
+  // Read-only: the show/hide toggle button below is currently commented out, so
+  // nothing sets this and the field stays masked. Restore `setShowPassword` here
+  // when re-enabling that button.
+  const [showPassword] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [search, setSearch] = useState("");
   const itemsPerPage = 7;

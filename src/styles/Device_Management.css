@@ -20,16 +20,23 @@
   font-size: 0.85rem;
   color: #64748b;
 }
-.dm-latest {
-  font-size: 0.75rem;
-  color: #334155;
-  background: #f1f5f9;
-  border: 1px solid #e2e8f0;
-  border-radius: 999px;
-  padding: 6px 12px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+/* The refresh control, at the head's right. */
+.dm-head-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
 }
-
+.dm-refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.dm-refresh-info {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  white-space: nowrap;
+}
 /* ---- cards ---- */
 .dm-cards {
   display: grid;
@@ -49,6 +56,33 @@
 }
 .dm-card-ok { border-left-color: #0f766e; }
 .dm-card-warn { border-left-color: #f59e0b; }
+/* Live-status tones. Same hues the StatusBadge uses, so a tile and the badges
+   it counts read as the same fact. */
+.dm-card-online { border-left-color: #16a34a; }
+.dm-card-idle { border-left-color: #f59e0b; }
+.dm-card-offline { border-left-color: #cbd5e1; }
+
+/* Only the status tiles are buttons; reset the UA button styling so they match
+   the plain tiles exactly, then add the affordances. */
+.dm-card-btn {
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+.dm-card-btn:hover { box-shadow: 0 2px 10px rgba(15, 23, 42, 0.08); }
+.dm-card-btn:active { transform: translateY(1px); }
+.dm-card-btn:focus-visible {
+  outline: 2px solid #0f766e55;
+  outline-offset: 2px;
+}
+/* The selected filter. Ring + tint, not colour alone — the tile also carries
+   its label and aria-pressed. */
+.dm-card-on {
+  border-color: #0f766e;
+  background: #f0fdfa;
+  box-shadow: inset 0 0 0 1px #0f766e33;
+}
 .dm-card-value {
   font-size: 1.5rem;
   font-weight: 800;
@@ -95,6 +129,27 @@
   padding: 40px 0;
 }
 
+/* ---- section heading ----
+   Matches .vm-section's separator so the page's three blocks (analytics,
+   release policy, devices) read as siblings. */
+.dm-section-head {
+  margin-top: 26px;
+  padding-top: 22px;
+  border-top: 1px solid #e2e8f0;
+  margin-bottom: 14px;
+}
+.dm-section-head h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: #0f172a;
+}
+.dm-section-head p {
+  margin: 4px 0 0;
+  font-size: 0.85rem;
+  color: #64748b;
+}
+
 /* ---- filters ---- */
 .dm-filters {
   display: flex;
@@ -116,13 +171,43 @@
   outline: 2px solid #2563eb33;
   border-color: #2563eb;
 }
-.dm-search { flex: 1 1 280px; min-width: 220px; }
-.dm-date {
+/* The field and its clear button share one box, so the × sits inside the input
+   instead of reading as a second action beside Search. */
+.dm-search-wrap {
+  position: relative;
+  display: flex;
+  flex: 1 1 280px;
+  min-width: 220px;
+}
+.dm-search {
+  flex: 1;
+  /* Room for the × so long text never runs underneath it. */
+  padding-right: 34px;
+}
+.dm-search-clear {
+  position: absolute;
+  right: 5px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: none;
+  background: transparent;
+  color: #64748b;
+  border-radius: 6px;
+  /* 24px: a comfortable hit target without crowding the field. */
+  width: 24px;
+  height: 24px;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-size: 0.75rem;
-  color: #64748b;
+  justify-content: center;
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.dm-search-clear:hover { background: #f1f5f9; color: #0f172a; }
+.dm-search-clear:focus-visible {
+  outline: 2px solid #0f766e55;
+  outline-offset: 1px;
 }
 .dm-btn {
   border: 1px solid #d7dee8;
@@ -133,8 +218,23 @@
   font-size: 0.78rem;
   font-weight: 600;
   cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
 .dm-btn:hover { background: #eef2f7; }
+
+/* The page's one action — weighted so it reads as the primary control. */
+.dm-btn-primary {
+  background: #0f766e;
+  border-color: #0f766e;
+  color: #fff;
+  padding: 7px 22px;
+}
+.dm-btn-primary:hover { background: #0b5e57; border-color: #0b5e57; }
+.dm-btn-primary:active { transform: translateY(1px); }
+.dm-btn-primary:focus-visible {
+  outline: 2px solid #0f766e55;
+  outline-offset: 2px;
+}
 
 /* ---- toolbar ---- */
 .dm-toolbar {
@@ -179,9 +279,40 @@
   position: sticky;
   top: 0;
 }
+/* ---- sortable headers ---- */
+.dm-th-sort {
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.dm-th-sort:hover { background: #eef2f7; color: #0f172a; }
+.dm-th-inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+/* The arrow holds its slot at all times, so the header text never shifts
+   sideways when the sort direction changes. */
+.dm-sort-icon {
+  font-size: 0.6rem;
+  line-height: 1;
+  width: 8px;
+  color: #cbd5e1;
+  transition: color 0.15s ease;
+}
+.dm-th-sort:hover .dm-sort-icon { color: #94a3b8; }
+.dm-th-active { color: #0f766e; background: #f0fdfa; }
+.dm-th-active .dm-sort-icon { color: #0f766e; }
+
 .dm-table tbody tr:last-child td { border-bottom: none; }
-.dm-row { cursor: pointer; }
-.dm-row:hover { background: #f8fafc; }
+.dm-row { cursor: pointer; transition: background 0.12s ease; }
+.dm-row:hover { background: #f0fdfa; }
+/* Build is numeric — tabular figures so digits line up column-wise when
+   scanning a sorted list. */
+.dm-table td.dm-num { font-variant-numeric: tabular-nums; }
+/* Relative time is secondary to the row's identity — recede it, and keep it on
+   one line so "20 hours ago" never wraps. */
+.dm-table td.dm-rel { color: #64748b; white-space: nowrap; }
 .dm-empty {
   text-align: center;
   color: #94a3b8;
@@ -219,46 +350,92 @@
 .dm-pg-info { font-size: 0.78rem; color: #64748b; font-variant-numeric: tabular-nums; }
 
 /* ---- detail modal ---- */
-.dm-modal-backdrop {
+/* ---- device detail: right-side drawer ----
+   A side panel rather than a centred modal: the row stays in place behind it,
+   so the table is still readable while a device is being inspected. */
+.dm-drawer-backdrop {
   position: fixed;
   inset: 0;
   background: rgba(15, 23, 42, 0.45);
   display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
+  justify-content: flex-end;
   z-index: 1000;
 }
-.dm-modal {
+.dm-drawer {
   background: #fff;
-  border-radius: 14px;
-  width: min(640px, 100%);
-  max-height: 85vh;
+  width: min(440px, 100%);
+  height: 100%;
   display: flex;
   flex-direction: column;
+  box-shadow: -8px 0 28px rgba(15, 23, 42, 0.18);
+  animation: dm-drawer-in 0.18s ease-out;
 }
-.dm-modal-head {
+/* Slides in from the edge it is anchored to, so the motion explains where the
+   panel came from. Users who ask for less motion get none. */
+@keyframes dm-drawer-in {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dm-drawer { animation: none; }
+}
+.dm-drawer-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
+  gap: 12px;
   padding: 16px 20px;
   border-bottom: 1px solid #e2e8f0;
+  /* Stays put while the body scrolls — the close button must never scroll off. */
+  flex-shrink: 0;
 }
-.dm-modal-head h2 { margin: 0; font-size: 1rem; font-weight: 800; color: #0f172a; }
-.dm-modal-body { padding: 16px 20px 22px; overflow-y: auto; }
-.dm-modal-body h4 {
+.dm-drawer-head h2 {
+  margin: 0 0 6px;
+  font-size: 1rem;
+  font-weight: 800;
+  color: #0f172a;
+}
+.dm-icon-btn {
+  border: 1px solid #d7dee8;
+  background: #f8fafc;
+  color: #475569;
+  border-radius: 8px;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.dm-icon-btn:hover { background: #eef2f7; color: #0f172a; }
+.dm-icon-btn:focus-visible {
+  outline: 2px solid #0f766e55;
+  outline-offset: 2px;
+}
+.dm-drawer-body {
+  padding: 16px 20px 22px;
+  overflow-y: auto;
+  flex: 1;
+}
+.dm-drawer-body h4 {
   margin: 16px 0 6px;
   font-size: 0.7rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: #64748b;
 }
-.dm-modal-body h4:first-child { margin-top: 0; }
+.dm-drawer-body h4:first-child { margin-top: 0; }
 .dm-dl {
   display: grid;
-  grid-template-columns: 150px 1fr;
+  /* Narrower label column than the old 640px modal used — the drawer is
+     ~440px, and the values (device ids, UA strings) need the room. */
+  grid-template-columns: 124px 1fr;
   gap: 6px 12px;
   margin: 0;
+  align-items: center;
 }
 .dm-dl dt { font-size: 0.78rem; color: #64748b; }
 .dm-dl dd {
