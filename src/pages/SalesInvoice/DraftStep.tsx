@@ -120,7 +120,7 @@ export default function DraftStep({ state, onReset, onCreateNew, onAddItems }: P
         <aside className="si-floating-notification si-floating-notification-error" role="alert" aria-live="assertive">
           <header>
             <div>
-              <strong>Unable to post invoice to SAP HANA</strong>
+              <strong>Unable to submit invoice for review</strong>
               <span>Full error message</span>
             </div>
             <button
@@ -142,7 +142,7 @@ export default function DraftStep({ state, onReset, onCreateNew, onAddItems }: P
             className="si-success-modal"
             role="alertdialog"
             aria-modal="true"
-            aria-label="Draft posted to SAP HANA"
+            aria-label="Invoice submitted for review"
           >
             <button
               type="button"
@@ -156,7 +156,7 @@ export default function DraftStep({ state, onReset, onCreateNew, onAddItems }: P
               <HiCheckCircle />
             </span>
             <span className="si-eyebrow">Sales Invoice</span>
-            <h2>Draft Posted to SAP HANA</h2>
+            <h2>Invoice Submitted for Review</h2>
             {state.postedDocNum && (
               <p className="si-success-docnum">Draft #{state.postedDocNum}</p>
             )}
