@@ -163,7 +163,7 @@ const handleLogin = async () => {
     showToast("Login successful. Redirecting...", "success");
 
     // Legal reviewers land on their own workspace; everyone else on the Dashboard.
-    const landingPath = String(user.role || "").toLowerCase() === "legal" ? "/Label_Checker" : "/Dashboard";
+    let  landingPath = String(user.role || "").toLowerCase() === "legal" ? "/Label_Checker" : "/Dashboard";
     // Carry any notification deep-link params (openOrderId / notificationId) so
     // a notification tapped while logged out still opens the exact order after
     // login instead of dropping the user on the dashboard.
@@ -171,7 +171,7 @@ const handleLogin = async () => {
     setTimeout(() => navigate(`${landingPath}${deepLink}`), 1000);
     // Landing: tracker users go to their first tracker page (they have no
     // Dashboard); legal reviewers to their workspace; everyone else Dashboard.
-    let landingPath = "/Dashboard";
+    landingPath = "/Dashboard";
     if (isTrackerRole(user.role)) {
       landingPath = trackerLandingPath(trackerPagesFor(user.role)) || "/Tracker_Queue";
     } else if (String(user.role || "").toLowerCase() === "legal") {
