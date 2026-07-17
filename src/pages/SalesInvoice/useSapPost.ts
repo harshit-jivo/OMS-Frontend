@@ -1,101 +1,17 @@
 import { useCallback, useReducer, useRef } from "react";
 import { apiFetch } from "./useSalesInvoice";
-import { todayInput } from "./salesInvoice.utils";
 
 /* ──────────────────────────────────────────────────────────────────────────
- * SAP draft → invoice payload
+ * Stored payload → SAP invoice
  *
- * The full SAP draft entity returned by /api/service-layer/draft/. We only read
- * the document header plus each line's batch allocations; everything else
- * (pricing, tax) SAP re-derives from the base sales order.
+ * The Invoice Review flow keeps the full invoice payload on the local PENDING
+ * record. Posting sends that payload verbatim to the service-layer invoice
+ * endpoint; SAP re-derives pricing/tax from the base sales order lines.
  * ────────────────────────────────────────────────────────────────────────── */
 
-type SapDraftBatch = {
-  BatchNumber?: string | null;
-  SystemSerialNumber?: number | null;
-  Quantity?: number | null;
-};
-
-type SapDraftLine = {
-  BaseType?: number | null;
-  BaseEntry?: number | null;
-  BaseLine?: number | null;
-  ShipDate?: string | null;
-  ItemCode?: string | null;
-  WarehouseCode?: string | null;
-  Quantity?: number | null;
-  BatchNumbers?: SapDraftBatch[] | null;
-};
-
-export type SapDraft = {
-  CardCode?: string | null;
-  DocDate?: string | null;
-  DocDueDate?: string | null;
-  TaxDate?: string | null;
-  NumAtCard?: string | null;
-  SalesPersonCode?: number | null;
-  ShipToCode?: string | null;
-  PayToCode?: string | null;
-  BPL_IDAssignedToInvoice?: number | null;
-  BPLName?: string | null;
-  DocumentLines?: SapDraftLine[] | null;
-};
-
-// The draft endpoint normally returns the OData entity directly, but tolerate the
-// proxy wrapping it under data/result/value (object or single-element array).
-const unwrapDraft = (payload: unknown): SapDraft | null => {
-  if (!payload || typeof payload !== "object") return null;
-  const obj = payload as Record<string, unknown>;
-  if (Array.isArray(obj.DocumentLines)) return obj as SapDraft;
-  for (const key of ["data", "result", "value"]) {
-    const nested = obj[key];
-    if (Array.isArray(nested)) {
-      const first = nested[0];
-      if (first && typeof first === "object") return first as SapDraft;
-    } else if (nested && typeof nested === "object") {
-      return nested as SapDraft;
-    }
-  }
-  return obj as SapDraft;
-};
-
-// Build the lean invoice-creation payload from a full SAP draft. BaseType 17 marks
-// each line as sourced from a sales order, so SAP copies pricing/tax from it.
-export const buildSapInvoicePayload = (draft: SapDraft) => {
-  // Stamp the invoice with today's date. The draft may have been created days
-  // earlier, but the posting must be dated the day it actually lands in SAP — so
-  // DocDate / DocDueDate / TaxDate (and each line's ShipDate) all use the current
-  // date rather than the draft's original dates.
-  const today = todayInput();
-  return {
-    CardCode: draft.CardCode ?? "",
-    DocDate: today,
-    DocDueDate: today,
-    TaxDate: today,
-    NumAtCard: draft.NumAtCard ?? "",
-    SalesPersonCode: draft.SalesPersonCode ?? -1,
-    ShipToCode: draft.ShipToCode ?? "",
-    PayToCode: draft.PayToCode ?? "",
-    ...(draft.BPL_IDAssignedToInvoice !== undefined && draft.BPL_IDAssignedToInvoice !== null
-      ? { BPL_IDAssignedToInvoice: draft.BPL_IDAssignedToInvoice }
-      : {}),
-    DocumentLines: (draft.DocumentLines ?? []).map((line) => ({
-      BaseType: line.BaseType ?? 17,
-      BaseEntry: line.BaseEntry,
-      BaseLine: line.BaseLine,
-      ...(line.ShipDate ? { ShipDate: today } : {}),
-      ItemCode: line.ItemCode,
-      WarehouseCode: line.WarehouseCode,
-      Quantity: line.Quantity,
-      BatchNumbers: (line.BatchNumbers ?? []).map((batch) => ({
-        ...(batch.BatchNumber ? { BatchNumber: batch.BatchNumber } : {}),
-        ...(batch.SystemSerialNumber !== undefined && batch.SystemSerialNumber !== null
-          ? { SystemSerialNumber: batch.SystemSerialNumber }
-          : {}),
-        Quantity: batch.Quantity,
-      })),
-    })),
-  };
+export type SapInvoicePayload = {
+  DocumentLines?: unknown[];
+  [key: string]: unknown;
 };
 
 // Trim a (possibly large JSON) SAP error down to something a log line / panel can
@@ -142,17 +58,16 @@ const extractInvoiceNumber = (value: unknown): string => {
 /* ──────────────────────────────────────────────────────────────────────────
  * Mission-control state machine
  *
- * Six visible stages map onto two real network awaits (GET draft, POST invoice);
- * the rest are short, deliberate dwells so each stage registers as a "win" and
- * the long SAP wait stays animated. See the loader component for the visuals.
+ * Five visible stages map onto one real network await (POST invoice); the rest
+ * are short, deliberate dwells so each stage registers as a "win" and the long
+ * SAP wait stays animated. See the loader component for the visuals.
  * ────────────────────────────────────────────────────────────────────────── */
 
-export type SapStepKey = "session" | "draft" | "payload" | "post" | "sap" | "invoice";
+export type SapStepKey = "session" | "payload" | "post" | "sap" | "invoice";
 
 export const SAP_STEPS: { key: SapStepKey; tile: string; label: string }[] = [
   { key: "session", tile: "Session", label: "Connecting to SAP" },
-  { key: "draft", tile: "Draft", label: "Retrieving draft" },
-  { key: "payload", tile: "Payload", label: "Validating & building invoice" },
+  { key: "payload", tile: "Payload", label: "Validating invoice payload" },
   { key: "post", tile: "Post", label: "Submitting to SAP" },
   { key: "sap", tile: "SAP", label: "SAP processing" },
   { key: "invoice", tile: "Invoice", label: "Confirming invoice number" },
@@ -237,7 +152,14 @@ function reducer(state: SapPostState, action: Action): SapPostState {
 const stamp = () => new Date().toTimeString().slice(0, 8); // "HH:MM:SS"
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-export type SapRunInput = { draftId: number | string; doc: SapDoc };
+export type SapRunInput = {
+  payload: SapInvoicePayload;
+  doc: SapDoc;
+  /** Runs once per attempt (including retries) after SAP confirms the invoice. */
+  onSuccess?: (invoiceNumber: string) => void | Promise<void>;
+  /** Runs once per attempt (including retries) when the post fails. */
+  onError?: (message: string, rawError: string) => void | Promise<void>;
+};
 
 export function useSapPost() {
   const [state, dispatch] = useReducer(reducer, initialState);
@@ -277,52 +199,32 @@ export function useSapPost() {
       if (!alive()) return;
       log("Secure session established.", "ok");
 
-      // 2. Retrieve draft (real await)
-      goto("draft");
-      log(`Requesting draft #${input.doc.draftNo} from SAP…`);
-      const draftData = await apiFetch<unknown>(
-        `/api/service-layer/draft/?draft_id=${encodeURIComponent(String(input.draftId))}`,
-      );
-      if (!alive()) return;
-      const draft = unwrapDraft(draftData);
-      const lines = draft?.DocumentLines ?? [];
-      if (!draft || lines.length === 0) {
-        throw new Error("Draft has no document lines to post.");
-      }
-      // Enrich the side panel now that we know the line count + branch.
-      dispatch({ type: "doc", patch: { itemCount: lines.length, branch: draft.BPLName ?? input.doc.branch } });
-      log(`Draft #${input.doc.draftNo} retrieved · ${lines.length} line item${lines.length === 1 ? "" : "s"}.`, "ok");
-
-      // 3. Validate + transform (client-side, paced for legibility)
+      // 2. Validate the stored payload (client-side, paced for legibility)
       goto("payload");
-      log("Validating line items, batches and quantities…");
+      log("Validating the stored invoice payload…");
       await wait(550);
       if (!alive()) return;
-      const payload = buildSapInvoicePayload(draft);
-      if (payload.DocumentLines.length === 0) {
-        throw new Error("Transformed payload has no document lines.");
+      const lines = Array.isArray(input.payload.DocumentLines) ? input.payload.DocumentLines : [];
+      if (lines.length === 0) {
+        throw new Error("Stored invoice payload has no document lines to post.");
       }
-      log(
-        `Validation passed · invoice payload built (${payload.DocumentLines.length} line${
-          payload.DocumentLines.length === 1 ? "" : "s"
-        }).`,
-        "ok",
-      );
+      dispatch({ type: "doc", patch: { itemCount: lines.length } });
+      log(`Validation passed · ${lines.length} line item${lines.length === 1 ? "" : "s"} ready.`, "ok");
       await wait(350);
       if (!alive()) return;
 
-      // 4. Submit
+      // 3. Submit
       goto("post");
-      log("POST /api/service-layer/invoice/?type=INVOICE → submitting document…");
+      log("POST /api/service-layer/invoice/ → submitting document…");
       await wait(400);
       if (!alive()) return;
 
-      // 5. SAP processing (this stage owns the long real await)
+      // 4. SAP processing (this stage owns the long real await)
       goto("sap");
       log("Awaiting SAP — posting the invoice (this can take 10–30s)…", "warn");
-      const result = await apiFetch<{ error?: unknown }>("/api/service-layer/invoice/?type=INVOICE", {
+      const result = await apiFetch<{ error?: unknown }>("/api/service-layer/invoice/", {
         method: "POST",
-        body: JSON.stringify(payload),
+        body: JSON.stringify(input.payload),
       });
       if (!alive()) return;
       // The SAP proxy can answer HTTP 200 with an error body.
@@ -332,7 +234,7 @@ export function useSapPost() {
         throw new Error(conciseError(sapError, "SAP rejected the invoice."));
       }
 
-      // 6. Confirm invoice number
+      // 5. Confirm invoice number
       goto("invoice");
       log("Reading back the generated invoice number…");
       await wait(450);
@@ -341,6 +243,7 @@ export function useSapPost() {
       if (invoiceNumber) log(`Invoice #${invoiceNumber} created in SAP.`, "ok");
       else log("Invoice created in SAP.", "ok");
       dispatch({ type: "success", invoiceNumber });
+      await input.onSuccess?.(invoiceNumber);
     } catch (err) {
       if (!alive()) return;
       const message = conciseError(err, "Unable to post the invoice to SAP.");
@@ -348,6 +251,7 @@ export function useSapPost() {
       const rawError = rawErrorText || (err instanceof Error ? err.message : String(err));
       log(message, "error");
       dispatch({ type: "error", failedStep: current, message, rawError });
+      await input.onError?.(message, rawError);
     }
   }, []);
 
