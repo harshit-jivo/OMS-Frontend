@@ -405,8 +405,8 @@ export default function Sidebar({ children }: SidebarProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Show OUR modal a few seconds after login (never on first paint / splash),
-  // and only when appropriate: never asked, or 7 days since last dismissal.
+  // Show OUR modal as soon as the app is actually loaded — no arbitrary wait.
+  // Only when appropriate: never asked, or 7 days since last dismissal.
   // Already-granted and denied users are skipped by shouldShowPrompt().
   useEffect(() => {
     if (!isWebPushSupported()) return;
@@ -416,8 +416,19 @@ export default function Sidebar({ children }: SidebarProps) {
     if (!eligible) return;
     if (!shouldShowPrompt(getCurrentPermission())) return;
 
-    const timer = window.setTimeout(() => setShowPushPrompt(true), 3000);
-    return () => window.clearTimeout(timer);
+    // Wait for "app is interactive", not a fixed timer: the role is resolved by
+    // now (this effect depends on it), so we only need to clear the first paint
+    // so the modal never lands on the splash screen. A double rAF fires right
+    // after the browser has committed that paint — typically a few ms, versus
+    // the 3s hardcoded delay this replaces.
+    let raf2 = 0;
+    const raf1 = window.requestAnimationFrame(() => {
+      raf2 = window.requestAnimationFrame(() => setShowPushPrompt(true));
+    });
+    return () => {
+      window.cancelAnimationFrame(raf1);
+      if (raf2) window.cancelAnimationFrame(raf2);
+    };
   }, [normalizedRole, isRateApprover]);
 
   // "Allow Notifications" → request the OS permission, then subscribe. Persists

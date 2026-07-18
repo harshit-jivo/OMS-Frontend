@@ -63,6 +63,16 @@ export const registerServiceWorker =
     if (!registrationPromise) {
       registrationPromise = navigator.serviceWorker
         .register(SERVICE_WORKER_URL)
+        .then((registration) => {
+          // Explicitly check for a newer worker on every app load. Push logic
+          // (which tab counts as visible, how notifications are shown) lives in
+          // the worker, so a browser holding a stale copy would keep the old
+          // behaviour indefinitely. The worker calls skipWaiting() + claim(), so
+          // a new version takes over immediately rather than waiting for every
+          // tab to close.
+          registration.update().catch(() => undefined);
+          return registration;
+        })
         .catch((error) => {
           console.warn("Service worker registration failed:", error);
           registrationPromise = null;
@@ -110,14 +120,31 @@ export const subscribeToPush = async (): Promise<boolean> => {
 
   try {
     const ready = await navigator.serviceWorker.ready;
+    const publicKey = await fetchPublicKey();
+    if (!publicKey) return false;
+    const desiredKey = urlBase64ToUint8Array(publicKey);
+
     let subscription = await ready.pushManager.getSubscription();
 
+    // A PushSubscription is permanently bound to the application server key it
+    // was created with. If the server's VAPID pair was rotated, an existing
+    // subscription can never receive our pushes again — the push service
+    // rejects them with "403 ... VAPID credentials do not correspond to the
+    // credentials used to create the subscriptions". Detect that mismatch and
+    // re-subscribe with the current key instead of re-uploading a dead row.
+    if (subscription && !usesKey(subscription, desiredKey)) {
+      try {
+        await subscription.unsubscribe();
+      } catch {
+        /* already gone — fall through and create a fresh subscription */
+      }
+      subscription = null;
+    }
+
     if (!subscription) {
-      const publicKey = await fetchPublicKey();
-      if (!publicKey) return false;
       subscription = await ready.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(publicKey) as BufferSource,
+        applicationServerKey: desiredKey as BufferSource,
       });
     }
 
@@ -127,6 +154,15 @@ export const subscribeToPush = async (): Promise<boolean> => {
     console.warn("Web push subscription failed:", error);
     return false;
   }
+};
+
+/** Whether an existing subscription was created with `key`. */
+const usesKey = (subscription: PushSubscription, key: Uint8Array): boolean => {
+  const existing = subscription.options?.applicationServerKey;
+  if (!existing) return false;
+  const bytes = new Uint8Array(existing as ArrayBuffer);
+  if (bytes.length !== key.length) return false;
+  return bytes.every((byte, index) => byte === key[index]);
 };
 
 /** Persist a PushSubscription (or its JSON) against the current user. */

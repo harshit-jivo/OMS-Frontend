@@ -47,6 +47,15 @@ function notificationTag(data) {
 
 self.addEventListener("push", (event) => {
   const data = parsePushData(event);
+
+  // Validation ping from the nightly cleanup: the server only needs the HTTP
+  // status of the push to know the endpoint is still alive, so we must NOT show
+  // anything to the user. Handle it silently and stop.
+  if (data && data.type === "__keepalive__") {
+    event.waitUntil(Promise.resolve());
+    return;
+  }
+
   const title = data.title || "Order update";
   const body = data.body || data.message || "";
 
@@ -62,22 +71,47 @@ self.addEventListener("push", (event) => {
         client.postMessage({ type: "PUSH_RECEIVED", data });
       }
 
-      // Show an OS desktop notification only when NO tab is visible — the
-      // in-app popup covers the visible case, so this avoids duplicates.
-      const hasVisibleClient = clients.some(
-        (client) => client.visibilityState === "visible" || client.focused,
+      // Show an OS notification unless the user can ACTUALLY see the app right
+      // now (in which case the in-app popup already covers it).
+      //
+      // "Actually see" means visible AND focused — both are required:
+      //
+      //   * `visibilityState` alone is not enough. Per the Page Visibility spec
+      //     a tab stays "visible" when its window is merely behind another
+      //     window or another application. So a user reading another site (or
+      //     working in another app) with an OMS tab open in a background window
+      //     still counts as "visible", and the old `||` check swallowed the OS
+      //     notification entirely — the exact bug this fixes.
+      //
+      //   * `focused` alone is not enough either: a focused-but-hidden client
+      //     isn't really on screen.
+      //
+      // This matches how Gmail / Slack / Teams behave: in-app UI only while you
+      // are looking at the tab, OS notification in every other case.
+      const hasActiveClient = clients.some(
+        (client) => client.visibilityState === "visible" && client.focused,
       );
-      if (hasVisibleClient) return;
+      if (hasActiveClient) return;
 
-      await self.registration.showNotification(title, {
-        body,
-        tag: notificationTag(data),
-        renotify: true,
-        timestamp: data.timestamp ? Date.parse(data.timestamp) : Date.now(),
-        icon: APP_ICON,
-        badge: APP_ICON,
-        data,
-      });
+      // A parse failure here must never swallow the notification silently, so
+      // guard the timestamp and fall back to "now" on anything unusable.
+      const parsedTimestamp = data.timestamp ? Date.parse(data.timestamp) : NaN;
+
+      try {
+        await self.registration.showNotification(title, {
+          body,
+          tag: notificationTag(data),
+          renotify: true,
+          timestamp: Number.isNaN(parsedTimestamp) ? Date.now() : parsedTimestamp,
+          icon: APP_ICON,
+          badge: APP_ICON,
+          data,
+        });
+      } catch (error) {
+        // Never let a malformed option (bad icon, bad timestamp, ...) drop the
+        // notification: retry with the minimum guaranteed-valid set.
+        await self.registration.showNotification(title, { body, data });
+      }
     })(),
   );
 });
