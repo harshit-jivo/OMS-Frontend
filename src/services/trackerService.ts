@@ -34,6 +34,7 @@ export interface Stage {
 export interface Vendor {
   card_code: string;
   card_name: string;
+  card_type?: string;   // 'S' = vendor/supplier, 'C' = customer
   gstin: string;
   state: string;
 }
@@ -106,6 +107,7 @@ export interface Invoice {
   status: "IN_PROGRESS" | "COMPLETED";
   current_stage_entered_at: string;
   is_locked: boolean;
+  rejection_pending: boolean;
   days_at_stage: string;
   is_overdue: boolean;
   editable: boolean;
