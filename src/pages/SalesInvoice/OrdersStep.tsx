@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { HiArrowRight } from "react-icons/hi2";
 import { formatDateDisplay, formatMoney, lineKey, toNumber } from "./salesInvoice.utils";
-import { apiFetch, type SalesInvoiceState } from "./useSalesInvoice";
+import { apiFetch, hanaUrl, type SalesInvoiceState } from "./useSalesInvoice";
 
 type Props = {
   state: SalesInvoiceState;
@@ -161,7 +161,7 @@ export default function OrdersStep({
         activeItemCodes.map(async ({ key, itemCode }) => {
           try {
             const data = await apiFetch<InventoryWarehouse[]>(
-              `/api/hana/inventory-details/?item_code=${encodeURIComponent(itemCode)}`,
+              hanaUrl(`/api/hana/inventory-details/?item_code=${encodeURIComponent(itemCode)}`),
             );
             return [key, normalizeWarehouseStock(Array.isArray(data) ? data : [])] as const;
           } catch (err) {
