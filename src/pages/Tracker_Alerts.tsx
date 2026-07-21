@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { HiExclamationTriangle, HiEye, HiArrowPath } from "react-icons/hi2";
+import { HiExclamationTriangle, HiEye, HiArrowPath, HiEnvelope } from "react-icons/hi2";
 import trackerService from "../services/trackerService";
 import type { Invoice, StuckAlert } from "../services/trackerService";
 import "../styles/Tracker.css";
@@ -85,7 +85,8 @@ export default function Tracker_Alerts() {
             <thead>
               <tr>
                 <th>Invoice No.</th><th>Party</th><th>Value</th><th>Stuck At</th>
-                <th>Days Here</th><th>Threshold</th><th>Over By</th><th>Since</th><th></th>
+                <th>Days Here</th><th>Threshold</th><th>Over By</th><th>Since</th>
+                <th>Mailed To</th><th></th>
               </tr>
             </thead>
             <tbody>
@@ -99,6 +100,19 @@ export default function Tracker_Alerts() {
                   <td>{a.threshold_days}</td>
                   <td><span className={"trk-badge " + tone(a.over_by)}>+{a.over_by.toFixed(1)} d</span></td>
                   <td>{fmtDT(a.stage_entered_at)}</td>
+                  <td style={{ maxWidth: 220, whiteSpace: "normal" }}>
+                    {a.notified && a.notified.length ? (
+                      <span title={a.notified.map((n) => `${n.user} — ${fmtDT(n.sent_at)}`).join("\n")}>
+                        <span className="trk-badge trk-badge-ok" style={{ marginRight: 4 }}>
+                          <HiEnvelope style={{ verticalAlign: "-2px" }} /> {a.notified.length}
+                        </span>
+                        {a.notified.slice(0, 2).map((n) => n.user).join(", ")}
+                        {a.notified.length > 2 ? ` +${a.notified.length - 2}` : ""}
+                      </span>
+                    ) : (
+                      <span className="trk-badge trk-badge-muted">Not mailed</span>
+                    )}
+                  </td>
                   <td>
                     <button className="trk-btn trk-btn-ghost" style={{ padding: "5px 9px" }}
                       onClick={() => openTimeline(a.invoice)}>
@@ -108,10 +122,10 @@ export default function Tracker_Alerts() {
                 </tr>
               ))}
               {!loading && alerts.length === 0 && (
-                <tr><td colSpan={9}><div className="trk-empty">No stuck invoices. 🎉</div></td></tr>
+                <tr><td colSpan={10}><div className="trk-empty">No stuck invoices. 🎉</div></td></tr>
               )}
               {loading && alerts.length === 0 && (
-                <tr><td colSpan={9}><div className="trk-empty">Loading…</div></td></tr>
+                <tr><td colSpan={10}><div className="trk-empty">Loading…</div></td></tr>
               )}
             </tbody>
           </table>

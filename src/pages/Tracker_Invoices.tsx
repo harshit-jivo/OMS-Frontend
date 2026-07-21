@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
-import { HiEye, HiClock, HiFunnel, HiArrowDownTray } from "react-icons/hi2";
+import { HiEye, HiClock, HiFunnel, HiArrowDownTray, HiTrash } from "react-icons/hi2";
+
+// A tracker admin may delete an invoice up to this stage order (inclusive).
+const DELETE_MAX_ORDER = 5;
 import { saveAs } from "file-saver";
 import trackerService from "../services/trackerService";
 import type { AllInvoiceFilters, Invoice, Lookups } from "../services/trackerService";
@@ -29,6 +32,30 @@ export default function Tracker_Invoices() {
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [timelineInv, setTimelineInv] = useState<Invoice | null>(null);
+  const [delInv, setDelInv] = useState<Invoice | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [toast, setToast] = useState("");
+  const flash = (m: string) => { setToast(m); setTimeout(() => setToast(""), 2600); };
+
+  // Stage order for an invoice (from lookups); used to gate the delete button.
+  const stageOrder = (inv: Invoice) =>
+    lookups?.stages.find((s) => s.code === inv.current_stage_code)?.order ?? 99;
+  const canDelete = (inv: Invoice) => stageOrder(inv) <= DELETE_MAX_ORDER;
+
+  const doDelete = async () => {
+    if (!delInv) return;
+    setDeleting(true);
+    try {
+      await trackerService.deleteInvoice(delInv.id);
+      flash(`Invoice ${delInv.invoice_number} deleted`);
+      setDelInv(null);
+      load();
+    } catch (err: any) {
+      flash(err?.response?.data?.detail || "Delete failed");
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   useEffect(() => {
     trackerService.getLookups().then(setLookups).catch(() => {});
@@ -184,11 +211,18 @@ export default function Tracker_Invoices() {
                         ? <span className="trk-badge trk-badge-ok">Completed</span>
                         : <span className="trk-badge trk-badge-warn">In progress</span>}
                     </td>
-                    <td>
+                    <td style={{ display: "flex", gap: 6 }}>
                       <button className="trk-btn trk-btn-ghost" style={{ padding: "5px 9px" }}
                         onClick={() => openTimeline(inv.id)}>
                         <HiEye /> Track
                       </button>
+                      {canDelete(inv) && (
+                        <button className="trk-btn trk-btn-danger" style={{ padding: "5px 9px" }}
+                          title="Delete invoice (allowed up to stage 5)"
+                          onClick={() => setDelInv(inv)}>
+                          <HiTrash /> Delete
+                        </button>
+                      )}
                     </td>
                   </tr>
                 );
@@ -237,6 +271,33 @@ export default function Tracker_Invoices() {
           </div>
         </div>
       )}
+
+      {/* Delete confirmation (tracker admin, up to stage 5) */}
+      {delInv && (
+        <div className="trk-modal-overlay" onClick={() => !deleting && setDelInv(null)}>
+          <div className="trk-modal" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+            <div className="trk-modal-head"><h3>Delete invoice?</h3></div>
+            <div className="trk-modal-body">
+              <p style={{ margin: 0 }}>
+                Delete invoice <b>{delInv.invoice_number}</b> — {delInv.party_name} (₹{money(delInv.invoice_value)})?
+              </p>
+              <p className="trk-sub" style={{ marginTop: 8 }}>
+                Currently at <b>{delInv.current_stage_name}</b>. It will be removed from the
+                tracker (soft delete — the record is kept but hidden).
+              </p>
+            </div>
+            <div className="trk-modal-foot">
+              <button className="trk-btn trk-btn-ghost" disabled={deleting}
+                onClick={() => setDelInv(null)}>Cancel</button>
+              <button className="trk-btn trk-btn-danger" disabled={deleting} onClick={doDelete}>
+                <HiTrash /> {deleting ? "Deleting…" : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {toast && <div className="trk-toast">{toast}</div>}
     </div>
   );
 }
