@@ -65,7 +65,7 @@ export default function Tracker_Queue() {
   const [holdType, setHoldType] = useState("");   // FULL | PARTIAL
   const [amount, setAmount] = useState("");        // hold / debit amount
   const [toast, setToast] = useState("");
-  const [subTab, setSubTab] = useState<"current" | "returned" | "advanced">("current");
+  const [subTab, setSubTab] = useState<"current" | "returned" | "advanced" | "rejected">("current");
   const [advancedRows, setAdvancedRows] = useState<Invoice[]>([]);
   const [search, setSearch] = useState("");
 
@@ -106,25 +106,32 @@ export default function Tracker_Queue() {
   );
 
   const isEntry = activeStage === "entry";
+  const isSapApproval = activeStage === "sap_approval";
 
-  // All invoices sitting at the active stage, split by how they arrived.
+  // All invoices sitting at the active stage, split by how they arrived / state.
   const stageRows = useMemo(
     () => queue.filter((i) => i.current_stage_code === activeStage),
     [queue, activeStage]
   );
+  // Rejected-but-awaiting-remarks (SAP/JSAP) get their own tab.
+  const rejectedRows = useMemo(
+    () => stageRows.filter((i) => i.rejection_pending),
+    [stageRows]
+  );
   const currentRows = useMemo(
-    () => stageRows.filter((i) => !i.arrived_via_return),
+    () => stageRows.filter((i) => !i.arrived_via_return && !i.rejection_pending),
     [stageRows]
   );
   const returnedRows = useMemo(
-    () => stageRows.filter((i) => i.arrived_via_return),
+    () => stageRows.filter((i) => i.arrived_via_return && !i.rejection_pending),
     [stageRows]
   );
 
   // Rows shown for the active sub-tab.
   const baseRows =
     subTab === "advanced" ? advancedRows :
-    subTab === "returned" ? returnedRows : currentRows;
+    subTab === "returned" ? returnedRows :
+    subTab === "rejected" ? rejectedRows : currentRows;
   const readOnly = subTab === "advanced";
   // Omni search filters whatever the active sub-tab shows.
   const rows = useMemo(() => {
@@ -172,9 +179,17 @@ export default function Tracker_Queue() {
     if (!remarks.trim()) { flash("Remarks are mandatory to return"); return; }
     runBulk({ action: "RETURN", remarks });
   };
+  // Rejected tab: supply the reason now and send the rejected invoice(s) back.
+  const onReturnRejected = () => {
+    if (!remarks.trim()) { flash("Enter remarks to return these rejected invoices"); return; }
+    runBulk({ stage_status: "REJECTED", remarks });
+  };
   const onApplyStatus = () => {
     if (!statusPick) { flash("Pick a status"); return; }
-    if (REASON_STATUSES.has(statusPick) && !remarks.trim()) {
+    // REJECTED is allowed WITHOUT remarks — it parks the invoice in the Rejected
+    // tab; remarks are supplied later to return it. All other reason statuses
+    // still require remarks up front.
+    if (statusPick !== "REJECTED" && REASON_STATUSES.has(statusPick) && !remarks.trim()) {
       flash("Remarks are mandatory for this status"); return;
     }
     if (statusPick === "HOLD" && !holdType) {
@@ -280,6 +295,12 @@ export default function Tracker_Queue() {
               onClick={() => setSubTab("returned")}>
               Returned<span className="trk-tab-count">{returnedRows.length}</span>
             </button>
+            {(isSapApproval || rejectedRows.length > 0) && (
+              <button className={"trk-tab" + (subTab === "rejected" ? " active" : "")}
+                onClick={() => setSubTab("rejected")}>
+                Rejected<span className="trk-tab-count">{rejectedRows.length}</span>
+              </button>
+            )}
             {isEntry && (
               <button className={"trk-tab" + (subTab === "advanced" ? " active" : "")}
                 onClick={() => setSubTab("advanced")}>
@@ -288,8 +309,24 @@ export default function Tracker_Queue() {
             )}
           </div>
 
-          {/* Action bar (adapts to the active stage's rules) — hidden in read-only history */}
-          {!readOnly && stageCfg && !stageCfg.is_terminal && (
+          {/* Rejected tab: supply the reason now to send these back to the previous stage */}
+          {subTab === "rejected" && (
+            <div className="trk-actionbar" style={{ background: "#fef2f2", borderColor: "#fecaca" }}>
+              <span className="trk-count">{selected.size} selected</span>
+              <input className="trk-remarks" placeholder="Rejection remarks (required to return)"
+                value={remarks} onChange={(e) => setRemarks(e.target.value)} />
+              <button className="trk-btn trk-btn-warn" onClick={onReturnRejected}
+                disabled={selected.size === 0}>
+                <HiArrowUturnLeft /> Return with remarks
+              </button>
+              <span className="trk-sub" style={{ fontSize: 11 }}>
+                Rejected without a reason — add remarks to send back to the previous stage.
+              </span>
+            </div>
+          )}
+
+          {/* Action bar (adapts to the active stage's rules) — hidden in read-only history + rejected tab */}
+          {!readOnly && subTab !== "rejected" && stageCfg && !stageCfg.is_terminal && (
             <div className="trk-actionbar">
               <span className="trk-count">{selected.size} selected</span>
               {stageCfg.requires_status ? (
@@ -314,12 +351,15 @@ export default function Tracker_Queue() {
                   )}
                   <input className="trk-remarks"
                     placeholder={
-                      REASON_STATUSES.has(statusPick) ? "Remarks (required)" : "Remarks (optional)"
+                      statusPick === "REJECTED" ? "Remarks (optional — blank parks it in Rejected)"
+                        : REASON_STATUSES.has(statusPick) ? "Remarks (required)" : "Remarks (optional)"
                     }
                     value={remarks} onChange={(e) => setRemarks(e.target.value)} />
                   <button className="trk-btn trk-btn-primary" onClick={onApplyStatus}
                     disabled={selected.size === 0}>
-                    {RETURN_STATUSES.has(statusPick) ? <><HiArrowUturnLeft /> Return</>
+                    {statusPick === "REJECTED"
+                      ? <><HiArrowUturnLeft /> {remarks.trim() ? "Reject & return" : "Reject"}</>
+                      : RETURN_STATUSES.has(statusPick) ? <><HiArrowUturnLeft /> Return</>
                       : statusPick === "HOLD" && holdType === "FULL" ? <>⏸ Hold</>
                       : <><HiArrowRight /> Apply</>}
                   </button>
@@ -450,6 +490,7 @@ export default function Tracker_Queue() {
                     <tr><td colSpan={12}><div className="trk-empty">
                       {subTab === "returned" ? "No returned invoices at this stage."
                         : subTab === "advanced" ? "Nothing advanced from here yet."
+                        : subTab === "rejected" ? "No rejected invoices awaiting remarks."
                         : "No invoices at this stage."}
                     </div></td></tr>
                   )}
