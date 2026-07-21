@@ -226,6 +226,11 @@ export const trackerService = {
     return data;
   },
 
+  // Soft-delete an entry-stage invoice (row is kept in the DB, just hidden).
+  async deleteInvoice(id: number): Promise<void> {
+    await api.delete(`/tracker/invoices/${id}/`);
+  },
+
   async myQueue(): Promise<MyQueue> {
     const { data } = await api.get("/tracker/my-queue/");
     return data;
@@ -440,6 +445,8 @@ export interface StuckAlert {
   threshold_days: number;
   over_by: number;
   is_active: boolean;
+  last_notified_at: string | null;
+  notified: { user: string; email: string; sent_at: string }[];
   created_at: string;
   updated_at: string;
 }

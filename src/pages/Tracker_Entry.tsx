@@ -4,6 +4,8 @@ import {
   HiLockClosed,
   HiPencilSquare,
   HiPlusCircle,
+  HiTrash,
+  HiMagnifyingGlass,
 } from "react-icons/hi2";
 import trackerService, { ADDITIONAL_CHARGE_TYPES } from "../services/trackerService";
 import type { Invoice, InvoiceWrite, Lookups, Vendor } from "../services/trackerService";
@@ -35,6 +37,15 @@ const fmtDate = (v?: string | null) => {
   return Number.isNaN(d.getTime()) ? v : d.toLocaleDateString("en-GB");
 };
 
+// Omni search: match a query against every meaningful invoice field.
+const invMatch = (i: Invoice, q: string) =>
+  [
+    i.invoice_number, i.party_name, i.party_code, i.party_gstin,
+    i.category_name, i.unit_name, i.branch_name, i.mode_name,
+    i.gst_type_name, i.gst_rate_label, i.invoice_value, i.taxable_value,
+    i.created_by_name,
+  ].some((v) => (v ?? "").toString().toLowerCase().includes(q));
+
 export default function Tracker_Entry() {
   const [lookups, setLookups] = useState<Lookups | null>(null);
   const [form, setForm] = useState<InvoiceWrite>({ ...EMPTY });
@@ -50,10 +61,28 @@ export default function Tracker_Entry() {
   const [toast, setToast] = useState("");
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [vendorOpen, setVendorOpen] = useState(false);
+  const [delInv, setDelInv] = useState<Invoice | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [search, setSearch] = useState("");
 
   const flash = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(""), 2600);
+  };
+
+  const doDelete = async () => {
+    if (!delInv) return;
+    setDeleting(true);
+    try {
+      await trackerService.deleteInvoice(delInv.id);
+      flash(`Invoice ${delInv.invoice_number} deleted`);
+      setDelInv(null);
+      refresh();
+    } catch (err: any) {
+      flash(err?.response?.data?.detail || "Delete failed");
+    } finally {
+      setDeleting(false);
+    }
   };
 
   useEffect(() => {
@@ -92,6 +121,11 @@ export default function Tracker_Entry() {
     () => myInvoices.filter((i) => i.current_stage_code === "entry"),
     [myInvoices]
   );
+  // Omni search over the head-office queue.
+  const shownMine = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return q ? mine.filter((i) => invMatch(i, q)) : mine;
+  }, [mine, search]);
 
   const setField = (k: keyof InvoiceWrite, v: string | number) =>
     setForm((f) => ({ ...f, [k]: v }));
@@ -202,7 +236,7 @@ export default function Tracker_Entry() {
     });
 
   // Selectable = still editable (unlocked at entry).
-  const selectableIds = useMemo(() => mine.filter((i) => i.editable).map((i) => i.id), [mine]);
+  const selectableIds = useMemo(() => shownMine.filter((i) => i.editable).map((i) => i.id), [shownMine]);
   const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id));
 
   const bulkAdvance = async () => {
@@ -390,6 +424,15 @@ export default function Tracker_Entry() {
             <h3 style={{ margin: 0 }}>Head Office Queue</h3>
             <div className="trk-sub">All invoices at the entry stage — created here or returned back — from any user.</div>
           </div>
+          <div style={{ position: "relative", minWidth: 260 }}>
+            <HiMagnifyingGlass style={{ position: "absolute", left: 10, top: 9, opacity: 0.4 }} />
+            <input
+              style={{ width: "100%", paddingLeft: 32 }}
+              placeholder="Search invoice no., party, GSTIN, category…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
         </div>
 
         {selected.size > 0 && (
@@ -426,10 +469,12 @@ export default function Tracker_Entry() {
               </tr>
             </thead>
             <tbody>
-              {mine.length === 0 && (
-                <tr><td colSpan={11}><div className="trk-empty">No invoices yet.</div></td></tr>
+              {shownMine.length === 0 && (
+                <tr><td colSpan={11}><div className="trk-empty">
+                  {search.trim() ? "No invoices match your search." : "No invoices yet."}
+                </div></td></tr>
               )}
-              {mine.map((inv) => (
+              {shownMine.map((inv) => (
                 <tr key={inv.id}
                   className={inv.is_overdue ? "trk-row-overdue" : inv.is_locked ? "trk-row-locked" : ""}>
                   <td>
@@ -461,10 +506,17 @@ export default function Tracker_Entry() {
                   </td>
                   <td>
                     {inv.editable && (
-                      <button className="trk-btn trk-btn-ghost" style={{ padding: "5px 10px" }}
-                        onClick={() => startEdit(inv)}>
-                        <HiPencilSquare /> Edit
-                      </button>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button className="trk-btn trk-btn-ghost" style={{ padding: "5px 10px" }}
+                          onClick={() => startEdit(inv)}>
+                          <HiPencilSquare /> Edit
+                        </button>
+                        <button className="trk-btn trk-btn-danger" style={{ padding: "5px 10px" }}
+                          title="Delete this invoice entry"
+                          onClick={() => setDelInv(inv)}>
+                          <HiTrash /> Delete
+                        </button>
+                      </div>
                     )}
                   </td>
                 </tr>
@@ -513,6 +565,33 @@ export default function Tracker_Entry() {
               </button>
               <button className="trk-btn trk-btn-primary" onClick={onConfirm} disabled={saving}>
                 {saving ? "Saving…" : editingId ? "Confirm update" : "Confirm & submit"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete confirmation */}
+      {delInv && (
+        <div className="trk-modal-overlay" onClick={() => !deleting && setDelInv(null)}>
+          <div className="trk-modal" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>
+            <div className="trk-modal-head">
+              <h3>Delete invoice?</h3>
+            </div>
+            <div className="trk-modal-body">
+              <p style={{ margin: 0 }}>
+                Delete invoice <b>{delInv.invoice_number}</b> — {delInv.party_name} (₹{money(delInv.invoice_value)})?
+              </p>
+              <p className="trk-sub" style={{ marginTop: 8 }}>
+                It will be removed from the entry desk. This can only be done while the
+                invoice is still at the entry stage.
+              </p>
+            </div>
+            <div className="trk-modal-foot">
+              <button className="trk-btn trk-btn-ghost" disabled={deleting}
+                onClick={() => setDelInv(null)}>Cancel</button>
+              <button className="trk-btn trk-btn-danger" disabled={deleting} onClick={doDelete}>
+                <HiTrash /> {deleting ? "Deleting…" : "Delete"}
               </button>
             </div>
           </div>

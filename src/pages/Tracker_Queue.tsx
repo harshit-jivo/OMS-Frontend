@@ -5,6 +5,8 @@ import {
   HiClock,
   HiBanknotes,
   HiEye,
+  HiMapPin,
+  HiMagnifyingGlass,
 } from "react-icons/hi2";
 import trackerService from "../services/trackerService";
 import type {
@@ -31,6 +33,15 @@ const fmtDT = (v?: string | null) => {
   });
 };
 
+// Omni search: match a query against every meaningful invoice field.
+const invMatch = (i: Invoice, q: string) =>
+  [
+    i.invoice_number, i.party_name, i.party_code, i.party_gstin,
+    i.category_name, i.unit_name, i.branch_name, i.mode_name,
+    i.current_stage_name, i.gst_type_name, i.gst_rate_label,
+    i.invoice_value, i.taxable_value, i.return_reason, i.returned_from,
+  ].some((v) => (v ?? "").toString().toLowerCase().includes(q));
+
 // Statuses that mean "send back" / "need a written reason".
 const RETURN_STATUSES = new Set(["RETURN", "REJECTED"]);
 const REASON_STATUSES = new Set(["RETURN", "REJECTED", "HOLD", "DEBIT"]);
@@ -56,8 +67,10 @@ export default function Tracker_Queue() {
   const [toast, setToast] = useState("");
   const [subTab, setSubTab] = useState<"current" | "returned" | "advanced">("current");
   const [advancedRows, setAdvancedRows] = useState<Invoice[]>([]);
+  const [search, setSearch] = useState("");
 
   const [timelineInv, setTimelineInv] = useState<Invoice | null>(null);
+  const [detailInv, setDetailInv] = useState<Invoice | null>(null);
   const [payInv, setPayInv] = useState<Invoice | null>(null);
   const [payForm, setPayForm] = useState<Partial<PaymentDetail>>({ ...EMPTY_PAYMENT });
 
@@ -109,10 +122,15 @@ export default function Tracker_Queue() {
   );
 
   // Rows shown for the active sub-tab.
-  const rows =
+  const baseRows =
     subTab === "advanced" ? advancedRows :
     subTab === "returned" ? returnedRows : currentRows;
   const readOnly = subTab === "advanced";
+  // Omni search filters whatever the active sub-tab shows.
+  const rows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return q ? baseRows.filter((i) => invMatch(i, q)) : baseRows;
+  }, [baseRows, search]);
 
   // Reset sub-tab + selection whenever the stage changes.
   useEffect(() => {
@@ -226,6 +244,15 @@ export default function Tracker_Queue() {
         <div>
           <h1>My Stage Queue</h1>
           <div className="trk-sub">Invoices waiting at your desk. Act in one click, in bulk.</div>
+        </div>
+        <div style={{ position: "relative", minWidth: 260 }}>
+          <HiMagnifyingGlass style={{ position: "absolute", left: 10, top: 9, opacity: 0.4 }} />
+          <input
+            style={{ width: "100%", paddingLeft: 32 }}
+            placeholder="Search invoice no., party, GSTIN, category…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
         </div>
       </div>
 
@@ -401,8 +428,14 @@ export default function Tracker_Queue() {
                       )}
                       <td style={{ display: "flex", gap: 6 }}>
                         <button className="trk-btn trk-btn-ghost" style={{ padding: "5px 9px" }}
+                          title="View full invoice details"
+                          onClick={() => setDetailInv(inv)}>
+                          <HiEye /> View
+                        </button>
+                        <button className="trk-btn trk-btn-ghost" style={{ padding: "5px 9px" }}
+                          title="View stage-by-stage timeline"
                           onClick={() => openTimeline(inv.id)}>
-                          <HiEye /> Track
+                          <HiMapPin /> Track
                         </button>
                         {!readOnly && stageCfg?.is_terminal && (
                           <button className="trk-btn trk-btn-primary" style={{ padding: "5px 9px" }}
@@ -425,6 +458,83 @@ export default function Tracker_Queue() {
             </div>
           </div>
         </>
+      )}
+
+      {/* Invoice details modal (read-only, any stage user can view) */}
+      {detailInv && (
+        <div className="trk-modal-overlay" onClick={() => setDetailInv(null)}>
+          <div className="trk-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="trk-modal-head">
+              <h3>{detailInv.invoice_number} — {detailInv.party_name}</h3>
+              <span className="trk-badge trk-badge-stage" style={{ marginLeft: 8 }}>
+                {detailInv.current_stage_name}
+              </span>
+            </div>
+            <div className="trk-modal-body">
+              {[
+                { title: "Invoice", fields: [
+                  ["Invoice No.", detailInv.invoice_number],
+                  ["Invoice Date", fmtDate(detailInv.invoice_date)],
+                  ["Mode", detailInv.mode_name],
+                  ["Status", detailInv.status === "COMPLETED" ? "Completed" : "In Progress"],
+                ]},
+                { title: "Party", fields: [
+                  ["Party Name", detailInv.party_name],
+                  ["Party Code", detailInv.party_code || "-"],
+                  ["Party GSTIN", detailInv.party_gstin || "-"],
+                ]},
+                { title: "Amounts", fields: [
+                  ["Taxable Value", `₹${money(detailInv.taxable_value)}`],
+                  ["GST Type", detailInv.gst_type_name],
+                  ["GST Rate", detailInv.gst_rate_label],
+                  ["GST Amount", `₹${money(detailInv.gst_amount)}`],
+                  ["Additional Charge", detailInv.additional_charge_type_display || "-"],
+                  ["Additional Amount", `₹${money(detailInv.additional_charge_amount)}`],
+                  ["Invoice Value", `₹${money(detailInv.invoice_value)}`],
+                ]},
+                { title: "Classification", fields: [
+                  ["Category", detailInv.category_name],
+                  ["Unit", detailInv.unit_name],
+                  ["Branch", detailInv.branch_name],
+                ]},
+                { title: "Workflow", fields: [
+                  ["Current Stage", detailInv.current_stage_name],
+                  ["Entered Stage", fmtDT(detailInv.current_stage_entered_at)],
+                  ["Days at Stage", detailInv.days_at_stage + (detailInv.is_overdue ? " ⚠ overdue" : "")],
+                  ...(detailInv.arrived_via_return ? [
+                    ["Returned By", `${detailInv.returned_from || "-"}${detailInv.returned_by ? ` (${detailInv.returned_by})` : ""}`] as [string, string],
+                    ["Return Reason", detailInv.return_reason || "-"] as [string, string],
+                  ] : []),
+                ]},
+                { title: "Audit", fields: [
+                  ["Created By", detailInv.created_by_name],
+                  ["Created On", fmtDT(detailInv.created_at)],
+                  ["Last Updated", fmtDT(detailInv.updated_at)],
+                ]},
+              ].map((section) => (
+                <div key={section.title} style={{ marginBottom: 14 }}>
+                  <div className="trk-sub" style={{ fontWeight: 600, marginBottom: 6 }}>{section.title}</div>
+                  <div className="trk-form-grid">
+                    {section.fields.map(([label, value]) => (
+                      <div className="trk-field" key={label}>
+                        <label>{label}</label>
+                        <div style={{ padding: "6px 0", fontWeight: 500, wordBreak: "break-word" }}>
+                          {value ?? "-"}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="trk-modal-foot">
+              <button className="trk-btn trk-btn-ghost" onClick={() => { setDetailInv(null); openTimeline(detailInv.id); }}>
+                <HiMapPin /> View Timeline
+              </button>
+              <button className="trk-btn trk-btn-primary" onClick={() => setDetailInv(null)}>Close</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Timeline modal */}
