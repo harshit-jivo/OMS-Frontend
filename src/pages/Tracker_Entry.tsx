@@ -343,7 +343,15 @@ export default function Tracker_Entry() {
                         ) : vendorMatches.map((v) => (
                           <div key={v.card_code} className="trk-combo-item"
                             onMouseDown={(e) => { e.preventDefault(); pickVendor(v); }}>
-                            <div>{v.card_name}</div>
+                            <div>
+                              {v.card_name}
+                              {v.card_type && (
+                                <span className={"trk-badge " + (v.card_type === "C" ? "trk-badge-ok" : "trk-badge-stage")}
+                                  style={{ marginLeft: 8, fontSize: 10, padding: "1px 7px" }}>
+                                  {v.card_type === "C" ? "Customer" : "Vendor"}
+                                </span>
+                              )}
+                            </div>
                             <div>
                               <span className="code">{v.card_code}{v.state ? ` · ${v.state}` : ""}</span>
                               {v.gstin && <span className="gst">  ·  {v.gstin}</span>}
