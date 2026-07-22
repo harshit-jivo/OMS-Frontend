@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { HiArchiveBox, HiArrowPath, HiArrowRight, HiChevronLeft, HiDocumentText, HiPhoto, HiTrash, HiXMark } from "react-icons/hi2";
-import DraftStep from "./DraftStep";
+import DraftStep, { BranchBadge } from "./DraftStep";
 import OrdersStep from "./OrdersStep";
-import { apiFetch, useSalesInvoice, type SalesInvoiceState } from "./useSalesInvoice";
+import { apiFetch, hanaUrl, useSalesInvoice, type SalesInvoiceState } from "./useSalesInvoice";
 import { formatMoney, type SelectedLine } from "./salesInvoice.utils";
 import "../../styles/Sales_Invoice.css";
 
@@ -515,6 +515,7 @@ type SkeletonInvoiceProps = {
   onRemoveItemRow: (rowId: number) => void;
   itemDraftError: string;
   onReset: () => void;
+  onChangeBranch: () => void;
 };
 
 function InvoiceSourceChoice({
@@ -750,7 +751,7 @@ function ItemPickerModal({
       setError("");
       try {
         const data = await apiFetch<FinishedGoodItem[] | { data?: FinishedGoodItem[]; results?: FinishedGoodItem[] }>(
-          "/api/hana/fg-items/",
+          hanaUrl("/api/hana/fg-items/"),
         );
         const nextItems = Array.isArray(data) ? data : data.data || data.results || [];
         if (active) setItems(nextItems);
@@ -1364,7 +1365,7 @@ function BatchPickerModal({
       setError("");
       try {
         const data = await apiFetch<InventoryWarehouse[]>(
-          `/api/hana/inventory-details/?item_code=${encodeURIComponent(item.ItemCode)}`,
+          hanaUrl(`/api/hana/inventory-details/?item_code=${encodeURIComponent(item.ItemCode)}`),
         );
         const nextWarehouses = Array.isArray(data) ? data : [];
         if (!active) return;
@@ -1402,7 +1403,7 @@ function BatchPickerModal({
       setError("");
       try {
         const data = await apiFetch<BatchDetail[]>(
-          `/api/hana/batch-details/?item_code=${encodeURIComponent(item.ItemCode)}&whs_code=${encodeURIComponent(selectedWhsCode)}`,
+          hanaUrl(`/api/hana/batch-details/?item_code=${encodeURIComponent(item.ItemCode)}&whs_code=${encodeURIComponent(selectedWhsCode)}`),
         );
         if (active) setBatches(Array.isArray(data) ? data : []);
       } catch (err) {
@@ -1609,6 +1610,7 @@ function SkeletonInvoice({
   onRemoveItemRow,
   itemDraftError,
   onReset,
+  onChangeBranch,
 }: SkeletonInvoiceProps) {
   const partyLabel = state.selectedParty
     ? state.selectedParty.CardName
@@ -1618,6 +1620,7 @@ function SkeletonInvoice({
     <div className="si-draft-stage">
       <section className="si-card si-draft-party-card si-draft-summary-card si-skeleton-party-card">
         <div className="si-draft-party-name-cell">
+          <BranchBadge branch={state.branch} onChange={onChangeBranch} />
           <span>Party Name</span>
           {state.selectedParty ? (
             <strong>{partyLabel}</strong>
@@ -1775,6 +1778,14 @@ export default function SalesInvoiceWizard() {
     if (openParty) setPartyModalOpen(true);
   };
 
+  // Return to the branch gate — clears the current invoice first.
+  const handleChangeBranch = () => {
+    if (window.confirm("Switching branch clears the current invoice. Continue?")) {
+      resetInvoiceFlow(false);
+      state.changeBranch();
+    }
+  };
+
   const createDraftFromSelectedOrders = async () => {
     const ok = await state.proceedToDraft();
     if (ok) closeOrdersModal();
@@ -1813,7 +1824,7 @@ export default function SalesInvoiceWizard() {
   const fetchItemWithCustomerPrice = async (item: FinishedGoodItem) => {
     const priceList = toFiniteQuantity(state.selectedParty?.ListNum, 1);
     const data = await apiFetch<ItemPriceApiResponse>(
-      `/api/hana/item-price/?item_code=${encodeURIComponent(item.ItemCode)}&price_list=${encodeURIComponent(String(priceList))}`,
+      hanaUrl(`/api/hana/item-price/?item_code=${encodeURIComponent(item.ItemCode)}&price_list=${encodeURIComponent(String(priceList))}`),
     );
     return mergeItemPrice(item, unwrapItemPriceRecord(data));
   };
@@ -1890,6 +1901,28 @@ export default function SalesInvoiceWizard() {
         onOpenSkuGallery={() => navigate("/Sales_Invoice/SKU_Images")}
       />
 
+      {/* Branch gate — everything downstream (customers, orders, prices,
+          stock) is branch-specific, so nothing loads until one is chosen. */}
+      {!state.branch && (
+        <div className="si-modal-backdrop si-branch-backdrop" role="presentation">
+          <section className="si-branch-modal" role="dialog" aria-modal="true" aria-label="Select branch">
+            <span className="si-eyebrow">Sales Invoice</span>
+            <h2>Select a branch</h2>
+            <p>Customers, orders, prices and stock load for the branch you pick.</p>
+            <div className="si-branch-options">
+              <button type="button" className="si-branch-option" onClick={() => state.selectBranch("OIL")}>
+                <span className="si-branch-emoji" aria-hidden="true">🛢️</span>
+                <strong>Oil</strong>
+              </button>
+              <button type="button" className="si-branch-option" onClick={() => state.selectBranch("BEVERAGE")}>
+                <span className="si-branch-emoji" aria-hidden="true">🥤</span>
+                <strong>Beverage</strong>
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
       {!showDraft && (
         <SkeletonInvoice
           state={state}
@@ -1904,6 +1937,7 @@ export default function SalesInvoiceWizard() {
           onRemoveItemRow={removeItemRow}
           itemDraftError={itemDraftError || state.draftError}
           onReset={resetInvoiceFlow}
+          onChangeBranch={handleChangeBranch}
         />
       )}
 
@@ -1913,6 +1947,7 @@ export default function SalesInvoiceWizard() {
           onReset={resetInvoiceFlow}
           onCreateNew={() => resetInvoiceFlow(false)}
           onAddItems={sourceMode === "items" ? openItemsModal : undefined}
+          onChangeBranch={handleChangeBranch}
         />
       )}
 

@@ -10,10 +10,74 @@ type Props = {
   onReset: () => void;
   onCreateNew: () => void;
   onAddItems?: () => void;
+  onChangeBranch?: () => void;
 };
 
+// Small branch pill shown inside the party header, with a Change action that
+// returns to the branch gate (clearing the current invoice).
+export function BranchBadge({
+  branch,
+  onChange,
+}: {
+  branch: SalesInvoiceState["branch"];
+  onChange?: () => void;
+}) {
+  if (!branch) return null;
+  return (
+    <span className="si-branch-badge">
+      Branch: <strong>{branch === "OIL" ? "Oil" : "Beverage"}</strong>
+      {onChange && (
+        <button type="button" onClick={onChange}>
+          Change
+        </button>
+      )}
+    </span>
+  );
+}
+
+// A date field that stays read-only until double-clicked, so header dates aren't
+// changed by accident. Double-click enables editing and opens the picker; blur
+// locks it again.
+function EditableDate({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const [editable, setEditable] = useState(false);
+  return (
+    <label className="si-draft-summary-date">
+      <span>{label}</span>
+      <input
+        type="date"
+        value={value}
+        readOnly={!editable}
+        className={editable ? "si-date-editable" : ""}
+        onDoubleClick={(event) => {
+          // Capture the element now — React nulls event.currentTarget once the
+          // handler returns, so the deferred callback can't read it.
+          const input = event.currentTarget;
+          setEditable(true);
+          window.requestAnimationFrame(() => {
+            input.focus();
+            try {
+              input.showPicker?.();
+            } catch {
+              /* showPicker needs a mutable input + user gesture; ignore if it can't open */
+            }
+          });
+        }}
+        onBlur={() => setEditable(false)}
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </label>
+  );
+}
+
 function DraftDocumentStrip({ state }: { state: SalesInvoiceState }) {
-  const [postingDateEditable, setPostingDateEditable] = useState(false);
   const updatePostingDate = (postingDate: string) => {
     state.updateForm({
       postingDate,
@@ -23,28 +87,23 @@ function DraftDocumentStrip({ state }: { state: SalesInvoiceState }) {
   };
 
   return (
-    <label className="si-draft-summary-date">
-      <span>Posting Date</span>
-      <input
-        type="date"
-        value={state.form.postingDate}
-        readOnly={!postingDateEditable}
-        className={postingDateEditable ? "si-date-editable" : ""}
-        onDoubleClick={(event) => {
-          setPostingDateEditable(true);
-          window.requestAnimationFrame(() => {
-            event.currentTarget.focus();
-            event.currentTarget.showPicker?.();
-          });
-        }}
-        onBlur={() => setPostingDateEditable(false)}
-        onChange={(event) => updatePostingDate(event.target.value)}
+    <div className="si-draft-summary-dates">
+      <EditableDate label="Posting Date" value={state.form.postingDate} onChange={updatePostingDate} />
+      <EditableDate
+        label="Appointment Date"
+        value={state.form.receivedDate}
+        onChange={(value) => state.updateForm({ receivedDate: value })}
       />
-    </label>
+      <EditableDate
+        label="Dispatch Date"
+        value={state.form.dispatchDate}
+        onChange={(value) => state.updateForm({ dispatchDate: value })}
+      />
+    </div>
   );
 }
 
-export default function DraftStep({ state, onReset, onCreateNew, onAddItems }: Props) {
+export default function DraftStep({ state, onReset, onCreateNew, onAddItems, onChangeBranch }: Props) {
   const [totalsModalOpen, setTotalsModalOpen] = useState(false);
   const [postErrorNotificationOpen, setPostErrorNotificationOpen] = useState(false);
   const [successModalOpen, setSuccessModalOpen] = useState(false);
@@ -91,6 +150,7 @@ export default function DraftStep({ state, onReset, onCreateNew, onAddItems }: P
 
       <section className="si-card si-draft-party-card si-draft-summary-card">
         <div className="si-draft-party-name-cell">
+          <BranchBadge branch={state.branch} onChange={onChangeBranch} />
           <span>Party Name</span>
           <strong>{customerName}</strong>
           <div className="si-draft-summary-actions">

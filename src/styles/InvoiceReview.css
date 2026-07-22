@@ -174,6 +174,16 @@
   color: #1d4ed8;
 }
 
+.ir-badge-edited {
+  background: #ede9fe;
+  color: #6d28d9;
+}
+
+.ir-badge-cl_raised {
+  background: #ccfbf1;
+  color: #0f766e;
+}
+
 /* Full error / rejection message inside the detail modal */
 .ir-error-box,
 .ir-reason-box {
@@ -277,6 +287,70 @@
 
 .ir-btn-sap:hover:not(:disabled) {
   background: #1d4ed8;
+}
+
+.ir-btn-edit {
+  background: #7c3aed;
+  color: #fff;
+}
+
+.ir-btn-edit:hover:not(:disabled) {
+  background: #6d28d9;
+}
+
+.ir-btn-cl {
+  background: #d97706;
+  color: #fff;
+}
+
+.ir-btn-cl:hover:not(:disabled) {
+  background: #b45309;
+}
+
+/* Credit-limit request form */
+.ir-cl-modal {
+  max-width: 560px;
+}
+
+.ir-cl-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.ir-cl-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.84rem;
+  color: #334155;
+  font-weight: 600;
+}
+
+.ir-cl-field-wide {
+  grid-column: 1 / -1;
+}
+
+.ir-cl-field input {
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 9px 12px;
+  font-size: 0.92rem;
+  font-weight: 400;
+  color: #0f172a;
+  background: #fff;
+}
+
+.ir-cl-field input:focus {
+  outline: 2px solid #d97706;
+  outline-offset: 1px;
+  border-color: transparent;
+}
+
+.ir-cl-field input[type="file"] {
+  padding: 7px;
+  background: #f8fafc;
 }
 
 .ir-icon-btn {
@@ -477,13 +551,15 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  padding: 20px 24px;
-  border-bottom: 1px solid #f1f5f9;
+  padding: 22px 24px 20px;
+  background: linear-gradient(180deg, #f8fafc, #ffffff);
+  border-bottom: 1px solid #eef2f7;
 }
 
 .ir-modal-head h2 {
-  margin: 2px 0 0;
-  font-size: 1.25rem;
+  margin: 3px 0 0;
+  font-size: 1.35rem;
+  letter-spacing: -0.01em;
 }
 
 .ir-modal-head p {
@@ -501,41 +577,136 @@
 }
 
 .ir-modal-body {
-  padding: 20px 24px;
+  padding: 22px 24px;
   overflow-y: auto;
+}
+
+/* Hero: total amount + status, the first thing the eye lands on */
+.ir-detail-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+  margin-bottom: 22px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #eff6ff 0%, #f8fafc 100%);
+  border: 1px solid #e0e7ff;
+}
+
+.ir-detail-hero-amount {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.ir-detail-hero-amount strong {
+  font-size: 1.75rem;
+  font-weight: 800;
+  line-height: 1;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+}
+
+.ir-badge-lg {
+  font-size: 0.8rem;
+  padding: 7px 15px;
 }
 
 .ir-meta-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 14px 20px;
-  margin: 0 0 20px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin: 0 0 24px;
+}
+
+.ir-meta-grid > div {
+  padding: 11px 14px;
+  background: #f8fafc;
+  border: 1px solid #eef2f7;
+  border-radius: 11px;
 }
 
 .ir-meta-grid dt {
-  font-size: 0.7rem;
+  font-size: 0.68rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: #94a3b8;
   font-weight: 700;
-  margin-bottom: 2px;
+  margin-bottom: 4px;
 }
 
 .ir-meta-grid dd {
   margin: 0;
   font-size: 0.92rem;
-  font-weight: 600;
+  font-weight: 700;
+  color: #0f172a;
 }
 
 .ir-section-title {
-  font-size: 0.95rem;
-  margin: 0 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 0 0 12px;
 }
 
-.ir-batch-list {
-  margin: 0;
-  padding-left: 16px;
-  font-size: 0.85rem;
+.ir-section-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: #e0e7ff;
+  color: #4338ca;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+/* Line-items table wrapped as a clean card inside the modal */
+.ir-modal-body .ir-table-wrap {
+  border: 1px solid #eef2f7;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.ir-modal-body .ir-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.ir-cell-code {
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.ir-batch-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ir-batch-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: #eef2ff;
+  border: 1px solid #e0e7ff;
+  color: #3730a3;
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ir-batch-chip em {
+  font-style: normal;
+  font-weight: 800;
+  color: #6366f1;
 }
 
 .ir-muted {
@@ -632,6 +803,14 @@
   background: #2563eb;
 }
 
+.ir-dot-edited {
+  background: #7c3aed;
+}
+
+.ir-dot-cl_raised {
+  background: #0d9488;
+}
+
 .ir-timeline-body {
   flex: 1;
 }
@@ -651,6 +830,11 @@
   margin: 6px 0 0;
   font-size: 0.84rem;
   color: #475569;
+}
+
+.ir-timeline-by {
+  color: #64748b;
+  font-size: 0.8rem;
 }
 
 .ir-timeline-error {
