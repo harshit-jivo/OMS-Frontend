@@ -5,6 +5,7 @@ import { exportToExcel } from "../utils/excelExport";
 import "../styles/Billing_Order.css";
 import { useNavigate, useLocation } from "react-router-dom";
 import { sortOrders } from "../utils/orderHistory";
+import { useUILabels } from "../services/uiConfig";
 import ItemSection from "../components/order-items/ItemSection";
 import PartyHeader from "../components/order-items/PartyHeader";
 import {
@@ -49,6 +50,7 @@ const isRejectedBillingOrder = (order: Order) => {
 };
   
 export default function Billing_orders() {
+  const { t } = useUILabels();
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -458,7 +460,7 @@ export default function Billing_orders() {
                   <th>Category</th><th>Scheme</th><th>Scheme Qty</th>
                   <th>Qty</th><th>Pcs</th><th>Boxes</th><th>Ltrs</th>
                   {/* <th>Scheme Ltrs</th> */}
-                  <th>Total Ltrs</th><th>Price List (Basic)</th><th>Basic Price</th><th>Tax %</th><th style={{ textAlign: 'right' }}>Amount</th></tr></thead>
+                  <th>Total Ltrs</th><th>{t("price_list", "Price List (Basic)")}</th><th>Basic Price</th><th>Tax %</th><th style={{ textAlign: 'right' }}>Amount</th></tr></thead>
                 <tbody>
                   {selectedItems.length > 0 ? selectedItems.map((item, i) => (
                     <tr key={i}>

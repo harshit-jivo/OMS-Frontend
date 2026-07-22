@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { ordersService } from "../services/ordersService";
 import { userService } from "../services/userService";
 import { getCurrentUser } from "../services/authService";
+import { useUILabels } from "../services/uiConfig";
 import type {
   Order,
   OrderItem,
@@ -122,6 +123,7 @@ const getDefaultDeliveryDate = () => {
 };
 
 export default function Add_Sales({ focMode = false }: AddSalesProps) {
+  const { t } = useUILabels();
   const location = useLocation();
   const navigate = useNavigate();
   const locationState =
@@ -1901,7 +1903,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
                 <input type="number" value={row.ltrs} readOnly />
               </div>
               <div className="sl-wiz-input">
-                <label>Price List</label>
+                <label>{t("price_list", "Price List")}</label>
                 <input type="number" value={row.priceListBasic} readOnly />
               </div>
               <div className="sl-wiz-input">
@@ -2920,7 +2922,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
                 <th>Boxes</th>
                 <th>Qty</th>
                 <th>Ltrs</th>
-                <th>Price List (Basic)</th>
+                <th>{t("price_list", "Price List (Basic)")}</th>
                 <th>Basic Price</th>
                 <th>Tax %</th>
                 <th>Amount</th>

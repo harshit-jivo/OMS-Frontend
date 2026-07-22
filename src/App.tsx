@@ -32,6 +32,7 @@ import Order_Stock_Check from "./pages/Order_Stock_Check";
 import Product_Stock from "./pages/Product_Stock";
 import Order_Flow_Settings from "./pages/Order_Flow_Settings";
 import Page_Permissions from "./pages/Page_Permissions";
+import UI_Labels from "./pages/UI_Labels";
 import Sales_Quotation from "./pages/Sales_Quotation";
 import LabelChecker from "./pages/Label_Checker";
 import NutritionManager from "./pages/Nutrition_Manager";
@@ -374,6 +375,15 @@ function App() {
           element={
             <Sidebar>
               <NutritionManager />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/UI_Labels"
+          element={
+            <Sidebar>
+              <UI_Labels />
             </Sidebar>
           }
         />

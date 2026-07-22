@@ -5,6 +5,7 @@ import type { Order, OrderItem } from "../services/ordersService";
 import { loadManagerOrders } from "../utils/orderHistory";
 import { formatOrderCreatedAt, getOrderItemSchemeNames, getOrderItemSchemes, getOrderItemSchemeQtyText, getOrderItemTotalLtrs, ordersService } from "../services/ordersService";
 import { startExcelExport, exportDateStamp } from "../utils/excelExport";
+import { useUILabels } from "../services/uiConfig";
 import "../styles/Report.css";
 import { sapService, type Product, type Party } from "../services/sapService";
 import { 
@@ -25,6 +26,7 @@ const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 1)
   .split("T")[0];
 
 export default function Sales_Report() {
+  const { t } = useUILabels();
   const [varietyList, setVarietyList] = useState<Product[]>([]);
   const [selectedVariety, setSelectedVariety] = useState<string>("");
   const [selectedParty, setSelectedParty] = useState<string>("");
@@ -980,7 +982,7 @@ export default function Sales_Report() {
                           <div><span>Boxes</span><strong>{Number(item.boxes).toFixed(2)}</strong></div>
                           <div><span>Ltrs</span><strong>{item.ltrs}</strong></div>
                           {schemes.length > 0 ? <div><span>Total Ltrs</span><strong>{getOrderItemTotalLtrs(item).toFixed(2)}</strong></div> : null}
-                          <div><span>Price List (Basic)</span><strong>{Number(item.price_list_basic).toFixed(2)}</strong></div>
+                          <div><span>{t("price_list", "Price List (Basic)")}</span><strong>{Number(item.price_list_basic).toFixed(2)}</strong></div>
                           <div><span>Basic Price</span><strong>{Number(item.basic_price).toFixed(2)}</strong></div>
                           <div><span>Tax %</span><strong>{Number(item.tax_rate).toFixed(2)}</strong></div>
                           <div className="order-detail-item-amount"><span>Amount</span><strong>{Number(item.total).toFixed(2)}</strong></div>
@@ -1008,7 +1010,7 @@ export default function Sales_Report() {
                     <th>Ltrs</th>
                     {/* <th>Scheme Ltrs</th> */}
                     <th>Total Ltrs</th>
-                    <th>Price List (Basic)</th>
+                    <th>{t("price_list", "Price List (Basic)")}</th>
                     <th>Basic Price</th>
                     <th>Tax %</th>
                     <th style={{ textAlign: "right" }}>Amount</th>

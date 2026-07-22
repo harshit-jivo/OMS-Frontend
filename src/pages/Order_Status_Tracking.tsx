@@ -11,6 +11,7 @@ import {
 } from "../utils/orderTrackingTimeline";
 import "../styles/Order_Status_Tracking.css";
 import "../styles/Auditor_Order.css";
+import { useUILabels } from "../services/uiConfig";
 import ItemSection from "../components/order-items/ItemSection";
 import PartyHeader from "../components/order-items/PartyHeader";
 import {
@@ -132,6 +133,7 @@ const normalizeTrackingOrders = (items: Order[], mode: TrackingMode) => {
 };
 
 export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps) {
+  const { t } = useUILabels();
   const [orders, setOrders] = useState<Order[]>([]);
   const [decisionFilter, setDecisionFilter] = useState<"all" | "accepted" | "rejected">("all");
   const [fromDate, setFromDate] = useState(firstDay);
@@ -635,7 +637,7 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
                     <th>Ltrs</th>
                     {/* <th>Scheme Ltrs</th> */}
                     <th>Total Ltrs</th>
-                    <th>Price List (Basic)</th>
+                    <th>{t("price_list", "Price List (Basic)")}</th>
                     <th>Basic Price</th>
                     <th>Amount</th>
                   </tr>

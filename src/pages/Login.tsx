@@ -4,6 +4,7 @@ import { landingPathFor } from "../config/pageAccess";
 import { loginUser } from "../services/authService";
 import { resolveStartupSession } from "../services/api";
 import { webDeviceService } from "../services/webDeviceService";
+import { loadUILabels } from "../services/uiConfig";
 import "../styles/Login.css";
 
 type ToastProps = {
@@ -166,6 +167,11 @@ const handleLogin = async () => {
     // telemetry that must never block, delay or fail login. Retries by itself
     // on the next authenticated session if it fails now.
     void webDeviceService.onAuthenticated("login");
+
+    // Fetch dynamic UI labels once for this session and cache them. Same
+    // fire-and-forget contract: never blocks login, and any screen falls back
+    // to hardcoded text until it resolves.
+    void loadUILabels(true);
 
     showToast("Login successful. Redirecting...", "success");
 

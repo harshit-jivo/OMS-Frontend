@@ -11,6 +11,7 @@ import type { OrderItem, Order, OrderLog, OrderStatus, PartyProduct, QuotationSt
 import { loadCurrentUserOrders } from "../utils/orderHistory";
 import "../styles/View_Orders.css";
 import "../styles/Auditor_Order.css";
+import { useUILabels } from "../services/uiConfig";
 import ItemSection from "../components/order-items/ItemSection";
 import PartyHeader from "../components/order-items/PartyHeader";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -79,6 +80,7 @@ const getRejectedByFromLogs = (logs: OrderLog[]) => {
 };
 
 export default function View_Orders() {
+  const { t } = useUILabels();
   const location = useLocation();
   const navigate = useNavigate();
   const [orders, setOrders] = useState<Order[]>([]);
@@ -683,7 +685,7 @@ export default function View_Orders() {
                   <tr>
                     <th>#</th><th>Item Code</th><th style={{ minWidth: '250px' }}>Item Name</th><th>Category</th><th>Scheme</th><th>Scheme Qty</th><th>Qty</th><th>Pcs</th><th>Boxes</th><th>Ltrs</th>
                     {/* <th>Scheme Ltrs</th> */}
-                    <th>Total Ltrs</th><th>Price List (Basic)</th><th>Basic Price</th><th>Tax %</th><th style={{textAlign:'right'}}>Amount</th>
+                    <th>Total Ltrs</th><th>{t("price_list", "Price List (Basic)")}</th><th>Basic Price</th><th>Tax %</th><th style={{textAlign:'right'}}>Amount</th>
                   </tr>
                 </thead>
                 <tbody>

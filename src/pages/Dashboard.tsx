@@ -19,6 +19,7 @@ import {
 } from "recharts";
 import { getCurrentUser } from "../services/authService";
 import { ordersService } from "../services/ordersService";
+import { useUILabels } from "../services/uiConfig";
 import type { Order } from "../services/ordersService";
 import api from "../services/api";
 import "../styles/Dashboard.css";
@@ -214,6 +215,7 @@ const EMPTY_CHARTS: ChartsData = {
 };
 
 export default function Dashboard() {
+  const { t } = useUILabels();
   const navigate = useNavigate();
   const [kpi, setKpi] = useState<KPIData | null>(null);
   const [charts, setCharts] = useState<ChartsData | null>(null);
@@ -1502,7 +1504,7 @@ export default function Dashboard() {
                       <th className="db-num">Boxes</th>
                       <th className="db-num">Ltrs</th>
                       <th className="db-num">Total Ltrs</th>
-                      <th className="db-num">Price List (Basic)</th>
+                      <th className="db-num">{t("price_list", "Price List (Basic)")}</th>
                       <th className="db-num">Basic Price</th>
                       <th className="db-num">Tax %</th>
                       <th className="db-num">Amount</th>

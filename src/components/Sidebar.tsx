@@ -34,6 +34,7 @@ import {
 import { getCurrentUser } from "../services/authService";
 import api from "../services/api";
 import { webDeviceService } from "../services/webDeviceService";
+import { loadUILabels } from "../services/uiConfig";
 import NotificationToaster, { showToast } from "./NotificationToaster";
 import {
   initNotificationBus,
@@ -314,6 +315,10 @@ export default function Sidebar({ children }: SidebarProps) {
     // restored session). Register/refresh this browser in the background — a
     // no-op if it already succeeded, so route changes don't re-POST.
     void webDeviceService.onAuthenticated("startup");
+
+    // Load dynamic UI labels once per authenticated session (covers a page
+    // reload / restored session where Login didn't run). De-duped internally.
+    void loadUILabels();
 
     initNotificationBus();
     initNotificationSound();
@@ -697,6 +702,18 @@ export default function Sidebar({ children }: SidebarProps) {
               <Link to="/Sales_Quotation" onClick={closeSidebar}>
                 <SidebarIcon><HiReceiptPercent /></SidebarIcon>
                 Sales Quotation
+              </Link>
+            </li>
+          )}
+
+          {/* Settings — admin-only configuration screens. */}
+          {isAdmin && <li className="sidebar-section">Settings</li>}
+
+          {isAdmin && (
+            <li className={location.pathname === "/UI_Labels" ? "active" : ""}>
+              <Link to="/UI_Labels" onClick={closeSidebar}>
+                <SidebarIcon><HiTag /></SidebarIcon>
+                UI Labels
               </Link>
             </li>
           )}

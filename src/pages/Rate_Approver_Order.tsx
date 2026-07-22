@@ -11,6 +11,7 @@ import { exportToExcel } from "../utils/excelExport";
 import "../styles/Auditor_Order.css";
 import { useLocation, useNavigate } from "react-router-dom";
 import { sortOrders } from "../utils/orderHistory";
+import { useUILabels } from "../services/uiConfig";
 import ItemSection from "../components/order-items/ItemSection";
 import PartyHeader from "../components/order-items/PartyHeader";
 import {
@@ -38,6 +39,7 @@ const formatCreatedDateTime = (value?: string | null) => {
 };
 
 export default function RateApproverOrders() {
+  const { t } = useUILabels();
   const location = useLocation();
   const navigate = useNavigate();
   const [orders, setOrders] = useState<Order[]>([]);
@@ -481,7 +483,7 @@ export default function RateApproverOrders() {
                     <th>Boxes</th>
                     <th>Ltrs</th>
                     <th>Total Ltrs</th>
-                    <th>Price List (Basic)</th>
+                    <th>{t("price_list", "Price List (Basic)")}</th>
                     <th>Basic Price</th>
                     <th>Tax %</th>
                     <th style={{ textAlign: "right" }}>Amount</th>

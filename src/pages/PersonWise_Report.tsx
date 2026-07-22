@@ -5,6 +5,7 @@ import type { Order, OrderItem } from "../services/ordersService";
 import { loadManagerOrders } from "../utils/orderHistory";
 import { formatOrderCreatedAt, getOrderItemSchemeNames, getOrderItemSchemes, getOrderItemSchemeQtyText, getOrderItemTotalLtrs, ordersService } from "../services/ordersService";
 import { startExcelExport, exportDateStamp } from "../utils/excelExport";
+import { useUILabels } from "../services/uiConfig";
 import "../styles/Report.css";
 import ItemSection from "../components/order-items/ItemSection";
 import PartyHeader from "../components/order-items/PartyHeader";
@@ -26,6 +27,7 @@ const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 1)
   .split("T")[0];
 
 export default function PersonWise_Report() {
+  const { t } = useUILabels();
   const [users, setUsers] = useState<User[]>([]);
   const [mainGroup, setMainGroup] = useState<{ id: number; name: string }[]>([]);
   const [selectedGroups, setSelectedGroups] = useState<number[]>([]);
@@ -631,7 +633,7 @@ export default function PersonWise_Report() {
                     <th>Scheme</th><th>Scheme Qty</th><th>Qty</th><th>Pcs</th><th>Boxes</th><th>Ltrs</th>
                     {/* <th>Scheme Ltrs</th>*/}
                     <th>Total Ltrs</th> 
-                    <th>Price List (Basic)</th><th>Basic Price</th><th>Tax %</th>
+                    <th>{t("price_list", "Price List (Basic)")}</th><th>Basic Price</th><th>Tax %</th>
                     <th style={{textAlign:'right'}}>Amount</th>
                   </tr>
                 </thead>

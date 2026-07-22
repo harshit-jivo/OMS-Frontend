@@ -11,6 +11,7 @@ import {
   LuTag,
 } from "react-icons/lu";
 import { getOrderItemSchemes, type OrderItem } from "../../services/ordersService";
+import { useUILabels } from "../../services/uiConfig";
 import Metric from "./Metric";
 import MetaChip from "./MetaChip";
 import { formatCurrency, getCategoryIcon, titleCase, varietyTone } from "./helpers";
@@ -34,6 +35,7 @@ const PriceMetric = memo(function PriceMetric({ label, value, highlight }: Price
 const toNumber = (value: unknown) => Number(value ?? 0);
 
 function ItemCard({ item }: { item: OrderItem }) {
+  const { t } = useUILabels();
   const [schemeOpen, setSchemeOpen] = useState(false);
 
   const CategoryIcon = getCategoryIcon(item);
@@ -90,7 +92,7 @@ function ItemCard({ item }: { item: OrderItem }) {
       {/* ── Pricing ── */}
       <div className="isec-card__pricing">
         <PriceMetric label="Basic Price" value={formatCurrency(item.basic_price)} />
-        <PriceMetric label="Price List" value={formatCurrency(item.price_list_basic)} />
+        <PriceMetric label={t("price_list", "Price List")} value={formatCurrency(item.price_list_basic)} />
         <PriceMetric label="GST" value={`${toNumber(item.tax_rate)}%`} />
         <PriceMetric label="Total" value={formatCurrency(item.total)} highlight />
       </div>
