@@ -95,6 +95,21 @@ const STATUS_FILTERS: Array<{ key: InvoiceStatus | "ALL"; label: string }> = [
 // Human-readable label for a status (e.g. POSTED_TO_SAP -> "POSTED TO SAP").
 const statusLabel = (status: InvoiceStatus) => status.replace(/_/g, " ");
 
+// Per-tab count map used for the number badges on the filter tabs. "ALL" holds
+// the grand total across every status.
+type StatusCounts = Record<InvoiceStatus | "ALL", number>;
+
+const createEmptyCounts = (): StatusCounts => ({
+  PENDING: 0,
+  APPROVED: 0,
+  POSTED_TO_SAP: 0,
+  REJECTED: 0,
+  EDITED: 0,
+  ERROR: 0,
+  CL_RAISED: 0,
+  ALL: 0,
+});
+
 const formatAmount = (value: unknown) => {
   const amount = toNumber(value);
   return `₹${amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -235,6 +250,7 @@ const updateInvoiceStatus = (
 export default function InvoiceReview() {
   const [statusFilter, setStatusFilter] = useState<InvoiceStatus | "ALL">("PENDING");
   const [records, setRecords] = useState<InvoiceRecord[]>([]);
+  const [counts, setCounts] = useState<StatusCounts>(createEmptyCounts);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [selected, setSelected] = useState<InvoiceRecord | null>(null);
@@ -274,6 +290,24 @@ export default function InvoiceReview() {
       )
     : STATUS_FILTERS;
 
+  // Tally the number of invoices per status for the tab badges. The tab list is
+  // server-filtered, so `records` only ever holds the active tab; we fetch the
+  // full unfiltered list once and count each status client-side.
+  const loadCounts = useCallback(async () => {
+    try {
+      const data = await apiFetch<unknown>(`/api/invoice/all/`);
+      const all = extractRecords(data);
+      const next = createEmptyCounts();
+      all.forEach((record) => {
+        next[normalizeStatus(record.status)] += 1;
+      });
+      next.ALL = all.length;
+      setCounts(next);
+    } catch (err) {
+      console.error(err);
+    }
+  }, []);
+
   const loadInvoices = useCallback(async () => {
     setLoading(true);
     setError("");
@@ -288,7 +322,9 @@ export default function InvoiceReview() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter]);
+    // Keep the tab badges in sync with every reload (tab switch or post-action).
+    void loadCounts();
+  }, [statusFilter, loadCounts]);
 
   useEffect(() => {
     loadInvoices();
@@ -606,16 +642,22 @@ export default function InvoiceReview() {
       </header>
 
       <nav className="ir-filters" aria-label="Filter invoices by status">
-        {visibleFilters.map((filter) => (
-          <button
-            key={filter.key}
-            type="button"
-            className={`ir-filter${statusFilter === filter.key ? " is-active" : ""}`}
-            onClick={() => setStatusFilter(filter.key)}
-          >
-            {filter.label}
-          </button>
-        ))}
+        {visibleFilters.map((filter) => {
+          const count = counts[filter.key] ?? 0;
+          return (
+            <button
+              key={filter.key}
+              type="button"
+              className={`ir-filter${statusFilter === filter.key ? " is-active" : ""}`}
+              onClick={() => setStatusFilter(filter.key)}
+            >
+              {filter.label}
+              {count > 0 && (
+                <span className="ir-filter-badge">{count > 99 ? "99+" : count}</span>
+              )}
+            </button>
+          );
+        })}
       </nav>
 
       {actionMessage && <div className="ir-banner ir-banner-success">{actionMessage}</div>}

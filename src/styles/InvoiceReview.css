@@ -37,6 +37,9 @@
 }
 
 .ir-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   border: 1px solid #e2e8f0;
   background: #fff;
   color: #475569;
@@ -46,6 +49,28 @@
   font-weight: 600;
   cursor: pointer;
   transition: all 0.15s ease;
+}
+
+/* Number badge sitting inline inside the tab header, after the label. */
+.ir-filter-badge {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #eef2f7;
+  color: #475569;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.ir-filter.is-active .ir-filter-badge {
+  /* Legible against the dark active tab. */
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
 }
 
 .ir-filter:hover {
