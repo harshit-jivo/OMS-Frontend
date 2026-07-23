@@ -498,6 +498,16 @@
   background: var(--warn-strong);
 }
 
+/* Raise-credit-limit action shown only on credit-limit failures. */
+.mcl-btn-cl {
+  background: #d97706;
+  color: #fff;
+}
+
+.mcl-btn-cl:hover {
+  background: #b45309;
+}
+
 .mcl-btn-ghost {
   background: #fff;
   border-color: var(--line);

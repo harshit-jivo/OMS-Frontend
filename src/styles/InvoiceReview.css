@@ -161,7 +161,7 @@
 .ir-row-actions {
   display: flex;
   gap: 8px;
-  justify-content: flex-end;
+  justify-content: flex-start;
 }
 
 /* Badges */
@@ -303,6 +303,7 @@
   font-style: italic;
   color: #a16207;
   white-space: nowrap;
+  display: none;
 }
 
 .ir-btn-sap {
@@ -747,6 +748,7 @@
   font-size: 0.82rem;
   font-weight: 600;
   color: #475569;
+  display: none;
 }
 
 .ir-raw pre {

@@ -274,6 +274,9 @@ export default function InvoiceReview() {
   const [clFlowStages, setClFlowStages] = useState<CreditLimitStage[]>([]);
   const [clFlowLoading, setClFlowLoading] = useState(false);
   const [clFlowError, setClFlowError] = useState("");
+  // The record currently being posted to SAP, kept so a credit-limit failure can
+  // offer "Raise CL" for the right invoice straight from the loader modal.
+  const [postingRecord, setPostingRecord] = useState<InvoiceRecord | null>(null);
   const sapPost = useSapPost();
   const navigate = useNavigate();
 
@@ -553,6 +556,7 @@ export default function InvoiceReview() {
     setActionError("");
     setActionMessage("");
     setSelected(null);
+    setPostingRecord(record);
 
     const payload = parsePayload(record.invoice_payload);
     sapPost.run({
@@ -591,8 +595,26 @@ export default function InvoiceReview() {
   const closeSapLoader = () => {
     const settled = sapPost.state.status === "success" || sapPost.state.status === "error";
     sapPost.close();
+    setPostingRecord(null);
     if (settled) loadInvoices();
   };
+
+  // The SAP post failed on a credit-limit check: close the loader and open the
+  // credit-limit request form for the invoice that was being posted.
+  const raiseClFromLoader = () => {
+    const record = postingRecord;
+    if (!record) return;
+    closeSapLoader();
+    void openCreditLimitRequest(record);
+  };
+
+  // True when the current SAP failure is specifically about the credit limit, so
+  // the loader can offer a "Raise CL" shortcut.
+  const sapErrorIsCreditLimit =
+    sapPost.state.status === "error" &&
+    /credit\s*limit/i.test(
+      String(sapPost.state.rawError || sapPost.state.errorMessage || ""),
+    );
 
   const openHistory = async (record: InvoiceRecord) => {
     // The history endpoint is keyed by the invoice-log id. On a list row that is
@@ -680,7 +702,7 @@ export default function InvoiceReview() {
                   <th>SO #</th>
                   <th>Party</th>
                   <th className="ir-num">Amount</th>
-                  <th>Status</th>
+                  {/* <th>Status</th> */}
                   <th>Submitted</th>
                   <th className="ir-actions-col">Actions</th>
                 </tr>
@@ -694,9 +716,9 @@ export default function InvoiceReview() {
                       <td>{record.so_number || "—"}</td>
                       <td>{record.party_name || "—"}</td>
                       <td className="ir-num">{formatAmount(record.total_amount)}</td>
-                      <td>
+                      {/* <td>
                         <span className={`ir-badge ir-badge-${status.toLowerCase()}`}>{statusLabel(status)}</span>
-                      </td>
+                      </td> */}
                       <td>{formatDateTime(record.created_at)}</td>
                       <td className="ir-actions-col">
                         <div className="ir-row-actions">
@@ -1276,7 +1298,16 @@ export default function InvoiceReview() {
 
       {/* Mission Control loader — drives the live post-to-SAP transaction and
           shows success or the translated SAP error (with retry) in place. */}
-      <MissionControlLoader state={sapPost.state} onClose={closeSapLoader} onRetry={sapPost.retry} />
+      <MissionControlLoader
+        state={sapPost.state}
+        onClose={closeSapLoader}
+        onRetry={sapPost.retry}
+        onRaiseCl={
+          canPostToSap && sapErrorIsCreditLimit && postingRecord
+            ? raiseClFromLoader
+            : undefined
+        }
+      />
     </div>
   );
 }
