@@ -1,5 +1,5 @@
 import { useCallback, useReducer, useRef } from "react";
-import { apiFetch } from "./useSalesInvoice";
+import { apiFetch, serviceLayerBranch, withBranch } from "./useSalesInvoice";
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Stored payload → SAP invoice
@@ -155,6 +155,8 @@ const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, 
 export type SapRunInput = {
   payload: SapInvoicePayload;
   doc: SapDoc;
+  /** Branch as stored on the log (OIL | BEVERAGE); mapped to the service-layer value. */
+  branch?: string;
   /** Runs once per attempt (including retries) after SAP confirms the invoice. */
   onSuccess?: (invoiceNumber: string) => void | Promise<void>;
   /** Runs once per attempt (including retries) when the post fails. */
@@ -215,14 +217,15 @@ export function useSapPost() {
 
       // 3. Submit
       goto("post");
-      log("POST /api/service-layer/invoice/ → submitting document…");
+      const invoiceUrl = withBranch("/api/service-layer/invoice/", serviceLayerBranch(input.branch));
+      log(`POST ${invoiceUrl} → submitting document…`);
       await wait(400);
       if (!alive()) return;
 
       // 4. SAP processing (this stage owns the long real await)
       goto("sap");
       log("Awaiting SAP — posting the invoice (this can take 10–30s)…", "warn");
-      const result = await apiFetch<{ error?: unknown }>("/api/service-layer/invoice/", {
+      const result = await apiFetch<{ error?: unknown }>(invoiceUrl, {
         method: "POST",
         body: JSON.stringify(input.payload),
       });

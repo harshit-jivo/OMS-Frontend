@@ -34,6 +34,7 @@ export interface Stage {
 export interface Vendor {
   card_code: string;
   card_name: string;
+  card_type?: string;   // 'S' = vendor/supplier, 'C' = customer
   gstin: string;
   state: string;
 }
@@ -106,6 +107,7 @@ export interface Invoice {
   status: "IN_PROGRESS" | "COMPLETED";
   current_stage_entered_at: string;
   is_locked: boolean;
+  rejection_pending: boolean;
   days_at_stage: string;
   is_overdue: boolean;
   editable: boolean;
@@ -224,6 +226,11 @@ export const trackerService = {
   async updateInvoice(id: number, payload: Partial<InvoiceWrite>): Promise<Invoice> {
     const { data } = await api.patch(`/tracker/invoices/${id}/`, payload);
     return data;
+  },
+
+  // Soft-delete an entry-stage invoice (row is kept in the DB, just hidden).
+  async deleteInvoice(id: number): Promise<void> {
+    await api.delete(`/tracker/invoices/${id}/`);
   },
 
   async myQueue(): Promise<MyQueue> {
@@ -440,6 +447,8 @@ export interface StuckAlert {
   threshold_days: number;
   over_by: number;
   is_active: boolean;
+  last_notified_at: string | null;
+  notified: { user: string; email: string; sent_at: string }[];
   created_at: string;
   updated_at: string;
 }

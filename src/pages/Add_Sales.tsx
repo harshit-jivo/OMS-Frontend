@@ -202,9 +202,10 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
   const isFocOrder = isFocMode || editOrderIsFoc;
   const canEditPoNumber =
     isBillingUser && (!isEditMode || locationState?.allowPoNumber === true);
-  // The guided 4-step wizard is only used for the standard create flow.
-  // Edit, Duplicate and FOC modes keep the original single-page form.
-  const useWizard = mode === "create" && !isFocMode && !isLoadingFromOrder;
+  // The guided 4-step wizard is used for both the standard create flow and the
+  // FOC create flow, so Add Sales and Add FOC share the same UI.
+  // Edit and Duplicate modes keep the original single-page form.
+  const useWizard = mode === "create" && !isLoadingFromOrder;
 
   // Use Effects
   useEffect(() => {
