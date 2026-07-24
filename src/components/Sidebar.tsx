@@ -788,7 +788,7 @@ export default function Sidebar({ children }: SidebarProps) {
             </li>
           )}
 
-          {canSee("Einvoice") && (
+          {(canSee("Einvoice") || userRole?.toLowerCase() === "billing") && (
             <li className={location.pathname === "/Einvoice" ? "active" : ""}>
               <Link to="/Einvoice" onClick={closeSidebar}>
                 <SidebarIcon><HiDocumentCheck /></SidebarIcon>
