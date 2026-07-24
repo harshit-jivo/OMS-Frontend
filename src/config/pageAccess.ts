@@ -28,11 +28,8 @@ export const TRACKER_ROLE_LABELS: Record<string, string> = {
   tracker_user: "Tracker User",
 };
 
-<<<<<<< HEAD
-=======
 const ALL_TRACKER_PAGES = Object.keys(TRACKER_PAGES);
 
->>>>>>> test
 export function normalizeRole(role?: string | null): string {
   return (role || "").toLowerCase().trim();
 }
@@ -42,19 +39,11 @@ export function isTrackerRole(role?: string | null): boolean {
   return normalizeRole(role) in TRACKER_ROLE_PAGES;
 }
 
-<<<<<<< HEAD
-/** The set of tracker page keys a user may see. Purely role-driven — only the
- *  three tracker sub-roles get tracker pages; OMS admin/other roles see none.
- *  (`_isAdmin` kept for call-site compatibility; intentionally unused.) */
-export function trackerPagesFor(role?: string | null, _isAdmin = false): Set<string> {
-  return new Set(TRACKER_ROLE_PAGES[normalizeRole(role)] || []);
-=======
 /** The set of tracker page keys a user may see. Superusers / OMS admins see all. */
 export function trackerPagesFor(role?: string | null, isAdmin = false): Set<string> {
   const r = normalizeRole(role);
   if (isAdmin || r === "admin") return new Set(ALL_TRACKER_PAGES);
   return new Set(TRACKER_ROLE_PAGES[r] || []);
->>>>>>> test
 }
 
 // Where a tracker user lands after login, by priority of what they can access.
@@ -66,8 +55,6 @@ export function trackerLandingPath(pages: Set<string>): string | null {
   }
   return null;
 }
-<<<<<<< HEAD
-=======
 
 /**
  * The landing path for ANY role, after a fresh login or a restored session:
@@ -87,4 +74,3 @@ export function landingPathFor(role?: string | null): string {
   if (normalizeRole(role) === "legal") return "/Label_Checker";
   return "/Dashboard";
 }
->>>>>>> test

@@ -390,60 +390,6 @@ export default function View_Orders() {
     pageNumber * itemsPerPage,
   );
 
-<<<<<<< HEAD
-  const downloadExcel = async (order: Order) => {
-    let excelData = [];
-
-    // List rows now load as summaries (no line items), so fetch full details
-    // on demand before exporting. Detail-view orders already carry their items.
-    let exportOrder = order;
-    if (!exportOrder.items || exportOrder.items.length === 0) {
-      try {
-        exportOrder = await ordersService.getOrderDetails(order.id);
-      } catch (error) {
-        console.log("Error fetching order details for export:", error);
-      }
-    }
-
-    // If items exist → flatten data
-    if (exportOrder.items && exportOrder.items.length > 0) {
-      excelData = exportOrder.items.map((item: OrderItem) => ({
-        "Order Number": exportOrder.order_number,
-        "Card Code": exportOrder.card_code,
-        "Card Name": exportOrder.card_name,
-        "Delivery Date": exportOrder.delivery_date,
-        "Status": exportOrder.status_display,
-
-        "Bill To": exportOrder.bill_to_address,
-        "Ship To": exportOrder.ship_to_address,
-
-        "Item Code": item.item_code,
-        "Item Name": item.item_name,
-        "Scheme": getOrderItemSchemeNames(item),
-        "Scheme Qty": getOrderItemSchemeQtyText(item),
-        // "Scheme Ltrs": (item as any).scheme_ltrs || "",
-        "Qty": item.qty,
-        "Boxes": item.boxes,
-        "Liters": item.ltrs,
-        "Total Ltrs": getOrderItemTotalLtrs(item),
-        "Price List (Basic)": item.price_list_basic,
-        "Basic Price": item.basic_price,
-        "Total Amount": item.total,
-      }));
-    } else {
-      // If no items → still export order
-      excelData.push({
-        "Order Number": exportOrder.order_number,
-        "Card Code": exportOrder.card_code,
-        "Card Name": exportOrder.card_name,
-        "Delivery Date": exportOrder.delivery_date,
-        "Status": exportOrder.status_display,
-        "Bill To": exportOrder.bill_to_address,
-        "Ship To": exportOrder.ship_to_address,
-        "Price List (Basic)": "",
-        "Basic Price": "",
-      });
-=======
   // Raw values only — exportToExcel infers the Excel type per column, so dates
   // stay dates and money stays numeric and summable.
   const buildOrderRows = (order: Order): Record<string, unknown>[] => {
@@ -462,7 +408,6 @@ export default function View_Orders() {
           "Basic Price": "",
         },
       ];
->>>>>>> test
     }
 
     return order.items.map((item: OrderItem) => ({
@@ -492,15 +437,6 @@ export default function View_Orders() {
       fileName: `Order_${order.order_number}.xlsx`,
       sheetName: "Order Details",
     });
-<<<<<<< HEAD
-
-    const file = new Blob([excelBuffer], {
-      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    });
-
-    saveAs(file, `Order_${exportOrder.order_number}.xlsx`);
-=======
->>>>>>> test
   };
   return (
     <div className="vo-page">

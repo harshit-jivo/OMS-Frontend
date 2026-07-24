@@ -32,8 +32,6 @@ import {
 } from "react-icons/hi2";
 import { getCurrentUser } from "../services/authService";
 import api from "../services/api";
-<<<<<<< HEAD
-=======
 import { webDeviceService } from "../services/webDeviceService";
 import { loadUILabels } from "../services/uiConfig";
 import NotificationToaster, { showToast } from "./NotificationToaster";
@@ -62,7 +60,6 @@ import {
   shouldShowPrompt,
 } from "../utils/notificationPermission";
 import NotificationPermissionModal from "./NotificationPermissionModal";
->>>>>>> test
 import { isTrackerRole, trackerPagesFor } from "../config/pageAccess";
 import "./Sidebar.css";
 

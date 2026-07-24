@@ -62,7 +62,6 @@ function ItemCard({ item }: { item: OrderItem }) {
           </div>
         </div>
 
-<<<<<<< HEAD
         {hasLastPurchasePrice && (
           <div className="isec-card__lpp" title="Last purchase price for this item">
             <span className="isec-card__lpp-label">Last Purchase</span>
@@ -71,10 +70,8 @@ function ItemCard({ item }: { item: OrderItem }) {
         )}
 
         {/* <div className="isec-card__actions">
-=======
         {/* Disabled. To re-enable, restore the `LuEllipsisVertical` import.
         <div className="isec-card__actions">
->>>>>>> test
           <span className="isec-card__chip" title={item.item_code}>
             {item.item_code}
           </span>
