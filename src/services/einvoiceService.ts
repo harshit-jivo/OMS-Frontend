@@ -52,6 +52,8 @@ export interface InvoiceListItem {
   doctotal: number;
   irn: string | null;
   irn_status: "GENERATED" | "FAILED" | "SKIPPED" | null;
+  /** Where the IRN was found: OMS (Django), @UTL_MDEXTH (SAP add-on), or OMS_IRN_LOG. */
+  irn_source: "OMS" | "@UTL_MDEXTH" | "OMS_IRN_LOG" | null;
   last_error: string | null;
 }
 
