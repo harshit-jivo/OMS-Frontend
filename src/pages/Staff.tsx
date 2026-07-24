@@ -3,6 +3,7 @@ import type { ChangeEvent, FormEvent } from "react";
 import { ordersService } from "../services/ordersService";
 import type { Product } from "../services/ordersService";
 import { userService } from "../services/userService";
+import { useUILabels } from "../services/uiConfig";
 import "../styles/Add_Sales.css";
 
 
@@ -64,6 +65,7 @@ const getCategoryText = (value: any) => {
 const normalizeCategory = (value: any) => getCategoryText(value).toUpperCase();
 
 export default function Staff() {
+  const { t } = useUILabels();
   const typeDropdownRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const itemDropdownRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const typeTriggerRefs = useRef<Record<number, HTMLButtonElement | null>>({});
@@ -526,7 +528,7 @@ export default function Staff() {
                 <th>Boxes</th>
                 <th>Qty</th>
                 <th>Ltrs</th>
-                <th>Price List (Basic)</th>
+                <th>{t("price_list", "Price List (Basic)")}</th>
                 <th>Tax %</th>
                 <th>Amount</th>
                 <th>X</th>

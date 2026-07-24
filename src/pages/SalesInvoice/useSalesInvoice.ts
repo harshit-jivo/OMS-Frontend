@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   buildInvoicePayload,
   calculateTotals,
@@ -14,6 +14,7 @@ import {
   type SalespersonDetails,
   type SelectedLine,
 } from "./salesInvoice.utils";
+import api, { API_BASE_URL } from "../../services/api";
 
 export type SalesOrderLine = {
   LineNum: number;
@@ -62,8 +63,11 @@ export type NextDocNumber = {
 type ApiMessageResponse = {
   message?: unknown;
   detail?: unknown;
+  details?: unknown;
   error?: unknown;
   errors?: unknown;
+  // SAP Service Layer nests the human text as message: { lang, value }.
+  value?: unknown;
   data?: unknown;
   result?: unknown;
   DocEntry?: unknown;
@@ -75,46 +79,204 @@ const createFreightRow = (): FreightRow => ({ expenseCode: "", expenseName: "", 
 const linesToRecord = (lines: SelectedLine[]) =>
   Object.fromEntries(lines.map((line) => [lineKey(line.DocEntry, line.LineNum), line]));
 
-const apiBaseUrl = String(
-  import.meta.env.VITE_BASE_URL
-    || import.meta.env.VITE_BACKEND_BASE_URL
-    || import.meta.env.VITE_API_BASE_URL
-    || "",
-)
-  .trim()
-  .replace(/\/+$/, "");
-
 export const resolveApiUrl = (url: string) => {
   if (/^https?:\/\//i.test(url)) return url;
 
   const normalizedUrl = url.startsWith("/") ? url : `/${url}`;
-  if (!apiBaseUrl) return normalizedUrl;
-
-  const path = /\/api$/i.test(apiBaseUrl)
+  const path = /\/api$/i.test(API_BASE_URL)
     ? normalizedUrl.replace(/^\/api(?=\/|$)/i, "")
     : normalizedUrl;
 
-  return `${apiBaseUrl}${path}`;
+  return `${API_BASE_URL}${path}`;
 };
 
-export const apiFetch = async <T,>(url: string, init?: RequestInit): Promise<T> => {
-  const token = localStorage.getItem("access");
-  const response = await fetch(resolveApiUrl(url), {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(init?.headers || {}),
-    },
-  });
+// Map an app URL to the shared axios instance. Absolute URLs bypass Axios'
+// baseURL so sale-invoice calls use the exact same configured API endpoint.
+const toAxiosRequest = (url: string): { url: string; baseURL?: string } => {
+  const resolved = resolveApiUrl(url);
+  if (/^https?:\/\//i.test(resolved)) return { url: resolved, baseURL: "" };
+  return { url: resolved.replace(/^\/api(?=\/|$)/i, "") || "/" };
+};
 
-  if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || `Request failed with ${response.status}`);
+// Best-effort stringify that never throws (circular refs fall back to String()).
+const safeJsonStringify = (value: unknown): string => {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
   }
+};
 
-  if (response.status === 204) return undefined as T;
-  return response.json() as Promise<T>;
+// Error thrown by the api* helpers. Carries the raw response body so callers
+// that need to inspect the payload (e.g. SAP error-code detection) aren't
+// limited to the flattened message string.
+export class RequestError extends Error {
+  status?: number;
+  data?: unknown;
+}
+
+// Normalise an axios error into the same Error(message) contract the previous
+// fetch()-based helpers threw (never logs tokens).
+const toRequestError = (error: any): RequestError => {
+  const status = error?.response?.status;
+  const data = error?.response?.data;
+  let message: string | undefined;
+  if (typeof data === "string") message = data;
+  else if (typeof data?.detail === "string" && data.detail) message = data.detail;
+  else if (typeof data?.message === "string" && data.message) message = data.message;
+  else if (data && typeof data === "object") {
+    message = Object.entries(data)
+      .map(([field, value]) => {
+        const text = Array.isArray(value)
+          ? value.join(", ")
+          : value !== null && typeof value === "object"
+            ? safeJsonStringify(value)
+            : String(value);
+        return `${field}: ${text}`;
+      })
+      .join(" ");
+  }
+  const requestError = new RequestError(
+    message || error?.message || `Request failed with ${status ?? ""}`.trim(),
+  );
+  requestError.status = status;
+  requestError.data = data;
+  return requestError;
+};
+
+/**
+ * JSON request through the ONE shared axios instance (services/api.ts), so it
+ * automatically gets the Authorization header, JWT refresh + retry, and central
+ * error handling. Signature/behaviour preserved: 204 → undefined, otherwise the
+ * parsed body; throws Error(message) on failure.
+ */
+export const apiFetch = async <T,>(url: string, init?: RequestInit): Promise<T> => {
+  const { url: axiosUrl, baseURL } = toAxiosRequest(url);
+  try {
+    const response = await api.request<T>({
+      url: axiosUrl,
+      method: (init?.method || "GET") as any,
+      ...(baseURL !== undefined ? { baseURL } : {}),
+      // Pass the already-serialized JSON body straight through.
+      ...(init?.body !== undefined ? { data: init.body } : {}),
+      ...(init?.headers ? { headers: init.headers as Record<string, string> } : {}),
+    });
+    if (response.status === 204) return undefined as T;
+    return response.data as T;
+  } catch (error) {
+    throw toRequestError(error);
+  }
+};
+
+/**
+ * Multipart upload (FormData) through the shared axios instance. Returns the
+ * parsed body, or null on 204. Setting Content-Type to multipart/form-data lets
+ * axios' browser adapter attach the correct boundary.
+ */
+export const apiUpload = async <T,>(
+  url: string,
+  formData: FormData,
+  method: "POST" | "PUT" | "PATCH" = "POST",
+): Promise<T | null> => {
+  const { url: axiosUrl, baseURL } = toAxiosRequest(url);
+  try {
+    const response = await api.request<T>({
+      url: axiosUrl,
+      method,
+      data: formData,
+      ...(baseURL !== undefined ? { baseURL } : {}),
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+    if (response.status === 204) return null;
+    return response.data as T;
+  } catch (error) {
+    throw toRequestError(error);
+  }
+};
+
+/** DELETE through the shared axios instance. Returns null on 204, else body. */
+export const apiDelete = async <T,>(url: string): Promise<T | null> => {
+  const { url: axiosUrl, baseURL } = toAxiosRequest(url);
+  try {
+    const response = await api.request<T>({
+      url: axiosUrl,
+      method: "DELETE",
+      ...(baseURL !== undefined ? { baseURL } : {}),
+    });
+    if (response.status === 204) return null;
+    return response.data as T;
+  } catch (error) {
+    throw toRequestError(error);
+  }
+};
+
+export const getCurrentUserId = (): number | null => Number(localStorage.getItem("user_id")) || null;
+
+// The Sales Invoice flow runs against exactly one company branch at a time.
+// Every /api/hana/ endpoint requires it as a query param (OIL | BEVERAGE).
+export type InvoiceBranch = "OIL" | "BEVERAGE";
+
+export const withBranch = (url: string, branch: string) =>
+  `${url}${url.includes("?") ? "&" : "?"}branch=${encodeURIComponent(branch)}`;
+
+const normalizeBranch = (value: unknown): InvoiceBranch =>
+  String(value || "").trim().toUpperCase() === "BEVERAGE" ? "BEVERAGE" : "OIL";
+
+// The /api/hana/ endpoints use the branch as stored (OIL | BEVERAGE), but the
+// /api/service-layer/ endpoints expect the plural BEVERAGES for beverages.
+// Map here so callers can pass the value stored on the log/wizard.
+export const serviceLayerBranch = (value: unknown): "OIL" | "BEVERAGES" =>
+  normalizeBranch(value) === "BEVERAGE" ? "BEVERAGES" : "OIL";
+
+// Module-scoped mirror of the wizard's active branch so deeply nested pickers
+// (item picker, batch picker, tabs) can build /api/hana/ URLs without the
+// branch being threaded through every prop chain. Only one Sales Invoice
+// wizard is ever mounted at a time.
+let activeBranch: InvoiceBranch = "OIL";
+
+export const hanaUrl = (url: string) => withBranch(url, activeBranch);
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Edit-and-resubmit handoff
+ *
+ * When a rejected invoice is reopened from the Invoice Review page, its stored
+ * payload is stashed under this key and the wizard rebuilds its state from it:
+ * party → open orders → matching lines (with the payload quantities). Batches
+ * are deliberately NOT restored — the draft step re-runs auto-allocation
+ * against current stock, which is the whole point of editing here.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+export const EDIT_RESTORE_STORAGE_KEY = "sales_invoice_edit_restore";
+
+export type EditRestorePayload = {
+  CardCode?: string;
+  DocumentLines?: Array<{
+    BaseEntry?: number | string;
+    BaseLine?: number | string;
+    ItemCode?: string;
+    Quantity?: number | string;
+  }>;
+  DocumentAdditionalExpenses?: Array<{
+    ExpenseCode?: number | string;
+    LineTotal?: number | string;
+    VatGroup?: string;
+  }>;
+  [key: string]: unknown;
+};
+
+export type EditRestore = { logId?: number | string; branch?: string; payload: EditRestorePayload };
+
+const readEditRestore = (): EditRestore | null => {
+  try {
+    const raw = sessionStorage.getItem(EDIT_RESTORE_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as EditRestore;
+    return parsed && typeof parsed === "object" && parsed.payload && typeof parsed.payload === "object"
+      ? parsed
+      : null;
+  } catch {
+    return null;
+  }
 };
 
 const pick = <T,>(source: Record<string, unknown>, keys: string[], fallback: T): T => {
@@ -146,14 +308,25 @@ const extractApiMessage = (value: unknown, fallback: string): string => {
 
   if (typeof parsed === "object") {
     const source = parsed as ApiMessageResponse;
-    const directMessage = source.message ?? source.detail ?? source.error ?? source.errors;
-    if (typeof directMessage === "string" && directMessage.trim()) return directMessage.trim();
-    if (directMessage && typeof directMessage === "object") return extractApiMessage(directMessage, fallback);
 
-    const nestedMessage = source.data ?? source.result;
-    if (nestedMessage) {
-      const extracted = extractApiMessage(nestedMessage, "");
-      if (extracted) return extracted;
+    // Direct human-readable text wins outright.
+    for (const candidate of [source.message, source.detail, source.value]) {
+      if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+    }
+
+    // Dig into nested wrappers for the most specific message. The top-level
+    // `error` is often just a generic label ("SAP Error") while the real text
+    // sits deeper, e.g. { error: "SAP Error", details: { error: { message } } }.
+    for (const nested of [source.message, source.detail, source.details, source.error, source.errors, source.data, source.result]) {
+      if (nested && typeof nested === "object") {
+        const extracted = extractApiMessage(nested, "");
+        if (extracted) return extracted;
+      }
+    }
+
+    // Generic string labels only as a last resort.
+    for (const candidate of [source.error, source.errors]) {
+      if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
     }
 
     const docNumber = source.DocNum ?? source.DocEntry;
@@ -300,6 +473,13 @@ const resolveDefaultAddress = (
 
 export function useSalesInvoice() {
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
+  // No branch selected yet → the wizard shows the branch gate and loads nothing.
+  const [branch, setBranch] = useState<InvoiceBranch | null>(null);
+
+  // Keep the module-scoped mirror (used by hanaUrl in nested pickers) in sync.
+  useEffect(() => {
+    if (branch) activeBranch = branch;
+  }, [branch]);
   const [parties, setParties] = useState<Party[]>([]);
   const [selectedParty, setSelectedParty] = useState<Party | null>(null);
   const [salesOrders, setSalesOrders] = useState<SalesOrder[]>([]);
@@ -321,14 +501,19 @@ export function useSalesInvoice() {
   const [draftError, setDraftError] = useState("");
   const [postError, setPostError] = useState("");
   const [postSuccess, setPostSuccess] = useState("");
+  const [postedDocNum, setPostedDocNum] = useState("");
 
+  // Customers, next doc number and freight masters are all branch-specific, so
+  // they load (and re-load) once a branch is selected.
   useEffect(() => {
+    if (!branch) return;
     const loadParties = async () => {
       setLoadingParties(true);
       setPartyError("");
+      setParties([]);
 
       try {
-        const data = await apiFetch<Party[]>("/api/hana/all-customers/");
+        const data = await apiFetch<Party[]>(withBranch("/api/hana/all-customers/", branch));
         setParties(Array.isArray(data) ? data : []);
       } catch (error) {
         console.error(error);
@@ -339,12 +524,13 @@ export function useSalesInvoice() {
     };
 
     loadParties();
-  }, []);
+  }, [branch]);
 
   useEffect(() => {
+    if (!branch) return;
     const loadNextDocNumber = async () => {
       try {
-        const data = await apiFetch<NextDocNumber[]>("/api/hana/next-doc-number/?doc_type=13");
+        const data = await apiFetch<NextDocNumber[]>(withBranch("/api/hana/next-doc-number/?doc_type=13", branch));
         const nextNumber = Array.isArray(data) ? data[0]?.NextNumber : "";
         setNextDocNumber(nextNumber === null || nextNumber === undefined ? "" : String(nextNumber));
       } catch (error) {
@@ -354,13 +540,14 @@ export function useSalesInvoice() {
     };
 
     loadNextDocNumber();
-  }, []);
+  }, [branch]);
 
   useEffect(() => {
+    if (!branch) return;
     const loadFreightOptions = async () => {
       try {
         const data = await apiFetch<FreightMaster[] | { data?: FreightMaster[]; results?: FreightMaster[] }>(
-          "/api/hana/freight-masters/",
+          withBranch("/api/hana/freight-masters/", branch),
         );
         const options = Array.isArray(data) ? data : data.data || data.results || [];
         setFreightOptions(options);
@@ -370,9 +557,10 @@ export function useSalesInvoice() {
     };
 
     loadFreightOptions();
-  }, []);
+  }, [branch]);
 
   const selectParty = useCallback(async (party: Party) => {
+    if (!branch) return [];
     setSelectedParty({
       CardCode: party.CardCode,
       CardName: party.CardName,
@@ -395,17 +583,20 @@ export function useSalesInvoice() {
 
     try {
       const data = await apiFetch<SalesOrder[] | { data?: SalesOrder[]; results?: SalesOrder[] }>(
-        `/api/hana/so/?card_code=${encodeURIComponent(party.CardCode)}`,
+        withBranch(`/api/hana/so/?card_code=${encodeURIComponent(party.CardCode)}`, branch),
       );
       const orders = Array.isArray(data) ? data : data.data || data.results || [];
-      setSalesOrders(orders.map(normalizeOrder));
+      const normalized = orders.map(normalizeOrder);
+      setSalesOrders(normalized);
+      return normalized;
     } catch (error) {
       console.error(error);
       setOrdersError("Unable to load open sales orders for this party.");
+      return [];
     } finally {
       setLoadingOrders(false);
     }
-  }, []);
+  }, [branch]);
 
   const changeParty = () => {
     setStep(1);
@@ -419,7 +610,25 @@ export function useSalesInvoice() {
     setShipToAddresses([]);
     setForm(emptyForm());
     setPostSuccess("");
+    setPostedDocNum("");
     setPostError("");
+  };
+
+  // Pick the company branch the invoice runs against. Everything downstream
+  // (customers, orders, prices, batches) is branch-specific, so choosing one
+  // resets the whole flow and reloads the masters.
+  const selectBranch = (next: InvoiceBranch) => {
+    if (next === branch) return;
+    setBranch(next);
+    setParties([]);
+    changeParty();
+  };
+
+  // Back to the branch gate (also clears any in-progress invoice).
+  const changeBranch = () => {
+    setBranch(null);
+    setParties([]);
+    changeParty();
   };
 
   const makeSelectedLine = (order: SalesOrder, line: SalesOrderLine): SelectedLine => {
@@ -585,13 +794,13 @@ export function useSalesInvoice() {
   );
 
   const loadPartyAddresses = useCallback(async () => {
-    if (!selectedParty) return false;
+    if (!selectedParty || !branch) return false;
     setLoadingDraftDetails(true);
     setDraftError("");
 
     try {
       const addressData = await apiFetch<PartyAddress[]>(
-        `/api/hana/address/?card_code=${encodeURIComponent(selectedParty.CardCode)}`,
+        withBranch(`/api/hana/address/?card_code=${encodeURIComponent(selectedParty.CardCode)}`, branch),
       );
       const addresses = Array.isArray(addressData) ? addressData : [];
       const billingAddresses = normalizeAddresses(addresses, "B");
@@ -621,19 +830,25 @@ export function useSalesInvoice() {
     } finally {
       setLoadingDraftDetails(false);
     }
-  }, [selectedParty]);
+  }, [branch, selectedParty]);
 
   const loadDraftDetails = useCallback(async () => {
-    if (!selectedParty || !firstSelectedLine) return false;
+    if (!selectedParty || !firstSelectedLine || !branch) return false;
     setLoadingDraftDetails(true);
     setDraftError("");
 
     try {
       const slpCode = firstSelectedLine.SlpCode ?? 0;
       const [customerData, salespersonData, addressData] = await Promise.all([
-        apiFetch<CustomerDetails[]>(`/api/hana/customer-details/?card_code=${encodeURIComponent(selectedParty.CardCode)}`),
-        apiFetch<SalespersonDetails[]>(`/api/hana/salesperson-details/?slp_code=${encodeURIComponent(String(slpCode))}`),
-        apiFetch<PartyAddress[]>(`/api/hana/address/?card_code=${encodeURIComponent(selectedParty.CardCode)}`),
+        apiFetch<CustomerDetails[]>(
+          withBranch(`/api/hana/customer-details/?card_code=${encodeURIComponent(selectedParty.CardCode)}`, branch),
+        ),
+        apiFetch<SalespersonDetails[]>(
+          withBranch(`/api/hana/salesperson-details/?slp_code=${encodeURIComponent(String(slpCode))}`, branch),
+        ),
+        apiFetch<PartyAddress[]>(
+          withBranch(`/api/hana/address/?card_code=${encodeURIComponent(selectedParty.CardCode)}`, branch),
+        ),
       ]);
       const customer = Array.isArray(customerData) ? customerData[0] || null : null;
       const salesperson = Array.isArray(salespersonData) ? salespersonData[0] || null : null;
@@ -675,7 +890,7 @@ export function useSalesInvoice() {
     } finally {
       setLoadingDraftDetails(false);
     }
-  }, [firstSelectedLine, selectedParty, selectedPayToCodes, selectedShipToCodes]);
+  }, [branch, firstSelectedLine, selectedParty, selectedPayToCodes, selectedShipToCodes]);
 
   const createInvoiceDraft = async () => {
     if (selectedLineList.length === 0) return;
@@ -706,6 +921,106 @@ export function useSalesInvoice() {
     return ok;
   };
 
+  /* ── Edit-and-resubmit restore ──────────────────────────────────────────
+   * A rejected invoice reopened from the Invoice Review page arrives via
+   * sessionStorage (EDIT_RESTORE_STORAGE_KEY). Phase 1 selects the party and
+   * rebuilds the selected lines from that party's live open orders using the
+   * payload quantities. Phase 2 runs on a later render (proceedToDraftFromItems
+   * needs the re-rendered selectedParty) and jumps to the draft step, where
+   * batch auto-allocation re-runs against current stock. */
+  const [editRestore] = useState<EditRestore | null>(() => readEditRestore());
+  const editRestoreStartedRef = useRef(false);
+  const [restoreStaged, setRestoreStaged] = useState<{ lines: SelectedLine[]; warning: string } | null>(null);
+
+  useEffect(() => {
+    if (!editRestore || editRestoreStartedRef.current) return;
+    // The reopened invoice dictates the branch — skip the branch gate and let
+    // the branch-scoped masters (parties etc.) load for it.
+    if (!branch) {
+      setBranch(normalizeBranch(editRestore.branch));
+      return;
+    }
+    if (loadingParties || parties.length === 0) return;
+    editRestoreStartedRef.current = true;
+    sessionStorage.removeItem(EDIT_RESTORE_STORAGE_KEY);
+
+    const payload = editRestore.payload;
+    const cardCode = String(payload.CardCode || "");
+    const party = parties.find((candidate) => candidate.CardCode === cardCode);
+    if (!party) {
+      setPartyError(
+        `Unable to reopen the invoice: customer ${cardCode || "(unknown)"} is not in the open-party list.`,
+      );
+      return;
+    }
+
+    (async () => {
+      const orders = await selectParty(party);
+      const payloadLines = (payload.DocumentLines || []).filter(
+        (line) => line.BaseEntry !== undefined && line.BaseEntry !== null,
+      );
+      const restored: SelectedLine[] = [];
+      const missing: string[] = [];
+
+      payloadLines.forEach((payloadLine) => {
+        const order = orders.find((candidate) => toNumber(candidate.DocEntry) === toNumber(payloadLine.BaseEntry));
+        const orderLine = order
+          ? getOrderLines(order).find((candidate) => toNumber(candidate.LineNum) === toNumber(payloadLine.BaseLine))
+          : undefined;
+        if (!order || !orderLine || toNumber(orderLine.OpenQty) < 1) {
+          missing.push(String(payloadLine.ItemCode || `SO line ${payloadLine.BaseEntry}/${payloadLine.BaseLine}`));
+          return;
+        }
+        const line = makeSelectedLine(order, orderLine);
+        // Requested quantity, clamped to what is still open on the sales order.
+        const requested = toNumber(payloadLine.Quantity);
+        if (requested >= 1) line.invoiceQty = Math.min(requested, line.OpenQty);
+        restored.push(line);
+      });
+
+      if (restored.length === 0) {
+        setOrdersError(
+          "Unable to reopen the invoice: none of its sales-order lines are still open. Build the invoice again from the open orders below.",
+        );
+        return;
+      }
+
+      // Freight comes back as stored; batches deliberately do not — the draft
+      // step re-runs auto-allocation against current stock.
+      const expenses = payload.DocumentAdditionalExpenses || [];
+      if (expenses.length) {
+        setFreightRows(
+          expenses.map((expense) => ({
+            expenseCode: String(expense.ExpenseCode ?? ""),
+            expenseName:
+              freightOptions.find((option) => toNumber(option.ExpnsCode) === toNumber(expense.ExpenseCode))?.ExpnsName
+              || "",
+            lineTotal: toNumber(expense.LineTotal),
+            taxCode: String(expense.VatGroup || ""),
+          })),
+        );
+      }
+
+      const warning = missing.length
+        ? `Reopened with ${restored.length} line${restored.length === 1 ? "" : "s"}. Not restored (no longer open on the sales order): ${missing.join(", ")}.`
+        : "";
+      setRestoreStaged({ lines: restored, warning });
+    })();
+  }, [branch, editRestore, freightOptions, loadingParties, parties, selectParty]);
+
+  useEffect(() => {
+    if (!restoreStaged || !selectedParty) return;
+    setRestoreStaged(null);
+    (async () => {
+      await proceedToDraftFromItems(restoreStaged.lines);
+      if (restoreStaged.warning) setDraftError(restoreStaged.warning);
+    })();
+    // proceedToDraftFromItems is recreated every render; the restoreStaged guard
+    // makes this effect run its body exactly once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [restoreStaged, selectedParty]);
+
+  
   useEffect(() => {
     if (step === 4 && selectedParty && !customerDetails && !loadingDraftDetails) {
       loadDraftDetails();
@@ -733,6 +1048,7 @@ export function useSalesInvoice() {
   const postInvoice = async () => {
     setPostError("");
     setPostSuccess("");
+    setPostedDocNum("");
 
     if (selectedLineList.length === 0) {
       setPostError("Select at least one line before posting.");
@@ -766,14 +1082,19 @@ export function useSalesInvoice() {
     setPosting(true);
     try {
       // Store the invoice locally as a PENDING record for review/approval instead of
-      // posting straight to SAP HANA. An approver promotes it to HANA later.
-      const createdBy = Number(localStorage.getItem("user_id"));
+      // creating a draft in SAP. The Invoice Review page approves it and posts it to
+      // SAP HANA later.
+      const createdBy = getCurrentUserId();
       const pendingPayload = {
-        so_number: String(firstSelectedLine?.DocNum ?? ""),
+        so_number: uniqueTextValues(selectedLineList.map((line) => (line.DocNum ? String(line.DocNum) : ""))).join(", "),
         party_name: selectedParty?.CardName || "",
         total_amount: totals.grandTotal,
         status: "PENDING",
-        ...(Number.isFinite(createdBy) ? { created_by: createdBy } : {}),
+        // The branch this invoice was built against; warehouse is the WHS code
+        // of the payload's first line.
+        branch: branch || "OIL",
+        warehouse: payload.DocumentLines[0]?.WarehouseCode || "",
+        ...(createdBy ? { created_by: createdBy } : {}),
         invoice_payload: payload,
       };
       const data = await apiFetch<ApiMessageResponse>("/api/invoice/pending/", {
@@ -792,6 +1113,9 @@ export function useSalesInvoice() {
   return {
     step,
     setStep,
+    branch,
+    selectBranch,
+    changeBranch,
     parties,
     selectedParty,
     salesOrders,
@@ -818,6 +1142,7 @@ export function useSalesInvoice() {
     draftError,
     postError,
     postSuccess,
+    postedDocNum,
     selectParty,
     changeParty,
     toggleLine,

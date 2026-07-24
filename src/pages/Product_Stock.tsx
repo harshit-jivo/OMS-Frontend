@@ -8,8 +8,7 @@ import {
   HiMagnifyingGlass,
   HiXMark,
 } from "react-icons/hi2";
-import * as XLSX from "xlsx";
-import { saveAs } from "file-saver";
+import { startExcelExport, exportDateStamp } from "../utils/excelExport";
 import { sapService } from "../services/sapService";
 import type { Product } from "../services/sapService";
 import type { Party, SapSalesOrder } from "../services/sapService";
@@ -946,28 +945,15 @@ export default function Product_Stock() {
       };
     });
 
-    excelData.push({
-      "Item Code": "",
-      Product: "",
-      Category: "",
-      Type: "",
-      Pack: "",
-      "Warehouse Stock": summary.totalStock,
-      "Warehouse Qty Ltrs": "" as unknown as number,
-      "Order Required Qty": summary.pendingRequired,
-      "Order Required Qty Ltrs": Math.round(summary.pendingRequiredLtrs),
-      "Left Over": summary.leftOverStock,
-      Status: "TOTAL",
+    startExcelExport(excelData, {
+      fileName: `Selected_SO_Stock_${exportDateStamp()}.xlsx`,
+      sheetName: "Selected SO Stock",
+      totalsRow: {
+        sum: ["Warehouse Stock", "Order Required Qty", "Order Required Qty Ltrs", "Left Over"],
+        labelColumn: "Status",
+        label: "TOTAL",
+      },
     });
-
-    const worksheet = XLSX.utils.json_to_sheet(excelData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Selected SO Stock");
-    const excelBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
-    const file = new Blob([excelBuffer], {
-      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    });
-    saveAs(file, `Selected_SO_Stock_${new Date().toISOString().split("T")[0]}.xlsx`);
   };
 
   const totalPages = Math.max(1, Math.ceil(filteredProducts.length / ITEMS_PER_PAGE));

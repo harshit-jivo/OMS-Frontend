@@ -1,11 +1,11 @@
 ﻿import { useState, useEffect } from "react";
-import * as XLSX from "xlsx";
-import { saveAs } from "file-saver";
 import { getOrderItemSchemeNames, getOrderItemSchemes, getOrderItemSchemeQtyText, getOrderItemTotalLtrs, ordersService } from "../services/ordersService";
 import type { Order, OrderItem, OrderLog } from "../services/ordersService";
+import { exportToExcel } from "../utils/excelExport";
 import "../styles/Auditor_Order.css";
 import { useLocation, useNavigate } from "react-router-dom";
 import { sortOrders } from "../utils/orderHistory";
+import { useUILabels } from "../services/uiConfig";
 import ItemSection from "../components/order-items/ItemSection";
 import PartyHeader from "../components/order-items/PartyHeader";
 import {
@@ -42,18 +42,20 @@ const formatCreatedDateTime = (value?: string | null) => {
 };
 
 export default function Auditor_orders() {
+  const { t } = useUILabels();
   const location = useLocation();
   const navigate = useNavigate();
   const [orders, setOrders] = useState<Order[]>([]);
   const [showDetails, setShowDetails] = useState(false);
   const [orderDetails, setOrderDetails] = useState<Order | null>(null);
   const [selectedItems, setSelectedItems] = useState<OrderItem[]>([]);
-  const [showRejectModal, setShowRejectModal] = useState(false);
-  const [rejectReason, setRejectReason] = useState("");
-  const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
-  const [showConfirmModal, setShowConfirmModal] = useState(false);
-  const [pendingOrderId, setPendingOrderId] = useState<number | null>(null);
-  const [pendingOrderNum, setPendingOrderNum] = useState("");
+  // Two-step approve/reject flow: review the order summary and enter a reason
+  // (optional for approve, required for reject), then confirm before the API
+  // call. Approve additionally pushes the order to SAP.
+  const [reviewOrder, setReviewOrder] = useState<Order | null>(null);
+  const [reviewAction, setReviewAction] = useState<"approve" | "reject" | null>(null);
+  const [reviewReason, setReviewReason] = useState("");
+  const [reviewStep, setReviewStep] = useState<"review" | "confirm">("review");
   const [isCreating, setIsCreating] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [quotationResult, setQuotationResult] = useState<{ number: string; order_id: string; message: string } | null>(null);
@@ -105,64 +107,77 @@ export default function Auditor_orders() {
   const removeHandledOrder = (orderId: number) => {
     setOrders((current) => current.filter((order) => order.id !== orderId));
     setSelectedItems([]);
-    setSelectedOrderId(null);
-    if (orderDetails?.id === orderId || pendingOrderId === orderId) {
+    if (orderDetails?.id === orderId) {
       setOrderDetails(null);
       setShowDetails(false);
     }
   };
 
-  const initiateApprove = (order: Order) => {
-    setPendingOrderId(order.id);
-    setPendingOrderNum(order.order_number);
-    setShowConfirmModal(true);
+  // Step 1 — open the review modal for an approve or reject action.
+  const openReview = (order: Order, action: "approve" | "reject") => {
+    setShowDetails(false);
+    setReviewOrder(order);
+    setReviewAction(action);
+    setReviewReason("");
+    setReviewStep("review");
   };
 
-  const confirmApprove = async () => {
-    if (!pendingOrderId) return;
-    setShowConfirmModal(false);
+  const closeReview = () => {
+    setReviewOrder(null);
+    setReviewAction(null);
+    setReviewReason("");
+    setReviewStep("review");
+  };
+
+  // Step 2 — after reviewing, move to the final confirmation step. Reject
+  // requires a reason; approve reason stays optional.
+  const proceedToConfirm = () => {
+    if (reviewAction === "reject" && !reviewReason.trim()) {
+      alert("Reason required");
+      return;
+    }
+    setReviewStep("confirm");
+  };
+
+  // Step 3 — user confirmed: approve pushes to SAP then updates status; reject
+  // just updates status.
+  const submitReview = async () => {
+    if (!reviewOrder || !reviewAction) return;
+    const order = reviewOrder;
+    const reason = reviewReason.trim();
+    if (reviewAction === "reject" && !reason) {
+      alert("Reason required");
+      return;
+    }
     setIsCreating(true);
-
     try {
-      const salesResponse = await api.post('/sap/approve-order/', {
-        order_id: pendingOrderId,
-      });
-      const sapData = salesResponse?.data?.data ?? salesResponse?.data;
-      const quotationNumber = sapData?.DocNum ?? sapData?.doc_num ?? sapData?.DocEntry ?? "-";
+      if (reviewAction === "approve") {
+        const salesResponse = await api.post('/sap/approve-sales-order/', {
+          order_id: order.id,
+        });
+        const sapData = salesResponse?.data?.data ?? salesResponse?.data;
+        const quotationNumber = sapData?.DocNum ?? sapData?.doc_num ?? sapData?.DocEntry ?? "-";
 
-      const response = await ordersService.UpdateStatus(pendingOrderId, 9);
-      setQuotationResult({
-        number: String(quotationNumber),
-        order_id: pendingOrderNum,
-        message: response.message || "Order completed successfully",
-      });
-      removeHandledOrder(pendingOrderId);
-      setShowSuccess(true);
+        const response = await ordersService.UpdateStatus(order.id, 9, reason || undefined);
+        setQuotationResult({
+          number: String(quotationNumber),
+          order_id: order.order_number,
+          message: response.message || "Order completed successfully",
+        });
+        removeHandledOrder(order.id);
+        setShowSuccess(true);
+      } else {
+        await ordersService.UpdateStatus(order.id, 7, reason);
+        alert("Order Rejected");
+        removeHandledOrder(order.id);
+      }
+      closeReview();
       fetchOrders();
       window.dispatchEvent(new Event('refresh-notifications'));
     } catch (error: any) {
       alert("Error: " + (error?.response?.data?.message || "Unknown error"));
     } finally {
       setIsCreating(false);
-      setPendingOrderId(null);
-    }
-  };
-
-  const rejectStatus = async (orderId: number | null) => {
-    if (!orderId) return;
-    if (!rejectReason.trim()) {
-      alert("Reason required");
-      return;
-    }
-    try {
-      await ordersService.UpdateStatus(orderId, 7, rejectReason);
-      alert("Order Rejected");
-      removeHandledOrder(orderId);
-      setShowRejectModal(false);
-      setRejectReason("");
-      fetchOrders();
-    } catch (error: any) {
-      alert("Error: " + (error?.response?.data?.message || "Unknown error"));
     }
   };
 
@@ -177,7 +192,9 @@ export default function Auditor_orders() {
       }
     }
 
-    let excelData: object[] = [];
+    // Raw values only — exportToExcel infers the Excel type per column, so dates
+    // stay dates and money stays numeric and summable.
+    let excelData: Record<string, unknown>[] = [];
 
     if (full.items && full.items.length > 0) {
       excelData = full.items.map((item: OrderItem) => ({
@@ -196,7 +213,7 @@ export default function Auditor_orders() {
         Qty: item.qty,
         Boxes: item.boxes,
         Liters: item.ltrs,
-        "Total Ltrs": getOrderItemTotalLtrs(item).toFixed(2),
+        "Total Ltrs": getOrderItemTotalLtrs(item),
         "Price List (Basic)": item.price_list_basic,
         "Basic Price": item.basic_price,
         "Total Amount": item.total,
@@ -215,14 +232,10 @@ export default function Auditor_orders() {
       });
     }
 
-    const worksheet = XLSX.utils.json_to_sheet(excelData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Order Details");
-    const excelBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
-    const file = new Blob([excelBuffer], {
-      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    await exportToExcel(excelData, {
+      fileName: `Order_${full.order_number}.xlsx`,
+      sheetName: "Order Details",
     });
-    saveAs(file, `Order_${full.order_number}.xlsx`);
   };
 
   const handleTrack = async (order: Order) => {
@@ -344,16 +357,13 @@ export default function Auditor_orders() {
                             </button>
                             <button
                               className="ao-row-btn ao-row-approve"
-                              onClick={() => initiateApprove(order)}
+                              onClick={() => openReview(order, "approve")}
                             >
                               <HiCheckCircle size={18} /> Approve
                             </button>
                             <button
                               className="ao-row-btn ao-row-reject"
-                              onClick={() => {
-                                setSelectedOrderId(order.id);
-                                setShowRejectModal(true);
-                              }}
+                              onClick={() => openReview(order, "reject")}
                             >
                               <HiXCircle size={18} /> Reject
                             </button>
@@ -408,16 +418,13 @@ export default function Auditor_orders() {
               </button>
               <button
                 className="ao-d-action-btn ao-d-approve"
-                onClick={() => initiateApprove(orderDetails)}
+                onClick={() => openReview(orderDetails, "approve")}
               >
                 <HiCheckCircle /> Approve
               </button>
               <button
                 className="ao-d-action-btn ao-d-reject"
-                onClick={() => {
-                  setSelectedOrderId(orderDetails.id);
-                  setShowRejectModal(true);
-                }}
+                onClick={() => openReview(orderDetails, "reject")}
               >
                 <HiXCircle /> Reject
               </button>
@@ -446,7 +453,7 @@ export default function Auditor_orders() {
                 <th>Ltrs</th>
                 {/* <th>Scheme Ltrs</th> */}
                 <th>Total Ltrs</th>
-                <th>Price List (Basic)</th>
+                <th>{t("price_list", "Price List (Basic)")}</th>
                 <th>Basic Price</th>
                 <th>Tax %</th>
                 <th style={{textAlign:'right'}}>Amount</th>
@@ -497,24 +504,98 @@ export default function Auditor_orders() {
         </div>
       )}
 
-      {showConfirmModal && (
+      {/* â”€â”€ STEP 1: REVIEW MODAL â”€â”€ */}
+      {reviewOrder && reviewAction && reviewStep === "review" && (
         <div className="ao-modal-overlay">
           <div className="ao-modal">
-            <div className="ao-modal-title">Create Sales Quotation</div>
-            <p className="ao-modal-msg">Do you want to create a Sales Quotation for order {pendingOrderNum}?</p>
+            <div className="ao-modal-title">
+              {reviewAction === "approve" ? "Review & Approve" : "Review & Reject"}
+            </div>
+            <p className="ao-modal-msg">Review the order details before you continue.</p>
+            <div className="ao-review-summary">
+              <div className="ao-review-row">
+                <span>Order Number</span>
+                <strong>{reviewOrder.order_number}</strong>
+              </div>
+              <div className="ao-review-row">
+                <span>Party</span>
+                <strong>{reviewOrder.card_name}</strong>
+              </div>
+              <div className="ao-review-row">
+                <span>Items</span>
+                <strong>{reviewOrder.items_count ?? reviewOrder.items?.length ?? 0}</strong>
+              </div>
+              <div className="ao-review-row">
+                <span>Amount</span>
+                <strong>
+                  ₹{Number(reviewOrder.total_amount || 0).toLocaleString("en-IN", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </strong>
+              </div>
+              <div className="ao-review-row">
+                <span>Delivery Date</span>
+                <strong>{reviewOrder.delivery_date || "-"}</strong>
+              </div>
+            </div>
+            <textarea
+              className="ao-modal-textarea"
+              value={reviewReason}
+              onChange={(e) => setReviewReason(e.target.value)}
+              placeholder={reviewAction === "approve" ? "Add a reason (optional)..." : "Type reason..."}
+              rows={3}
+            />
             <div className="ao-modal-actions">
-              <button className="ao-btn-approve" onClick={confirmApprove}>Confirm</button>
-              <button className="ao-btn-cancel" onClick={() => { setShowConfirmModal(false); setPendingOrderId(null); }}>Cancel</button>
+              <button className="ao-btn-approve" onClick={proceedToConfirm}>Continue</button>
+              <button className="ao-btn-cancel" onClick={closeReview}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* â”€â”€ STEP 2: CONFIRM MODAL â”€â”€ */}
+      {reviewOrder && reviewAction && reviewStep === "confirm" && (
+        <div className="ao-modal-overlay">
+          <div className="ao-modal">
+            <div className="ao-modal-title">
+              {reviewAction === "approve" ? "Confirm Approval" : "Confirm Rejection"}
+            </div>
+            <p className="ao-modal-msg">
+              {reviewAction === "approve"
+                ? `Push order ${reviewOrder.order_number} to SAP as a Sales Order?`
+                : `Are you sure you want to reject order ${reviewOrder.order_number}?`}
+            </p>
+            <div className="ao-modal-actions">
+              <button className="ao-btn-approve" onClick={submitReview} disabled={isCreating}>
+                {reviewAction === "approve" ? "Yes, Approve" : "Yes, Reject"}
+              </button>
+              <button
+                className="ao-btn-cancel"
+                onClick={() => setReviewStep("review")}
+                disabled={isCreating}
+              >
+                Back
+              </button>
             </div>
           </div>
         </div>
       )}
 
       {isCreating && (
-        <div className="ao-modal-overlay">
-          <div className="ao-modal ao-modal-loading">
-            <div className="ao-spinner" />
-            <p className="ao-loading-text">Creating Sales Quotation...</p>
+        <div className="ao-modal-overlay ao-loading-overlay" aria-hidden="false">
+          <div
+            className="ao-modal ao-modal-loading"
+            role="status"
+            aria-live="polite"
+            aria-busy="true"
+          >
+            <div className="ao-spinner" aria-hidden="true" />
+            <div className="ao-modal-title">Creating Sales Order</div>
+            <p className="ao-loading-text">
+              Sending order {reviewOrder?.order_number ?? ""} to SAP. This may take a little while.
+            </p>
+            <p className="ao-loading-hint">Please do not refresh or close this window.</p>
           </div>
         </div>
       )}
@@ -526,7 +607,7 @@ export default function Auditor_orders() {
             <div className="ao-modal-title">Order Completed</div>
             <div className="ao-success-info">
               <div className="ao-success-row">
-                <span className="ao-success-label">Quotation No.</span>
+                <span className="ao-success-label">Sales Order No.</span>
                 <strong className="ao-success-value">{quotationResult.number}</strong>
               </div>
               <div className="ao-success-row">
@@ -540,39 +621,6 @@ export default function Auditor_orders() {
             </div>
             <div className="ao-modal-actions">
               <button className="ao-btn-approve" onClick={() => { setShowSuccess(false); setQuotationResult(null); }}>OK</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* â"€â"€ REJECT MODAL â"€â"€ */}
-      {showRejectModal && (
-        <div className="ao-modal-overlay">
-          <div className="ao-modal">
-            <div className="ao-modal-title">Rejection Reason</div>
-            <textarea
-              className="ao-modal-textarea"
-              value={rejectReason}
-              onChange={(e) => setRejectReason(e.target.value)}
-              placeholder="Type reason..."
-              rows={4}
-            />
-            <div className="ao-modal-actions">
-              <button
-                className="ao-btn-approve"
-                onClick={() => rejectStatus(selectedOrderId)}
-              >
-                Submit
-              </button>
-              <button
-                className="ao-btn-cancel"
-                onClick={() => {
-                  setShowRejectModal(false);
-                  setRejectReason("");
-                }}
-              >
-                Cancel
-              </button>
             </div>
           </div>
         </div>
@@ -648,6 +696,5 @@ export default function Auditor_orders() {
     </div>
   );
 }
-
 
 

@@ -1,7 +1,14 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+<<<<<<< HEAD
 import { isTrackerRole, trackerLandingPath, trackerPagesFor } from "../config/pageAccess";
+=======
+import { landingPathFor } from "../config/pageAccess";
+>>>>>>> test
 import { loginUser } from "../services/authService";
+import { resolveStartupSession } from "../services/api";
+import { webDeviceService } from "../services/webDeviceService";
+import { loadUILabels } from "../services/uiConfig";
 import "../styles/Login.css";
 
 type ToastProps = {
@@ -87,10 +94,28 @@ export default function Login() {
 
   const navigate = useNavigate();
 
+  // If a valid session already exists (or an expired access token can be
+  // silently refreshed), skip the Login screen and go straight into the app.
+  // We NEVER clear tokens here — opening Login must not affect any tab.
   useEffect(() => {
-    localStorage.removeItem("access");
-    localStorage.removeItem("refresh");
-  }, []);
+    let cancelled = false;
+    (async () => {
+      const outcome = await resolveStartupSession();
+      if (cancelled || outcome !== "authenticated") return;
+      // Same landing rule as a fresh login (see handleLogin) — one shared helper,
+      // so a restored session can never land somewhere a new login wouldn't.
+      const landing = landingPathFor(localStorage.getItem("role"));
+      // Preserve any notification deep-link params (openOrderId / notificationId)
+      // that a service-worker "openWindow" put on the "/" URL, so the Sidebar's
+      // openOrderId effect on the landing route can open the exact Sales Order
+      // instead of dropping it on the redirect.
+      navigate(`${landing}${window.location.search}`, { replace: true });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [navigate]);
+
   const [username, setUsername] = useState<string>("");
   const [password, setPassword] = useState<string>("");
   const [showPass, setShowPass] = useState<boolean>(false);
@@ -105,6 +130,16 @@ export default function Login() {
     setToast({ message, type });
 
   const closeToast = () => setToast(null);
+
+  // Surface the "session expired" message set by the API layer when a refresh
+  // fails and the user is bounced back to login (Task 5).
+  useEffect(() => {
+    const expiredMessage = sessionStorage.getItem("session_expired");
+    if (expiredMessage) {
+      sessionStorage.removeItem("session_expired");
+      showToast(expiredMessage, "error");
+    }
+  }, []);
   
 const handleLogin = async () => {
 
@@ -132,8 +167,19 @@ const handleLogin = async () => {
     localStorage.setItem("main_group_id", String(user.main_group?.id || ""));
     localStorage.setItem("main_group_name", user.main_group?.name || "");
 
+    // Register this browser with the backend. Fire-and-forget: best-effort
+    // telemetry that must never block, delay or fail login. Retries by itself
+    // on the next authenticated session if it fails now.
+    void webDeviceService.onAuthenticated("login");
+
+    // Fetch dynamic UI labels once for this session and cache them. Same
+    // fire-and-forget contract: never blocks login, and any screen falls back
+    // to hardcoded text until it resolves.
+    void loadUILabels(true);
+
     showToast("Login successful. Redirecting...", "success");
 
+<<<<<<< HEAD
     setTimeout(() => navigate("/Dashboard"), 1000);
     // Landing: tracker users go to their first tracker page (they have no
     // Dashboard); legal reviewers to their workspace; everyone else Dashboard.
@@ -142,6 +188,16 @@ const handleLogin = async () => {
       landingPath = trackerLandingPath(trackerPagesFor(user.role)) || "/Tracker_Queue";
     } 
     setTimeout(() => navigate(landingPath), 1000);
+=======
+    // Landing: tracker users go to their first tracker page (they have no
+    // Dashboard); legal reviewers to their workspace; everyone else Dashboard.
+    const landingPath = landingPathFor(user.role);
+    // Carry any notification deep-link params (openOrderId / notificationId) so
+    // a notification tapped while logged out still opens the exact order after
+    // login instead of dropping the user on the dashboard.
+    const deepLink = window.location.search;
+    setTimeout(() => navigate(`${landingPath}${deepLink}`), 1000);
+>>>>>>> test
 
   } catch (error) {
     console.error(error);

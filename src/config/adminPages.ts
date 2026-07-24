@@ -18,6 +18,13 @@ export const GRANTABLE_ADMIN_PAGES: GrantablePage[] = [
   { key: "Reports", label: "Reports", path: "/Daily_Report" },
   // Tracker pages are gated centrally by role (see config/pageAccess.ts),
   // not by per-user extra_pages, so they are intentionally not listed here.
+  { key: "Einvoice", label: "e-Invoice (IRN)", path: "/Einvoice" },
+  { key: "Ewaybill", label: "e-Way Bill", path: "/Ewaybill" },
+  // System — one page carrying live device activity and version analytics.
+  // "Device_Activity" and "Version_Management" are deliberately no longer
+  // grantable: the pages they gated are gone, so offering those permissions
+  // would grant nothing. Any stored grant with those keys is simply ignored.
+  { key: "Device_Management", label: "Device Management", path: "/Device_Management" },
 ];
 
 export const GRANTABLE_PAGE_KEYS = GRANTABLE_ADMIN_PAGES.map((page) => page.key);

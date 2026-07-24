@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { HiTrash, HiXMark } from "react-icons/hi2";
+import { API_ORIGIN } from "../../services/api";
 import { formatMoney, lineKey, toNumber, type SelectedLine } from "./salesInvoice.utils";
-import { apiFetch, type SalesInvoiceState } from "./useSalesInvoice";
+import { apiFetch, hanaUrl, type SalesInvoiceState } from "./useSalesInvoice";
 
 type Props = {
   state: SalesInvoiceState;
@@ -71,21 +72,12 @@ type SkuImageRecord = {
 
 type SkuImageApiResponse = SkuImageRecord[] | { data?: SkuImageRecord[]; results?: SkuImageRecord[] };
 
-const skuImageBaseUrl = String(
-  import.meta.env.VITE_BASE_URL
-    || import.meta.env.VITE_BACKEND_BASE_URL
-    || import.meta.env.VITE_API_BASE_URL
-    || "",
-)
-  .replace(/\/+$/, "")
-  .replace(/\/api$/i, "");
-
 const getSkuImageUrl = (imagePath?: string | null) => {
   const path = String(imagePath || "").trim();
   if (!path) return "";
   if (/^https?:\/\//i.test(path)) return path;
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-  return skuImageBaseUrl ? `${skuImageBaseUrl}${normalizedPath}` : normalizedPath;
+  return `${API_ORIGIN}${normalizedPath}`;
 };
 
 const getSkuCodeKey = (itemCode?: string | null) => String(itemCode || "").trim().toUpperCase();
@@ -290,7 +282,7 @@ function BatchPickerModal({
       setError("");
       try {
         const data = await apiFetch<InventoryWarehouse[]>(
-          `/api/hana/inventory-details/?item_code=${encodeURIComponent(context.itemCode)}`,
+          hanaUrl(`/api/hana/inventory-details/?item_code=${encodeURIComponent(context.itemCode)}`),
         );
         const nextWarehouses = Array.isArray(data) ? data : [];
         if (!active) return;
@@ -349,7 +341,7 @@ function BatchPickerModal({
           warehouseOptions.map(async ({ code: whsCode }) => {
             try {
               const data = await apiFetch<BatchDetail[]>(
-                `/api/hana/batch-details/?item_code=${encodeURIComponent(context.itemCode)}&whs_code=${encodeURIComponent(whsCode)}`,
+                hanaUrl(`/api/hana/batch-details/?item_code=${encodeURIComponent(context.itemCode)}&whs_code=${encodeURIComponent(whsCode)}`),
               );
               return [whsCode, Array.isArray(data) ? data : []] as const;
             } catch (err) {
@@ -559,7 +551,7 @@ export default function ContentsTab({ state }: Props) {
           itemCodes.map(async (itemCode) => {
             try {
               const data = await apiFetch<InventoryWarehouse[]>(
-                `/api/hana/inventory-details/?item_code=${encodeURIComponent(itemCode)}`,
+                hanaUrl(`/api/hana/inventory-details/?item_code=${encodeURIComponent(itemCode)}`),
               );
               return [itemCode, Array.isArray(data) ? data : []] as const;
             } catch (err) {
@@ -595,7 +587,7 @@ export default function ContentsTab({ state }: Props) {
   ): Promise<{ allocations: BatchAllocation[]; failureReason: BatchAllocationFailure["reason"] | null }> => {
     try {
       const data = await apiFetch<BatchDetail[]>(
-        `/api/hana/batch-details/?item_code=${encodeURIComponent(line.ItemCode)}&whs_code=${encodeURIComponent(whsCode)}`,
+        hanaUrl(`/api/hana/batch-details/?item_code=${encodeURIComponent(line.ItemCode)}&whs_code=${encodeURIComponent(whsCode)}`),
       );
       const batches = Array.isArray(data) ? data : [];
       const allocations = allocateNearestExpiryBatches(batches, toNumber(line.invoiceQty));

@@ -139,7 +139,10 @@ html, body {
   position: fixed;
   top: 58px; left: 0;
   width: 230px;
-  height: calc(100vh - 58px);
+  /* Anchor to top + bottom instead of an explicit vh height so the
+     sidebar always spans header-to-bottom correctly, including when
+     the UI is scaled with `zoom` on large screens. */
+  bottom: 0;
   background: linear-gradient(180deg, #172033 0%, #111827 100%);
   border-right: 1px solid rgba(59,130,246,.14);
   border-radius: 0;
@@ -557,4 +560,19 @@ body {
   border: 1px solid rgba(226, 232, 240, 0.95);
   box-shadow: 0 6px 20px rgba(15, 23, 42, 0.05);
   padding: 24px;
+}
+
+/* Sidebar group label — introduced with the System group (Device/Version
+   Management). Non-interactive; purely a visual divider in the flat nav list. */
+.sidebar ul li.sidebar-section {
+  padding: 14px 16px 4px;
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  pointer-events: none;
+}
+.sidebar.collapsed ul li.sidebar-section {
+  display: none;
 }

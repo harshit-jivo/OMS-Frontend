@@ -1025,6 +1025,27 @@ background: #94a3b8;
 cursor: not-allowed;
 }
 
+.sl-btn-draft {
+display: inline-flex;
+align-items: center;
+justify-content: center;
+height: var(--btn-h, 40px);
+border: 1px solid #d97706;
+padding: 0 16px;
+background: #f59e0b;
+border-radius: var(--radius-sm, 8px);
+font-size: var(--font-ui, 13px);
+font-weight: 600;
+cursor: pointer;
+color: #fff;
+}
+
+.sl-btn-draft:disabled {
+background: #fcd9a0;
+border-color: #fcd9a0;
+cursor: not-allowed;
+}
+
 .sl-btn-clear {
 display: inline-flex;
 align-items: center;
@@ -2154,4 +2175,7 @@ text-align: right;
   border-top: 1px solid #eef2f7;
   background: #fbfcfe;
 }
+<<<<<<< HEAD
   
+=======
+>>>>>>> test

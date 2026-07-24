@@ -5,17 +5,15 @@ import {
   LuBoxes,
   LuChevronDown,
   LuDroplets,
-  LuEllipsisVertical,
   LuLeaf,
   LuPackage,
   LuRuler,
   LuTag,
-  LuUsers,
 } from "react-icons/lu";
 import { getOrderItemSchemes, type OrderItem } from "../../services/ordersService";
+import { useUILabels } from "../../services/uiConfig";
 import Metric from "./Metric";
 import MetaChip from "./MetaChip";
-import ApprovalAvatar from "./ApprovalAvatar";
 import { formatCurrency, getCategoryIcon, titleCase, varietyTone } from "./helpers";
 
 type PriceMetricProps = {
@@ -37,10 +35,10 @@ const PriceMetric = memo(function PriceMetric({ label, value, highlight }: Price
 const toNumber = (value: unknown) => Number(value ?? 0);
 
 function ItemCard({ item }: { item: OrderItem }) {
+  const { t } = useUILabels();
   const [schemeOpen, setSchemeOpen] = useState(false);
 
   const CategoryIcon = getCategoryIcon(item);
-  const approvers = Array.isArray(item.approval_approvers) ? item.approval_approvers : [];
   const schemes = getOrderItemSchemes(item);
   const showScheme = Boolean(item.is_scheme_visible) && schemes.length > 0;
   const hasLastPurchasePrice =
@@ -64,6 +62,7 @@ function ItemCard({ item }: { item: OrderItem }) {
           </div>
         </div>
 
+<<<<<<< HEAD
         {hasLastPurchasePrice && (
           <div className="isec-card__lpp" title="Last purchase price for this item">
             <span className="isec-card__lpp-label">Last Purchase</span>
@@ -72,6 +71,10 @@ function ItemCard({ item }: { item: OrderItem }) {
         )}
 
         {/* <div className="isec-card__actions">
+=======
+        {/* Disabled. To re-enable, restore the `LuEllipsisVertical` import.
+        <div className="isec-card__actions">
+>>>>>>> test
           <span className="isec-card__chip" title={item.item_code}>
             {item.item_code}
           </span>
@@ -104,12 +107,14 @@ function ItemCard({ item }: { item: OrderItem }) {
       {/* ── Pricing ── */}
       <div className="isec-card__pricing">
         <PriceMetric label="Basic Price" value={formatCurrency(item.basic_price)} />
-        <PriceMetric label="Price List" value={formatCurrency(item.price_list_basic)} />
+        <PriceMetric label={t("price_list", "Price List")} value={formatCurrency(item.price_list_basic)} />
         <PriceMetric label="GST" value={`${toNumber(item.tax_rate)}%`} />
         <PriceMetric label="Total" value={formatCurrency(item.total)} highlight />
       </div>
 
-      {/* ── Approvers ──
+      {/* ── Approvers ── Disabled. To re-enable, restore the `LuUsers` and
+          `ApprovalAvatar` imports and the `approvers` const:
+          const approvers = Array.isArray(item.approval_approvers) ? item.approval_approvers : [];
       {approvers.length > 0 && (
         <div className="isec-card__approval">
           <span className="isec-card__approval-icon" aria-hidden="true">

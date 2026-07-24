@@ -1,6 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import * as XLSX from "xlsx";
-import { saveAs } from "file-saver";
+import { startExcelExport } from "../utils/excelExport";
 import {
   getOrderItemSchemeNames,
   getOrderItemSchemes,
@@ -12,6 +11,7 @@ import type { OrderItem, Order, OrderLog, OrderStatus, PartyProduct, QuotationSt
 import { loadCurrentUserOrderSummaries } from "../utils/orderHistory";
 import "../styles/View_Orders.css";
 import "../styles/Auditor_Order.css";
+import { useUILabels } from "../services/uiConfig";
 import ItemSection from "../components/order-items/ItemSection";
 import PartyHeader from "../components/order-items/PartyHeader";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -80,6 +80,7 @@ const getRejectedByFromLogs = (logs: OrderLog[]) => {
 };
 
 export default function View_Orders() {
+  const { t } = useUILabels();
   const location = useLocation();
   const navigate = useNavigate();
   const [orders, setOrders] = useState<Order[]>([]);
@@ -389,6 +390,7 @@ export default function View_Orders() {
     pageNumber * itemsPerPage,
   );
 
+<<<<<<< HEAD
   const downloadExcel = async (order: Order) => {
     let excelData = [];
 
@@ -441,23 +443,64 @@ export default function View_Orders() {
         "Price List (Basic)": "",
         "Basic Price": "",
       });
+=======
+  // Raw values only — exportToExcel infers the Excel type per column, so dates
+  // stay dates and money stays numeric and summable.
+  const buildOrderRows = (order: Order): Record<string, unknown>[] => {
+    // If no items → still export the order header on its own.
+    if (!order.items || order.items.length === 0) {
+      return [
+        {
+          "Order Number": order.order_number,
+          "Card Code": order.card_code,
+          "Card Name": order.card_name,
+          "Delivery Date": order.delivery_date,
+          Status: order.status_display,
+          "Bill To": order.bill_to_address,
+          "Ship To": order.ship_to_address,
+          "Price List (Basic)": "",
+          "Basic Price": "",
+        },
+      ];
+>>>>>>> test
     }
 
-    const worksheet = XLSX.utils.json_to_sheet(excelData);
-    const workbook = XLSX.utils.book_new();
+    return order.items.map((item: OrderItem) => ({
+      "Order Number": order.order_number,
+      "Card Code": order.card_code,
+      "Card Name": order.card_name,
+      "Delivery Date": order.delivery_date,
+      Status: order.status_display,
+      "Bill To": order.bill_to_address,
+      "Ship To": order.ship_to_address,
+      "Item Code": item.item_code,
+      "Item Name": item.item_name,
+      Scheme: getOrderItemSchemeNames(item),
+      "Scheme Qty": getOrderItemSchemeQtyText(item),
+      Qty: item.qty,
+      Boxes: item.boxes,
+      Liters: item.ltrs,
+      "Total Ltrs": getOrderItemTotalLtrs(item),
+      "Price List (Basic)": item.price_list_basic,
+      "Basic Price": item.basic_price,
+      "Total Amount": item.total,
+    }));
+  };
 
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Order Details");
-
-    const excelBuffer = XLSX.write(workbook, {
-      bookType: "xlsx",
-      type: "array",
+  const downloadExcel = (order: Order) => {
+    startExcelExport(buildOrderRows(order), {
+      fileName: `Order_${order.order_number}.xlsx`,
+      sheetName: "Order Details",
     });
+<<<<<<< HEAD
 
     const file = new Blob([excelBuffer], {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     });
 
     saveAs(file, `Order_${exportOrder.order_number}.xlsx`);
+=======
+>>>>>>> test
   };
   return (
     <div className="vo-page">
@@ -706,7 +749,7 @@ export default function View_Orders() {
                   <tr>
                     <th>#</th><th>Item Code</th><th style={{ minWidth: '250px' }}>Item Name</th><th>Category</th><th>Scheme</th><th>Scheme Qty</th><th>Qty</th><th>Pcs</th><th>Boxes</th><th>Ltrs</th>
                     {/* <th>Scheme Ltrs</th> */}
-                    <th>Total Ltrs</th><th>Price List (Basic)</th><th>Basic Price</th><th>Tax %</th><th style={{textAlign:'right'}}>Amount</th>
+                    <th>Total Ltrs</th><th>{t("price_list", "Price List (Basic)")}</th><th>Basic Price</th><th>Tax %</th><th style={{textAlign:'right'}}>Amount</th>
                   </tr>
                 </thead>
                 <tbody>

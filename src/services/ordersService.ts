@@ -226,6 +226,7 @@ export interface Order {
   items_count?: number;
   created_at: string;
   created_by: string | number;
+  rejected_by?: string | null;
   total_amount: number;
   sap_doc_number?: string;
   quotation_cancelled?: boolean;
@@ -268,6 +269,8 @@ export interface QuotationOverviewItem {
   quotation_cancelled_at: string | null;
   quotation_cancelled_by: string | null;
   quotation_status: QuotationStatusLabel;
+  category?: string;
+  categories?: string[];
 }
 
 export interface OrderLog {
@@ -512,6 +515,54 @@ export const ordersService = {
     };
     const response = await api.post("/orders/create/", payload);
     return response.data;
+  },
+
+  // Save a (possibly incomplete) order as a draft. Drafts skip the approval
+  // flow and notifications; pass an existing orderId to update a draft in place.
+  saveDraft: async (formData: Partial<CreateOrder>, orderId?: number) => {
+    const items = Array.isArray(formData.items) ? formData.items : [];
+    const payload = {
+      ...formData,
+      ...(orderId ? { order_id: orderId } : {}),
+      is_draft: true,
+      items: items.map((item) => ({
+        ...item,
+        sub_group: item.sub_group ?? item.variety,
+        qty: Number(item.qty),
+        pcs: Number(item.pcs),
+        boxes: Number(item.boxes),
+        ltrs: Number(item.ltrs),
+        price_list_basic: Number(item.price_list_basic),
+        basic_price: Number(item.basic_price),
+        tax_rate: Number(item.tax_rate),
+        total: Number(item.total),
+        scheme_id: item.scheme_id ? Number(item.scheme_id) : undefined,
+        scheme_qty: item.scheme_qty ? Number(item.scheme_qty) : 0,
+        schemes: Array.isArray(item.schemes)
+          ? item.schemes.map((scheme) => ({
+              scheme_id: Number(scheme.scheme_id),
+              scheme_qty: Number(scheme.scheme_qty ?? scheme.qty_scheme ?? 0),
+            }))
+          : undefined,
+        total_ltrs: item.total_ltrs,
+      })),
+    };
+    const response = await api.post("/orders/create/", payload);
+    return response.data;
+  },
+
+  // List the current user's draft orders (full details).
+  getDrafts: async (userId: number) => {
+    const response = await api.get(`/orders/ordersbyuser/${userId}/`);
+    const orders = (response.data as Order[]).map(normalizeOrder);
+    return orders.filter(
+      (order) => String(order.status_display || "").trim().toLowerCase() === "draft",
+    );
+  },
+
+  deleteDraft: async (orderId: number) => {
+    const response = await api.delete(`/orders/${orderId}/delete-draft/`);
+    return response.data as { message: string };
   },
 
   async getOrders(status?: number | string, billing?: boolean, approvalPending?: boolean) {

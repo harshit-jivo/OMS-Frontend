@@ -1,0 +1,785 @@
+/* ──────────────────────────────────────────────────────────────────────────
+ * Invoice processing modal — a calm, human-friendly window over the SAP post.
+ * No console / log / endpoint language: a "production line" while we work, a
+ * clear success, and translated, actionable errors. Plain CSS, matching the
+ * app theme (white surface, #f8fafc insets, #e2e8f0 hairlines, #2563eb accent).
+ * ────────────────────────────────────────────────────────────────────────── */
+
+.mcl-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 7000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.5);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  animation: mcl-fade 0.22s ease both;
+}
+
+.mcl-card {
+  --accent: #2563eb;
+  --accent-deep: #1d4ed8;
+  --ok: #16a34a;
+  --ok-strong: #15803d;
+  --ok-bg: #f0fdf4;
+  --ok-border: #bbf7d0;
+  --warn: #d97706;
+  --warn-strong: #b45309;
+  --warn-bg: #fffbeb;
+  --warn-border: #fde68a;
+  --surface: #ffffff;
+  --surface-2: #f8fafc;
+  --surface-3: #f1f5f9;
+  --line: #e2e8f0;
+  --ink: #0f172a;
+  --strong: #1e293b;
+  --muted: #475569;
+  --faint: #94a3b8;
+
+  position: relative;
+  width: min(480px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  box-shadow: 0 30px 60px -15px rgba(15, 23, 42, 0.35);
+  color: var(--ink);
+  font-family: "Inter", "Segoe UI", system-ui, sans-serif;
+  animation: mcl-pop 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.mcl-card-success {
+  border-color: var(--ok-border);
+}
+
+.mcl-card-error {
+  border-color: var(--warn-border);
+  animation: mcl-pop 0.3s cubic-bezier(0.22, 1, 0.36, 1) both, mcl-nudge 0.45s ease 0.3s 1;
+}
+
+/* Close affordance (only when settled) */
+.mcl-x {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: inline-flex;
+  border: none;
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+  font-size: 1.35rem;
+  padding: 4px;
+  border-radius: 9px;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.mcl-x:hover {
+  color: var(--ink);
+  background: var(--surface-3);
+}
+
+/* Shared stage column — loading, success and error all render here, so the error
+ * lands in the same centred area the animation occupied (no layout jump). */
+.mcl-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  min-height: 380px;
+  padding: 36px 28px 28px;
+}
+
+.mcl-title {
+  margin: 0;
+  font-size: 1.3rem;
+  font-weight: 800;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+}
+
+.mcl-title-warn {
+  color: var(--warn-strong);
+}
+
+.mcl-sub {
+  margin: 8px 0 0;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  color: var(--muted);
+  max-width: 36ch;
+}
+
+.mcl-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── Running: animated factory hero ─────────────────────────────────────── */
+.mcl-hero {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 96px;
+  height: 96px;
+  margin-bottom: 20px;
+}
+
+.mcl-hero-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(37, 99, 235, 0.16), rgba(37, 99, 235, 0) 70%);
+  animation: mcl-pulse 2s ease-out infinite;
+}
+
+.mcl-hero-ring-2 {
+  animation-delay: 1s;
+}
+
+.mcl-hero-emoji {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  font-size: 2.1rem;
+  line-height: 1;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  box-shadow: 0 10px 24px -12px rgba(37, 99, 235, 0.5);
+  animation: mcl-swap 0.45s cubic-bezier(0.22, 1, 0.36, 1) both, mcl-bob 2.4s ease-in-out 0.45s infinite;
+}
+
+.mcl-rotating {
+  margin: 10px 0 0;
+  min-height: 1.2em;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: -0.01em;
+  animation: mcl-rise 0.4s ease both;
+}
+
+/* Progress + production-line rail */
+.mcl-progress {
+  width: 100%;
+  margin-top: 22px;
+}
+
+.mcl-progress-track {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+
+.mcl-progress-fill {
+  position: relative;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent-deep), #3b82f6);
+  transition: width 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+  overflow: hidden;
+}
+
+.mcl-card-success .mcl-progress-fill {
+  background: linear-gradient(90deg, var(--ok-strong), #22c55e);
+}
+
+.mcl-progress-shimmer {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent);
+  transform: translateX(-100%);
+  animation: mcl-shimmer 1.5s ease-in-out infinite;
+}
+
+.mcl-rail {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.mcl-rail-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--surface-3);
+  border: 1px solid var(--line);
+  transition: background 0.3s ease, transform 0.3s ease;
+}
+
+.mcl-rail-dot.is-done {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.mcl-rail-dot.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  transform: scale(1.35);
+  animation: mcl-pulse-dot 1.4s ease-out infinite;
+}
+
+.mcl-keep-open {
+  margin: 20px 0 0;
+  font-size: 0.78rem;
+  color: var(--faint);
+}
+
+/* ── Success / error badges ─────────────────────────────────────────────── */
+.mcl-badge {
+  display: grid;
+  place-items: center;
+  width: 76px;
+  height: 76px;
+  margin-bottom: 18px;
+  border-radius: 50%;
+  font-size: 2.4rem;
+  animation: mcl-pop 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.mcl-badge-ok {
+  color: var(--ok);
+  background: var(--ok-bg);
+  border: 1px solid var(--ok-border);
+}
+
+.mcl-badge-ok svg {
+  animation: mcl-check 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.1s both;
+}
+
+.mcl-badge-warn {
+  color: var(--warn);
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+}
+
+/* Success invoice number */
+.mcl-invoice-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 18px;
+  padding: 14px 22px;
+  border-radius: 14px;
+  background: var(--ok-bg);
+  border: 1px solid var(--ok-border);
+}
+
+.mcl-invoice-chip span {
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ok-strong);
+}
+
+.mcl-invoice-chip strong {
+  font-size: 1.55rem;
+  font-weight: 800;
+  color: var(--ok-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Error: small themed banner, then the BUSINESS REASON as the focal point ─ */
+.mcl-error-banner {
+  margin: 2px 0 8px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--faint);
+}
+
+/* The extracted business error — the largest, first thing the eye lands on. */
+.mcl-error-title {
+  margin: 0;
+  font-size: 1.55rem;
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  color: var(--warn-strong);
+}
+
+.mcl-error-body {
+  margin-top: 14px;
+  width: 100%;
+  max-width: 42ch;
+}
+
+.mcl-error-what {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.55;
+  color: var(--strong);
+}
+
+/* Structured figures pulled from the error (e.g. credit limit / balance). */
+.mcl-error-facts {
+  margin: 14px 0 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--warn-border);
+  border: 1px solid var(--warn-border);
+  border-radius: 10px;
+  overflow: hidden;
+  text-align: left;
+}
+
+.mcl-error-facts > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--warn-bg);
+}
+
+.mcl-error-facts dt {
+  font-size: 0.82rem;
+  color: var(--warn-strong);
+}
+
+.mcl-error-facts dd {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: var(--warn-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.mcl-error-do {
+  margin: 14px 0 0;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.mcl-error-safe {
+  margin: 14px 0 0;
+  padding: 10px 14px;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--warn-strong);
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  border-radius: 10px;
+}
+
+/* ── Business-friendly summary ──────────────────────────────────────────── */
+.mcl-summary {
+  margin: 22px 0 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  text-align: left;
+}
+
+.mcl-summary > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 14px;
+  background: var(--surface-2);
+}
+
+.mcl-summary dt {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.mcl-summary dt svg {
+  color: var(--faint);
+  font-size: 1rem;
+}
+
+.mcl-summary dd {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--strong);
+  text-align: right;
+}
+
+.mcl-summary-total dt {
+  font-weight: 700;
+  color: var(--strong);
+}
+
+.mcl-summary-total dd {
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.mcl-clamp {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Actions ────────────────────────────────────────────────────────────── */
+.mcl-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 24px;
+  width: 100%;
+  justify-content: center;
+}
+
+.mcl-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  padding: 11px 22px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+
+.mcl-btn:active {
+  transform: translateY(1px);
+}
+
+.mcl-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.mcl-btn-ok {
+  background: var(--ok);
+  color: #fff;
+  min-width: 140px;
+}
+
+.mcl-btn-ok:hover {
+  background: var(--ok-strong);
+}
+
+.mcl-btn-warn {
+  background: var(--warn);
+  color: #fff;
+}
+
+.mcl-btn-warn:hover {
+  background: var(--warn-strong);
+}
+
+/* Raise-credit-limit action shown only on credit-limit failures. */
+.mcl-btn-cl {
+  background: #d97706;
+  color: #fff;
+}
+
+.mcl-btn-cl:hover {
+  background: #b45309;
+}
+
+.mcl-btn-ghost {
+  background: #fff;
+  border-color: var(--line);
+  color: var(--muted);
+}
+
+.mcl-btn-ghost:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+/* ── Technical details (collapsed) ──────────────────────────────────────── */
+.mcl-tech {
+  margin-top: 22px;
+  width: 100%;
+  text-align: left;
+  border-top: 1px solid var(--line);
+}
+
+.mcl-tech > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 14px 2px 4px;
+  list-style: none;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--faint);
+  user-select: none;
+}
+
+.mcl-tech > summary::-webkit-details-marker {
+  display: none;
+}
+
+.mcl-tech > summary:hover {
+  color: var(--muted);
+}
+
+.mcl-tech-chevron {
+  transition: transform 0.2s ease;
+}
+
+.mcl-tech[open] .mcl-tech-chevron {
+  transform: rotate(180deg);
+}
+
+.mcl-tech-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 0 2px;
+  animation: mcl-rise 0.25s ease both;
+}
+
+.mcl-tech-label {
+  font-size: 0.66rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--faint);
+  margin-top: 6px;
+}
+
+.mcl-tech-pre {
+  margin: 0;
+  padding: 10px 12px;
+  max-height: 160px;
+  overflow: auto;
+  background: var(--surface-3);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  font-family: "JetBrains Mono", "SFMono-Regular", ui-monospace, monospace;
+  font-size: 0.74rem;
+  line-height: 1.5;
+  color: var(--strong);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.mcl-tech-log {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 150px;
+  overflow: auto;
+  padding: 8px 12px;
+  background: var(--surface-3);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  font-family: "JetBrains Mono", "SFMono-Regular", ui-monospace, monospace;
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
+.mcl-tech-line {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px;
+  color: var(--muted);
+}
+
+.mcl-tech-time {
+  color: var(--faint);
+}
+
+.mcl-tech-ok {
+  color: var(--ok-strong);
+}
+
+.mcl-tech-warn {
+  color: var(--warn-strong);
+}
+
+.mcl-tech-error {
+  color: #b91c1c;
+}
+
+.mcl-tech-meta {
+  margin-top: 6px;
+  font-size: 0.7rem;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Keyframes ──────────────────────────────────────────────────────────── */
+@keyframes mcl-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes mcl-pop {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes mcl-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes mcl-swap {
+  from {
+    opacity: 0;
+    transform: scale(0.6) rotate(-12deg);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) rotate(0);
+  }
+}
+
+@keyframes mcl-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-5px);
+  }
+}
+
+@keyframes mcl-pulse {
+  0% {
+    transform: scale(0.7);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(1.5);
+    opacity: 0;
+  }
+}
+
+@keyframes mcl-pulse-dot {
+  0% {
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(37, 99, 235, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0);
+  }
+}
+
+@keyframes mcl-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes mcl-check {
+  from {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes mcl-nudge {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-5px);
+  }
+  75% {
+    transform: translateX(5px);
+  }
+}
+
+/* ── Responsive ─────────────────────────────────────────────────────────── */
+@media (max-width: 520px) {
+  .mcl-backdrop {
+    padding: 14px;
+  }
+
+  .mcl-stage {
+    padding: 30px 20px 22px;
+  }
+
+  .mcl-actions {
+    flex-direction: column-reverse;
+  }
+
+  .mcl-btn {
+    width: 100%;
+  }
+
+  .mcl-clamp {
+    max-width: 150px;
+  }
+}
+
+/* Respect reduced-motion: drop the decorative loops, keep content legible. */
+@media (prefers-reduced-motion: reduce) {
+  .mcl-backdrop,
+  .mcl-card,
+  .mcl-card-error,
+  .mcl-badge,
+  .mcl-hero-emoji,
+  .mcl-rotating,
+  .mcl-tech-body {
+    animation: none;
+  }
+
+  .mcl-hero-ring,
+  .mcl-hero-emoji,
+  .mcl-rail-dot.is-active,
+  .mcl-progress-shimmer,
+  .mcl-badge-ok svg {
+    animation: none;
+  }
+}

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   HiArrowPath,
   HiCheckCircle,
@@ -9,23 +10,20 @@ import {
   HiExclamationTriangle,
   HiClock,
   HiPaperAirplane,
-  HiArchiveBox,
-  HiTruck,
-  HiCircleStack,
+  HiPencilSquare,
+  HiBanknotes,
 } from "react-icons/hi2";
-import { apiFetch } from "./SalesInvoice/useSalesInvoice";
+import { apiFetch, apiUpload, EDIT_RESTORE_STORAGE_KEY } from "./SalesInvoice/useSalesInvoice";
+import { useSapPost } from "./SalesInvoice/useSapPost";
 import { toNumber } from "./SalesInvoice/salesInvoice.utils";
+import MissionControlLoader from "../components/MissionControlLoader";
 import "../styles/InvoiceReview.css";
 
-type InvoiceStatus = "PENDING" | "APPROVED" | "REJECTED" | "ERROR" | "POSTED_TO_SAP";
+type InvoiceStatus = "PENDING" | "APPROVED" | "REJECTED" | "EDITED" | "ERROR" | "POSTED_TO_SAP" | "CL_RAISED";
 
 // Exact status string the backend stores after a successful SAP post.
 // Change this single constant if the backend expects a different value.
 const POSTED_TO_SAP_STATUS: InvoiceStatus = "POSTED_TO_SAP";
-
-// Endpoint that posts the invoice payload straight to SAP HANA (the same one the
-// Sales Invoice page used before the review flow was introduced).
-const SAP_POST_ENDPOINT = "/api/service-layer/invoice/";
 
 type InvoiceBatch = {
   BatchNumber?: string;
@@ -66,8 +64,11 @@ type InvoiceRecord = {
   rejection_reason?: string;
   invoice_log?: number | string;
   created_by?: number | string;
+  created_by_name?: string;
   created_at?: string;
   updated_at?: string;
+  branch?: string;
+  warehouse?: string;
   invoice_payload?: InvoicePayload | string;
   [key: string]: unknown;
 };
@@ -85,20 +86,29 @@ const STATUS_FILTERS: Array<{ key: InvoiceStatus | "ALL"; label: string }> = [
   { key: "APPROVED", label: "Approved" },
   { key: "POSTED_TO_SAP", label: "Posted to SAP" },
   { key: "REJECTED", label: "Rejected" },
+  { key: "EDITED", label: "Edited" },
   { key: "ERROR", label: "Error" },
+  { key: "CL_RAISED", label: "CL Raised" },
   { key: "ALL", label: "All" },
 ];
 
 // Human-readable label for a status (e.g. POSTED_TO_SAP -> "POSTED TO SAP").
 const statusLabel = (status: InvoiceStatus) => status.replace(/_/g, " ");
 
-// Animated steps shown while a (slow) SAP post is in flight.
-const POSTING_STEPS = [
-  { label: "Checking stock", detail: "Verifying available quantities.", Icon: HiCircleStack },
-  { label: "Grabbing inventory", detail: "Allocating batches from the warehouse.", Icon: HiArchiveBox },
-  { label: "Loading vehicle", detail: "Preparing the dispatch.", Icon: HiTruck },
-  { label: "Posting to SAP", detail: "Sending the invoice to SAP HANA.", Icon: HiPaperAirplane },
-];
+// Per-tab count map used for the number badges on the filter tabs. "ALL" holds
+// the grand total across every status.
+type StatusCounts = Record<InvoiceStatus | "ALL", number>;
+
+const createEmptyCounts = (): StatusCounts => ({
+  PENDING: 0,
+  APPROVED: 0,
+  POSTED_TO_SAP: 0,
+  REJECTED: 0,
+  EDITED: 0,
+  ERROR: 0,
+  CL_RAISED: 0,
+  ALL: 0,
+});
 
 const formatAmount = (value: unknown) => {
   const amount = toNumber(value);
@@ -123,8 +133,10 @@ const normalizeStatus = (status?: string): InvoiceStatus => {
   if (
     upper === "APPROVED"
     || upper === "REJECTED"
+    || upper === "EDITED"
     || upper === "ERROR"
     || upper === "POSTED_TO_SAP"
+    || upper === "CL_RAISED"
   ) {
     return upper;
   }
@@ -165,17 +177,6 @@ const extractMessage = (value: unknown, fallback: string) => {
   return fallback;
 };
 
-// The complete error, preserved verbatim (full response body / object).
-const stringifyError = (value: unknown): string => {
-  if (value instanceof Error) return value.message;
-  if (typeof value === "string") return value;
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
-};
-
 // Pull the deepest human-readable SAP message out of a raw error string (for UI).
 const readableSapError = (raw: string): string => {
   try {
@@ -193,9 +194,44 @@ const readableSapError = (raw: string): string => {
   return raw;
 };
 
-// A SAP service-layer call can return HTTP 200 with an error body; detect it.
-const responseHasError = (data: unknown): boolean =>
-  Boolean(data && typeof data === "object" && (data as ApiMessageResponse).error);
+/* ── Credit-limit request (external DSR service) ─────────────────────────
+ * When a SAP post fails specifically because the customer's credit limit is
+ * exceeded, the reviewer can raise a credit-limit request with the DSR
+ * service. The DSR API has no CORS support, so both calls go through the OMS
+ * backend proxy (/api/invoice/credit-limit/...; base URL configured there via
+ * DSR_API_BASE). The customer's live balance/limit are prefetched for the form. */
+
+// Company id for the DSR credit-limit service, derived from the branch stored
+// on the log: OIL → 1, BEVERAGE → 2.
+const companyForBranch = (branch?: unknown) =>
+  String(branch || "").trim().toUpperCase() === "BEVERAGE" ? "2" : "1";
+
+type CustomerCard = {
+  cardCode?: string;
+  cardName?: string;
+  cardType?: string;
+  balance?: string | number;
+  debtLine?: string | number;
+  creditLine?: string | number;
+};
+
+// One approval stage in a credit-limit request's JSAP flow.
+type CreditLimitStage = {
+  stageId?: number;
+  stageName?: string;
+  priority?: number;
+  assignedTo?: string;
+  actionStatus?: string | null;
+  actionDate?: string | null;
+  description?: string | null;
+  approvalRequired?: number;
+  rejectRequired?: number;
+};
+
+// The raise-credit-limit action only applies to errors that are actually about
+// the customer's credit limit.
+const isCreditLimitError = (record: InvoiceRecord) =>
+  /credit\s*limit/i.test(String(record.error_message || ""));
 
 /**
  * Update an invoice record's status. A rejection_reason is required when the
@@ -211,16 +247,10 @@ const updateInvoiceStatus = (
     body: JSON.stringify({ status, ...(extra || {}) }),
   });
 
-// Post the invoice payload straight to SAP HANA.
-const postPayloadToSap = (record: InvoiceRecord) =>
-  apiFetch<ApiMessageResponse>(SAP_POST_ENDPOINT, {
-    method: "POST",
-    body: JSON.stringify(parsePayload(record.invoice_payload)),
-  });
-
 export default function InvoiceReview() {
   const [statusFilter, setStatusFilter] = useState<InvoiceStatus | "ALL">("PENDING");
   const [records, setRecords] = useState<InvoiceRecord[]>([]);
+  const [counts, setCounts] = useState<StatusCounts>(createEmptyCounts);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [selected, setSelected] = useState<InvoiceRecord | null>(null);
@@ -231,19 +261,24 @@ export default function InvoiceReview() {
   const [historyRecords, setHistoryRecords] = useState<InvoiceRecord[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState("");
-  const [postingToSap, setPostingToSap] = useState(false);
-  const [postingStepIndex, setPostingStepIndex] = useState(0);
-
-  useEffect(() => {
-    if (!postingToSap) {
-      setPostingStepIndex(0);
-      return undefined;
-    }
-    const interval = window.setInterval(() => {
-      setPostingStepIndex((index) => Math.min(index + 1, POSTING_STEPS.length - 1));
-    }, 1400);
-    return () => window.clearInterval(interval);
-  }, [postingToSap]);
+  const [clRecord, setClRecord] = useState<InvoiceRecord | null>(null);
+  const [clCard, setClCard] = useState<CustomerCard | null>(null);
+  const [clLoading, setClLoading] = useState(false);
+  const [clLookupError, setClLookupError] = useState("");
+  const [clNewLimit, setClNewLimit] = useState("");
+  const [clValidTill, setClValidTill] = useState("");
+  const [clFile, setClFile] = useState<File | null>(null);
+  const [clSubmitting, setClSubmitting] = useState(false);
+  const [clSubmitError, setClSubmitError] = useState("");
+  const [clFlowRecord, setClFlowRecord] = useState<InvoiceRecord | null>(null);
+  const [clFlowStages, setClFlowStages] = useState<CreditLimitStage[]>([]);
+  const [clFlowLoading, setClFlowLoading] = useState(false);
+  const [clFlowError, setClFlowError] = useState("");
+  // The record currently being posted to SAP, kept so a credit-limit failure can
+  // offer "Raise CL" for the right invoice straight from the loader modal.
+  const [postingRecord, setPostingRecord] = useState<InvoiceRecord | null>(null);
+  const sapPost = useSapPost();
+  const navigate = useNavigate();
 
   // Factory approvers only review (Pending/Approved/Rejected) and cannot post to
   // SAP — that's the billing role's job.
@@ -253,8 +288,28 @@ export default function InvoiceReview() {
   // Only the factory approver approves/rejects; billing just sees "Pending Approval".
   const canApproveReject = isFactoryApprover;
   const visibleFilters = isFactoryApprover
-    ? STATUS_FILTERS.filter((f) => f.key === "PENDING" || f.key === "APPROVED" || f.key === "REJECTED")
+    ? STATUS_FILTERS.filter(
+        (f) => f.key === "PENDING" || f.key === "APPROVED" || f.key === "REJECTED" || f.key === "EDITED",
+      )
     : STATUS_FILTERS;
+
+  // Tally the number of invoices per status for the tab badges. The tab list is
+  // server-filtered, so `records` only ever holds the active tab; we fetch the
+  // full unfiltered list once and count each status client-side.
+  const loadCounts = useCallback(async () => {
+    try {
+      const data = await apiFetch<unknown>(`/api/invoice/all/`);
+      const all = extractRecords(data);
+      const next = createEmptyCounts();
+      all.forEach((record) => {
+        next[normalizeStatus(record.status)] += 1;
+      });
+      next.ALL = all.length;
+      setCounts(next);
+    } catch (err) {
+      console.error(err);
+    }
+  }, []);
 
   const loadInvoices = useCallback(async () => {
     setLoading(true);
@@ -270,7 +325,9 @@ export default function InvoiceReview() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter]);
+    // Keep the tab badges in sync with every reload (tab switch or post-action).
+    void loadCounts();
+  }, [statusFilter, loadCounts]);
 
   useEffect(() => {
     loadInvoices();
@@ -323,9 +380,172 @@ export default function InvoiceReview() {
     }
   };
 
-  // Post an approved (or error/retry) invoice to SAP HANA, then record the
-  // outcome: POSTED_TO_SAP on success, or ERROR with the message on failure.
-  const handlePostToSap = async (record: InvoiceRecord) => {
+  // Reopen a rejected invoice for editing: mark the log EDITED (clearing the
+  // rejection reason), hand the stored payload to the Sales Invoice wizard via
+  // sessionStorage, and navigate there. The wizard rebuilds the party and lines
+  // and re-runs batch allocation against current stock; resubmitting creates a
+  // fresh PENDING log, so this record's EDITED status is terminal.
+  const handleEdit = async (record: InvoiceRecord) => {
+    if (record.id === undefined || record.id === null) {
+      setActionError("This invoice has no identifier and cannot be edited.");
+      return;
+    }
+    const label = `SO #${record.so_number || record.id}`;
+    if (!window.confirm(`Edit ${label} and resubmit it for approval?`)) return;
+
+    setActionId(record.id);
+    setActionError("");
+    setActionMessage("");
+    try {
+      await apiFetch<ApiMessageResponse>(`/api/invoice/log/${encodeURIComponent(String(record.id))}/`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "EDITED", rejection_reason: null }),
+      });
+      sessionStorage.setItem(
+        EDIT_RESTORE_STORAGE_KEY,
+        JSON.stringify({ logId: record.id, branch: record.branch, payload: parsePayload(record.invoice_payload) }),
+      );
+      navigate("/Sales_Invoice");
+    } catch (err) {
+      console.error(err);
+      setActionError(extractMessage(err, "Unable to mark the invoice as edited."));
+      setActionId(null);
+    }
+  };
+
+  // Open the credit-limit request form for a credit-limit ERROR record and
+  // prefetch the customer's live balance/limit from the DSR service, matched by
+  // the payload's CardCode.
+  const openCreditLimitRequest = async (record: InvoiceRecord) => {
+    const cardCode = String(parsePayload(record.invoice_payload).CardCode || "");
+    setClRecord(record);
+    setClCard(null);
+    setClLookupError("");
+    setClNewLimit("");
+    setClValidTill("");
+    setClFile(null);
+    setClSubmitError("");
+    setClLoading(true);
+    try {
+      const company = companyForBranch(record.branch);
+      const data = await apiFetch<{ success?: boolean; data?: CustomerCard[] }>(
+        `/api/invoice/credit-limit/cards/?company=${company}`,
+      );
+      const cards = Array.isArray(data?.data) ? data.data : [];
+      const card = cards.find((candidate) => String(candidate.cardCode || "") === cardCode) || null;
+      setClCard(card);
+      if (!card) {
+        setClLookupError(
+          `Customer ${cardCode || "(unknown)"} was not found in the credit-limit master, so balances could not be prefilled.`,
+        );
+      }
+    } catch (err) {
+      console.error(err);
+      setClLookupError(extractMessage(err, "Unable to load customer credit data."));
+    } finally {
+      setClLoading(false);
+    }
+  };
+
+  // Submit the credit-limit request as multipart form-data: a documentData JSON
+  // blob plus the mandatory attachment.
+  const submitCreditLimitRequest = async () => {
+    if (!clRecord) return;
+    const cardCode = String(parsePayload(clRecord.invoice_payload).CardCode || "");
+    const newLimit = Number(clNewLimit);
+    if (!Number.isFinite(newLimit) || newLimit <= 0) {
+      setClSubmitError("Enter a valid new credit limit.");
+      return;
+    }
+    if (!clValidTill) {
+      setClSubmitError("Select a valid-till date.");
+      return;
+    }
+    if (!clFile) {
+      setClSubmitError("An attachment is mandatory for a credit-limit request.");
+      return;
+    }
+
+    const company = companyForBranch(clRecord.branch);
+    const documentData = {
+      branchId: company,
+      customerCode: clCard?.cardCode || cardCode,
+      customerValue: clCard?.cardName || clRecord.party_name || "",
+      currentBalance: toNumber(clCard?.balance),
+      currentCreditLimit: toNumber(clCard?.creditLine),
+      newCreditLimit: newLimit,
+      validTill: `${clValidTill} 23:59:59.00`,
+      companyId: company,
+      // createdBy is stamped server-side (OMS_JSAP_USER_ID) — see the backend proxy.
+      totalEntries: 1,
+    };
+
+    const formData = new FormData();
+    formData.append("documentData", JSON.stringify(documentData));
+    formData.append("attachment", clFile);
+    if (clRecord.id !== undefined && clRecord.id !== null) {
+      formData.append("invoice_log_id", String(clRecord.id));
+    }
+
+    setClSubmitting(true);
+    setClSubmitError("");
+    try {
+      await apiUpload("/api/invoice/credit-limit/request/", formData);
+      // Move the log to the CL Raised tab now that a request exists for it.
+      if (clRecord.id !== undefined && clRecord.id !== null) {
+        try {
+          await updateInvoiceStatus(clRecord.id, "CL_RAISED");
+        } catch (statusErr) {
+          console.error("Unable to set CL RAISED status:", statusErr);
+        }
+      }
+      setActionMessage(
+        `Credit-limit request raised for ${documentData.customerValue || cardCode} (new limit ${formatAmount(newLimit)}).`,
+      );
+      setClRecord(null);
+      loadInvoices();
+    } catch (err) {
+      console.error(err);
+      setClSubmitError(extractMessage(err, "Unable to raise the credit-limit request."));
+    } finally {
+      setClSubmitting(false);
+    }
+  };
+
+  // Show the JSAP approval flow for a credit-limit request. Keyed by the invoice
+  // log id; company is 1 for OIL, 2 for BEVERAGE (via companyForBranch).
+  const openCreditLimitFlow = async (record: InvoiceRecord) => {
+    if (record.id === undefined || record.id === null) {
+      setActionError("This invoice has no identifier and cannot show its flow.");
+      return;
+    }
+    setClFlowRecord(record);
+    setClFlowStages([]);
+    setClFlowError("");
+    setClFlowLoading(true);
+    try {
+      const company = companyForBranch(record.branch);
+      const data = await apiFetch<{ success?: boolean; data?: CreditLimitStage[] }>(
+        `/api/invoice/credit-limit/flow/?invoice_id=${encodeURIComponent(String(record.id))}&company=${company}`,
+      );
+      const stages = Array.isArray(data?.data) ? data.data : [];
+      stages.sort((a, b) => toNumber(a.priority) - toNumber(b.priority));
+      setClFlowStages(stages);
+      if (stages.length === 0) setClFlowError("No approval stages were returned for this request.");
+    } catch (err) {
+      console.error(err);
+      setClFlowError(extractMessage(err, "Unable to load the credit-limit approval flow."));
+    } finally {
+      setClFlowLoading(false);
+    }
+  };
+
+  // Post an approved (or error/retry) invoice to SAP HANA through the Mission
+  // Control loader. The loader owns the live progress and shows any SAP error
+  // (translated, with technical details) inside itself; here we only record the
+  // outcome on the local record: POSTED_TO_SAP on success, ERROR with the
+  // readable SAP message on failure.
+  const handlePostToSap = (record: InvoiceRecord) => {
     if (record.id === undefined || record.id === null) {
       setActionError("This invoice has no identifier and cannot be posted.");
       return;
@@ -333,50 +553,68 @@ export default function InvoiceReview() {
     const label = `SO #${record.so_number || record.id}`;
     if (!window.confirm(`Post ${label} to SAP HANA?`)) return;
 
-    setActionId(record.id);
     setActionError("");
     setActionMessage("");
-    setPostingToSap(true);
+    setSelected(null);
+    setPostingRecord(record);
 
-    // Record an ERROR outcome. Save the readable SAP message (e.g. the
-    // "Credit Limit Exceeded!" text) in the log, overwriting any previous error.
-    const logError = async (rawError: string) => {
-      const message = readableSapError(rawError);
-      try {
-        await updateInvoiceStatus(record.id, "ERROR", { error_message: message });
-      } catch (logErr) {
-        console.error("Unable to log SAP post error:", logErr);
-      }
-      setActionError(message);
-      // Keep an open detail modal in sync with the new error.
-      setSelected((current) =>
-        current && current.id === record.id
-          ? { ...current, status: "ERROR", error_message: message }
-          : current,
-      );
-    };
-
-    try {
-      const data = await postPayloadToSap(record);
-      // The SAP proxy can return a 200 response that still carries an error body.
-      if (responseHasError(data)) {
-        await logError(stringifyError(data));
-        await loadInvoices();
-        return;
-      }
-      await updateInvoiceStatus(record.id, POSTED_TO_SAP_STATUS);
-      setActionMessage(`${label} posted to SAP HANA successfully.`);
-      setSelected(null);
-      await loadInvoices();
-    } catch (err) {
-      console.error(err);
-      await logError(stringifyError(err));
-      await loadInvoices();
-    } finally {
-      setActionId(null);
-      setPostingToSap(false);
-    }
+    const payload = parsePayload(record.invoice_payload);
+    sapPost.run({
+      payload,
+      branch: record.branch,
+      doc: {
+        draftNo: String(record.so_number || record.id),
+        customer: record.party_name || "",
+        itemCount: (payload.DocumentLines || []).length || null,
+        total: toNumber(record.total_amount),
+        branch: record.branch || "",
+      },
+      onSuccess: async () => {
+        setActionMessage(`${label} posted to SAP HANA successfully.`);
+        try {
+          await updateInvoiceStatus(record.id, POSTED_TO_SAP_STATUS);
+        } catch (logErr) {
+          console.error("Unable to record SAP post success:", logErr);
+        }
+      },
+      onError: async (message, rawError) => {
+        // Save the readable SAP message (e.g. the "Credit Limit Exceeded!" text)
+        // in the log, overwriting any previous error.
+        const readable = readableSapError(rawError || message);
+        try {
+          await updateInvoiceStatus(record.id, "ERROR", { error_message: readable });
+        } catch (logErr) {
+          console.error("Unable to log SAP post error:", logErr);
+        }
+      },
+    });
   };
+
+  // Dismiss the loader; refresh the list once the run has settled so the row
+  // reflects the recorded POSTED_TO_SAP / ERROR status.
+  const closeSapLoader = () => {
+    const settled = sapPost.state.status === "success" || sapPost.state.status === "error";
+    sapPost.close();
+    setPostingRecord(null);
+    if (settled) loadInvoices();
+  };
+
+  // The SAP post failed on a credit-limit check: close the loader and open the
+  // credit-limit request form for the invoice that was being posted.
+  const raiseClFromLoader = () => {
+    const record = postingRecord;
+    if (!record) return;
+    closeSapLoader();
+    void openCreditLimitRequest(record);
+  };
+
+  // True when the current SAP failure is specifically about the credit limit, so
+  // the loader can offer a "Raise CL" shortcut.
+  const sapErrorIsCreditLimit =
+    sapPost.state.status === "error" &&
+    /credit\s*limit/i.test(
+      String(sapPost.state.rawError || sapPost.state.errorMessage || ""),
+    );
 
   const openHistory = async (record: InvoiceRecord) => {
     // The history endpoint is keyed by the invoice-log id. On a list row that is
@@ -409,38 +647,6 @@ export default function InvoiceReview() {
 
   return (
     <div className="ir-page">
-      {postingToSap && (
-        <div className="ir-posting-overlay" role="status" aria-live="polite" aria-label="Posting invoice to SAP HANA">
-          <section className="ir-posting-card">
-            <div className="ir-posting-orbit" aria-hidden="true">
-              <HiTruck />
-              <span />
-            </div>
-            <h2>Posting to SAP HANA…</h2>
-            <p className="ir-posting-detail">{POSTING_STEPS[postingStepIndex].detail}</p>
-            <ol className="ir-posting-steps">
-              {POSTING_STEPS.map((step, index) => {
-                const StepIcon = step.Icon;
-                const isActive = index === postingStepIndex;
-                const isDone = index < postingStepIndex;
-                return (
-                  <li className={`${isActive ? "is-active" : ""}${isDone ? " is-done" : ""}`} key={step.label}>
-                    <span className="ir-posting-step-icon">
-                      {isActive ? <HiArrowPath className="ir-spin" aria-hidden="true" /> : <StepIcon aria-hidden="true" />}
-                    </span>
-                    <span className="ir-posting-step-copy">
-                      <strong>{step.label}</strong>
-                      <small>{step.detail}</small>
-                    </span>
-                  </li>
-                );
-              })}
-            </ol>
-            <p className="ir-posting-foot">This can take a little while — please don’t close this window.</p>
-          </section>
-        </div>
-      )}
-
       <header className="ir-header">
         <div>
           <h1>Invoice Review</h1>
@@ -458,16 +664,22 @@ export default function InvoiceReview() {
       </header>
 
       <nav className="ir-filters" aria-label="Filter invoices by status">
-        {visibleFilters.map((filter) => (
-          <button
-            key={filter.key}
-            type="button"
-            className={`ir-filter${statusFilter === filter.key ? " is-active" : ""}`}
-            onClick={() => setStatusFilter(filter.key)}
-          >
-            {filter.label}
-          </button>
-        ))}
+        {visibleFilters.map((filter) => {
+          const count = counts[filter.key] ?? 0;
+          return (
+            <button
+              key={filter.key}
+              type="button"
+              className={`ir-filter${statusFilter === filter.key ? " is-active" : ""}`}
+              onClick={() => setStatusFilter(filter.key)}
+            >
+              {filter.label}
+              {count > 0 && (
+                <span className="ir-filter-badge">{count > 99 ? "99+" : count}</span>
+              )}
+            </button>
+          );
+        })}
       </nav>
 
       {actionMessage && <div className="ir-banner ir-banner-success">{actionMessage}</div>}
@@ -490,7 +702,7 @@ export default function InvoiceReview() {
                   <th>SO #</th>
                   <th>Party</th>
                   <th className="ir-num">Amount</th>
-                  <th>Status</th>
+                  {/* <th>Status</th> */}
                   <th>Submitted</th>
                   <th className="ir-actions-col">Actions</th>
                 </tr>
@@ -504,9 +716,9 @@ export default function InvoiceReview() {
                       <td>{record.so_number || "—"}</td>
                       <td>{record.party_name || "—"}</td>
                       <td className="ir-num">{formatAmount(record.total_amount)}</td>
-                      <td>
+                      {/* <td>
                         <span className={`ir-badge ir-badge-${status.toLowerCase()}`}>{statusLabel(status)}</span>
-                      </td>
+                      </td> */}
                       <td>{formatDateTime(record.created_at)}</td>
                       <td className="ir-actions-col">
                         <div className="ir-row-actions">
@@ -526,7 +738,7 @@ export default function InvoiceReview() {
                             <HiClock aria-hidden="true" />
                             History
                           </button>
-                          {status === "PENDING" && (
+                          {(status === "PENDING" || status === "EDITED") && (
                             canApproveReject ? (
                               <>
                                 <button
@@ -563,7 +775,7 @@ export default function InvoiceReview() {
                               {busy ? "…" : "Post to SAP"}
                             </button>
                           )}
-                          {status === "ERROR" && canPostToSap && (
+                          {(status === "ERROR" || status === "CL_RAISED") && canPostToSap && (
                             <button
                               type="button"
                               className="ir-btn ir-btn-sap ir-btn-sm"
@@ -572,6 +784,39 @@ export default function InvoiceReview() {
                             >
                               <HiArrowPath aria-hidden="true" />
                               {busy ? "…" : "Repost to SAP"}
+                            </button>
+                          )}
+                          {status === "CL_RAISED" && canPostToSap && (
+                            <button
+                              type="button"
+                              className="ir-btn ir-btn-cl ir-btn-sm"
+                              disabled={busy}
+                              onClick={() => openCreditLimitFlow(record)}
+                            >
+                              <HiBanknotes aria-hidden="true" />
+                              Show Flow
+                            </button>
+                          )}
+                          {status === "ERROR" && canPostToSap && isCreditLimitError(record) && (
+                            <button
+                              type="button"
+                              className="ir-btn ir-btn-cl ir-btn-sm"
+                              disabled={busy}
+                              onClick={() => openCreditLimitRequest(record)}
+                            >
+                              <HiBanknotes aria-hidden="true" />
+                              {busy ? "…" : "Raise CL"}
+                            </button>
+                          )}
+                          {status === "REJECTED" && canPostToSap && (
+                            <button
+                              type="button"
+                              className="ir-btn ir-btn-edit ir-btn-sm"
+                              disabled={busy}
+                              onClick={() => handleEdit(record)}
+                            >
+                              <HiPencilSquare aria-hidden="true" />
+                              {busy ? "…" : "Edit"}
                             </button>
                           )}
                         </div>
@@ -623,19 +868,19 @@ export default function InvoiceReview() {
                   <span><strong>Rejection reason:</strong> {selected.rejection_reason}</span>
                 </div>
               )}
+              <div className="ir-detail-hero">
+                <div className="ir-detail-hero-amount">
+                  <span className="ir-eyebrow">Total Amount</span>
+                  <strong>{formatAmount(selected.total_amount)}</strong>
+                </div>
+                <span
+                  className={`ir-badge ir-badge-lg ir-badge-${normalizeStatus(selected.status).toLowerCase()}`}
+                >
+                  {statusLabel(normalizeStatus(selected.status))}
+                </span>
+              </div>
+
               <dl className="ir-meta-grid">
-                <div>
-                  <dt>Status</dt>
-                  <dd>
-                    <span className={`ir-badge ir-badge-${normalizeStatus(selected.status).toLowerCase()}`}>
-                      {statusLabel(normalizeStatus(selected.status))}
-                    </span>
-                  </dd>
-                </div>
-                <div>
-                  <dt>Total Amount</dt>
-                  <dd>{formatAmount(selected.total_amount)}</dd>
-                </div>
                 <div>
                   <dt>Customer Code</dt>
                   <dd>{selectedPayload.CardCode || "—"}</dd>
@@ -654,7 +899,10 @@ export default function InvoiceReview() {
                 </div>
               </dl>
 
-              <h3 className="ir-section-title">Line Items</h3>
+              <h3 className="ir-section-title">
+                Line Items
+                <span className="ir-section-count">{(selectedPayload.DocumentLines || []).length}</span>
+              </h3>
               <div className="ir-table-wrap">
                 <table className="ir-table ir-table-compact">
                   <thead>
@@ -669,7 +917,7 @@ export default function InvoiceReview() {
                   <tbody>
                     {(selectedPayload.DocumentLines || []).map((line, index) => (
                       <tr key={line.LineNum ?? index}>
-                        <td>{line.ItemCode || "—"}</td>
+                        <td className="ir-cell-code">{line.ItemCode || "—"}</td>
                         <td>{line.WarehouseCode || "—"}</td>
                         <td className="ir-num">{toNumber(line.Quantity).toLocaleString("en-IN")}</td>
                         <td>{line.TaxCode || "—"}</td>
@@ -677,14 +925,14 @@ export default function InvoiceReview() {
                           {(line.BatchNumbers || []).length === 0 ? (
                             <span className="ir-muted">No batch</span>
                           ) : (
-                            <ul className="ir-batch-list">
+                            <div className="ir-batch-chips">
                               {(line.BatchNumbers || []).map((batch, batchIndex) => (
-                                <li key={batchIndex}>
+                                <span className="ir-batch-chip" key={batchIndex}>
                                   {batch.BatchNumber || `Serial ${batch.SystemSerialNumber ?? "?"}`}
-                                  <span className="ir-muted"> × {toNumber(batch.Quantity)}</span>
-                                </li>
+                                  <em>×{toNumber(batch.Quantity)}</em>
+                                </span>
                               ))}
-                            </ul>
+                            </div>
                           )}
                         </td>
                       </tr>
@@ -699,7 +947,7 @@ export default function InvoiceReview() {
               </details>
             </div>
 
-            {normalizeStatus(selected.status) === "PENDING" && (
+            {["PENDING", "EDITED"].includes(normalizeStatus(selected.status)) && (
               <footer className="ir-modal-foot">
                 {canApproveReject ? (
                   <>
@@ -742,8 +990,30 @@ export default function InvoiceReview() {
               </footer>
             )}
 
-            {normalizeStatus(selected.status) === "ERROR" && canPostToSap && (
+            {["ERROR", "CL_RAISED"].includes(normalizeStatus(selected.status)) && canPostToSap && (
               <footer className="ir-modal-foot">
+                {normalizeStatus(selected.status) === "ERROR" && isCreditLimitError(selected) && (
+                  <button
+                    type="button"
+                    className="ir-btn ir-btn-cl"
+                    disabled={actionId === selected.id}
+                    onClick={() => openCreditLimitRequest(selected)}
+                  >
+                    <HiBanknotes aria-hidden="true" />
+                    Raise Credit Limit
+                  </button>
+                )}
+                {normalizeStatus(selected.status) === "CL_RAISED" && (
+                  <button
+                    type="button"
+                    className="ir-btn ir-btn-cl"
+                    disabled={actionId === selected.id}
+                    onClick={() => openCreditLimitFlow(selected)}
+                  >
+                    <HiBanknotes aria-hidden="true" />
+                    Show Flow
+                  </button>
+                )}
                 <button
                   type="button"
                   className="ir-btn ir-btn-sap"
@@ -751,7 +1021,21 @@ export default function InvoiceReview() {
                   onClick={() => handlePostToSap(selected)}
                 >
                   <HiArrowPath aria-hidden="true" />
-                  Report to SAP
+                  Repost to SAP
+                </button>
+              </footer>
+            )}
+
+            {normalizeStatus(selected.status) === "REJECTED" && canPostToSap && (
+              <footer className="ir-modal-foot">
+                <button
+                  type="button"
+                  className="ir-btn ir-btn-edit"
+                  disabled={actionId === selected.id}
+                  onClick={() => handleEdit(selected)}
+                >
+                  <HiPencilSquare aria-hidden="true" />
+                  Edit &amp; Resubmit
                 </button>
               </footer>
             )}
@@ -805,6 +1089,9 @@ export default function InvoiceReview() {
                             <span className={`ir-badge ir-badge-${entryStatus.toLowerCase()}`}>{statusLabel(entryStatus)}</span>
                             <time>{formatDateTime(entry.created_at)}</time>
                           </div>
+                          {entry.created_by_name && (
+                            <p className="ir-timeline-note ir-timeline-by">By: {entry.created_by_name}</p>
+                          )}
                           {entry.rejection_reason && (
                             <p className="ir-timeline-note">Reason: {entry.rejection_reason}</p>
                           )}
@@ -821,6 +1108,206 @@ export default function InvoiceReview() {
           </section>
         </div>
       )}
+
+      {/* Credit-limit request form (credit-limit ERROR records only) */}
+      {clRecord && (
+        <div
+          className="ir-modal-backdrop"
+          role="presentation"
+          onClick={() => !clSubmitting && setClRecord(null)}
+        >
+          <section
+            className="ir-modal ir-cl-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Raise credit limit request"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header className="ir-modal-head">
+              <div>
+                <span className="ir-eyebrow">Credit Limit Request</span>
+                <h2>{clCard?.cardName || clRecord.party_name || "—"}</h2>
+                <p>{String(parsePayload(clRecord.invoice_payload).CardCode || "—")}</p>
+              </div>
+              <button
+                type="button"
+                className="ir-icon-btn"
+                aria-label="Close credit limit request"
+                onClick={() => !clSubmitting && setClRecord(null)}
+              >
+                <HiXMark aria-hidden="true" />
+              </button>
+            </header>
+
+            <div className="ir-modal-body">
+              {clLoading ? (
+                <div className="ir-empty">Loading customer credit data…</div>
+              ) : (
+                <>
+                  {clLookupError && <div className="ir-banner ir-banner-error">{clLookupError}</div>}
+                  <dl className="ir-meta-grid">
+                    <div>
+                      <dt>Current Balance</dt>
+                      <dd>{clCard ? formatAmount(clCard.balance) : "—"}</dd>
+                    </div>
+                    <div>
+                      <dt>Current Credit Limit</dt>
+                      <dd>{clCard ? formatAmount(clCard.creditLine) : "—"}</dd>
+                    </div>
+                    <div>
+                      <dt>Card Type</dt>
+                      <dd>{clCard?.cardType || "—"}</dd>
+                    </div>
+                    <div>
+                      <dt>Branch</dt>
+                      <dd>{clRecord.branch || "—"}</dd>
+                    </div>
+                  </dl>
+
+                  <div className="ir-cl-form">
+                    <label className="ir-cl-field">
+                      <span>New Credit Limit *</span>
+                      <input
+                        type="number"
+                        min={1}
+                        value={clNewLimit}
+                        onChange={(event) => setClNewLimit(event.target.value)}
+                        placeholder="e.g. 200000"
+                      />
+                    </label>
+                    <label className="ir-cl-field">
+                      <span>Valid Till *</span>
+                      <input
+                        type="date"
+                        value={clValidTill}
+                        onChange={(event) => setClValidTill(event.target.value)}
+                      />
+                    </label>
+                    <label className="ir-cl-field ir-cl-field-wide">
+                      <span>Attachment * (mandatory)</span>
+                      <input
+                        type="file"
+                        onChange={(event) => setClFile(event.target.files?.[0] || null)}
+                      />
+                    </label>
+                  </div>
+
+                  {clSubmitError && <div className="ir-banner ir-banner-error">{clSubmitError}</div>}
+                </>
+              )}
+            </div>
+
+            <footer className="ir-modal-foot">
+              <button
+                type="button"
+                className="ir-btn ir-btn-ghost"
+                onClick={() => setClRecord(null)}
+                disabled={clSubmitting}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="ir-btn ir-btn-cl"
+                onClick={submitCreditLimitRequest}
+                disabled={clSubmitting || clLoading}
+              >
+                <HiBanknotes aria-hidden="true" />
+                {clSubmitting ? "Submitting…" : "Raise Request"}
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
+
+      {/* Credit-limit approval flow (CL Raised records) */}
+      {clFlowRecord && (
+        <div className="ir-modal-backdrop" role="presentation" onClick={() => setClFlowRecord(null)}>
+          <section
+            className="ir-modal ir-cl-flow-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Credit limit approval flow"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header className="ir-modal-head">
+              <div>
+                <span className="ir-eyebrow">Credit Limit Flow</span>
+                <h2>{clFlowRecord.party_name || "—"}</h2>
+                <p>SO #{clFlowRecord.so_number || clFlowRecord.id}</p>
+              </div>
+              <button
+                type="button"
+                className="ir-icon-btn"
+                aria-label="Close credit limit flow"
+                onClick={() => setClFlowRecord(null)}
+              >
+                <HiXMark aria-hidden="true" />
+              </button>
+            </header>
+
+            <div className="ir-modal-body">
+              {clFlowLoading ? (
+                <div className="ir-empty">Loading approval flow…</div>
+              ) : clFlowError ? (
+                <div className="ir-banner ir-banner-error">{clFlowError}</div>
+              ) : (
+                <ol className="ir-timeline">
+                  {clFlowStages.map((stage, index) => {
+                    const acted = String(stage.actionStatus || "").trim();
+                    const dotClass = acted
+                      ? /reject/i.test(acted)
+                        ? "ir-dot-rejected"
+                        : "ir-dot-approved"
+                      : "ir-dot-pending";
+                    const badgeClass = acted
+                      ? /reject/i.test(acted)
+                        ? "ir-badge-rejected"
+                        : "ir-badge-approved"
+                      : "ir-badge-pending";
+                    return (
+                      <li className="ir-timeline-item" key={stage.stageId ?? index}>
+                        <span className={`ir-timeline-dot ${dotClass}`} aria-hidden="true" />
+                        <div className="ir-timeline-body">
+                          <div className="ir-timeline-head">
+                            <strong>
+                              {toNumber(stage.priority) ? `${toNumber(stage.priority)}. ` : ""}
+                              {stage.stageName || "—"}
+                            </strong>
+                            <span className={`ir-badge ${badgeClass}`}>{acted || "Pending"}</span>
+                          </div>
+                          <p className="ir-timeline-note ir-timeline-by">
+                            Assigned to: {stage.assignedTo || "—"}
+                          </p>
+                          {stage.actionDate && (
+                            <p className="ir-timeline-note">Actioned: {formatDateTime(stage.actionDate)}</p>
+                          )}
+                          {stage.description && (
+                            <p className="ir-timeline-note">{stage.description}</p>
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ol>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
+
+      {/* Mission Control loader — drives the live post-to-SAP transaction and
+          shows success or the translated SAP error (with retry) in place. */}
+      <MissionControlLoader
+        state={sapPost.state}
+        onClose={closeSapLoader}
+        onRetry={sapPost.retry}
+        onRaiseCl={
+          canPostToSap && sapErrorIsCreditLimit && postingRecord
+            ? raiseClFromLoader
+            : undefined
+        }
+      />
     </div>
   );
 }

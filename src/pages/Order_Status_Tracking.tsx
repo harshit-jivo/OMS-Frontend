@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState, useRef } from "react";
-import * as XLSX from "xlsx";
-import { saveAs } from "file-saver";
+import { exportToExcel } from "../utils/excelExport";
 import type { Order, OrderItem, OrderLog } from "../services/ordersService";
 import { sapService } from "../services/sapService";
 import { getOrderItemSchemes, getOrderItemTotalLtrs, ordersService } from "../services/ordersService";
@@ -12,10 +11,11 @@ import {
 } from "../utils/orderTrackingTimeline";
 import "../styles/Order_Status_Tracking.css";
 import "../styles/Auditor_Order.css";
+import { useUILabels } from "../services/uiConfig";
 import ItemSection from "../components/order-items/ItemSection";
 import PartyHeader from "../components/order-items/PartyHeader";
 import {
-  HiEye, HiArrowDownTray, HiArrowPath
+  HiEye, HiArrowDownTray, HiArrowPath, HiMagnifyingGlass, HiXMark
 } from "react-icons/hi2";
 
 type TrackingMode = "auditor" | "billing" | "rate_approver";
@@ -38,7 +38,10 @@ const BILLING_REJECTED_KEYWORDS = ["billing rejected", "rejected by billing", "b
 const AUDITOR_REJECTED_CODES = ["REJECTED"];
 const AUDITOR_ACCEPTED_STATUS_CODES = ["BILLING", "BILLING_PENDING", "APPROVED", "COMPLETED"];
 const BILLING_REJECTED_CODES = ["BILLING_REJECTED"];
-const APPROVER_ACCEPTED_STATUS_CODES = ["APPROVED", "BILLING"];
+const APPROVER_ACCEPTED_STATUS_CODES = ["APPROVED", "BILLING", "BILLING_PENDING", "BILLED", "COMPLETED"];
+// An order can only progress past rate approval if it was approved, so any
+// downstream status counts as accepted for the rate approver view.
+const APPROVER_ACCEPTED_KEYWORDS = ["billing", "billed", "audit", "completed", "quotation"];
 const RATE_APPROVER_REJECTED_KEYWORDS = ["rate approver rejected", "rate rejected", "rejected"];
 const RATE_APPROVER_TRACKING_FALLBACK_STATUS = "APPROVED";
 
@@ -93,7 +96,10 @@ const getDecisionType = (order: Order, mode: TrackingMode) => {
     if (RATE_APPROVER_REJECTED_KEYWORDS.some((keyword) => normalized.includes(keyword))) {
       return "rejected";
     }
-    if (APPROVER_ACCEPTED_STATUS_CODES.includes(statusCode) || normalized.includes("billing")) {
+    if (
+      APPROVER_ACCEPTED_STATUS_CODES.includes(statusCode) ||
+      APPROVER_ACCEPTED_KEYWORDS.some((keyword) => normalized.includes(keyword))
+    ) {
       return "accepted";
     }
   }
@@ -127,10 +133,13 @@ const normalizeTrackingOrders = (items: Order[], mode: TrackingMode) => {
 };
 
 export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps) {
+  const { t } = useUILabels();
   const [orders, setOrders] = useState<Order[]>([]);
   const [decisionFilter, setDecisionFilter] = useState<"all" | "accepted" | "rejected">("all");
   const [fromDate, setFromDate] = useState(firstDay);
   const [toDate, setToDate] = useState(lastDay);
+  const [searchInput, setSearchInput] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [showDetails, setShowDetails] = useState(false);
   const [orderDetails, setOrderDetails] = useState<Order | null>(null);
@@ -187,9 +196,13 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
         matchesDate = orderDate >= from && orderDate <= to;
       }
 
-      return matchesDate;
+      const matchesCardName = !appliedSearch || String(order.card_name || "")
+        .toLowerCase()
+        .includes(appliedSearch);
+
+      return matchesDate && matchesCardName;
     });
-  }, [trackedOrders, fromDate, toDate]);
+  }, [trackedOrders, fromDate, toDate, appliedSearch]);
 
   const filteredOrders = useMemo(() => {
     return dateFilteredOrders.filter((order) => {
@@ -283,8 +296,6 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
     0,
   );
   const grandTotal = subtotal + taxTotal;
-  const hasQuotationNumber = Boolean(String(orderDetails?.sap_doc_number || "").trim());
-  const isCompletedOrder = isCompletedStatus(orderDetails);
 
   const handleTrack = async (order: Order) => {
     setTrackingOrder(order);
@@ -305,7 +316,7 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
   const downloadExcel = async (order: Order) => {
     const quotationNo = await resolveQuotationNumber(order);
     const exportOrder = applyQuotationNumber(order, quotationNo);
-    let excelData: object[] = [];
+    let excelData: Record<string, unknown>[] = [];
 
     if (exportOrder.items && exportOrder.items.length > 0) {
       excelData = exportOrder.items.flatMap((item: OrderItem) => {
@@ -324,7 +335,7 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
         Qty: item.qty,
         Boxes: item.boxes,
         Liters: item.ltrs,
-        "Total Ltrs": getOrderItemTotalLtrs(item).toFixed(2),
+        "Total Ltrs": getOrderItemTotalLtrs(item),
         "Price List (Basic)": item.price_list_basic,
         "Basic Price": item.basic_price,
         "Total Amount": item.total,
@@ -348,14 +359,10 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
       });
     }
 
-    const worksheet = XLSX.utils.json_to_sheet(excelData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Status Tracking");
-    const excelBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
-    const file = new Blob([excelBuffer], {
-      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    await exportToExcel(excelData, {
+      fileName: `Tracked_Order_${exportOrder.order_number}.xlsx`,
+      sheetName: "Status Tracking",
     });
-    saveAs(file, `Tracked_Order_${exportOrder.order_number}.xlsx`);
   };
 
   return (
@@ -414,6 +421,37 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
               >
                 Rejected
               </button>
+              <div className="ot-card-search">
+                <HiMagnifyingGlass className="ot-card-search-icon" aria-hidden="true" />
+                <input
+                  type="text"
+                  className="ot-card-search-input"
+                  value={searchInput}
+                  onChange={(e) => {
+                    const value = e.target.value.toUpperCase();
+                    setSearchInput(value);
+                    setAppliedSearch(value.trim().toLowerCase());
+                    setCurrentPage(1);
+                  }}
+                  placeholder="Search e.g. Bachan Singh"
+                  aria-label="Search orders by card name"
+                />
+                {(searchInput || appliedSearch) && (
+                  <button
+                    type="button"
+                    className="ot-card-search-clear"
+                    onClick={() => {
+                      setSearchInput("");
+                      setAppliedSearch("");
+                      setCurrentPage(1);
+                    }}
+                    aria-label="Clear card-name search"
+                    title="Clear search"
+                  >
+                    <HiXMark aria-hidden="true" />
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="ot-filters">
@@ -599,7 +637,7 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
                     <th>Ltrs</th>
                     {/* <th>Scheme Ltrs</th> */}
                     <th>Total Ltrs</th>
-                    <th>Price List (Basic)</th>
+                    <th>{t("price_list", "Price List (Basic)")}</th>
                     <th>Basic Price</th>
                     <th>Amount</th>
                   </tr>
