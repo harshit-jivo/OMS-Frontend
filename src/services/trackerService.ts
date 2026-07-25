@@ -79,6 +79,7 @@ export interface PaymentDetail {
 export interface Invoice {
   id: number;
   invoice_date: string;
+  effective_month: string;   // stored as first-of-month date (YYYY-MM-01)
   party_name: string;
   party_code: string;
   party_gstin: string;
@@ -129,6 +130,7 @@ export interface Invoice {
 
 export interface InvoiceWrite {
   invoice_date: string;
+  effective_month: string;   // sent as first-of-month date (YYYY-MM-01)
   party_name: string;
   party_code: string;
   party_gstin: string;
@@ -188,6 +190,7 @@ export interface AllInvoiceFilters {
   status?: string;      // IN_PROGRESS | COMPLETED
   stage?: string;       // current_stage code
   overdue?: "true" | "false";
+  effective_month?: string;   // "YYYY-MM"
 }
 
 // ---------------------------------------------------------------------------
