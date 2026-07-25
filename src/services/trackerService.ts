@@ -68,10 +68,13 @@ export interface StageEvent {
 }
 
 export interface PaymentDetail {
-  discount_amount: string;
-  tds_amount: string;
-  paid_amount: string;
-  open_balance: string;
+  discount_pct: string;      // user input — % on net invoice value
+  tds_pct: string;           // user input — % on taxable value
+  hold_added_back: boolean;  // release the held amount back into the payable
+  discount_amount: string;   // derived server-side
+  tds_amount: string;        // derived server-side
+  paid_amount: string;       // cumulative paid
+  open_balance: string;      // derived: net payable - paid
   status: "OPEN" | "PAID";
   updated_at: string;
 }
@@ -94,6 +97,9 @@ export interface Invoice {
   additional_charge_type_display: string | null;
   additional_charge_amount: string;
   invoice_value: string;
+  debit_amount: string;              // total debited at Pre-Audit
+  hold_amount: string;               // total withheld via a PARTIAL hold
+  net_invoice_value: string;         // invoice_value - debit_amount
   category: number;
   category_name: string;
   unit: number;
@@ -112,6 +118,11 @@ export interface Invoice {
   days_at_stage: string;
   is_overdue: boolean;
   editable: boolean;
+  // Payment summary (present at the terminal/payment stage).
+  payment_status: "OPEN" | "PAID" | null;
+  paid_amount: string | null;
+  open_balance: string | null;
+  is_partially_paid: boolean;
   created_by: number;
   created_by_name: string;
   created_at: string;

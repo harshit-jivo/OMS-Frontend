@@ -46,13 +46,16 @@ const invMatch = (i: Invoice, q: string) =>
 const RETURN_STATUSES = new Set(["RETURN", "REJECTED"]);
 const REASON_STATUSES = new Set(["RETURN", "REJECTED", "HOLD", "DEBIT"]);
 
+// The payment form now captures only the three inputs; every amount, the open
+// balance and the status are derived (mirrored from the server maths).
 const EMPTY_PAYMENT: Partial<PaymentDetail> = {
-  discount_amount: "",
-  tds_amount: "",
+  discount_pct: "",
+  tds_pct: "",
   paid_amount: "",
-  open_balance: "",
-  status: "OPEN",
+  hold_added_back: false,
 };
+
+const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
 export default function Tracker_Queue() {
   const [lookups, setLookups] = useState<Lookups | null>(null);
@@ -65,7 +68,7 @@ export default function Tracker_Queue() {
   const [holdType, setHoldType] = useState("");   // FULL | PARTIAL
   const [amount, setAmount] = useState("");        // hold / debit amount
   const [toast, setToast] = useState("");
-  const [subTab, setSubTab] = useState<"current" | "returned" | "advanced" | "rejected">("current");
+  const [subTab, setSubTab] = useState<"current" | "returned" | "advanced" | "rejected" | "partial">("current");
   const [advancedRows, setAdvancedRows] = useState<Invoice[]>([]);
   const [search, setSearch] = useState("");
 
@@ -73,6 +76,10 @@ export default function Tracker_Queue() {
   const [detailInv, setDetailInv] = useState<Invoice | null>(null);
   const [payInv, setPayInv] = useState<Invoice | null>(null);
   const [payForm, setPayForm] = useState<Partial<PaymentDetail>>({ ...EMPTY_PAYMENT });
+  // Whether the user has manually typed a paid amount. Until then, the paid
+  // field auto-follows the net payable (so it always shows amount-after-deductions).
+  const [paidEdited, setPaidEdited] = useState(false);
+  const [savingPay, setSavingPay] = useState(false);
 
   const flash = (m: string) => { setToast(m); setTimeout(() => setToast(""), 2600); };
 
@@ -107,6 +114,7 @@ export default function Tracker_Queue() {
 
   const isEntry = activeStage === "entry";
   const isSapApproval = activeStage === "sap_approval";
+  const isTerminal = !!stageCfg?.is_terminal;
 
   // All invoices sitting at the active stage, split by how they arrived / state.
   const stageRows = useMemo(
@@ -118,8 +126,15 @@ export default function Tracker_Queue() {
     () => stageRows.filter((i) => i.rejection_pending),
     [stageRows]
   );
+  // Partially-paid invoices (terminal stage) get their own tab and are kept out
+  // of "Current" so the to-pay list and the part-paid list don't mix.
+  const partialRows = useMemo(
+    () => stageRows.filter((i) => i.is_partially_paid && !i.rejection_pending),
+    [stageRows]
+  );
   const currentRows = useMemo(
-    () => stageRows.filter((i) => !i.arrived_via_return && !i.rejection_pending),
+    () => stageRows.filter(
+      (i) => !i.arrived_via_return && !i.rejection_pending && !i.is_partially_paid),
     [stageRows]
   );
   const returnedRows = useMemo(
@@ -131,7 +146,8 @@ export default function Tracker_Queue() {
   const baseRows =
     subTab === "advanced" ? advancedRows :
     subTab === "returned" ? returnedRows :
-    subTab === "rejected" ? rejectedRows : currentRows;
+    subTab === "rejected" ? rejectedRows :
+    subTab === "partial" ? partialRows : currentRows;
   const readOnly = subTab === "advanced";
   // Omni search filters whatever the active sub-tab shows.
   const rows = useMemo(() => {
@@ -216,38 +232,45 @@ export default function Tracker_Queue() {
     try {
       const full = await trackerService.getInvoice(inv.id);
       setPayInv(full);
-      if (full.payment) {
-        // Show blanks (with a placeholder) instead of a pre-filled 0.00.
-        const blankZero = (v: string) => (Number(v) === 0 ? "" : v);
+      const blankZero = (v?: string) => (!v || Number(v) === 0 ? "" : v);
+      if (full.payment && (Number(full.payment.paid_amount) > 0
+          || Number(full.payment.discount_pct) > 0 || Number(full.payment.tds_pct) > 0)) {
+        // Editing an existing (e.g. partial) payment — restore the inputs and
+        // treat the paid amount as user-set so it isn't auto-overwritten.
         setPayForm({
-          discount_amount: blankZero(full.payment.discount_amount),
-          tds_amount: blankZero(full.payment.tds_amount),
-          paid_amount: blankZero(full.payment.paid_amount),
-          open_balance: blankZero(full.payment.open_balance),
-          status: full.payment.status,
+          discount_pct: blankZero(full.payment.discount_pct),
+          tds_pct: blankZero(full.payment.tds_pct),
+          hold_added_back: full.payment.hold_added_back,
+          paid_amount: full.payment.paid_amount,
         });
+        setPaidEdited(true);
       } else {
         setPayForm({ ...EMPTY_PAYMENT });
+        setPaidEdited(false);   // paid auto-follows net payable until edited
       }
     } catch { flash("Failed to load payment"); }
   };
-  const savePayment = async () => {
+
+  const savePayment = async (calc: { netPayable: number; paid: number; isPaid: boolean }) => {
     if (!payInv) return;
-    // Blank amounts save as 0.
-    const payload = {
-      ...payForm,
-      discount_amount: payForm.discount_amount || "0",
-      tds_amount: payForm.tds_amount || "0",
-      paid_amount: payForm.paid_amount || "0",
-      open_balance: payForm.open_balance || "0",
-    };
+    if (calc.paid > calc.netPayable + 0.005) {
+      flash("Paid amount cannot exceed the net payable"); return;
+    }
+    setSavingPay(true);
     try {
-      await trackerService.updatePayment(payInv.id, payload);
-      flash(payForm.status === "PAID" ? "Payment saved — invoice completed" : "Payment saved");
+      await trackerService.updatePayment(payInv.id, {
+        discount_pct: payForm.discount_pct || "0",
+        tds_pct: payForm.tds_pct || "0",
+        hold_added_back: !!payForm.hold_added_back,
+        paid_amount: String(round2(calc.paid)),
+      });
+      flash(calc.isPaid ? "Payment complete — invoice closed" : "Partial payment saved");
       setPayInv(null);
       load();
     } catch (err: any) {
       flash(err?.response?.data?.detail || "Payment save failed");
+    } finally {
+      setSavingPay(false);
     }
   };
 
@@ -295,6 +318,12 @@ export default function Tracker_Queue() {
               onClick={() => setSubTab("returned")}>
               Returned<span className="trk-tab-count">{returnedRows.length}</span>
             </button>
+            {isTerminal && (
+              <button className={"trk-tab" + (subTab === "partial" ? " active" : "")}
+                onClick={() => setSubTab("partial")}>
+                Partial<span className="trk-tab-count">{partialRows.length}</span>
+              </button>
+            )}
             {(isSapApproval || rejectedRows.length > 0) && (
               <button className={"trk-tab" + (subTab === "rejected" ? " active" : "")}
                 onClick={() => setSubTab("rejected")}>
@@ -437,7 +466,19 @@ export default function Tracker_Queue() {
                       <td>{inv.invoice_number}</td>
                       <td>{inv.party_name}</td>
                       <td>{fmtDate(inv.invoice_date)}</td>
-                      <td>₹{money(inv.invoice_value)}</td>
+                      <td>
+                        ₹{money(inv.net_invoice_value ?? inv.invoice_value)}
+                        {Number(inv.debit_amount) > 0 && (
+                          <div className="trk-sub" style={{ fontSize: 11, color: "#b45309" }}>
+                            −₹{money(inv.debit_amount)} debit
+                          </div>
+                        )}
+                        {inv.is_partially_paid && (
+                          <div className="trk-sub" style={{ fontSize: 11, color: "#b45309" }}>
+                            bal ₹{money(inv.open_balance || 0)}
+                          </div>
+                        )}
+                      </td>
                       <td>{inv.category_name}</td>
                       <td>{inv.unit_name} / {inv.branch_name}</td>
                       {subTab === "returned" && (
@@ -491,6 +532,7 @@ export default function Tracker_Queue() {
                       {subTab === "returned" ? "No returned invoices at this stage."
                         : subTab === "advanced" ? "Nothing advanced from here yet."
                         : subTab === "rejected" ? "No rejected invoices awaiting remarks."
+                        : subTab === "partial" ? "No partially-paid invoices."
                         : "No invoices at this stage."}
                     </div></td></tr>
                   )}
@@ -532,6 +574,13 @@ export default function Tracker_Queue() {
                   ["Additional Charge", detailInv.additional_charge_type_display || "-"],
                   ["Additional Amount", `₹${money(detailInv.additional_charge_amount)}`],
                   ["Invoice Value", `₹${money(detailInv.invoice_value)}`],
+                  ...(Number(detailInv.debit_amount) > 0 ? [
+                    ["Debit (Pre-Audit)", `− ₹${money(detailInv.debit_amount)}`] as [string, string],
+                    ["Net Value", `₹${money(detailInv.net_invoice_value)}`] as [string, string],
+                  ] : []),
+                  ...(Number(detailInv.hold_amount) > 0 ? [
+                    ["Hold Amount", `₹${money(detailInv.hold_amount)}`] as [string, string],
+                  ] : []),
                 ]},
                 { title: "Classification", fields: [
                   ["Category", detailInv.category_name],
@@ -614,39 +663,146 @@ export default function Tracker_Queue() {
       )}
 
       {/* Payment modal */}
-      {payInv && (
-        <div className="trk-modal-overlay" onClick={() => setPayInv(null)}>
-          <div className="trk-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="trk-modal-head">
-              <h3>Payment — {payInv.invoice_number}</h3>
-            </div>
-            <div className="trk-modal-body">
-              <div className="trk-form-grid">
-                {(["discount_amount", "tds_amount", "paid_amount", "open_balance"] as const).map((k) => (
-                  <div className="trk-field" key={k}>
-                    <label>{k.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}</label>
-                    <input type="number" step="0.01" placeholder="0.00"
-                      value={(payForm[k] as string) ?? ""}
-                      onChange={(e) => setPayForm((f) => ({ ...f, [k]: e.target.value }))} />
+      {payInv && (() => {
+        const invoiceValue = round2(Number(payInv.invoice_value || 0));
+        const debit = round2(Number(payInv.debit_amount || 0));
+        const netInvoice = round2(Number(payInv.net_invoice_value ?? invoiceValue));
+        const hold = round2(Number(payInv.hold_amount || 0));
+        const holdBack = !!payForm.hold_added_back;
+        // Payable base drops the held amount unless the handler releases it.
+        const payableBase = Math.max(0, holdBack ? netInvoice : round2(netInvoice - hold));
+        const taxable = round2(Number(payInv.taxable_value || 0));
+        const dpct = Number(payForm.discount_pct || 0);
+        const tpct = Number(payForm.tds_pct || 0);
+        // Discount is on the full net invoice value (incl. the held portion).
+        const discountAmt = round2(netInvoice * dpct / 100);
+        const tdsAmt = round2(taxable * tpct / 100);
+        const netPayable = Math.max(0, round2(payableBase - discountAmt - tdsAmt));   // cap this round
+        const totalOwed = Math.max(0, round2(netInvoice - discountAmt - tdsAmt));     // incl. hold
+        // Paid auto-follows net payable until the user types a value.
+        const paid = paidEdited ? Number(payForm.paid_amount || 0) : netPayable;
+        // Open balance is against the full obligation — an un-released hold stays open.
+        const openBalance = round2(totalOwed - paid);
+        const over = paid > netPayable + 0.005;
+        const isPaid = !over && openBalance <= 0.005;
+        const ro = { background: "#f3f4f6", fontWeight: 600 } as const;
+
+        return (
+          <div className="trk-modal-overlay" onClick={() => setPayInv(null)}>
+            <div className="trk-modal" style={{ maxWidth: 640 }} onClick={(e) => e.stopPropagation()}>
+              <div className="trk-modal-head">
+                <h3>Payment — {payInv.invoice_number}</h3>
+                <span className="trk-sub" style={{ marginLeft: 8 }}>{payInv.party_name}</span>
+              </div>
+              <div className="trk-modal-body">
+                <div className="trk-form-grid">
+                  <div className="trk-field">
+                    <label>Invoice Value{debit > 0 ? " (after debit)" : ""}</label>
+                    <input readOnly style={ro} value={`₹ ${money(netInvoice)}`} />
+                    {debit > 0 && (
+                      <span className="trk-sub" style={{ fontSize: 11, color: "#b45309" }}>
+                        ₹{money(invoiceValue)} − ₹{money(debit)} debit
+                      </span>
+                    )}
                   </div>
-                ))}
-                <div className="trk-field">
-                  <label>Status</label>
-                  <select value={payForm.status}
-                    onChange={(e) => setPayForm((f) => ({ ...f, status: e.target.value as "OPEN" | "PAID" }))}>
-                    <option value="OPEN">Open</option>
-                    <option value="PAID">Paid</option>
-                  </select>
+                  <div className="trk-field">
+                    <label>Taxable Value</label>
+                    <input readOnly style={ro} value={`₹ ${money(taxable)}`} />
+                  </div>
+
+                  {hold > 0 && (
+                    <>
+                      <div className="trk-field">
+                        <label>Hold Amount</label>
+                        <input readOnly style={{ ...ro, color: "#b45309" }} value={`₹ ${money(hold)}`} />
+                        <span className="trk-sub" style={{ fontSize: 11 }}>
+                          {holdBack
+                            ? "released — added back to the payable"
+                            : `withheld — payable value ₹${money(round2(netInvoice - hold))}`}
+                        </span>
+                      </div>
+                      <div className="trk-field" style={{ justifyContent: "flex-end" }}>
+                        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                          <input type="checkbox" checked={holdBack}
+                            onChange={(e) => setPayForm((f) => ({ ...f, hold_added_back: e.target.checked }))} />
+                          Add hold amount back to the invoice
+                        </label>
+                      </div>
+                    </>
+                  )}
+
+                  <div className="trk-field">
+                    <label>Discount %</label>
+                    <input type="number" step="0.01" min="0" max="100" placeholder="0"
+                      value={payForm.discount_pct ?? ""}
+                      onChange={(e) => setPayForm((f) => ({ ...f, discount_pct: e.target.value }))} />
+                    <span className="trk-sub" style={{ fontSize: 11 }}>
+                      on invoice value (after debit{hold > 0 ? ", incl. held" : ""})
+                    </span>
+                  </div>
+                  <div className="trk-field">
+                    <label>Discount Amount</label>
+                    <input readOnly style={ro} value={`₹ ${money(discountAmt)}`} />
+                  </div>
+
+                  <div className="trk-field">
+                    <label>TDS %</label>
+                    <input type="number" step="0.01" min="0" max="100" placeholder="0"
+                      value={payForm.tds_pct ?? ""}
+                      onChange={(e) => setPayForm((f) => ({ ...f, tds_pct: e.target.value }))} />
+                    <span className="trk-sub" style={{ fontSize: 11 }}>on taxable value</span>
+                  </div>
+                  <div className="trk-field">
+                    <label>TDS Amount</label>
+                    <input readOnly style={ro} value={`₹ ${money(tdsAmt)}`} />
+                  </div>
+
+                  <div className="trk-field">
+                    <label>Net Payable</label>
+                    <input readOnly style={{ background: "#eef2ff", fontWeight: 700, color: "#4338ca" }}
+                      value={`₹ ${money(netPayable)}`} />
+                  </div>
+                  <div className="trk-field">
+                    <label>Paid Amount</label>
+                    <input type="number" step="0.01" min="0" max={netPayable}
+                      value={paidEdited ? (payForm.paid_amount ?? "") : netPayable.toFixed(2)}
+                      onChange={(e) => { setPaidEdited(true); setPayForm((f) => ({ ...f, paid_amount: e.target.value })); }} />
+                    {over && (
+                      <span className="trk-err" style={{ fontSize: 11 }}>
+                        Cannot exceed net payable (₹{money(netPayable)})
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="trk-field">
+                    <label>Open Balance</label>
+                    <input readOnly
+                      style={{ background: openBalance > 0.005 ? "#fef3c7" : "#dcfce7", fontWeight: 700 }}
+                      value={`₹ ${money(openBalance)}`} />
+                    {hold > 0 && !holdBack && (
+                      <span className="trk-sub" style={{ fontSize: 11, color: "#b45309" }}>
+                        includes ₹{money(hold)} held back — release it to close the invoice
+                      </span>
+                    )}
+                  </div>
+                  <div className="trk-field">
+                    <label>Status</label>
+                    <input readOnly style={ro}
+                      value={isPaid ? "PAID — completes on save" : "OPEN — stays for balance"} />
+                  </div>
                 </div>
               </div>
-            </div>
-            <div className="trk-modal-foot">
-              <button className="trk-btn trk-btn-ghost" onClick={() => setPayInv(null)}>Cancel</button>
-              <button className="trk-btn trk-btn-primary" onClick={savePayment}>Save payment</button>
+              <div className="trk-modal-foot">
+                <button className="trk-btn trk-btn-ghost" onClick={() => setPayInv(null)}>Cancel</button>
+                <button className="trk-btn trk-btn-primary" disabled={savingPay || over}
+                  onClick={() => savePayment({ netPayable, paid, isPaid })}>
+                  {savingPay ? "Saving…" : isPaid ? "Pay in full & close" : "Save partial payment"}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {toast && <div className="trk-toast">{toast}</div>}
     </div>
