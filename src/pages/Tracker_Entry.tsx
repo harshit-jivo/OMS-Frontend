@@ -13,6 +13,7 @@ import "../styles/Tracker.css";
 
 const EMPTY: InvoiceWrite = {
   invoice_date: "",
+  effective_month: "",   // held as "YYYY-MM" in the form; sent as "YYYY-MM-01"
   party_name: "",
   party_code: "",
   party_gstin: "",
@@ -35,6 +36,22 @@ const fmtDate = (v?: string | null) => {
   if (!v) return "-";
   const d = new Date(v);
   return Number.isNaN(d.getTime()) ? v : d.toLocaleDateString("en-GB");
+};
+
+// Today's date as YYYY-MM-DD (local), used to cap the invoice-date picker.
+const todayISO = () => {
+  const d = new Date();
+  const off = d.getTimezoneOffset();
+  return new Date(d.getTime() - off * 60000).toISOString().slice(0, 10);
+};
+
+// Effective month display: first-of-month date -> "Mon YYYY".
+const fmtMonth = (v?: string | null) => {
+  if (!v) return "-";
+  const d = new Date(v);
+  return Number.isNaN(d.getTime())
+    ? v
+    : d.toLocaleDateString("en-GB", { month: "short", year: "numeric" });
 };
 
 // Omni search: match a query against every meaningful invoice field.
@@ -64,6 +81,9 @@ export default function Tracker_Entry() {
   const [delInv, setDelInv] = useState<Invoice | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [search, setSearch] = useState("");
+  const [monthFilter, setMonthFilter] = useState("");   // "YYYY-MM" effective-month filter
+  const [detailInv, setDetailInv] = useState<Invoice | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   const flash = (msg: string) => {
     setToast(msg);
@@ -121,11 +141,15 @@ export default function Tracker_Entry() {
     () => myInvoices.filter((i) => i.current_stage_code === "entry"),
     [myInvoices]
   );
-  // Omni search over the head-office queue.
+  // Omni search + effective-month filter over the head-office queue.
   const shownMine = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return q ? mine.filter((i) => invMatch(i, q)) : mine;
-  }, [mine, search]);
+    let list = q ? mine.filter((i) => invMatch(i, q)) : mine;
+    if (monthFilter) {
+      list = list.filter((i) => (i.effective_month || "").slice(0, 7) === monthFilter);
+    }
+    return list;
+  }, [mine, search, monthFilter]);
 
   const setField = (k: keyof InvoiceWrite, v: string | number) =>
     setForm((f) => ({ ...f, [k]: v }));
@@ -133,6 +157,8 @@ export default function Tracker_Entry() {
   const validate = () => {
     const e: Record<string, string> = {};
     if (!form.invoice_date) e.invoice_date = "Required";
+    else if (form.invoice_date > todayISO()) e.invoice_date = "Cannot be a future date";
+    if (!form.effective_month) e.effective_month = "Required";
     if (!form.party_name.trim()) e.party_name = "Required";
     if (!form.invoice_number.trim()) e.invoice_number = "Required";
     if (!form.taxable_value) e.taxable_value = "Required";
@@ -155,6 +181,8 @@ export default function Tracker_Entry() {
     // No charge type -> zero amount; blank amount -> 0 (backend needs a number).
     const payload: InvoiceWrite = {
       ...form,
+      // Month picker gives "YYYY-MM"; the API stores a DateField -> first of month.
+      effective_month: form.effective_month ? `${form.effective_month}-01` : "",
       additional_charge_amount: form.additional_charge_type
         ? (form.additional_charge_amount || "0")
         : "0",
@@ -192,6 +220,21 @@ export default function Tracker_Entry() {
     }
   };
 
+  // Row click -> open a read-only detail modal. Show the row immediately, then
+  // enrich with the full detail (timeline + payment) from the API.
+  const openDetail = async (inv: Invoice) => {
+    setDetailInv(inv);
+    setDetailLoading(true);
+    try {
+      const full = await trackerService.getInvoice(inv.id);
+      setDetailInv(full);
+    } catch {
+      /* keep the row data we already have */
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
   const openCreate = () => {
     setEditingId(null);
     setForm({ ...EMPTY });
@@ -203,6 +246,8 @@ export default function Tracker_Entry() {
     setEditingId(inv.id);
     setForm({
       invoice_date: inv.invoice_date,
+      // Stored as YYYY-MM-DD; the month input wants YYYY-MM.
+      effective_month: (inv.effective_month || "").slice(0, 7),
       party_name: inv.party_name,
       party_code: inv.party_code || "",
       party_gstin: inv.party_gstin || "",
@@ -323,8 +368,12 @@ export default function Tracker_Entry() {
             <div className="trk-modal-body">
               <div className="trk-form-grid">
                 {field("invoice_date", "Invoice Date", (
-                  <input type="date" value={form.invoice_date}
+                  <input type="date" value={form.invoice_date} max={todayISO()}
                     onChange={(e) => setField("invoice_date", e.target.value)} />
+                ))}
+                {field("effective_month", "Effective Month", (
+                  <input type="month" value={form.effective_month}
+                    onChange={(e) => setField("effective_month", e.target.value)} />
                 ))}
                 {field("party_name", "Party Name (search SAP vendors)", (
                   <div className="trk-combo">
@@ -432,14 +481,28 @@ export default function Tracker_Entry() {
             <h3 style={{ margin: 0 }}>Head Office Queue</h3>
             <div className="trk-sub">All invoices at the entry stage — created here or returned back — from any user.</div>
           </div>
-          <div style={{ position: "relative", minWidth: 260 }}>
-            <HiMagnifyingGlass style={{ position: "absolute", left: 10, top: 9, opacity: 0.4 }} />
-            <input
-              style={{ width: "100%", paddingLeft: 32 }}
-              placeholder="Search invoice no., party, GSTIN, category…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <div style={{ position: "relative", minWidth: 260 }}>
+              <HiMagnifyingGlass style={{ position: "absolute", left: 10, top: 9, opacity: 0.4 }} />
+              <input
+                style={{ width: "100%", paddingLeft: 32 }}
+                placeholder="Search invoice no., party, GSTIN, category…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+            <div className="trk-field" style={{ margin: 0 }}>
+              <input
+                type="month"
+                value={monthFilter}
+                title="Filter by effective month"
+                onChange={(e) => setMonthFilter(e.target.value)}
+              />
+            </div>
+            {monthFilter && (
+              <button className="trk-btn trk-btn-ghost" style={{ padding: "6px 10px" }}
+                onClick={() => setMonthFilter("")}>Clear</button>
+            )}
           </div>
         </div>
 
@@ -467,6 +530,7 @@ export default function Tracker_Entry() {
                 <th>Invoice No.</th>
                 <th>Party</th>
                 <th>Inv. Date</th>
+                <th>Eff. Month</th>
                 <th>Value</th>
                 <th>GST</th>
                 <th>Category</th>
@@ -478,14 +542,17 @@ export default function Tracker_Entry() {
             </thead>
             <tbody>
               {shownMine.length === 0 && (
-                <tr><td colSpan={11}><div className="trk-empty">
-                  {search.trim() ? "No invoices match your search." : "No invoices yet."}
+                <tr><td colSpan={12}><div className="trk-empty">
+                  {search.trim() || monthFilter ? "No invoices match your filters." : "No invoices yet."}
                 </div></td></tr>
               )}
               {shownMine.map((inv) => (
                 <tr key={inv.id}
-                  className={inv.is_overdue ? "trk-row-overdue" : inv.is_locked ? "trk-row-locked" : ""}>
-                  <td>
+                  className={inv.is_overdue ? "trk-row-overdue" : inv.is_locked ? "trk-row-locked" : ""}
+                  style={{ cursor: "pointer" }}
+                  title="Click to view full invoice details"
+                  onClick={() => openDetail(inv)}>
+                  <td onClick={(e) => e.stopPropagation()}>
                     {inv.editable ? (
                       <input type="checkbox" checked={selected.has(inv.id)}
                         onChange={() => toggle(inv.id)} />
@@ -496,6 +563,7 @@ export default function Tracker_Entry() {
                   <td>{inv.invoice_number}</td>
                   <td>{inv.party_name}</td>
                   <td>{fmtDate(inv.invoice_date)}</td>
+                  <td>{fmtMonth(inv.effective_month)}</td>
                   <td>₹{money(inv.invoice_value)}</td>
                   <td>{inv.gst_type_name} {inv.gst_rate_label}</td>
                   <td>{inv.category_name}</td>
@@ -512,7 +580,7 @@ export default function Tracker_Entry() {
                       <span className="trk-badge trk-badge-muted">Locked</span>
                     )}
                   </td>
-                  <td>
+                  <td onClick={(e) => e.stopPropagation()}>
                     {inv.editable && (
                       <div style={{ display: "flex", gap: 6 }}>
                         <button className="trk-btn trk-btn-ghost" style={{ padding: "5px 10px" }}
@@ -545,6 +613,8 @@ export default function Tracker_Entry() {
               <div className="trk-review-grid">
                 {[
                   ["Invoice Date", fmtDate(form.invoice_date)],
+                  ["Effective Month", form.effective_month
+                    ? fmtMonth(`${form.effective_month}-01`) : "—"],
                   ["Party Name", form.party_name],
                   ["GST Number", form.party_gstin || "—"],
                   ["Invoice Number", form.invoice_number],
@@ -601,6 +671,112 @@ export default function Tracker_Entry() {
               <button className="trk-btn trk-btn-danger" disabled={deleting} onClick={doDelete}>
                 <HiTrash /> {deleting ? "Deleting…" : "Delete"}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---- Invoice detail (read-only) ---- */}
+      {detailInv && (
+        <div className="trk-modal-overlay" onClick={() => setDetailInv(null)}>
+          <div className="trk-modal" style={{ maxWidth: 820 }} onClick={(e) => e.stopPropagation()}>
+            <div className="trk-modal-head">
+              <h3>
+                Invoice {detailInv.invoice_number}
+                {detailLoading && <span className="trk-sub"> · loading…</span>}
+              </h3>
+            </div>
+            <div className="trk-modal-body">
+              <div className="trk-review-grid">
+                {[
+                  ["Invoice Number", detailInv.invoice_number],
+                  ["Invoice Date", fmtDate(detailInv.invoice_date)],
+                  ["Effective Month", fmtMonth(detailInv.effective_month)],
+                  ["Party Name", detailInv.party_name],
+                  ["Party Code", detailInv.party_code || "—"],
+                  ["GST Number", detailInv.party_gstin || "—"],
+                  ["Taxable Value", `₹${money(detailInv.taxable_value)}`],
+                  ["GST", `${detailInv.gst_type_name} ${detailInv.gst_rate_label}`],
+                  ["GST Amount", `₹${money(detailInv.gst_amount)}`],
+                  ["Additional Charge", detailInv.additional_charge_type
+                    ? `${detailInv.additional_charge_type_display} — ₹${money(detailInv.additional_charge_amount)}`
+                    : "None"],
+                  ["Invoice Value", `₹${money(detailInv.invoice_value)}`],
+                  ["Category", detailInv.category_name],
+                  ["Unit", detailInv.unit_name],
+                  ["Branch", detailInv.branch_name],
+                  ["Mode", detailInv.mode_name],
+                  ["Current Stage", detailInv.current_stage_name],
+                  ["Status", detailInv.status === "COMPLETED" ? "Completed" : "In Progress"],
+                  ["Days at Stage", detailInv.days_at_stage],
+                  ["Created By", detailInv.created_by_name],
+                  ["Created At", fmtDate(detailInv.created_at)],
+                ].map(([k, v]) => (
+                  <div className="trk-review-item" key={k}>
+                    <span className="k">{k}</span>
+                    <span className="v">{v || "-"}</span>
+                  </div>
+                ))}
+              </div>
+
+              {detailInv.events && detailInv.events.length > 0 && (
+                <div style={{ marginTop: 18 }}>
+                  <h4 style={{ margin: "0 0 8px" }}>Stage Timeline</h4>
+                  <div className="trk-table-wrap">
+                    <table className="trk-table">
+                      <thead>
+                        <tr>
+                          <th>Stage</th>
+                          <th>Event</th>
+                          <th>Status</th>
+                          <th>By</th>
+                          <th>Entered</th>
+                          <th>Exited</th>
+                          <th>Days</th>
+                          <th>Remarks</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {detailInv.events.map((ev) => (
+                          <tr key={ev.id}>
+                            <td>{ev.stage_name}</td>
+                            <td>{ev.event_type}</td>
+                            <td>{ev.stage_status || "—"}</td>
+                            <td>{ev.acted_by_name || "—"}</td>
+                            <td>{fmtDate(ev.entered_at)}</td>
+                            <td>{ev.exited_at ? fmtDate(ev.exited_at) : "—"}</td>
+                            <td>{ev.days_spent ?? "—"}</td>
+                            <td>{ev.remarks || "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {detailInv.payment && (
+                <div style={{ marginTop: 18 }}>
+                  <h4 style={{ margin: "0 0 8px" }}>Payment</h4>
+                  <div className="trk-review-grid">
+                    {[
+                      ["Discount", `₹${money(detailInv.payment.discount_amount)}`],
+                      ["TDS", `₹${money(detailInv.payment.tds_amount)}`],
+                      ["Paid", `₹${money(detailInv.payment.paid_amount)}`],
+                      ["Open Balance", `₹${money(detailInv.payment.open_balance)}`],
+                      ["Status", detailInv.payment.status],
+                    ].map(([k, v]) => (
+                      <div className="trk-review-item" key={k}>
+                        <span className="k">{k}</span>
+                        <span className="v">{v}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="trk-modal-foot">
+              <button className="trk-btn trk-btn-ghost" onClick={() => setDetailInv(null)}>Close</button>
             </div>
           </div>
         </div>

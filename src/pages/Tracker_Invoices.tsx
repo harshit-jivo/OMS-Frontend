@@ -15,6 +15,12 @@ const fmtDate = (v?: string | null) => {
   const d = new Date(v);
   return Number.isNaN(d.getTime()) ? v : d.toLocaleDateString("en-GB");
 };
+const fmtMonth = (v?: string | null) => {
+  if (!v) return "-";
+  const d = new Date(v);
+  return Number.isNaN(d.getTime())
+    ? v : d.toLocaleDateString("en-GB", { month: "short", year: "numeric" });
+};
 const fmtDT = (v?: string | null) => {
   if (!v) return "-";
   const d = new Date(v);
@@ -128,6 +134,11 @@ export default function Tracker_Invoices() {
           <input value={filters.invoice_number || ""} onChange={(e) => setF("invoice_number", e.target.value)} placeholder="Invoice #" />
         </div>
         <div className="trk-field" style={{ gap: 4 }}>
+          <label style={{ fontSize: 11 }}>Effective month</label>
+          <input type="month" value={filters.effective_month || ""}
+            onChange={(e) => setF("effective_month", e.target.value)} />
+        </div>
+        <div className="trk-field" style={{ gap: 4 }}>
           <label style={{ fontSize: 11 }}>Stage</label>
           <select value={filters.stage || ""} onChange={(e) => setF("stage", e.target.value)}>
             <option value="">All stages</option>
@@ -180,7 +191,7 @@ export default function Tracker_Invoices() {
           <table className="trk-table">
             <thead>
               <tr>
-                <th>Invoice No.</th><th>Party</th><th>Inv. Date</th><th>Value</th>
+                <th>Invoice No.</th><th>Party</th><th>Inv. Date</th><th>Eff. Month</th><th>Value</th>
                 <th>GST</th><th>Category</th><th>Unit / Branch</th>
                 <th>Current Stage</th><th>Days Here</th><th>Status</th><th></th>
               </tr>
@@ -196,6 +207,7 @@ export default function Tracker_Invoices() {
                     <td>{inv.invoice_number}</td>
                     <td>{inv.party_name}</td>
                     <td>{fmtDate(inv.invoice_date)}</td>
+                    <td>{fmtMonth(inv.effective_month)}</td>
                     <td>₹{money(inv.invoice_value)}</td>
                     <td>{inv.gst_type_name} {inv.gst_rate_label}</td>
                     <td>{inv.category_name}</td>
@@ -228,10 +240,10 @@ export default function Tracker_Invoices() {
                 );
               })}
               {!loading && rows.length === 0 && (
-                <tr><td colSpan={11}><div className="trk-empty">No invoices match these filters.</div></td></tr>
+                <tr><td colSpan={12}><div className="trk-empty">No invoices match these filters.</div></td></tr>
               )}
               {loading && (
-                <tr><td colSpan={11}><div className="trk-empty">Loading…</div></td></tr>
+                <tr><td colSpan={12}><div className="trk-empty">Loading…</div></td></tr>
               )}
             </tbody>
           </table>
