@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   HiArrowPath,
@@ -12,6 +12,7 @@ import {
   HiPaperAirplane,
   HiPencilSquare,
   HiBanknotes,
+  HiArrowUturnLeft,
 } from "react-icons/hi2";
 import { apiFetch, apiUpload, EDIT_RESTORE_STORAGE_KEY } from "./SalesInvoice/useSalesInvoice";
 import { useSapPost } from "./SalesInvoice/useSapPost";
@@ -70,6 +71,13 @@ type InvoiceRecord = {
   branch?: string;
   warehouse?: string;
   invoice_payload?: InvoicePayload | string;
+  // Revision lineage. `supersedes` is the rejected log this one was reworked
+  // from; `superseded_by_id` is the replacement that was submitted for it.
+  supersedes?: number | string | null;
+  supersedes_so_number?: string | null;
+  supersedes_status?: string | null;
+  supersedes_rejection_reason?: string | null;
+  superseded_by_id?: number | string | null;
   [key: string]: unknown;
 };
 
@@ -233,6 +241,9 @@ type CreditLimitStage = {
 const isCreditLimitError = (record: InvoiceRecord) =>
   /credit\s*limit/i.test(String(record.error_message || ""));
 
+// A value is a usable lineage reference (log id) — 0 is not a valid pk here.
+const hasRef = (value: unknown) => value !== undefined && value !== null && value !== "";
+
 /**
  * Update an invoice record's status. A rejection_reason is required when the
  * status becomes REJECTED, and an error_message is logged when it becomes ERROR.
@@ -338,6 +349,17 @@ export default function InvoiceReview() {
     [selected],
   );
 
+  // Version number per log id in the history chain, keyed in first-seen
+  // (chronological) order: oldest version is 1. Size is the number of versions.
+  const historyVersions = useMemo(() => {
+    const versions = new Map<string, number>();
+    historyRecords.forEach((entry) => {
+      const key = String(entry.invoice_log ?? "");
+      if (!versions.has(key)) versions.set(key, versions.size + 1);
+    });
+    return versions;
+  }, [historyRecords]);
+
   const handleAction = async (record: InvoiceRecord, status: InvoiceStatus) => {
     if (record.id === undefined || record.id === null) {
       setActionError("This invoice has no identifier and cannot be updated.");
@@ -380,12 +402,15 @@ export default function InvoiceReview() {
     }
   };
 
-  // Reopen a rejected invoice for editing: mark the log EDITED (clearing the
-  // rejection reason), hand the stored payload to the Sales Invoice wizard via
-  // sessionStorage, and navigate there. The wizard rebuilds the party and lines
-  // and re-runs batch allocation against current stock; resubmitting creates a
-  // fresh PENDING log, so this record's EDITED status is terminal.
-  const handleEdit = async (record: InvoiceRecord) => {
+  // Reopen a rejected invoice for editing: hand the stored payload to the Sales
+  // Invoice wizard via sessionStorage and navigate there. The wizard rebuilds the
+  // party and lines and re-runs batch allocation against current stock.
+  //
+  // This log is NOT touched here. It stays REJECTED — with its reason intact and
+  // visible to reviewers — until a replacement is actually submitted; the create
+  // endpoint retires it to EDITED at that point (see `edited_from`). An edit that
+  // is started and then abandoned therefore leaves the rejection standing.
+  const handleEdit = (record: InvoiceRecord) => {
     if (record.id === undefined || record.id === null) {
       setActionError("This invoice has no identifier and cannot be edited.");
       return;
@@ -393,24 +418,13 @@ export default function InvoiceReview() {
     const label = `SO #${record.so_number || record.id}`;
     if (!window.confirm(`Edit ${label} and resubmit it for approval?`)) return;
 
-    setActionId(record.id);
     setActionError("");
     setActionMessage("");
-    try {
-      await apiFetch<ApiMessageResponse>(`/api/invoice/log/${encodeURIComponent(String(record.id))}/`, {
-        method: "PATCH",
-        body: JSON.stringify({ status: "EDITED", rejection_reason: null }),
-      });
-      sessionStorage.setItem(
-        EDIT_RESTORE_STORAGE_KEY,
-        JSON.stringify({ logId: record.id, branch: record.branch, payload: parsePayload(record.invoice_payload) }),
-      );
-      navigate("/Sales_Invoice");
-    } catch (err) {
-      console.error(err);
-      setActionError(extractMessage(err, "Unable to mark the invoice as edited."));
-      setActionId(null);
-    }
+    sessionStorage.setItem(
+      EDIT_RESTORE_STORAGE_KEY,
+      JSON.stringify({ logId: record.id, branch: record.branch, payload: parsePayload(record.invoice_payload) }),
+    );
+    navigate("/Sales_Invoice");
   };
 
   // Open the credit-limit request form for a credit-limit ERROR record and
@@ -632,10 +646,14 @@ export default function InvoiceReview() {
     setHistoryError("");
     setHistoryLoading(true);
     try {
+      // Returns the whole revision chain, oldest first. Re-sorted defensively;
+      // the id tiebreaker keeps same-timestamp entries in insertion order so
+      // version boundaries stay contiguous.
       const data = await apiFetch<unknown>(`/api/invoice/history/${encodeURIComponent(String(logId))}/`);
-      const rows = extractRecords(data).sort(
-        (a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime(),
-      );
+      const rows = extractRecords(data).sort((a, b) => {
+        const byTime = new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime();
+        return byTime !== 0 ? byTime : toNumber(a.id) - toNumber(b.id);
+      });
       setHistoryRecords(rows);
     } catch (err) {
       console.error(err);
@@ -713,7 +731,23 @@ export default function InvoiceReview() {
                   const busy = actionId === record.id;
                   return (
                     <tr key={record.id ?? index}>
-                      <td>{record.so_number || "—"}</td>
+                      <td>
+                        {record.so_number || "—"}
+                        {/* Lineage: this row is either a rework of a rejected
+                            invoice, or the version that was reworked away. */}
+                        {hasRef(record.supersedes) && (
+                          <span className="ir-lineage-chip" title={record.supersedes_rejection_reason || undefined}>
+                            <HiArrowUturnLeft aria-hidden="true" />
+                            Revision of #{record.supersedes}
+                          </span>
+                        )}
+                        {hasRef(record.superseded_by_id) && (
+                          <span className="ir-lineage-chip ir-lineage-chip-muted">
+                            <HiArrowUturnLeft aria-hidden="true" />
+                            Replaced by #{record.superseded_by_id}
+                          </span>
+                        )}
+                      </td>
                       <td>{record.party_name || "—"}</td>
                       <td className="ir-num">{formatAmount(record.total_amount)}</td>
                       {/* <td>
@@ -856,6 +890,43 @@ export default function InvoiceReview() {
             </header>
 
             <div className="ir-modal-body">
+              {/* The approver of a reworked invoice needs to see why the previous
+                  attempt was turned down before deciding on this one. */}
+              {hasRef(selected.supersedes) && (
+                <div className="ir-lineage-box" role="note">
+                  <HiArrowUturnLeft aria-hidden="true" />
+                  <div>
+                    <strong>
+                      Revision of invoice #{selected.supersedes}
+                      {selected.supersedes_so_number ? ` (SO #${selected.supersedes_so_number})` : ""}, which was
+                      rejected.
+                    </strong>
+                    {selected.supersedes_rejection_reason && (
+                      <p>Previous rejection reason: {selected.supersedes_rejection_reason}</p>
+                    )}
+                    <button
+                      type="button"
+                      className="ir-link-btn"
+                      onClick={() => {
+                        const record = selected;
+                        setSelected(null);
+                        void openHistory(record);
+                      }}
+                    >
+                      View full revision history
+                    </button>
+                  </div>
+                </div>
+              )}
+              {hasRef(selected.superseded_by_id) && (
+                <div className="ir-lineage-box ir-lineage-box-muted" role="note">
+                  <HiArrowUturnLeft aria-hidden="true" />
+                  <div>
+                    <strong>Replaced by invoice #{selected.superseded_by_id}.</strong>
+                    <p>This version was reworked and is no longer active.</p>
+                  </div>
+                </div>
+              )}
               {selected.error_message && (
                 <div className="ir-error-box" role="alert">
                   <HiExclamationTriangle aria-hidden="true" />
@@ -1081,25 +1152,40 @@ export default function InvoiceReview() {
                 <ol className="ir-timeline">
                   {historyRecords.map((entry, index) => {
                     const entryStatus = normalizeStatus(entry.status);
+                    // The timeline spans every version in the revision chain, so
+                    // mark where one log ends and its rework begins.
+                    const logId = entry.invoice_log;
+                    const startsVersion = index === 0 || historyRecords[index - 1].invoice_log !== logId;
+                    const versionNumber = historyVersions.get(String(logId ?? "")) ?? 1;
                     return (
-                      <li className="ir-timeline-item" key={entry.id ?? index}>
-                        <span className={`ir-timeline-dot ir-dot-${entryStatus.toLowerCase()}`} aria-hidden="true" />
-                        <div className="ir-timeline-body">
-                          <div className="ir-timeline-head">
-                            <span className={`ir-badge ir-badge-${entryStatus.toLowerCase()}`}>{statusLabel(entryStatus)}</span>
-                            <time>{formatDateTime(entry.created_at)}</time>
+                      <Fragment key={entry.id ?? index}>
+                        {startsVersion && historyVersions.size > 1 && (
+                          <li className="ir-timeline-sep" aria-hidden="false">
+                            <span>
+                              Version {versionNumber} of {historyVersions.size}
+                              {hasRef(logId) ? ` · invoice #${logId}` : ""}
+                            </span>
+                          </li>
+                        )}
+                        <li className="ir-timeline-item">
+                          <span className={`ir-timeline-dot ir-dot-${entryStatus.toLowerCase()}`} aria-hidden="true" />
+                          <div className="ir-timeline-body">
+                            <div className="ir-timeline-head">
+                              <span className={`ir-badge ir-badge-${entryStatus.toLowerCase()}`}>{statusLabel(entryStatus)}</span>
+                              <time>{formatDateTime(entry.created_at)}</time>
+                            </div>
+                            {entry.created_by_name && (
+                              <p className="ir-timeline-note ir-timeline-by">By: {entry.created_by_name}</p>
+                            )}
+                            {entry.rejection_reason && (
+                              <p className="ir-timeline-note">Reason: {entry.rejection_reason}</p>
+                            )}
+                            {entry.error_message && (
+                              <p className="ir-timeline-note ir-timeline-error">{entry.error_message}</p>
+                            )}
                           </div>
-                          {entry.created_by_name && (
-                            <p className="ir-timeline-note ir-timeline-by">By: {entry.created_by_name}</p>
-                          )}
-                          {entry.rejection_reason && (
-                            <p className="ir-timeline-note">Reason: {entry.rejection_reason}</p>
-                          )}
-                          {entry.error_message && (
-                            <p className="ir-timeline-note ir-timeline-error">{entry.error_message}</p>
-                          )}
-                        </div>
-                      </li>
+                        </li>
+                      </Fragment>
                     );
                   })}
                 </ol>

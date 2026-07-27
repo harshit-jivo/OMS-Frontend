@@ -241,6 +241,74 @@
   margin-top: 1px;
 }
 
+/* Revision lineage — links a reworked invoice to the rejected one it replaces */
+.ir-lineage-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  margin-bottom: 18px;
+  border-radius: 10px;
+  font-size: 0.86rem;
+  line-height: 1.45;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1e40af;
+}
+
+.ir-lineage-box-muted {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+  color: #475569;
+}
+
+.ir-lineage-box svg {
+  flex-shrink: 0;
+  font-size: 1.2rem;
+  margin-top: 1px;
+}
+
+.ir-lineage-box p {
+  margin: 5px 0 0;
+}
+
+.ir-link-btn {
+  margin-top: 7px;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.ir-lineage-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  white-space: nowrap;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1d4ed8;
+}
+
+.ir-lineage-chip-muted {
+  background: #f1f5f9;
+  border-color: #e2e8f0;
+  color: #64748b;
+}
+
+.ir-lineage-chip svg {
+  font-size: 0.8rem;
+}
+
 /* Buttons */
 .ir-btn {
   display: inline-flex;
@@ -795,6 +863,26 @@
 
 .ir-timeline-item:last-child::before {
   display: none;
+}
+
+/* Boundary between two versions of the same invoice in the revision chain */
+.ir-timeline-sep {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 2px 0 14px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.ir-timeline-sep::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: #e2e8f0;
 }
 
 .ir-timeline-dot {
