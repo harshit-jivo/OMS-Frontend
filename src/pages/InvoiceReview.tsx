@@ -595,8 +595,17 @@ export default function InvoiceReview() {
         // Save the readable SAP message (e.g. the "Credit Limit Exceeded!" text)
         // in the log, overwriting any previous error.
         const readable = readableSapError(rawError || message);
+        // A credit-limit rejection on an invoice that already has a credit-limit
+        // request in flight is the expected result until that request is
+        // approved — not a new failure. Keep it in CL Raised so it stays on that
+        // tab with its Show Flow / Repost actions; the message is still recorded.
+        // Any other failure on a CL Raised invoice is a genuine error.
+        const stillAwaitingCreditLimit =
+          normalizeStatus(record.status) === "CL_RAISED" && /credit\s*limit/i.test(readable);
         try {
-          await updateInvoiceStatus(record.id, "ERROR", { error_message: readable });
+          await updateInvoiceStatus(record.id, stillAwaitingCreditLimit ? "CL_RAISED" : "ERROR", {
+            error_message: readable,
+          });
         } catch (logErr) {
           console.error("Unable to log SAP post error:", logErr);
         }
@@ -1389,7 +1398,13 @@ export default function InvoiceReview() {
         onClose={closeSapLoader}
         onRetry={sapPost.retry}
         onRaiseCl={
-          canPostToSap && sapErrorIsCreditLimit && postingRecord
+          // Not offered when a request is already in flight — that invoice is
+          // waiting on the existing approval, and the row only exposes Show Flow
+          // for it. Raising a second request would duplicate it in JSAP.
+          canPostToSap
+          && sapErrorIsCreditLimit
+          && postingRecord
+          && normalizeStatus(postingRecord.status) !== "CL_RAISED"
             ? raiseClFromLoader
             : undefined
         }
