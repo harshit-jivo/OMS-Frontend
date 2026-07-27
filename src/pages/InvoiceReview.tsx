@@ -298,7 +298,7 @@ export default function InvoiceReview() {
   // full unfiltered list once and count each status client-side.
   const loadCounts = useCallback(async () => {
     try {
-      const data = await apiFetch<unknown>(`/api/invoice/all/`);
+      const data = await apiFetch<unknown>(`/api/invoice/logs/all/`);
       const all = extractRecords(data);
       const next = createEmptyCounts();
       all.forEach((record) => {
@@ -316,7 +316,7 @@ export default function InvoiceReview() {
     setError("");
     try {
       const query = statusFilter === "ALL" ? "" : `?status=${statusFilter}`;
-      const data = await apiFetch<unknown>(`/api/invoice/all/${query}`);
+      const data = await apiFetch<unknown>(`/api/invoice/logs/all/${query}`);
       setRecords(extractRecords(data));
     } catch (err) {
       console.error(err);
