@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   HiArrowPath,
+  HiBanknotes,
   HiBuildingOffice2,
   HiCheckCircle,
   HiChevronDown,
@@ -31,8 +32,8 @@ const FACTORY_STAGES = [
   { emoji: "🔧", label: "Assembling your order" },
   { emoji: "📋", label: "Running quality checks" },
   { emoji: "🏭", label: "Coordinating production" },
-  { emoji: "📤", label: "Preparing dispatch" },
-  { emoji: "🚚", label: "Dispatch team standing by" },
+  { emoji: "📤", label: "Preparing Stock" },
+  { emoji: "🚚", label: "Collecting Items" },
 ];
 
 const ROTATE_MS = 2600;
@@ -49,9 +50,15 @@ type Props = {
   onClose: () => void;
   /** Re-run the post from the beginning. */
   onRetry: () => void;
+  /**
+   * When the failure is a credit-limit issue, the parent supplies this to let the
+   * user raise a credit-limit request straight from the error modal. Omit (or pass
+   * undefined) to hide the button for non-credit-limit errors.
+   */
+  onRaiseCl?: () => void;
 };
 
-export default function MissionControlLoader({ state, onClose, onRetry }: Props) {
+export default function MissionControlLoader({ state, onClose, onRetry, onRaiseCl }: Props) {
   const { status, logs, doc, invoiceNumber, errorMessage, rawError } = state;
   const isRunning = status === "running";
   const isSuccess = status === "success";
@@ -175,6 +182,11 @@ export default function MissionControlLoader({ state, onClose, onRetry }: Props)
               <button type="button" className="mcl-btn mcl-btn-ghost" onClick={onClose}>
                 Close
               </button>
+              {onRaiseCl && (
+                <button type="button" className="mcl-btn mcl-btn-cl" onClick={onRaiseCl}>
+                  <HiBanknotes aria-hidden="true" /> Raise CL
+                </button>
+              )}
               <button ref={primaryRef} type="button" className="mcl-btn mcl-btn-warn" onClick={onRetry}>
                 <HiArrowPath aria-hidden="true" /> Retry
               </button>

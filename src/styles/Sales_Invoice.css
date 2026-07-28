@@ -940,6 +940,7 @@
   font-size: 12px;
   font-weight: 850;
   padding: 10px 12px;
+  display: none;
 }
 
 .si-payload-box pre {

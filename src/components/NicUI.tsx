@@ -37,8 +37,8 @@ export function CompanyDbSelect({ value, onChange }: { value: string; onChange: 
 }
 
 /* ---- Status badge ---- */
-export function StatusBadge({ tone, children }: { tone: "ok" | "err" | "warn" | "muted"; children: ReactNode }) {
-  return <span className={`nic-badge nic-badge--${tone}`}>{children}</span>;
+export function StatusBadge({ tone, children, title }: { tone: "ok" | "err" | "warn" | "muted"; children: ReactNode; title?: string }) {
+  return <span className={`nic-badge nic-badge--${tone}`} title={title}>{children}</span>;
 }
 
 /* ---- Collapsible raw JSON ---- */

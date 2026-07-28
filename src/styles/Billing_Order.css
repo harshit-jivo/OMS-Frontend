@@ -365,6 +365,19 @@
         .bo-modal-textarea:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,.1); }
         .bo-modal-actions { display: flex; gap: 8px; }
 
+        /* Review step: order summary shown before the final confirm. */
+        .bo-review-summary {
+          display: flex; flex-direction: column; gap: 8px;
+          background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px;
+          padding: 12px 14px; margin: 4px 0 2px;
+        }
+        .bo-review-row {
+          display: flex; justify-content: space-between; align-items: center; gap: 12px;
+          font-size: 13px;
+        }
+        .bo-review-row span { color: #64748b; }
+        .bo-review-row strong { color: #0f172a; font-weight: 600; text-align: right; }
+
 
                 .ao-btn-icon {
   border: none;

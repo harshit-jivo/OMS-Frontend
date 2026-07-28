@@ -459,11 +459,21 @@ export default function Order_Tracking() {
           String(log.performed_by_name || "").trim(),
         ].filter(Boolean);
 
+        // Preserve the actual API remark rather than hardcoding "Approved".
+        // When multiple rate approvers are merged, join their distinct remarks.
+        const remarks = Array.from(
+          new Set(
+            [previousLog.remarks, log.remarks]
+              .map((remark) => String(remark || "").trim())
+              .filter(Boolean),
+          ),
+        ).join(", ");
+
         mergedLogs[mergedLogs.length - 1] = {
           ...previousLog,
           performed_by_name: Array.from(new Set(names)).join(", "),
           created_at: log.created_at || previousLog.created_at,
-          remarks: "Approved",
+          remarks,
         };
         return mergedLogs;
       }
@@ -471,7 +481,6 @@ export default function Order_Tracking() {
       mergedLogs.push({
         ...log,
         status_name: "Rate Approval",
-        remarks: "Approved",
       });
       return mergedLogs;
     }, []);
@@ -625,10 +634,7 @@ export default function Order_Tracking() {
     return log.status_name;
   };
 
-  const getLogDisplayRemark = (log: OrderLog) => {
-    if (isSentToAuditorLog(log)) return "Sent to auditor";
-    return log.remarks;
-  };
+  const getLogDisplayRemark = (log: OrderLog) => log.remarks;
 
   const getLogTone = (status: string, performedBy: string | null) => {
     const normalized = String(status || "").toLowerCase();

@@ -224,11 +224,21 @@ const mergeRateApprovalLogs = (displayLogs: OrderLog[], contextLogs: OrderLog[])
         String(log.performed_by_name || "").trim(),
       ].filter(Boolean);
 
+      // Preserve the actual API remark rather than hardcoding "Approved".
+      // When multiple rate approvers are merged, join their distinct remarks.
+      const remarks = Array.from(
+        new Set(
+          [previousLog.remarks, log.remarks]
+            .map((remark) => String(remark || "").trim())
+            .filter(Boolean),
+        ),
+      ).join(", ");
+
       mergedLogs[mergedLogs.length - 1] = {
         ...previousLog,
         performed_by_name: Array.from(new Set(names)).join(", "),
         created_at: log.created_at || previousLog.created_at,
-        remarks: "Approved",
+        remarks,
       };
       return;
     }
@@ -236,7 +246,6 @@ const mergeRateApprovalLogs = (displayLogs: OrderLog[], contextLogs: OrderLog[])
     mergedLogs.push({
       ...log,
       status_name: "Rate Approval",
-      remarks: "Approved",
     });
   });
 
@@ -424,10 +433,7 @@ export const getOrderLogDisplayTitle = (
   return log.status_name;
 };
 
-export const getOrderLogDisplayRemark = (log: OrderLog) => {
-  if (isSentToAuditorLog(log)) return "Sent to auditor";
-  return log.remarks;
-};
+export const getOrderLogDisplayRemark = (log: OrderLog) => log.remarks;
 
 export const getOrderLogTone = (status: string, performedBy: string | null) => {
   const normalized = String(status || "").toLowerCase();
