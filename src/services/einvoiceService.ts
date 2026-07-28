@@ -62,6 +62,18 @@ export interface InvoiceListResponse {
   results: InvoiceListItem[];
 }
 
+/** A selectable SAP company DB — decides which company an IRN is generated
+ *  against and which schema's OMS_IRN_LOG it is mirrored into. */
+export interface CompanyChoice {
+  label: string;        // OIL | BEVERAGE
+  company_db: string;   // JIVO_OIL_HANADB | JIVO_BEVERAGES_HANADB
+}
+
+export interface CompanyListResponse {
+  results: CompanyChoice[];
+  default: string;
+}
+
 export interface GenerationLog {
   id: number;
   docentry: number;
@@ -91,6 +103,9 @@ export interface GenerationLogsResponse {
 export const einvoiceService = {
   /* --- config / auth --- */
   health: async () => (await api.get("einvoice/health/")).data,
+  // Companies (SAP company DBs) an IRN can be generated against / mirrored into.
+  listCompanies: async () =>
+    (await api.get<CompanyListResponse>("einvoice/companies/")).data,
   token: async () => (await api.post("einvoice/token/")).data,
   heartbeat: async () => (await api.get("einvoice/heartbeat/")).data,
 
