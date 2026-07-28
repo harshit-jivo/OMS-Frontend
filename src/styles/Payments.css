@@ -1,0 +1,229 @@
+/* Make Payment — UI-only styles.
+   Modern enterprise dashboard look: rounded inputs, soft shadows, generous
+   spacing, smooth hover/focus, responsive one-row layout that wraps. Palette
+   matches the rest of the app (slate + blue accent, green submit). */
+
+.pay-page {
+  padding: 28px 28px 40px;
+  max-width: 1200px;
+}
+
+/* ── Header ── */
+.pay-header {
+  margin-bottom: 22px;
+}
+
+.pay-title {
+  font-size: 24px;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+.pay-subtitle {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: #64748b;
+}
+
+/* ── Card ── */
+.pay-card {
+  background: #ffffff;
+  border: 1px solid #e6ecf4;
+  border-radius: 16px;
+  padding: 28px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
+}
+
+.pay-row {
+  margin-bottom: 24px;
+}
+
+.pay-row:last-child {
+  margin-bottom: 0;
+}
+
+/* Row 1 — four fields in one row, wrapping responsively. */
+.pay-row-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 20px;
+}
+
+/* ── Field + label ── */
+.pay-field {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.pay-field-full {
+  width: 100%;
+}
+
+.pay-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+  margin-bottom: 8px;
+}
+
+/* ── Select with leading icon + custom chevron ── */
+.pay-select-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.pay-select-icon {
+  position: absolute;
+  left: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+  font-size: 18px;
+  pointer-events: none;
+  transition: color 0.15s ease;
+}
+
+.pay-select-chevron {
+  position: absolute;
+  right: 12px;
+  display: inline-flex;
+  align-items: center;
+  color: #94a3b8;
+  font-size: 18px;
+  pointer-events: none;
+  transition: transform 0.15s ease, color 0.15s ease;
+}
+
+.pay-select {
+  width: 100%;
+  height: 46px;
+  padding: 0 40px 0 40px;
+  border: 1px solid #dbe4ee;
+  border-radius: 11px;
+  background: #f8fafc;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 500;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease,
+    background 0.15s ease;
+}
+
+.pay-select:hover {
+  border-color: #bfdbfe;
+  background: #ffffff;
+}
+
+.pay-select:focus {
+  outline: none;
+  border-color: #2563eb;
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+}
+
+.pay-select-wrap:focus-within .pay-select-icon {
+  color: #2563eb;
+}
+
+.pay-select-wrap:focus-within .pay-select-chevron {
+  color: #2563eb;
+  transform: rotate(180deg);
+}
+
+/* ── Textarea ── */
+.pay-textarea {
+  width: 100%;
+  min-height: 110px;
+  padding: 14px 16px;
+  border: 1px solid #dbe4ee;
+  border-radius: 12px;
+  background: #f8fafc;
+  color: #0f172a;
+  font-size: 14px;
+  font-family: inherit;
+  line-height: 1.5;
+  resize: vertical;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease,
+    background 0.15s ease;
+}
+
+.pay-textarea::placeholder {
+  color: #94a3b8;
+}
+
+.pay-textarea:hover {
+  border-color: #bfdbfe;
+  background: #ffffff;
+}
+
+.pay-textarea:focus {
+  outline: none;
+  border-color: #2563eb;
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+}
+
+/* ── Submit (green, left aligned) ── */
+.pay-actions {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.pay-submit {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 46px;
+  padding: 0 24px;
+  border: none;
+  border-radius: 11px;
+  background: #16a34a;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 6px 16px rgba(22, 163, 74, 0.24);
+  transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.pay-submit:hover {
+  background: #15803d;
+  box-shadow: 0 8px 20px rgba(22, 163, 74, 0.32);
+  transform: translateY(-1px);
+}
+
+.pay-submit:active {
+  transform: translateY(0);
+  box-shadow: 0 4px 12px rgba(22, 163, 74, 0.24);
+}
+
+/* ── Responsive ── */
+@media (max-width: 1024px) {
+  .pay-row-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 600px) {
+  .pay-page {
+    padding: 20px 16px 32px;
+  }
+  .pay-card {
+    padding: 20px;
+  }
+  .pay-row-grid {
+    grid-template-columns: 1fr;
+  }
+  .pay-submit {
+    width: 100%;
+    justify-content: center;
+  }
+}

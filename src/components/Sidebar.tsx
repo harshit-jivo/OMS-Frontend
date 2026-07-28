@@ -4,6 +4,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   HiArrowPath,
   HiArrowRightOnRectangle,
+  HiBanknotes,
   HiCalendarDays,
   HiChartBar,
   HiChevronDown,
@@ -702,6 +703,18 @@ export default function Sidebar({ children }: SidebarProps) {
               <Link to="/Sales_Quotation" onClick={closeSidebar}>
                 <SidebarIcon><HiReceiptPercent /></SidebarIcon>
                 Sales Quotation
+              </Link>
+            </li>
+          )}
+
+          {/* Payments */}
+          {isAdmin && <li className="sidebar-section">Payments</li>}
+
+          {isAdmin && (
+            <li className={location.pathname === "/Make_Payment" ? "active" : ""}>
+              <Link to="/Make_Payment" onClick={closeSidebar}>
+                <SidebarIcon><HiBanknotes /></SidebarIcon>
+                Make Payment
               </Link>
             </li>
           )}
