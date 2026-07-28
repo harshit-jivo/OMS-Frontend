@@ -446,3 +446,91 @@
   word-break: break-all;
 }
 .dm-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+/* ---- Update Status pill (table column) ---- */
+.dm-upd {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  border: 1px solid transparent;
+}
+.dm-upd-latest { background: #dcfce7; border-color: #16a34a; color: #166534; }
+.dm-upd-old { background: #fee2e2; border-color: #dc2626; color: #991b1b; }
+.dm-upd-unknown { color: #94a3b8; }
+
+/* ---- Mobile Version Policy forms ---- */
+.dm-policies {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+  margin-bottom: 22px;
+}
+.dm-policy {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.dm-policy h3 {
+  margin: 0 0 2px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+.dm-policy-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #475569;
+}
+.dm-policy-field .dm-input { width: 100%; }
+.dm-policy-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+.dm-policy-ok { font-size: 0.78rem; color: #166534; font-weight: 600; }
+.dm-policy-err { font-size: 0.78rem; color: #dc2626; font-weight: 600; }
+
+/* ---- Version-adoption footer (latest vs old counts under the bars) ---- */
+.dm-adopt-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  align-items: center;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #f1f5f9;
+  font-size: 0.8rem;
+  color: #475569;
+}
+.dm-adopt-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.dm-adopt-stat b {
+  font-variant-numeric: tabular-nums;
+  color: #0f172a;
+}
+.dm-adopt-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+}
+/* Match the bar colours: latest = green (ACTIVE_COLOR), old = red (INACTIVE_COLOR). */
+.dm-adopt-dot-latest { background: #0f766e; }
+.dm-adopt-dot-old { background: #dc2626; }
+.dm-adopt-nopolicy {
+  font-size: 0.75rem;
+  color: #94a3b8;
+}

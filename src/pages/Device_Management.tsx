@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Bar,
+  BarChart,
   Cell,
   Legend,
   Pie,
   PieChart,
   ResponsiveContainer,
   Tooltip,
+  XAxis,
+  YAxis,
 } from "recharts";
 import {
   deviceAdminService,
@@ -13,7 +17,11 @@ import {
   type CountRow,
   type DeviceFilters,
   type DeviceRow,
+  type MobilePlatform,
   type Pagination,
+  type PlatformAdoption,
+  type VersionPolicy,
+  type VersionPolicyStat,
 } from "../services/deviceAdminService";
 import { HiXMark } from "react-icons/hi2";
 import StatusBadge from "../components/StatusBadge";
@@ -268,6 +276,203 @@ function SortHeader({
   );
 }
 
+/** Per-row Update Status pill: latest = green, old = red, unknown = neutral. */
+function UpdateBadge({ status }: { status: DeviceRow["update_status"] }) {
+  if (status === "latest") return <span className="dm-upd dm-upd-latest">Latest</span>;
+  if (status === "old") return <span className="dm-upd dm-upd-old">Old</span>;
+  // "unknown" — no policy for this platform (or it is the web). A dash reads as
+  // "not applicable" rather than implying the device is up to date or not.
+  return <span className="dm-upd dm-upd-unknown" title="No version policy for this platform">—</span>;
+}
+
+const MOBILE_PLATFORMS: { key: MobilePlatform; label: string }[] = [
+  { key: "ANDROID", label: "Android" },
+  { key: "IOS", label: "iOS" },
+];
+
+/** One platform's policy form. Loads existing values; saves via PUT. */
+function PolicyForm({
+  platform,
+  label,
+  initial,
+  onSaved,
+}: {
+  platform: MobilePlatform;
+  label: string;
+  initial: VersionPolicy | null;
+  onSaved: () => void;
+}) {
+  const [version, setVersion] = useState(initial?.required_version ?? "");
+  const [build, setBuild] = useState(
+    initial?.required_build != null ? String(initial.required_build) : "",
+  );
+  const [storeUrl, setStoreUrl] = useState(initial?.store_url ?? "");
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  // Re-sync when the parent reloads policies (e.g. after saving the other one).
+  useEffect(() => {
+    setVersion(initial?.required_version ?? "");
+    setBuild(initial?.required_build != null ? String(initial.required_build) : "");
+    setStoreUrl(initial?.store_url ?? "");
+  }, [initial]);
+
+  const save = async () => {
+    setMsg(null);
+    const buildNum = Number(build);
+    if (!version.trim() || !Number.isInteger(buildNum) || buildNum < 1) {
+      setMsg({ ok: false, text: "Enter a version and a whole build number (≥ 1)." });
+      return;
+    }
+    setSaving(true);
+    try {
+      await deviceAdminService.saveVersionPolicy({
+        platform,
+        required_version: version.trim(),
+        required_build: buildNum,
+        store_url: storeUrl.trim(),
+      });
+      setMsg({ ok: true, text: "Saved." });
+      onSaved();
+    } catch (err) {
+      // Surface the server's field error (e.g. an invalid store URL) rather
+      // than a generic failure.
+      const data = (err as { response?: { data?: { errors?: Record<string, string[]>; message?: string } } })
+        ?.response?.data;
+      const firstError = data?.errors ? Object.values(data.errors)[0]?.[0] : undefined;
+      setMsg({ ok: false, text: firstError || data?.message || "Could not save. Please try again." });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="dm-policy">
+      <h3>{label}</h3>
+      <label className="dm-policy-field">
+        <span>Required Version</span>
+        <input
+          className="dm-input"
+          value={version}
+          onChange={(e) => setVersion(e.target.value)}
+          placeholder="e.g. 1.0.5"
+        />
+      </label>
+      <label className="dm-policy-field">
+        <span>Required Build</span>
+        <input
+          className="dm-input"
+          value={build}
+          onChange={(e) => setBuild(e.target.value)}
+          inputMode="numeric"
+          placeholder="e.g. 5"
+        />
+      </label>
+      <label className="dm-policy-field">
+        <span>Store URL</span>
+        <input
+          className="dm-input"
+          value={storeUrl}
+          onChange={(e) => setStoreUrl(e.target.value)}
+          placeholder="https://play.google.com/store/apps/…"
+        />
+      </label>
+      <div className="dm-policy-actions">
+        <button type="button" className="dm-btn dm-btn-primary" onClick={save} disabled={saving}>
+          {saving ? "Saving…" : "Save"}
+        </button>
+        {msg && (
+          <span className={msg.ok ? "dm-policy-ok" : "dm-policy-err"}>{msg.text}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Version-adoption bars for one platform: build → users, newest first.
+ *  The required build is highlighted; everything below it reads as "old".
+ *  A footer summarises how many devices are on the latest build vs old,
+ *  counting the bars above (this replaces the old Latest/Old KPI cards). */
+function AdoptionChart({
+  adoption,
+  stat,
+}: {
+  adoption?: PlatformAdoption;
+  stat?: VersionPolicyStat;
+}) {
+  const data = useMemo(
+    () =>
+      (adoption?.builds ?? []).map((b) => ({
+        name: `Build ${b.build_number}`,
+        users: b.users,
+        devices: b.devices,
+        isRequired: adoption?.required_build === b.build_number,
+      })),
+    [adoption],
+  );
+
+  // The latest/old split. Shown even when there are no bars yet, so the footer
+  // always states the current picture ("0 devices"). "No policy" when the
+  // platform has no required build set — old/latest is undefined without one.
+  const hasPolicy = stat?.required_build != null;
+  const footer = (
+    <div className="dm-adopt-foot">
+      {hasPolicy ? (
+        <>
+          <span className="dm-adopt-stat">
+            <span className="dm-adopt-dot dm-adopt-dot-latest" aria-hidden="true" />
+            <b>{stat?.latest ?? 0}</b> latest
+          </span>
+          <span className="dm-adopt-stat">
+            <span className="dm-adopt-dot dm-adopt-dot-old" aria-hidden="true" />
+            <b>{stat?.old ?? 0}</b> old
+          </span>
+        </>
+      ) : (
+        <span className="dm-adopt-nopolicy">No version policy set — set a required build to classify devices.</span>
+      )}
+    </div>
+  );
+
+  if (!data.length) {
+    return (
+      <>
+        <p className="dm-empty-sm">No devices yet</p>
+        {footer}
+      </>
+    );
+  }
+
+  return (
+    <>
+      <ResponsiveContainer width="100%" height={Math.max(120, data.length * 34 + 20)}>
+        <BarChart data={data} layout="vertical" margin={{ top: 4, right: 40, bottom: 4, left: 8 }}>
+          <XAxis type="number" allowDecimals={false} hide />
+          <YAxis type="category" dataKey="name" width={78} tick={{ fontSize: 12, fill: "#475569" }} />
+          <Tooltip
+            formatter={(value, _n, item) => [
+              `${value} users · ${(item?.payload as { devices: number }).devices} devices`,
+              "",
+            ]}
+            labelStyle={{ fontWeight: 600 }}
+          />
+          <Bar dataKey="users" radius={[0, 4, 4, 0]} label={{ position: "right", fontSize: 11, fill: "#475569" }}>
+            {data.map((row) => (
+              <Cell
+                key={row.name}
+                // Required build = green (latest); anything else = red (old).
+                // Same language as the footer and the table's Update column.
+                fill={row.isRequired ? ACTIVE_COLOR : INACTIVE_COLOR}
+              />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+      {footer}
+    </>
+  );
+}
+
 export default function Device_Management() {
   const [filters, setFilters] = useState<DeviceFilters>(EMPTY_FILTERS);
   const [searchInput, setSearchInput] = useState("");
@@ -281,6 +486,21 @@ export default function Device_Management() {
   const [error, setError] = useState("");
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const [selected, setSelected] = useState<DeviceRow | null>(null);
+  // Mobile version policies, loaded once (and reloaded after a save). Separate
+  // from the analytics poll: they change only when an admin edits them.
+  const [policies, setPolicies] =
+    useState<Record<MobilePlatform, VersionPolicy | null> | null>(null);
+
+  const loadPolicies = useCallback(() => {
+    deviceAdminService
+      .getVersionPolicies()
+      .then(setPolicies)
+      .catch((err) => console.error("Failed to load version policies", err));
+  }, []);
+
+  useEffect(() => {
+    loadPolicies();
+  }, [loadPolicies]);
 
   /**
    * Devices and analytics load together: the status tiles count the same rows
@@ -334,6 +554,13 @@ export default function Device_Management() {
   useEffect(() => {
     loadRef.current = load;
   }, [load]);
+
+  // After saving a policy, refresh the policy forms AND the analytics/table so
+  // the new latest/old counts and Update Status column reflect it at once.
+  const onPolicySaved = useCallback(() => {
+    loadPolicies();
+    loadRef.current(true);
+  }, [loadPolicies]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -475,10 +702,9 @@ export default function Device_Management() {
             onClick={() => toggleStatus("offline")}
           />
           <Card label="Total Devices" value={cards.total_devices} />
-          <Card label="Active" value={cards.active_devices} tone="ok" />
-          <Card label="Inactive" value={cards.inactive_devices} />
-          <Card label="Mobile" value={cards.mobile_devices} />
-          <Card label="Web" value={cards.web_devices} />
+          {/* Active/Inactive/Mobile/Web and the four Latest/Old tiles were
+              removed: the latest-vs-old counts now live in the footer of each
+              Version Adoption chart, next to the bars they summarise. */}
         </section>
       )}
 
@@ -492,8 +718,45 @@ export default function Device_Management() {
           <ChartBox title="App Type Distribution">
             <DistributionPie data={topSlices(charts.app_type_distribution, "app_type")} />
           </ChartBox>
+
+          <ChartBox title="Android Version Adoption" subtitle="Users per build — the required build is green">
+            <AdoptionChart
+              adoption={charts.version_adoption?.ANDROID}
+              stat={cards?.version_policy?.ANDROID}
+            />
+          </ChartBox>
+
+          <ChartBox title="iOS Version Adoption" subtitle="Users per build — the required build is green">
+            <AdoptionChart
+              adoption={charts.version_adoption?.IOS}
+              stat={cards?.version_policy?.IOS}
+            />
+          </ChartBox>
         </section>
       )}
+
+      {/* ---- Mobile Version Policy ----
+          Only Android and iOS are ever gated. Saving here sets the minimum
+          acceptable build; out-of-date mobile clients get an update screen. The
+          web is never validated and is deliberately absent. */}
+      <div className="dm-section-head">
+        <h2>Mobile Version Policy</h2>
+        <p>
+          The required build for each mobile platform. Devices below it are asked
+          to update. The web is never version-checked.
+        </p>
+      </div>
+      <section className="dm-policies">
+        {MOBILE_PLATFORMS.map(({ key, label }) => (
+          <PolicyForm
+            key={key}
+            platform={key}
+            label={label}
+            initial={policies?.[key] ?? null}
+            onSaved={onPolicySaved}
+          />
+        ))}
+      </section>
 
       {/* ---- devices (absorbed the former /Device_Activity page) ----
           Headed explicitly so the search box states what it searches. */}
@@ -560,14 +823,17 @@ export default function Device_Management() {
               <SortHeader label="App Type" field="app_type" ordering={ordering} onSort={toggleSort} />
               <SortHeader label="Version" field="app_version" ordering={ordering} onSort={toggleSort} />
               <SortHeader label="Build" field="build_number" ordering={ordering} onSort={toggleSort} />
+              {/* Derived from the version policy, server-side. Not sortable: it's
+                  computed, not a stored column the API can order by. */}
+              <th>Update</th>
               <SortHeader label="Relative" field="last_active" ordering={ordering} onSort={toggleSort} />
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={6} className="dm-empty">Loading devices…</td></tr>
+              <tr><td colSpan={7} className="dm-empty">Loading devices…</td></tr>
             ) : rows.length === 0 ? (
-              <tr><td colSpan={6} className="dm-empty">No devices match this search</td></tr>
+              <tr><td colSpan={7} className="dm-empty">No devices match this search</td></tr>
             ) : (
               rows.map((row) => (
                 <tr key={row.id} onClick={() => setSelected(row)} className="dm-row" title="View device details">
@@ -579,6 +845,7 @@ export default function Device_Management() {
                   <td>{row.app_type}</td>
                   <td>{row.app_version}</td>
                   <td className="dm-num">{row.build_number}</td>
+                  <td><UpdateBadge status={row.update_status} /></td>
                   <td className="dm-rel" title={formatDateTime(row.last_active)}>
                     {relativeTime(row.last_active)}
                   </td>
