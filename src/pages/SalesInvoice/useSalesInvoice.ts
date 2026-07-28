@@ -124,6 +124,9 @@ const toRequestError = (error: any): RequestError => {
   if (typeof data === "string") message = data;
   else if (typeof data?.detail === "string" && data.detail) message = data.detail;
   else if (typeof data?.message === "string" && data.message) message = data.message;
+  // Several OMS endpoints report failures as {"error": "..."}; without this the
+  // generic branch below renders them as "error: <text>".
+  else if (typeof data?.error === "string" && data.error) message = data.error;
   else if (data && typeof data === "object") {
     message = Object.entries(data)
       .map(([field, value]) => {

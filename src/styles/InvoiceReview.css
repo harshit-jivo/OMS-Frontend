@@ -865,6 +865,34 @@
   display: none;
 }
 
+/* Credit-limit flow verdict, above the stage timeline */
+.ir-cl-summary {
+  padding: 10px 14px;
+  margin-bottom: 18px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.ir-cl-summary-approved {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+  color: #15803d;
+}
+
+.ir-cl-summary-rejected {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #b91c1c;
+}
+
+.ir-cl-summary-pending {
+  background: #fefce8;
+  border-color: #fef08a;
+  color: #a16207;
+}
+
 /* Boundary between two versions of the same invoice in the revision chain */
 .ir-timeline-sep {
   display: flex;

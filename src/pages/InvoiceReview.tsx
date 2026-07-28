@@ -236,6 +236,42 @@ type CreditLimitStage = {
   rejectRequired?: number;
 };
 
+/* JSAP reports each approval stage with a single-letter action code, not a word:
+ * A = approved, R = rejected, P = pending, null/blank = not actioned yet. The
+ * word forms are accepted as a fallback in case the service ever returns them. */
+type StageTone = "approved" | "rejected" | "pending";
+type StageState = { label: string; tone: StageTone };
+
+const CL_STAGE_CODES: Record<string, StageState> = {
+  A: { label: "Approved", tone: "approved" },
+  R: { label: "Rejected", tone: "rejected" },
+  P: { label: "Pending", tone: "pending" },
+};
+
+const creditLimitStageState = (actionStatus?: string | null): StageState => {
+  const raw = String(actionStatus ?? "").trim();
+  if (!raw) return { label: "Pending", tone: "pending" };
+  const byCode = CL_STAGE_CODES[raw.toUpperCase()];
+  if (byCode) return byCode;
+  if (/reject/i.test(raw)) return { label: "Rejected", tone: "rejected" };
+  if (/approve/i.test(raw)) return { label: "Approved", tone: "approved" };
+  return { label: raw, tone: "pending" };
+};
+
+// One-line answer to "did the credit limit go through?", derived from the stages.
+const creditLimitFlowSummary = (stages: CreditLimitStage[]): StageState | null => {
+  if (stages.length === 0) return null;
+  const states = stages.map((stage) => creditLimitStageState(stage.actionStatus));
+  const rejectedAt = states.findIndex((state) => state.tone === "rejected");
+  if (rejectedAt >= 0) {
+    return { label: `Rejected at stage ${rejectedAt + 1} of ${stages.length}`, tone: "rejected" };
+  }
+  const approved = states.filter((state) => state.tone === "approved").length;
+  return approved === stages.length
+    ? { label: `Approved — all ${stages.length} stages cleared`, tone: "approved" }
+    : { label: `Pending — ${approved} of ${stages.length} stages approved`, tone: "pending" };
+};
+
 // The raise-credit-limit action only applies to errors that are actually about
 // the customer's credit limit.
 const isCreditLimitError = (record: InvoiceRecord) =>
@@ -348,6 +384,8 @@ export default function InvoiceReview() {
     () => (selected ? parsePayload(selected.invoice_payload) : {}),
     [selected],
   );
+
+  const clFlowSummary = useMemo(() => creditLimitFlowSummary(clFlowStages), [clFlowStages]);
 
   // Version number per log id in the history chain, keyed in first-seen
   // (chronological) order: oldest version is 1. Size is the number of versions.
@@ -1347,29 +1385,25 @@ export default function InvoiceReview() {
               ) : clFlowError ? (
                 <div className="ir-banner ir-banner-error">{clFlowError}</div>
               ) : (
+                <>
+                {clFlowSummary && (
+                  <div className={`ir-cl-summary ir-cl-summary-${clFlowSummary.tone}`}>
+                    {clFlowSummary.label}
+                  </div>
+                )}
                 <ol className="ir-timeline">
                   {clFlowStages.map((stage, index) => {
-                    const acted = String(stage.actionStatus || "").trim();
-                    const dotClass = acted
-                      ? /reject/i.test(acted)
-                        ? "ir-dot-rejected"
-                        : "ir-dot-approved"
-                      : "ir-dot-pending";
-                    const badgeClass = acted
-                      ? /reject/i.test(acted)
-                        ? "ir-badge-rejected"
-                        : "ir-badge-approved"
-                      : "ir-badge-pending";
+                    const state = creditLimitStageState(stage.actionStatus);
                     return (
                       <li className="ir-timeline-item" key={stage.stageId ?? index}>
-                        <span className={`ir-timeline-dot ${dotClass}`} aria-hidden="true" />
+                        <span className={`ir-timeline-dot ir-dot-${state.tone}`} aria-hidden="true" />
                         <div className="ir-timeline-body">
                           <div className="ir-timeline-head">
                             <strong>
                               {toNumber(stage.priority) ? `${toNumber(stage.priority)}. ` : ""}
                               {stage.stageName || "—"}
                             </strong>
-                            <span className={`ir-badge ${badgeClass}`}>{acted || "Pending"}</span>
+                            <span className={`ir-badge ir-badge-${state.tone}`}>{state.label}</span>
                           </div>
                           <p className="ir-timeline-note ir-timeline-by">
                             Assigned to: {stage.assignedTo || "—"}
@@ -1385,6 +1419,7 @@ export default function InvoiceReview() {
                     );
                   })}
                 </ol>
+                </>
               )}
             </div>
           </section>
