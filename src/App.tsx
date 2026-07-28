@@ -1,10 +1,12 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import ErrorBoundary from "./components/ErrorBoundary";
 import Login from "./pages/Login";
 import Sidebar from "./components/Sidebar";
 import Dashboard from "./pages/Dashboard";
 import App_User from "./pages/App_User";
 import Sap_sync from "./pages/Sap_Sync";
 import Add_Sales from "./pages/Add_Sales";
+import Drafts from "./pages/Drafts";
 import View_Orders from "./pages/View_Orders";
 import Auditor_orders from "./pages/Auditor_Order";
 import Billing_orders from "./pages/Billing_Order";
@@ -21,7 +23,7 @@ import Party_Assignment from "./pages/Party_Assignment";
 import Party_Product_Assignment from "./pages/Party_Product_Assignment";
 import Add_Scheme from "./pages/Add_Scheme";
 import FOC from "./pages/FOC";
-import SalesInvoice from "./pages/Sales_Invoice";
+import SalesInvoice from "./pages/Sales_Invoice";    
 import SkuGalleryPage from "./pages/SalesInvoice/SkuGalleryPage";
 import InvoiceReview from "./pages/InvoiceReview";
 import Staff from "./pages/Staff";
@@ -30,6 +32,7 @@ import Order_Stock_Check from "./pages/Order_Stock_Check";
 import Product_Stock from "./pages/Product_Stock";
 import Order_Flow_Settings from "./pages/Order_Flow_Settings";
 import Page_Permissions from "./pages/Page_Permissions";
+import UI_Labels from "./pages/UI_Labels";
 import Sales_Quotation from "./pages/Sales_Quotation";
 import LabelChecker from "./pages/Label_Checker";
 import NutritionManager from "./pages/Nutrition_Manager";
@@ -41,10 +44,14 @@ import Tracker_Admin from "./pages/Tracker_Admin";
 import Tracker_Reports from "./pages/Tracker_Reports";
 import Tracker_Alerts from "./pages/Tracker_Alerts";
 import Tracker_Invoices from "./pages/Tracker_Invoices";
+import Profile from "./pages/Profile";
+import Device_Management from "./pages/Device_Management";
+import Invoice_Report from "./pages/Invoice_Report";
 
 function App() {
   return (
     <BrowserRouter>
+      <ErrorBoundary>
       <Routes>
         <Route path="/" element={<Login />} />
 
@@ -53,6 +60,25 @@ function App() {
           element={
             <Sidebar>
               <Dashboard />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Profile"
+          element={
+            <Sidebar>
+              <Profile />
+            </Sidebar>
+          }
+        />
+
+        {/* System — Device & Version Management (admin) */}
+        <Route
+          path="/Device_Management"
+          element={
+            <Sidebar>
+              <Device_Management />
             </Sidebar>
           }
         />
@@ -80,6 +106,15 @@ function App() {
           element={
             <Sidebar>
               <Add_Sales />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Drafts"
+          element={
+            <Sidebar>
+              <Drafts />
             </Sidebar>
           }
         />
@@ -116,6 +151,15 @@ function App() {
           element={
             <Sidebar>
               <InvoiceReview />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Invoice_Report"
+          element={
+            <Sidebar>
+              <Invoice_Report />
             </Sidebar>
           }
         />
@@ -317,6 +361,11 @@ function App() {
           }
         />
 
+       
+
+       
+        
+       
         <Route
           path="/Label_Checker"
           element={
@@ -335,6 +384,17 @@ function App() {
           }
         />
 
+        <Route
+          path="/UI_Labels"
+          element={
+            <Sidebar>
+              <UI_Labels />
+            </Sidebar>
+          }
+        />
+
+        {/* Any unknown path falls back to the dashboard instead of a blank page. */}
+        <Route path="*" element={<Navigate to="/Dashboard" replace />} />
         <Route
           path="/Einvoice"
           element={
@@ -407,6 +467,7 @@ function App() {
           }
         />
       </Routes>
+      </ErrorBoundary>
     </BrowserRouter>
   );
 }

@@ -55,3 +55,22 @@ export function trackerLandingPath(pages: Set<string>): string | null {
   }
   return null;
 }
+
+/**
+ * The landing path for ANY role, after a fresh login or a restored session:
+ *   • tracker sub-roles -> their highest-priority tracker page
+ *   • legal reviewers   -> their own workspace
+ *   • everyone else     -> the Dashboard
+ *
+ * Both entry points in `pages/Login.tsx` (the login submit and the
+ * already-authenticated startup redirect) call this, so the two can never drift
+ * apart again. Callers append `window.location.search` themselves to preserve
+ * notification deep-link params.
+ */
+export function landingPathFor(role?: string | null): string {
+  if (isTrackerRole(role)) {
+    return trackerLandingPath(trackerPagesFor(role)) || TRACKER_PAGES.Tracker_Queue.path;
+  }
+  if (normalizeRole(role) === "legal") return "/Label_Checker";
+  return "/Dashboard";
+}

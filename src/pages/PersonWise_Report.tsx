@@ -4,9 +4,11 @@ import type { User } from "../services/userService";
 import type { Order, OrderItem } from "../services/ordersService";
 import { loadManagerOrders } from "../utils/orderHistory";
 import { formatOrderCreatedAt, getOrderItemSchemeNames, getOrderItemSchemes, getOrderItemSchemeQtyText, getOrderItemTotalLtrs, ordersService } from "../services/ordersService";
-import * as XLSX from "xlsx";
-import { saveAs } from "file-saver";
+import { startExcelExport, exportDateStamp } from "../utils/excelExport";
+import { useUILabels } from "../services/uiConfig";
 import "../styles/Report.css";
+import ItemSection from "../components/order-items/ItemSection";
+import PartyHeader from "../components/order-items/PartyHeader";
 import { 
   HiEye,           // View
   HiArrowDownTray    // Download
@@ -25,6 +27,7 @@ const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 1)
   .split("T")[0];
 
 export default function PersonWise_Report() {
+  const { t } = useUILabels();
   const [users, setUsers] = useState<User[]>([]);
   const [mainGroup, setMainGroup] = useState<{ id: number; name: string }[]>([]);
   const [selectedGroups, setSelectedGroups] = useState<number[]>([]);
@@ -218,161 +221,91 @@ export default function PersonWise_Report() {
     
   // };
 
-  const downloadExcel = (order: Order) => {
-    const excelData: Record<string, unknown>[] = [];
-    if (order.items && order.items.length > 0) {
-      order.items.forEach((item: OrderItem) => {
-        excelData.push({
+  // Raw values only — exportToExcel infers the Excel type per column, so dates
+  // stay dates and money stays numeric and summable.
+  const buildOrderRows = (order: Order): Record<string, unknown>[] => {
+    if (!order.items || order.items.length === 0) {
+      return [
+        {
           "Order Number": order.order_number,
           "Card Code": order.card_code,
           "Card Name": order.card_name,
-          "Created At": formatOrderCreatedAt(order.created_at),
+          "Created At": order.created_at,
           "Bill To": order.bill_to_address,
           "Ship To": order.ship_to_address,
           "Delivery Date": order.delivery_date,
-          "Status": order.status_display,
-          "FOC": order.is_foc ? "Yes" : "No",
-          "Item Code": item.item_code,
-          "Item Name": item.item_name,
-          "Scheme": getOrderItemSchemeNames(item),
-          "Scheme Qty": getOrderItemSchemeQtyText(item),
-          // "Scheme Ltrs": (item as any).scheme_ltrs || "",
-          "Qty": item.qty,
-          "Boxes": item.boxes,
-          "Liters": item.ltrs,
-          "Total Ltrs": getOrderItemTotalLtrs(item).toFixed(2),
-          "Price List (Basic)": item.price_list_basic,
-          "Basic Price": item.basic_price,
-          "Tax Rate": item.tax_rate,
-          "Total Amount": item.total,
-          "Grand Total": (Number(item.total || 0) + (Number(item.total || 0) * Number(item.tax_rate || 0) / 100)).toFixed(2),
-        });
-      });
-    } else {
-      excelData.push({
+          Status: order.status_display,
+          FOC: Boolean(order.is_foc),
+          // Item columns are held open so an order with no line items still
+          // produces the same sheet layout as every other export.
+          "Item Code": null,
+          "Item Name": null,
+          Scheme: null,
+          "Scheme Qty": null,
+          Qty: null,
+          Boxes: null,
+          Liters: null,
+          "Total Ltrs": null,
+          "Price List (Basic)": null,
+          "Basic Price": null,
+          "Tax Rate": null,
+          "Total Amount": null,
+          "Grand Total": null,
+        },
+      ];
+    }
+
+    return order.items.map((item: OrderItem) => {
+      const total = Number(item.total || 0);
+      const taxRate = Number(item.tax_rate || 0);
+      return {
         "Order Number": order.order_number,
         "Card Code": order.card_code,
         "Card Name": order.card_name,
-        "Created At": formatOrderCreatedAt(order.created_at),
+        "Created At": order.created_at,
+        "Bill To": order.bill_to_address,
+        "Ship To": order.ship_to_address,
         "Delivery Date": order.delivery_date,
-        "Status": order.status_display,
-        "FOC": order.is_foc ? "Yes" : "No",
-      });
-    }
-    const totalAmount = excelData.reduce((s, r) => s + Number(r["Total Amount"] || 0), 0);
-    const grandTotal = excelData.reduce((s, r) => s + Number(r["Grand Total"] || 0), 0);
-    excelData.push({
-      "Order Number": "",
-      "Card Code": "",
-      "Card Name": "",
-      "Created At": "",
-      "Bill To": "",
-      "Ship To": "",
-      "Delivery Date": "",
-      "Status": "",
-      "FOC": "",
-      "Item Code": "",
-      "Item Name": "",
-      "Scheme": "",
-      "Scheme Qty": "",
-      // "Scheme Ltrs": "",
-      "Qty": "",
-      "Boxes": "",
-      "Liters": "",
-      "Total Ltrs": "",
-      "Price List (Basic)": "",
-      "Basic Price": "",
-      "Tax Rate": "TOTAL",
-      "Total Amount": totalAmount.toFixed(2),
-      "Grand Total": grandTotal.toFixed(2),
+        Status: order.status_display,
+        FOC: Boolean(order.is_foc),
+        "Item Code": item.item_code,
+        "Item Name": item.item_name,
+        Scheme: getOrderItemSchemeNames(item),
+        "Scheme Qty": getOrderItemSchemeQtyText(item),
+        Qty: item.qty,
+        Boxes: item.boxes,
+        Liters: item.ltrs,
+        "Total Ltrs": getOrderItemTotalLtrs(item),
+        "Price List (Basic)": item.price_list_basic,
+        "Basic Price": item.basic_price,
+        "Tax Rate": taxRate,
+        "Total Amount": total,
+        "Grand Total": total + (total * taxRate) / 100,
+      };
     });
-    const worksheet = XLSX.utils.json_to_sheet(excelData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Order Details");
-    const excelBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
-    const file = new Blob([excelBuffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-    saveAs(file, `Order_${order.order_number}.xlsx`);
+  };
+
+  const ORDER_TOTALS = {
+    sum: ["Total Amount", "Grand Total"],
+    labelColumn: "Tax Rate",
+    label: "TOTAL",
+  };
+
+  const downloadExcel = (order: Order) => {
+    startExcelExport(buildOrderRows(order), {
+      fileName: `Order_${order.order_number}.xlsx`,
+      sheetName: "Order Details",
+      totalsRow: ORDER_TOTALS,
+    });
   };
 
   const downloadAllExcel = () => {
     if (filteredOrders.length === 0) return;
-    const excelData: Record<string, unknown>[] = [];
-    filteredOrders.forEach((order) => {
-      if (order.items && order.items.length > 0) {
-        order.items.forEach((item: OrderItem) => {
-          excelData.push({
-            "Order Number": order.order_number,
-            "Card Code": order.card_code,
-            "Card Name": order.card_name,
-            "Created At": formatOrderCreatedAt(order.created_at),
-            "Bill To": order.bill_to_address,
-        "Ship To": order.ship_to_address,
-        "Delivery Date": order.delivery_date,
-        "Status": order.status_display,
-        "FOC": order.is_foc ? "Yes" : "No",
-        "Item Code": item.item_code,
-        "Item Name": item.item_name,
-        "Scheme": getOrderItemSchemeNames(item),
-        "Scheme Qty": getOrderItemSchemeQtyText(item),
-        // "Scheme Ltrs": (item as any).scheme_ltrs || "",
-        "Qty": item.qty,
-        "Boxes": item.boxes,
-        "Liters": item.ltrs,
-        "Total Ltrs": getOrderItemTotalLtrs(item).toFixed(2),
-        "Price List (Basic)": item.price_list_basic,
-        "Basic Price": item.basic_price,
-        "Tax Rate": item.tax_rate,
-        "Total Amount": item.total,
-        "Grand Total": (Number(item.total || 0) + (Number(item.total || 0) * Number(item.tax_rate || 0) / 100)).toFixed(2),
-          });
-        });
-      } else {
-        excelData.push({
-          "Order Number": order.order_number,
-          "Card Code": order.card_code,
-          "Card Name": order.card_name,
-          "Created At": formatOrderCreatedAt(order.created_at),
-          "Delivery Date": order.delivery_date,
-          "Status": order.status_display,
-          "FOC": order.is_foc ? "Yes" : "No",
-          "Bill To": order.bill_to_address,
-          "Ship To": order.ship_to_address,
-        });
-      }
+    startExcelExport(filteredOrders.flatMap(buildOrderRows), {
+      fileName: `PersonWise_Report_${selectedUser}_${exportDateStamp()}.xlsx`,
+      sheetName: "All Orders",
+      totalsRow: ORDER_TOTALS,
     });
-    const allTotalAmount = excelData.reduce((s, r) => s + Number(r["Total Amount"] || 0), 0);
-    const allGrandTotal = excelData.reduce((s, r) => s + Number(r["Grand Total"] || 0), 0);
-    excelData.push({
-      "Order Number": "",
-      "Card Code": "",
-      "Card Name": "",
-      "Created At": "",
-      "Bill To": "",
-      "Ship To": "",
-      "Delivery Date": "",
-      "Status": "",
-      "FOC": "",
-      "Item Code": "",
-      "Item Name": "",
-      "Scheme": "",
-      "Scheme Qty": "",
-      // "Scheme Ltrs": "",
-      "Qty": "",
-      "Boxes": "",
-      "Liters": "",
-      "Total Ltrs": "",
-      "Price List (Basic)": "",
-      "Basic Price": "",
-      "Tax Rate": "TOTAL",
-      "Total Amount": allTotalAmount.toFixed(2),
-      "Grand Total": allGrandTotal.toFixed(2),
-    });
-    const worksheet = XLSX.utils.json_to_sheet(excelData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "All Orders");
-    const excelBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
-    const file = new Blob([excelBuffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-    saveAs(file, `PersonWise_Report_${selectedUser}_${new Date().toISOString().split("T")[0]}.xlsx`);
   };
 
   const isFilterReady = selectedGroups.length > 0;
@@ -684,46 +617,7 @@ export default function PersonWise_Report() {
             </button>
           </div>
 
-          <div className="dr-d-header-card">
-            <div className="dr-d-info-grid">
-              <div className="dr-d-info-field dr-d-info-span2">
-                <span className="dr-d-hf-label">Order Number</span>
-                <div className="dr-d-ordnum-row">
-                  <span className="dr-d-ordnum">{orderDetails.order_number}</span>
-                  {orderDetails.is_foc ? <span className="dr-foc-badge dr-foc-badge-detail">FOC ORDER</span> : null}
-                  <span className={`dr-badge dr-badge-${(orderDetails.status_display || "").toLowerCase().replace(/\s+/g, "-")}`}>{orderDetails.status_display}</span>
-                </div>
-              </div>
-              <div className="dr-d-info-field">
-                <span className="dr-d-hf-label">Created At</span>
-                <span className="dr-d-hf-value">{formatOrderCreatedAt(orderDetails.created_at)}</span>
-              </div>
-              <div className="dr-d-info-field">
-                <span className="dr-d-hf-label">Delivery Date</span>
-                <span className="dr-d-hf-value">{orderDetails.delivery_date || "-"}</span>
-              </div>
-              <div className="dr-d-info-field">
-                <span className="dr-d-hf-label">PO Number</span>
-                <span className="dr-d-hf-value">{orderDetails.po_number || "-"}</span>
-              </div>
-              <div className="dr-d-info-field">
-                <span className="dr-d-hf-label">Party Name</span>
-                <span className="dr-d-hf-value">{orderDetails.card_name}</span>
-              </div>
-              <div className="dr-d-info-field">
-                <span className="dr-d-hf-label">Card Code</span>
-                <span className="dr-d-hf-value">{orderDetails.card_code}</span>
-              </div>
-              <div className="dr-d-info-field">
-                <span className="dr-d-hf-label">Bill To</span>
-                <span className="dr-d-hf-value">{orderDetails.bill_to_address || "-"}</span>
-              </div>
-              <div className="dr-d-info-field">
-                <span className="dr-d-hf-label">Ship To</span>
-                <span className="dr-d-hf-value">{orderDetails.ship_to_address || "-"}</span>
-              </div>
-            </div>
-          </div>
+          <PartyHeader order={orderDetails} />
 
           <div className="dr-d-items">
             <div className="dr-d-items-head">
@@ -731,49 +625,7 @@ export default function PersonWise_Report() {
               <span className="dr-d-items-count">{selectedItems.length}</span>
             </div>
             <div className="dr-d-items-scroll">
-              {selectedItems.length > 0 ? (
-                <div className="order-detail-card-list">
-                  {selectedItems.map((item, i) => {
-                    const schemes = getOrderItemSchemes(item);
-
-                    return (
-                      <article className="order-detail-item-card" key={`${item.item_code}-detail-card-${i}`}>
-                        <div className="order-detail-item-top">
-                          <span className="order-detail-item-index">Item {i + 1}</span>
-                          <span className="order-detail-item-code">{item.item_code}</span>
-                        </div>
-                        <div className="order-detail-item-main">
-                          <div className="order-detail-item-title-wrap">
-                            <span className="order-detail-label">Item Name</span>
-                            <h4 className="order-detail-item-title">{item.item_name}</h4>
-                          </div>
-                          <div className="order-detail-item-tags">
-                            <span className="order-detail-item-category">{item.category || "-"}</span>
-                            {schemes.map((scheme, schemeIndex) => (
-                              <span className="order-detail-scheme-chip" key={`${item.item_code}-scheme-card-${schemeIndex}`}>
-                                <em>Sch</em>{scheme.name || "-"} <strong>Qty {scheme.qty || 0}</strong>
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="order-detail-item-metrics">
-                          <div><span>Qty</span><strong>{item.qty}</strong></div>
-                          <div><span>Pcs</span><strong>{item.pcs}</strong></div>
-                          <div><span>Boxes</span><strong>{Number(item.boxes).toFixed(2)}</strong></div>
-                          <div><span>Ltrs</span><strong>{item.ltrs}</strong></div>
-                          {schemes.length > 0 ? <div><span>Total Ltrs</span><strong>{getOrderItemTotalLtrs(item).toFixed(2)}</strong></div> : null}
-                          <div><span>Price List (Basic)</span><strong>{Number(item.price_list_basic).toFixed(2)}</strong></div>
-                          <div><span>Basic Price</span><strong>{Number(item.basic_price).toFixed(2)}</strong></div>
-                          <div><span>Tax %</span><strong>{Number(item.tax_rate).toFixed(2)}</strong></div>
-                          <div className="order-detail-item-amount"><span>Amount</span><strong>{Number(item.total).toFixed(2)}</strong></div>
-                        </div>
-                      </article>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="order-detail-empty">No items found</div>
-              )}
+              <ItemSection items={selectedItems} />
               <table className="dr-d-tbl">
                 <thead>
                   <tr>
@@ -781,7 +633,7 @@ export default function PersonWise_Report() {
                     <th>Scheme</th><th>Scheme Qty</th><th>Qty</th><th>Pcs</th><th>Boxes</th><th>Ltrs</th>
                     {/* <th>Scheme Ltrs</th>*/}
                     <th>Total Ltrs</th> 
-                    <th>Price List (Basic)</th><th>Basic Price</th><th>Tax %</th>
+                    <th>{t("price_list", "Price List (Basic)")}</th><th>Basic Price</th><th>Tax %</th>
                     <th style={{textAlign:'right'}}>Amount</th>
                   </tr>
                 </thead>
@@ -825,6 +677,18 @@ export default function PersonWise_Report() {
               <span className="dr-d-sum-label">Tax</span>
               <span className="dr-d-sum-val">{selectedItems.reduce((s, i) => s + (Number(i.total || 0) * Number(i.tax_rate || 0) / 100), 0).toFixed(2)}</span>
             </div>
+            {[
+              { label: "Commodity", value: orderDetails.vareity_cost?.commodity_price, cls: "vc-commodity" },
+              { label: "Other", value: orderDetails.vareity_cost?.other_total, cls: "vc-other" },
+              { label: "Premium", value: orderDetails.vareity_cost?.premium_total, cls: "vc-premium" },
+            ]
+              .filter((entry) => Number(entry.value) > 0)
+              .map((entry) => (
+                <div className="dr-d-sum-row" key={entry.label}>
+                  <span className={`dr-d-sum-label vc-pill ${entry.cls}`}>{entry.label}</span>
+                  <span className="dr-d-sum-val">{Number(entry.value).toFixed(2)}</span>
+                </div>
+              ))}
             <div className="dr-d-sum-row dr-d-sum-grand">
               <span className="dr-d-sum-label">Grand Total</span>
               <span className="dr-d-sum-val">{(selectedItems.reduce((s, i) => s + Number(i.total || 0), 0) + selectedItems.reduce((s, i) => s + (Number(i.total || 0) * Number(i.tax_rate || 0) / 100), 0)).toFixed(2)}</span>

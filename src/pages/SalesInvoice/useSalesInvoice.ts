@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   buildInvoicePayload,
   calculateTotals,
@@ -14,6 +14,7 @@ import {
   type SalespersonDetails,
   type SelectedLine,
 } from "./salesInvoice.utils";
+import api, { API_BASE_URL } from "../../services/api";
 
 export type SalesOrderLine = {
   LineNum: number;
@@ -62,8 +63,11 @@ export type NextDocNumber = {
 type ApiMessageResponse = {
   message?: unknown;
   detail?: unknown;
+  details?: unknown;
   error?: unknown;
   errors?: unknown;
+  // SAP Service Layer nests the human text as message: { lang, value }.
+  value?: unknown;
   data?: unknown;
   result?: unknown;
   DocEntry?: unknown;
@@ -72,95 +76,208 @@ type ApiMessageResponse = {
 
 const createFreightRow = (): FreightRow => ({ expenseCode: "", expenseName: "", lineTotal: 0, taxCode: "" });
 
-// Unique, time-ordered reference stamped on each invoice post so the resulting SAP
-// document can be traced back to OMS. Capped at 15 characters to fit the SAP UDF:
-// a base-36 millisecond timestamp (~8 chars, keeps refs sortable) plus a random
-// suffix that guarantees uniqueness within the same millisecond.
-const OMS_REF_MAX_LENGTH = 15;
-const generateOmsRef = (): string => {
-  let ref = Date.now().toString(36);
-  while (ref.length < OMS_REF_MAX_LENGTH) {
-    ref += Math.random().toString(36).slice(2);
-  }
-  return ref.slice(0, OMS_REF_MAX_LENGTH);
-};
-
 const linesToRecord = (lines: SelectedLine[]) =>
   Object.fromEntries(lines.map((line) => [lineKey(line.DocEntry, line.LineNum), line]));
-
-const apiBaseUrl = String(
-  import.meta.env.VITE_BASE_URL
-    || import.meta.env.VITE_BACKEND_BASE_URL
-    || import.meta.env.VITE_API_BASE_URL
-    || "",
-)
-  .trim()
-  .replace(/\/+$/, "");
 
 export const resolveApiUrl = (url: string) => {
   if (/^https?:\/\//i.test(url)) return url;
 
   const normalizedUrl = url.startsWith("/") ? url : `/${url}`;
-  if (!apiBaseUrl) return normalizedUrl;
-
-  const path = /\/api$/i.test(apiBaseUrl)
+  const path = /\/api$/i.test(API_BASE_URL)
     ? normalizedUrl.replace(/^\/api(?=\/|$)/i, "")
     : normalizedUrl;
 
-  return `${apiBaseUrl}${path}`;
+  return `${API_BASE_URL}${path}`;
 };
 
-export const apiFetch = async <T,>(url: string, init?: RequestInit): Promise<T> => {
-  const token = localStorage.getItem("access");
-  const response = await fetch(resolveApiUrl(url), {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(init?.headers || {}),
-    },
-  });
-
-  if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || `Request failed with ${response.status}`);
-  }
-
-  if (response.status === 204) return undefined as T;
-  return response.json() as Promise<T>;
+// Map an app URL to the shared axios instance. Absolute URLs bypass Axios'
+// baseURL so sale-invoice calls use the exact same configured API endpoint.
+const toAxiosRequest = (url: string): { url: string; baseURL?: string } => {
+  const resolved = resolveApiUrl(url);
+  if (/^https?:\/\//i.test(resolved)) return { url: resolved, baseURL: "" };
+  return { url: resolved.replace(/^\/api(?=\/|$)/i, "") || "/" };
 };
 
-// Local invoice history log. We append one row per lifecycle event (draft created
-// → PENDING, approved → APPROVED, rejected → REJECTED) so the full audit trail is
-// preserved rather than mutating a single record.
-export type InvoiceLogStatus = "PENDING" | "APPROVED" | "REJECTED";
-
-export type InvoiceLogInput = {
-  so_number?: string;
-  party_name?: string;
-  total_amount?: string | number;
-  ref_id?: string;
-  status: InvoiceLogStatus;
-  created_by?: number | null;
-  approved_by?: number | null;
-  rejected_by?: number | null;
-  rejection_reason?: string;
-  invoice_payload?: unknown;
-};
-
-// Best-effort: a logging failure must never disrupt the actual draft/approval flow.
-export const createInvoiceLog = async (input: InvoiceLogInput): Promise<void> => {
+// Best-effort stringify that never throws (circular refs fall back to String()).
+const safeJsonStringify = (value: unknown): string => {
   try {
-    await apiFetch("/api/invoice/log/create/", {
-      method: "POST",
-      body: JSON.stringify(input),
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+};
+
+// Error thrown by the api* helpers. Carries the raw response body so callers
+// that need to inspect the payload (e.g. SAP error-code detection) aren't
+// limited to the flattened message string.
+export class RequestError extends Error {
+  status?: number;
+  data?: unknown;
+}
+
+// Normalise an axios error into the same Error(message) contract the previous
+// fetch()-based helpers threw (never logs tokens).
+const toRequestError = (error: any): RequestError => {
+  const status = error?.response?.status;
+  const data = error?.response?.data;
+  let message: string | undefined;
+  if (typeof data === "string") message = data;
+  else if (typeof data?.detail === "string" && data.detail) message = data.detail;
+  else if (typeof data?.message === "string" && data.message) message = data.message;
+  else if (data && typeof data === "object") {
+    message = Object.entries(data)
+      .map(([field, value]) => {
+        const text = Array.isArray(value)
+          ? value.join(", ")
+          : value !== null && typeof value === "object"
+            ? safeJsonStringify(value)
+            : String(value);
+        return `${field}: ${text}`;
+      })
+      .join(" ");
+  }
+  const requestError = new RequestError(
+    message || error?.message || `Request failed with ${status ?? ""}`.trim(),
+  );
+  requestError.status = status;
+  requestError.data = data;
+  return requestError;
+};
+
+/**
+ * JSON request through the ONE shared axios instance (services/api.ts), so it
+ * automatically gets the Authorization header, JWT refresh + retry, and central
+ * error handling. Signature/behaviour preserved: 204 → undefined, otherwise the
+ * parsed body; throws Error(message) on failure.
+ */
+export const apiFetch = async <T,>(url: string, init?: RequestInit): Promise<T> => {
+  const { url: axiosUrl, baseURL } = toAxiosRequest(url);
+  try {
+    const response = await api.request<T>({
+      url: axiosUrl,
+      method: (init?.method || "GET") as any,
+      ...(baseURL !== undefined ? { baseURL } : {}),
+      // Pass the already-serialized JSON body straight through.
+      ...(init?.body !== undefined ? { data: init.body } : {}),
+      ...(init?.headers ? { headers: init.headers as Record<string, string> } : {}),
     });
+    if (response.status === 204) return undefined as T;
+    return response.data as T;
   } catch (error) {
-    console.error("Unable to create invoice log:", error);
+    throw toRequestError(error);
+  }
+};
+
+/**
+ * Multipart upload (FormData) through the shared axios instance. Returns the
+ * parsed body, or null on 204. Setting Content-Type to multipart/form-data lets
+ * axios' browser adapter attach the correct boundary.
+ */
+export const apiUpload = async <T,>(
+  url: string,
+  formData: FormData,
+  method: "POST" | "PUT" | "PATCH" = "POST",
+): Promise<T | null> => {
+  const { url: axiosUrl, baseURL } = toAxiosRequest(url);
+  try {
+    const response = await api.request<T>({
+      url: axiosUrl,
+      method,
+      data: formData,
+      ...(baseURL !== undefined ? { baseURL } : {}),
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+    if (response.status === 204) return null;
+    return response.data as T;
+  } catch (error) {
+    throw toRequestError(error);
+  }
+};
+
+/** DELETE through the shared axios instance. Returns null on 204, else body. */
+export const apiDelete = async <T,>(url: string): Promise<T | null> => {
+  const { url: axiosUrl, baseURL } = toAxiosRequest(url);
+  try {
+    const response = await api.request<T>({
+      url: axiosUrl,
+      method: "DELETE",
+      ...(baseURL !== undefined ? { baseURL } : {}),
+    });
+    if (response.status === 204) return null;
+    return response.data as T;
+  } catch (error) {
+    throw toRequestError(error);
   }
 };
 
 export const getCurrentUserId = (): number | null => Number(localStorage.getItem("user_id")) || null;
+
+// The Sales Invoice flow runs against exactly one company branch at a time.
+// Every /api/hana/ endpoint requires it as a query param (OIL | BEVERAGE).
+export type InvoiceBranch = "OIL" | "BEVERAGE";
+
+export const withBranch = (url: string, branch: string) =>
+  `${url}${url.includes("?") ? "&" : "?"}branch=${encodeURIComponent(branch)}`;
+
+const normalizeBranch = (value: unknown): InvoiceBranch =>
+  String(value || "").trim().toUpperCase() === "BEVERAGE" ? "BEVERAGE" : "OIL";
+
+// The /api/hana/ endpoints use the branch as stored (OIL | BEVERAGE), but the
+// /api/service-layer/ endpoints expect the plural BEVERAGES for beverages.
+// Map here so callers can pass the value stored on the log/wizard.
+export const serviceLayerBranch = (value: unknown): "OIL" | "BEVERAGES" =>
+  normalizeBranch(value) === "BEVERAGE" ? "BEVERAGES" : "OIL";
+
+// Module-scoped mirror of the wizard's active branch so deeply nested pickers
+// (item picker, batch picker, tabs) can build /api/hana/ URLs without the
+// branch being threaded through every prop chain. Only one Sales Invoice
+// wizard is ever mounted at a time.
+let activeBranch: InvoiceBranch = "OIL";
+
+export const hanaUrl = (url: string) => withBranch(url, activeBranch);
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Edit-and-resubmit handoff
+ *
+ * When a rejected invoice is reopened from the Invoice Review page, its stored
+ * payload is stashed under this key and the wizard rebuilds its state from it:
+ * party → open orders → matching lines (with the payload quantities). Batches
+ * are deliberately NOT restored — the draft step re-runs auto-allocation
+ * against current stock, which is the whole point of editing here.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+export const EDIT_RESTORE_STORAGE_KEY = "sales_invoice_edit_restore";
+
+export type EditRestorePayload = {
+  CardCode?: string;
+  DocumentLines?: Array<{
+    BaseEntry?: number | string;
+    BaseLine?: number | string;
+    ItemCode?: string;
+    Quantity?: number | string;
+  }>;
+  DocumentAdditionalExpenses?: Array<{
+    ExpenseCode?: number | string;
+    LineTotal?: number | string;
+    VatGroup?: string;
+  }>;
+  [key: string]: unknown;
+};
+
+export type EditRestore = { logId?: number | string; branch?: string; payload: EditRestorePayload };
+
+const readEditRestore = (): EditRestore | null => {
+  try {
+    const raw = sessionStorage.getItem(EDIT_RESTORE_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as EditRestore;
+    return parsed && typeof parsed === "object" && parsed.payload && typeof parsed.payload === "object"
+      ? parsed
+      : null;
+  } catch {
+    return null;
+  }
+};
 
 const pick = <T,>(source: Record<string, unknown>, keys: string[], fallback: T): T => {
   for (const key of keys) {
@@ -191,14 +308,25 @@ const extractApiMessage = (value: unknown, fallback: string): string => {
 
   if (typeof parsed === "object") {
     const source = parsed as ApiMessageResponse;
-    const directMessage = source.message ?? source.detail ?? source.error ?? source.errors;
-    if (typeof directMessage === "string" && directMessage.trim()) return directMessage.trim();
-    if (directMessage && typeof directMessage === "object") return extractApiMessage(directMessage, fallback);
 
-    const nestedMessage = source.data ?? source.result;
-    if (nestedMessage) {
-      const extracted = extractApiMessage(nestedMessage, "");
-      if (extracted) return extracted;
+    // Direct human-readable text wins outright.
+    for (const candidate of [source.message, source.detail, source.value]) {
+      if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+    }
+
+    // Dig into nested wrappers for the most specific message. The top-level
+    // `error` is often just a generic label ("SAP Error") while the real text
+    // sits deeper, e.g. { error: "SAP Error", details: { error: { message } } }.
+    for (const nested of [source.message, source.detail, source.details, source.error, source.errors, source.data, source.result]) {
+      if (nested && typeof nested === "object") {
+        const extracted = extractApiMessage(nested, "");
+        if (extracted) return extracted;
+      }
+    }
+
+    // Generic string labels only as a last resort.
+    for (const candidate of [source.error, source.errors]) {
+      if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
     }
 
     const docNumber = source.DocNum ?? source.DocEntry;
@@ -220,71 +348,6 @@ const formatApiErrorMessage = (value: unknown, fallback: string): string => {
   } catch {
     return extractApiMessage(parsed, fallback);
   }
-};
-
-// SAP's approval flow frequently rejects the post with code -2028 ("No matching
-// records found") even though the draft was actually created. Detect that code
-// anywhere in the (possibly deeply nested) error payload.
-const isNoMatchingRecordsError = (value: unknown): boolean => {
-  const text = typeof value === "string"
-    ? value
-    : (() => {
-        try {
-          return JSON.stringify(value);
-        } catch {
-          return String(value);
-        }
-      })();
-  return text.includes("-2028");
-};
-
-// Interpret the /draft/verify response: find the draft record with this refId in
-// SAP. The endpoint returns { data: [ ...matching records ] }, where each record
-// echoes its U_OMS_REF. We return the matching row (so the caller can read its
-// DocEntry/DocNum); when the row carries U_OMS_REF we confirm it matches the ref
-// we posted to rule out a stray hit.
-const findDraftRecordForRef = (response: unknown, refId: string): Record<string, unknown> | null => {
-  const records =
-    response && typeof response === "object" && Array.isArray((response as { data?: unknown }).data)
-      ? ((response as { data: Array<Record<string, unknown>> }).data)
-      : Array.isArray(response)
-        ? (response as Array<Record<string, unknown>>)
-        : [];
-
-  if (records.length === 0) return null;
-  return (
-    records.find((row) => {
-      const ref = row?.U_OMS_REF;
-      return ref === undefined || ref === null || String(ref) === refId;
-    }) || null
-  );
-};
-
-// Ask SAP whether the draft for this reference id actually landed, returning the
-// matching record (or null). A failed/absent verification yields null so the
-// caller reports failure.
-const verifyDraftRecord = async (refId: string): Promise<Record<string, unknown> | null> => {
-  try {
-    const data = await apiFetch<unknown>(`/api/hana/draft/verify?refId=${encodeURIComponent(refId)}`);
-    return findDraftRecordForRef(data, refId);
-  } catch (error) {
-    console.error("Draft verification failed:", error);
-    return null;
-  }
-};
-
-// Pull a draft/document number out of an API response, digging into nested
-// data/result wrappers. Prefers DocEntry (the draft key) but falls back to DocNum.
-const extractDocNumber = (value: unknown): string => {
-  const parsed = parsePossibleJson(value);
-  if (!parsed || typeof parsed !== "object") return "";
-  const source = parsed as ApiMessageResponse;
-  const docNumber = source.DocEntry ?? source.DocNum;
-  if (docNumber !== undefined && docNumber !== null && String(docNumber).trim()) {
-    return String(docNumber).trim();
-  }
-  const nested = source.data ?? source.result;
-  return nested ? extractDocNumber(nested) : "";
 };
 
 const normalizeLine = (line: SalesOrderLine, index: number): SalesOrderLine => ({
@@ -410,6 +473,13 @@ const resolveDefaultAddress = (
 
 export function useSalesInvoice() {
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
+  // No branch selected yet → the wizard shows the branch gate and loads nothing.
+  const [branch, setBranch] = useState<InvoiceBranch | null>(null);
+
+  // Keep the module-scoped mirror (used by hanaUrl in nested pickers) in sync.
+  useEffect(() => {
+    if (branch) activeBranch = branch;
+  }, [branch]);
   const [parties, setParties] = useState<Party[]>([]);
   const [selectedParty, setSelectedParty] = useState<Party | null>(null);
   const [salesOrders, setSalesOrders] = useState<SalesOrder[]>([]);
@@ -433,13 +503,17 @@ export function useSalesInvoice() {
   const [postSuccess, setPostSuccess] = useState("");
   const [postedDocNum, setPostedDocNum] = useState("");
 
+  // Customers, next doc number and freight masters are all branch-specific, so
+  // they load (and re-load) once a branch is selected.
   useEffect(() => {
+    if (!branch) return;
     const loadParties = async () => {
       setLoadingParties(true);
       setPartyError("");
+      setParties([]);
 
       try {
-        const data = await apiFetch<Party[]>("/api/hana/all-customers/");
+        const data = await apiFetch<Party[]>(withBranch("/api/hana/all-customers/", branch));
         setParties(Array.isArray(data) ? data : []);
       } catch (error) {
         console.error(error);
@@ -450,12 +524,13 @@ export function useSalesInvoice() {
     };
 
     loadParties();
-  }, []);
+  }, [branch]);
 
   useEffect(() => {
+    if (!branch) return;
     const loadNextDocNumber = async () => {
       try {
-        const data = await apiFetch<NextDocNumber[]>("/api/hana/next-doc-number/?doc_type=13");
+        const data = await apiFetch<NextDocNumber[]>(withBranch("/api/hana/next-doc-number/?doc_type=13", branch));
         const nextNumber = Array.isArray(data) ? data[0]?.NextNumber : "";
         setNextDocNumber(nextNumber === null || nextNumber === undefined ? "" : String(nextNumber));
       } catch (error) {
@@ -465,13 +540,14 @@ export function useSalesInvoice() {
     };
 
     loadNextDocNumber();
-  }, []);
+  }, [branch]);
 
   useEffect(() => {
+    if (!branch) return;
     const loadFreightOptions = async () => {
       try {
         const data = await apiFetch<FreightMaster[] | { data?: FreightMaster[]; results?: FreightMaster[] }>(
-          "/api/hana/freight-masters/",
+          withBranch("/api/hana/freight-masters/", branch),
         );
         const options = Array.isArray(data) ? data : data.data || data.results || [];
         setFreightOptions(options);
@@ -481,9 +557,10 @@ export function useSalesInvoice() {
     };
 
     loadFreightOptions();
-  }, []);
+  }, [branch]);
 
   const selectParty = useCallback(async (party: Party) => {
+    if (!branch) return [];
     setSelectedParty({
       CardCode: party.CardCode,
       CardName: party.CardName,
@@ -506,17 +583,20 @@ export function useSalesInvoice() {
 
     try {
       const data = await apiFetch<SalesOrder[] | { data?: SalesOrder[]; results?: SalesOrder[] }>(
-        `/api/hana/so/?card_code=${encodeURIComponent(party.CardCode)}`,
+        withBranch(`/api/hana/so/?card_code=${encodeURIComponent(party.CardCode)}`, branch),
       );
       const orders = Array.isArray(data) ? data : data.data || data.results || [];
-      setSalesOrders(orders.map(normalizeOrder));
+      const normalized = orders.map(normalizeOrder);
+      setSalesOrders(normalized);
+      return normalized;
     } catch (error) {
       console.error(error);
       setOrdersError("Unable to load open sales orders for this party.");
+      return [];
     } finally {
       setLoadingOrders(false);
     }
-  }, []);
+  }, [branch]);
 
   const changeParty = () => {
     setStep(1);
@@ -532,6 +612,23 @@ export function useSalesInvoice() {
     setPostSuccess("");
     setPostedDocNum("");
     setPostError("");
+  };
+
+  // Pick the company branch the invoice runs against. Everything downstream
+  // (customers, orders, prices, batches) is branch-specific, so choosing one
+  // resets the whole flow and reloads the masters.
+  const selectBranch = (next: InvoiceBranch) => {
+    if (next === branch) return;
+    setBranch(next);
+    setParties([]);
+    changeParty();
+  };
+
+  // Back to the branch gate (also clears any in-progress invoice).
+  const changeBranch = () => {
+    setBranch(null);
+    setParties([]);
+    changeParty();
   };
 
   const makeSelectedLine = (order: SalesOrder, line: SalesOrderLine): SelectedLine => {
@@ -697,13 +794,13 @@ export function useSalesInvoice() {
   );
 
   const loadPartyAddresses = useCallback(async () => {
-    if (!selectedParty) return false;
+    if (!selectedParty || !branch) return false;
     setLoadingDraftDetails(true);
     setDraftError("");
 
     try {
       const addressData = await apiFetch<PartyAddress[]>(
-        `/api/hana/address/?card_code=${encodeURIComponent(selectedParty.CardCode)}`,
+        withBranch(`/api/hana/address/?card_code=${encodeURIComponent(selectedParty.CardCode)}`, branch),
       );
       const addresses = Array.isArray(addressData) ? addressData : [];
       const billingAddresses = normalizeAddresses(addresses, "B");
@@ -733,19 +830,25 @@ export function useSalesInvoice() {
     } finally {
       setLoadingDraftDetails(false);
     }
-  }, [selectedParty]);
+  }, [branch, selectedParty]);
 
   const loadDraftDetails = useCallback(async () => {
-    if (!selectedParty || !firstSelectedLine) return false;
+    if (!selectedParty || !firstSelectedLine || !branch) return false;
     setLoadingDraftDetails(true);
     setDraftError("");
 
     try {
       const slpCode = firstSelectedLine.SlpCode ?? 0;
       const [customerData, salespersonData, addressData] = await Promise.all([
-        apiFetch<CustomerDetails[]>(`/api/hana/customer-details/?card_code=${encodeURIComponent(selectedParty.CardCode)}`),
-        apiFetch<SalespersonDetails[]>(`/api/hana/salesperson-details/?slp_code=${encodeURIComponent(String(slpCode))}`),
-        apiFetch<PartyAddress[]>(`/api/hana/address/?card_code=${encodeURIComponent(selectedParty.CardCode)}`),
+        apiFetch<CustomerDetails[]>(
+          withBranch(`/api/hana/customer-details/?card_code=${encodeURIComponent(selectedParty.CardCode)}`, branch),
+        ),
+        apiFetch<SalespersonDetails[]>(
+          withBranch(`/api/hana/salesperson-details/?slp_code=${encodeURIComponent(String(slpCode))}`, branch),
+        ),
+        apiFetch<PartyAddress[]>(
+          withBranch(`/api/hana/address/?card_code=${encodeURIComponent(selectedParty.CardCode)}`, branch),
+        ),
       ]);
       const customer = Array.isArray(customerData) ? customerData[0] || null : null;
       const salesperson = Array.isArray(salespersonData) ? salespersonData[0] || null : null;
@@ -787,7 +890,7 @@ export function useSalesInvoice() {
     } finally {
       setLoadingDraftDetails(false);
     }
-  }, [firstSelectedLine, selectedParty, selectedPayToCodes, selectedShipToCodes]);
+  }, [branch, firstSelectedLine, selectedParty, selectedPayToCodes, selectedShipToCodes]);
 
   const createInvoiceDraft = async () => {
     if (selectedLineList.length === 0) return;
@@ -818,6 +921,106 @@ export function useSalesInvoice() {
     return ok;
   };
 
+  /* ── Edit-and-resubmit restore ──────────────────────────────────────────
+   * A rejected invoice reopened from the Invoice Review page arrives via
+   * sessionStorage (EDIT_RESTORE_STORAGE_KEY). Phase 1 selects the party and
+   * rebuilds the selected lines from that party's live open orders using the
+   * payload quantities. Phase 2 runs on a later render (proceedToDraftFromItems
+   * needs the re-rendered selectedParty) and jumps to the draft step, where
+   * batch auto-allocation re-runs against current stock. */
+  const [editRestore] = useState<EditRestore | null>(() => readEditRestore());
+  const editRestoreStartedRef = useRef(false);
+  const [restoreStaged, setRestoreStaged] = useState<{ lines: SelectedLine[]; warning: string } | null>(null);
+
+  useEffect(() => {
+    if (!editRestore || editRestoreStartedRef.current) return;
+    // The reopened invoice dictates the branch — skip the branch gate and let
+    // the branch-scoped masters (parties etc.) load for it.
+    if (!branch) {
+      setBranch(normalizeBranch(editRestore.branch));
+      return;
+    }
+    if (loadingParties || parties.length === 0) return;
+    editRestoreStartedRef.current = true;
+    sessionStorage.removeItem(EDIT_RESTORE_STORAGE_KEY);
+
+    const payload = editRestore.payload;
+    const cardCode = String(payload.CardCode || "");
+    const party = parties.find((candidate) => candidate.CardCode === cardCode);
+    if (!party) {
+      setPartyError(
+        `Unable to reopen the invoice: customer ${cardCode || "(unknown)"} is not in the open-party list.`,
+      );
+      return;
+    }
+
+    (async () => {
+      const orders = await selectParty(party);
+      const payloadLines = (payload.DocumentLines || []).filter(
+        (line) => line.BaseEntry !== undefined && line.BaseEntry !== null,
+      );
+      const restored: SelectedLine[] = [];
+      const missing: string[] = [];
+
+      payloadLines.forEach((payloadLine) => {
+        const order = orders.find((candidate) => toNumber(candidate.DocEntry) === toNumber(payloadLine.BaseEntry));
+        const orderLine = order
+          ? getOrderLines(order).find((candidate) => toNumber(candidate.LineNum) === toNumber(payloadLine.BaseLine))
+          : undefined;
+        if (!order || !orderLine || toNumber(orderLine.OpenQty) < 1) {
+          missing.push(String(payloadLine.ItemCode || `SO line ${payloadLine.BaseEntry}/${payloadLine.BaseLine}`));
+          return;
+        }
+        const line = makeSelectedLine(order, orderLine);
+        // Requested quantity, clamped to what is still open on the sales order.
+        const requested = toNumber(payloadLine.Quantity);
+        if (requested >= 1) line.invoiceQty = Math.min(requested, line.OpenQty);
+        restored.push(line);
+      });
+
+      if (restored.length === 0) {
+        setOrdersError(
+          "Unable to reopen the invoice: none of its sales-order lines are still open. Build the invoice again from the open orders below.",
+        );
+        return;
+      }
+
+      // Freight comes back as stored; batches deliberately do not — the draft
+      // step re-runs auto-allocation against current stock.
+      const expenses = payload.DocumentAdditionalExpenses || [];
+      if (expenses.length) {
+        setFreightRows(
+          expenses.map((expense) => ({
+            expenseCode: String(expense.ExpenseCode ?? ""),
+            expenseName:
+              freightOptions.find((option) => toNumber(option.ExpnsCode) === toNumber(expense.ExpenseCode))?.ExpnsName
+              || "",
+            lineTotal: toNumber(expense.LineTotal),
+            taxCode: String(expense.VatGroup || ""),
+          })),
+        );
+      }
+
+      const warning = missing.length
+        ? `Reopened with ${restored.length} line${restored.length === 1 ? "" : "s"}. Not restored (no longer open on the sales order): ${missing.join(", ")}.`
+        : "";
+      setRestoreStaged({ lines: restored, warning });
+    })();
+  }, [branch, editRestore, freightOptions, loadingParties, parties, selectParty]);
+
+  useEffect(() => {
+    if (!restoreStaged || !selectedParty) return;
+    setRestoreStaged(null);
+    (async () => {
+      await proceedToDraftFromItems(restoreStaged.lines);
+      if (restoreStaged.warning) setDraftError(restoreStaged.warning);
+    })();
+    // proceedToDraftFromItems is recreated every render; the restoreStaged guard
+    // makes this effect run its body exactly once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [restoreStaged, selectedParty]);
+
+  
   useEffect(() => {
     if (step === 4 && selectedParty && !customerDetails && !loadingDraftDetails) {
       loadDraftDetails();
@@ -877,87 +1080,31 @@ export function useSalesInvoice() {
     }
 
     setPosting(true);
-    // The reference stamped on the payload doubles as the key we use to verify the
-    // draft actually landed in SAP when the approval flow rejects the post with -2028.
-    const refId = generateOmsRef();
-
-    // Reference data shared by every ref-log entry for this attempt. The outcome
-    // (status + error_message) is filled in per branch below.
-    const refLogBase = {
-      ref_id: refId,
-      card_name: selectedParty?.CardName || "",
-      doc_date: form.postingDate,
-      so_number: uniqueTextValues(selectedLineList.map((line) => (line.DocNum ? String(line.DocNum) : ""))).join(", "),
-      posted_by: Number(localStorage.getItem("user_id")) || null,
-    };
-
-    // Record the final outcome in the local ref log. Best-effort: a logging failure
-    // must never change what the user sees about the actual post.
-    const writeRefLog = async (status: "Success" | "Failed", errorMessage = "") => {
-      try {
-        await apiFetch("/api/invoice/refLogs/", {
-          method: "POST",
-          body: JSON.stringify({ ...refLogBase, status, error_message: errorMessage }),
-        });
-      } catch (logError) {
-        console.error("Unable to write invoice ref log:", logError);
-      }
-    };
-
-    // Append a PENDING history log when the draft lands in SAP. Carries the full
-    // invoice payload so the approval screen has the original document on record.
-    const logDraftCreated = () =>
-      createInvoiceLog({
-        so_number: refLogBase.so_number,
-        party_name: selectedParty?.CardName || "",
-        total_amount: String(totals.grandTotal),
-        ref_id: refId,
-        status: "PENDING",
-        created_by: getCurrentUserId(),
-        invoice_payload: { ...payload, U_OMS_REF: refId },
-      });
-
-    // A post can "fail" two ways: a thrown error (HTTP error) or a 200 with an error
-    // body. Both funnel here. SAP's approval flow commonly returns -2028 ("No matching
-    // records") even though the draft was created, so on that code we re-check SAP by
-    // refId before deciding it failed. Any other error — or a -2028 with nothing in
-    // SAP — is a genuine failure.
-    const resolvePostFailure = async (errorValue: unknown) => {
-      if (isNoMatchingRecordsError(errorValue)) {
-        const record = await verifyDraftRecord(refId);
-        if (record) {
-          await writeRefLog("Success");
-          await logDraftCreated();
-          setPostedDocNum(extractDocNumber(record));
-          setPostSuccess("Invoice draft created in SAP successfully.");
-          return;
-        }
-      }
-      const message = formatApiErrorMessage(errorValue, "Draft creation unsuccessful.");
-      await writeRefLog("Failed", message);
-      setPostError(message);
-    };
-
     try {
-      // Store the invoice draft in SAP via the service-layer endpoint (type=DRAFT).
-      // A fresh unique U_OMS_REF is stamped on each attempt so the SAP document can be
-      // cross-referenced back to OMS (and verified after a -2028 response).
-      const data = await apiFetch<ApiMessageResponse>("/api/service-layer/invoice/?type=DRAFT", {
+      // Store the invoice locally as a PENDING record for review/approval instead of
+      // creating a draft in SAP. The Invoice Review page approves it and posts it to
+      // SAP HANA later.
+      const createdBy = getCurrentUserId();
+      const pendingPayload = {
+        so_number: uniqueTextValues(selectedLineList.map((line) => (line.DocNum ? String(line.DocNum) : ""))).join(", "),
+        party_name: selectedParty?.CardName || "",
+        total_amount: totals.grandTotal,
+        status: "PENDING",
+        // The branch this invoice was built against; warehouse is the WHS code
+        // of the payload's first line.
+        branch: branch || "OIL",
+        warehouse: payload.DocumentLines[0]?.WarehouseCode || "",
+        ...(createdBy ? { created_by: createdBy } : {}),
+        invoice_payload: payload,
+      };
+      const data = await apiFetch<ApiMessageResponse>("/api/invoice/pending/", {
         method: "POST",
-        body: JSON.stringify({ ...payload, U_OMS_REF: refId }),
+        body: JSON.stringify(pendingPayload),
       });
-      // The SAP proxy can return HTTP 200 with an error body — run the same failure path.
-      if (data && typeof data === "object" && data.error) {
-        await resolvePostFailure(data);
-        return;
-      }
-      await writeRefLog("Success");
-      await logDraftCreated();
-      setPostedDocNum(extractDocNumber(data));
-      setPostSuccess("Invoice draft created in SAP successfully.");
+      setPostSuccess(extractApiMessage(data, "Invoice submitted for review and approval."));
     } catch (error) {
       console.error(error);
-      await resolvePostFailure(error instanceof Error ? error.message : error);
+      setPostError(formatApiErrorMessage(error instanceof Error ? error.message : error, "Unable to submit invoice for review."));
     } finally {
       setPosting(false);
     }
@@ -966,6 +1113,9 @@ export function useSalesInvoice() {
   return {
     step,
     setStep,
+    branch,
+    selectBranch,
+    changeBranch,
     parties,
     selectedParty,
     salesOrders,

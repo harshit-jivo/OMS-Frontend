@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import * as XLSX from "xlsx";
+import * as XLSX from "xlsx"; // reading uploaded workbooks only; writing goes through excelExport
+import { startSheetsExport } from "../utils/excelExport";
 import type { Product } from "../services/ordersService";
 import { sapService, type Party } from "../services/sapService";
 import { userService } from "../services/userService";
@@ -290,10 +291,13 @@ export default function Party_Product_Assignment() {
         "Basic Rate": 120,
       },
     ];
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(partyRows), "Parties");
-    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(productRows), "Products");
-    XLSX.writeFile(workbook, "party-product-assignment-template.xlsx");
+    startSheetsExport(
+      [
+        { sheetName: "Parties", rows: partyRows },
+        { sheetName: "Products", rows: productRows },
+      ],
+      "party-product-assignment-template.xlsx",
+    );
   };
 
   const handleImportExcel = async (file: File) => {

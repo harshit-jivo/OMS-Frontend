@@ -302,18 +302,18 @@ html, body {
 }
 
 .content-area {
-  margin-left: 246px;
-  margin-top: 58px;
-  margin-bottom: 2rem;
+  margin-left: 220px;
+  padding-top: 75px;
+  /* margin-bottom: 2rem; */
   box-sizing: border-box;
-  padding: 1.25rem 1.25rem 3rem 0;
+  /* padding: 1.25rem 1.25rem 3rem 0; */
   min-height: calc(100vh - 58px);
-  background: transparent;
+  background: white;
   transition: margin-left .28s ease, padding .28s ease;
 }
 
 .content-area.sidebar-collapsed {
-  margin-left: 88px;
+  margin-left: 70px;
   padding-left: 0;
 }
 
@@ -560,4 +560,19 @@ body {
   border: 1px solid rgba(226, 232, 240, 0.95);
   box-shadow: 0 6px 20px rgba(15, 23, 42, 0.05);
   padding: 24px;
+}
+
+/* Sidebar group label — introduced with the System group (Device/Version
+   Management). Non-interactive; purely a visual divider in the flat nav list. */
+.sidebar ul li.sidebar-section {
+  padding: 14px 16px 4px;
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  pointer-events: none;
+}
+.sidebar.collapsed ul li.sidebar-section {
+  display: none;
 }

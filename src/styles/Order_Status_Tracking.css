@@ -205,6 +205,58 @@
   background: #f8fafc;
 }
 
+.ot-card-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: clamp(240px, 28vw, 390px);
+}
+
+.ot-card-search-icon {
+  position: absolute;
+  left: 12px;
+  width: 18px;
+  height: 18px;
+  color: #64748b;
+  pointer-events: none;
+}
+
+.ot-card-search-input {
+  width: 100%;
+  height: var(--input-h, 40px);
+  padding: 0 38px;
+  border: 1px solid #d1d5db;
+  border-radius: var(--radius-sm, 8px);
+  background: #fff;
+  color: #1e293b;
+  font: var(--font-ui, 13px) 'Inter', sans-serif;
+  outline: none;
+  transition: border-color .15s, box-shadow .15s;
+}
+
+.ot-card-search-input::placeholder { color: #94a3b8; }
+.ot-card-search-input:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, .1); }
+
+.ot-card-search-clear {
+  position: absolute;
+  right: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+}
+
+.ot-card-search-clear:hover { background: #f1f5f9; color: #0f172a; }
+.ot-card-search-clear:focus-visible { outline: 2px solid #2563eb; outline-offset: 1px; }
+.ot-card-search-clear svg { width: 18px; height: 18px; }
+
 .ot-table tbody tr.ot-foc-row,
 .ot-table tbody tr.ot-foc-row:nth-child(even) {
   background: #fff7ed;
@@ -333,6 +385,12 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+
+/* Reused .ao-detail styling has bottom padding for a fixed footer; this page
+   has no fixed footer, so trim it back. */
+.ot-page .ao-detail {
+  padding-bottom: 24px;
 }
 
 .ot-detail-nav {
@@ -516,6 +574,8 @@
   .ot-filters {
     width: 100%;
   }
+
+  .ot-card-search { width: 100%; }
 
   .ot-select,
   .ot-date-input,
