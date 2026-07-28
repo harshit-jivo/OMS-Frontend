@@ -531,7 +531,7 @@ html, body {
 
 body {
   font-family: 'Inter', sans-serif;
-  background: var(--bg-gradient);
+  background: white;
   color: var(--text-dark);
 }
 
