@@ -181,6 +181,8 @@ const extractMessage = (value: unknown, fallback: string) => {
     const obj = value as ApiMessageResponse;
     if (typeof obj.message === "string" && obj.message.trim()) return obj.message;
     if (typeof obj.detail === "string" && obj.detail.trim()) return obj.detail;
+    const errorText = (obj as { error?: unknown }).error;
+    if (typeof errorText === "string" && errorText.trim()) return errorText;
   }
   return fallback;
 };
@@ -558,6 +560,27 @@ export default function InvoiceReview() {
       loadInvoices();
     } catch (err) {
       console.error(err);
+      // 409 = a credit-limit request already exists for this invoice log (the row
+      // is keyed by invoice_log_id). Nothing was created; the record simply belongs
+      // on the CL Raised tab, so move it there instead of showing a hard failure.
+      if ((err as { status?: number })?.status === 409) {
+        if (clRecord.id !== undefined && clRecord.id !== null) {
+          try {
+            await updateInvoiceStatus(clRecord.id, "CL_RAISED");
+          } catch (statusErr) {
+            console.error("Unable to set CL RAISED status:", statusErr);
+          }
+        }
+        setActionMessage(
+          extractMessage(
+            (err as { data?: unknown })?.data,
+            "A credit-limit request has already been raised for this invoice.",
+          ),
+        );
+        setClRecord(null);
+        loadInvoices();
+        return;
+      }
       setClSubmitError(extractMessage(err, "Unable to raise the credit-limit request."));
     } finally {
       setClSubmitting(false);
@@ -633,17 +656,8 @@ export default function InvoiceReview() {
         // Save the readable SAP message (e.g. the "Credit Limit Exceeded!" text)
         // in the log, overwriting any previous error.
         const readable = readableSapError(rawError || message);
-        // A credit-limit rejection on an invoice that already has a credit-limit
-        // request in flight is the expected result until that request is
-        // approved — not a new failure. Keep it in CL Raised so it stays on that
-        // tab with its Show Flow / Repost actions; the message is still recorded.
-        // Any other failure on a CL Raised invoice is a genuine error.
-        const stillAwaitingCreditLimit =
-          normalizeStatus(record.status) === "CL_RAISED" && /credit\s*limit/i.test(readable);
         try {
-          await updateInvoiceStatus(record.id, stillAwaitingCreditLimit ? "CL_RAISED" : "ERROR", {
-            error_message: readable,
-          });
+          await updateInvoiceStatus(record.id, "ERROR", { error_message: readable });
         } catch (logErr) {
           console.error("Unable to log SAP post error:", logErr);
         }
@@ -1433,13 +1447,7 @@ export default function InvoiceReview() {
         onClose={closeSapLoader}
         onRetry={sapPost.retry}
         onRaiseCl={
-          // Not offered when a request is already in flight — that invoice is
-          // waiting on the existing approval, and the row only exposes Show Flow
-          // for it. Raising a second request would duplicate it in JSAP.
-          canPostToSap
-          && sapErrorIsCreditLimit
-          && postingRecord
-          && normalizeStatus(postingRecord.status) !== "CL_RAISED"
+          canPostToSap && sapErrorIsCreditLimit && postingRecord
             ? raiseClFromLoader
             : undefined
         }

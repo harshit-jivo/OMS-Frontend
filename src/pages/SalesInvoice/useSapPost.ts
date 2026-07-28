@@ -1,5 +1,6 @@
 import { useCallback, useReducer, useRef } from "react";
 import { apiFetch, serviceLayerBranch, withBranch } from "./useSalesInvoice";
+import { extractRawMessage } from "./sapErrorTranslator";
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Stored payload → SAP invoice
@@ -232,9 +233,10 @@ export function useSapPost() {
       if (!alive()) return;
       // The SAP proxy can answer HTTP 200 with an error body.
       if (result && typeof result === "object" && (result as { error?: unknown }).error) {
-        const sapError = (result as { error?: unknown }).error;
-        rawErrorText = safeStringify(sapError);
-        throw new Error(conciseError(sapError, "SAP rejected the invoice."));
+        // Keep the WHOLE body: the top-level `error` is usually a generic label
+        // ("SAP Error") while the real reason sits in `details.error.message`.
+        rawErrorText = safeStringify(result);
+        throw new Error(conciseError(extractRawMessage(result), "SAP rejected the invoice."));
       }
 
       // 5. Confirm invoice number
@@ -249,9 +251,21 @@ export function useSapPost() {
       await input.onSuccess?.(invoiceNumber);
     } catch (err) {
       if (!alive()) return;
-      const message = conciseError(err, "Unable to post the invoice to SAP.");
-      // Prefer the captured SAP payload; otherwise fall back to the thrown message.
-      const rawError = rawErrorText || (err instanceof Error ? err.message : String(err));
+      // Prefer the captured SAP payload, then the response body carried on a
+      // RequestError (apiFetch flattens `{error:"SAP Error", details:{…}}` down to
+      // "SAP Error" for `message`, so the body is the only place the real reason
+      // survives), and only then the thrown message.
+      const responseData = (err as { data?: unknown } | null)?.data;
+      const rawError =
+        rawErrorText ||
+        (responseData !== undefined && responseData !== null
+          ? safeStringify(responseData)
+          : err instanceof Error
+            ? err.message
+            : String(err));
+      const message =
+        conciseError(extractRawMessage(rawError), "") ||
+        conciseError(err, "Unable to post the invoice to SAP.");
       log(message, "error");
       dispatch({ type: "error", failedStep: current, message, rawError });
       await input.onError?.(message, rawError);
