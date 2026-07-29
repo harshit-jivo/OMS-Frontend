@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { HiCheckCircle, HiExclamationCircle, HiChevronDown } from "react-icons/hi2";
-import einvoiceService from "../services/einvoiceService";
+import { einvoiceService } from "../services/einvoiceService";
 import type { CompanyChoice, ValidationError } from "../services/einvoiceService";
 
 /* ---- Field (label + control) ---- */
