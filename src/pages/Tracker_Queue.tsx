@@ -11,6 +11,7 @@ import {
 import trackerService from "../services/trackerService";
 import type {
   Invoice,
+  JsapStatus,
   Lookups,
   PaymentDetail,
   QueueStage,
@@ -42,6 +43,53 @@ const invMatch = (i: Invoice, q: string) =>
     i.invoice_value, i.taxable_value, i.return_reason, i.returned_from,
   ].some((v) => (v ?? "").toString().toLowerCase().includes(q));
 
+/**
+ * One invoice's JSAP verdict. `undefined` means the lookup is still in flight;
+ * `null` means it failed. An unavailable status is not an error — it explains
+ * why the invoice can't be linked to a JSAP decision, which is exactly what the
+ * handler needs to see.
+ */
+function JsapCell({ status }: { status?: JsapStatus | null }) {
+  if (status === undefined) return <span className="trk-sub">checking…</span>;
+  if (status === null) return <span className="trk-badge trk-badge-muted">unavailable</span>;
+
+  if (!status.available) {
+    return (
+      <>
+        <span className="trk-badge trk-badge-muted">
+          {status.reason === "not_in_jsap" ? "Not in JSAP"
+            : status.reason === "no_party_code" ? "No SAP vendor"
+            : status.reason === "no_draft" ? "No SAP draft"
+            : status.reason === "not_submitted" ? "Not submitted"
+            : status.reason === "rejection_pending" ? "Rejected here"
+            : "Unavailable"}
+        </span>
+        {status.detail && (
+          <div className="trk-sub" style={{ fontSize: 11 }}>{status.detail}</div>
+        )}
+      </>
+    );
+  }
+
+  const cls = status.status === "A" ? "trk-badge-success"
+    : status.status === "R" ? "trk-badge-danger" : "trk-badge-muted";
+  return (
+    <>
+      <span className={"trk-badge " + cls}>{status.label}</span>
+      {status.description && (
+        <div className="trk-sub" style={{ fontSize: 11, whiteSpace: "normal" }}>
+          {status.description}
+        </div>
+      )}
+      {status.doc_entry != null && (
+        <div className="trk-sub" style={{ fontSize: 10, color: "#94a3b8" }}>
+          draft {status.doc_entry}
+        </div>
+      )}
+    </>
+  );
+}
+
 // Statuses that mean "send back" / "need a written reason".
 const RETURN_STATUSES = new Set(["RETURN", "REJECTED"]);
 const REASON_STATUSES = new Set(["RETURN", "REJECTED", "HOLD", "DEBIT"]);
@@ -71,6 +119,9 @@ export default function Tracker_Queue() {
   const [subTab, setSubTab] = useState<"current" | "returned" | "advanced" | "rejected" | "partial">("current");
   const [advancedRows, setAdvancedRows] = useState<Invoice[]>([]);
   const [search, setSearch] = useState("");
+  // JSAP desk: per-invoice budget verdict, keyed by invoice id (null = lookup failed).
+  const [jsapStatuses, setJsapStatuses] = useState<Record<number, JsapStatus | null>>({});
+  const [syncingJsap, setSyncingJsap] = useState(false);
 
   const [timelineInv, setTimelineInv] = useState<Invoice | null>(null);
   const [detailInv, setDetailInv] = useState<Invoice | null>(null);
@@ -114,6 +165,10 @@ export default function Tracker_Queue() {
 
   const isEntry = activeStage === "entry";
   const isSapApproval = activeStage === "sap_approval";
+  // The JSAP desk mirrors a decision taken in JSAP — nobody approves here, so
+  // it gets a read-only status panel and a refresh button instead of the
+  // usual status/advance controls.
+  const isJsap = activeStage === "jsap_approval";
   const isTerminal = !!stageCfg?.is_terminal;
 
   // All invoices sitting at the active stage, split by how they arrived / state.
@@ -167,6 +222,42 @@ export default function Tracker_Queue() {
       trackerService.getStageAdvanced(activeStage).then(setAdvancedRows).catch(() => {});
     }
   }, [subTab, activeStage]);
+
+  // JSAP desk: fetch each parked invoice's budget verdict so the handler can
+  // see WHY something is sitting here without opening it one by one.
+  useEffect(() => {
+    if (!isJsap || !stageRows.length) { setJsapStatuses({}); return; }
+    let cancelled = false;
+    (async () => {
+      const entries = await Promise.all(stageRows.map(async (inv) => {
+        try { return [inv.id, await trackerService.getJsapStatus(inv.id)] as const; }
+        catch { return [inv.id, null] as const; }
+      }));
+      if (cancelled) return;
+      const map: Record<number, JsapStatus | null> = {};
+      for (const [id, st] of entries) map[id] = st;
+      setJsapStatuses(map);
+    })();
+    return () => { cancelled = true; };
+  }, [isJsap, stageRows]);
+
+  // Pull the latest decisions from JSAP: approved invoices advance, rejected
+  // ones return to SAP Approval with JSAP's own reason.
+  const onSyncJsap = async () => {
+    setSyncingJsap(true);
+    try {
+      const res = await trackerService.syncJsap();
+      const n = (res.advanced?.length ?? 0) + (res.returned?.length ?? 0);
+      flash(n === 0
+        ? `No change — ${res.waiting?.length ?? 0} still awaiting a JSAP decision`
+        : `${res.advanced?.length ?? 0} approved, ${res.returned?.length ?? 0} returned`);
+      load();
+    } catch (err: any) {
+      flash(err?.response?.data?.detail || "Could not reach JSAP");
+    } finally {
+      setSyncingJsap(false);
+    }
+  };
 
   const toggle = (id: number) =>
     setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -324,7 +415,7 @@ export default function Tracker_Queue() {
                 Partial<span className="trk-tab-count">{partialRows.length}</span>
               </button>
             )}
-            {(isSapApproval || rejectedRows.length > 0) && (
+            {(isSapApproval || isJsap || rejectedRows.length > 0) && (
               <button className={"trk-tab" + (subTab === "rejected" ? " active" : "")}
                 onClick={() => setSubTab("rejected")}>
                 Rejected<span className="trk-tab-count">{rejectedRows.length}</span>
@@ -350,6 +441,23 @@ export default function Tracker_Queue() {
               </button>
               <span className="trk-sub" style={{ fontSize: 11 }}>
                 Rejected without a reason — add remarks to send back to the previous stage.
+              </span>
+            </div>
+          )}
+
+          {/* JSAP desk: pull the decision in from JSAP. The status bar below
+              still works, so a handler can also approve/reject by hand — for an
+              invoice JSAP never received, or to override what it says. */}
+          {!readOnly && subTab !== "rejected" && isJsap && (
+            <div className="trk-actionbar" style={{ background: "#eff6ff", borderColor: "#bfdbfe" }}>
+              <button className="trk-btn trk-btn-primary" onClick={onSyncJsap}
+                disabled={syncingJsap}>
+                {syncingJsap ? "Checking JSAP…" : "↻ Refresh from JSAP"}
+              </button>
+              <span className="trk-sub" style={{ fontSize: 11 }}>
+                Approved in JSAP → advances automatically. Rejected → goes back to
+                SAP Approval with JSAP's reason. Nothing is sent to JSAP from here —
+                use the controls below to decide manually instead.
               </span>
             </div>
           )}
@@ -446,6 +554,7 @@ export default function Tracker_Queue() {
                     <th>Category</th>
                     <th>Unit / Branch</th>
                     {subTab === "returned" && <><th>Sent Back By</th><th>Reason</th></>}
+                    {isJsap && subTab !== "advanced" && <th>JSAP Status</th>}
                     {subTab === "advanced" ? (
                       <><th>Now At</th><th>Advanced On</th></>
                     ) : (
@@ -490,6 +599,11 @@ export default function Tracker_Queue() {
                             </span>
                           </td>
                         </>
+                      )}
+                      {isJsap && subTab !== "advanced" && (
+                        <td style={{ maxWidth: 240, whiteSpace: "normal" }}>
+                          <JsapCell status={jsapStatuses[inv.id]} />
+                        </td>
                       )}
                       {subTab === "advanced" ? (
                         <>
