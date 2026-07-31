@@ -58,10 +58,10 @@ type Props = {
    */
   onRaiseCl?: () => void;
   /**
-   * Opens the invoice's bill print. Shown on the success panel only when the
-   * parent supplies it and SAP gave back a document to print.
+   * Link to the invoice's bill print. Shown on the success panel only when the
+   * parent supplies it (i.e. SAP gave back a document to print).
    */
-  onViewReport?: () => void;
+  reportUrl?: string;
 };
 
 export default function MissionControlLoader({
@@ -69,10 +69,9 @@ export default function MissionControlLoader({
   onClose,
   onRetry,
   onRaiseCl,
-  onViewReport,
+  reportUrl,
 }: Props) {
-  const { status, logs, doc, invoiceNumber, docNum, docEntry, errorMessage, rawError } = state;
-  const canPrint = Boolean(onViewReport && (docNum || docEntry));
+  const { status, logs, doc, invoiceNumber, errorMessage, rawError } = state;
   const isRunning = status === "running";
   const isSuccess = status === "success";
   const isError = status === "error";
@@ -151,10 +150,15 @@ export default function MissionControlLoader({
             <SummaryPanel doc={doc} />
 
             <div className="mcl-actions">
-              {canPrint && (
-                <button type="button" className="mcl-btn mcl-btn-ghost" onClick={onViewReport}>
+              {reportUrl && (
+                <a
+                  className="mcl-btn mcl-btn-ghost"
+                  href={reportUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
                   <HiDocumentText aria-hidden="true" /> Generate Invoice Report
-                </button>
+                </a>
               )}
               <button ref={primaryRef} type="button" className="mcl-btn mcl-btn-ok" onClick={onClose}>
                 Done

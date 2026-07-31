@@ -328,6 +328,12 @@
   cursor: not-allowed;
 }
 
+/* Some actions are links (they open a new tab) but must read as buttons. */
+a.ir-btn {
+  text-decoration: none;
+  line-height: 1.2;
+}
+
 .ir-btn-sm {
   padding: 6px 10px;
   font-size: 0.78rem;

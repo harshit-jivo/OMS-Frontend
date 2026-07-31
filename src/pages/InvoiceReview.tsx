@@ -297,18 +297,23 @@ const hasRef = (value: unknown) => value !== undefined && value !== null && valu
 
 const trimmed = (value: unknown) => String(value ?? "").trim();
 
+type ReportRef = { docEntry: string; docNum: string; party: string };
+
 // The report can only be generated once we know which SAP document to print.
-const invoiceReportRef = (record: InvoiceRecord) => {
+const invoiceReportRef = (record: InvoiceRecord): ReportRef | null => {
   const docEntry = trimmed(record.sap_doc_entry);
-  if (docEntry) return { docEntry, docNum: trimmed(record.sap_doc_num) };
   const docNum = trimmed(record.sap_doc_num);
-  return docNum ? { docEntry: "", docNum } : null;
+  if (!docEntry && !docNum) return null;
+  return { docEntry, docNum, party: trimmed(record.party_name) };
 };
 
-const invoiceReportUrl = (ref: { docEntry: string; docNum: string }) => {
+// The party name only travels so the backend can name the download
+// "<DocNum> <Party Name>.pdf"; it plays no part in resolving the document.
+const invoiceReportUrl = (ref: ReportRef) => {
   const params = new URLSearchParams();
   if (ref.docNum) params.set("docNum", ref.docNum);
   if (ref.docEntry) params.set("docEntry", ref.docEntry);
+  if (ref.party) params.set("party", ref.party);
   return `${API_BASE_URL}/invoice/crystal/?${params.toString()}`;
 };
 
@@ -709,28 +714,13 @@ export default function InvoiceReview() {
     });
   };
 
-  // Open the Crystal bill print for a posted invoice in a new tab. The backend
-  // streams the PDF, so the browser's own viewer handles it — nothing to render
-  // here. Popup blockers are the only realistic failure, hence the fallback.
-  const openInvoiceReport = (ref: { docEntry: string; docNum: string } | null) => {
-    if (!ref) {
-      setActionError(
-        "This invoice has no SAP document number recorded, so its report cannot be generated. " +
-          "Use the Invoice Report page with the SAP invoice number instead.",
-      );
-      return;
-    }
-    setActionError("");
-    const url = invoiceReportUrl(ref);
-    const opened = window.open(url, "_blank", "noopener,noreferrer");
-    if (!opened) window.location.href = url;
-  };
-
-  // Same, straight from the success panel of the post loader.
-  const openReportFromLoader = () => {
+  // The bill print for the invoice that was just posted, offered on the loader's
+  // success panel so billing can print without going back to the list.
+  const loaderReportUrl = (() => {
     const { docNum, docEntry } = sapPost.state;
-    openInvoiceReport(docNum || docEntry ? { docNum, docEntry } : null);
-  };
+    if (!docNum && !docEntry) return undefined;
+    return invoiceReportUrl({ docNum, docEntry, party: trimmed(postingRecord?.party_name) });
+  })();
 
   // Dismiss the loader; refresh the list once the run has settled so the row
   // reflects the recorded POSTED_TO_SAP / ERROR status.
@@ -938,22 +928,32 @@ export default function InvoiceReview() {
                               {busy ? "…" : "Post to SAP"}
                             </button>
                           )}
-                          {status === "POSTED_TO_SAP" && (
-                            <button
-                              type="button"
-                              className="ir-btn ir-btn-report ir-btn-sm"
-                              disabled={!reportRef}
-                              title={
-                                reportRef
-                                  ? `Open the bill print for invoice #${reportRef.docNum || reportRef.docEntry}`
-                                  : "No SAP document number was recorded for this invoice"
-                              }
-                              onClick={() => openInvoiceReport(reportRef)}
-                            >
-                              <HiDocumentText aria-hidden="true" />
-                              Generate Report
-                            </button>
-                          )}
+                          {/* A real anchor, not window.open: popup blockers can
+                              turn an opener into a same-tab navigation, and this
+                              must never take the reviewer off the list. */}
+                          {status === "POSTED_TO_SAP" &&
+                            (reportRef ? (
+                              <a
+                                className="ir-btn ir-btn-report ir-btn-sm"
+                                href={invoiceReportUrl(reportRef)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title={`Open the bill print for invoice #${reportRef.docNum || reportRef.docEntry}`}
+                              >
+                                <HiDocumentText aria-hidden="true" />
+                                Generate Report
+                              </a>
+                            ) : (
+                              <button
+                                type="button"
+                                className="ir-btn ir-btn-report ir-btn-sm"
+                                disabled
+                                title="No SAP document number was recorded for this invoice"
+                              >
+                                <HiDocumentText aria-hidden="true" />
+                                Generate Report
+                              </button>
+                            ))}
                           {(status === "ERROR" || status === "CL_RAISED") && canPostToSap && (
                             <button
                               type="button"
@@ -1208,20 +1208,27 @@ export default function InvoiceReview() {
 
             {normalizeStatus(selected.status) === "POSTED_TO_SAP" && (
               <footer className="ir-modal-foot">
-                <button
-                  type="button"
-                  className="ir-btn ir-btn-report"
-                  disabled={!invoiceReportRef(selected)}
-                  title={
-                    invoiceReportRef(selected)
-                      ? undefined
-                      : "No SAP document number was recorded for this invoice"
-                  }
-                  onClick={() => openInvoiceReport(invoiceReportRef(selected))}
-                >
-                  <HiDocumentText aria-hidden="true" />
-                  Generate Invoice Report
-                </button>
+                {invoiceReportRef(selected) ? (
+                  <a
+                    className="ir-btn ir-btn-report"
+                    href={invoiceReportUrl(invoiceReportRef(selected)!)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <HiDocumentText aria-hidden="true" />
+                    Generate Invoice Report
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    className="ir-btn ir-btn-report"
+                    disabled
+                    title="No SAP document number was recorded for this invoice"
+                  >
+                    <HiDocumentText aria-hidden="true" />
+                    Generate Invoice Report
+                  </button>
+                )}
               </footer>
             )}
 
@@ -1554,7 +1561,7 @@ export default function InvoiceReview() {
             ? raiseClFromLoader
             : undefined
         }
-        onViewReport={openReportFromLoader}
+        reportUrl={loaderReportUrl}
       />
     </div>
   );
