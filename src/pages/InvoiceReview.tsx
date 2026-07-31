@@ -13,7 +13,9 @@ import {
   HiPencilSquare,
   HiBanknotes,
   HiArrowUturnLeft,
+  HiDocumentText,
 } from "react-icons/hi2";
+import { API_BASE_URL } from "../services/api";
 import { apiFetch, apiUpload, EDIT_RESTORE_STORAGE_KEY } from "./SalesInvoice/useSalesInvoice";
 import { useSapPost } from "./SalesInvoice/useSapPost";
 import { toNumber } from "./SalesInvoice/salesInvoice.utils";
@@ -71,6 +73,9 @@ type InvoiceRecord = {
   branch?: string;
   warehouse?: string;
   invoice_payload?: InvoicePayload | string;
+  // SAP identifiers recorded when the invoice posted; drive the bill print.
+  sap_doc_num?: string | null;
+  sap_doc_entry?: string | null;
   // Revision lineage. `supersedes` is the rejected log this one was reworked
   // from; `superseded_by_id` is the replacement that was submitted for it.
   supersedes?: number | string | null;
@@ -282,6 +287,31 @@ const isCreditLimitError = (record: InvoiceRecord) =>
 // A value is a usable lineage reference (log id) — 0 is not a valid pk here.
 const hasRef = (value: unknown) => value !== undefined && value !== null && value !== "";
 
+/* ── Bill print ────────────────────────────────────────────────────────────
+ * The backend proxies the Crystal bill print and answers with the PDF itself.
+ * It accepts either the internal OINV key (DocEntry) — which is what Crystal
+ * actually renders from — or the visible invoice number (DocNum), which it
+ * resolves to a DocEntry first. We prefer DocEntry when the post recorded one,
+ * because the DocNum lookup only searches the OIL company database.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+const trimmed = (value: unknown) => String(value ?? "").trim();
+
+// The report can only be generated once we know which SAP document to print.
+const invoiceReportRef = (record: InvoiceRecord) => {
+  const docEntry = trimmed(record.sap_doc_entry);
+  if (docEntry) return { docEntry, docNum: trimmed(record.sap_doc_num) };
+  const docNum = trimmed(record.sap_doc_num);
+  return docNum ? { docEntry: "", docNum } : null;
+};
+
+const invoiceReportUrl = (ref: { docEntry: string; docNum: string }) => {
+  const params = new URLSearchParams();
+  if (ref.docNum) params.set("docNum", ref.docNum);
+  if (ref.docEntry) params.set("docEntry", ref.docEntry);
+  return `${API_BASE_URL}/invoice/crystal/?${params.toString()}`;
+};
+
 /**
  * Update an invoice record's status. A rejection_reason is required when the
  * status becomes REJECTED, and an error_message is logged when it becomes ERROR.
@@ -289,7 +319,12 @@ const hasRef = (value: unknown) => value !== undefined && value !== null && valu
 const updateInvoiceStatus = (
   id: InvoiceRecord["id"],
   status: InvoiceStatus,
-  extra?: { rejection_reason?: string; error_message?: string },
+  extra?: {
+    rejection_reason?: string;
+    error_message?: string;
+    sap_doc_num?: string;
+    sap_doc_entry?: string;
+  },
 ) =>
   apiFetch<ApiMessageResponse>(`/api/invoice/${id}/update-status/`, {
     method: "PATCH",
@@ -644,10 +679,19 @@ export default function InvoiceReview() {
         total: toNumber(record.total_amount),
         branch: record.branch || "",
       },
-      onSuccess: async () => {
-        setActionMessage(`${label} posted to SAP HANA successfully.`);
+      onSuccess: async ({ invoiceNumber, docNum, docEntry }) => {
+        setActionMessage(
+          invoiceNumber
+            ? `${label} posted to SAP HANA successfully as invoice #${invoiceNumber}.`
+            : `${label} posted to SAP HANA successfully.`,
+        );
         try {
-          await updateInvoiceStatus(record.id, POSTED_TO_SAP_STATUS);
+          // Keep SAP's identifiers on the log so the row can print the bill
+          // later without anyone having to look the invoice up in SAP.
+          await updateInvoiceStatus(record.id, POSTED_TO_SAP_STATUS, {
+            ...(docNum ? { sap_doc_num: docNum } : {}),
+            ...(docEntry ? { sap_doc_entry: docEntry } : {}),
+          });
         } catch (logErr) {
           console.error("Unable to record SAP post success:", logErr);
         }
@@ -663,6 +707,29 @@ export default function InvoiceReview() {
         }
       },
     });
+  };
+
+  // Open the Crystal bill print for a posted invoice in a new tab. The backend
+  // streams the PDF, so the browser's own viewer handles it — nothing to render
+  // here. Popup blockers are the only realistic failure, hence the fallback.
+  const openInvoiceReport = (ref: { docEntry: string; docNum: string } | null) => {
+    if (!ref) {
+      setActionError(
+        "This invoice has no SAP document number recorded, so its report cannot be generated. " +
+          "Use the Invoice Report page with the SAP invoice number instead.",
+      );
+      return;
+    }
+    setActionError("");
+    const url = invoiceReportUrl(ref);
+    const opened = window.open(url, "_blank", "noopener,noreferrer");
+    if (!opened) window.location.href = url;
+  };
+
+  // Same, straight from the success panel of the post loader.
+  const openReportFromLoader = () => {
+    const { docNum, docEntry } = sapPost.state;
+    openInvoiceReport(docNum || docEntry ? { docNum, docEntry } : null);
   };
 
   // Dismiss the loader; refresh the list once the run has settled so the row
@@ -790,6 +857,7 @@ export default function InvoiceReview() {
                 {records.map((record, index) => {
                   const status = normalizeStatus(record.status);
                   const busy = actionId === record.id;
+                  const reportRef = invoiceReportRef(record);
                   return (
                     <tr key={record.id ?? index}>
                       <td>
@@ -868,6 +936,22 @@ export default function InvoiceReview() {
                             >
                               <HiPaperAirplane aria-hidden="true" />
                               {busy ? "…" : "Post to SAP"}
+                            </button>
+                          )}
+                          {status === "POSTED_TO_SAP" && (
+                            <button
+                              type="button"
+                              className="ir-btn ir-btn-report ir-btn-sm"
+                              disabled={!reportRef}
+                              title={
+                                reportRef
+                                  ? `Open the bill print for invoice #${reportRef.docNum || reportRef.docEntry}`
+                                  : "No SAP document number was recorded for this invoice"
+                              }
+                              onClick={() => openInvoiceReport(reportRef)}
+                            >
+                              <HiDocumentText aria-hidden="true" />
+                              Generate Report
                             </button>
                           )}
                           {(status === "ERROR" || status === "CL_RAISED") && canPostToSap && (
@@ -1118,6 +1202,25 @@ export default function InvoiceReview() {
                 >
                   <HiPaperAirplane aria-hidden="true" />
                   Post to SAP
+                </button>
+              </footer>
+            )}
+
+            {normalizeStatus(selected.status) === "POSTED_TO_SAP" && (
+              <footer className="ir-modal-foot">
+                <button
+                  type="button"
+                  className="ir-btn ir-btn-report"
+                  disabled={!invoiceReportRef(selected)}
+                  title={
+                    invoiceReportRef(selected)
+                      ? undefined
+                      : "No SAP document number was recorded for this invoice"
+                  }
+                  onClick={() => openInvoiceReport(invoiceReportRef(selected))}
+                >
+                  <HiDocumentText aria-hidden="true" />
+                  Generate Invoice Report
                 </button>
               </footer>
             )}
@@ -1451,6 +1554,7 @@ export default function InvoiceReview() {
             ? raiseClFromLoader
             : undefined
         }
+        onViewReport={openReportFromLoader}
       />
     </div>
   );

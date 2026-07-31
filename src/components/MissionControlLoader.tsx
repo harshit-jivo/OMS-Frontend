@@ -6,6 +6,7 @@ import {
   HiCheckCircle,
   HiChevronDown,
   HiCube,
+  HiDocumentText,
   HiExclamationTriangle,
   HiUserCircle,
   HiXMark,
@@ -56,10 +57,22 @@ type Props = {
    * undefined) to hide the button for non-credit-limit errors.
    */
   onRaiseCl?: () => void;
+  /**
+   * Opens the invoice's bill print. Shown on the success panel only when the
+   * parent supplies it and SAP gave back a document to print.
+   */
+  onViewReport?: () => void;
 };
 
-export default function MissionControlLoader({ state, onClose, onRetry, onRaiseCl }: Props) {
-  const { status, logs, doc, invoiceNumber, errorMessage, rawError } = state;
+export default function MissionControlLoader({
+  state,
+  onClose,
+  onRetry,
+  onRaiseCl,
+  onViewReport,
+}: Props) {
+  const { status, logs, doc, invoiceNumber, docNum, docEntry, errorMessage, rawError } = state;
+  const canPrint = Boolean(onViewReport && (docNum || docEntry));
   const isRunning = status === "running";
   const isSuccess = status === "success";
   const isError = status === "error";
@@ -138,6 +151,11 @@ export default function MissionControlLoader({ state, onClose, onRetry, onRaiseC
             <SummaryPanel doc={doc} />
 
             <div className="mcl-actions">
+              {canPrint && (
+                <button type="button" className="mcl-btn mcl-btn-ghost" onClick={onViewReport}>
+                  <HiDocumentText aria-hidden="true" /> Generate Invoice Report
+                </button>
+              )}
               <button ref={primaryRef} type="button" className="mcl-btn mcl-btn-ok" onClick={onClose}>
                 Done
               </button>

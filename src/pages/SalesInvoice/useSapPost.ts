@@ -35,12 +35,12 @@ const safeStringify = (value: unknown): string => {
   }
 };
 
-// Pull the created invoice's number out of the POST response, digging into nested
-// data/result wrappers. Prefers DocNum (the human invoice number), then DocEntry.
-const extractInvoiceNumber = (value: unknown): string => {
+// Pull the first of `keys` that carries a value out of the POST response, digging
+// into nested data/result wrappers.
+const extractField = (value: unknown, keys: string[]): string => {
   if (!value || typeof value !== "object") return "";
   const obj = value as Record<string, unknown>;
-  for (const key of ["DocNum", "DocEntry", "docNum", "docEntry", "InvoiceNumber", "invoiceNumber"]) {
+  for (const key of keys) {
     const candidate = obj[key];
     if (candidate !== undefined && candidate !== null && String(candidate).trim()) {
       return String(candidate).trim();
@@ -49,12 +49,19 @@ const extractInvoiceNumber = (value: unknown): string => {
   for (const key of ["data", "result", "invoice"]) {
     const nested = obj[key];
     if (nested && typeof nested === "object") {
-      const found = extractInvoiceNumber(nested);
+      const found = extractField(nested, keys);
       if (found) return found;
     }
   }
   return "";
 };
+
+// The visible invoice number, and the internal OINV key the Crystal bill print is
+// rendered from. Both are read back so the review row can print the invoice
+// without a second lookup against SAP.
+const extractDocNum = (value: unknown) =>
+  extractField(value, ["DocNum", "docNum", "InvoiceNumber", "invoiceNumber"]);
+const extractDocEntry = (value: unknown) => extractField(value, ["DocEntry", "docEntry"]);
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Mission-control state machine
@@ -91,6 +98,10 @@ export type SapPostState = {
   failedStep: SapStepKey | null;
   logs: SapLog[];
   invoiceNumber: string;
+  /** SAP's visible invoice number (DocNum), when the response carried one. */
+  docNum: string;
+  /** SAP's internal OINV key (DocEntry) — what the bill print is rendered from. */
+  docEntry: string;
   /** Concise human-readable error text (input to the friendly translator). */
   errorMessage: string;
   /** Full, untouched SAP / network response — only surfaced under "Technical details". */
@@ -104,7 +115,7 @@ type Action =
   | { type: "step"; step: SapStepKey }
   | { type: "log"; text: string; level: SapLogLevel; time: string }
   | { type: "doc"; patch: Partial<SapDoc> }
-  | { type: "success"; invoiceNumber: string }
+  | { type: "success"; invoiceNumber: string; docNum: string; docEntry: string }
   | { type: "error"; failedStep: SapStepKey; message: string; rawError: string };
 
 const emptyDoc: SapDoc = { draftNo: "", customer: "", itemCount: null, total: 0, branch: "" };
@@ -115,6 +126,8 @@ const initialState: SapPostState = {
   failedStep: null,
   logs: [],
   invoiceNumber: "",
+  docNum: "",
+  docEntry: "",
   errorMessage: "",
   rawError: "",
   doc: emptyDoc,
@@ -136,7 +149,15 @@ function reducer(state: SapPostState, action: Action): SapPostState {
     case "doc":
       return { ...state, doc: { ...state.doc, ...action.patch } };
     case "success":
-      return { ...state, status: "success", activeStep: "invoice", failedStep: null, invoiceNumber: action.invoiceNumber };
+      return {
+        ...state,
+        status: "success",
+        activeStep: "invoice",
+        failedStep: null,
+        invoiceNumber: action.invoiceNumber,
+        docNum: action.docNum,
+        docEntry: action.docEntry,
+      };
     case "error":
       return {
         ...state,
@@ -153,13 +174,21 @@ function reducer(state: SapPostState, action: Action): SapPostState {
 const stamp = () => new Date().toTimeString().slice(0, 8); // "HH:MM:SS"
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+/** What SAP gave back for a successfully created invoice. */
+export type SapPostResult = {
+  /** DocNum when present, else DocEntry — what the UI shows as "the number". */
+  invoiceNumber: string;
+  docNum: string;
+  docEntry: string;
+};
+
 export type SapRunInput = {
   payload: SapInvoicePayload;
   doc: SapDoc;
   /** Branch as stored on the log (OIL | BEVERAGE); mapped to the service-layer value. */
   branch?: string;
   /** Runs once per attempt (including retries) after SAP confirms the invoice. */
-  onSuccess?: (invoiceNumber: string) => void | Promise<void>;
+  onSuccess?: (result: SapPostResult) => void | Promise<void>;
   /** Runs once per attempt (including retries) when the post fails. */
   onError?: (message: string, rawError: string) => void | Promise<void>;
 };
@@ -244,11 +273,13 @@ export function useSapPost() {
       log("Reading back the generated invoice number…");
       await wait(450);
       if (!alive()) return;
-      const invoiceNumber = extractInvoiceNumber(result);
+      const docNum = extractDocNum(result);
+      const docEntry = extractDocEntry(result);
+      const invoiceNumber = docNum || docEntry;
       if (invoiceNumber) log(`Invoice #${invoiceNumber} created in SAP.`, "ok");
       else log("Invoice created in SAP.", "ok");
-      dispatch({ type: "success", invoiceNumber });
-      await input.onSuccess?.(invoiceNumber);
+      dispatch({ type: "success", invoiceNumber, docNum, docEntry });
+      await input.onSuccess?.({ invoiceNumber, docNum, docEntry });
     } catch (err) {
       if (!alive()) return;
       // Prefer the captured SAP payload, then the response body carried on a
