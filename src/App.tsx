@@ -47,6 +47,7 @@ import Tracker_Invoices from "./pages/Tracker_Invoices";
 import Profile from "./pages/Profile";
 import Device_Management from "./pages/Device_Management";
 import Invoice_Report from "./pages/Invoice_Report";
+import HAIS from "./pages/HAIS";
 
 function App() {
   return (
@@ -409,6 +410,15 @@ function App() {
           element={
             <Sidebar>
               <Ewaybill />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/HAIS"
+          element={
+            <Sidebar>
+              <HAIS />
             </Sidebar>
           }
         />

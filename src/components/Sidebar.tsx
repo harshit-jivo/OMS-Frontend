@@ -10,6 +10,7 @@ import {
   HiClock,
   HiCog6Tooth,
   HiClipboardDocumentList,
+  HiComputerDesktop,
   HiCube,
   HiDevicePhoneMobile,
   HiDocumentCheck,
@@ -804,6 +805,17 @@ export default function Sidebar({ children }: SidebarProps) {
               <Link to="/Ewaybill" onClick={closeSidebar}>
                 <SidebarIcon><HiTruck /></SidebarIcon>
                 e-Way Bill
+              </Link>
+            </li>
+          )}
+
+          {/* TEMPORARY: also visible to the Billing role so it can be reviewed.
+              Remove `|| userRole ... "billing"` to revert to admin/granted-only. */}
+          {(canSee("HAIS") || userRole?.toLowerCase() === "billing") && (
+            <li className={location.pathname === "/HAIS" ? "active" : ""}>
+              <Link to="/HAIS" onClick={closeSidebar}>
+                <SidebarIcon><HiComputerDesktop /></SidebarIcon>
+                Hardware Assets
               </Link>
             </li>
           )}
