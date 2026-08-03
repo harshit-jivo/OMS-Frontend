@@ -10,16 +10,31 @@ import {
 import { API_BASE_URL } from "../services/api";
 import "../styles/Invoice_Report.css";
 
+// Oil and beverage are separate SAP company databases with separate Crystal
+// reports, and the same DocNum can exist in both — so the branch travels with
+// the request and decides which one is resolved and rendered.
+const BRANCHES = [
+  { value: "OIL", label: "Oil" },
+  { value: "BEVERAGE", label: "Beverage" },
+] as const;
+
+type Branch = (typeof BRANCHES)[number]["value"];
+
 // Bill prints are proxied through our own backend (it resolves DocNum ->
-// DocEntry against OINV, then streams the Crystal PDF back). The response is
-// application/pdf, so the PDF is embedded via an <iframe> instead of fetched.
-const billPdfUrl = (docNum: string) =>
-  `${API_BASE_URL}/invoice/crystal/?docNum=${encodeURIComponent(docNum)}`;
+// DocEntry against the branch's OINV, then streams the Crystal PDF back). The
+// response is application/pdf, so the PDF is embedded via an <iframe> instead
+// of fetched.
+const billPdfUrl = (docNum: string, branch: Branch) =>
+  `${API_BASE_URL}/invoice/crystal/?docNum=${encodeURIComponent(docNum)}&branch=${branch}`;
 
 export default function Invoice_Report() {
   const role = (localStorage.getItem("role") || "").toLowerCase();
 
   const [docNum, setDocNum] = useState("");
+  const [branch, setBranch] = useState<Branch>("OIL");
+  // The branch the currently previewed PDF was fetched with — switching the
+  // selector must not silently repoint the open preview.
+  const [activeBranch, setActiveBranch] = useState<Branch>("OIL");
   const [activeDocNum, setActiveDocNum] = useState("");
   const [pdfLoading, setPdfLoading] = useState(false);
   const [error, setError] = useState("");
@@ -39,6 +54,7 @@ export default function Invoice_Report() {
     }
     setError("");
     setPdfLoading(true);
+    setActiveBranch(branch);
     // Re-setting the same value must still reload the iframe, so clear first.
     if (trimmed === activeDocNum) {
       setActiveDocNum("");
@@ -61,12 +77,38 @@ export default function Invoice_Report() {
         <div>
           <h1 className="invr-title">Invoice Report</h1>
           <p className="invr-subtitle">
-            Enter a Doc Number to fetch and preview the invoice bill print.
+            Pick a company and enter a Doc Number to fetch and preview the
+            invoice bill print.
           </p>
         </div>
       </div>
 
       <form className="invr-form-card" onSubmit={handleSubmit}>
+        <div className="invr-field invr-field-branch">
+          <span className="invr-label" id="invr-branch-label">
+            Company
+          </span>
+          <div
+            className="invr-segmented"
+            role="radiogroup"
+            aria-labelledby="invr-branch-label"
+          >
+            {BRANCHES.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                role="radio"
+                aria-checked={branch === option.value}
+                className={`invr-segment${
+                  branch === option.value ? " invr-segment-active" : ""
+                }`}
+                onClick={() => setBranch(option.value)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="invr-field">
           <label className="invr-label" htmlFor="invr-docnum">
             Doc Number
@@ -107,10 +149,13 @@ export default function Invoice_Report() {
             <span className="invr-viewer-title">
               <HiDocumentText aria-hidden="true" />
               Bill_{activeDocNum}.pdf
+              <span className="invr-viewer-branch">
+                {activeBranch === "BEVERAGE" ? "Beverage" : "Oil"}
+              </span>
             </span>
             <a
               className="invr-btn invr-btn-ghost"
-              href={billPdfUrl(activeDocNum)}
+              href={billPdfUrl(activeDocNum, activeBranch)}
               target="_blank"
               rel="noopener noreferrer"
             >
@@ -120,10 +165,10 @@ export default function Invoice_Report() {
           </div>
           {pdfLoading && <div className="invr-loading">Loading invoice…</div>}
           <iframe
-            key={activeDocNum}
+            key={`${activeBranch}-${activeDocNum}`}
             className="invr-pdf-frame"
             title={`Invoice ${activeDocNum}`}
-            src={billPdfUrl(activeDocNum)}
+            src={billPdfUrl(activeDocNum, activeBranch)}
             onLoad={() => setPdfLoading(false)}
           />
         </div>

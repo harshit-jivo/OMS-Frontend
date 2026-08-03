@@ -297,23 +297,31 @@ const hasRef = (value: unknown) => value !== undefined && value !== null && valu
 
 const trimmed = (value: unknown) => String(value ?? "").trim();
 
-type ReportRef = { docEntry: string; docNum: string; party: string };
+type ReportRef = { docEntry: string; docNum: string; party: string; branch: string };
 
 // The report can only be generated once we know which SAP document to print.
 const invoiceReportRef = (record: InvoiceRecord): ReportRef | null => {
   const docEntry = trimmed(record.sap_doc_entry);
   const docNum = trimmed(record.sap_doc_num);
   if (!docEntry && !docNum) return null;
-  return { docEntry, docNum, party: trimmed(record.party_name) };
+  return {
+    docEntry,
+    docNum,
+    party: trimmed(record.party_name),
+    branch: trimmed(record.branch),
+  };
 };
 
 // The party name only travels so the backend can name the download
 // "<DocNum> <Party Name>.pdf"; it plays no part in resolving the document.
+// The branch does: oil and beverage are separate company databases with
+// separate Crystal reports, and the backend defaults to oil without it.
 const invoiceReportUrl = (ref: ReportRef) => {
   const params = new URLSearchParams();
   if (ref.docNum) params.set("docNum", ref.docNum);
   if (ref.docEntry) params.set("docEntry", ref.docEntry);
   if (ref.party) params.set("party", ref.party);
+  if (ref.branch) params.set("branch", ref.branch);
   return `${API_BASE_URL}/invoice/crystal/?${params.toString()}`;
 };
 
@@ -719,7 +727,12 @@ export default function InvoiceReview() {
   const loaderReportUrl = (() => {
     const { docNum, docEntry } = sapPost.state;
     if (!docNum && !docEntry) return undefined;
-    return invoiceReportUrl({ docNum, docEntry, party: trimmed(postingRecord?.party_name) });
+    return invoiceReportUrl({
+      docNum,
+      docEntry,
+      party: trimmed(postingRecord?.party_name),
+      branch: trimmed(postingRecord?.branch),
+    });
   })();
 
   // Dismiss the loader; refresh the list once the run has settled so the row
