@@ -33,7 +33,7 @@ import Product_Stock from "./pages/Product_Stock";
 import Order_Flow_Settings from "./pages/Order_Flow_Settings";
 import Page_Permissions from "./pages/Page_Permissions";
 import UI_Labels from "./pages/UI_Labels";
-import MakePayment from "./pages/Payments/MakePayment";
+import ApprovalManagement from "./pages/Payments/ApprovalManagement";
 import Sales_Quotation from "./pages/Sales_Quotation";
 import LabelChecker from "./pages/Label_Checker";
 import NutritionManager from "./pages/Nutrition_Manager";
@@ -390,10 +390,10 @@ function App() {
         />
 
         <Route
-          path="/Make_Payment"
+          path="/Approval_Management"
           element={
             <Sidebar>
-              <MakePayment />
+              <ApprovalManagement />
             </Sidebar>
           }
         />

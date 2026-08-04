@@ -26,3 +26,32 @@ export const GRANTABLE_ADMIN_PAGES: GrantablePage[] = [
 ];
 
 export const GRANTABLE_PAGE_KEYS = GRANTABLE_ADMIN_PAGES.map((page) => page.key);
+
+/**
+ * Payments module ACTION permissions.
+ *
+ * These differ from the page grants above: a page grant answers "can you open
+ * this screen", these answer "can you take this action". They are stored in the
+ * same `User.extra_pages` list, so one grant UI and one login payload cover
+ * both — but they are listed separately so the Permissions page can present
+ * them under their own heading rather than implying they open a page.
+ *
+ * The keys MUST match payments/permissions.py and the mobile app exactly.
+ */
+// `path` is informational here: these grants gate ACTIONS in the mobile app
+// (raising a receipt, deciding an approval), not a web route. Recording and
+// approving both happen on mobile; the web side only configures the workflow.
+export const PAYMENT_ACTION_PERMISSIONS: GrantablePage[] = [
+  { key: "Payments_Create", label: "Payments — Create", path: "/Approval_Management" },
+  { key: "Payments_Approve", label: "Payments — Approve", path: "/Approval_Management" },
+  { key: "Deposit_Create", label: "Deposit — Create", path: "/Approval_Management" },
+  { key: "Deposit_Approve", label: "Deposit — Approve", path: "/Approval_Management" },
+];
+
+export const PAYMENT_ACTION_KEYS = PAYMENT_ACTION_PERMISSIONS.map((p) => p.key);
+
+/** Every key an admin may grant — page access plus payment actions. */
+export const ALL_GRANTABLE_KEYS = [
+  ...GRANTABLE_PAGE_KEYS,
+  ...PAYMENT_ACTION_KEYS,
+];
