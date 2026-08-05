@@ -31,6 +31,10 @@ export interface Address {
   state?: string;
   zip_code?: string;
   gst_number?: string;
+  country?: string;
+  /** SAP address category (e.g. plant / depot); groups a party's addresses. */
+  category?: string;
+  synced_at?: string;
 }
 
 export interface Party  {

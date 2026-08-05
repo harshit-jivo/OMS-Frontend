@@ -23,7 +23,7 @@ import Party_Assignment from "./pages/Party_Assignment";
 import Party_Product_Assignment from "./pages/Party_Product_Assignment";
 import Add_Scheme from "./pages/Add_Scheme";
 import FOC from "./pages/FOC";
-import SalesInvoice from "./pages/Sales_Invoice";
+import SalesInvoice from "./pages/Sales_Invoice";    
 import SkuGalleryPage from "./pages/SalesInvoice/SkuGalleryPage";
 import InvoiceReview from "./pages/InvoiceReview";
 import Staff from "./pages/Staff";
@@ -47,6 +47,8 @@ import Tracker_Invoices from "./pages/Tracker_Invoices";
 import Profile from "./pages/Profile";
 import Device_Management from "./pages/Device_Management";
 import Invoice_Report from "./pages/Invoice_Report";
+import HAIS from "./pages/HAIS";
+import AssetPublicView from "./pages/HAIS/AssetPublicView";
 
 function App() {
   return (
@@ -54,6 +56,9 @@ function App() {
       <ErrorBoundary>
       <Routes>
         <Route path="/" element={<Login />} />
+
+        {/* Standalone device page opened by scanning a device QR (no sidebar). */}
+        <Route path="/hais/device/:code" element={<AssetPublicView />} />
 
         <Route
           path="/Dashboard"
@@ -361,6 +366,11 @@ function App() {
           }
         />
 
+       
+
+       
+        
+       
         <Route
           path="/Label_Checker"
           element={
@@ -404,6 +414,15 @@ function App() {
           element={
             <Sidebar>
               <Ewaybill />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/HAIS"
+          element={
+            <Sidebar>
+              <HAIS />
             </Sidebar>
           }
         />

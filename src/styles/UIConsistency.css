@@ -233,7 +233,7 @@
 .db-panel,
 .db-chart-box,
 .db-card {
-  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.05), 0 4px 12px rgba(15, 23, 42, 0.03);
+  box-shadow: none;
   border-radius: 18px;
   border-color: #dbe4ee;
 }
@@ -258,8 +258,8 @@
 .vo-d-summary,
 .ao-d-summary,
 .bo-d-summary {
-  background: rgba(255, 255, 255, 0.96);
-  border: 1px solid #dbe4ee;
+  background: transparent;
+  border: none  ;
   /* backdrop-filter: blur(10px); */
 }
 

@@ -68,10 +68,13 @@ export interface StageEvent {
 }
 
 export interface PaymentDetail {
-  discount_amount: string;
-  tds_amount: string;
-  paid_amount: string;
-  open_balance: string;
+  discount_pct: string;      // user input — % on net invoice value
+  tds_pct: string;           // user input — % on taxable value
+  hold_added_back: boolean;  // release the held amount back into the payable
+  discount_amount: string;   // derived server-side
+  tds_amount: string;        // derived server-side
+  paid_amount: string;       // cumulative paid
+  open_balance: string;      // derived: net payable - paid
   status: "OPEN" | "PAID";
   updated_at: string;
 }
@@ -79,6 +82,7 @@ export interface PaymentDetail {
 export interface Invoice {
   id: number;
   invoice_date: string;
+  effective_month: string;   // stored as first-of-month date (YYYY-MM-01)
   party_name: string;
   party_code: string;
   party_gstin: string;
@@ -93,6 +97,9 @@ export interface Invoice {
   additional_charge_type_display: string | null;
   additional_charge_amount: string;
   invoice_value: string;
+  debit_amount: string;              // total debited at Pre-Audit
+  hold_amount: string;               // total withheld via a PARTIAL hold
+  net_invoice_value: string;         // invoice_value - debit_amount
   category: number;
   category_name: string;
   unit: number;
@@ -111,6 +118,11 @@ export interface Invoice {
   days_at_stage: string;
   is_overdue: boolean;
   editable: boolean;
+  // Payment summary (present at the terminal/payment stage).
+  payment_status: "OPEN" | "PAID" | null;
+  paid_amount: string | null;
+  open_balance: string | null;
+  is_partially_paid: boolean;
   created_by: number;
   created_by_name: string;
   created_at: string;
@@ -129,6 +141,7 @@ export interface Invoice {
 
 export interface InvoiceWrite {
   invoice_date: string;
+  effective_month: string;   // sent as first-of-month date (YYYY-MM-01)
   party_name: string;
   party_code: string;
   party_gstin: string;
@@ -168,6 +181,52 @@ export interface BulkResult {
   processed_count: number;
 }
 
+/**
+ * Budget-approval status from JSAP. `available: false` is a normal answer, not
+ * an error — `reason` says why the invoice could not be linked:
+ *   not_in_jsap    Mart, which JSAP does not budget-approve
+ *   no_party_code  no SAP vendor picked, so the document cannot be identified
+ *   no_draft       no SAP draft matches this invoice number + vendor
+ *   not_submitted  the draft exists but has not reached JSAP yet
+ *   not_configured JSAP database not set up on the server
+ *   rejection_pending  rejected by hand here, awaiting remarks (sync stands down)
+ */
+export interface JsapStatus {
+  available: boolean;
+  reason?: "not_in_jsap" | "no_party_code" | "no_draft" | "not_submitted"
+    | "not_configured" | "rejection_pending";
+  detail?: string;
+  status?: "A" | "P" | "R";
+  label?: string;
+  description?: string;      // the approver's own reason on a rejection
+  doc_id?: number;
+  doc_entry?: number;        // the SAP *draft* (ODRF) DocEntry
+  branch?: string;
+  decided_on?: string | null;
+  decided_by?: number | null;
+  updated_on?: string | null;
+  draft?: {
+    schema: string;
+    docentry: number;
+    docnum: number;
+    num_at_card: string;
+    card_code: string;
+    card_name: string;
+  };
+}
+
+export interface JsapSyncResult {
+  // Whole-desk sweep
+  advanced?: number[];
+  returned?: number[];
+  waiting?: number[];
+  errors?: { id: number; error: string }[];
+  // Single invoice
+  changed?: boolean;
+  action?: "ADVANCE" | "RETURN" | null;
+  status?: JsapStatus | null;
+}
+
 export interface InvoiceFilters {
   party?: string;
   invoice_number?: string;
@@ -188,6 +247,7 @@ export interface AllInvoiceFilters {
   status?: string;      // IN_PROGRESS | COMPLETED
   stage?: string;       // current_stage code
   overdue?: "true" | "false";
+  effective_month?: string;   // "YYYY-MM"
 }
 
 // ---------------------------------------------------------------------------
@@ -242,6 +302,23 @@ export const trackerService = {
     const { data } = await api.get("/tracker/stage-advanced/", {
       params: { stage: stageCode },
     });
+    return data;
+  },
+
+  /** Budget-approval status of one invoice, read straight from JSAP. */
+  async getJsapStatus(invoiceId: number): Promise<JsapStatus> {
+    const { data } = await api.get(`/tracker/invoices/${invoiceId}/jsap/`);
+    return data;
+  },
+
+  /**
+   * Pull the latest decisions from JSAP. Omit `invoiceId` to sweep the whole
+   * JSAP desk. Approved invoices advance, rejected ones go back to SAP
+   * Approval carrying JSAP's reason; nothing is written to JSAP.
+   */
+  async syncJsap(invoiceId?: number): Promise<JsapSyncResult> {
+    const { data } = await api.post("/tracker/jsap/sync/",
+      invoiceId ? { invoice_id: invoiceId } : {});
     return data;
   },
 

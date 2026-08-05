@@ -8,7 +8,7 @@ import {
   ordersService,
 } from "../services/ordersService";
 import type { OrderItem, Order, OrderLog, OrderStatus, PartyProduct, QuotationStatus } from "../services/ordersService";
-import { loadCurrentUserOrders } from "../utils/orderHistory";
+import { loadCurrentUserOrderSummaries } from "../utils/orderHistory";
 import "../styles/View_Orders.css";
 import "../styles/Auditor_Order.css";
 import { useUILabels } from "../services/uiConfig";
@@ -109,7 +109,7 @@ export default function View_Orders() {
     const fetchOrders = async () => {
       setIsOrdersLoading(true);
       try {
-        const data = await loadCurrentUserOrders();
+        const data = await loadCurrentUserOrderSummaries();
         setOrders(data);
       } catch (error) {
         console.log("Error fetching orders:", error);

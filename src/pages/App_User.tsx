@@ -6,6 +6,7 @@ import "../styles/App_User.css";
 import {
   HiAtSymbol,
   HiBuildingOffice2,
+  HiCheckCircle,
   HiEnvelope,
   HiLockClosed,
   HiMapPin,
@@ -15,6 +16,8 @@ import {
   HiTag,
   HiUser,
   HiUserGroup,
+  HiXCircle,
+  HiXMark,
 } from "react-icons/hi2";
 
 export default function App_User() {
@@ -22,8 +25,6 @@ export default function App_User() {
   const stateRef = useRef<HTMLDivElement>(null);
   const groupRef = useRef<HTMLDivElement>(null);
   const roleRef = useRef<HTMLDivElement>(null);
-  const companyRef = useRef<HTMLDivElement>(null);
-  const categoryRef = useRef<HTMLDivElement>(null);
   const varietyRef = useRef<HTMLDivElement>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [isUsersLoading, setIsUsersLoading] = useState(true);
@@ -49,11 +50,10 @@ export default function App_User() {
     variety: "",
   });
   const [showForm, setShowForm] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [mgDropdownOpen, setMgDropdownOpen] = useState(false);
   const [stDropdownOpen, setStDropdownOpen] = useState(false);
   const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
-  const [companyDropdownOpen, setCompanyDropdownOpen] = useState(false);
-  const [categoryDropdownOpen, setCategoryDropdownOpen] = useState(false);
   const [varietyDropdownOpen, setVarietyDropdownOpen] = useState(false);
   const [varietySearch, setVarietySearch] = useState("");
   // Read-only: the show/hide toggle button below is currently commented out, so
@@ -103,20 +103,6 @@ export default function App_User() {
         !roleRef.current.contains(event.target as Node)
       ) {
         setRoleDropdownOpen(false);
-      }
-
-      if (
-        companyRef.current &&
-        !companyRef.current.contains(event.target as Node)
-      ) {
-        setCompanyDropdownOpen(false);
-      }
-
-      if (
-        categoryRef.current &&
-        !categoryRef.current.contains(event.target as Node)
-      ) {
-        setCategoryDropdownOpen(false);
       }
 
       if (
@@ -265,9 +251,6 @@ export default function App_User() {
   const getOptionName = (options: Option[], id: number | null | undefined, fallback: string) =>
     options.find((item) => item.id === id)?.name || fallback;
 
-  const getCategoryName = (id: number | null | undefined) =>
-    categories.find((item) => item.id === id)?.category || "Select Category";
-
   const selectedVarieties = String(formData.variety || "")
     .split(",")
     .map((value) => value.trim())
@@ -321,8 +304,6 @@ export default function App_User() {
 
   const closeSingleSelects = () => {
     setRoleDropdownOpen(false);
-    setCompanyDropdownOpen(false);
-    setCategoryDropdownOpen(false);
     setVarietyDropdownOpen(false);
   };
 
@@ -398,6 +379,12 @@ export default function App_User() {
       return;
     }
 
+    // Creating/updating a user is a multi-write call (role, groups, states,
+    // categories, password); block the form until it settles so an impatient
+    // second submit can't fire the same write twice.
+    if (isSaving) return;
+    setIsSaving(true);
+
     try {
       let result;
 
@@ -436,6 +423,8 @@ export default function App_User() {
       }
     } catch (error: any) {
       alert("Error: " + getCreateUserErrorMessage(error));
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -467,6 +456,9 @@ export default function App_User() {
     };
     const mainGroupIds = getIds(editableUser.main_groups);
     const stateIds = getIds(editableUser.states);
+    // Carry the category m2m through the edit so saving can't drop it. The
+    // Category select is single-choice, so picking one replaces this list.
+    const categoryIds = getIds((editableUser as { categories?: unknown }).categories);
     const roleName = String(
       editableUser.role || editableUser.role_name || editableUser.role_display || "",
     ).toLowerCase();
@@ -487,7 +479,8 @@ export default function App_User() {
       states: stateIds,
       role: roleId,
       company: getId(editableUser.company) || null,
-      category: getId(editableUser.category) || null,
+      category: getId(editableUser.category) || categoryIds[0] || null,
+      categories: categoryIds,
       // formData.variety is the in-form holder for the user's sub group assignment.
       variety: editableUser.sub_group || "",
     });
@@ -524,6 +517,24 @@ export default function App_User() {
     setEditUserId(null);
   };
 
+  /* The serializer sends company/category either as a nested object or as a bare
+   * id depending on the endpoint, so resolve both shapes against the loaded
+   * option lists before showing them in the table. */
+  const resolveOptionName = (value: unknown, options: Option[]): string => {
+    if (value === null || value === undefined || value === "") return "—";
+    if (typeof value === "object") {
+      const nested = value as { name?: string; id?: number };
+      return nested.name || options.find((item) => item.id === nested.id)?.name || "—";
+    }
+    return options.find((item) => item.id === Number(value))?.name || String(value);
+  };
+
+  const userCategoryName = (user: User): string => {
+    if (user.category?.category) return user.category.category;
+    const first = user.categories?.[0]?.category;
+    return first || "—";
+  };
+
   // Omni search across id, name, username, email and role.
   const normalizedSearch = search.trim().toLowerCase();
   const filteredUsers = normalizedSearch
@@ -533,6 +544,17 @@ export default function App_User() {
           .some((value) => value.includes(normalizedSearch)),
       )
     : users;
+
+  const activeUsers = users.filter((user) => user.is_active !== false).length;
+  const distinctRoles = new Set(
+    users.map((user) => String(user.role || user.role_name || "").trim()).filter(Boolean),
+  ).size;
+  const userKpis = [
+    { label: "Total Users", value: users.length, icon: HiUserGroup, tone: "" },
+    { label: "Active", value: activeUsers, icon: HiCheckCircle, tone: "au-kpi-ok" },
+    { label: "Inactive", value: users.length - activeUsers, icon: HiXCircle, tone: "au-kpi-bad" },
+    { label: "Roles In Use", value: distinctRoles, icon: HiShieldCheck, tone: "" },
+  ];
 
   return (
     <div className="au-page app-page">
@@ -583,6 +605,26 @@ export default function App_User() {
         </div>
       </div>
 
+      {/* ── KPI CARDS ── */}
+      <div className="au-kpis">
+        {userKpis.map((kpi) => {
+          const Icon = kpi.icon;
+          return (
+            <article className={`au-kpi ${kpi.tone}`} key={kpi.label}>
+              <span className="au-kpi-icon" aria-hidden="true">
+                <Icon />
+              </span>
+              <div className="au-kpi-body">
+                <span className="au-kpi-value">
+                  {isUsersLoading ? "—" : kpi.value.toLocaleString("en-IN")}
+                </span>
+                <span className="au-kpi-label">{kpi.label}</span>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+
       {/* ── USERS TABLE ── */}
       <div className="au-table-card">
             {isUsersLoading ? (
@@ -600,6 +642,9 @@ export default function App_User() {
                       <th>Username</th>
                       <th>Email</th>
                       <th>Role</th>
+                      <th>Company</th>
+                      <th>Category</th>
+                      <th>Status</th>
                       <th>Actions</th>
                     </tr>
                   </thead>
@@ -614,8 +659,25 @@ export default function App_User() {
                             <td className="au-muted">{user.id}</td>
                             <td className="au-name">{user.name}</td>
                             <td>{user.username}</td>
-                            <td>{user.email}</td>
-                            <td>{user.role}</td>
+                            <td>{user.email || "—"}</td>
+                            <td>
+                              {user.role ? (
+                                <span className="au-cell-badge au-cell-badge-role">{user.role}</span>
+                              ) : (
+                                <span className="au-muted">—</span>
+                              )}
+                            </td>
+                            <td>{resolveOptionName(user.company, company)}</td>
+                            <td>{userCategoryName(user)}</td>
+                            <td>
+                              <span
+                                className={`au-cell-badge ${
+                                  user.is_active === false ? "au-cell-badge-bad" : "au-cell-badge-ok"
+                                }`}
+                              >
+                                {user.is_active === false ? "Inactive" : "Active"}
+                              </span>
+                            </td>
                             <td>
                               <button
                                 className="au-edit-btn"
@@ -676,12 +738,27 @@ export default function App_User() {
               type="button"
               className="au-modal-close"
               onClick={closeForm}
+              disabled={isSaving}
               aria-label="Close"
             >
               &times;
             </button>
           </div>
-          <form onSubmit={handleSubmit}>
+
+          {/* Covers the form for the duration of the save, so nothing can be
+              edited or re-submitted mid-write. */}
+          {isSaving && (
+            <div className="au-saving" role="status" aria-live="polite">
+              <span className="au-saving-spinner" aria-hidden="true" />
+              <span className="au-saving-text">
+                {isEditMode ? "Updating user…" : "Creating user…"}
+              </span>
+              <span className="au-saving-hint">This only takes a moment.</span>
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} aria-busy={isSaving}>
+            <fieldset className="au-fieldset" disabled={isSaving}>
             <div className="au-form-grid">
               <div className="au-field">
                 <label className="au-label">Full Name</label>
@@ -950,91 +1027,59 @@ export default function App_User() {
                   )}
                 </div>
               </div>
+              {/* Company and Category are short, mutually exclusive lists, so they
+                  read better as pellets than as dropdowns — every option visible,
+                  one tap to pick. */}
               <div className="au-field au-full">
-                <label className="au-label">Company</label>
-                <div className="au-mg-dropdown" ref={companyRef}>
-                  <div
-                    className="au-mg-trigger"
-                    onClick={() => {
-                      closeSingleSelects();
-                      setCompanyDropdownOpen((value) => !value);
-                    }}
-                  >
-                    <span className="au-trigger-label">
-                      <HiBuildingOffice2 className="au-field-icon" aria-hidden="true" />
-                      <span>{getOptionName(company, formData.company, "Select Company")}</span>
-                    </span>
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                      <path
-                        d="M3 4.5L6 7.5L9 4.5"
-                        stroke="#64748b"
-                        strokeWidth="1.4"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
+                <label className="au-label">
+                  <HiBuildingOffice2 className="au-field-icon" aria-hidden="true" />
+                  Company
+                </label>
+                {company.length === 0 ? (
+                  <p className="au-pellet-empty">No companies available.</p>
+                ) : (
+                  <div className="au-pellets" role="radiogroup" aria-label="Company">
+                    {company.map((c) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={formData.company === c.id}
+                        className={`au-pellet${formData.company === c.id ? " au-pellet-active" : ""}`}
+                        onClick={() => setFormData((prev) => ({ ...prev, company: c.id }))}
+                      >
+                        {c.name}
+                      </button>
+                    ))}
                   </div>
-                  {companyDropdownOpen && (
-                    <div className="au-mg-menu">
-                      {company.map((c) => (
-                        <button
-                          key={c.id}
-                          type="button"
-                          className={`au-mg-option au-select-option${formData.company === c.id ? " is-selected" : ""}`}
-                          onClick={() => {
-                            setFormData((prev) => ({ ...prev, company: c.id }));
-                            setCompanyDropdownOpen(false);
-                          }}
-                        >
-                          {c.name}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                )}
               </div>
               <div className="au-field au-full">
-                <label className="au-label">Category</label>
-                <div className="au-mg-dropdown" ref={categoryRef}>
-                  <div
-                    className="au-mg-trigger"
-                    onClick={() => {
-                      closeSingleSelects();
-                      setCategoryDropdownOpen((value) => !value);
-                    }}
-                  >
-                      <span className="au-trigger-label">
-                        <HiTag className="au-field-icon" aria-hidden="true" />
-                      <span>{getCategoryName(formData.category)}</span>
-                    </span>
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                      <path
-                        d="M3 4.5L6 7.5L9 4.5"
-                        stroke="#64748b"
-                        strokeWidth="1.4"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
+                <label className="au-label">
+                  <HiTag className="au-field-icon" aria-hidden="true" />
+                  Category
+                </label>
+                {categories.length === 0 ? (
+                  <p className="au-pellet-empty">No categories available.</p>
+                ) : (
+                  <div className="au-pellets" role="radiogroup" aria-label="Category">
+                    {categories.map((c) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={formData.category === c.id}
+                        className={`au-pellet${formData.category === c.id ? " au-pellet-active" : ""}`}
+                        // Switching category invalidates the sub groups under it.
+                        onClick={() =>
+                          setFormData((prev) => ({ ...prev, category: c.id, categories: [c.id], variety: "" }))
+                        }
+                      >
+                        {c.category}
+                      </button>
+                    ))}
                   </div>
-                  {categoryDropdownOpen && (
-                    <div className="au-mg-menu">
-                      {categories.map((c) => (
-                        <button
-                          key={c.id}
-                          type="button"
-                          className={`au-mg-option au-select-option${formData.category === c.id ? " is-selected" : ""}`}
-                          onClick={() => {
-                            setFormData((prev) => ({ ...prev, category: c.id, variety: "" }));
-                            setCategoryDropdownOpen(false);
-                          }}
-                        >
-                          {c.category}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                )}
               </div>
               <div className="au-field au-full">
                 <label className="au-label">Sub Group</label>
@@ -1050,6 +1095,9 @@ export default function App_User() {
                       <HiTag className="au-field-icon" aria-hidden="true" />
                       <span>{varietyLabel}</span>
                     </span>
+                    {selectedVarieties.length > 0 && (
+                      <span className="au-pellet-count">{selectedVarieties.length}</span>
+                    )}
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
                       <path
                         d="M3 4.5L6 7.5L9 4.5"
@@ -1124,32 +1172,71 @@ export default function App_User() {
                     </div>
                   )}
                 </div>
+                {/* Whatever is already selected stays visible as removable pellets,
+                    so the picks are readable without reopening the dropdown. */}
+                {selectedVarieties.length > 0 && (
+                  <div className="au-pellets au-pellets-chosen">
+                    {selectedVarieties.map((variety) => (
+                      <button
+                        key={`chosen-${variety}`}
+                        type="button"
+                        className="au-pellet au-pellet-chosen"
+                        title={`Remove ${variety}`}
+                        aria-label={`Remove ${variety}`}
+                        onClick={() => toggleVariety(variety)}
+                      >
+                        {variety}
+                        <HiXMark className="au-pellet-x" aria-hidden="true" />
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      className="au-pellet au-pellet-clear"
+                      onClick={() => setFormData((prev) => ({ ...prev, variety: "" }))}
+                    >
+                      Clear all
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
 
             <div className="au-form-actions">
-              <button type="submit" className="au-submit">
-                <span>{isEditMode ? "Update User" : "Create User"}</span>
-                <svg
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  style={{
-                    width: "13px",
-                    height: "13px",
-                    position: "relative",
-                    zIndex: 1,
-                  }}
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M17 8l4 4m0 0l-4 4m4-4H3"
-                  />
-                </svg>
+              <button type="submit" className="au-submit" disabled={isSaving}>
+                <span>
+                  {isSaving
+                    ? isEditMode
+                      ? "Updating…"
+                      : "Creating…"
+                    : isEditMode
+                      ? "Update User"
+                      : "Create User"}
+                </span>
+                {isSaving ? (
+                  <span className="au-submit-spinner" aria-hidden="true" />
+                ) : (
+                  <svg
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    style={{
+                      width: "13px",
+                      height: "13px",
+                      position: "relative",
+                      zIndex: 1,
+                    }}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M17 8l4 4m0 0l-4 4m4-4H3"
+                    />
+                  </svg>
+                )}
               </button>
             </div>
+            </fieldset>
           </form>
           </div>
         </div>

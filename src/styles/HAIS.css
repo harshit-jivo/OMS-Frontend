@@ -1,0 +1,375 @@
+/* HAIS — small theme-matching touches (blue #2563eb accent, slate text,
+   #dbe4ee borders) layered on top of the shared nic-*/ofs-* styles. */
+
+/* Clickable register rows */
+.hais-row {
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.hais-row:hover {
+  background: #f5f8ff;
+}
+
+/* Soft-filled, rounded icon action buttons — colour-coded per action, and
+   inverting to a solid fill on hover. */
+.hais-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.hais-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: #f1f5f9;
+  color: #64748b;
+  cursor: pointer;
+  transition: transform 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+.hais-icon-btn svg {
+  width: 17px;
+  height: 17px;
+}
+.hais-icon-btn:hover {
+  transform: translateY(-1px);
+}
+.hais-icon-btn:active {
+  transform: translateY(0);
+}
+
+/* Handover — blue */
+.hais-icon-btn--handover {
+  background: #eff6ff;
+  color: #2563eb;
+}
+.hais-icon-btn--handover:hover {
+  background: #2563eb;
+  color: #fff;
+}
+/* History — violet */
+.hais-icon-btn--history {
+  background: #f5f3ff;
+  color: #7c3aed;
+}
+.hais-icon-btn--history:hover {
+  background: #7c3aed;
+  color: #fff;
+}
+/* Edit (also updates config) — emerald */
+.hais-icon-btn--edit {
+  background: #ecfdf5;
+  color: #059669;
+}
+.hais-icon-btn--edit:hover {
+  background: #059669;
+  color: #fff;
+}
+
+/* Details popup */
+.hais-detail-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.hais-detail-modal {
+  width: 100%;
+  max-width: 760px;
+  max-height: 88vh;
+  overflow-y: auto;
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.18);
+}
+.hais-detail-head {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 22px;
+  background: linear-gradient(90deg, #2563eb 0%, #1d4ed8 100%);
+  color: #fff;
+  border-radius: 16px 16px 0 0;
+}
+.hais-detail-head h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.hais-detail-head .hais-detail-sub {
+  font-size: 12px;
+  opacity: 0.85;
+  font-weight: 600;
+}
+.hais-detail-close {
+  background: rgba(255, 255, 255, 0.18);
+  border: none;
+  color: #fff;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+.hais-detail-close:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+.hais-detail-body {
+  padding: 18px 22px 22px;
+}
+.hais-detail-section-title {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #2563eb;
+  margin: 18px 0 8px;
+}
+.hais-detail-section-title:first-child {
+  margin-top: 4px;
+}
+.hais-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 20px;
+}
+.hais-detail-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-bottom: 1px solid #f1f5f9;
+  padding-bottom: 8px;
+}
+.hais-detail-item .k {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #94a3b8;
+}
+.hais-detail-item .v {
+  font-size: 13px;
+  color: #0f172a;
+  font-weight: 600;
+  word-break: break-word;
+}
+.hais-detail-foot {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 0 22px 22px;
+}
+
+@media (max-width: 640px) {
+  .hais-detail-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── QR code (asset detail) ── */
+.hais-detail-idrow {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+.hais-detail-idrow-info {
+  flex: 1 1 320px;
+  min-width: 260px;
+}
+.hais-qr {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+}
+.hais-qr-caption {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+/* ── QR scanner (lookup) ── */
+.hais-scanner-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.hais-scanner-modal {
+  background: #fff;
+  border-radius: 12px;
+  padding: 16px;
+  width: min(420px, 92vw);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+}
+.hais-scanner-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.hais-scanner-reader {
+  width: 100%;
+  overflow: hidden;
+  border-radius: 8px;
+}
+
+/* ── Unassigned checkbox (asset form) ── */
+.hais-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  user-select: none;
+}
+.hais-check input {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+/* ── Date field with calendar button ── */
+.nic-date-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.nic-date-wrap .nic-input {
+  flex: 1;
+  padding-right: 36px;
+}
+.nic-date-btn {
+  position: absolute;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  background: transparent;
+  color: #2563eb;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.nic-date-btn:hover {
+  background: #eff6ff;
+}
+/* Native date input drives the picker but stays out of sight. */
+.nic-date-native {
+  position: absolute;
+  right: 6px;
+  width: 26px;
+  height: 26px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ── Multi-select storage type (checkbox group) ── */
+.hais-multi {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding: 8px 10px;
+  border: 1px solid #d7dee8;
+  border-radius: 8px;
+  background: #fff;
+}
+.hais-multi label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  user-select: none;
+}
+.hais-multi .nic-note {
+  margin: 0;
+}
+
+/* ── Error popup ── */
+.hais-error-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1100;
+}
+.hais-error-modal {
+  background: #fff;
+  border-radius: 12px;
+  width: min(420px, 92vw);
+  padding: 20px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+  text-align: center;
+}
+.hais-error-modal .hais-error-icon {
+  font-size: 40px;
+  color: #ef4444;
+  line-height: 1;
+}
+.hais-error-modal h3 {
+  margin: 10px 0 6px;
+}
+.hais-error-modal p {
+  margin: 0 0 16px;
+  color: #334155;
+}
+
+/* ── Standalone device page (opened from a scanned QR link) ── */
+.hais-public {
+  min-height: 100vh;
+  background: #f1f5f9;
+  display: flex;
+  justify-content: center;
+  padding: 20px 12px 40px;
+}
+.hais-public-card {
+  width: 100%;
+  max-width: 640px;
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.08);
+  padding: 20px 22px 28px;
+}
+.hais-public-head {
+  border-bottom: 1px solid #e2e8f0;
+  padding-bottom: 10px;
+  margin-bottom: 12px;
+}
+
+/* Hint under the device QR. */
+.hais-qr-hint {
+  font-size: 11px;
+  color: #64748b;
+  text-align: center;
+  max-width: 150px;
+}

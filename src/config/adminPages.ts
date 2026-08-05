@@ -16,8 +16,11 @@ export const GRANTABLE_ADMIN_PAGES: GrantablePage[] = [
   { key: "Order_Flow_Settings", label: "Order Flow Settings", path: "/Order_Flow_Settings" },
   { key: "Product_Stock", label: "Stock", path: "/Product_Stock" },
   { key: "Reports", label: "Reports", path: "/Daily_Report" },
+  // Tracker pages are gated centrally by role (see config/pageAccess.ts),
+  // not by per-user extra_pages, so they are intentionally not listed here.
   { key: "Einvoice", label: "e-Invoice (IRN)", path: "/Einvoice" },
   { key: "Ewaybill", label: "e-Way Bill", path: "/Ewaybill" },
+  { key: "HAIS", label: "Hardware Assets (HAIS)", path: "/HAIS" },
   // System — one page carrying live device activity and version analytics.
   // "Device_Activity" and "Version_Management" are deliberately no longer
   // grantable: the pages they gated are gone, so offering those permissions

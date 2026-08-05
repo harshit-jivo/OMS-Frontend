@@ -202,8 +202,9 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
   const isFocOrder = isFocMode || editOrderIsFoc;
   const canEditPoNumber =
     isBillingUser && (!isEditMode || locationState?.allowPoNumber === true);
-  // The guided 4-step wizard is used for both the standard create flow and the
-  // FOC create flow, so Add Sales and Add FOC share the same UI.
+  // The guided 4-step wizard is used for the standard create flow AND for FOC
+  // orders, so the FOC page looks identical to the Add Sales page. FOC-specific
+  // behaviour (price forced to 0, no scheme panel) is handled via `isFocOrder`.
   // Edit and Duplicate modes keep the original single-page form.
   const useWizard = mode === "create" && !isLoadingFromOrder;
 
@@ -1904,7 +1905,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
                 <input type="number" value={row.ltrs} readOnly />
               </div>
               <div className="sl-wiz-input">
-                <label>{t("price_list", "Price List")}</label>
+                <label>Price List</label>
                 <input type="number" value={row.priceListBasic} readOnly />
               </div>
               <div className="sl-wiz-input">
