@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { HiArrowPath, HiUserPlus, HiClipboardDocumentList, HiMagnifyingGlass, HiPencil, HiPlusCircle, HiQrCode } from "react-icons/hi2";
 import { StatusBadge, ErrorAlert, apiErrorMessage } from "../../components/NicUI";
-import { haisService, WORKING_STATUSES, type Asset } from "../../services/haisService";
+import { haisService, WORKING_STATUSES, holderLabel, type Asset } from "../../services/haisService";
 import AssetHistory from "./AssetHistory";
 import AssetActionModal from "./AssetActionModal";
 import AssetDetails from "./AssetDetails";
@@ -146,7 +146,7 @@ export default function AssetRegister({ onEdit, onAdd, onLookup }: Props) {
                 <tr key={a.asset_id} className="hais-row" onClick={() => setDetailAsset(a)}>
                   <td className="nic-mono">{a.asset_id}</td>
                   <td>{a.asset_type || "—"}</td>
-                  <td>{a.current_user_name || a.current_user_id || "—"}</td>
+                  <td>{holderLabel(a)}</td>
                   <td>{a.handover_date || "—"}</td>
                   <td>{a.company || "—"}</td>
                   <td>{a.model_num || "—"}</td>

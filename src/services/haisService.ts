@@ -2,11 +2,11 @@
  * HAIS — Hardware Asset Identification Software
  * Service layer for the office hardware asset register.
  *
- * NOTE: This is a STATIC / in-memory implementation — there is no backend
- * yet. All data lives in the `STORE` array below and resets on page reload.
- * The method signatures already match a REST API (`hais/assets/`), so
- * swapping to real `api` calls later is a drop-in change.
+ * Assets are still served from the in-memory `STORE` below (empty until the
+ * asset endpoints are wired). The DROPDOWNS, however, are live: Asset Type,
+ * Department and Storage Type load from the DB masters under /api/hais/.
  * ===================================================================== */
+import api from "./api";
 
 /** Operational state of a physical asset. */
 export type WorkingStatus =
@@ -24,48 +24,16 @@ export const WORKING_STATUSES: WorkingStatus[] = [
   "Scrapped",
 ];
 
-/** Hardware category — every kind of office device we track. */
-export const ASSET_TYPES = [
-  "Desktop / PC",
-  "Laptop",
-  "Monitor",
-  "Keyboard",
-  "Mouse",
-  "Printer",
-  "Scanner",
-  "UPS",
-  "Server",
-  "Router",
-  "Switch",
-  "Mobile",
-  "Tablet",
-  "Projector",
-  "Webcam",
-  "Headphone",
-  "Docking Station",
-  "Hard Disk",
-  "Pen Drive",
-  "Other",
-] as const;
-export type AssetType = (typeof ASSET_TYPES)[number];
+/** A dynamic dropdown value served from the DB (hais masters). */
+export interface HaisOption {
+  id: number;
+  name: string;
+}
 
-/** Departments — used by the Department dropdown on the form. */
-export const DEPARTMENTS = [
-  "IT",
-  "Accounts",
-  "Admin",
-  "HR",
-  "Sales",
-  "Marketing",
-  "Production",
-  "Purchase",
-  "Legal",
-  "Management",
-  "Store",
-] as const;
-
-/** Storage medium — used by the Storage Type dropdown. */
-export const STORAGE_TYPES = ["SSD", "HDD", "NVMe SSD", "eMMC", "Hybrid", "N/A"] as const;
+/* Asset Type / Department / Storage Type are NO LONGER static — they come from
+ * the DB dropdown masters via `haisService.options.*`. Only Working Status
+ * stays static (above). Asset Type is now just a free string on the record. */
+export type AssetType = string;
 
 /** The five configuration fields — snapshotted into history on each change. */
 export interface ConfigFields {
@@ -73,6 +41,7 @@ export interface ConfigFields {
   memory?: string;
   operating_system?: string;
   storage_type?: string;
+  storage_types?: string[];
   storage?: string;
 }
 
@@ -124,14 +93,16 @@ export interface Asset {
   asset_type?: AssetType | string;   // Asset Type / Category
   company?: string;                  // manufacturer / brand
   model_num?: string;
-  serial_num?: string;
+  serial_num?: string;                // required + unique — every device has its own
+  qr_code?: string;                   // QR payload, generated from the serial number
   warranty_ends?: string;
 
   /* configuration (structured) */
   processor?: string;
   memory?: string;                   // RAM
   operating_system?: string;
-  storage_type?: string;
+  storage_type?: string;             // legacy single value (kept for history/config)
+  storage_types?: string[];          // multi-select storage types (SSD, HDD, …)
   storage?: string;
 
   /* assignment / tracking */
@@ -176,9 +147,17 @@ export interface AssetListParams {
   asset_type?: string;
 }
 
+/** Display name for the current holder, or "Unassigned" when the device has none. */
+export function holderLabel(a: Asset): string {
+  return (a.current_user_name || a.current_user_id || "").trim() || "Unassigned";
+}
+
 /** Compose a one-line configuration summary from the structured fields. */
 export function configSummary(a: ConfigFields): string {
-  const storage = a.storage ? `${a.storage}${a.storage_type ? ` ${a.storage_type}` : ""}` : "";
+  const types = a.storage_types && a.storage_types.length
+    ? a.storage_types.join(" / ")
+    : a.storage_type ?? "";
+  const storage = a.storage ? `${a.storage}${types ? ` ${types}` : ""}` : "";
   return [a.processor, a.memory, storage, a.operating_system].filter(Boolean).join(", ");
 }
 
@@ -203,405 +182,216 @@ export function diffConfig(before: ConfigFields, after: ConfigFields): string {
     ["storage", "Storage"],
   ];
   return labels
-    .filter(([k]) => (before[k] ?? "").trim() !== (after[k] ?? "").trim())
-    .map(([k, label]) => `${label} ${(before[k] || "—")} → ${(after[k] || "—")}`)
+    .filter(([k]) => String(before[k] ?? "").trim() !== String(after[k] ?? "").trim())
+    .map(([k, label]) => `${label} ${(before[k] as string) || "—"} → ${(after[k] as string) || "—"}`)
     .join("; ");
 }
 
-/** Short code per category, used when the system generates an Asset ID. */
-const ID_PREFIX: Record<string, string> = {
-  "Desktop / PC": "DT",
-  Laptop: "LT",
-  Monitor: "MN",
-  Keyboard: "KB",
-  Mouse: "MS",
-  Printer: "PR",
-  Scanner: "SC",
-  UPS: "UPS",
-  Server: "SV",
-  Router: "RT",
-  Switch: "SW",
-  Mobile: "MB",
-  Tablet: "TB",
-  Projector: "PJ",
-  Webcam: "WC",
-  Headphone: "HP",
-  "Docking Station": "DK",
-  "Hard Disk": "HD",
-  "Pen Drive": "PD",
-  Other: "AS",
-};
-
-/* ------------------------------------------------------------------ *
- * Static seed data — sample assets so every screen has something to
- * show without a backend. Edit / add freely.
- * ------------------------------------------------------------------ */
-const STORE: Asset[] = [
-  {
-    asset_id: "JIVO-LT-0001",
-    asset_type: "Laptop",
-    company: "Dell",
-    model_num: "Latitude 5440",
-    serial_num: "DL5440X92KK",
-    warranty_ends: "05/01/2028",
-    processor: "Intel Core i5 12th Gen",
-    memory: "16 GB",
-    operating_system: "Windows 11 Pro",
-    storage_type: "SSD",
-    storage: "512 GB",
-    current_user_id: "EMP1042",
-    current_user_name: "Rahul Sharma",
-    prev_user_id: "EMP1007",
-    prev_user_name: "Anita Desai",
-    department: "IT",
-    email_id: "rahul.sharma@jivo.com",
-    current_location: "Head Office - 2nd Floor",
-    handover_date: "12/03/2026",
-    purchase_invoice_no: "INV-2025-8841",
-    purchase_invoice_date: "05/01/2025",
-    amount: 72000,
-    vendor: "Computech Solutions",
-    date_of_last_service: "18/06/2026",
-    working_status: "Working",
-    remarks: "Battery replaced under warranty.",
-    history: [
-      { date: "05/01/2025", action: "Assigned", to_user_id: "EMP1007", to_user_name: "Anita Desai", department: "IT", location: "Head Office - 2nd Floor", reason: "New purchase — issued to employee", config: { processor: "Intel Core i5 12th Gen", memory: "8 GB", operating_system: "Windows 11 Pro", storage_type: "SSD", storage: "512 GB" } } as AssetHistoryEntry,
-      { date: "12/03/2026", action: "Handover", from_user_id: "EMP1007", from_user_name: "Anita Desai", to_user_id: "EMP1042", to_user_name: "Rahul Sharma", department: "IT", location: "Head Office - 2nd Floor", reason: "Anita left; RAM upgraded for new user", config: { processor: "Intel Core i5 12th Gen", memory: "16 GB", operating_system: "Windows 11 Pro", storage_type: "SSD", storage: "512 GB" }, config_change: "Memory 8 GB → 16 GB" },
-    ],
-  },
-  {
-    asset_id: "JIVO-DT-0007",
-    asset_type: "Desktop / PC",
-    company: "HP",
-    model_num: "ProDesk 400 G9",
-    serial_num: "HPPD400G9-7781",
-    warranty_ends: "22/02/2028",
-    processor: "Intel Core i7 13th Gen",
-    memory: "16 GB",
-    operating_system: "Windows 11 Pro",
-    storage_type: "NVMe SSD",
-    storage: "1 TB",
-    current_user_id: "EMP2210",
-    current_user_name: "Priya Nair",
-    prev_user_id: "",
-    prev_user_name: "",
-    department: "Accounts",
-    email_id: "priya.nair@jivo.com",
-    current_location: "Head Office - 1st Floor",
-    handover_date: "01/07/2026",
-    purchase_invoice_no: "INV-2025-9020",
-    purchase_invoice_date: "22/02/2025",
-    amount: 58000,
-    vendor: "Computech Solutions",
-    date_of_last_service: "",
-    working_status: "Working",
-    remarks: "",
-    history: [
-      { date: "01/07/2026", action: "Assigned", to_user_id: "EMP2210", to_user_name: "Priya Nair", department: "Accounts", location: "Head Office - 1st Floor", reason: "New purchase — issued to employee" },
-    ],
-  },
-  {
-    asset_id: "JIVO-KB-0021",
-    asset_type: "Keyboard",
-    company: "Logitech",
-    model_num: "K120",
-    serial_num: "LGK120-4432",
-    warranty_ends: "10/09/2027",
-    processor: "",
-    memory: "",
-    operating_system: "",
-    storage_type: "",
-    storage: "",
-    current_user_id: "EMP2210",
-    current_user_name: "Priya Nair",
-    prev_user_id: "EMP1042",
-    prev_user_name: "Rahul Sharma",
-    department: "Accounts",
-    email_id: "",
-    current_location: "Head Office - 1st Floor",
-    handover_date: "01/07/2026",
-    purchase_invoice_no: "INV-2025-9020",
-    purchase_invoice_date: "10/09/2024",
-    amount: 650,
-    vendor: "Computech Solutions",
-    date_of_last_service: "",
-    working_status: "Working",
-    remarks: "Bundled with desktop JIVO-DT-0007.",
-    history: [
-      { date: "10/09/2024", action: "Assigned", to_user_id: "EMP1042", to_user_name: "Rahul Sharma", department: "IT", location: "Head Office - 2nd Floor", reason: "New purchase — issued to employee" },
-      { date: "01/07/2026", action: "Reassigned", from_user_id: "EMP1042", from_user_name: "Rahul Sharma", to_user_id: "EMP2210", to_user_name: "Priya Nair", department: "Accounts", location: "Head Office - 1st Floor", reason: "Moved with desk to Accounts" },
-    ],
-  },
-  {
-    asset_id: "JIVO-MS-0034",
-    asset_type: "Mouse",
-    company: "Logitech",
-    model_num: "B100",
-    serial_num: "LGB100-9910",
-    warranty_ends: "10/09/2027",
-    processor: "",
-    memory: "",
-    operating_system: "",
-    storage_type: "",
-    storage: "",
-    current_user_id: "EMP1042",
-    current_user_name: "Rahul Sharma",
-    prev_user_id: "",
-    prev_user_name: "",
-    department: "IT",
-    email_id: "",
-    current_location: "Head Office - 2nd Floor",
-    handover_date: "12/03/2026",
-    purchase_invoice_no: "INV-2025-8841",
-    purchase_invoice_date: "10/09/2024",
-    amount: 350,
-    vendor: "Computech Solutions",
-    date_of_last_service: "",
-    working_status: "Working",
-    remarks: "",
-    history: [
-      { date: "12/03/2026", action: "Assigned", to_user_id: "EMP1042", to_user_name: "Rahul Sharma", department: "IT", location: "Head Office - 2nd Floor", reason: "New purchase — issued to employee" },
-    ],
-  },
-  {
-    asset_id: "JIVO-PR-0003",
-    asset_type: "Printer",
-    company: "Canon",
-    model_num: "LBP2900B",
-    serial_num: "CN2900B-5567",
-    warranty_ends: "14/11/2026",
-    processor: "",
-    memory: "",
-    operating_system: "",
-    storage_type: "",
-    storage: "",
-    current_user_id: "EMP3001",
-    current_user_name: "Admin Store",
-    prev_user_id: "EMP2210",
-    prev_user_name: "Priya Nair",
-    department: "Admin",
-    email_id: "",
-    current_location: "Store Room",
-    handover_date: "20/05/2026",
-    purchase_invoice_no: "INV-2024-3312",
-    purchase_invoice_date: "14/11/2024",
-    amount: 12500,
-    vendor: "Office Mart",
-    date_of_last_service: "02/04/2026",
-    working_status: "Under Repair",
-    remarks: "Paper feed jam — sent to vendor.",
-    history: [
-      { date: "14/11/2024", action: "Assigned", to_user_id: "EMP2210", to_user_name: "Priya Nair", department: "Accounts", location: "Head Office - 1st Floor", reason: "New purchase — issued to department" },
-      { date: "20/05/2026", action: "Returned", from_user_id: "EMP2210", from_user_name: "Priya Nair", to_user_id: "EMP3001", to_user_name: "Admin Store", department: "Admin", location: "Store Room", reason: "Frequent jams — pulled back to store for servicing" },
-    ],
-  },
-];
-
-// Small delay so the UI's loading states are visible, mimicking a real call.
-const delay = <T,>(value: T): Promise<T> =>
-  new Promise((resolve) => setTimeout(() => resolve(value), 150));
-
-/** Generate the next sequential Asset ID for a category, e.g. JIVO-LT-0002. */
-function nextAssetId(assetType?: string): string {
-  const base = `JIVO-${ID_PREFIX[assetType ?? ""] ?? "AS"}-`;
-  const highest = STORE
-    .filter((a) => a.asset_id.startsWith(base))
-    .map((a) => parseInt(a.asset_id.slice(base.length), 10))
-    .filter((n) => !Number.isNaN(n))
-    .reduce((max, n) => Math.max(max, n), 0);
-  return `${base}${String(highest + 1).padStart(4, "0")}`;
+/** The QR payload for a device — its serial number, which is unique per device.
+ *  Scanning this QR in the app resolves straight back to the one matching asset. */
+export function qrValueFor(serialNum?: string): string {
+  return (serialNum ?? "").trim();
 }
 
-const matches = (a: Asset, term: string) => {
-  const t = term.toLowerCase();
-  return [
-    a.asset_id, a.current_user_name, a.current_user_id, a.prev_user_name,
-    a.serial_num, a.company, a.model_num, a.department, a.current_location, a.asset_type,
-  ].some((v) => String(v ?? "").toLowerCase().includes(t));
-};
+/* ------------------------------------------------------------------ *
+ * API mapping — the backend stores dropdowns as FK ids and the history
+ * as log rows; the frontend `Asset` uses names + a `history` array. These
+ * helpers translate between the two shapes.
+ * ------------------------------------------------------------------ */
+
+// Cached dropdown masters so create/update can map names → FK ids without a
+// round-trip per field. Cleared whenever a new option is added (createOption).
+let optionCache: {
+  assetTypes: HaisOption[];
+  departments: HaisOption[];
+  storageTypes: HaisOption[];
+} | null = null;
+
+async function loadOptionMaps() {
+  if (!optionCache) {
+    const [assetTypes, departments, storageTypes] = await Promise.all([
+      fetchOptions("asset-types"),
+      fetchOptions("departments"),
+      fetchOptions("storage-types"),
+    ]);
+    optionCache = { assetTypes, departments, storageTypes };
+  }
+  return optionCache;
+}
+
+function idByName(list: HaisOption[], name?: string): number | null {
+  const n = (name ?? "").trim().toUpperCase();
+  if (!n) return null;
+  return list.find((o) => o.name.toUpperCase() === n)?.id ?? null;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function historyFromLog(l: Record<string, any>): AssetHistoryEntry {
+  return {
+    date: l.event_date,
+    action: l.action,
+    from_user_id: l.from_user_id,
+    from_user_name: l.from_user_name,
+    to_user_id: l.to_user_id,
+    to_user_name: l.to_user_name,
+    department: l.department_name ?? "",
+    location: l.location,
+    reason: l.reason,
+    config: l.config_json ?? undefined,
+    config_change: l.config_change || undefined,
+  };
+}
+
+/** Backend asset → frontend `Asset` (dropdowns as names, logs as history). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function assetFromApi(a: Record<string, any>): Asset {
+  return {
+    ...(a as object),
+    asset_id: a.asset_id,
+    serial_num: a.serial_num,
+    qr_code: a.qr_code ?? "",
+    asset_type: a.asset_type_name ?? "",
+    department: a.department_name ?? "",
+    storage_types: a.storage_type_names ?? [],
+    amount: a.amount == null ? "" : a.amount,
+    history: Array.isArray(a.logs) ? a.logs.map(historyFromLog) : [],
+  } as Asset;
+}
+
+// String fields copied through as-is (only when present on the partial).
+const ASSET_STRING_FIELDS: (keyof Asset)[] = [
+  "serial_num", "company", "model_num", "warranty_ends", "processor", "memory",
+  "operating_system", "storage", "current_user_id", "current_user_name",
+  "prev_user_id", "prev_user_name", "email_id", "current_location", "handover_date",
+  "purchase_invoice_no", "purchase_invoice_date", "vendor", "date_of_last_service",
+  "working_status", "remarks",
+];
+
+/** Frontend `Asset` (partial) → backend write payload (names → FK ids).
+ *  Only fields present on the partial are sent, so a partial PATCH never
+ *  blanks out untouched columns. */
+async function assetToApi(p: Partial<Asset>): Promise<Record<string, unknown>> {
+  const maps = await loadOptionMaps();
+  const body: Record<string, unknown> = {};
+  for (const k of ASSET_STRING_FIELDS) {
+    if (p[k] !== undefined) body[k] = p[k] == null ? "" : String(p[k]);
+  }
+  if (typeof body.serial_num === "string") body.serial_num = body.serial_num.trim();
+  if (p.amount !== undefined) {
+    body.amount = p.amount === "" || p.amount == null ? null : Number(p.amount);
+  }
+  if (p.asset_type !== undefined) body.asset_type = idByName(maps.assetTypes, p.asset_type as string);
+  if (p.department !== undefined) body.department = idByName(maps.departments, p.department as string);
+  if (p.storage_types !== undefined) {
+    body.storage_type_ids = (p.storage_types ?? [])
+      .map((n) => idByName(maps.storageTypes, n))
+      .filter((x): x is number => x != null);
+  }
+  return body;
+}
+
+/** Fetch a dropdown master (active rows only) from the DB. DRF returns a bare
+ *  array; tolerate a paginated `{results}` shape too. */
+async function fetchOptions(path: string): Promise<HaisOption[]> {
+  const { data } = await api.get(`/hais/${path}/`, { params: { active: 1 } });
+  const rows: Array<{ id: number; name: string }> = Array.isArray(data)
+    ? data
+    : data?.results ?? [];
+  return rows.map((r) => ({ id: r.id, name: r.name }));
+}
+
+/** Add a new dropdown value. Names are stored in CAPITALS. */
+async function createOption(path: string, name: string): Promise<HaisOption> {
+  const { data } = await api.post(`/hais/${path}/`, { name: name.trim().toUpperCase() });
+  optionCache = null; // a new option exists — force the name→id map to reload
+  return { id: data.id, name: data.name };
+}
 
 export const haisService = {
+  /* --- dynamic dropdowns (from the DB masters) --- */
+  options: {
+    assetTypes: (): Promise<HaisOption[]> => fetchOptions("asset-types"),
+    departments: (): Promise<HaisOption[]> => fetchOptions("departments"),
+    storageTypes: (): Promise<HaisOption[]> => fetchOptions("storage-types"),
+    createAssetType: (name: string): Promise<HaisOption> => createOption("asset-types", name),
+    createDepartment: (name: string): Promise<HaisOption> => createOption("departments", name),
+    createStorageType: (name: string): Promise<HaisOption> => createOption("storage-types", name),
+  },
+
   /* --- list / search the register --- */
   list: async (params: AssetListParams = {}): Promise<AssetListResponse> => {
-    let rows = [...STORE];
-    if (params.search) rows = rows.filter((a) => matches(a, params.search!));
-    if (params.working_status) rows = rows.filter((a) => a.working_status === params.working_status);
-    if (params.department) rows = rows.filter((a) => a.department === params.department);
-    if (params.asset_type) rows = rows.filter((a) => a.asset_type === params.asset_type);
-    return delay({ results: rows, count: rows.length });
+    const query: Record<string, string> = {};
+    if (params.search) query.search = params.search;
+    if (params.working_status) query.working_status = params.working_status;
+    const { data } = await api.get("/hais/assets/", { params: query });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rows: any[] = Array.isArray(data) ? data : data?.results ?? [];
+    return { results: rows.map(assetFromApi), count: rows.length };
   },
 
   /* --- single asset (also used by the QR / barcode lookup) --- */
   get: async (assetId: string): Promise<Asset> => {
-    const found = STORE.find((a) => a.asset_id.toLowerCase() === assetId.toLowerCase());
-    if (!found) throw new Error(`No asset found with ID "${assetId}".`);
-    return delay({ ...found });
+    const { data } = await api.get(`/hais/assets/${encodeURIComponent(assetId)}/`);
+    return assetFromApi(data);
   },
 
-  /* --- create --- *
-   * The Asset ID is generated by the system (not entered by the user). */
+  /* --- resolve a scanned QR (serial number, or Asset ID as fallback) --- */
+  getBySerial: async (code: string): Promise<Asset> => {
+    const { data } = await api.get("/hais/assets/by-serial/", {
+      params: { code: code.trim() },
+    });
+    return assetFromApi(data);
+  },
+
+  /* --- create --- (Asset ID + QR are generated server-side) */
   create: async (payload: Asset): Promise<Asset> => {
-    const asset_id = (payload.asset_id || "").trim() || nextAssetId(payload.asset_type);
-    if (STORE.some((a) => a.asset_id.toLowerCase() === asset_id.toLowerCase())) {
-      throw new Error(`Asset ID "${asset_id}" already exists.`);
-    }
-    // Seed the history with the first assignment.
-    const record: Asset = {
-      ...payload,
-      asset_id,
-      history: [
-        {
-          date: payload.handover_date,
-          action: "Assigned",
-          to_user_id: payload.current_user_id,
-          to_user_name: payload.current_user_name,
-          department: payload.department,
-          location: payload.current_location,
-          reason: "Initial assignment",
-          config: configSnapshot(payload),
-        } as AssetHistoryEntry,
-      ],
-    };
-    STORE.unshift(record);
-    return delay({ ...record });
+    const body = await assetToApi(payload);
+    const { data } = await api.post("/hais/assets/", body);
+    return assetFromApi(data);
   },
 
-  /* --- update --- *
-   * A single edit path that keeps the history trail complete:
-   *   • if the current user changed  → a "Handover" entry (old → new holder)
-   *   • else if the config changed    → a "Config Updated" entry
-   * Either way a configuration snapshot + change summary is recorded, so a RAM
-   * upgrade (with or without a handover) is never lost. `reason` explains why. */
+  /* --- update --- (the server logs a Handover or Config change as needed) */
   update: async (
     assetId: string,
     payload: Partial<Asset>,
     reason?: string,
   ): Promise<Asset> => {
-    const idx = STORE.findIndex((a) => a.asset_id.toLowerCase() === assetId.toLowerCase());
-    if (idx === -1) throw new Error(`No asset found with ID "${assetId}".`);
-    const before = STORE[idx];
-    const beforeConfig = configSnapshot(before);
-
-    const userChanged =
-      payload.current_user_id !== undefined &&
-      String(payload.current_user_id) !== String(before.current_user_id ?? "");
-
-    const next: Asset = { ...before, ...payload, asset_id: before.asset_id };
-    const afterConfig = configSnapshot(next);
-    const change = diffConfig(beforeConfig, afterConfig);
-
-    if (userChanged) {
-      next.prev_user_id = before.current_user_id;
-      next.prev_user_name = before.current_user_name;
-      const entry: AssetHistoryEntry = {
-        date: payload.handover_date ?? next.handover_date,
-        action: "Handover",
-        from_user_id: before.current_user_id,
-        from_user_name: before.current_user_name,
-        to_user_id: next.current_user_id,
-        to_user_name: next.current_user_name,
-        department: next.department,
-        location: next.current_location,
-        reason: reason || "Reassigned",
-        config: afterConfig,
-        config_change: change || undefined,
-      };
-      next.history = [...(before.history ?? []), entry];
-    } else if (change) {
-      const entry: AssetHistoryEntry = {
-        date: payload.date_of_last_service ?? next.date_of_last_service,
-        action: "Config Updated",
-        to_user_id: before.current_user_id,
-        to_user_name: before.current_user_name,
-        department: before.department,
-        location: before.current_location,
-        reason: reason || "Configuration updated",
-        config: afterConfig,
-        config_change: change,
-      };
-      next.history = [...(before.history ?? []), entry];
-    }
-
-    STORE[idx] = next;
-    return delay({ ...next });
+    const body = await assetToApi(payload);
+    if (reason) body.reason = reason;
+    const { data } = await api.patch(
+      `/hais/assets/${encodeURIComponent(assetId)}/`,
+      body,
+    );
+    return assetFromApi(data);
   },
 
   /* --- handover: give the device to another person --- *
-   * Records the new holder AND a snapshot of the configuration at handover.
-   * Optionally the config can be upgraded for the new user at the same time. */
+   * Modelled as an update that changes the current holder; the server records
+   * a "Handover" log because current_user_id changes. Optional config upgrade. */
   handover: async (assetId: string, input: HandoverInput): Promise<Asset> => {
-    const idx = STORE.findIndex((a) => a.asset_id.toLowerCase() === assetId.toLowerCase());
-    if (idx === -1) throw new Error(`No asset found with ID "${assetId}".`);
-    const before = STORE[idx];
-    const beforeConfig = configSnapshot(before);
-
-    const next: Asset = { ...before };
-    // Apply any configuration change made during the handover.
-    if (input.config) Object.assign(next, input.config);
-    const afterConfig = configSnapshot(next);
-    const change = diffConfig(beforeConfig, afterConfig);
-
-    // Rotate users: current becomes previous, new becomes current.
-    next.prev_user_id = before.current_user_id;
-    next.prev_user_name = before.current_user_name;
-    next.current_user_id = input.to_user_id;
-    next.current_user_name = input.to_user_name;
-    if (input.department) next.department = input.department;
-    if (input.location) next.current_location = input.location;
-    if (input.handover_date) next.handover_date = input.handover_date;
-
-    const entry: AssetHistoryEntry = {
-      date: input.handover_date,
-      action: "Handover",
-      from_user_id: before.current_user_id,
-      from_user_name: before.current_user_name,
-      to_user_id: input.to_user_id,
-      to_user_name: input.to_user_name,
-      department: next.department,
-      location: next.current_location,
-      reason: input.reason,
-      config: afterConfig,
-      config_change: change || undefined,
+    const patch: Partial<Asset> = {
+      current_user_id: input.to_user_id,
+      current_user_name: input.to_user_name ?? "",
+      department: input.department,
+      current_location: input.location,
+      handover_date: input.handover_date,
+      ...(input.config ?? {}),
     };
-    next.history = [...(before.history ?? []), entry];
-    STORE[idx] = next;
-    return delay({ ...next });
+    return haisService.update(assetId, patch, input.reason);
   },
 
-  /* --- update config: hardware change with NO handover (same user) --- *
-   * e.g. the hardware team increases the RAM. Logged in history with the
-   * before→after change and a snapshot, so nothing is lost. */
+  /* --- update config: hardware change with NO handover (same user) --- */
   updateConfig: async (assetId: string, input: ConfigUpdateInput): Promise<Asset> => {
-    const idx = STORE.findIndex((a) => a.asset_id.toLowerCase() === assetId.toLowerCase());
-    if (idx === -1) throw new Error(`No asset found with ID "${assetId}".`);
-    const before = STORE[idx];
-    const beforeConfig = configSnapshot(before);
-
-    const next: Asset = { ...before, ...input.config };
-    if (input.service_date) next.date_of_last_service = input.service_date;
-    const afterConfig = configSnapshot(next);
-    const change = diffConfig(beforeConfig, afterConfig);
-
-    const entry: AssetHistoryEntry = {
-      date: input.service_date,
-      action: "Config Updated",
-      to_user_id: before.current_user_id,
-      to_user_name: before.current_user_name,
-      department: before.department,
-      location: before.current_location,
-      reason: input.reason,
-      config: afterConfig,
-      config_change: change || undefined,
+    const patch: Partial<Asset> = {
+      ...input.config,
+      date_of_last_service: input.service_date,
     };
-    next.history = [...(before.history ?? []), entry];
-    STORE[idx] = next;
-    return delay({ ...next });
+    return haisService.update(assetId, patch, input.reason);
   },
 
   /* --- delete --- */
   remove: async (assetId: string): Promise<{ ok: true }> => {
-    const idx = STORE.findIndex((a) => a.asset_id.toLowerCase() === assetId.toLowerCase());
-    if (idx !== -1) STORE.splice(idx, 1);
-    return delay({ ok: true as const });
+    await api.delete(`/hais/assets/${encodeURIComponent(assetId)}/`);
+    return { ok: true as const };
   },
 };

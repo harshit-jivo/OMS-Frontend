@@ -48,6 +48,7 @@ import Profile from "./pages/Profile";
 import Device_Management from "./pages/Device_Management";
 import Invoice_Report from "./pages/Invoice_Report";
 import HAIS from "./pages/HAIS";
+import AssetPublicView from "./pages/HAIS/AssetPublicView";
 
 function App() {
   return (
@@ -55,6 +56,9 @@ function App() {
       <ErrorBoundary>
       <Routes>
         <Route path="/" element={<Login />} />
+
+        {/* Standalone device page opened by scanning a device QR (no sidebar). */}
+        <Route path="/hais/device/:code" element={<AssetPublicView />} />
 
         <Route
           path="/Dashboard"

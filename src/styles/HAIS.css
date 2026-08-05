@@ -179,3 +179,197 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* ── QR code (asset detail) ── */
+.hais-detail-idrow {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+.hais-detail-idrow-info {
+  flex: 1 1 320px;
+  min-width: 260px;
+}
+.hais-qr {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+}
+.hais-qr-caption {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+/* ── QR scanner (lookup) ── */
+.hais-scanner-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.hais-scanner-modal {
+  background: #fff;
+  border-radius: 12px;
+  padding: 16px;
+  width: min(420px, 92vw);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+}
+.hais-scanner-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.hais-scanner-reader {
+  width: 100%;
+  overflow: hidden;
+  border-radius: 8px;
+}
+
+/* ── Unassigned checkbox (asset form) ── */
+.hais-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  user-select: none;
+}
+.hais-check input {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+/* ── Date field with calendar button ── */
+.nic-date-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.nic-date-wrap .nic-input {
+  flex: 1;
+  padding-right: 36px;
+}
+.nic-date-btn {
+  position: absolute;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  background: transparent;
+  color: #2563eb;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.nic-date-btn:hover {
+  background: #eff6ff;
+}
+/* Native date input drives the picker but stays out of sight. */
+.nic-date-native {
+  position: absolute;
+  right: 6px;
+  width: 26px;
+  height: 26px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ── Multi-select storage type (checkbox group) ── */
+.hais-multi {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding: 8px 10px;
+  border: 1px solid #d7dee8;
+  border-radius: 8px;
+  background: #fff;
+}
+.hais-multi label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  user-select: none;
+}
+.hais-multi .nic-note {
+  margin: 0;
+}
+
+/* ── Error popup ── */
+.hais-error-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1100;
+}
+.hais-error-modal {
+  background: #fff;
+  border-radius: 12px;
+  width: min(420px, 92vw);
+  padding: 20px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+  text-align: center;
+}
+.hais-error-modal .hais-error-icon {
+  font-size: 40px;
+  color: #ef4444;
+  line-height: 1;
+}
+.hais-error-modal h3 {
+  margin: 10px 0 6px;
+}
+.hais-error-modal p {
+  margin: 0 0 16px;
+  color: #334155;
+}
+
+/* ── Standalone device page (opened from a scanned QR link) ── */
+.hais-public {
+  min-height: 100vh;
+  background: #f1f5f9;
+  display: flex;
+  justify-content: center;
+  padding: 20px 12px 40px;
+}
+.hais-public-card {
+  width: 100%;
+  max-width: 640px;
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.08);
+  padding: 20px 22px 28px;
+}
+.hais-public-head {
+  border-bottom: 1px solid #e2e8f0;
+  padding-bottom: 10px;
+  margin-bottom: 12px;
+}
+
+/* Hint under the device QR. */
+.hais-qr-hint {
+  font-size: 11px;
+  color: #64748b;
+  text-align: center;
+  max-width: 150px;
+}

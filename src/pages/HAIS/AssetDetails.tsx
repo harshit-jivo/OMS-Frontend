@@ -1,6 +1,7 @@
 import { HiUserPlus, HiClipboardDocumentList, HiPencil } from "react-icons/hi2";
 import { StatusBadge } from "../../components/NicUI";
-import { configSummary, type Asset } from "../../services/haisService";
+import { configSummary, holderLabel, type Asset } from "../../services/haisService";
+import AssetQr from "./AssetQr";
 
 function statusTone(status?: string): "ok" | "err" | "warn" | "muted" {
   switch ((status || "").toLowerCase()) {
@@ -65,17 +66,22 @@ export default function AssetDetails({ asset, onClose, onEdit, onHandover, onHis
         </div>
 
         <div className="hais-detail-body">
-          <Section
-            title="Identification"
-            rows={[
-              ["Asset ID", asset.asset_id],
-              ["Category", asset.asset_type],
-              ["Company", asset.company],
-              ["Model No.", asset.model_num],
-              ["Serial No.", asset.serial_num],
-              ["Warranty Ends", asset.warranty_ends],
-            ]}
-          />
+          <div className="hais-detail-idrow">
+            <div className="hais-detail-idrow-info">
+              <Section
+                title="Identification"
+                rows={[
+                  ["Asset ID", asset.asset_id],
+                  ["Category", asset.asset_type],
+                  ["Company", asset.company],
+                  ["Model No.", asset.model_num],
+                  ["Serial No.", asset.serial_num],
+                  ["Warranty Ends", asset.warranty_ends],
+                ]}
+              />
+            </div>
+            <AssetQr asset={asset} />
+          </div>
 
           <Section
             title="Configuration"
@@ -92,7 +98,7 @@ export default function AssetDetails({ asset, onClose, onEdit, onHandover, onHis
           <Section
             title="Assignment & Tracking"
             rows={[
-              ["Current User", asset.current_user_name || asset.current_user_id],
+              ["Current User", holderLabel(asset)],
               ["Current User ID", asset.current_user_id],
               ["Previous User", asset.prev_user_name || asset.prev_user_id],
               ["Department", asset.department],

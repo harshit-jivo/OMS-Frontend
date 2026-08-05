@@ -4,11 +4,10 @@ import { NicField, ErrorAlert, apiErrorMessage } from "../../components/NicUI";
 import {
   haisService,
   configSummary,
-  DEPARTMENTS,
-  STORAGE_TYPES,
   type Asset,
   type ConfigFields,
 } from "../../services/haisService";
+import { useHaisOptions } from "./useHaisOptions";
 
 type Mode = "handover" | "config";
 
@@ -29,6 +28,8 @@ const pickConfig = (a: Asset): ConfigFields => ({
 
 export default function AssetActionModal({ asset, mode, onClose, onDone }: Props) {
   const isHandover = mode === "handover";
+  // Dropdown values, loaded from the DB masters.
+  const { departments, storageTypes } = useHaisOptions();
 
   // Handover fields
   const [toUserId, setToUserId] = useState("");
@@ -46,10 +47,17 @@ export default function AssetActionModal({ asset, mode, onClose, onDone }: Props
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
+  // Emp ID is optional here, but if entered it is auto-prefixed with the company
+  // code (JWPL) and uppercased — same rule as the Add form.
+  const setEmpId = (raw: string) => {
+    const code = raw.toUpperCase().replace(/\s+/g, "").replace(/^(JWPL)+/, "");
+    setToUserId(code ? `JWPL${code}` : "");
+  };
+
   const submit = async () => {
     setError("");
-    if (isHandover && !toUserId.trim()) {
-      setError("New user's Emp ID is required.");
+    if (isHandover && !toUserName.trim()) {
+      setError("New user's Name is required.");
       return;
     }
     if (!isHandover && !reason.trim()) {
@@ -95,8 +103,8 @@ export default function AssetActionModal({ asset, mode, onClose, onDone }: Props
       <NicField label="Storage Type">
         <select className="nic-select" value={config.storage_type ?? ""} onChange={(e) => setCfg("storage_type")(e.target.value)}>
           <option value="">— Select —</option>
-          {STORAGE_TYPES.map((s) => (
-            <option key={s} value={s}>{s}</option>
+          {storageTypes.map((s) => (
+            <option key={s.id} value={s.name}>{s.name}</option>
           ))}
         </select>
       </NicField>
@@ -135,17 +143,17 @@ export default function AssetActionModal({ asset, mode, onClose, onDone }: Props
           <>
             <h4 className="nic-subsection-title">New Holder</h4>
             <div className="nic-form-grid">
-              <NicField label="New User ID (Emp ID) *">
-                <input className="nic-input" value={toUserId} onChange={(e) => setToUserId(e.target.value)} placeholder="e.g. EMP2210" />
+              <NicField label="New User Name *">
+                <input className="nic-input" value={toUserName} onChange={(e) => setToUserName(e.target.value.toUpperCase())} placeholder="e.g. PRIYA NAIR" />
               </NicField>
-              <NicField label="New User Name">
-                <input className="nic-input" value={toUserName} onChange={(e) => setToUserName(e.target.value)} />
+              <NicField label="New User ID (Emp ID)" hint="Auto-prefixed with JWPL">
+                <input className="nic-input nic-mono" value={toUserId} onChange={(e) => setEmpId(e.target.value)} placeholder="JWPL0001" />
               </NicField>
               <NicField label="Department">
                 <select className="nic-select" value={department} onChange={(e) => setDepartment(e.target.value)}>
                   <option value="">— Select —</option>
-                  {DEPARTMENTS.map((d) => (
-                    <option key={d} value={d}>{d}</option>
+                  {departments.map((d) => (
+                    <option key={d.id} value={d.name}>{d.name}</option>
                   ))}
                 </select>
               </NicField>

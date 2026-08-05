@@ -1,13 +1,22 @@
 import { useState } from "react";
 import { HiMagnifyingGlass, HiQrCode, HiPencil, HiUserPlus } from "react-icons/hi2";
 import { KeyValues, StatusBadge, ErrorAlert, apiErrorMessage } from "../../components/NicUI";
-import { haisService, configSummary, type Asset } from "../../services/haisService";
+import { haisService, configSummary, holderLabel, type Asset } from "../../services/haisService";
 import AssetHistory from "./AssetHistory";
 import AssetActionModal from "./AssetActionModal";
+import QrScanner from "./QrScanner";
 
 type Props = {
   onEdit?: (assetId: string) => void;
 };
+
+// A scanned QR now carries a URL (…/hais/device/<serial>). Pull the serial out
+// of it; if it's already a bare code, use it as-is.
+function codeFromScan(text: string): string {
+  const t = text.trim();
+  const m = t.match(/\/hais\/device\/([^/?#]+)/i);
+  return m ? decodeURIComponent(m[1]) : t;
+}
 
 function statusTone(status?: string): "ok" | "err" | "warn" | "muted" {
   switch ((status || "").toLowerCase()) {
@@ -30,6 +39,8 @@ export default function AssetLookup({ onEdit }: Props) {
   const [error, setError] = useState("");
   // Which action modal is open for the loaded asset (null = none).
   const [action, setAction] = useState<null | "handover" | "config">(null);
+  // Whether the in-app camera scanner is open.
+  const [scanning, setScanning] = useState(false);
 
   const run = async () => {
     const id = assetId.trim();
@@ -49,6 +60,24 @@ export default function AssetLookup({ onEdit }: Props) {
     }
   };
 
+  // A QR was scanned — its payload is the device URL (or serial). Resolve the
+  // serial to the matching device and show it right here.
+  const onScan = async (text: string) => {
+    setScanning(false);
+    const code = codeFromScan(text);
+    setError("");
+    setAsset(null);
+    setAssetId(code);
+    setBusy(true);
+    try {
+      setAsset(await haisService.getBySerial(code));
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <section className="ofs-card ofs-card--wide">
       <div className="ofs-card-head">
@@ -56,8 +85,7 @@ export default function AssetLookup({ onEdit }: Props) {
         <h2>Asset Lookup</h2>
       </div>
 
-      {/* The QR / barcode scanner (added next) will drop the decoded Asset ID
-          into this same field and fire the lookup automatically. */}
+      {/* Web is type-to-look-up only; QR scanning lives in the mobile app. */}
       <div className="nic-form-grid">
         <label className="nic-field nic-field--full">
           <span className="nic-label">Asset ID</span>
@@ -66,7 +94,7 @@ export default function AssetLookup({ onEdit }: Props) {
             value={assetId}
             onChange={(e) => setAssetId(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && void run()}
-            placeholder="Scan or type the Asset ID"
+            placeholder="Type the Asset ID"
           />
         </label>
       </div>
@@ -76,11 +104,13 @@ export default function AssetLookup({ onEdit }: Props) {
           <HiMagnifyingGlass style={{ verticalAlign: "-3px", marginRight: 6 }} />
           {busy ? "Searching…" : "Look up"}
         </button>
-        <button className="nic-tab" disabled title="QR / barcode scanning — coming next">
+        <button className="nic-tab" onClick={() => setScanning(true)} disabled={busy}>
           <HiQrCode style={{ verticalAlign: "-3px", marginRight: 6 }} />
-          Scan QR (soon)
+          Scan QR
         </button>
       </div>
+
+      {scanning && <QrScanner onDecode={(t) => void onScan(t)} onClose={() => setScanning(false)} />}
 
       <ErrorAlert>{error}</ErrorAlert>
 
@@ -101,7 +131,7 @@ export default function AssetLookup({ onEdit }: Props) {
                 ["Serial No.", asset.serial_num],
                 ["Configuration", configSummary(asset)],
                 ["Warranty Ends", asset.warranty_ends],
-                ["Current User", asset.current_user_name || asset.current_user_id],
+                ["Current User", holderLabel(asset)],
                 ["Previous User", asset.prev_user_name || asset.prev_user_id],
                 ["Department", asset.department],
                 ["Email ID", asset.email_id],

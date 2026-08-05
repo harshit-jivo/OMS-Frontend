@@ -809,9 +809,8 @@ export default function Sidebar({ children }: SidebarProps) {
             </li>
           )}
 
-          {/* TEMPORARY: also visible to the Billing role so it can be reviewed.
-              Remove `|| userRole ... "billing"` to revert to admin/granted-only. */}
-          {(canSee("HAIS") || userRole?.toLowerCase() === "billing") && (
+          {/* Visible to admins, users granted the "HAIS" page, and the HAIS role. */}
+          {(canSee("HAIS") || userRole?.toLowerCase() === "hais") && (
             <li className={location.pathname === "/HAIS" ? "active" : ""}>
               <Link to="/HAIS" onClick={closeSidebar}>
                 <SidebarIcon><HiComputerDesktop /></SidebarIcon>
