@@ -216,6 +216,46 @@ export interface RequestFilters {
 // Masters (backend NOT built yet — see notes on each method)
 // ---------------------------------------------------------------------------
 
+/** One SAP House Bank Account (DSC1). SAP is the master; OMS stores none. */
+export interface SapBank {
+  bank_code: string;
+  display_name: string;
+  gl_account: string;
+  account_number: string;
+  branch: string;
+  ifsc: string;
+  key: string;
+  label: string;
+}
+
+/** Freshness of the cached SAP bank list. */
+export interface BankSyncMeta {
+  synced_at: string | null;
+  stale: boolean;
+  source: "sap" | "cache" | "stale" | "none";
+  available: boolean;
+  bank_count: number;
+  /** True when any method is unmapped or points at a vanished account. */
+  has_errors: boolean;
+}
+
+/** A payment method and the SAP account it resolves to. */
+export interface MethodMappingRow {
+  payment_method: string;
+  label: string;
+  is_cash: boolean;
+  mapping_id: number | null;
+  bank_key: string;
+  gl_account: string;
+  bank_code: string;
+  bank_name: string;
+  account_number: string;
+  branch: string;
+  configured: boolean;
+  valid: boolean;
+  error: string;
+}
+
 export interface CompanyMapping {
   id: number;
   company: Company;
@@ -223,6 +263,15 @@ export interface CompanyMapping {
   company_db: string;
   hana_schema: string;
   default_bpl_id: number | null;
+  /**
+   * SAP G/L for cash receipts.
+   *
+   * Lives here, not in the payment-method mapping, because cash is the one
+   * tender that does NOT land in a bank: SAP publishes bank accounts as House
+   * Bank Accounts (DSC1) and a cash drawer has no such row, so there is
+   * nothing to pick from and the account must be named directly.
+   */
+  cash_gl_account: string;
   is_active: boolean;
   sort_order: number;
 }
@@ -235,36 +284,9 @@ export type CompanyMappingPayload = Partial<
     | "company_db"
     | "hana_schema"
     | "default_bpl_id"
+    | "cash_gl_account"
     | "is_active"
     | "sort_order"
-  >
->;
-
-/** Mirrors payments/serializers.py BankAccountSerializer. */
-export interface BankAccount {
-  id: number;
-  name: string;
-  company: Company;
-  account_type: "CASH" | "BANK";
-  masked_number: string;
-  /** SAP posting target. Required — a deposit cannot post to SAP without it. */
-  sap_gl_account: string;
-  ifsc: string;
-  branch_name: string;
-  is_active: boolean;
-}
-
-export type BankAccountPayload = Partial<
-  Pick<
-    BankAccount,
-    | "name"
-    | "company"
-    | "account_type"
-    | "masked_number"
-    | "sap_gl_account"
-    | "ifsc"
-    | "branch_name"
-    | "is_active"
   >
 >;
 
@@ -438,31 +460,6 @@ const approvalService = {
 
   // ---- Masters ---------------------------------------------------------
   // ---- Bank accounts (admin CRUD) --------------------------------------
-  // Distinct from listBankAccounts below: the admin list returns INACTIVE rows
-  // too, so a deactivated account can be seen and switched back on.
-  adminListBankAccounts: async (company?: Company): Promise<BankAccount[]> => {
-    const res = await api.get("/payments/admin/bank-accounts/", {
-      params: company ? { company } : undefined,
-    });
-    return rows<BankAccount>(res.data);
-  },
-
-  createBankAccount: async (payload: BankAccountPayload): Promise<BankAccount> => {
-    const res = await api.post("/payments/admin/bank-accounts/", payload);
-    return unwrap<BankAccount>(res.data);
-  },
-
-  updateBankAccount: async (
-    id: number,
-    payload: BankAccountPayload,
-  ): Promise<BankAccount> => {
-    const res = await api.patch(`/payments/admin/bank-accounts/${id}/`, payload);
-    return unwrap<BankAccount>(res.data);
-  },
-
-  deleteBankAccount: async (id: number): Promise<void> => {
-    await api.delete(`/payments/admin/bank-accounts/${id}/`);
-  },
 
   // ---- Collection persons (admin CRUD) ---------------------------------
   adminListCollectionPersons: async (
@@ -504,12 +501,56 @@ const approvalService = {
     return rows<CollectionPerson>(res.data);
   },
 
-  /** Live — payments/views.py BankAccountListView. */
-  listBankAccounts: async (company?: Company): Promise<BankAccount[]> => {
-    const res = await api.get("/payments/bank-accounts/", {
-      params: company ? { company } : undefined,
+  // ---- Payment method mapping (admin) ---------------------------------
+  /** One row per payment method, with its resolved SAP account. */
+  methodMappingStatus: async (
+    company: Company,
+    refresh = false,
+  ): Promise<{ rows: MethodMappingRow[]; meta: BankSyncMeta }> => {
+    const res = await api.get("/payments/admin/method-mapping-status/", {
+      params: refresh ? { company, refresh: "true" } : { company },
     });
-    return rows<BankAccount>(res.data);
+    return {
+      rows: rows<MethodMappingRow>(res.data),
+      meta: (res.data?.meta ?? {}) as BankSyncMeta,
+    };
+  },
+
+  /** The SAP house bank accounts themselves — the left panel. */
+  listSapBanks: async (
+    company: Company,
+    refresh = false,
+  ): Promise<SapBank[]> => {
+    const res = await api.get("/payments/banks/", {
+      params: refresh ? { company, refresh: "true" } : { company },
+    });
+    return rows<SapBank>(res.data);
+  },
+
+  saveMethodMapping: async (payload: {
+    id?: number;
+    company: Company;
+    payment_method: string;
+    bank_key: string;
+    is_active?: boolean;
+  }): Promise<void> => {
+    const { id, ...body } = payload;
+    if (id) await api.patch(`/payments/admin/method-mappings/${id}/`, body);
+    else await api.post("/payments/admin/method-mappings/", body);
+  },
+
+  /** Deactivate rather than delete keeps the row as history. */
+  setMethodMappingActive: async (
+    id: number,
+    isActive: boolean,
+  ): Promise<void> => {
+    await api.patch(`/payments/admin/method-mappings/${id}/`, {
+      is_active: isActive,
+    });
+  },
+
+  deleteMethodMapping: async (id: number): Promise<void> => {
+    await api.delete(`/payments/admin/method-mappings/${id}/`);
   },
 
   // ---- Company mappings (admin CRUD) ----------------------------------

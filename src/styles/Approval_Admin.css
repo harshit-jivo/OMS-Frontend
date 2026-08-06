@@ -580,3 +580,58 @@
   .apv-toolbar .apv-spacer { margin-left: 0; }
   .apv-search { min-width: 100%; }
 }
+
+/* --- Payment method mapping: SAP accounts beside their mapping ---------- */
+/* Two panels on a desktop; they stack on a narrow screen rather than forcing
+   the page to scroll sideways. Each table scrolls inside its own wrapper. */
+/* Stacked, not side by side: SAP's accounts are the reference you read FIRST,
+   then the mapping below says which one each method uses. Full width also lets
+   both tables show every column without their own horizontal scroll. */
+.apv-config-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-top: 14px;
+}
+
+.apv-config-grid .apv-table-wrap {
+  overflow-x: auto;
+}
+
+.apv-sub {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--apv-text, #0f172a);
+}
+
+.apv-muted {
+  color: #64748b;
+  font-size: 12px;
+}
+
+/* Base shape; .ok / .err below tint it. */
+.apv-pill {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.apv-pill.ok {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.apv-pill.err {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.apv-note-err {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #b91c1c;
+}

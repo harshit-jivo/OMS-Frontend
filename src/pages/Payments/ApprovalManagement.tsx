@@ -13,18 +13,20 @@ import {
   HiXCircle,
 } from "react-icons/hi2";
 
+import ConfigTab from "./ConfigTab";
 import approvalService, {
   COMPANY_OPTIONS,
   DOCUMENT_TYPE_OPTIONS,
   type ApprovalLevel,
   type ApprovalRequest,
   type ApprovalWorkflow,
-  type BankAccount,
-  type BankAccountPayload,
   type CollectionPerson,
   type CollectionPersonPayload,
   type Company,
+  type BankSyncMeta,
   type CompanyMapping,
+  type MethodMappingRow,
+  type SapBank,
   type CompanyMappingPayload,
   type DocumentType,
   type LevelApprover,
@@ -64,7 +66,13 @@ import "../../styles/Approval_Admin.css";
  * mock data.
  */
 
-type Tab = "overview" | "workflows" | "levels" | "approvers" | "requests" | "masters";
+type Tab =
+  | "overview"
+  | "workflows"
+  | "levels"
+  | "approvers"
+  | "requests"
+  | "masters";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "Overview" },
@@ -173,6 +181,7 @@ export default function ApprovalManagement() {
       {tab === "requests" && <RequestsTab flash={flash} />}
 
       {tab === "masters" && <MastersTab canEdit={isAdmin} flash={flash} />}
+
 
       {toast && (
         <div className={`apv-toast${toast.kind === "err" ? " is-err" : ""}`}>
@@ -2157,17 +2166,6 @@ function Detail({ label, children }: { label: string; children: React.ReactNode 
 // Masters
 // ===========================================================================
 
-const EMPTY_BANK: BankAccountPayload = {
-  name: "",
-  company: "OIL",
-  account_type: "BANK",
-  masked_number: "",
-  sap_gl_account: "",
-  ifsc: "",
-  branch_name: "",
-  is_active: true,
-};
-
 const EMPTY_PERSON: CollectionPersonPayload = {
   name: "",
   // Blank = selectable in every company; the dialog explains this.
@@ -2184,23 +2182,18 @@ const EMPTY_MAPPING: CompanyMappingPayload = {
   company_db: "",
   hana_schema: "",
   default_bpl_id: null,
+  cash_gl_account: "",
   is_active: true,
 };
 
 function MastersTab({ canEdit, flash }: { canEdit: boolean; flash: Flash }) {
-  // Company filters for the two lists below. Declared before the resources so
-  // they can be passed as dependencies.
-  const [bankCompany, setBankCompany] = useState<Company | "">("");
+  // Company filter for the list below. Declared before the resource so it can
+  // be passed as a dependency.
   const [personCompany, setPersonCompany] = useState<Company | "">("");
 
   const companies = useResource(() => approvalService.listCompanyMappings(), []);
-  // The ADMIN endpoints, not the picker feeds — these return inactive rows too,
-  // so a deactivated account can be seen and switched back on.
-  const banks = useResource(
-    () => approvalService.adminListBankAccounts(bankCompany || undefined),
-    [],
-    [bankCompany],
-  );
+  // The ADMIN endpoint, not the picker feed — it returns inactive rows too,
+  // so a deactivated person can be seen and switched back on.
   const persons = useResource(
     () => approvalService.adminListCollectionPersons(personCompany || undefined),
     [],
@@ -2211,10 +2204,6 @@ function MastersTab({ canEdit, flash }: { canEdit: boolean; flash: Flash }) {
     (CompanyMappingPayload & { id?: number }) | null
   >(null);
   const [deleting, setDeleting] = useState<CompanyMapping | null>(null);
-  const [editingBank, setEditingBank] = useState<
-    (BankAccountPayload & { id?: number }) | null
-  >(null);
-  const [deletingBank, setDeletingBank] = useState<BankAccount | null>(null);
   const [editingPerson, setEditingPerson] = useState<
     (CollectionPersonPayload & { id?: number }) | null
   >(null);
@@ -2222,65 +2211,6 @@ function MastersTab({ canEdit, flash }: { canEdit: boolean; flash: Flash }) {
     null,
   );
   const [busy, setBusy] = useState(false);
-
-  // ---- Bank accounts ---------------------------------------------------
-  // sap_gl_account is mandatory: it is the SAP posting target, and the DB has
-  // a (company, sap_gl_account) unique constraint that blank values collide on.
-  const bankValid =
-    !!editingBank?.name?.trim() &&
-    !!editingBank?.company &&
-    !!editingBank?.sap_gl_account?.trim();
-
-  const saveBank = async () => {
-    if (!editingBank) return;
-    setBusy(true);
-    try {
-      if (editingBank.id) {
-        const { id, ...payload } = editingBank;
-        await approvalService.updateBankAccount(id, payload);
-        flash("Account updated");
-      } else {
-        await approvalService.createBankAccount(editingBank);
-        flash("Account created");
-      }
-      setEditingBank(null);
-      banks.reload();
-    } catch (err) {
-      flash(messageFrom(err, "Save failed"), "err");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const toggleBank = async (account: BankAccount) => {
-    setBusy(true);
-    try {
-      await approvalService.updateBankAccount(account.id, {
-        is_active: !account.is_active,
-      });
-      flash(account.is_active ? "Deactivated" : "Activated");
-      banks.reload();
-    } catch (err) {
-      flash(messageFrom(err, "Update failed"), "err");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const confirmDeleteBank = async () => {
-    if (!deletingBank) return;
-    setBusy(true);
-    try {
-      await approvalService.deleteBankAccount(deletingBank.id);
-      flash("Account deleted");
-      setDeletingBank(null);
-      banks.reload();
-    } catch (err) {
-      flash(messageFrom(err, "Delete failed"), "err");
-    } finally {
-      setBusy(false);
-    }
-  };
 
   // ---- Collection persons ----------------------------------------------
   const personValid = !!editingPerson?.name?.trim();
@@ -2413,6 +2343,7 @@ function MastersTab({ canEdit, flash }: { canEdit: boolean; flash: Flash }) {
                 <th>Display name</th>
                 <th>SAP database</th>
                 <th>HANA schema</th>
+                <th>Cash G/L</th>
                 <th>Status</th>
                 <th />
               </tr>
@@ -2447,6 +2378,15 @@ function MastersTab({ canEdit, flash }: { canEdit: boolean; flash: Flash }) {
                     </td>
                     <td>
                       <code>{c.hana_schema}</code>
+                    </td>
+                    <td>
+                      {c.cash_gl_account ? (
+                        <code>{c.cash_gl_account}</code>
+                      ) : (
+                        // Cash cannot post without it, so an empty value is
+                        // flagged rather than shown as a blank cell.
+                        <span className="apv-pill err">Not set</span>
+                      )}
                     </td>
                     <td>
                       <ActivePill active={c.is_active} />
@@ -2599,6 +2539,24 @@ function MastersTab({ canEdit, flash }: { canEdit: boolean; flash: Flash }) {
             </div>
 
             <div className="apv-field">
+              <label htmlFor="cm-cash-gl">Cash G/L account</label>
+              <input
+                id="cm-cash-gl"
+                className="apv-input"
+                value={editing.cash_gl_account ?? ""}
+                onChange={(e) =>
+                  setEditing({ ...editing, cash_gl_account: e.target.value })
+                }
+                placeholder="1105003"
+              />
+              <span className="apv-hint">
+                Where cash receipts post in SAP. Typed rather than picked:
+                every other tender lands in a bank account SAP publishes, but a
+                cash drawer is not a bank and has no such record.
+              </span>
+            </div>
+
+            <div className="apv-field">
               <label htmlFor="cm-bpl">Default branch (BPL ID)</label>
               <input
                 id="cm-bpl"
@@ -2643,139 +2601,11 @@ function MastersTab({ canEdit, flash }: { canEdit: boolean; flash: Flash }) {
         />
       )}
 
-      {/* ── Bank accounts ─────────────────────────────────────────────── */}
-      <div className="apv-card">
-        <div className="apv-card-head">
-          <h3>Bank accounts</h3>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <select
-              className="apv-select"
-              value={bankCompany}
-              onChange={(e) => setBankCompany(e.target.value as Company | "")}
-              aria-label="Filter bank accounts by company"
-            >
-              <option value="">All companies</option>
-              {COMPANY_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-            <button type="button" className="apv-btn apv-btn-sm" onClick={banks.reload}>
-              <HiArrowPath /> Refresh
-            </button>
-            {canEdit && (
-              <button
-                type="button"
-                className="apv-btn apv-btn-sm apv-btn-primary"
-                onClick={() =>
-                  setEditingBank({
-                    ...EMPTY_BANK,
-                    company: (bankCompany || "OIL") as Company,
-                  })
-                }
-              >
-                <HiPlusCircle /> Add account
-              </button>
-            )}
-          </div>
-        </div>
-        <div className="apv-table-wrap">
-          <table className="apv-table">
-            <thead>
-              <tr>
-                <th>Company</th>
-                <th>Account</th>
-                <th>Number</th>
-                <th>SAP GL account</th>
-                <th>Type</th>
-                <th>Status</th>
-                <th />
-              </tr>
-            </thead>
-            <AsyncBoundaryTable
-              loading={banks.loading}
-              error={banks.error}
-              isEmpty={banks.data.length === 0}
-              onRetry={banks.reload}
-              cols={7}
-              emptyTitle="No bank accounts"
-              emptyHint="Add the accounts that cash and cheques are banked into. A deposit cannot be recorded without one."
-              emptyAction={
-                canEdit ? (
-                  <button
-                    type="button"
-                    className="apv-btn apv-btn-primary"
-                    onClick={() =>
-                      setEditingBank({
-                        ...EMPTY_BANK,
-                        company: (bankCompany || "OIL") as Company,
-                      })
-                    }
-                  >
-                    <HiPlusCircle /> Add account
-                  </button>
-                ) : undefined
-              }
-            >
-              <tbody>
-                {banks.data.map((b) => (
-                  <tr key={b.id}>
-                    <td>{b.company}</td>
-                    <td>{b.name}</td>
-                    <td>
-                      <code>{b.masked_number || "—"}</code>
-                    </td>
-                    <td>
-                      <code>{b.sap_gl_account}</code>
-                    </td>
-                    <td>{b.account_type}</td>
-                    <td>
-                      <ActivePill active={b.is_active} />
-                    </td>
-                    <td>
-                      <div className="apv-row-actions">
-                        {canEdit && (
-                          <>
-                            <button
-                              type="button"
-                              className="apv-btn apv-btn-icon"
-                              title={b.is_active ? "Deactivate" : "Activate"}
-                              aria-label={`Toggle ${b.name}`}
-                              disabled={busy}
-                              onClick={() => toggleBank(b)}
-                            >
-                              {b.is_active ? <HiEye /> : <HiEyeSlash />}
-                            </button>
-                            <button
-                              type="button"
-                              className="apv-btn apv-btn-icon"
-                              title="Edit"
-                              aria-label={`Edit ${b.name}`}
-                              onClick={() => setEditingBank({ ...b })}
-                            >
-                              <HiPencilSquare />
-                            </button>
-                            <button
-                              type="button"
-                              className="apv-btn apv-btn-icon apv-btn-danger"
-                              title="Delete"
-                              aria-label={`Delete ${b.name}`}
-                              onClick={() => setDeletingBank(b)}
-                            >
-                              <HiTrash />
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </AsyncBoundaryTable>
-          </table>
-        </div>
-      </div>
+      {/* ── Payment method mapping ────────────────────────────────────
+          Sits between the company mapping (which supplies the cash G/L) and
+          collection persons, because it depends on the company being mapped
+          first — its bank list comes from that company's SAP database. */}
+      <ConfigTab canEdit={canEdit} flash={flash} />
 
       {/* ── Collection persons ────────────────────────────────────────── */}
       <div className="apv-card">
@@ -2912,174 +2742,6 @@ function MastersTab({ canEdit, flash }: { canEdit: boolean; flash: Flash }) {
         </div>
       </div>
 
-      {/* ── Bank account dialog ───────────────────────────────────────── */}
-      {editingBank && (
-        <Modal
-          title={editingBank.id ? "Edit bank account" : "Add bank account"}
-          onClose={() => setEditingBank(null)}
-          footer={
-            <>
-              <button
-                type="button"
-                className="apv-btn"
-                onClick={() => setEditingBank(null)}
-                disabled={busy}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="apv-btn apv-btn-primary"
-                onClick={saveBank}
-                disabled={busy || !bankValid}
-              >
-                {busy ? "Saving…" : "Save account"}
-              </button>
-            </>
-          }
-        >
-          <div className="apv-form-grid">
-            <div className="apv-field">
-              <label htmlFor="ba-company">Company</label>
-              <select
-                id="ba-company"
-                className="apv-select"
-                value={editingBank.company ?? "OIL"}
-                onChange={(e) =>
-                  setEditingBank({
-                    ...editingBank,
-                    company: e.target.value as Company,
-                  })
-                }
-              >
-                {COMPANY_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="apv-field">
-              <label htmlFor="ba-type">Type</label>
-              <select
-                id="ba-type"
-                className="apv-select"
-                value={editingBank.account_type ?? "BANK"}
-                onChange={(e) =>
-                  setEditingBank({
-                    ...editingBank,
-                    account_type: e.target.value as "CASH" | "BANK",
-                  })
-                }
-              >
-                <option value="BANK">Bank</option>
-                <option value="CASH">Cash</option>
-              </select>
-              <span className="apv-hint">
-                Cash accounts receive cash deposits; bank accounts receive cheques
-                and transfers.
-              </span>
-            </div>
-
-            <div className="apv-field is-full">
-              <label htmlFor="ba-name">Account name</label>
-              <input
-                id="ba-name"
-                className="apv-input"
-                value={editingBank.name ?? ""}
-                onChange={(e) =>
-                  setEditingBank({ ...editingBank, name: e.target.value })
-                }
-                placeholder="HDFC Bank — Current"
-              />
-            </div>
-
-            <div className="apv-field">
-              <label htmlFor="ba-number">Account number</label>
-              <input
-                id="ba-number"
-                className="apv-input"
-                value={editingBank.masked_number ?? ""}
-                onChange={(e) =>
-                  setEditingBank({
-                    ...editingBank,
-                    masked_number: e.target.value,
-                  })
-                }
-                placeholder="****4821"
-              />
-              <span className="apv-hint">
-                Mask all but the last four digits — this is shown in the app.
-              </span>
-            </div>
-
-            <div className="apv-field">
-              <label htmlFor="ba-gl">SAP GL account</label>
-              <input
-                id="ba-gl"
-                className="apv-input"
-                value={editingBank.sap_gl_account ?? ""}
-                onChange={(e) =>
-                  setEditingBank({
-                    ...editingBank,
-                    sap_gl_account: e.target.value,
-                  })
-                }
-                placeholder="_SYS00000000123"
-              />
-              <span className="apv-hint">
-                Required — the account a deposit posts to in SAP. Must be unique
-                within the company.
-              </span>
-            </div>
-
-
-            <div className="apv-field">
-              <label htmlFor="ba-ifsc">IFSC</label>
-              <input
-                id="ba-ifsc"
-                className="apv-input"
-                value={editingBank.ifsc ?? ""}
-                onChange={(e) =>
-                  setEditingBank({
-                    ...editingBank,
-                    ifsc: e.target.value.toUpperCase(),
-                  })
-                }
-                placeholder="Optional"
-              />
-            </div>
-
-            <div className="apv-field is-full">
-              <label htmlFor="ba-branch">Branch</label>
-              <input
-                id="ba-branch"
-                className="apv-input"
-                value={editingBank.branch_name ?? ""}
-                onChange={(e) =>
-                  setEditingBank({ ...editingBank, branch_name: e.target.value })
-                }
-                placeholder="Optional"
-              />
-            </div>
-
-            <div className="apv-field is-full">
-              <label className="apv-check">
-                <input
-                  type="checkbox"
-                  checked={editingBank.is_active ?? true}
-                  onChange={(e) =>
-                    setEditingBank({ ...editingBank, is_active: e.target.checked })
-                  }
-                />
-                Active — inactive accounts disappear from the deposit picker
-              </label>
-            </div>
-          </div>
-        </Modal>
-      )}
-
       {/* ── Collection person dialog ──────────────────────────────────── */}
       {editingPerson && (
         <Modal
@@ -3195,18 +2857,6 @@ function MastersTab({ canEdit, flash }: { canEdit: boolean; flash: Flash }) {
             </div>
           </div>
         </Modal>
-      )}
-
-      {deletingBank && (
-        <ConfirmDialog
-          title="Delete bank account"
-          message={`Delete "${deletingBank.name}"? Existing deposits that used it are not affected, but it can no longer be selected. Deactivating is usually safer.`}
-          confirmLabel="Delete"
-          danger
-          busy={busy}
-          onConfirm={confirmDeleteBank}
-          onCancel={() => setDeletingBank(null)}
-        />
       )}
 
       {deletingPerson && (
