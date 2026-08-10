@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { ordersService } from "../services/ordersService";
 import { userService } from "../services/userService";
 import { getCurrentUser } from "../services/authService";
-import { useUILabels } from "../services/uiConfig";
+import { useUILabels, useFieldConfig } from "../services/uiConfig";
 import type {
   Order,
   OrderItem,
@@ -124,6 +124,7 @@ const getDefaultDeliveryDate = () => {
 
 export default function Add_Sales({ focMode = false }: AddSalesProps) {
   const { t } = useUILabels();
+  const { field } = useFieldConfig();
   const location = useLocation();
   const navigate = useNavigate();
   const locationState =
@@ -138,7 +139,6 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
   const isDuplicateMode = mode === "duplicate" && editOrderId !== null;
   const isLoadingFromOrder = isEditMode || isDuplicateMode;
   const isFocMode = focMode && !isLoadingFromOrder;
-  const [userRole, setUserRole] = useState("");
   const [userDefaultCategory, setUserDefaultCategory] = useState("");
   const [parties, setParties] = useState<any[]>([]);
   const [selectedPartyCategory, setSelectedPartyCategory] = useState("");
@@ -198,10 +198,21 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
   const [itemModalIndex, setItemModalIndex] = useState<number | null>(null);
   const [itemModalSnapshot, setItemModalSnapshot] = useState<SalesRow | null>(null);
   const [itemModalIsNew, setItemModalIsNew] = useState(false);
-  const isBillingUser = userRole.toLowerCase() === "billing";
   const isFocOrder = isFocMode || editOrderIsFoc;
+  // Admin-controlled PO field behaviour (label + enabled + required). Defaults
+  // preserve the original hardcoded behaviour if config hasn't loaded yet.
+  const poField = field("po_number", {
+    label: "PO Number",
+    enabled: true,
+    required: false,
+  });
+  // PO is available to anyone on the order-create page (not billing-only); the
+  // admin `enabled` flag decides whether it shows. In EDIT mode the original
+  // `allowPoNumber` guard is preserved so editing an existing order doesn't
+  // newly expose PO where it wasn't intended.
   const canEditPoNumber =
-    isBillingUser && (!isEditMode || locationState?.allowPoNumber === true);
+    poField.enabled &&
+    (!isEditMode || locationState?.allowPoNumber === true);
   // The guided 4-step wizard is used for both the standard create flow and the
   // FOC create flow, so Add Sales and Add FOC share the same UI.
   // Edit and Duplicate modes keep the original single-page form.
@@ -226,8 +237,6 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
   const fetchCurrentUserProfile = async () => {
     try {
       const user = await getCurrentUser();
-      const role = user?.role_name || user?.role || user?.role_display || "";
-      setUserRole(typeof role === "object" ? role.name || "" : String(role));
       const profileCategory = getUserCategoryText(user);
       setUserDefaultCategory(profileCategory);
       if (profileCategory && !isLoadingFromOrder) {
@@ -235,7 +244,6 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
       }
     } catch (error) {
       console.log("Error fetching current user:", error);
-      setUserRole("");
       setUserDefaultCategory("");
     }
   };
@@ -695,6 +703,13 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
 
     if (rows.some((row) => !row.confirmed && row.item)) {
       alert("Please confirm the current item before submitting the order.");
+      return false;
+    }
+
+    // PO number is mandatory only when the field is shown AND admin-marked
+    // required. Kept last so item checks fire first.
+    if (canEditPoNumber && poField.required && !formData.poNumber.trim()) {
+      alert(`${poField.label} is required.`);
       return false;
     }
 
@@ -2287,7 +2302,10 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
         {canEditPoNumber && (
           <div className="sl-field">
             <label className="sl-label" htmlFor="wiz-po">
-              PO Number
+              {poField.label}
+              {poField.required && (
+                <span style={{ color: "#dc2626" }}> *</span>
+              )}
             </label>
             <div className="sl-input-wrap">
               <input
@@ -2426,7 +2444,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
         <div className="sl-wiz-review-foot">
           {formData.poNumber && (
             <div className="sl-wiz-review-kv">
-              <span>PO Number</span>
+              <span>{poField.label}</span>
               <strong>{formData.poNumber}</strong>
             </div>
           )}
@@ -3358,7 +3376,10 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
           {canEditPoNumber && (
             <div className="sl-field">
               <label className="sl-label" htmlFor="poNumber">
-                PO Number
+                {poField.label}
+                {poField.required && (
+                  <span style={{ color: "#dc2626" }}> *</span>
+                )}
               </label>
               <div className="sl-input-wrap">
                 <input

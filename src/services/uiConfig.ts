@@ -144,6 +144,132 @@ export const useUILabels = () => {
   return { labels: map, t };
 };
 
+// ===========================================================================
+// Field behaviour config — enabled/required flags for INPUT fields.
+//
+// Separate store from the label text above (fetched from /ui-config/fields/),
+// so a form can hide a field or make it mandatory purely from admin settings.
+// Same module-store + localStorage-mirror pattern as the labels store.
+// ===========================================================================
+
+/** Behaviour of a single field key. */
+export interface UIFieldConfig {
+  label: string;
+  enabled: boolean;
+  required: boolean;
+}
+
+export type UIFieldMap = Record<string, UIFieldConfig>;
+
+const FIELDS_STORAGE_KEY = "ui_fields";
+const FIELDS_ENDPOINT = "/ui-config/fields/";
+
+let fields: UIFieldMap = readPersistedFields();
+let fieldsLoadPromise: Promise<UIFieldMap> | null = null;
+const fieldListeners = new Set<() => void>();
+
+function readPersistedFields(): UIFieldMap {
+  try {
+    const raw = localStorage.getItem(FIELDS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return parsed && typeof parsed === "object" ? (parsed as UIFieldMap) : {};
+  } catch {
+    return {};
+  }
+}
+
+function setFields(next: UIFieldMap) {
+  fields = next || {};
+  try {
+    localStorage.setItem(FIELDS_STORAGE_KEY, JSON.stringify(fields));
+  } catch {
+    /* persistence is best-effort only */
+  }
+  fieldListeners.forEach((l) => l());
+}
+
+export const getUIFields = (): UIFieldMap => fields;
+
+/**
+ * Resolve a field's behaviour. `fallback` is the built-in default so a form is
+ * always correct before the config loads or if the key is absent — pass the
+ * hardcoded behaviour the code used before this feature.
+ */
+export const getField = (
+  key: string,
+  fallback: UIFieldConfig,
+): UIFieldConfig => {
+  const value = fields[key];
+  return value && typeof value === "object" ? value : fallback;
+};
+
+/** Fetch the field-config map once and cache it. Never throws. */
+export const loadUIFields = (force = false): Promise<UIFieldMap> => {
+  if (!force && fieldsLoadPromise) return fieldsLoadPromise;
+  fieldsLoadPromise = api
+    .get<UIFieldMap>(FIELDS_ENDPOINT)
+    .then((res) => {
+      const data = res.data && typeof res.data === "object" ? res.data : {};
+      setFields(data);
+      return data;
+    })
+    .catch(() => fields)
+    .finally(() => {
+      fieldsLoadPromise = null;
+    });
+  return fieldsLoadPromise;
+};
+
+/** Optimistically merge a saved field's behaviour into the cache. */
+export const applyFieldUpdate = (
+  fieldKey: string,
+  config: UIFieldConfig,
+) => {
+  setFields({ ...fields, [fieldKey]: config });
+};
+
+/** Drop a field from the cache (after an admin delete/deactivate). */
+export const removeField = (fieldKey: string) => {
+  if (!(fieldKey in fields)) return;
+  const next = { ...fields };
+  delete next[fieldKey];
+  setFields(next);
+};
+
+/** Clear everything (call on logout). */
+export const clearUIFields = () => {
+  try {
+    localStorage.removeItem(FIELDS_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+  setFields({});
+};
+
+const subscribeFields = (cb: () => void) => {
+  fieldListeners.add(cb);
+  return () => {
+    fieldListeners.delete(cb);
+  };
+};
+
+/**
+ * Subscribe a component to the field-config map. Returns a `field(key, fallback)`
+ * reader that re-renders when config changes.
+ *
+ *   const { field } = useFieldConfig();
+ *   const po = field("po_number", { label: "PO Number", enabled: true, required: false });
+ *   if (po.enabled) { ...render... }
+ */
+export const useFieldConfig = () => {
+  const map = useSyncExternalStore(subscribeFields, getUIFields, getUIFields);
+  const field = (key: string, fallback: UIFieldConfig): UIFieldConfig => {
+    const value = map[key];
+    return value && typeof value === "object" ? value : fallback;
+  };
+  return { fields: map, field };
+};
+
 // ---------------------------------------------------------------------------
 // Admin CRUD — used only by the UI Label Management page (admin only).
 // ---------------------------------------------------------------------------
@@ -155,6 +281,9 @@ export interface UILabelRow {
   display_name: string;
   description: string;
   is_active: boolean;
+  // Field-behaviour flags (only meaningful for input-field keys, e.g. po_number).
+  is_enabled: boolean;
+  is_required: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -164,6 +293,8 @@ export interface UILabelInput {
   display_name: string;
   description?: string;
   is_active?: boolean;
+  is_enabled?: boolean;
+  is_required?: boolean;
 }
 
 /** Unwrap the backend's `{success, message, data}` admin envelope. */

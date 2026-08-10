@@ -35,7 +35,7 @@ import {
 import { getCurrentUser } from "../services/authService";
 import api from "../services/api";
 import { webDeviceService } from "../services/webDeviceService";
-import { loadUILabels } from "../services/uiConfig";
+import { loadUILabels, loadUIFields } from "../services/uiConfig";
 import NotificationToaster, { showToast } from "./NotificationToaster";
 import {
   initNotificationBus,
@@ -335,6 +335,7 @@ export default function Sidebar({ children }: SidebarProps) {
     // Load dynamic UI labels once per authenticated session (covers a page
     // reload / restored session where Login didn't run). De-duped internally.
     void loadUILabels();
+    void loadUIFields();
 
     initNotificationBus();
     initNotificationSound();

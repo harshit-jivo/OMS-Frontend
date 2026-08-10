@@ -4,7 +4,7 @@ import { landingPathFor } from "../config/pageAccess";
 import { loginUser } from "../services/authService";
 import { resolveStartupSession } from "../services/api";
 import { webDeviceService } from "../services/webDeviceService";
-import { loadUILabels } from "../services/uiConfig";
+import { loadUILabels, loadUIFields } from "../services/uiConfig";
 import "../styles/Login.css";
 
 type ToastProps = {
@@ -172,6 +172,7 @@ const handleLogin = async () => {
     // fire-and-forget contract: never blocks login, and any screen falls back
     // to hardcoded text until it resolves.
     void loadUILabels(true);
+    void loadUIFields(true);
 
     showToast("Login successful. Redirecting...", "success");
 
