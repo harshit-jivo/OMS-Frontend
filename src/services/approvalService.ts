@@ -61,7 +61,7 @@ interface Paginated<T> {
  * plain DRF generics (workflows, levels) return it bare. Unwrapping in one
  * place keeps that difference out of every component.
  */
-const unwrap = <T>(body: Envelope<T> | T): T =>
+export const unwrap = <T>(body: Envelope<T> | T): T =>
   body && typeof body === "object" && "data" in (body as Envelope<T>)
     ? (body as Envelope<T>).data
     : (body as T);
@@ -297,14 +297,13 @@ export interface CollectionPerson {
   name: string;
   company: Company | "";
   phone: string;
-  sap_slp_code: number | null;
   is_active: boolean;
 }
 
 export type CollectionPersonPayload = Partial<
   Pick<
     CollectionPerson,
-    "name" | "code" | "company" | "phone" | "sap_slp_code" | "is_active"
+    "name" | "code" | "company" | "phone" | "is_active"
   >
 >;
 

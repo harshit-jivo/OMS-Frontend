@@ -33,7 +33,8 @@ import Product_Stock from "./pages/Product_Stock";
 import Order_Flow_Settings from "./pages/Order_Flow_Settings";
 import Page_Permissions from "./pages/Page_Permissions";
 import UI_Labels from "./pages/UI_Labels";
-import ApprovalManagement from "./pages/Payments/ApprovalManagement";
+import PaymentsDashboard from "./pages/Payments/ApprovalManagement";
+import RequirePermission from "./components/RequirePermission";
 import Sales_Quotation from "./pages/Sales_Quotation";
 import LabelChecker from "./pages/Label_Checker";
 import NutritionManager from "./pages/Nutrition_Manager";
@@ -390,12 +391,22 @@ function App() {
         />
 
         <Route
-          path="/Approval_Management"
+          path="/Payments_Dashboard"
           element={
-            <Sidebar>
-              <ApprovalManagement />
-            </Sidebar>
+            <RequirePermission permission="Payments_Dashboard">
+              <Sidebar>
+                <PaymentsDashboard />
+              </Sidebar>
+            </RequirePermission>
           }
+        />
+
+        {/* The page was called Approval Management until it became the
+            dashboard. Redirected rather than dropped so existing bookmarks and
+            the page-permission rows that still carry the old path keep working. */}
+        <Route
+          path="/Approval_Management"
+          element={<Navigate to="/Payments_Dashboard" replace />}
         />
 
         {/* Any unknown path falls back to the dashboard instead of a blank page. */}

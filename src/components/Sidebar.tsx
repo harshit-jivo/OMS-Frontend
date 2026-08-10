@@ -4,7 +4,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   HiArrowPath,
   HiArrowRightOnRectangle,
-  HiCheckBadge,
+  HiChartPie,
   HiCalendarDays,
   HiChartBar,
   HiChevronDown,
@@ -707,14 +707,18 @@ export default function Sidebar({ children }: SidebarProps) {
             </li>
           )}
 
-          {/* Payments */}
-          {isAdmin && <li className="sidebar-section">Payments</li>}
+          {/* Payments — visible to admins and to anyone granted the
+              Payments_Dashboard permission. The server enforces the same key
+              on every analytics endpoint; this only decides the menu. */}
+          {canSee("Payments_Dashboard") && (
+            <li className="sidebar-section">Payments</li>
+          )}
 
-          {isAdmin && (
-            <li className={location.pathname === "/Approval_Management" ? "active" : ""}>
-              <Link to="/Approval_Management" onClick={closeSidebar}>
-                <SidebarIcon><HiCheckBadge /></SidebarIcon>
-                Approvals
+          {canSee("Payments_Dashboard") && (
+            <li className={location.pathname === "/Payments_Dashboard" ? "active" : ""}>
+              <Link to="/Payments_Dashboard" onClick={closeSidebar}>
+                <SidebarIcon><HiChartPie /></SidebarIcon>
+                Payments Dashboard
               </Link>
             </li>
           )}

@@ -113,8 +113,30 @@ export function useToast() {
   return { toast, flash };
 }
 
-/** Admin gate — mirrors approvals/permissions.py is_admin(). */
+/**
+ * Config-edit gate — mirrors approvals/permissions.py IsApprovalAdmin.
+ *
+ * Two ways in: an admin, or a holder of `Payments_Dashboard`. The four
+ * configuration tabs sit on the Payments Dashboard page, so a user granted that
+ * page gets the tabs that come with it — previously they rendered but every
+ * request behind them returned 403, which reads as a broken page rather than a
+ * withheld one.
+ *
+ * Read from localStorage rather than a fetch because that is where the login
+ * response already puts the grant, and because this only decides whether to
+ * DISABLE a button. The server re-checks the same key on every write, so a
+ * tampered localStorage buys a live-looking form and a 403 on save.
+ */
 export function useIsApprovalAdmin(): boolean {
   const role = (localStorage.getItem("role") || "").toLowerCase().trim();
-  return role === "admin";
+  if (role === "admin") return true;
+
+  try {
+    const stored: unknown = JSON.parse(localStorage.getItem("extra_pages") || "[]");
+    return Array.isArray(stored) && stored.map(String).includes("Payments_Dashboard");
+  } catch {
+    // Corrupt storage is no proof of a grant, so fall back to read-only —
+    // matching RequirePermission, which denies on the same failure.
+    return false;
+  }
 }

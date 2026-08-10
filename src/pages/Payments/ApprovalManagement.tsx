@@ -2,7 +2,6 @@ import { useMemo, useState } from "react";
 import {
   HiArrowPath,
   HiArrowDownTray,
-  HiCheckCircle,
   HiChevronDown,
   HiChevronUp,
   HiEye,
@@ -10,7 +9,6 @@ import {
   HiPencilSquare,
   HiPlusCircle,
   HiTrash,
-  HiXCircle,
 } from "react-icons/hi2";
 
 import ConfigTab from "./ConfigTab";
@@ -18,20 +16,15 @@ import approvalService, {
   COMPANY_OPTIONS,
   DOCUMENT_TYPE_OPTIONS,
   type ApprovalLevel,
-  type ApprovalRequest,
   type ApprovalWorkflow,
   type CollectionPerson,
   type CollectionPersonPayload,
   type Company,
-  type BankSyncMeta,
   type CompanyMapping,
-  type MethodMappingRow,
-  type SapBank,
   type CompanyMappingPayload,
   type DocumentType,
   type LevelApprover,
   type LevelPayload,
-  type RequestStatus,
   type WorkflowPayload,
 } from "../../services/approvalService";
 import {
@@ -41,10 +34,10 @@ import {
   ErrorState,
   Modal,
   SearchSelect,
-  StatusPill,
   TableSkeleton,
 } from "./ApprovalUI";
-import { formatAge, formatDateTime, formatMoney } from "./approvalFormat";
+import { formatDateTime } from "./approvalFormat";
+import AnalyticsTab from "./AnalyticsTab";
 import {
   messageFrom,
   useIsApprovalAdmin,
@@ -52,6 +45,8 @@ import {
   useToast,
 } from "./useApprovalAdmin";
 import "../../styles/Approval_Admin.css";
+import "../../styles/Payments_Dashboard.css";
+import "../../styles/Payments_Dashboard_Table.css";
 
 /**
  * Approval Workflow Management — single admin console for the Payments module.
@@ -67,26 +62,32 @@ import "../../styles/Approval_Admin.css";
  */
 
 type Tab =
-  | "overview"
+  | "analytics"
   | "workflows"
   | "levels"
   | "approvers"
-  | "requests"
   | "masters";
 
+// Analytics is first and default — the page is now a dashboard that also
+// carries its configuration, rather than a configuration console.
+//
+// The former Overview and Requests tabs are gone: Overview counted workflows
+// and pending requests, which the dashboard now reports in money terms, and
+// Requests duplicated the approval queue the operators work from in the app.
+// The four configuration tabs stay, because without them nobody can add an
+// approver, change an approval level or map a payment method to a SAP bank.
 const TABS: { id: Tab; label: string }[] = [
-  { id: "overview", label: "Overview" },
+  { id: "analytics", label: "Analytics" },
   { id: "workflows", label: "Workflows" },
   { id: "levels", label: "Levels" },
   { id: "approvers", label: "Approvers" },
-  { id: "requests", label: "Requests" },
   { id: "masters", label: "Masters" },
 ];
 
 type Flash = (text: string, kind?: "ok" | "err") => void;
 
-export default function ApprovalManagement() {
-  const [tab, setTab] = useState<Tab>("overview");
+export default function PaymentsDashboard() {
+  const [tab, setTab] = useState<Tab>("analytics");
   const { toast, flash } = useToast();
   const isAdmin = useIsApprovalAdmin();
 
@@ -113,19 +114,21 @@ export default function ApprovalManagement() {
     <div className="apv-page app-page">
       <div className="apv-header">
         <div>
-          <h1>Approval Management</h1>
+          <h1>Payments Dashboard</h1>
           <div className="apv-sub">
-            Configure approval workflows, levels and approvers for payments,
-            deposits and other documents.
+            Track and analyze payment and deposit activities.
           </div>
         </div>
       </div>
 
-      {!isAdmin && (
+      {/* Analytics is read-only for everyone, so the configuration warning
+          would be noise there. */}
+      {!isAdmin && tab !== "analytics" && (
         <div className="apv-notice apv-notice-warn">
           <span>
-            You are signed in without administrator rights. Configuration is
-            read-only — the server rejects changes from non-admin accounts.
+            Configuration is read-only for this account. Editing needs
+            administrator rights or the Payments Dashboard permission — the
+            server rejects changes without one of them.
           </span>
         </div>
       )}
@@ -145,7 +148,7 @@ export default function ApprovalManagement() {
         ))}
       </div>
 
-      {tab === "overview" && <OverviewTab workflows={workflows.data} />}
+      {tab === "analytics" && <AnalyticsTab />}
 
       {tab === "workflows" && (
         <WorkflowsTab
@@ -178,8 +181,6 @@ export default function ApprovalManagement() {
         />
       )}
 
-      {tab === "requests" && <RequestsTab flash={flash} />}
-
       {tab === "masters" && <MastersTab canEdit={isAdmin} flash={flash} />}
 
 
@@ -192,152 +193,6 @@ export default function ApprovalManagement() {
   );
 }
 
-// ===========================================================================
-// Overview
-// ===========================================================================
-
-function OverviewTab({ workflows }: { workflows: ApprovalWorkflow[] }) {
-  const requests = useResource(
-    () => approvalService.listRequests({}),
-    { results: [] as ApprovalRequest[], count: 0 },
-  );
-  const inbox = useResource(
-    () => approvalService.inbox(),
-    { results: [] as ApprovalRequest[], count: 0 },
-  );
-
-  const stats = useMemo(() => {
-    const all = requests.data.results;
-    const today = new Date().toDateString();
-    const decidedToday = (status: RequestStatus) =>
-      all.filter(
-        (r) =>
-          r.status === status &&
-          r.decided_at &&
-          new Date(r.decided_at).toDateString() === today,
-      ).length;
-
-    return {
-      totalWorkflows: workflows.length,
-      activeWorkflows: workflows.filter((w) => w.is_active).length,
-      awaitingMe: inbox.data.count,
-      pending: all.filter((r) => r.status === "PENDING").length,
-      approvedToday: decidedToday("APPROVED"),
-      rejectedToday: decidedToday("REJECTED"),
-    };
-  }, [workflows, requests.data.results, inbox.data.count]);
-
-  // A workflow with no active levels can never be satisfied — surface it here
-  // rather than letting a document deadlock after submission.
-  const brokenWorkflows = useMemo(
-    () =>
-      workflows.filter(
-        (w) => w.is_active && w.levels.filter((l) => l.is_active).length === 0,
-      ),
-    [workflows],
-  );
-
-  const recent = requests.data.results.slice(0, 8);
-
-  return (
-    <>
-      <div className="apv-stats">
-        <Stat label="Workflows" value={stats.totalWorkflows} />
-        <Stat label="Active" value={stats.activeWorkflows} tone="ok" />
-        <Stat label="Awaiting me" value={stats.awaitingMe} tone="warn" />
-        <Stat label="Pending" value={stats.pending} tone="warn" />
-        <Stat label="Approved today" value={stats.approvedToday} tone="ok" />
-        <Stat label="Rejected today" value={stats.rejectedToday} tone="err" />
-      </div>
-
-      {brokenWorkflows.length > 0 && (
-        <div className="apv-notice apv-notice-warn">
-          <span>
-            <strong>
-              {brokenWorkflows.length} active workflow
-              {brokenWorkflows.length > 1 ? "s have" : " has"} no active levels.
-            </strong>{" "}
-            Documents submitted against{" "}
-            {brokenWorkflows.length > 1 ? "them" : "it"} cannot be approved by
-            anyone. Add at least one level:{" "}
-            {brokenWorkflows.map((w) => w.code).join(", ")}
-          </span>
-        </div>
-      )}
-
-      <div className="apv-card">
-        <div className="apv-card-head">
-          <h3>Recent requests</h3>
-          <button type="button" className="apv-btn apv-btn-sm" onClick={requests.reload}>
-            <HiArrowPath /> Refresh
-          </button>
-        </div>
-
-        <div className="apv-table-wrap">
-          <table className="apv-table">
-            <thead>
-              <tr>
-                <th>Document</th>
-                <th>Type</th>
-                <th>Company</th>
-                <th className="apv-num">Amount</th>
-                <th>Level</th>
-                <th>Status</th>
-                <th>Submitted by</th>
-                <th>Age</th>
-              </tr>
-            </thead>
-            <AsyncBoundaryTable
-              loading={requests.loading}
-              error={requests.error}
-              isEmpty={recent.length === 0}
-              onRetry={requests.reload}
-              cols={8}
-              emptyTitle="No requests yet"
-              emptyHint="Approval requests appear here once a payment or deposit is submitted."
-            >
-              <tbody>
-                {recent.map((r) => (
-                  <tr key={r.id}>
-                    <td>
-                      <code>{r.document_number || `#${r.id}`}</code>
-                    </td>
-                    <td>{r.document_type}</td>
-                    <td>{r.company}</td>
-                    <td className="apv-num">{formatMoney(r.amount)}</td>
-                    <td>{r.level_label}</td>
-                    <td>
-                      <StatusPill status={r.status} label={r.status_display} />
-                    </td>
-                    <td>{r.submitted_by_name || "—"}</td>
-                    <td>{formatAge(r.submitted_at || r.created_at)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </AsyncBoundaryTable>
-          </table>
-        </div>
-      </div>
-    </>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: number;
-  tone?: "ok" | "warn" | "err";
-}) {
-  return (
-    <div className="apv-stat">
-      <div className="apv-stat-label">{label}</div>
-      <div className={`apv-stat-value${tone ? ` is-${tone}` : ""}`}>{value}</div>
-    </div>
-  );
-}
 
 /** AsyncBoundary that renders its states as a full-width table row. */
 function AsyncBoundaryTable({
@@ -1806,361 +1661,6 @@ function ApproversTab({
   );
 }
 
-// ===========================================================================
-// Requests
-// ===========================================================================
-
-function RequestsTab({ flash }: { flash: Flash }) {
-  const [status, setStatus] = useState<RequestStatus | "">("");
-  const [company, setCompany] = useState<Company | "">("");
-  const [docType, setDocType] = useState<DocumentType | "">("");
-  const [onlyMine, setOnlyMine] = useState(false);
-  const [detailId, setDetailId] = useState<number | null>(null);
-
-  const requests = useResource(
-    () =>
-      approvalService.listRequests({
-        status: status || undefined,
-        company: company || undefined,
-        document_type: docType || undefined,
-        mine: onlyMine || undefined,
-      }),
-    { results: [] as ApprovalRequest[], count: 0 },
-    [status, company, docType, onlyMine],
-  );
-
-  return (
-    <div className="apv-card">
-      <div className="apv-toolbar">
-        <select
-          className="apv-select"
-          value={status}
-          onChange={(e) => setStatus(e.target.value as RequestStatus | "")}
-          aria-label="Status"
-        >
-          <option value="">All statuses</option>
-          <option value="PENDING">Pending</option>
-          <option value="APPROVED">Approved</option>
-          <option value="REJECTED">Rejected</option>
-          <option value="CANCELLED">Cancelled</option>
-          <option value="DRAFT">Draft</option>
-        </select>
-
-        <select
-          className="apv-select"
-          value={company}
-          onChange={(e) => setCompany(e.target.value as Company | "")}
-          aria-label="Company"
-        >
-          <option value="">All companies</option>
-          {COMPANY_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-
-        <select
-          className="apv-select"
-          value={docType}
-          onChange={(e) => setDocType(e.target.value as DocumentType | "")}
-          aria-label="Document type"
-        >
-          <option value="">All document types</option>
-          {DOCUMENT_TYPE_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-
-        <label className="apv-check">
-          <input
-            type="checkbox"
-            checked={onlyMine}
-            onChange={(e) => setOnlyMine(e.target.checked)}
-          />
-          Submitted by me
-        </label>
-
-        <div className="apv-spacer" />
-        <button type="button" className="apv-btn" onClick={requests.reload}>
-          <HiArrowPath /> Refresh
-        </button>
-      </div>
-
-      <div className="apv-table-wrap">
-        <table className="apv-table">
-          <thead>
-            <tr>
-              <th>Document</th>
-              <th>Type</th>
-              <th>Company</th>
-              <th className="apv-num">Amount</th>
-              <th>Level</th>
-              <th>Status</th>
-              <th>Submitted by</th>
-              <th>Submitted</th>
-              <th>Age</th>
-              <th />
-            </tr>
-          </thead>
-          <AsyncBoundaryTable
-            loading={requests.loading}
-            error={requests.error}
-            isEmpty={requests.data.results.length === 0}
-            onRetry={requests.reload}
-            cols={10}
-            emptyTitle="No approval requests"
-            emptyHint="Requests appear here once a payment or deposit is submitted for approval."
-          >
-            <tbody>
-              {requests.data.results.map((r) => (
-                <tr key={r.id}>
-                  <td>
-                    <code>{r.document_number || `#${r.id}`}</code>
-                  </td>
-                  <td>{r.document_type}</td>
-                  <td>{r.company}</td>
-                  <td className="apv-num">{formatMoney(r.amount)}</td>
-                  <td>{r.level_label}</td>
-                  <td>
-                    <StatusPill status={r.status} label={r.status_display} />
-                  </td>
-                  <td>{r.submitted_by_name || "—"}</td>
-                  <td>{formatDateTime(r.submitted_at)}</td>
-                  <td>
-                    {r.status === "PENDING"
-                      ? formatAge(r.level_entered_at || r.submitted_at)
-                      : "—"}
-                  </td>
-                  <td>
-                    <div className="apv-row-actions">
-                      <button
-                        type="button"
-                        className="apv-btn apv-btn-sm"
-                        onClick={() => setDetailId(r.id)}
-                      >
-                        View
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </AsyncBoundaryTable>
-        </table>
-      </div>
-
-      {requests.data.count > requests.data.results.length && (
-        <div className="apv-sub" style={{ marginTop: 10 }}>
-          Showing {requests.data.results.length} of {requests.data.count} requests.
-          Narrow the filters to see more.
-        </div>
-      )}
-
-      {detailId !== null && (
-        <RequestDetailModal
-          id={detailId}
-          onClose={() => setDetailId(null)}
-          onActed={() => {
-            setDetailId(null);
-            requests.reload();
-          }}
-          flash={flash}
-        />
-      )}
-    </div>
-  );
-}
-
-function RequestDetailModal({
-  id,
-  onClose,
-  onActed,
-  flash,
-}: {
-  id: number;
-  onClose: () => void;
-  onActed: () => void;
-  flash: Flash;
-}) {
-  const detail = useResource(
-    () => approvalService.getRequest(id),
-    null as Awaited<ReturnType<typeof approvalService.getRequest>> | null,
-    [id],
-  );
-  const [remarks, setRemarks] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [showRemarksError, setShowRemarksError] = useState(false);
-
-  const req = detail.data;
-  const canAct = !!req?.can_act && req?.status === "PENDING";
-
-  const act = async (decision: "APPROVE" | "REJECT") => {
-    // The server enforces this too; catching it here gives a field-level
-    // message instead of a generic 400.
-    if (decision === "REJECT" && !remarks.trim()) {
-      setShowRemarksError(true);
-      return;
-    }
-    setBusy(true);
-    try {
-      await approvalService.act(id, decision, remarks.trim());
-      flash(decision === "APPROVE" ? "Request approved" : "Request rejected");
-      onActed();
-    } catch (err) {
-      flash(messageFrom(err, "Action failed"), "err");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Modal
-      title={
-        req ? `Request ${req.document_number || `#${req.id}`}` : "Approval request"
-      }
-      onClose={onClose}
-      wide
-      footer={
-        canAct ? (
-          <>
-            <button type="button" className="apv-btn" onClick={onClose} disabled={busy}>
-              Close
-            </button>
-            <button
-              type="button"
-              className="apv-btn apv-btn-danger"
-              onClick={() => act("REJECT")}
-              disabled={busy}
-            >
-              <HiXCircle /> Reject
-            </button>
-            <button
-              type="button"
-              className="apv-btn apv-btn-ok"
-              onClick={() => act("APPROVE")}
-              disabled={busy}
-            >
-              <HiCheckCircle /> Approve
-            </button>
-          </>
-        ) : (
-          <button type="button" className="apv-btn" onClick={onClose}>
-            Close
-          </button>
-        )
-      }
-    >
-      {detail.loading && <div className="apv-loading">Loading request…</div>}
-      {!detail.loading && detail.error && (
-        <ErrorState message={detail.error} onRetry={detail.reload} />
-      )}
-
-      {!detail.loading && !detail.error && req && (
-        <>
-          <div className="apv-detail-grid" style={{ marginBottom: 18 }}>
-            <Detail label="Status">
-              <StatusPill status={req.status} label={req.status_display} />
-            </Detail>
-            <Detail label="Stage">{req.level_label}</Detail>
-            <Detail label="Amount">{formatMoney(req.amount)}</Detail>
-            <Detail label="Company">{req.company}</Detail>
-            <Detail label="Document type">{req.document_type}</Detail>
-            <Detail label="Workflow">{req.workflow_code}</Detail>
-            <Detail label="Submitted by">{req.submitted_by_name || "—"}</Detail>
-            <Detail label="Submitted">{formatDateTime(req.submitted_at)}</Detail>
-            {req.round_number > 1 && (
-              <Detail label="Round">
-                {req.round_number} (resubmitted)
-              </Detail>
-            )}
-          </div>
-
-          <h3 style={{ fontSize: 14, margin: "0 0 12px" }}>History</h3>
-          {req.actions.length === 0 ? (
-            <EmptyState title="No actions yet" hint="Nobody has acted on this request." />
-          ) : (
-            <div className="apv-timeline">
-              {[...req.actions]
-                .sort((a, b) => a.sequence - b.sequence)
-                .map((a, i, arr) => {
-                  const tone = a.action.includes("REJECT")
-                    ? "is-err"
-                    : a.action.includes("APPROVE")
-                      ? "is-ok"
-                      : "";
-                  return (
-                    <div className="apv-tl-item" key={a.id}>
-                      <div className="apv-tl-rail">
-                        <div className={`apv-tl-dot ${tone}`} />
-                        {i < arr.length - 1 && <div className="apv-tl-line" />}
-                      </div>
-                      <div className="apv-tl-body">
-                        <div className="apv-tl-title">
-                          {a.action_display}
-                          {a.level_name ? ` — ${a.level_name}` : ""}
-                        </div>
-                        <div className="apv-tl-meta">
-                          {a.approver_username || "system"}
-                          {a.approver_role ? ` (${a.approver_role})` : ""} ·{" "}
-                          {formatDateTime(a.acted_at)}
-                          {a.round_number > 1 ? ` · round ${a.round_number}` : ""}
-                        </div>
-                        {a.remarks && (
-                          <div className="apv-tl-remarks">{a.remarks}</div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-            </div>
-          )}
-
-          {canAct && (
-            <div className="apv-field is-full" style={{ marginTop: 18 }}>
-              <label htmlFor="act-remarks">Remarks</label>
-              <textarea
-                id="act-remarks"
-                className="apv-textarea"
-                value={remarks}
-                onChange={(e) => {
-                  setRemarks(e.target.value);
-                  if (e.target.value.trim()) setShowRemarksError(false);
-                }}
-                placeholder="Optional when approving. Required when rejecting."
-              />
-              {showRemarksError && (
-                <span className="apv-err-text">
-                  Remarks are mandatory when rejecting.
-                </span>
-              )}
-            </div>
-          )}
-
-          {!canAct && req.status === "PENDING" && (
-            <div className="apv-notice apv-notice-info" style={{ marginTop: 18 }}>
-              <span>
-                This request is waiting at {req.level_label}, but you are not an
-                eligible approver for that level.
-              </span>
-            </div>
-          )}
-        </>
-      )}
-    </Modal>
-  );
-}
-
-function Detail({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <div className="apv-detail-label">{label}</div>
-      <div className="apv-detail-value">{children}</div>
-    </div>
-  );
-}
 
 // ===========================================================================
 // Masters

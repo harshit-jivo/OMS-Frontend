@@ -42,10 +42,15 @@ export const GRANTABLE_PAGE_KEYS = GRANTABLE_ADMIN_PAGES.map((page) => page.key)
 // (raising a receipt, deciding an approval), not a web route. Recording and
 // approving both happen on mobile; the web side only configures the workflow.
 export const PAYMENT_ACTION_PERMISSIONS: GrantablePage[] = [
-  { key: "Payments_Create", label: "Payments — Create", path: "/Approval_Management" },
-  { key: "Payments_Approve", label: "Payments — Approve", path: "/Approval_Management" },
-  { key: "Deposit_Create", label: "Deposit — Create", path: "/Approval_Management" },
-  { key: "Deposit_Approve", label: "Deposit — Approve", path: "/Approval_Management" },
+  { key: "Payments_Create", label: "Payments — Create", path: "/Payments_Dashboard" },
+  { key: "Payments_Approve", label: "Payments — Approve", path: "/Payments_Dashboard" },
+  { key: "Deposit_Create", label: "Deposit — Create", path: "/Payments_Dashboard" },
+  { key: "Deposit_Approve", label: "Deposit — Approve", path: "/Payments_Dashboard" },
+  // Unlike the four above, this one DOES open a page — the analytics dashboard
+  // on web and mobile. It is deliberately not implied by any of them: the
+  // people who record and approve payments are not automatically the people
+  // who should see company-wide collection totals.
+  { key: "Payments_Dashboard", label: "Payments Dashboard", path: "/Payments_Dashboard" },
 ];
 
 export const PAYMENT_ACTION_KEYS = PAYMENT_ACTION_PERMISSIONS.map((p) => p.key);
