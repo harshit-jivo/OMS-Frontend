@@ -78,6 +78,21 @@ type Notification = {
   created_at: string;
 };
 
+/**
+ * Window events that ask the bell to re-count.
+ *
+ * Two spellings exist in the codebase and both are dispatched in practice:
+ * `ordersService` uses the camelCase name, while the auditor / billing /
+ * rate-approver pages use the hyphenated one. Only camelCase was ever
+ * listened for, so those pages' refreshes were silently lost. Accepting both
+ * is the smallest correct fix and removes the chance of the same mismatch
+ * recurring.
+ */
+const REFRESH_EVENT_NAMES = [
+  "refreshNotifications",
+  "refresh-notifications",
+] as const;
+
 const SidebarIcon = ({ children }: { children: ReactNode }) => (
   <span className="sb-nav-icon" aria-hidden="true">
     {children}
@@ -361,7 +376,15 @@ export default function Sidebar({ children }: SidebarProps) {
 
     const handleRefresh = () => fetchNotifications();
     const handleFocus = () => fetchNotifications();
-    window.addEventListener("refreshNotifications", handleRefresh);
+    // Both spellings are honoured deliberately. Order pages dispatch the
+    // hyphenated name (Auditor_Order, Billing_Order, Rate_Approver_Order) while
+    // ordersService dispatches the camelCase one; only the latter was listened
+    // for, so those pages' badge refreshes silently did nothing. Listening for
+    // both fixes them without editing every dispatcher, and keeps working if a
+    // future page picks either spelling.
+    REFRESH_EVENT_NAMES.forEach((name) =>
+      window.addEventListener(name, handleRefresh),
+    );
     window.addEventListener("focus", handleFocus);
 
     (async () => {
@@ -385,7 +408,9 @@ export default function Sidebar({ children }: SidebarProps) {
 
     return () => {
       off();
-      window.removeEventListener("refreshNotifications", handleRefresh);
+      REFRESH_EVENT_NAMES.forEach((name) =>
+        window.removeEventListener(name, handleRefresh),
+      );
       window.removeEventListener("focus", handleFocus);
       if (interval) window.clearInterval(interval);
     };
