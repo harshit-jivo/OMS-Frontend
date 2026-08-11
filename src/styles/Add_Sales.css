@@ -83,6 +83,24 @@ color: #dc2626;
 font-weight: 700;
 }
 
+/* a native select sitting in the same shell as the text inputs */
+.sl-input-wrap select {
+width: 100%;
+height: 100%;
+border: none;
+outline: none;
+background: transparent;
+font-size: var(--font-ui, 13px);
+color: #0f172a;
+cursor: pointer;
+}
+
+.sl-field-note {
+margin-top: 4px;
+font-size: 11.5px;
+color: #94a3b8;
+}
+
 /* ================= INPUT WRAP ================= */
 .sl-input-wrap {
 border: 1px solid #d1d5db; 

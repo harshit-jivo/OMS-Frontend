@@ -1,8 +1,7 @@
-/* Scheme Manager — calm, progressive-disclosure layout.
-   The page holds a lot of concepts (triggers, benefits, targeting, dry-run),
-   so nothing is shown at full detail until it is asked for: the list is one
-   line per scheme, the editor lives in a drawer, and the vendor tools sit
-   behind their own tab. */
+/* Scheme Manager — plain-language, progressive disclosure.
+   The list is one sentence per scheme; everything that needs a form lives in a
+   drawer, and the editor is written as a sentence you fill in rather than a
+   grid of jargon fields. */
 
 .sch-page {
   --sch-line: #e6ecf4;
@@ -14,46 +13,45 @@
 
 .sch-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 24px;
+  gap: 16px;
   flex-wrap: wrap;
-  margin: 4px 0 18px;
+  margin: 4px 0 16px;
 }
 
 .sch-head h1 {
-  margin: 10px 0 0;
-  font-size: 26px;
+  margin: 0;
+  font-size: 24px;
   font-weight: 800;
   letter-spacing: -0.025em;
   color: var(--app-text);
 }
 
-.sch-sub {
-  margin: 6px 0 0;
-  max-width: 62ch;
-  font-size: 13px;
-  line-height: 1.6;
-  color: var(--app-muted);
+.sch-head-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
+/* collapsible — used for the editor's rare settings */
+
 .sch-learn {
-  margin-top: 10px;
+  margin-top: 4px;
   border: 1px solid var(--sch-line);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.7);
-  max-width: 72ch;
+  background: var(--sch-soft);
   overflow: hidden;
 }
 
 .sch-learn > summary {
   cursor: pointer;
   list-style: none;
-  padding: 9px 14px;
-  font-size: 12px;
+  padding: 11px 14px;
+  font-size: 12.5px;
   font-weight: 700;
   letter-spacing: 0.02em;
-  color: var(--app-accent-dark);
+  color: #64748b;
 }
 
 .sch-learn > summary::-webkit-details-marker { display: none; }
@@ -66,85 +64,10 @@
 .sch-learn[open] > summary::before { content: "−  "; }
 
 .sch-learn-body {
-  padding: 0 14px 14px;
+  padding: 0 14px 16px;
   font-size: 13px;
   line-height: 1.7;
   color: #475569;
-}
-
-.sch-learn-body p { margin: 0 0 8px; }
-.sch-learn-body p:last-child { margin-bottom: 0; }
-
-/* stats */
-
-.sch-stats {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.sch-stat {
-  min-width: 104px;
-  padding: 10px 14px;
-  border: 1px solid var(--sch-line);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.92);
-}
-
-.sch-stat-n {
-  display: block;
-  font-size: 22px;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-  color: var(--app-text);
-  line-height: 1.1;
-}
-
-.sch-stat-l {
-  display: block;
-  margin-top: 2px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: #94a3b8;
-}
-
-.sch-stat.is-warn .sch-stat-n { color: #b45309; }
-
-/* ── tabs ───────────────────────────────────────────────────────────── */
-
-.sch-tabs {
-  display: flex;
-  gap: 4px;
-  padding: 4px;
-  margin-bottom: 16px;
-  width: fit-content;
-  max-width: 100%;
-  border: 1px solid var(--sch-line);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.85);
-}
-
-.sch-tab {
-  border: none;
-  background: transparent;
-  padding: 8px 18px;
-  border-radius: 999px;
-  font-size: 13px;
-  font-weight: 600;
-  color: #64748b;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-  white-space: nowrap;
-}
-
-.sch-tab:hover { color: var(--app-text); }
-
-.sch-tab.is-active {
-  background: var(--app-accent);
-  color: #fff;
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.28);
 }
 
 /* ── toolbar ────────────────────────────────────────────────────────── */
@@ -186,11 +109,7 @@
   font-size: 13px;
   color: var(--app-text);
   box-sizing: border-box;
-}
-
-.sch-toolbar-spacer { flex: 1 1 0; }
-
-.sch-toolbar-select { width: auto; min-width: 150px; }
+}.sch-toolbar-select { width: auto; min-width: 150px; }
 
 /* ── generic controls ───────────────────────────────────────────────── */
 
@@ -250,8 +169,7 @@
 .sch-check input { accent-color: var(--app-accent); width: 15px; height: 15px; }
 
 .sch-btn,
-.sch-btn-primary,
-.sch-btn-danger {
+.sch-btn-primary {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -282,17 +200,8 @@
 
 .sch-btn-primary:hover:not(:disabled) { background: #1d4ed8; }
 
-.sch-btn-danger {
-  border: 1px solid #f6d4d4;
-  background: #fff;
-  color: #b91c1c;
-}
-
-.sch-btn-danger:hover:not(:disabled) { background: #fef2f2; }
-
 .sch-btn:disabled,
-.sch-btn-primary:disabled,
-.sch-btn-danger:disabled {
+.sch-btn-primary:disabled {
   opacity: 0.5;
   cursor: not-allowed;
   box-shadow: none;
@@ -463,6 +372,8 @@
 
 .sch-row-sum strong { color: #047857; font-weight: 600; }
 
+.sch-block li.muted { color: #94a3b8; font-size: 12.5px; }
+
 .sch-row-side {
   flex: none;
   display: flex;
@@ -473,22 +384,13 @@
 .sch-reach {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
   font-size: 12px;
   color: #64748b;
-}
-
-.sch-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #22c55e;
-}
-
-.sch-dot.warn { background: #f59e0b; }
-.sch-dot.off { background: #cbd5e1; }
-
-/* expanded detail */
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}/* expanded detail */
 
 .sch-detail {
   padding: 4px 18px 20px 46px;
@@ -538,37 +440,6 @@
   padding-top: 14px;
   border-top: 1px solid var(--sch-line);
 }
-
-/* targeting panel inside a row */
-
-.sch-target {
-  margin-top: 14px;
-  padding: 16px;
-  border: 1px solid #dbe9ff;
-  border-radius: 14px;
-  background: #f6faff;
-}
-
-.sch-target-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-  gap: 12px;
-  align-items: end;
-}
-
-.sch-target-list { margin-top: 14px; }
-
-.sch-target-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 0;
-  font-size: 13px;
-  color: #334155;
-}
-
-.sch-target-row + .sch-target-row { border-top: 1px solid #e6eefb; }
 
 /* ── states ─────────────────────────────────────────────────────────── */
 
@@ -683,27 +554,7 @@
 /* drawer sections */
 
 .sch-section { padding: 20px 0; }
-.sch-section + .sch-section { border-top: 1px solid var(--sch-line); }
-
-.sch-section-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-bottom: 12px;
-}
-
-.sch-section-head h3 {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--app-text);
-}
-
-.sch-section-head p { margin: 3px 0 0; font-size: 12px; color: #94a3b8; }
-
-.sch-grid {
+.sch-section + .sch-section { border-top: 1px solid var(--sch-line); }.sch-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 14px;
@@ -711,33 +562,7 @@
 
 .sch-grid.tight { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
 
-.sch-span-2 { grid-column: 1 / -1; }
-
-.sch-rowbox {
-  border: 1px solid var(--sch-line);
-  border-radius: 14px;
-  padding: 14px;
-  background: var(--sch-soft);
-}
-
-.sch-rowbox + .sch-rowbox { margin-top: 10px; }
-
-.sch-rowbox-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid #e9eef6;
-  font-size: 12px;
-  color: #64748b;
-}
-
-.sch-inline { display: flex; gap: 6px; }
-.sch-inline .sch-select { width: 92px; flex: none; }
-
-.sch-toggles {
+.sch-span-2 { grid-column: 1 / -1; }.sch-toggles {
   display: flex;
   gap: 18px;
   flex-wrap: wrap;
@@ -809,34 +634,7 @@
 .sch-picker-opt .muted { color: #94a3b8; font-weight: 400; }
 .sch-picker-empty { padding: 16px; font-size: 13px; color: #94a3b8; }
 
-/* ── vendor check tab ───────────────────────────────────────────────── */
-
-.sch-panel {
-  border: 1px solid var(--sch-line);
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.94);
-  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.04);
-  padding: 22px;
-}
-
-.sch-panel + .sch-panel { margin-top: 16px; }
-
-.sch-panel-head { margin-bottom: 16px; }
-
-.sch-panel-head h2 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--app-text);
-}
-
-.sch-panel-head p {
-  margin: 5px 0 0;
-  max-width: 68ch;
-  font-size: 13px;
-  line-height: 1.6;
-  color: var(--app-muted);
-}
+/* ── vendor check results ───────────────────────────────────────────── */
 
 .sch-result {
   border: 1px solid var(--sch-line);
@@ -860,6 +658,125 @@
 .sch-result-line { margin-top: 6px; font-size: 13px; color: #334155; }
 .sch-result-line.give { color: #047857; font-weight: 600; }
 .sch-result-meta { margin-top: 5px; font-size: 12px; color: #94a3b8; }
+
+/* ── the editor, written as a sentence ──────────────────────────────── */
+
+.sch-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.sch-step-n {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--app-accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.sch-step h3 {
+  margin: 2px 0 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--app-text);
+}
+
+.sch-step p { margin: 3px 0 0; font-size: 12.5px; color: #94a3b8; }
+
+/* One rule = one line of readable English with the inputs sitting in it. */
+.sch-sentence {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  border: 1px solid var(--sch-line);
+  border-radius: 12px;
+  background: var(--sch-soft);
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: #475569;
+}
+
+.sch-word {
+  color: #64748b;
+  white-space: nowrap;
+}
+
+.sch-sentence .sch-input,
+.sch-sentence .sch-select,
+.sch-sentence .sch-picker-trigger {
+  height: 34px;
+  background: #fff;
+}
+
+.sch-w-qty { width: 74px; flex: none; }
+.sch-w-uom { width: 104px; flex: none; }
+.sch-w-mode { width: 108px; flex: none; }
+.sch-w-match { width: 132px; flex: none; }
+
+.sch-w-value {
+  flex: 1 1 190px;
+  min-width: 160px;
+}
+
+.sch-x-sm {
+  width: 26px;
+  height: 26px;
+  font-size: 15px;
+  margin-left: auto;
+}
+
+.sch-add {
+  border: 1px dashed #cbd5e1;
+  background: transparent;
+  border-radius: 10px;
+  padding: 7px 13px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #64748b;
+  cursor: pointer;
+}
+
+.sch-add:hover { border-color: var(--app-accent); color: var(--app-accent-dark); }
+
+.sch-mt { margin-top: 22px; }
+
+/* Reads the whole rule back in the same words the list will use. */
+.sch-readback {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #f2f8f5;
+  border: 1px solid #cfe8dc;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #35624f;
+}
+
+.sch-readback strong { color: #047857; }
+
+.sch-empty-inline {
+  padding: 12px 14px;
+  border: 1px dashed #e2e8f0;
+  border-radius: 12px;
+  font-size: 13px;
+  color: #94a3b8;
+  margin-bottom: 8px;
+}
+
+.sch-missing {
+  font-size: 12.5px;
+  color: #b45309;
+}
 
 @media (max-width: 700px) {
   .sch-detail { padding-left: 18px; }
