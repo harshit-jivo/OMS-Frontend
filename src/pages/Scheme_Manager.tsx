@@ -33,6 +33,7 @@ import "../styles/Scheme_Manager.css";
 type StateOption = { id: number; name: string; code: string };
 type PartyOption = { card_code: string; card_name: string };
 type MainGroupOption = { id: number; name: string };
+type CatalogueItem = { item_code: string; item_name: string; category?: string };
 
 const CATEGORIES = ["OIL", "BEVERAGES", "MART"];
 
@@ -43,6 +44,10 @@ const apiErrorText = (error: unknown, fallback: string) => {
   if (data?.errors) return `${fallback}: ${JSON.stringify(data.errors)}`;
   return data?.message || fallback;
 };
+
+// ---------------------------------------------------------------------------
+// icons
+// ---------------------------------------------------------------------------
 
 const CaretIcon = () => (
   <svg className="sch-caret" width="14" height="14" viewBox="0 0 16 16" fill="none">
@@ -74,12 +79,10 @@ const SearchIcon = () => (
 
 // ---------------------------------------------------------------------------
 
-type CatalogueItem = { item_code: string; item_name: string; category?: string };
-
 /**
  * Searchable product picker.
  *
- * Schemes are configured by people who know products by name, not by FG code, so
+ * Schemes are set up by people who know products by name, not by FG code, so
  * every item field on this page is one of these. The stored value is still the
  * item_code — that is what the engine matches on — but it is never typed.
  */
@@ -87,7 +90,7 @@ function ItemPicker({
   value,
   products,
   onChange,
-  placeholder = "Search item...",
+  placeholder = "search item...",
   allowClear = false,
   clearLabel = "— none —",
 }: {
@@ -206,12 +209,11 @@ export default function Scheme_Manager() {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [search, setSearch] = useState("");
-  const [includeInactive, setIncludeInactive] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState("");
+  const [includeInactive, setIncludeInactive] = useState(false);
   const [notice, setNotice] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
-  const [tab, setTab] = useState<"schemes" | "check">("schemes");
 
-  // Reference data for the targeting pickers.
+  // Reference data for the "who gets it" pickers.
   const [states, setStates] = useState<StateOption[]>([]);
   const [parties, setParties] = useState<PartyOption[]>([]);
   const [mainGroups, setMainGroups] = useState<MainGroupOption[]>([]);
@@ -228,13 +230,11 @@ export default function Scheme_Manager() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [draft, setDraft] = useState<SchemeWritePayload>(emptyScheme());
   const [isSaving, setIsSaving] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   // One row expanded at a time keeps the list scannable.
   const [expandedId, setExpandedId] = useState<number | null>(null);
-
-  // Targeting panel, one scheme at a time.
-  const [targetingId, setTargetingId] = useState<number | null>(null);
-  const [assignmentDraft, setAssignmentDraft] = useState<SchemeAssignment>(emptyAssignment());
+  const [checkOpen, setCheckOpen] = useState(false);
 
   const loadSchemes = async (
     overrides: { search?: string; includeInactive?: boolean; category?: string } = {},
@@ -312,23 +312,24 @@ export default function Scheme_Manager() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Close the drawer on Escape — it covers the page, so it needs a way out
-  // that is not the mouse.
+  // Escape closes whichever drawer is open — both cover the page.
   useEffect(() => {
-    if (editingId === null) return;
+    if (editingId === null && !checkOpen) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") closeEditor();
+      if (event.key !== "Escape") return;
+      if (editingId !== null) closeEditor();
+      else setCheckOpen(false);
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [editingId]);
+  }, [editingId, checkOpen]);
 
   // -- editor -------------------------------------------------------------
 
   const openNew = () => {
     setEditingId(0);
     setDraft(emptyScheme());
-    setTargetingId(null);
+    setShowAdvanced(false);
     setNotice(null);
   };
 
@@ -348,7 +349,7 @@ export default function Scheme_Manager() {
       triggers: scheme.triggers.length ? scheme.triggers : [emptyTrigger()],
       assignments: scheme.assignments,
     });
-    setTargetingId(null);
+    setShowAdvanced(false);
     setNotice(null);
   };
 
@@ -372,12 +373,25 @@ export default function Scheme_Manager() {
       benefits: prev.benefits.map((row, i) => (i === index ? { ...row, ...patch } : row)),
     }));
 
-  const canSave =
-    draft.code.trim().length > 0 &&
-    draft.name.trim().length > 0 &&
-    draft.triggers.length > 0 &&
-    draft.benefits.length > 0 &&
-    draft.triggers.every((t) => t.match_type === "ALL" || t.match_value.trim().length > 0);
+  const patchAssignment = (index: number, patch: Partial<SchemeAssignment>) =>
+    setDraft((prev) => ({
+      ...prev,
+      assignments: prev.assignments.map((row, i) => (i === index ? { ...row, ...patch } : row)),
+    }));
+
+  /** What is still missing before this can be saved, in plain words. */
+  const missing = useMemo(() => {
+    const gaps: string[] = [];
+    if (!draft.name.trim()) gaps.push("a name");
+    if (!draft.code.trim()) gaps.push("a short code");
+    if (draft.triggers.some((t) => t.match_type !== "ALL" && !t.match_value.trim()))
+      gaps.push("what earns it");
+    if (draft.assignments.some((a) => a.scope_type !== "ALL" && !a.scope_value.trim()))
+      gaps.push("who each rule sends it to");
+    return gaps;
+  }, [draft]);
+
+  const canSave = missing.length === 0;
 
   const saveScheme = async () => {
     setIsSaving(true);
@@ -385,12 +399,14 @@ export default function Scheme_Manager() {
     try {
       if (editingId) {
         await schemeService.update(editingId, draft);
-        setNotice({ tone: "ok", text: "Scheme updated" });
+        setNotice({ tone: "ok", text: "Saved" });
       } else {
         const created = await schemeService.create(draft);
         setNotice({
           tone: "ok",
-          text: `Scheme created. It reaches nobody until you target it — use "Targeting" on ${created.code}.`,
+          text: draft.assignments.length
+            ? `${created.code} created and live.`
+            : `${created.code} created — it reaches nobody until you say who gets it.`,
         });
       }
       closeEditor();
@@ -404,7 +420,7 @@ export default function Scheme_Manager() {
   };
 
   const deactivate = async (scheme: Scheme) => {
-    if (!window.confirm(`Deactivate "${scheme.name}"? It stops applying everywhere, reversibly.`))
+    if (!window.confirm(`Turn "${scheme.name}" off? It stops applying everywhere, reversibly.`))
       return;
     setNotice(null);
     try {
@@ -413,19 +429,19 @@ export default function Scheme_Manager() {
       await loadSchemes();
     } catch (error) {
       console.error("Error deactivating scheme:", error);
-      setNotice({ tone: "error", text: apiErrorText(error, "Could not deactivate the scheme") });
+      setNotice({ tone: "error", text: apiErrorText(error, "Could not turn the scheme off") });
     }
   };
 
   /**
    * Hard delete, straight from the row. The API refuses it when an order line
    * already references the scheme — what was given away has to stay on record —
-   * so a refusal is reported as-is and Deactivate remains the way out.
+   * so a refusal is reported as-is and turning it off remains the way out.
    */
   const deleteScheme = async (scheme: Scheme) => {
     if (
       !window.confirm(
-        `Delete "${scheme.name}" permanently? This cannot be undone. If any order has already used it, deactivate it instead.`,
+        `Delete "${scheme.name}" permanently? This cannot be undone. If any order has already used it, turn it off instead.`,
       )
     )
       return;
@@ -437,12 +453,11 @@ export default function Scheme_Manager() {
           tone: "error",
           text:
             response.message ||
-            `Cannot delete — ${response.used_by_order_lines ?? "some"} order line(s) use this scheme. Deactivate it instead.`,
+            `Cannot delete — ${response.used_by_order_lines ?? "some"} order line(s) use this. Turn it off instead.`,
         });
         return;
       }
       if (expandedId === scheme.id) setExpandedId(null);
-      if (targetingId === scheme.id) setTargetingId(null);
       setNotice({ tone: "ok", text: response.message || `Deleted ${scheme.code}` });
       await loadSchemes();
     } catch (error) {
@@ -451,48 +466,9 @@ export default function Scheme_Manager() {
     }
   };
 
-  // -- targeting ----------------------------------------------------------
-
-  const openTargeting = (scheme: Scheme) => {
-    setTargetingId(targetingId === scheme.id ? null : scheme.id);
-    setAssignmentDraft(emptyAssignment());
-    setEditingId(null);
-    setNotice(null);
-  };
-
-  const addAssignment = async (schemeId: number) => {
-    if (assignmentDraft.scope_type !== "ALL" && !assignmentDraft.scope_value.trim()) {
-      setNotice({ tone: "error", text: "Pick who this scheme should reach." });
-      return;
-    }
-    setNotice(null);
-    try {
-      await schemeService.saveAssignments(schemeId, assignmentDraft);
-      setAssignmentDraft(emptyAssignment());
-      await loadSchemes();
-      setNotice({ tone: "ok", text: "Targeting saved" });
-    } catch (error) {
-      console.error("Error saving assignment:", error);
-      setNotice({ tone: "error", text: apiErrorText(error, "Could not save the targeting") });
-    }
-  };
-
-  const removeAssignment = async (schemeId: number, assignment: SchemeAssignment) => {
-    if (!assignment.id) return;
-    if (!window.confirm(`Remove targeting "${describeScope(assignment)}"?`)) return;
-    try {
-      await schemeService.removeAssignment(schemeId, assignment.id);
-      await loadSchemes();
-      setNotice({ tone: "ok", text: "Targeting removed" });
-    } catch (error) {
-      console.error("Error removing assignment:", error);
-      setNotice({ tone: "error", text: apiErrorText(error, "Could not remove the targeting") });
-    }
-  };
-
-  /** Options for the scope_value picker, by scope type. */
-  const scopeOptions = useMemo(() => {
-    switch (assignmentDraft.scope_type) {
+  /** Options for one rule's target picker, by the kind of target chosen. */
+  const targetOptions = (scopeType: ScopeType) => {
+    switch (scopeType) {
       case "STATE":
         return states.map((s) => ({ value: s.code, label: `${s.name} (${s.code})` }));
       case "PARTY":
@@ -504,77 +480,24 @@ export default function Scheme_Manager() {
       default:
         return [];
     }
-  }, [assignmentDraft.scope_type, states, parties, mainGroups]);
+  };
 
   const editingScheme = editingId ? schemes.find((s) => s.id === editingId) : null;
-
-  const stats = useMemo(() => {
-    const active = schemes.filter((s) => s.is_active).length;
-    const untargeted = schemes.filter((s) => s.assignments.length === 0).length;
-    return { total: schemes.length, active, untargeted };
-  }, [schemes]);
 
   return (
     <div className="sch-page app-page">
       {/* ---- header -------------------------------------------------- */}
       <header className="sch-head">
-        <div>
-          <span className="app-chip">Offers</span>
-          <h1>Schemes</h1>
-          <p className="sch-sub">
-            Set up an offer, then choose who it reaches. Everything else stays out of the way until
-            you open it.
-          </p>
-
-          <details className="sch-learn">
-            <summary>How a scheme works</summary>
-            <div className="sch-learn-body">
-              <p>
-                A scheme is an offer, and it reaches vendors through <strong>targeting</strong> —
-                one row for a single vendor, or one row for an entire state.
-              </p>
-              <p>
-                <strong>Triggers</strong> say what earns it; <strong>benefits</strong> say what is
-                given away. For a 1+1 combo, a trigger set to <em>Free (combo) line</em> sizes the
-                giveaway off the pack's free half.
-              </p>
-            </div>
-          </details>
-        </div>
-
-        <div className="sch-stats">
-          <div className="sch-stat">
-            <span className="sch-stat-n">{stats.total}</span>
-            <span className="sch-stat-l">Listed</span>
-          </div>
-          <div className="sch-stat">
-            <span className="sch-stat-n">{stats.active}</span>
-            <span className="sch-stat-l">Active</span>
-          </div>
-          <div className={`sch-stat${stats.untargeted ? " is-warn" : ""}`}>
-            <span className="sch-stat-n">{stats.untargeted}</span>
-            <span className="sch-stat-l">Untargeted</span>
-          </div>
+        <h1>Schemes</h1>
+        <div className="sch-head-actions">
+          <button type="button" className="sch-btn" onClick={() => setCheckOpen(true)}>
+            Check a vendor
+          </button>
+          <button type="button" className="sch-btn-primary" onClick={openNew}>
+            + New scheme
+          </button>
         </div>
       </header>
-
-      {/* ---- tabs ---------------------------------------------------- */}
-      <div className="sch-tabs">
-        <button
-          type="button"
-          className={`sch-tab${tab === "schemes" ? " is-active" : ""}`}
-          onClick={() => setTab("schemes")}
-        >
-          Schemes
-        </button>
-        <button
-          type="button"
-          className={`sch-tab${tab === "check" ? " is-active" : ""}`}
-          onClick={() => setTab("check")}
-        >
-          Check a vendor
-        </button>
-      </div>
 
       {notice && (
         <div className={`sch-notice ${notice.tone}`}>
@@ -585,389 +508,237 @@ export default function Scheme_Manager() {
         </div>
       )}
 
-      {tab === "schemes" ? (
-        <>
-          {/* ---- toolbar --------------------------------------------- */}
-          <div className="sch-toolbar">
-            <div className="sch-search">
-              <SearchIcon />
-              <input
-                type="text"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                onKeyDown={(event) => event.key === "Enter" && loadSchemes()}
-                placeholder="Search by code or name..."
-              />
-            </div>
-            <select
-              className="sch-select sch-toolbar-select"
-              value={categoryFilter}
-              onChange={(event) => {
-                setCategoryFilter(event.target.value);
-                void loadSchemes({ category: event.target.value });
-              }}
-            >
-              <option value="">All categories</option>
-              {CATEGORIES.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
+      {/* ---- toolbar ------------------------------------------------- */}
+      <div className="sch-toolbar">
+        <div className="sch-search">
+          <SearchIcon />
+          <input
+            type="text"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            onKeyDown={(event) => event.key === "Enter" && loadSchemes()}
+            onBlur={() => loadSchemes()}
+            placeholder="Search schemes..."
+          />
+        </div>
+        <select
+          className="sch-select sch-toolbar-select"
+          value={categoryFilter}
+          onChange={(event) => {
+            setCategoryFilter(event.target.value);
+            void loadSchemes({ category: event.target.value });
+          }}
+        >
+          <option value="">All categories</option>
+          {CATEGORIES.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </select>
+        <label className="sch-check">
+          <input
+            type="checkbox"
+            checked={includeInactive}
+            onChange={(event) => {
+              setIncludeInactive(event.target.checked);
+              void loadSchemes({ includeInactive: event.target.checked });
+            }}
+          />
+          Show turned-off
+        </label>
+      </div>
+
+      {/* ---- list ---------------------------------------------------- */}
+      <div className="sch-list">
+        {isLoading ? (
+          <div style={{ padding: "8px 0" }}>
+            <div className="sch-skeleton" />
+            <div className="sch-skeleton" />
+            <div className="sch-skeleton" />
+          </div>
+        ) : loadError ? (
+          <div className="sch-state error">
+            <h3>Could not load schemes</h3>
+            <p>{loadError}</p>
             <button type="button" className="sch-btn" onClick={() => loadSchemes()}>
-              Search
+              Try again
             </button>
-            <label className="sch-check">
-              <input
-                type="checkbox"
-                checked={includeInactive}
-                onChange={(event) => {
-                  setIncludeInactive(event.target.checked);
-                  void loadSchemes({ includeInactive: event.target.checked });
-                }}
-              />
-              Include inactive
-            </label>
-            <div className="sch-toolbar-spacer" />
+          </div>
+        ) : schemes.length === 0 ? (
+          <div className="sch-state">
+            <h3>No schemes yet</h3>
+            <p>A scheme is an offer: what a vendor has to buy, and what they get free.</p>
             <button type="button" className="sch-btn-primary" onClick={openNew}>
               + New scheme
             </button>
           </div>
+        ) : (
+          schemes.map((scheme) => {
+            const isOpen = expandedId === scheme.id;
+            const grants = scheme.assignments.filter((a) => !a.is_exclusion);
+            const exclusions = scheme.assignments.filter((a) => a.is_exclusion);
+            const buy = scheme.triggers[0]
+              ? describeTrigger(scheme.triggers[0], itemNameOf)
+              : "no rule set";
+            const get = scheme.benefits[0]
+              ? describeBenefit(scheme.benefits[0], itemNameOf)
+              : "nothing set";
+            const extras =
+              scheme.triggers.length + scheme.benefits.length - 2;
 
-          {/* ---- list ------------------------------------------------ */}
-          <div className="sch-list">
-            {isLoading ? (
-              <div style={{ padding: "8px 0" }}>
-                <div className="sch-skeleton" />
-                <div className="sch-skeleton" />
-                <div className="sch-skeleton" />
-              </div>
-            ) : loadError ? (
-              <div className="sch-state error">
-                <h3>Could not load schemes</h3>
-                <p>{loadError}</p>
-                <button type="button" className="sch-btn" onClick={() => loadSchemes()}>
-                  Try again
-                </button>
-              </div>
-            ) : schemes.length === 0 ? (
-              <div className="sch-state">
-                <h3>No schemes yet</h3>
-                <p>Create one, then target it at a vendor or a state.</p>
-                <button type="button" className="sch-btn-primary" onClick={openNew}>
-                  + New scheme
-                </button>
-              </div>
-            ) : (
-              schemes.map((scheme) => {
-                const grants = scheme.assignments.filter((a) => !a.is_exclusion);
-                const exclusions = scheme.assignments.filter((a) => a.is_exclusion);
-                const isTargeting = targetingId === scheme.id;
-                const isOpen = expandedId === scheme.id;
-                const headline = scheme.benefits[0]
-                  ? describeBenefit(scheme.benefits[0], itemNameOf)
-                  : "No benefit set";
-                const earns = scheme.triggers[0]
-                  ? describeTrigger(scheme.triggers[0], itemNameOf)
-                  : "No trigger set";
-
-                return (
-                  <div
-                    key={scheme.id}
-                    className={[
-                      "sch-item",
-                      isOpen ? "is-open" : "",
-                      scheme.is_active ? "" : "is-inactive",
-                    ]
-                      .filter(Boolean)
-                      .join(" ")}
+            return (
+              <div
+                key={scheme.id}
+                className={[
+                  "sch-item",
+                  isOpen ? "is-open" : "",
+                  scheme.is_active ? "" : "is-inactive",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+              >
+                <div className="sch-row">
+                  <button
+                    type="button"
+                    className="sch-row-open"
+                    onClick={() => setExpandedId(isOpen ? null : scheme.id)}
+                    aria-expanded={isOpen}
                   >
-                    <div className="sch-row">
-                      <button
-                        type="button"
-                        className="sch-row-open"
-                        onClick={() => {
-                          setExpandedId(isOpen ? null : scheme.id);
-                          if (isOpen) setTargetingId(null);
-                        }}
-                        aria-expanded={isOpen}
-                      >
-                      <CaretIcon />
-                      <div className="sch-row-main">
-                        <div className="sch-row-title">
-                          <span className="sch-row-name">{scheme.name}</span>
-                          <span className="sch-chip code">{scheme.code}</span>
-                          {scheme.category ? (
-                            <span className="sch-chip green">{scheme.category}</span>
-                          ) : (
-                            <span className="sch-chip">All categories</span>
-                          )}
-                          {!scheme.is_active && <span className="sch-chip red">Inactive</span>}
-                          {scheme.stackable && <span className="sch-chip blue">Stackable</span>}
-                        </div>
-                        <div className="sch-row-sum">
-                          {earns} → <strong>{headline}</strong>
-                          {scheme.benefits.length + scheme.triggers.length > 2
-                            ? `  · +${scheme.benefits.length + scheme.triggers.length - 2} more`
-                            : ""}
-                        </div>
+                    <CaretIcon />
+                    <div className="sch-row-main">
+                      <div className="sch-row-title">
+                        <span className="sch-row-name">{scheme.name}</span>
+                        {!scheme.is_active && <span className="sch-chip red">Off</span>}
                       </div>
-                      <div className="sch-row-side">
-                        {scheme.assignments.length === 0 ? (
-                          <span className="sch-reach">
-                            <i className="sch-dot warn" /> Not targeted
-                          </span>
-                        ) : (
-                          <span className="sch-reach">
-                            <i className={`sch-dot${scheme.is_active ? "" : " off"}`} />
-                            {grants.length} reach
-                            {exclusions.length ? ` · ${exclusions.length} excluded` : ""}
-                          </span>
-                        )}
+                      {/* The whole offer as one sentence — this line is what the
+                          list is for. */}
+                      <div className="sch-row-sum">
+                        {buy} → <strong>{get}</strong>
+                        {extras > 0 ? ` · +${extras} more` : ""}
                       </div>
-                      </button>
+                    </div>
+                    <div className="sch-row-side">
+                      {scheme.category && <span className="sch-chip green">{scheme.category}</span>}
+                      {grants.length === 0 ? (
+                        <span className="sch-chip amber">Nobody yet</span>
+                      ) : (
+                        <span className="sch-reach">
+                          {describeScope(grants[0])}
+                          {grants.length > 1 ? ` +${grants.length - 1}` : ""}
+                          {exclusions.length ? " *" : ""}
+                        </span>
+                      )}
+                    </div>
+                  </button>
 
-                      <div className="sch-row-tools">
-                        <button
-                          type="button"
-                          className="sch-icon-btn"
-                          onClick={() => openEdit(scheme)}
-                          title="Edit scheme"
-                          aria-label={`Edit ${scheme.code}`}
-                        >
-                          <PencilIcon />
-                        </button>
-                        <button
-                          type="button"
-                          className="sch-icon-btn is-danger"
-                          onClick={() => deleteScheme(scheme)}
-                          title="Delete scheme"
-                          aria-label={`Delete ${scheme.code}`}
-                        >
-                          <TrashIcon />
-                        </button>
+                  <div className="sch-row-tools">
+                    <button
+                      type="button"
+                      className="sch-icon-btn"
+                      onClick={() => openEdit(scheme)}
+                      title="Edit"
+                      aria-label={`Edit ${scheme.code}`}
+                    >
+                      <PencilIcon />
+                    </button>
+                    <button
+                      type="button"
+                      className="sch-icon-btn is-danger"
+                      onClick={() => deleteScheme(scheme)}
+                      title="Delete"
+                      aria-label={`Delete ${scheme.code}`}
+                    >
+                      <TrashIcon />
+                    </button>
+                  </div>
+                </div>
+
+                {isOpen && (
+                  <div className="sch-detail">
+                    <div className="sch-detail-grid">
+                      <div className="sch-block">
+                        <div className="sch-block-title">To earn it</div>
+                        <ul>
+                          {scheme.triggers.map((trigger, i) => (
+                            <li key={i}>{describeTrigger(trigger, itemNameOf)}</li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div className="sch-block">
+                        <div className="sch-block-title">They get</div>
+                        <ul>
+                          {scheme.benefits.map((benefit, i) => (
+                            <li key={i} className="give">
+                              {describeBenefit(benefit, itemNameOf)}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div className="sch-block">
+                        <div className="sch-block-title">Sent to</div>
+                        <div className="sch-tags">
+                          {grants.length === 0 && exclusions.length === 0 ? (
+                            <span className="sch-chip amber">Nobody yet</span>
+                          ) : (
+                            <>
+                              {grants.map((assignment, i) => (
+                                <span key={assignment.id ?? `g${i}`} className="sch-chip blue">
+                                  {describeScope(assignment)}
+                                </span>
+                              ))}
+                              {exclusions.map((assignment, i) => (
+                                <span key={assignment.id ?? `e${i}`} className="sch-chip red">
+                                  not {describeScope(assignment)}
+                                </span>
+                              ))}
+                            </>
+                          )}
+                        </div>
+                      </div>
+                      <div className="sch-block">
+                        <div className="sch-block-title">Runs</div>
+                        <ul>
+                          <li>
+                            {scheme.valid_from || scheme.valid_to
+                              ? `${scheme.valid_from || "any time"} to ${scheme.valid_to || "no end"}`
+                              : "Always"}
+                          </li>
+                          <li className="muted">
+                            {scheme.code}
+                            {scheme.category ? ` · ${scheme.category}` : " · all categories"}
+                            {scheme.stackable ? " · combines with others" : ""}
+                          </li>
+                          {scheme.description && <li className="muted">{scheme.description}</li>}
+                        </ul>
                       </div>
                     </div>
 
-                    {isOpen && (
-                      <div className="sch-detail">
-                        <div className="sch-detail-grid">
-                          <div className="sch-block">
-                            <div className="sch-block-title">Earns it</div>
-                            <ul>
-                              {scheme.triggers.map((trigger, i) => (
-                                <li key={i}>{describeTrigger(trigger, itemNameOf)}</li>
-                              ))}
-                            </ul>
-                          </div>
-                          <div className="sch-block">
-                            <div className="sch-block-title">Gives away</div>
-                            <ul>
-                              {scheme.benefits.map((benefit, i) => (
-                                <li key={i} className="give">
-                                  {describeBenefit(benefit, itemNameOf)}
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                          <div className="sch-block">
-                            <div className="sch-block-title">Reaches</div>
-                            <div className="sch-tags">
-                              {grants.length === 0 && exclusions.length === 0 ? (
-                                <span className="sch-chip amber">Nobody — not targeted yet</span>
-                              ) : (
-                                <>
-                                  {grants.map((assignment) => (
-                                    <span key={assignment.id} className="sch-chip blue">
-                                      {describeScope(assignment)}
-                                    </span>
-                                  ))}
-                                  {exclusions.map((assignment) => (
-                                    <span key={assignment.id} className="sch-chip red">
-                                      except {describeScope(assignment)}
-                                    </span>
-                                  ))}
-                                </>
-                              )}
-                            </div>
-                          </div>
-                          <div className="sch-block">
-                            <div className="sch-block-title">Validity</div>
-                            <ul>
-                              <li>
-                                {scheme.valid_from || scheme.valid_to
-                                  ? `${scheme.valid_from || "—"} to ${scheme.valid_to || "—"}`
-                                  : "No date limit"}
-                              </li>
-                              {scheme.priority !== 0 && <li>Priority {scheme.priority}</li>}
-                              {scheme.description && <li>{scheme.description}</li>}
-                            </ul>
-                          </div>
-                        </div>
-
-                        <div className="sch-actions">
-                          {/* Edit and Delete live on the row header itself. */}
-                          <button
-                            type="button"
-                            className={isTargeting ? "sch-btn sch-btn-sm" : "sch-btn-primary sch-btn-sm"}
-                            onClick={() => openTargeting(scheme)}
-                          >
-                            {isTargeting ? "Close targeting" : `Targeting (${scheme.assignments.length})`}
-                          </button>
-                          {scheme.is_active && (
-                            <button
-                              type="button"
-                              className="sch-btn-danger sch-btn-sm"
-                              onClick={() => deactivate(scheme)}
-                            >
-                              Deactivate
-                            </button>
-                          )}
-                        </div>
-
-                        {isTargeting && (
-                          <div className="sch-target">
-                            <div className="sch-target-grid">
-                              <div>
-                                <label className="sch-label">Reach</label>
-                                <select
-                                  className="sch-select"
-                                  value={assignmentDraft.scope_type}
-                                  onChange={(e) =>
-                                    setAssignmentDraft((prev) => ({
-                                      ...prev,
-                                      scope_type: e.target.value as ScopeType,
-                                      scope_value: "",
-                                    }))
-                                  }
-                                >
-                                  {SCOPE_TYPE_OPTIONS.map((o) => (
-                                    <option key={o.value} value={o.value}>
-                                      {o.label}
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-                              <div>
-                                <label className="sch-label">Who</label>
-                                {assignmentDraft.scope_type === "ALL" ? (
-                                  <input className="sch-input" value="Everyone" disabled />
-                                ) : (
-                                  <>
-                                    <input
-                                      className="sch-input"
-                                      list={`scope-options-${scheme.id}`}
-                                      value={assignmentDraft.scope_value}
-                                      onChange={(e) =>
-                                        setAssignmentDraft((prev) => ({
-                                          ...prev,
-                                          scope_value: e.target.value,
-                                        }))
-                                      }
-                                      placeholder="Type to search..."
-                                    />
-                                    <datalist id={`scope-options-${scheme.id}`}>
-                                      {scopeOptions.map((o) => (
-                                        <option key={o.value} value={o.value}>
-                                          {o.label}
-                                        </option>
-                                      ))}
-                                    </datalist>
-                                  </>
-                                )}
-                              </div>
-                              <div>
-                                <label className="sch-label">Category (optional)</label>
-                                <select
-                                  className="sch-select"
-                                  value={assignmentDraft.category}
-                                  onChange={(e) =>
-                                    setAssignmentDraft((prev) => ({ ...prev, category: e.target.value }))
-                                  }
-                                >
-                                  <option value="">All categories</option>
-                                  {CATEGORIES.map((c) => (
-                                    <option key={c} value={c}>
-                                      {c}
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-                              <div>
-                                <label className="sch-check">
-                                  <input
-                                    type="checkbox"
-                                    checked={assignmentDraft.is_exclusion}
-                                    onChange={(e) =>
-                                      setAssignmentDraft((prev) => ({
-                                        ...prev,
-                                        is_exclusion: e.target.checked,
-                                      }))
-                                    }
-                                  />
-                                  Exclude instead
-                                </label>
-                              </div>
-                            </div>
-
-                            <div className="sch-hint">
-                              {assignmentDraft.is_exclusion
-                                ? "Exclusions win at every level — use one to carve a vendor out of a state-wide scheme."
-                                : SCOPE_TYPE_OPTIONS.find((o) => o.value === assignmentDraft.scope_type)?.hint}
-                            </div>
-
-                            <div style={{ marginTop: "12px" }}>
-                              <button
-                                type="button"
-                                className="sch-btn-primary sch-btn-sm"
-                                onClick={() => addAssignment(scheme.id)}
-                              >
-                                Add targeting
-                              </button>
-                            </div>
-
-                            {scheme.assignments.length > 0 && (
-                              <div className="sch-target-list">
-                                <div className="sch-block-title">Current targeting</div>
-                                {scheme.assignments.map((assignment) => (
-                                  <div key={assignment.id} className="sch-target-row">
-                                    <span>
-                                      {assignment.is_exclusion && (
-                                        <span className="sch-chip red" style={{ marginRight: "8px" }}>
-                                          Exclude
-                                        </span>
-                                      )}
-                                      {describeScope(assignment)}
-                                      {!assignment.is_active && (
-                                        <span className="sch-chip" style={{ marginLeft: "8px" }}>
-                                          Inactive
-                                        </span>
-                                      )}
-                                    </span>
-                                    <button
-                                      type="button"
-                                      className="sch-btn-danger sch-btn-sm"
-                                      onClick={() => removeAssignment(scheme.id, assignment)}
-                                    >
-                                      Remove
-                                    </button>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    )}
+                    <div className="sch-actions">
+                      <button
+                        type="button"
+                        className="sch-btn sch-btn-sm"
+                        onClick={() => openEdit(scheme)}
+                      >
+                        Edit
+                      </button>
+                      {scheme.is_active && (
+                        <button
+                          type="button"
+                          className="sch-btn sch-btn-sm"
+                          onClick={() => deactivate(scheme)}
+                        >
+                          Turn off
+                        </button>
+                      )}
+                    </div>
                   </div>
-                );
-              })
-            )}
-          </div>
-        </>
-      ) : (
-        <VendorCheck products={products} itemNameOf={itemNameOf} />
-      )}
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
 
       {/* ---- editor drawer ------------------------------------------- */}
       {editingId !== null && (
@@ -976,8 +747,8 @@ export default function Scheme_Manager() {
           <aside className="sch-drawer" role="dialog" aria-modal="true">
             <div className="sch-drawer-head">
               <div>
-                <h2>{editingId ? `Edit ${editingScheme?.code ?? "scheme"}` : "New scheme"}</h2>
-                <p>The offer first, then what earns it and what it gives away.</p>
+                <h2>{editingId ? editingScheme?.name || "Edit scheme" : "New scheme"}</h2>
+                <p>An offer, what earns it, and who gets it.</p>
               </div>
               <button type="button" className="sch-x" onClick={closeEditor} aria-label="Close">
                 ×
@@ -985,18 +756,28 @@ export default function Scheme_Manager() {
             </div>
 
             <div className="sch-drawer-body">
-              {/* offer */}
+              {/* 1 — the offer -------------------------------------- */}
               <section className="sch-section">
-                <div className="sch-section-head">
+                <div className="sch-step">
+                  <span className="sch-step-n">1</span>
                   <div>
-                    <h3>The offer</h3>
-                    <p>How this scheme is identified and when it runs.</p>
+                    <h3>Name it</h3>
+                    <p>What you will recognise it by later.</p>
                   </div>
                 </div>
 
                 <div className="sch-grid">
+                  <div className="sch-span-2">
+                    <label className="sch-label">Name</label>
+                    <input
+                      className="sch-input"
+                      value={draft.name}
+                      onChange={(e) => patchDraft({ name: e.target.value })}
+                      placeholder="1 free piece on 10 boxes"
+                    />
+                  </div>
                   <div>
-                    <label className="sch-label">Code</label>
+                    <label className="sch-label">Short code</label>
                     <input
                       className="sch-input"
                       value={draft.code}
@@ -1005,7 +786,7 @@ export default function Scheme_Manager() {
                     />
                   </div>
                   <div>
-                    <label className="sch-label">Category</label>
+                    <label className="sch-label">Applies to</label>
                     <select
                       className="sch-select"
                       value={draft.category}
@@ -1014,26 +795,13 @@ export default function Scheme_Manager() {
                       <option value="">Every category</option>
                       {CATEGORIES.map((c) => (
                         <option key={c} value={c}>
-                          {c}
+                          {c} only
                         </option>
                       ))}
                     </select>
-                    <div className="sch-hint">
-                      An OIL scheme never fires on a MART or BEVERAGES line, however it is
-                      targeted.
-                    </div>
                   </div>
                   <div>
-                    <label className="sch-label">Name</label>
-                    <input
-                      className="sch-input"
-                      value={draft.name}
-                      onChange={(e) => patchDraft({ name: e.target.value })}
-                      placeholder="1 free pcs on 10 boxes"
-                    />
-                  </div>
-                  <div>
-                    <label className="sch-label">Valid from</label>
+                    <label className="sch-label">Starts</label>
                     <input
                       type="date"
                       className="sch-input"
@@ -1042,7 +810,7 @@ export default function Scheme_Manager() {
                     />
                   </div>
                   <div>
-                    <label className="sch-label">Valid to</label>
+                    <label className="sch-label">Ends</label>
                     <input
                       type="date"
                       className="sch-input"
@@ -1050,238 +818,349 @@ export default function Scheme_Manager() {
                       onChange={(e) => patchDraft({ valid_to: e.target.value || null })}
                     />
                   </div>
-                  <div>
-                    <label className="sch-label">Priority</label>
-                    <input
-                      type="number"
-                      className="sch-input"
-                      value={draft.priority}
-                      onChange={(e) => patchDraft({ priority: Number(e.target.value) })}
-                    />
-                    <div className="sch-hint">Higher wins a clash on the same giveaway item.</div>
-                  </div>
-                  <div className="sch-span-2">
-                    <label className="sch-label">Description</label>
-                    <input
-                      className="sch-input"
-                      value={draft.description}
-                      onChange={(e) => patchDraft({ description: e.target.value })}
-                      placeholder="Optional note for whoever reads this later"
-                    />
-                  </div>
-                  <div className="sch-span-2">
-                    <div className="sch-toggles">
-                      <label className="sch-check">
-                        <input
-                          type="checkbox"
-                          checked={draft.is_active}
-                          onChange={(e) => patchDraft({ is_active: e.target.checked })}
-                        />
-                        Active
-                      </label>
-                      <label className="sch-check">
-                        <input
-                          type="checkbox"
-                          checked={draft.stackable}
-                          onChange={(e) => patchDraft({ stackable: e.target.checked })}
-                        />
-                        Stackable (may combine with other schemes)
-                      </label>
-                    </div>
-                  </div>
                 </div>
               </section>
 
-              {/* triggers */}
+              {/* 2 — the rule --------------------------------------- */}
               <section className="sch-section">
-                <SectionHead
-                  title="Triggers — what earns it"
-                  hint="Any one matching trigger qualifies the line."
-                  onAdd={() => patchDraft({ triggers: [...draft.triggers, emptyTrigger()] })}
-                />
+                <div className="sch-step">
+                  <span className="sch-step-n">2</span>
+                  <div>
+                    <h3>Write the offer</h3>
+                    <p>Buy this much, get that free.</p>
+                  </div>
+                </div>
+
+                <div className="sch-block-title">To earn it, the vendor must buy</div>
                 {draft.triggers.map((trigger, index) => (
-                  <div key={index} className="sch-rowbox">
-                    <div className="sch-grid tight">
-                      <div>
-                        <label className="sch-label">Match on</label>
-                        <select
-                          className="sch-select"
-                          value={trigger.match_type}
-                          onChange={(e) =>
-                            patchTrigger(index, { match_type: e.target.value as MatchType })
-                          }
-                        >
-                          {MATCH_TYPE_OPTIONS.map((o) => (
-                            <option key={o.value} value={o.value}>
-                              {o.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="sch-label">Value</label>
+                  <div key={index} className="sch-sentence">
+                    <span className="sch-word">at least</span>
+                    <input
+                      type="number"
+                      min="0"
+                      className="sch-input sch-w-qty"
+                      value={trigger.min_qty}
+                      onChange={(e) => patchTrigger(index, { min_qty: e.target.value })}
+                      placeholder="0"
+                    />
+                    <select
+                      className="sch-select sch-w-uom"
+                      value={trigger.min_uom}
+                      onChange={(e) => patchTrigger(index, { min_uom: e.target.value as Uom })}
+                    >
+                      {UOM_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="sch-word">of</span>
+                    <select
+                      className="sch-select sch-w-match"
+                      value={trigger.match_type}
+                      onChange={(e) => patchTrigger(index, { match_type: e.target.value as MatchType })}
+                    >
+                      {MATCH_TYPE_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                    {trigger.match_type !== "ALL" && (
+                      <span className="sch-w-value">
                         {trigger.match_type === "ITEM" ? (
                           <ItemPicker
                             value={trigger.match_value}
                             products={products}
                             onChange={(itemCode) => patchTrigger(index, { match_value: itemCode })}
-                            placeholder="Search the item that earns this..."
+                            placeholder="search the product..."
                           />
                         ) : (
                           <input
                             className="sch-input"
-                            value={trigger.match_type === "ALL" ? "" : trigger.match_value}
-                            disabled={trigger.match_type === "ALL"}
+                            value={trigger.match_value}
                             onChange={(e) => patchTrigger(index, { match_value: e.target.value })}
                             placeholder="OLIVE"
                           />
                         )}
-                      </div>
-                      <div>
-                        <label className="sch-label">Minimum qty</label>
-                        <div className="sch-inline">
-                          <input
-                            type="number"
-                            min="0"
-                            className="sch-input"
-                            value={trigger.min_qty}
-                            onChange={(e) => patchTrigger(index, { min_qty: e.target.value })}
-                            placeholder="0"
-                          />
-                          <select
-                            className="sch-select"
-                            value={trigger.min_uom}
-                            onChange={(e) => patchTrigger(index, { min_uom: e.target.value as Uom })}
-                          >
-                            {UOM_OPTIONS.map((o) => (
-                              <option key={o.value} value={o.value}>
-                                {o.label}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      </div>
-                      <div>
-                        <label className="sch-label">Quantity counted</label>
-                        <select
-                          className="sch-select"
-                          value={trigger.applies_to}
-                          onChange={(e) =>
-                            patchTrigger(index, { applies_to: e.target.value as AppliesTo })
-                          }
-                        >
-                          {APPLIES_TO_OPTIONS.map((o) => (
-                            <option key={o.value} value={o.value}>
-                              {o.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-                    <div className="sch-rowbox-foot">
-                      <span>{APPLIES_TO_OPTIONS.find((o) => o.value === trigger.applies_to)?.hint}</span>
-                      {draft.triggers.length > 1 && (
-                        <button
-                          type="button"
-                          className="sch-btn-danger sch-btn-sm"
-                          onClick={() =>
-                            patchDraft({ triggers: draft.triggers.filter((_, i) => i !== index) })
-                          }
-                        >
-                          Remove
-                        </button>
-                      )}
-                    </div>
+                      </span>
+                    )}
+                    {draft.triggers.length > 1 && (
+                      <button
+                        type="button"
+                        className="sch-x sch-x-sm"
+                        title="Remove"
+                        onClick={() =>
+                          patchDraft({ triggers: draft.triggers.filter((_, i) => i !== index) })
+                        }
+                      >
+                        ×
+                      </button>
+                    )}
                   </div>
                 ))}
+                <button
+                  type="button"
+                  className="sch-add"
+                  onClick={() => patchDraft({ triggers: [...draft.triggers, emptyTrigger()] })}
+                >
+                  + another way to earn it
+                </button>
+
+                <div className="sch-block-title sch-mt">And they get</div>
+                {draft.benefits.map((benefit, index) => (
+                  <div key={index} className="sch-sentence">
+                    <input
+                      type="number"
+                      min="0"
+                      className="sch-input sch-w-qty"
+                      value={benefit.free_qty}
+                      onChange={(e) => patchBenefit(index, { free_qty: e.target.value })}
+                      placeholder="1"
+                    />
+                    <select
+                      className="sch-select sch-w-uom"
+                      value={benefit.free_uom}
+                      onChange={(e) => patchBenefit(index, { free_uom: e.target.value as Uom })}
+                    >
+                      {UOM_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="sch-word">of</span>
+                    <span className="sch-w-value">
+                      <ItemPicker
+                        value={benefit.free_item_code ?? ""}
+                        products={products}
+                        onChange={(itemCode) => patchBenefit(index, { free_item_code: itemCode })}
+                        placeholder="search the free product..."
+                        allowClear
+                        clearLabel="the same item they bought"
+                      />
+                    </span>
+                    <span className="sch-word">free, for every</span>
+                    <input
+                      type="number"
+                      min="0"
+                      className="sch-input sch-w-qty"
+                      value={benefit.per_qty}
+                      onChange={(e) => patchBenefit(index, { per_qty: e.target.value })}
+                      placeholder="10"
+                    />
+                    <span className="sch-word">bought</span>
+                    {draft.benefits.length > 1 && (
+                      <button
+                        type="button"
+                        className="sch-x sch-x-sm"
+                        title="Remove"
+                        onClick={() =>
+                          patchDraft({ benefits: draft.benefits.filter((_, i) => i !== index) })
+                        }
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  className="sch-add"
+                  onClick={() => patchDraft({ benefits: [...draft.benefits, emptyBenefit()] })}
+                >
+                  + another free item
+                </button>
+
+                <div className="sch-readback">
+                  {draft.triggers.map((t) => describeTrigger(t, itemNameOf)).join(", or ")} →{" "}
+                  <strong>
+                    {draft.benefits.map((b) => describeBenefit(b, itemNameOf)).join(" and ")}
+                  </strong>
+                </div>
               </section>
 
-              {/* benefits */}
+              {/* 3 — who gets it ------------------------------------ */}
               <section className="sch-section">
-                <SectionHead
-                  title="Benefits — what is given away"
-                  hint="Leave the item blank to give away the ordered item itself."
-                  onAdd={() => patchDraft({ benefits: [...draft.benefits, emptyBenefit()] })}
-                />
-                {draft.benefits.map((benefit, index) => (
-                  <div key={index} className="sch-rowbox">
-                    <div className="sch-grid tight">
-                      <div>
-                        <label className="sch-label">Free item</label>
-                        <ItemPicker
-                          value={benefit.free_item_code ?? ""}
-                          products={products}
-                          onChange={(itemCode) => patchBenefit(index, { free_item_code: itemCode })}
-                          placeholder="Search the item to give away..."
-                          allowClear
-                          clearLabel="— same as the ordered item —"
-                        />
-                      </div>
-                      <div>
-                        <label className="sch-label">Buy (per)</label>
+                <div className="sch-step">
+                  <span className="sch-step-n">3</span>
+                  <div>
+                    <h3>Say who gets it</h3>
+                    <p>Until there is a line here, the offer reaches nobody.</p>
+                  </div>
+                </div>
+
+                {draft.assignments.length === 0 && (
+                  <div className="sch-empty-inline">No one yet.</div>
+                )}
+
+                {draft.assignments.map((assignment, index) => (
+                  <div key={assignment.id ?? `new-${index}`} className="sch-sentence">
+                    <select
+                      className="sch-select sch-w-mode"
+                      value={assignment.is_exclusion ? "EXCLUDE" : "SEND"}
+                      onChange={(e) =>
+                        patchAssignment(index, { is_exclusion: e.target.value === "EXCLUDE" })
+                      }
+                    >
+                      <option value="SEND">Send to</option>
+                      <option value="EXCLUDE">Except</option>
+                    </select>
+                    <select
+                      className="sch-select sch-w-match"
+                      value={assignment.scope_type}
+                      onChange={(e) =>
+                        patchAssignment(index, {
+                          scope_type: e.target.value as ScopeType,
+                          scope_value: "",
+                        })
+                      }
+                    >
+                      {SCOPE_TYPE_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                    {assignment.scope_type !== "ALL" && (
+                      <span className="sch-w-value">
                         <input
-                          type="number"
-                          min="0"
                           className="sch-input"
-                          value={benefit.per_qty}
-                          onChange={(e) => patchBenefit(index, { per_qty: e.target.value })}
-                          placeholder="10"
+                          list={`targets-${assignment.scope_type}`}
+                          value={assignment.scope_value}
+                          onChange={(e) => patchAssignment(index, { scope_value: e.target.value })}
+                          placeholder="type to search..."
                         />
-                      </div>
-                      <div>
-                        <label className="sch-label">Get free</label>
-                        <input
-                          type="number"
-                          min="0"
-                          className="sch-input"
-                          value={benefit.free_qty}
-                          onChange={(e) => patchBenefit(index, { free_qty: e.target.value })}
-                          placeholder="1"
-                        />
-                      </div>
-                      <div>
-                        <label className="sch-label">Free unit</label>
-                        <select
-                          className="sch-select"
-                          value={benefit.free_uom}
-                          onChange={(e) => patchBenefit(index, { free_uom: e.target.value as Uom })}
-                        >
-                          {UOM_OPTIONS.map((o) => (
+                        <datalist id={`targets-${assignment.scope_type}`}>
+                          {targetOptions(assignment.scope_type).map((o) => (
                             <option key={o.value} value={o.value}>
                               {o.label}
                             </option>
                           ))}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="sch-label">Cap (optional)</label>
-                        <input
-                          type="number"
-                          min="0"
-                          className="sch-input"
-                          value={benefit.max_free_qty ?? ""}
-                          onChange={(e) => patchBenefit(index, { max_free_qty: e.target.value })}
-                          placeholder="no cap"
-                        />
-                      </div>
-                    </div>
-                    <div className="sch-rowbox-foot">
-                      <span>{describeBenefit(benefit, itemNameOf)}</span>
-                      {draft.benefits.length > 1 && (
-                        <button
-                          type="button"
-                          className="sch-btn-danger sch-btn-sm"
-                          onClick={() =>
-                            patchDraft({ benefits: draft.benefits.filter((_, i) => i !== index) })
-                          }
-                        >
-                          Remove
-                        </button>
-                      )}
-                    </div>
+                        </datalist>
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      className="sch-x sch-x-sm"
+                      title="Remove"
+                      onClick={() =>
+                        patchDraft({
+                          assignments: draft.assignments.filter((_, i) => i !== index),
+                        })
+                      }
+                    >
+                      ×
+                    </button>
                   </div>
                 ))}
+                <button
+                  type="button"
+                  className="sch-add"
+                  onClick={() =>
+                    patchDraft({ assignments: [...draft.assignments, emptyAssignment()] })
+                  }
+                >
+                  + who gets it
+                </button>
+                {draft.assignments.some((a) => a.is_exclusion) && (
+                  <div className="sch-hint">
+                    An “Except” line always wins — use one to carve a vendor out of a state-wide
+                    offer.
+                  </div>
+                )}
               </section>
+
+              {/* everything most people never touch ------------------ */}
+              <details
+                className="sch-learn"
+                open={showAdvanced}
+                onToggle={(e) => setShowAdvanced((e.target as HTMLDetailsElement).open)}
+              >
+                <summary>Rare settings</summary>
+                <div className="sch-learn-body">
+                  <div className="sch-grid">
+                    <div className="sch-span-2">
+                      <label className="sch-label">Note</label>
+                      <input
+                        className="sch-input"
+                        value={draft.description}
+                        onChange={(e) => patchDraft({ description: e.target.value })}
+                        placeholder="For whoever reads this later"
+                      />
+                    </div>
+                    <div>
+                      <label className="sch-label">Wins over offers below</label>
+                      <input
+                        type="number"
+                        className="sch-input"
+                        value={draft.priority}
+                        onChange={(e) => patchDraft({ priority: Number(e.target.value) })}
+                      />
+                      <div className="sch-hint">Higher number wins a clash on the same free item.</div>
+                    </div>
+                    <div>
+                      <label className="sch-label">Count towards the offer</label>
+                      <select
+                        className="sch-select"
+                        value={draft.triggers[0]?.applies_to ?? "PAID_LINE"}
+                        onChange={(e) =>
+                          patchDraft({
+                            triggers: draft.triggers.map((t) => ({
+                              ...t,
+                              applies_to: e.target.value as AppliesTo,
+                            })),
+                          })
+                        }
+                      >
+                        {APPLIES_TO_OPTIONS.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="sch-hint">
+                        {
+                          APPLIES_TO_OPTIONS.find(
+                            (o) => o.value === (draft.triggers[0]?.applies_to ?? "PAID_LINE"),
+                          )?.hint
+                        }
+                      </div>
+                    </div>
+                    <div className="sch-span-2">
+                      <div className="sch-toggles">
+                        <label className="sch-check">
+                          <input
+                            type="checkbox"
+                            checked={draft.is_active}
+                            onChange={(e) => patchDraft({ is_active: e.target.checked })}
+                          />
+                          On
+                        </label>
+                        <label className="sch-check">
+                          <input
+                            type="checkbox"
+                            checked={draft.stackable}
+                            onChange={(e) => patchDraft({ stackable: e.target.checked })}
+                          />
+                          Can combine with other offers
+                        </label>
+                      </div>
+                    </div>
+                    <div className="sch-span-2">
+                      <label className="sch-label">Most free items per order line</label>
+                      <input
+                        type="number"
+                        min="0"
+                        className="sch-input"
+                        value={draft.benefits[0]?.max_free_qty ?? ""}
+                        onChange={(e) => patchBenefit(0, { max_free_qty: e.target.value })}
+                        placeholder="no limit"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </details>
             </div>
 
             <div className="sch-drawer-foot">
@@ -1291,16 +1170,38 @@ export default function Scheme_Manager() {
                 disabled={!canSave || isSaving}
                 onClick={saveScheme}
               >
-                {isSaving ? "Saving..." : editingId ? "Save changes" : "Create scheme"}
+                {isSaving ? "Saving..." : editingId ? "Save" : "Create scheme"}
               </button>
               <button type="button" className="sch-btn" onClick={closeEditor}>
                 Cancel
               </button>
-              {!canSave && (
-                <span style={{ fontSize: "12.5px", color: "#b45309" }}>
-                  Code, name, and a value for every non-"Any item" trigger are required.
-                </span>
-              )}
+              {!canSave && <span className="sch-missing">Still needs {missing.join(", ")}.</span>}
+            </div>
+          </aside>
+        </>
+      )}
+
+      {/* ---- vendor check drawer ------------------------------------- */}
+      {checkOpen && (
+        <>
+          <div className="sch-scrim" onClick={() => setCheckOpen(false)} />
+          <aside className="sch-drawer" role="dialog" aria-modal="true">
+            <div className="sch-drawer-head">
+              <div>
+                <h2>Check a vendor</h2>
+                <p>What reaches them, and what a line would actually give. Nothing is saved.</p>
+              </div>
+              <button
+                type="button"
+                className="sch-x"
+                onClick={() => setCheckOpen(false)}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+            <div className="sch-drawer-body">
+              <VendorCheck products={products} itemNameOf={itemNameOf} />
             </div>
           </aside>
         </>
@@ -1310,28 +1211,6 @@ export default function Scheme_Manager() {
 }
 
 // ---------------------------------------------------------------------------
-
-function SectionHead({
-  title,
-  hint,
-  onAdd,
-}: {
-  title: string;
-  hint: string;
-  onAdd: () => void;
-}) {
-  return (
-    <div className="sch-section-head">
-      <div>
-        <h3>{title}</h3>
-        <p>{hint}</p>
-      </div>
-      <button type="button" className="sch-btn sch-btn-sm" onClick={onAdd}>
-        + Add
-      </button>
-    </div>
-  );
-}
 
 /**
  * "What does this vendor get, and why?" — the first question anyone asks about
@@ -1412,18 +1291,10 @@ function VendorCheck({
 
   return (
     <>
-      <div className="sch-panel">
-        <div className="sch-panel-head">
-          <h2>What reaches this vendor?</h2>
-          <p>
-            Every scheme that reaches a vendor, and which targeting rule let it in. Nothing is
-            saved.
-          </p>
-        </div>
-
+      <section className="sch-section">
         <div className="sch-grid">
           <div>
-            <label className="sch-label">Card code</label>
+            <label className="sch-label">Vendor card code</label>
             <input
               className="sch-input"
               value={cardCode}
@@ -1455,14 +1326,10 @@ function VendorCheck({
             disabled={!cardCode.trim() || isChecking}
             onClick={check}
           >
-            {isChecking ? "Checking..." : "Check vendor"}
+            {isChecking ? "Checking..." : "What do they get?"}
           </button>
-          <button
-            type="button"
-            className="sch-btn"
-            onClick={() => setShowDryRun((prev) => !prev)}
-          >
-            {showDryRun ? "Hide line dry-run" : "Dry-run a line"}
+          <button type="button" className="sch-btn" onClick={() => setShowDryRun((p) => !p)}>
+            {showDryRun ? "Hide line test" : "Test a line"}
           </button>
         </div>
 
@@ -1479,18 +1346,20 @@ function VendorCheck({
             ) : (
               <>
                 <div className="sch-hint" style={{ marginBottom: "10px" }}>
-                  Resolved as state <strong>{applicable[0].context.state_code || "—"}</strong>, main
+                  Treated as state <strong>{applicable[0].context.state_code || "—"}</strong>, main
                   group <strong>{applicable[0].context.main_group || "—"}</strong>.
                 </div>
                 {applicable.map((scheme) => (
                   <div key={scheme.scheme_id} className="sch-result">
                     <div className="sch-result-title">
                       {scheme.name}
-                      <span className="sch-chip code">{scheme.code}</span>
                       {scheme.category && <span className="sch-chip green">{scheme.category}</span>}
                       <span className="sch-chip blue">
-                        via {scheme.granted_by.scope_type}
-                        {scheme.granted_by.scope_value ? ` ${scheme.granted_by.scope_value}` : ""}
+                        because of {describeScope({
+                          scope_type: scheme.granted_by.scope_type,
+                          scope_value: scheme.granted_by.scope_value,
+                          category: "",
+                        })}
                       </span>
                     </div>
                     <div className="sch-result-line">
@@ -1505,30 +1374,23 @@ function VendorCheck({
             )}
           </div>
         )}
-      </div>
+      </section>
 
       {showDryRun && (
-        <div className="sch-panel">
-          <div className="sch-panel-head">
-            <h2>Dry-run a line</h2>
-            <p>
-              Test one order line against the engine to confirm the quantity before it goes near a
-              real order. Uses the card code and category above.
-            </p>
-          </div>
-
+        <section className="sch-section">
+          <div className="sch-block-title">Test one order line</div>
           <div className="sch-grid">
             <div>
-              <label className="sch-label">Item ordered</label>
+              <label className="sch-label">Product ordered</label>
               <ItemPicker
                 value={itemCode}
                 products={products}
                 onChange={setItemCode}
-                placeholder="Search the item to test..."
+                placeholder="search the product..."
               />
             </div>
             <div>
-              <label className="sch-label">Qty</label>
+              <label className="sch-label">How many</label>
               <input
                 type="number"
                 min="0"
@@ -1544,9 +1406,9 @@ function VendorCheck({
                 value={comboFreeItem}
                 products={products}
                 onChange={setComboFreeItem}
-                placeholder="1+1 only — search..."
+                placeholder="1+1 only..."
                 allowClear
-                clearLabel="— not a combo —"
+                clearLabel="not a combo"
               />
             </div>
             <div>
@@ -1569,7 +1431,7 @@ function VendorCheck({
               disabled={!cardCode.trim() || !itemCode.trim() || isChecking}
               onClick={runPreview}
             >
-              {isChecking ? "Running..." : "Run dry-run"}
+              {isChecking ? "Running..." : "Run the test"}
             </button>
             {!cardCode.trim() && (
               <span className="sch-hint" style={{ marginLeft: "10px" }}>
@@ -1581,24 +1443,21 @@ function VendorCheck({
           {proposals && (
             <div style={{ marginTop: "18px" }}>
               {proposals.length === 0 ? (
-                <div className="sch-hint">No scheme fires on this line.</div>
+                <div className="sch-hint">Nothing fires on this line.</div>
               ) : (
                 proposals.map((proposal, index) => (
                   <div key={index} className="sch-result">
-                    <div className="sch-result-title">
-                      {proposal.scheme_name}
-                      <span className="sch-chip code">{proposal.scheme_code}</span>
-                    </div>
+                    <div className="sch-result-title">{proposal.scheme_name}</div>
                     <div className="sch-result-line">
                       {proposal.qty_is_user_supplied ? (
                         <>
-                          Applies, but carries no rule — <strong>the user types the quantity</strong>.
+                          Applies, but has no rule — <strong>the quantity is typed by hand</strong>.
                         </>
                       ) : (
                         <>
-                          Qualifying {proposal.qualifying_qty} →{" "}
+                          On {proposal.qualifying_qty} ordered →{" "}
                           <strong>
-                            {proposal.qty} {proposal.free_uom} of{" "}
+                            {proposal.qty} {proposal.free_uom.toLowerCase()} of{" "}
                             {itemNameOf(proposal.benefit_item_code)}
                           </strong>{" "}
                           free
@@ -1606,15 +1465,19 @@ function VendorCheck({
                       )}
                     </div>
                     <div className="sch-result-meta">
-                      via {proposal.scope_type}
-                      {proposal.scope_value ? ` ${proposal.scope_value}` : ""}
+                      because of{" "}
+                      {describeScope({
+                        scope_type: proposal.scope_type,
+                        scope_value: proposal.scope_value,
+                        category: "",
+                      })}
                     </div>
                   </div>
                 ))
               )}
             </div>
           )}
-        </div>
+        </section>
       )}
     </>
   );

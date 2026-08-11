@@ -13,21 +13,21 @@ import api from "./api";
 export type Uom = "QTY" | "PCS" | "BOX" | "LTR";
 
 export const UOM_OPTIONS: { value: Uom; label: string }[] = [
-  { value: "QTY", label: "Qty" },
-  { value: "PCS", label: "Pieces" },
-  { value: "BOX", label: "Boxes" },
-  { value: "LTR", label: "Litres" },
+  { value: "QTY", label: "qty" },
+  { value: "PCS", label: "pieces" },
+  { value: "BOX", label: "boxes" },
+  { value: "LTR", label: "litres" },
 ];
 
 export type MatchType = "ITEM" | "SUB_GROUP" | "VARIETY" | "BRAND" | "CATEGORY" | "ALL";
 
 export const MATCH_TYPE_OPTIONS: { value: MatchType; label: string }[] = [
-  { value: "ITEM", label: "Item code" },
-  { value: "SUB_GROUP", label: "Sub group" },
-  { value: "VARIETY", label: "Variety" },
-  { value: "BRAND", label: "Brand" },
-  { value: "CATEGORY", label: "Category" },
-  { value: "ALL", label: "Any item" },
+  { value: "ITEM", label: "one product" },
+  { value: "SUB_GROUP", label: "a sub group" },
+  { value: "VARIETY", label: "a variety" },
+  { value: "BRAND", label: "a brand" },
+  { value: "CATEGORY", label: "a category" },
+  { value: "ALL", label: "anything" },
 ];
 
 /**
@@ -39,29 +39,29 @@ export type AppliesTo = "PAID_LINE" | "FREE_LINE" | "BOTH";
 export const APPLIES_TO_OPTIONS: { value: AppliesTo; label: string; hint: string }[] = [
   {
     value: "PAID_LINE",
-    label: "Paid line",
-    hint: "Qualify on the quantity actually ordered. The ordinary single-FG case.",
+    label: "the quantity ordered",
+    hint: "The normal case — count what the vendor actually pays for.",
   },
   {
     value: "FREE_LINE",
-    label: "Free (combo) line",
-    hint: "Qualify on the free half of a 1+1 — the giveaway is sized on top of it.",
+    label: "the free half of a 1+1",
+    hint: "Count the combo's free item instead, so this offer sits on top of it.",
   },
   {
     value: "BOTH",
-    label: "Paid + free",
-    hint: "Qualify on the paid quantity and the combo's free half added together.",
+    label: "both added together",
+    hint: "Count the paid quantity and the combo's free half together.",
   },
 ];
 
 export type ScopeType = "PARTY" | "MAIN_GROUP" | "STATE" | "CATEGORY" | "ALL";
 
 export const SCOPE_TYPE_OPTIONS: { value: ScopeType; label: string; hint: string }[] = [
-  { value: "PARTY", label: "Vendor", hint: "One party, by card code." },
-  { value: "STATE", label: "State", hint: "Every vendor in the state, including ones added later." },
-  { value: "MAIN_GROUP", label: "Main group", hint: "Every vendor in the main group." },
-  { value: "CATEGORY", label: "Category", hint: "Every vendor ordering in this category." },
-  { value: "ALL", label: "All vendors", hint: "No targeting at all." },
+  { value: "PARTY", label: "One vendor", hint: "A single party, by card code." },
+  { value: "STATE", label: "A whole state", hint: "Every vendor in the state, including ones added later." },
+  { value: "MAIN_GROUP", label: "A main group", hint: "Every vendor in that main group." },
+  { value: "CATEGORY", label: "A category", hint: "Every vendor ordering in that category." },
+  { value: "ALL", label: "Everyone", hint: "Every vendor, with no narrowing at all." },
 ];
 
 /** Mirrors SchemeAssignment.SCOPE_SPECIFICITY — the more specific scope wins. */
@@ -283,14 +283,38 @@ export const serializeScheme = (draft: SchemeWritePayload) => ({
     min_uom: trigger.min_uom,
     applies_to: trigger.applies_to,
   })),
+  // Sent with the scheme so an offer can be created already targeted. The API
+  // replaces the whole set, which is why the editor holds the full list. The
+  // dedupe guards the (scheme, scope_type, scope_value, category) unique key.
+  assignments: dedupeAssignments(draft.assignments).map((assignment) => ({
+    scope_type: assignment.scope_type,
+    scope_value: assignment.scope_type === "ALL" ? "" : assignment.scope_value.trim(),
+    category: assignment.category || "",
+    is_exclusion: assignment.is_exclusion,
+    valid_from: assignment.valid_from || null,
+    valid_to: assignment.valid_to || null,
+    is_active: assignment.is_active,
+  })),
 });
+
+/** Last one wins on a repeated (type, value, category) — the API's unique key. */
+export const dedupeAssignments = (rows: SchemeAssignment[]) => {
+  const byKey = new Map<string, SchemeAssignment>();
+  rows.forEach((row) => {
+    const value = row.scope_type === "ALL" ? "" : row.scope_value.trim();
+    byKey.set(`${row.scope_type}|${value.toLowerCase()}|${(row.category || "").toLowerCase()}`, row);
+  });
+  return [...byKey.values()];
+};
 
 /** Resolves an item code to its product name. Falls back to the code itself. */
 export type ItemNameResolver = (itemCode: string) => string;
 
 const defaultResolver: ItemNameResolver = (itemCode) => itemCode;
 
-/** Human-readable summary of what one benefit gives. */
+const uomWord = (uom: Uom) => UOM_OPTIONS.find((o) => o.value === uom)?.label ?? uom.toLowerCase();
+
+/** Plain-English summary of what one benefit gives. */
 export const describeBenefit = (
   benefit: SchemeBenefit,
   resolveItemName: ItemNameResolver = defaultResolver,
@@ -298,16 +322,17 @@ export const describeBenefit = (
   const perQty = num(benefit.per_qty);
   const freeQty = num(benefit.free_qty);
   const code = String(benefit.free_item_code ?? "").trim();
-  const item = code ? resolveItemName(code) : "the ordered item";
+  const item = code ? resolveItemName(code) : "the same item";
   const cap = nullableNum(benefit.max_free_qty);
-  const capText = cap ? `, capped at ${cap}` : "";
+  const capText = cap ? `, up to ${cap}` : "";
+  const unit = uomWord(benefit.free_uom);
 
-  if (perQty <= 0 && freeQty <= 0) return `${item} — quantity typed by the user`;
-  if (perQty <= 0) return `${freeQty} ${benefit.free_uom} of ${item}${capText}`;
-  return `every ${perQty} → ${freeQty} ${benefit.free_uom} of ${item}${capText}`;
+  if (perQty <= 0 && freeQty <= 0) return `free ${item}, quantity typed by hand`;
+  if (perQty <= 0) return `${freeQty} ${unit} of ${item} free${capText}`;
+  return `${freeQty} ${unit} of ${item} free for every ${perQty}${capText}`;
 };
 
-/** Human-readable summary of what one trigger requires. */
+/** Plain-English summary of what one trigger requires. */
 export const describeTrigger = (
   trigger: SchemeTrigger,
   resolveItemName: ItemNameResolver = defaultResolver,
@@ -318,26 +343,30 @@ export const describeTrigger = (
     trigger.match_type === "ITEM" && trigger.match_value
       ? resolveItemName(trigger.match_value)
       : trigger.match_value;
-  const on =
-    trigger.match_type === "ALL"
-      ? "any item"
-      : `${MATCH_TYPE_OPTIONS.find((o) => o.value === trigger.match_type)?.label ?? trigger.match_type} = ${value || "?"}`;
   const min = num(trigger.min_qty);
-  const minText = min > 0 ? `, min ${min} ${trigger.min_uom}` : "";
+  const what =
+    trigger.match_type === "ALL"
+      ? "anything"
+      : value || "(nothing chosen)";
+
+  const buy = min > 0 ? `buy ${min} ${uomWord(trigger.min_uom)} of ${what}` : `buy ${what}`;
   const half =
     trigger.applies_to === "FREE_LINE"
-      ? " (counts the combo's free half)"
+      ? " (counting the combo's free half)"
       : trigger.applies_to === "BOTH"
-        ? " (counts paid + free)"
+        ? " (counting paid + free)"
         : "";
-  return `${on}${minText}${half}`;
+  return `${buy}${half}`;
 };
 
 export const describeScope = (assignment: Pick<SchemeAssignment, "scope_type" | "scope_value" | "category">) => {
-  const label = SCOPE_TYPE_OPTIONS.find((o) => o.value === assignment.scope_type)?.label ?? assignment.scope_type;
-  const target = assignment.scope_type === "ALL" ? "" : ` ${assignment.scope_value}`;
   const category = assignment.category ? ` · ${assignment.category}` : "";
-  return `${label}${target}${category}`;
+  if (assignment.scope_type === "ALL") return `Everyone${category}`;
+  // These render as small chips, so the value carries it — qualified only where
+  // the value alone would be ambiguous.
+  const target = assignment.scope_value || "?";
+  const named = assignment.scope_type === "MAIN_GROUP" ? `${target} group` : target;
+  return `${named}${category}`;
 };
 
 export const schemeService = {

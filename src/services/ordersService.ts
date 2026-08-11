@@ -215,6 +215,8 @@ export interface CreateOrder {
 
   delivery_date: string;
   po_number?: string;
+  /** One warehouse for the whole order; blank uses the backend's default. */
+  warehouse_code?: string;
   is_foc?: boolean;
   company: number;
 
@@ -253,6 +255,7 @@ export interface Order {
   dispatch_from_id?: number;
   dispatch_from_name?: string;
   po_number: string;
+  warehouse_code?: string;
   is_foc?: boolean;
   company?: string | number;
   remarks?: string;

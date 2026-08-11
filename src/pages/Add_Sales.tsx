@@ -4,6 +4,7 @@ import { ordersService } from "../services/ordersService";
 import { schemeService } from "../services/schemeService";
 import type { PreviewLine, SchemeProposal } from "../services/schemeService";
 import { userService } from "../services/userService";
+import { sapService } from "../services/sapService";
 import { getCurrentUser } from "../services/authService";
 import { useUILabels } from "../services/uiConfig";
 import type {
@@ -156,6 +157,9 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
   const [shipSearch, setShipSearch] = useState("");
   const [shipDropdownOpen, setShipDropdownOpen] = useState(false);
   const [companyDropdownOpen, setCompanyDropdownOpen] = useState(false);
+  // One warehouse for the whole order — every SAP line, free stock included,
+  // is stamped with it. Blank lets the backend fall back to its category default.
+  const [warehouses, setWarehouses] = useState<{ code: string; name: string }[]>([]);
   const [openRowDropdown, setOpenRowDropdown] = useState<string | null>(null);
   const [branch, setBranch] = useState<any[]>([]);
   const [billAddress, setBillAddress] = useState<any[]>([]);
@@ -200,6 +204,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
     Deliverydate: getDefaultDeliveryDate(),
     poNumber: "",
     company: "",
+    warehouse: "",
     comment: "",
   });
 
@@ -233,6 +238,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
     fetchProducts();
     fetchCompany();
     fetchCurrentUserProfile();
+    fetchWarehouses("");
   }, []);
 
   useEffect(() => {
@@ -241,6 +247,13 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
       setEditOrderIsDraft(false);
     }
   }, [isLoadingFromOrder]);
+
+  // The two company databases have separate warehouse masters, so the list is
+  // refetched whenever the party's category changes.
+  useEffect(() => {
+    void fetchWarehouses(selectedPartyCategory);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPartyCategory]);
 
   const fetchCurrentUserProfile = async () => {
     try {
@@ -354,6 +367,17 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
       setCompany(data);
     } catch (error) {
       console.log("Error fetching Company:", error);
+    }
+  };
+
+  const fetchWarehouses = async (category: string) => {
+    // The two company databases have separate warehouse masters.
+    const branch = String(category || "").toUpperCase() === "BEVERAGES" ? "BEVERAGE" : "OIL";
+    try {
+      setWarehouses(await sapService.getWarehouses(branch));
+    } catch (error) {
+      console.log("Error fetching warehouses:", error);
+      setWarehouses([]);
     }
   };
 
@@ -628,6 +652,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
           Deliverydate: isDuplicateMode ? getDefaultDeliveryDate() : order.delivery_date || "",
           poNumber: isDuplicateMode ? "" : order.po_number || "",
           company: order.company ? String(order.company) : "",
+          warehouse: order.warehouse_code || "",
           comment: isDuplicateMode ? "" : order.remarks || "",
         });
         const orderStateCode = order.party_state || "";
@@ -758,6 +783,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
           normalizeOptionText(item?.name).includes("jivo wellness"),
         )?.id || "",
       ),
+      warehouse: "",
       comment: "",
     });
 
@@ -842,6 +868,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
 
       delivery_date: formData.Deliverydate,
       ...(canEditPoNumber ? { po_number: formData.poNumber.trim() } : {}),
+      warehouse_code: formData.warehouse,
       remarks: formData.comment.trim(),
       is_foc: isFocOrder,
       company: Number(formData.company),
@@ -991,6 +1018,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
         )?.bpl_name || "",
       delivery_date: formData.Deliverydate || null,
       ...(canEditPoNumber ? { po_number: formData.poNumber.trim() } : {}),
+      warehouse_code: formData.warehouse,
       remarks: formData.comment.trim(),
       is_foc: isFocOrder,
       company: Number(formData.company) || 0,
@@ -2873,6 +2901,28 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
           </div>
         )}
         <div className="sl-field">
+          <label className="sl-label" htmlFor="wiz-warehouse">
+            Warehouse
+          </label>
+          <div className="sl-input-wrap">
+            <select
+              id="wiz-warehouse"
+              name="warehouse"
+              value={formData.warehouse}
+              onChange={handleChange}
+            >
+              <option value="">Default warehouse</option>
+              {warehouses.map((warehouse) => (
+                <option key={warehouse.code} value={warehouse.code}>
+                  {warehouse.name} ({warehouse.code})
+                </option>
+              ))}
+            </select>
+            <div className="sl-focus-line" />
+          </div>
+          <div className="sl-field-note">Used for every item on this order.</div>
+        </div>
+        <div className="sl-field">
           <label className="sl-label">Company</label>
           <div
             className={`sl-party-dropdown${companyDropdownOpen ? " open" : ""}`}
@@ -3965,6 +4015,29 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
               </div>
             </div>
           )}
+
+          <div className="sl-field">
+            <label className="sl-label" htmlFor="warehouse">
+              Warehouse
+            </label>
+            <div className="sl-input-wrap">
+              <select
+                id="warehouse"
+                name="warehouse"
+                value={formData.warehouse}
+                onChange={handleChange}
+              >
+                <option value="">Default warehouse</option>
+                {warehouses.map((warehouse) => (
+                  <option key={warehouse.code} value={warehouse.code}>
+                    {warehouse.name} ({warehouse.code})
+                  </option>
+                ))}
+              </select>
+              <div className="sl-focus-line" />
+            </div>
+            <div className="sl-field-note">Used for every item on this order.</div>
+          </div>
 
           <div className="sl-field">
             <label className="sl-label">Company</label>
