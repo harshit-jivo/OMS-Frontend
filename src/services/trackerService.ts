@@ -137,6 +137,45 @@ export interface Invoice {
   returned_at?: string;
   // Present in the stage-advanced payload:
   advanced_at?: string;
+  // Present in the my-queue payload: where an Advance would send this invoice.
+  // At Pre-Audit a Transport invoice goes to Transport Approval first, and only
+  // to Data Entry once that desk has approved it.
+  next_stage_code?: string | null;
+  next_stage_name?: string | null;
+}
+
+/**
+ * One row of a desk's decision log (`/tracker/stage-decisions/`). A log of
+ * events, not invoices: an invoice debited twice appears twice, and a trip to
+ * the Transport Approval desk is its own row with a verdict.
+ */
+export interface StageDecision {
+  event_id: number;
+  invoice_id: number;
+  invoice_number: string;
+  invoice_date: string;
+  party_name: string;
+  invoice_value: string;
+  net_invoice_value: string;
+  category_name: string;
+  unit_name: string;
+  branch_name: string;
+  decision: "OK" | "HOLD" | "DEBIT" | "TRANSPORT_APPROVAL";
+  hold_type: "" | "FULL" | "PARTIAL";
+  amount: string | null;          // held / debited on THIS decision
+  remarks: string;
+  acted_by_name: string | null;
+  decided_at: string;
+  days_spent: string | null;
+  is_still_here: boolean;         // a FULL hold is still parked at this desk
+  current_stage_code: string;
+  current_stage_name: string;
+  invoice_status: "IN_PROGRESS" | "COMPLETED";
+  total_debit_amount: string;     // running total on the invoice
+  total_hold_amount: string;
+  // TRANSPORT_APPROVAL rows only:
+  verdict?: "AWAITING" | "APPROVED" | "REJECTED" | "REJECTION_PENDING";
+  sent_at?: string;
 }
 
 export interface InvoiceWrite {
@@ -301,6 +340,36 @@ export const trackerService = {
   async getStageAdvanced(stageCode: string): Promise<Invoice[]> {
     const { data } = await api.get("/tracker/stage-advanced/", {
       params: { stage: stageCode },
+    });
+    return data;
+  },
+
+  /**
+   * A desk's decision log — what it marked OK / HOLD / DEBIT, and what it sent
+   * for Transport Approval. Omit `decision` for every disposition.
+   */
+  async getStageDecisions(
+    stageCode: string,
+    decision?: string,
+  ): Promise<StageDecision[]> {
+    const { data } = await api.get("/tracker/stage-decisions/", {
+      params: { stage: stageCode, ...(decision ? { decision } : {}) },
+    });
+    return data;
+  },
+
+  /**
+   * Excel export of one queue tab, in the same register layout as the
+   * All-Invoices export. `ids` are the rows the tab is showing, in order.
+   */
+  async exportStageTab(
+    stageCode: string,
+    tab: string,
+    ids: number[],
+  ): Promise<Blob> {
+    const { data } = await api.get("/tracker/stage-export/", {
+      params: { stage: stageCode, tab, ids: ids.join(",") },
+      responseType: "blob",
     });
     return data;
   },
