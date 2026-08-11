@@ -160,7 +160,8 @@ export interface StageDecision {
   category_name: string;
   unit_name: string;
   branch_name: string;
-  decision: "OK" | "HOLD" | "DEBIT" | "TRANSPORT_APPROVAL";
+  decision: "OK" | "HOLD" | "DEBIT" | "APPROVED" | "REJECTED" | "RETURN"
+    | "TRANSPORT_APPROVAL";
   hold_type: "" | "FULL" | "PARTIAL";
   amount: string | null;          // held / debited on THIS decision
   remarks: string;
@@ -173,6 +174,14 @@ export interface StageDecision {
   invoice_status: "IN_PROGRESS" | "COMPLETED";
   total_debit_amount: string;     // running total on the invoice
   total_hold_amount: string;
+  /**
+   * The invoice came BACK to this desk after the decision — so a send-back is
+   * no longer outstanding. Those rows are filtered out unless the request asks
+   * for them (`includeResolved`).
+   */
+  came_back: boolean;
+  /** A rejection parked here until the written reason arrives. */
+  awaiting_remarks?: boolean;
   // TRANSPORT_APPROVAL rows only:
   verdict?: "AWAITING" | "APPROVED" | "REJECTED" | "REJECTION_PENDING";
   sent_at?: string;
@@ -351,9 +360,14 @@ export const trackerService = {
   async getStageDecisions(
     stageCode: string,
     decision?: string,
+    includeResolved = false,
   ): Promise<StageDecision[]> {
     const { data } = await api.get("/tracker/stage-decisions/", {
-      params: { stage: stageCode, ...(decision ? { decision } : {}) },
+      params: {
+        stage: stageCode,
+        ...(decision ? { decision } : {}),
+        ...(includeResolved ? { include_resolved: 1 } : {}),
+      },
     });
     return data;
   },
