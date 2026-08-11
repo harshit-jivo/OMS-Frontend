@@ -78,8 +78,18 @@ export default function InvoiceBrowser() {
     }
   };
 
+  const sourceLabel = (s: InvoiceListItem["irn_source"]) =>
+    s === "@UTL_MDEXTH" ? "SAP" : s === "OMS_IRN_LOG" ? "OMS log" : s === "OMS" ? "OMS" : "";
+
   const statusBadge = (r: InvoiceListItem) => {
-    if (r.irn_status === "GENERATED") return <StatusBadge tone="ok">IRN done</StatusBadge>;
+    if (r.irn_status === "GENERATED") {
+      const src = sourceLabel(r.irn_source);
+      return (
+        <StatusBadge tone="ok" title={src ? `IRN found in ${r.irn_source}` : undefined}>
+          {src ? `IRN done (${src})` : "IRN done"}
+        </StatusBadge>
+      );
+    }
     if (r.irn_status === "FAILED") return <StatusBadge tone="err">Failed</StatusBadge>;
     if (r.irn_status === "SKIPPED") return <StatusBadge tone="muted">Skipped</StatusBadge>;
     return <StatusBadge tone="warn">No IRN</StatusBadge>;
@@ -92,7 +102,9 @@ export default function InvoiceBrowser() {
         <h2>Invoices — Generate IRN</h2>
       </div>
       <p className="nic-note">
-        Browse recent SAP invoices (any source) and generate the IRN for any that don't have one.
+        Shows only invoices that don't yet have an IRN (checked in SAP <code>@UTL_MDEXTH</code>,
+        <code> OMS_IRN_LOG</code>, and OMS) — the ones you still need to generate. Invoices that
+        already have an IRN are hidden.
       </p>
 
       <div className="nic-form-grid" style={{ marginTop: 12 }}>
@@ -156,11 +168,15 @@ export default function InvoiceBrowser() {
                     {r.last_error ? <div className="nic-note" style={{ marginTop: 4 }}>{r.last_error}</div> : null}
                   </td>
                   <td style={{ whiteSpace: "nowrap" }}>
-                    {r.irn ? (
+                    {r.irn && r.irn_source === "OMS" ? (
+                      // QR is renderable only for OMS-generated IRNs (signed QR stored in OMS DB)
                       <button className="ofs-secondary" style={{ minHeight: 30, padding: "0 10px", fontSize: 11 }}
                         onClick={() => setQrIrn(r.irn!)}>
                         View QR
                       </button>
+                    ) : r.irn ? (
+                      // Already has an IRN in SAP (@UTL_MDEXTH) / OMS_IRN_LOG — nothing to generate.
+                      <span className="nic-note" title={r.irn}>Generated in {sourceLabel(r.irn_source)}</span>
                     ) : (
                       <button className="ofs-primary" style={{ minHeight: 30, padding: "0 12px", fontSize: 11 }}
                         onClick={() => void generate(r.docentry)} disabled={busyDoc === r.docentry}>
@@ -175,7 +191,7 @@ export default function InvoiceBrowser() {
           </table>
         </div>
       ) : !loading ? (
-        <p className="nic-note">No invoices loaded.</p>
+        <p className="nic-note">No pending invoices — every recent invoice already has an IRN. Use Search to find a specific one.</p>
       ) : null}
     </section>
   );

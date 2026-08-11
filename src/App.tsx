@@ -23,7 +23,7 @@ import Party_Assignment from "./pages/Party_Assignment";
 import Party_Product_Assignment from "./pages/Party_Product_Assignment";
 import Add_Scheme from "./pages/Add_Scheme";
 import FOC from "./pages/FOC";
-import SalesInvoice from "./pages/Sales_Invoice";
+import SalesInvoice from "./pages/Sales_Invoice";    
 import SkuGalleryPage from "./pages/SalesInvoice/SkuGalleryPage";
 import InvoiceReview from "./pages/InvoiceReview";
 import Staff from "./pages/Staff";
@@ -363,6 +363,11 @@ function App() {
           }
         />
 
+       
+
+       
+        
+       
         <Route
           path="/Label_Checker"
           element={

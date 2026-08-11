@@ -1919,7 +1919,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
                 <input type="number" value={row.ltrs} readOnly />
               </div>
               <div className="sl-wiz-input">
-                <label>{t("price_list", "Price List")}</label>
+                <label>Price List</label>
                 <input type="number" value={row.priceListBasic} readOnly />
               </div>
               <div className="sl-wiz-input">

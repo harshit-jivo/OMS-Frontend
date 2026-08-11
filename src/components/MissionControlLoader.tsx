@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   HiArrowPath,
+  HiBanknotes,
   HiBuildingOffice2,
   HiCheckCircle,
   HiChevronDown,
   HiCube,
+  HiDocumentText,
   HiExclamationTriangle,
   HiUserCircle,
   HiXMark,
@@ -31,8 +33,8 @@ const FACTORY_STAGES = [
   { emoji: "🔧", label: "Assembling your order" },
   { emoji: "📋", label: "Running quality checks" },
   { emoji: "🏭", label: "Coordinating production" },
-  { emoji: "📤", label: "Preparing dispatch" },
-  { emoji: "🚚", label: "Dispatch team standing by" },
+  { emoji: "📤", label: "Preparing Stock" },
+  { emoji: "🚚", label: "Collecting Items" },
 ];
 
 const ROTATE_MS = 2600;
@@ -49,9 +51,26 @@ type Props = {
   onClose: () => void;
   /** Re-run the post from the beginning. */
   onRetry: () => void;
+  /**
+   * When the failure is a credit-limit issue, the parent supplies this to let the
+   * user raise a credit-limit request straight from the error modal. Omit (or pass
+   * undefined) to hide the button for non-credit-limit errors.
+   */
+  onRaiseCl?: () => void;
+  /**
+   * Link to the invoice's bill print. Shown on the success panel only when the
+   * parent supplies it (i.e. SAP gave back a document to print).
+   */
+  reportUrl?: string;
 };
 
-export default function MissionControlLoader({ state, onClose, onRetry }: Props) {
+export default function MissionControlLoader({
+  state,
+  onClose,
+  onRetry,
+  onRaiseCl,
+  reportUrl,
+}: Props) {
   const { status, logs, doc, invoiceNumber, errorMessage, rawError } = state;
   const isRunning = status === "running";
   const isSuccess = status === "success";
@@ -131,6 +150,16 @@ export default function MissionControlLoader({ state, onClose, onRetry }: Props)
             <SummaryPanel doc={doc} />
 
             <div className="mcl-actions">
+              {reportUrl && (
+                <a
+                  className="mcl-btn mcl-btn-ghost"
+                  href={reportUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <HiDocumentText aria-hidden="true" /> Generate Invoice Report
+                </a>
+              )}
               <button ref={primaryRef} type="button" className="mcl-btn mcl-btn-ok" onClick={onClose}>
                 Done
               </button>
@@ -175,6 +204,11 @@ export default function MissionControlLoader({ state, onClose, onRetry }: Props)
               <button type="button" className="mcl-btn mcl-btn-ghost" onClick={onClose}>
                 Close
               </button>
+              {onRaiseCl && (
+                <button type="button" className="mcl-btn mcl-btn-cl" onClick={onRaiseCl}>
+                  <HiBanknotes aria-hidden="true" /> Raise CL
+                </button>
+              )}
               <button ref={primaryRef} type="button" className="mcl-btn mcl-btn-warn" onClick={onRetry}>
                 <HiArrowPath aria-hidden="true" /> Retry
               </button>

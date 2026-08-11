@@ -474,6 +474,12 @@
   transform: translateY(1px);
 }
 
+/* The bill-print action is a link (new tab) styled as a button. */
+a.mcl-btn {
+  text-decoration: none;
+  line-height: 1.2;
+}
+
 .mcl-btn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
@@ -496,6 +502,16 @@
 
 .mcl-btn-warn:hover {
   background: var(--warn-strong);
+}
+
+/* Raise-credit-limit action shown only on credit-limit failures. */
+.mcl-btn-cl {
+  background: #d97706;
+  color: #fff;
+}
+
+.mcl-btn-cl:hover {
+  background: #b45309;
 }
 
 .mcl-btn-ghost {

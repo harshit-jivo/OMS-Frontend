@@ -100,7 +100,7 @@ export default function Login() {
       if (cancelled || outcome !== "authenticated") return;
       // Same landing rule as a fresh login (see handleLogin) — one shared helper,
       // so a restored session can never land somewhere a new login wouldn't.
-      const landing = landingPathFor(localStorage.getItem("role"));
+      let landing = landingPathFor(localStorage.getItem("role"));
       // Preserve any notification deep-link params (openOrderId / notificationId)
       // that a service-worker "openWindow" put on the "/" URL, so the Sidebar's
       // openOrderId effect on the landing route can open the exact Sales Order

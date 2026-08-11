@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   HiArrowPath,
@@ -12,7 +12,10 @@ import {
   HiPaperAirplane,
   HiPencilSquare,
   HiBanknotes,
+  HiArrowUturnLeft,
+  HiDocumentText,
 } from "react-icons/hi2";
+import { API_BASE_URL } from "../services/api";
 import { apiFetch, apiUpload, EDIT_RESTORE_STORAGE_KEY } from "./SalesInvoice/useSalesInvoice";
 import { useSapPost } from "./SalesInvoice/useSapPost";
 import { toNumber } from "./SalesInvoice/salesInvoice.utils";
@@ -70,6 +73,16 @@ type InvoiceRecord = {
   branch?: string;
   warehouse?: string;
   invoice_payload?: InvoicePayload | string;
+  // SAP identifiers recorded when the invoice posted; drive the bill print.
+  sap_doc_num?: string | null;
+  sap_doc_entry?: string | null;
+  // Revision lineage. `supersedes` is the rejected log this one was reworked
+  // from; `superseded_by_id` is the replacement that was submitted for it.
+  supersedes?: number | string | null;
+  supersedes_so_number?: string | null;
+  supersedes_status?: string | null;
+  supersedes_rejection_reason?: string | null;
+  superseded_by_id?: number | string | null;
   [key: string]: unknown;
 };
 
@@ -173,6 +186,8 @@ const extractMessage = (value: unknown, fallback: string) => {
     const obj = value as ApiMessageResponse;
     if (typeof obj.message === "string" && obj.message.trim()) return obj.message;
     if (typeof obj.detail === "string" && obj.detail.trim()) return obj.detail;
+    const errorText = (obj as { error?: unknown }).error;
+    if (typeof errorText === "string" && errorText.trim()) return errorText;
   }
   return fallback;
 };
@@ -228,10 +243,79 @@ type CreditLimitStage = {
   rejectRequired?: number;
 };
 
+/* JSAP reports each approval stage with a single-letter action code, not a word:
+ * A = approved, R = rejected, P = pending, null/blank = not actioned yet. The
+ * word forms are accepted as a fallback in case the service ever returns them. */
+type StageTone = "approved" | "rejected" | "pending";
+type StageState = { label: string; tone: StageTone };
+
+const CL_STAGE_CODES: Record<string, StageState> = {
+  A: { label: "Approved", tone: "approved" },
+  R: { label: "Rejected", tone: "rejected" },
+  P: { label: "Pending", tone: "pending" },
+};
+
+const creditLimitStageState = (actionStatus?: string | null): StageState => {
+  const raw = String(actionStatus ?? "").trim();
+  if (!raw) return { label: "Pending", tone: "pending" };
+  const byCode = CL_STAGE_CODES[raw.toUpperCase()];
+  if (byCode) return byCode;
+  if (/reject/i.test(raw)) return { label: "Rejected", tone: "rejected" };
+  if (/approve/i.test(raw)) return { label: "Approved", tone: "approved" };
+  return { label: raw, tone: "pending" };
+};
+
+// One-line answer to "did the credit limit go through?", derived from the stages.
+const creditLimitFlowSummary = (stages: CreditLimitStage[]): StageState | null => {
+  if (stages.length === 0) return null;
+  const states = stages.map((stage) => creditLimitStageState(stage.actionStatus));
+  const rejectedAt = states.findIndex((state) => state.tone === "rejected");
+  if (rejectedAt >= 0) {
+    return { label: `Rejected at stage ${rejectedAt + 1} of ${stages.length}`, tone: "rejected" };
+  }
+  const approved = states.filter((state) => state.tone === "approved").length;
+  return approved === stages.length
+    ? { label: `Approved — all ${stages.length} stages cleared`, tone: "approved" }
+    : { label: `Pending — ${approved} of ${stages.length} stages approved`, tone: "pending" };
+};
+
 // The raise-credit-limit action only applies to errors that are actually about
 // the customer's credit limit.
 const isCreditLimitError = (record: InvoiceRecord) =>
   /credit\s*limit/i.test(String(record.error_message || ""));
+
+// A value is a usable lineage reference (log id) — 0 is not a valid pk here.
+const hasRef = (value: unknown) => value !== undefined && value !== null && value !== "";
+
+/* ── Bill print ────────────────────────────────────────────────────────────
+ * The backend proxies the Crystal bill print and answers with the PDF itself.
+ * It accepts either the internal OINV key (DocEntry) — which is what Crystal
+ * actually renders from — or the visible invoice number (DocNum), which it
+ * resolves to a DocEntry first. We prefer DocEntry when the post recorded one,
+ * because the DocNum lookup only searches the OIL company database.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+const trimmed = (value: unknown) => String(value ?? "").trim();
+
+type ReportRef = { docEntry: string; docNum: string; party: string };
+
+// The report can only be generated once we know which SAP document to print.
+const invoiceReportRef = (record: InvoiceRecord): ReportRef | null => {
+  const docEntry = trimmed(record.sap_doc_entry);
+  const docNum = trimmed(record.sap_doc_num);
+  if (!docEntry && !docNum) return null;
+  return { docEntry, docNum, party: trimmed(record.party_name) };
+};
+
+// The party name only travels so the backend can name the download
+// "<DocNum> <Party Name>.pdf"; it plays no part in resolving the document.
+const invoiceReportUrl = (ref: ReportRef) => {
+  const params = new URLSearchParams();
+  if (ref.docNum) params.set("docNum", ref.docNum);
+  if (ref.docEntry) params.set("docEntry", ref.docEntry);
+  if (ref.party) params.set("party", ref.party);
+  return `${API_BASE_URL}/invoice/crystal/?${params.toString()}`;
+};
 
 /**
  * Update an invoice record's status. A rejection_reason is required when the
@@ -240,7 +324,12 @@ const isCreditLimitError = (record: InvoiceRecord) =>
 const updateInvoiceStatus = (
   id: InvoiceRecord["id"],
   status: InvoiceStatus,
-  extra?: { rejection_reason?: string; error_message?: string },
+  extra?: {
+    rejection_reason?: string;
+    error_message?: string;
+    sap_doc_num?: string;
+    sap_doc_entry?: string;
+  },
 ) =>
   apiFetch<ApiMessageResponse>(`/api/invoice/${id}/update-status/`, {
     method: "PATCH",
@@ -274,6 +363,9 @@ export default function InvoiceReview() {
   const [clFlowStages, setClFlowStages] = useState<CreditLimitStage[]>([]);
   const [clFlowLoading, setClFlowLoading] = useState(false);
   const [clFlowError, setClFlowError] = useState("");
+  // The record currently being posted to SAP, kept so a credit-limit failure can
+  // offer "Raise CL" for the right invoice straight from the loader modal.
+  const [postingRecord, setPostingRecord] = useState<InvoiceRecord | null>(null);
   const sapPost = useSapPost();
   const navigate = useNavigate();
 
@@ -295,7 +387,7 @@ export default function InvoiceReview() {
   // full unfiltered list once and count each status client-side.
   const loadCounts = useCallback(async () => {
     try {
-      const data = await apiFetch<unknown>(`/api/invoice/all/`);
+      const data = await apiFetch<unknown>(`/api/invoice/logs/all/`);
       const all = extractRecords(data);
       const next = createEmptyCounts();
       all.forEach((record) => {
@@ -313,7 +405,7 @@ export default function InvoiceReview() {
     setError("");
     try {
       const query = statusFilter === "ALL" ? "" : `?status=${statusFilter}`;
-      const data = await apiFetch<unknown>(`/api/invoice/all/${query}`);
+      const data = await apiFetch<unknown>(`/api/invoice/logs/all/${query}`);
       setRecords(extractRecords(data));
     } catch (err) {
       console.error(err);
@@ -334,6 +426,19 @@ export default function InvoiceReview() {
     () => (selected ? parsePayload(selected.invoice_payload) : {}),
     [selected],
   );
+
+  const clFlowSummary = useMemo(() => creditLimitFlowSummary(clFlowStages), [clFlowStages]);
+
+  // Version number per log id in the history chain, keyed in first-seen
+  // (chronological) order: oldest version is 1. Size is the number of versions.
+  const historyVersions = useMemo(() => {
+    const versions = new Map<string, number>();
+    historyRecords.forEach((entry) => {
+      const key = String(entry.invoice_log ?? "");
+      if (!versions.has(key)) versions.set(key, versions.size + 1);
+    });
+    return versions;
+  }, [historyRecords]);
 
   const handleAction = async (record: InvoiceRecord, status: InvoiceStatus) => {
     if (record.id === undefined || record.id === null) {
@@ -377,12 +482,15 @@ export default function InvoiceReview() {
     }
   };
 
-  // Reopen a rejected invoice for editing: mark the log EDITED (clearing the
-  // rejection reason), hand the stored payload to the Sales Invoice wizard via
-  // sessionStorage, and navigate there. The wizard rebuilds the party and lines
-  // and re-runs batch allocation against current stock; resubmitting creates a
-  // fresh PENDING log, so this record's EDITED status is terminal.
-  const handleEdit = async (record: InvoiceRecord) => {
+  // Reopen a rejected invoice for editing: hand the stored payload to the Sales
+  // Invoice wizard via sessionStorage and navigate there. The wizard rebuilds the
+  // party and lines and re-runs batch allocation against current stock.
+  //
+  // This log is NOT touched here. It stays REJECTED — with its reason intact and
+  // visible to reviewers — until a replacement is actually submitted; the create
+  // endpoint retires it to EDITED at that point (see `edited_from`). An edit that
+  // is started and then abandoned therefore leaves the rejection standing.
+  const handleEdit = (record: InvoiceRecord) => {
     if (record.id === undefined || record.id === null) {
       setActionError("This invoice has no identifier and cannot be edited.");
       return;
@@ -390,24 +498,13 @@ export default function InvoiceReview() {
     const label = `SO #${record.so_number || record.id}`;
     if (!window.confirm(`Edit ${label} and resubmit it for approval?`)) return;
 
-    setActionId(record.id);
     setActionError("");
     setActionMessage("");
-    try {
-      await apiFetch<ApiMessageResponse>(`/api/invoice/log/${encodeURIComponent(String(record.id))}/`, {
-        method: "PATCH",
-        body: JSON.stringify({ status: "EDITED", rejection_reason: null }),
-      });
-      sessionStorage.setItem(
-        EDIT_RESTORE_STORAGE_KEY,
-        JSON.stringify({ logId: record.id, branch: record.branch, payload: parsePayload(record.invoice_payload) }),
-      );
-      navigate("/Sales_Invoice");
-    } catch (err) {
-      console.error(err);
-      setActionError(extractMessage(err, "Unable to mark the invoice as edited."));
-      setActionId(null);
-    }
+    sessionStorage.setItem(
+      EDIT_RESTORE_STORAGE_KEY,
+      JSON.stringify({ logId: record.id, branch: record.branch, payload: parsePayload(record.invoice_payload) }),
+    );
+    navigate("/Sales_Invoice");
   };
 
   // Open the credit-limit request form for a credit-limit ERROR record and
@@ -503,6 +600,27 @@ export default function InvoiceReview() {
       loadInvoices();
     } catch (err) {
       console.error(err);
+      // 409 = a credit-limit request already exists for this invoice log (the row
+      // is keyed by invoice_log_id). Nothing was created; the record simply belongs
+      // on the CL Raised tab, so move it there instead of showing a hard failure.
+      if ((err as { status?: number })?.status === 409) {
+        if (clRecord.id !== undefined && clRecord.id !== null) {
+          try {
+            await updateInvoiceStatus(clRecord.id, "CL_RAISED");
+          } catch (statusErr) {
+            console.error("Unable to set CL RAISED status:", statusErr);
+          }
+        }
+        setActionMessage(
+          extractMessage(
+            (err as { data?: unknown })?.data,
+            "A credit-limit request has already been raised for this invoice.",
+          ),
+        );
+        setClRecord(null);
+        loadInvoices();
+        return;
+      }
       setClSubmitError(extractMessage(err, "Unable to raise the credit-limit request."));
     } finally {
       setClSubmitting(false);
@@ -553,6 +671,7 @@ export default function InvoiceReview() {
     setActionError("");
     setActionMessage("");
     setSelected(null);
+    setPostingRecord(record);
 
     const payload = parsePayload(record.invoice_payload);
     sapPost.run({
@@ -565,10 +684,19 @@ export default function InvoiceReview() {
         total: toNumber(record.total_amount),
         branch: record.branch || "",
       },
-      onSuccess: async () => {
-        setActionMessage(`${label} posted to SAP HANA successfully.`);
+      onSuccess: async ({ invoiceNumber, docNum, docEntry }) => {
+        setActionMessage(
+          invoiceNumber
+            ? `${label} posted to SAP HANA successfully as invoice #${invoiceNumber}.`
+            : `${label} posted to SAP HANA successfully.`,
+        );
         try {
-          await updateInvoiceStatus(record.id, POSTED_TO_SAP_STATUS);
+          // Keep SAP's identifiers on the log so the row can print the bill
+          // later without anyone having to look the invoice up in SAP.
+          await updateInvoiceStatus(record.id, POSTED_TO_SAP_STATUS, {
+            ...(docNum ? { sap_doc_num: docNum } : {}),
+            ...(docEntry ? { sap_doc_entry: docEntry } : {}),
+          });
         } catch (logErr) {
           console.error("Unable to record SAP post success:", logErr);
         }
@@ -586,13 +714,39 @@ export default function InvoiceReview() {
     });
   };
 
+  // The bill print for the invoice that was just posted, offered on the loader's
+  // success panel so billing can print without going back to the list.
+  const loaderReportUrl = (() => {
+    const { docNum, docEntry } = sapPost.state;
+    if (!docNum && !docEntry) return undefined;
+    return invoiceReportUrl({ docNum, docEntry, party: trimmed(postingRecord?.party_name) });
+  })();
+
   // Dismiss the loader; refresh the list once the run has settled so the row
   // reflects the recorded POSTED_TO_SAP / ERROR status.
   const closeSapLoader = () => {
     const settled = sapPost.state.status === "success" || sapPost.state.status === "error";
     sapPost.close();
+    setPostingRecord(null);
     if (settled) loadInvoices();
   };
+
+  // The SAP post failed on a credit-limit check: close the loader and open the
+  // credit-limit request form for the invoice that was being posted.
+  const raiseClFromLoader = () => {
+    const record = postingRecord;
+    if (!record) return;
+    closeSapLoader();
+    void openCreditLimitRequest(record);
+  };
+
+  // True when the current SAP failure is specifically about the credit limit, so
+  // the loader can offer a "Raise CL" shortcut.
+  const sapErrorIsCreditLimit =
+    sapPost.state.status === "error" &&
+    /credit\s*limit/i.test(
+      String(sapPost.state.rawError || sapPost.state.errorMessage || ""),
+    );
 
   const openHistory = async (record: InvoiceRecord) => {
     // The history endpoint is keyed by the invoice-log id. On a list row that is
@@ -610,10 +764,14 @@ export default function InvoiceReview() {
     setHistoryError("");
     setHistoryLoading(true);
     try {
+      // Returns the whole revision chain, oldest first. Re-sorted defensively;
+      // the id tiebreaker keeps same-timestamp entries in insertion order so
+      // version boundaries stay contiguous.
       const data = await apiFetch<unknown>(`/api/invoice/history/${encodeURIComponent(String(logId))}/`);
-      const rows = extractRecords(data).sort(
-        (a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime(),
-      );
+      const rows = extractRecords(data).sort((a, b) => {
+        const byTime = new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime();
+        return byTime !== 0 ? byTime : toNumber(a.id) - toNumber(b.id);
+      });
       setHistoryRecords(rows);
     } catch (err) {
       console.error(err);
@@ -680,7 +838,7 @@ export default function InvoiceReview() {
                   <th>SO #</th>
                   <th>Party</th>
                   <th className="ir-num">Amount</th>
-                  <th>Status</th>
+                  {/* <th>Status</th> */}
                   <th>Submitted</th>
                   <th className="ir-actions-col">Actions</th>
                 </tr>
@@ -689,14 +847,31 @@ export default function InvoiceReview() {
                 {records.map((record, index) => {
                   const status = normalizeStatus(record.status);
                   const busy = actionId === record.id;
+                  const reportRef = invoiceReportRef(record);
                   return (
                     <tr key={record.id ?? index}>
-                      <td>{record.so_number || "—"}</td>
+                      <td>
+                        {record.so_number || "—"}
+                        {/* Lineage: this row is either a rework of a rejected
+                            invoice, or the version that was reworked away. */}
+                        {hasRef(record.supersedes) && (
+                          <span className="ir-lineage-chip" title={record.supersedes_rejection_reason || undefined}>
+                            <HiArrowUturnLeft aria-hidden="true" />
+                            Revision of #{record.supersedes}
+                          </span>
+                        )}
+                        {hasRef(record.superseded_by_id) && (
+                          <span className="ir-lineage-chip ir-lineage-chip-muted">
+                            <HiArrowUturnLeft aria-hidden="true" />
+                            Replaced by #{record.superseded_by_id}
+                          </span>
+                        )}
+                      </td>
                       <td>{record.party_name || "—"}</td>
                       <td className="ir-num">{formatAmount(record.total_amount)}</td>
-                      <td>
+                      {/* <td>
                         <span className={`ir-badge ir-badge-${status.toLowerCase()}`}>{statusLabel(status)}</span>
-                      </td>
+                      </td> */}
                       <td>{formatDateTime(record.created_at)}</td>
                       <td className="ir-actions-col">
                         <div className="ir-row-actions">
@@ -753,6 +928,32 @@ export default function InvoiceReview() {
                               {busy ? "…" : "Post to SAP"}
                             </button>
                           )}
+                          {/* A real anchor, not window.open: popup blockers can
+                              turn an opener into a same-tab navigation, and this
+                              must never take the reviewer off the list. */}
+                          {status === "POSTED_TO_SAP" &&
+                            (reportRef ? (
+                              <a
+                                className="ir-btn ir-btn-report ir-btn-sm"
+                                href={invoiceReportUrl(reportRef)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title={`Open the bill print for invoice #${reportRef.docNum || reportRef.docEntry}`}
+                              >
+                                <HiDocumentText aria-hidden="true" />
+                                Generate Report
+                              </a>
+                            ) : (
+                              <button
+                                type="button"
+                                className="ir-btn ir-btn-report ir-btn-sm"
+                                disabled
+                                title="No SAP document number was recorded for this invoice"
+                              >
+                                <HiDocumentText aria-hidden="true" />
+                                Generate Report
+                              </button>
+                            ))}
                           {(status === "ERROR" || status === "CL_RAISED") && canPostToSap && (
                             <button
                               type="button"
@@ -834,6 +1035,43 @@ export default function InvoiceReview() {
             </header>
 
             <div className="ir-modal-body">
+              {/* The approver of a reworked invoice needs to see why the previous
+                  attempt was turned down before deciding on this one. */}
+              {hasRef(selected.supersedes) && (
+                <div className="ir-lineage-box" role="note">
+                  <HiArrowUturnLeft aria-hidden="true" />
+                  <div>
+                    <strong>
+                      Revision of invoice #{selected.supersedes}
+                      {selected.supersedes_so_number ? ` (SO #${selected.supersedes_so_number})` : ""}, which was
+                      rejected.
+                    </strong>
+                    {selected.supersedes_rejection_reason && (
+                      <p>Previous rejection reason: {selected.supersedes_rejection_reason}</p>
+                    )}
+                    <button
+                      type="button"
+                      className="ir-link-btn"
+                      onClick={() => {
+                        const record = selected;
+                        setSelected(null);
+                        void openHistory(record);
+                      }}
+                    >
+                      View full revision history
+                    </button>
+                  </div>
+                </div>
+              )}
+              {hasRef(selected.superseded_by_id) && (
+                <div className="ir-lineage-box ir-lineage-box-muted" role="note">
+                  <HiArrowUturnLeft aria-hidden="true" />
+                  <div>
+                    <strong>Replaced by invoice #{selected.superseded_by_id}.</strong>
+                    <p>This version was reworked and is no longer active.</p>
+                  </div>
+                </div>
+              )}
               {selected.error_message && (
                 <div className="ir-error-box" role="alert">
                   <HiExclamationTriangle aria-hidden="true" />
@@ -968,6 +1206,32 @@ export default function InvoiceReview() {
               </footer>
             )}
 
+            {normalizeStatus(selected.status) === "POSTED_TO_SAP" && (
+              <footer className="ir-modal-foot">
+                {invoiceReportRef(selected) ? (
+                  <a
+                    className="ir-btn ir-btn-report"
+                    href={invoiceReportUrl(invoiceReportRef(selected)!)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <HiDocumentText aria-hidden="true" />
+                    Generate Invoice Report
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    className="ir-btn ir-btn-report"
+                    disabled
+                    title="No SAP document number was recorded for this invoice"
+                  >
+                    <HiDocumentText aria-hidden="true" />
+                    Generate Invoice Report
+                  </button>
+                )}
+              </footer>
+            )}
+
             {["ERROR", "CL_RAISED"].includes(normalizeStatus(selected.status)) && canPostToSap && (
               <footer className="ir-modal-foot">
                 {normalizeStatus(selected.status) === "ERROR" && isCreditLimitError(selected) && (
@@ -1059,25 +1323,40 @@ export default function InvoiceReview() {
                 <ol className="ir-timeline">
                   {historyRecords.map((entry, index) => {
                     const entryStatus = normalizeStatus(entry.status);
+                    // The timeline spans every version in the revision chain, so
+                    // mark where one log ends and its rework begins.
+                    const logId = entry.invoice_log;
+                    const startsVersion = index === 0 || historyRecords[index - 1].invoice_log !== logId;
+                    const versionNumber = historyVersions.get(String(logId ?? "")) ?? 1;
                     return (
-                      <li className="ir-timeline-item" key={entry.id ?? index}>
-                        <span className={`ir-timeline-dot ir-dot-${entryStatus.toLowerCase()}`} aria-hidden="true" />
-                        <div className="ir-timeline-body">
-                          <div className="ir-timeline-head">
-                            <span className={`ir-badge ir-badge-${entryStatus.toLowerCase()}`}>{statusLabel(entryStatus)}</span>
-                            <time>{formatDateTime(entry.created_at)}</time>
+                      <Fragment key={entry.id ?? index}>
+                        {startsVersion && historyVersions.size > 1 && (
+                          <li className="ir-timeline-sep" aria-hidden="false">
+                            <span>
+                              Version {versionNumber} of {historyVersions.size}
+                              {hasRef(logId) ? ` · invoice #${logId}` : ""}
+                            </span>
+                          </li>
+                        )}
+                        <li className="ir-timeline-item">
+                          <span className={`ir-timeline-dot ir-dot-${entryStatus.toLowerCase()}`} aria-hidden="true" />
+                          <div className="ir-timeline-body">
+                            <div className="ir-timeline-head">
+                              <span className={`ir-badge ir-badge-${entryStatus.toLowerCase()}`}>{statusLabel(entryStatus)}</span>
+                              <time>{formatDateTime(entry.created_at)}</time>
+                            </div>
+                            {entry.created_by_name && (
+                              <p className="ir-timeline-note ir-timeline-by">By: {entry.created_by_name}</p>
+                            )}
+                            {entry.rejection_reason && (
+                              <p className="ir-timeline-note">Reason: {entry.rejection_reason}</p>
+                            )}
+                            {entry.error_message && (
+                              <p className="ir-timeline-note ir-timeline-error">{entry.error_message}</p>
+                            )}
                           </div>
-                          {entry.created_by_name && (
-                            <p className="ir-timeline-note ir-timeline-by">By: {entry.created_by_name}</p>
-                          )}
-                          {entry.rejection_reason && (
-                            <p className="ir-timeline-note">Reason: {entry.rejection_reason}</p>
-                          )}
-                          {entry.error_message && (
-                            <p className="ir-timeline-note ir-timeline-error">{entry.error_message}</p>
-                          )}
-                        </div>
-                      </li>
+                        </li>
+                      </Fragment>
                     );
                   })}
                 </ol>
@@ -1230,29 +1509,25 @@ export default function InvoiceReview() {
               ) : clFlowError ? (
                 <div className="ir-banner ir-banner-error">{clFlowError}</div>
               ) : (
+                <>
+                {clFlowSummary && (
+                  <div className={`ir-cl-summary ir-cl-summary-${clFlowSummary.tone}`}>
+                    {clFlowSummary.label}
+                  </div>
+                )}
                 <ol className="ir-timeline">
                   {clFlowStages.map((stage, index) => {
-                    const acted = String(stage.actionStatus || "").trim();
-                    const dotClass = acted
-                      ? /reject/i.test(acted)
-                        ? "ir-dot-rejected"
-                        : "ir-dot-approved"
-                      : "ir-dot-pending";
-                    const badgeClass = acted
-                      ? /reject/i.test(acted)
-                        ? "ir-badge-rejected"
-                        : "ir-badge-approved"
-                      : "ir-badge-pending";
+                    const state = creditLimitStageState(stage.actionStatus);
                     return (
                       <li className="ir-timeline-item" key={stage.stageId ?? index}>
-                        <span className={`ir-timeline-dot ${dotClass}`} aria-hidden="true" />
+                        <span className={`ir-timeline-dot ir-dot-${state.tone}`} aria-hidden="true" />
                         <div className="ir-timeline-body">
                           <div className="ir-timeline-head">
                             <strong>
                               {toNumber(stage.priority) ? `${toNumber(stage.priority)}. ` : ""}
                               {stage.stageName || "—"}
                             </strong>
-                            <span className={`ir-badge ${badgeClass}`}>{acted || "Pending"}</span>
+                            <span className={`ir-badge ir-badge-${state.tone}`}>{state.label}</span>
                           </div>
                           <p className="ir-timeline-note ir-timeline-by">
                             Assigned to: {stage.assignedTo || "—"}
@@ -1268,6 +1543,7 @@ export default function InvoiceReview() {
                     );
                   })}
                 </ol>
+                </>
               )}
             </div>
           </section>
@@ -1276,7 +1552,17 @@ export default function InvoiceReview() {
 
       {/* Mission Control loader — drives the live post-to-SAP transaction and
           shows success or the translated SAP error (with retry) in place. */}
-      <MissionControlLoader state={sapPost.state} onClose={closeSapLoader} onRetry={sapPost.retry} />
+      <MissionControlLoader
+        state={sapPost.state}
+        onClose={closeSapLoader}
+        onRetry={sapPost.retry}
+        onRaiseCl={
+          canPostToSap && sapErrorIsCreditLimit && postingRecord
+            ? raiseClFromLoader
+            : undefined
+        }
+        reportUrl={loaderReportUrl}
+      />
     </div>
   );
 }

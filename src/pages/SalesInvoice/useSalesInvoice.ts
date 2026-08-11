@@ -124,6 +124,9 @@ const toRequestError = (error: any): RequestError => {
   if (typeof data === "string") message = data;
   else if (typeof data?.detail === "string" && data.detail) message = data.detail;
   else if (typeof data?.message === "string" && data.message) message = data.message;
+  // Several OMS endpoints report failures as {"error": "..."}; without this the
+  // generic branch below renders them as "error: <text>".
+  else if (typeof data?.error === "string" && data.error) message = data.error;
   else if (data && typeof data === "object") {
     message = Object.entries(data)
       .map(([field, value]) => {
@@ -559,8 +562,44 @@ export function useSalesInvoice() {
     loadFreightOptions();
   }, [branch]);
 
+  /* ── Edit-and-resubmit link ─────────────────────────────────────────────
+   * Set while the wizard is rebuilding a rejected invoice. It pins the customer
+   * (a replacement for invoice X must stay on X's customer — otherwise it is a
+   * different invoice wearing X's history) and carries the source log id, which
+   * postInvoice sends as `edited_from` so the backend retires the original.
+   *
+   * Leaving the customer — Change party / Change branch — drops the link rather
+   * than blocking: the submission then becomes an ordinary new invoice and the
+   * rejected log keeps its REJECTED status and reason.
+   *
+   * Mirrored in a ref because the guards below run inside callbacks created
+   * before the corresponding state exists. */
+  type EditLink = { logId?: number | string; cardCode: string };
+  const editLinkRef = useRef<EditLink | null>(null);
+  const [editLink, setEditLinkState] = useState<EditLink | null>(null);
+  const setEditLink = useCallback((next: EditLink | null) => {
+    editLinkRef.current = next;
+    setEditLinkState(next);
+  }, []);
+
+  // Drop the link and tell the user the rejected invoice is no longer being
+  // replaced. No-op when there was no link to begin with.
+  const releaseEditLink = useCallback(() => {
+    const link = editLinkRef.current;
+    if (!link) return;
+    setEditLink(null);
+    setPartyError(
+      `No longer editing rejected invoice${link.logId ? ` #${link.logId}` : ""} — it keeps its rejection. Anything you submit now is a new invoice.`,
+    );
+  }, [setEditLink]);
+
   const selectParty = useCallback(async (party: Party) => {
     if (!branch) return [];
+    // A replacement invoice cannot change customer: picking a different one
+    // detaches from the rejected invoice instead of carrying its identity over.
+    if (editLinkRef.current && party.CardCode !== editLinkRef.current.cardCode) {
+      releaseEditLink();
+    }
     setSelectedParty({
       CardCode: party.CardCode,
       CardName: party.CardName,
@@ -596,9 +635,10 @@ export function useSalesInvoice() {
     } finally {
       setLoadingOrders(false);
     }
-  }, [branch]);
+  }, [branch, releaseEditLink]);
 
   const changeParty = () => {
+    releaseEditLink();
     setStep(1);
     setSelectedParty(null);
     setSalesOrders([]);
@@ -954,6 +994,10 @@ export function useSalesInvoice() {
       return;
     }
 
+    // Pin the customer and remember which log this submission replaces. Set
+    // before selectParty so its guard sees the matching card code.
+    setEditLink({ logId: editRestore.logId, cardCode });
+
     (async () => {
       const orders = await selectParty(party);
       const payloadLines = (payload.DocumentLines || []).filter(
@@ -1006,7 +1050,7 @@ export function useSalesInvoice() {
         : "";
       setRestoreStaged({ lines: restored, warning });
     })();
-  }, [branch, editRestore, freightOptions, loadingParties, parties, selectParty]);
+  }, [branch, editRestore, freightOptions, loadingParties, parties, selectParty, setEditLink]);
 
   useEffect(() => {
     if (!restoreStaged || !selectedParty) return;
@@ -1085,6 +1129,14 @@ export function useSalesInvoice() {
       // creating a draft in SAP. The Invoice Review page approves it and posts it to
       // SAP HANA later.
       const createdBy = getCurrentUserId();
+      // Only claim to replace the rejected log when this really is its
+      // replacement — same customer, link never released. Otherwise the original
+      // stays REJECTED and this is simply a new invoice.
+      const link = editLinkRef.current;
+      const editedFrom =
+        link && link.logId !== undefined && link.logId !== null && selectedParty?.CardCode === link.cardCode
+          ? link.logId
+          : null;
       const pendingPayload = {
         so_number: uniqueTextValues(selectedLineList.map((line) => (line.DocNum ? String(line.DocNum) : ""))).join(", "),
         party_name: selectedParty?.CardName || "",
@@ -1095,12 +1147,16 @@ export function useSalesInvoice() {
         branch: branch || "OIL",
         warehouse: payload.DocumentLines[0]?.WarehouseCode || "",
         ...(createdBy ? { created_by: createdBy } : {}),
+        ...(editedFrom !== null ? { edited_from: editedFrom } : {}),
         invoice_payload: payload,
       };
       const data = await apiFetch<ApiMessageResponse>("/api/invoice/pending/", {
         method: "POST",
         body: JSON.stringify(pendingPayload),
       });
+      // The original has been retired by the backend; a further submit from this
+      // session must not try to retire anything again.
+      if (editedFrom !== null) setEditLink(null);
       setPostSuccess(extractApiMessage(data, "Invoice submitted for review and approval."));
     } catch (error) {
       console.error(error);
@@ -1143,6 +1199,8 @@ export function useSalesInvoice() {
     postError,
     postSuccess,
     postedDocNum,
+    // Non-null while this invoice is a replacement for a rejected one.
+    editLink,
     selectParty,
     changeParty,
     toggleLine,
