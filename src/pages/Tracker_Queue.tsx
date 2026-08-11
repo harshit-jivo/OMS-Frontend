@@ -149,6 +149,10 @@ function VerdictBadge({ v }: { v?: StageDecision["verdict"] }) {
 
 // Statuses that mean "send back" / "need a written reason".
 const RETURN_STATUSES = new Set(["RETURN", "REJECTED"]);
+/** Pre-Audit disposition that hands the invoice to the Transport Approval desk. */
+const TRANSPORT_STATUS = "TRANSPORT_APPROVAL";
+/** Stage statuses are stored as keys; show them without the underscores. */
+const statusLabel = (s: string) => s.replace(/_/g, " ");
 const REASON_STATUSES = new Set(["RETURN", "REJECTED", "HOLD", "DEBIT"]);
 
 // The payment form now captures only the three inputs; every amount, the open
@@ -296,6 +300,21 @@ export default function Tracker_Queue() {
     setSelected(new Set()); setRemarks(""); setStatusPick("");
     setHoldType(""); setAmount(""); setSubTab("current");
   }, [activeStage]);
+  const loadDecisions = async (clear = false) => {
+    const decision = DECISION_TABS[subTab];
+    if (!decision || !activeStage) return;
+    setLoadingDecisions(true);
+    if (clear) setDecisionRows([]);
+    try {
+      setDecisionRows(
+        await trackerService.getStageDecisions(activeStage, decision, showResolved));
+    } catch {
+      flash("Failed to load the decision log");
+    } finally {
+      setLoadingDecisions(false);
+    }
+  };
+
   // Reset selection when the sub-tab changes; lazy-load the history tabs.
   useEffect(() => {
     setSelected(new Set());
@@ -303,15 +322,7 @@ export default function Tracker_Queue() {
     if (subTab === "advanced") {
       trackerService.getStageAdvanced(activeStage).then(setAdvancedRows).catch(() => {});
     }
-    const decision = DECISION_TABS[subTab];
-    if (decision) {
-      setLoadingDecisions(true);
-      setDecisionRows([]);
-      trackerService.getStageDecisions(activeStage, decision, showResolved)
-        .then(setDecisionRows)
-        .catch(() => flash("Failed to load the decision log"))
-        .finally(() => setLoadingDecisions(false));
-    }
+    loadDecisions(true);
   }, [subTab, activeStage, showResolved]);
 
   // JSAP desk: fetch each parked invoice's budget verdict so the handler can
@@ -366,13 +377,30 @@ export default function Tracker_Queue() {
         (res.errors.length ? `, ${res.errors.length} failed: ${res.errors[0]?.error}` : "")
       );
       setRemarks(""); setStatusPick(""); setHoldType(""); setAmount("");
+      setSelected(new Set());
       load();
+      if (isDecisionTab) loadDecisions();   // the log the action just changed
     } catch (err: any) {
       flash(err?.response?.data?.detail || "Action failed");
     }
   };
 
+  // Full holds are the only decision-log rows still sitting at this desk, so
+  // they are the only ones that can be released from the Hold tab.
+  const heldHere = useMemo(
+    () => decRows.filter((d) => d.is_still_here && d.hold_type === "FULL"),
+    [decRows]
+  );
+  const canReleaseHolds = subTab === "hold" && heldHere.length > 0;
+  const allHeldSelected =
+    heldHere.length > 0 && heldHere.every((d) => selected.has(d.invoice_id));
+
   const onAdvance = () => runBulk({ action: "ADVANCE", remarks });
+  /** Release the selected full holds: mark them OK and let them move on. */
+  const onReleaseHold = (status: string) => {
+    if (!selected.size) { flash("Select at least one held invoice"); return; }
+    runBulk({ stage_status: status, remarks });
+  };
   const onReturn = () => {
     if (!remarks.trim()) { flash("Remarks are mandatory to return"); return; }
     runBulk({ action: "RETURN", remarks });
@@ -645,7 +673,7 @@ export default function Tracker_Queue() {
                   <select value={statusPick} onChange={(e) => { setStatusPick(e.target.value); setHoldType(""); setAmount(""); }}>
                     <option value="">Status…</option>
                     {stageCfg.status_choices.map((s) => (
-                      <option key={s} value={s}>{s}</option>
+                      <option key={s} value={s}>{statusLabel(s)}</option>
                     ))}
                   </select>
                   {statusPick === "HOLD" && (
@@ -672,10 +700,16 @@ export default function Tracker_Queue() {
                       ? <><HiArrowUturnLeft /> {remarks.trim() ? "Reject & return" : "Reject"}</>
                       : RETURN_STATUSES.has(statusPick) ? <><HiArrowUturnLeft /> Return</>
                       : statusPick === "HOLD" && holdType === "FULL" ? <>⏸ Hold</>
+                      : statusPick === TRANSPORT_STATUS ? <><HiArrowRight /> Send for approval</>
                       : <><HiArrowRight /> Apply</>}
                   </button>
                   {statusPick === "HOLD" && holdType === "PARTIAL" && (
                     <span className="trk-sub" style={{ fontSize: 11 }}>Amount required (except RM-PM)</span>
+                  )}
+                  {statusPick === TRANSPORT_STATUS && (
+                    <span className="trk-sub" style={{ fontSize: 11 }}>
+                      Goes to the Transport Approval desk and comes back here once approved
+                    </span>
                   )}
                 </>
               ) : (
@@ -724,6 +758,11 @@ export default function Tracker_Queue() {
                   : "Every invoice this desk passed as OK."}
                 {" "}Read-only log — the invoice may have moved on since.
               </span>
+              {subTab === "hold" && heldHere.length > 0 && (
+                <span className="trk-sub" style={{ fontSize: 11, color: "#b45309" }}>
+                  {heldHere.length} still held here — tick them below to release.
+                </span>
+              )}
               {SENT_BACK_TABS.has(subTab) && (
                 <label style={{ display: "flex", alignItems: "center", gap: 6,
                                 marginLeft: "auto", fontSize: 12, cursor: "pointer" }}>
@@ -732,6 +771,31 @@ export default function Tracker_Queue() {
                   Also show ones that came back
                 </label>
               )}
+            </div>
+          )}
+
+          {/* Hold tab: release a full hold — it is still parked at this desk,
+              so it can be dispositioned straight from the log. */}
+          {canReleaseHolds && (
+            <div className="trk-actionbar" style={{ background: "#fffbeb", borderColor: "#fde68a" }}>
+              <span className="trk-count">{selected.size} selected</span>
+              <input className="trk-remarks" placeholder="Remarks (optional)"
+                value={remarks} onChange={(e) => setRemarks(e.target.value)} />
+              <button className="trk-btn trk-btn-success"
+                onClick={() => onReleaseHold("OK")} disabled={!selected.size}>
+                <HiArrowRight /> Release as OK
+                {stageCfg && !stageCfg.is_terminal && " → next stage"}
+              </button>
+              {(stageCfg?.status_choices ?? []).includes(TRANSPORT_STATUS) && (
+                <button className="trk-btn trk-btn-primary"
+                  onClick={() => onReleaseHold(TRANSPORT_STATUS)} disabled={!selected.size}>
+                  <HiArrowRight /> Release for transport approval
+                </button>
+              )}
+              <span className="trk-sub" style={{ fontSize: 11 }}>
+                Clears the hold and advances the invoice — same as dispositioning
+                it from the Current tab.
+              </span>
             </div>
           )}
 
@@ -752,6 +816,16 @@ export default function Tracker_Queue() {
               <table className="trk-table">
                 <thead>
                   <tr>
+                    {canReleaseHolds && (
+                      <th>
+                        <input type="checkbox" checked={allHeldSelected}
+                          onChange={(e) =>
+                            setSelected(e.target.checked
+                              ? new Set(heldHere.map((d) => d.invoice_id))
+                              : new Set())
+                          } />
+                      </th>
+                    )}
                     <th>Invoice No.</th>
                     <th>Party</th>
                     <th>Inv. Date</th>
@@ -767,6 +841,14 @@ export default function Tracker_Queue() {
                 <tbody>
                   {decRows.map((d) => (
                     <tr key={d.event_id}>
+                      {canReleaseHolds && (
+                        <td>
+                          {d.is_still_here && d.hold_type === "FULL" && (
+                            <input type="checkbox" checked={selected.has(d.invoice_id)}
+                              onChange={() => toggle(d.invoice_id)} />
+                          )}
+                        </td>
+                      )}
                       <td>{d.invoice_number}</td>
                       <td>{d.party_name}</td>
                       <td>{fmtDate(d.invoice_date)}</td>
@@ -821,7 +903,7 @@ export default function Tracker_Queue() {
                     </tr>
                   ))}
                   {decRows.length === 0 && (
-                    <tr><td colSpan={10}><div className="trk-empty">
+                    <tr><td colSpan={11}><div className="trk-empty">
                       {loadingDecisions ? "Loading…"
                         : subTab === "transport" ? "Nothing sent for transport approval yet."
                         : SENT_BACK_TABS.has(subTab)
