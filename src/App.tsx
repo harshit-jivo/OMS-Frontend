@@ -49,6 +49,8 @@ import Device_Management from "./pages/Device_Management";
 import Invoice_Report from "./pages/Invoice_Report";
 import HAIS from "./pages/HAIS";
 import AssetPublicView from "./pages/HAIS/AssetPublicView";
+import Distributor from "./pages/Distributor";
+import MartApproval from "./pages/MartApproval";
 
 function App() {
   return (
@@ -423,6 +425,24 @@ function App() {
           element={
             <Sidebar>
               <HAIS />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Distributor"
+          element={
+            <Sidebar>
+              <Distributor />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Mart_Approval"
+          element={
+            <Sidebar>
+              <MartApproval />
             </Sidebar>
           }
         />

@@ -4,13 +4,14 @@ import AssetRegister from "./AssetRegister";
 import AssetForm from "./AssetForm";
 import AssetLookup from "./AssetLookup";
 import OptionManager from "./OptionManager";
+import HaisReports from "./HaisReports";
 import { haisService } from "../../services/haisService";
 import "../../styles/Order_Flow_Settings.css";
 import "../../styles/Einvoice.css";
 
 // Tabs shown across the top. "edit" is a sub-view (reached from the register /
 // lookup), not a tab, so it is not listed here.
-type Tab = "list" | "add" | "lookup" | "asset-types" | "departments" | "storage-types";
+type Tab = "list" | "add" | "lookup" | "asset-types" | "departments" | "storage-types" | "reports";
 type View = Tab | "edit";
 
 const TABS: { key: Tab; label: string }[] = [
@@ -20,6 +21,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "asset-types", label: "Asset Type" },
   { key: "departments", label: "Departments" },
   { key: "storage-types", label: "Storage Type" },
+  { key: "reports", label: "Reports" },
 ];
 
 export default function HAIS() {
@@ -119,6 +121,8 @@ export default function HAIS() {
             create={haisService.options.createStorageType}
           />
         )}
+
+        {view === "reports" && <HaisReports />}
       </div>
     </div>
   );

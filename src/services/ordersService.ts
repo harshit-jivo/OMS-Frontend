@@ -191,6 +191,82 @@ export interface CreateOrder {
   items: OrderItem[];
 }
 
+// ── Distributor / Mart flow payload + read models ───────────────────────────
+// Billing-shaped item so a distributor sales order carries the SAME data as a
+// normal order (pcs/boxes/ltrs/landing/tax all computed like Add Sales).
+export interface MartOrderItemPayload {
+  item_code: string;
+  item_name: string;
+  category: string;
+  brand: string;
+  variety: string;
+  sub_group: string;
+  item_type: string;
+  pcs: number;
+  boxes: number;
+  qty: number;
+  ltrs: number;
+  price_list_basic: number;
+  basic_price: number;
+  tax_rate: number;
+  total: number;
+  total_ltrs: number;
+}
+
+export interface MartOrderPayload {
+  order_id?: number;
+  order_type: "DISTRIBUTOR";
+  card_code: string;
+  card_name: string;
+  bill_to_id: number;
+  bill_to_address: string;
+  ship_to_id: number;
+  ship_to_address: string;
+  delivery_date: string;
+  po_number?: string;
+  company: number;
+  total_amount: number;
+  items: MartOrderItemPayload[];
+}
+
+export interface MartOrderSummary {
+  id: number;
+  order_number: string;
+  order_type: string;
+  card_code: string;
+  card_name: string;
+  company: string;
+  total_amount: string;
+  status: string;
+  status_id: number;
+  is_pending: boolean;
+  status_display: string;
+  po_number?: string;
+  delivery_date?: string | null;
+  created_by?: string | null;
+  created_at?: string;
+  rejection_reason?: string;
+  items_count: number;
+}
+
+export interface MartOrderDetailItem {
+  id: number;
+  item_code: string;
+  item_name: string;
+  category: string;
+  qty: string;
+  basic_price: string;
+  total: string;
+}
+
+export interface MartOrderDetail extends MartOrderSummary {
+  bill_to_id: number;
+  bill_to_address: string;
+  ship_to_id: number;
+  ship_to_address: string;
+  items: MartOrderDetailItem[];
+}
+
 export interface RateApproval {
   id: number;
   approver: number;
@@ -514,6 +590,38 @@ export const ordersService = {
       })),
     };
     const response = await api.post("/orders/create/", payload);
+    return response.data;
+  },
+
+  // ── Distributor / Mart flow ───────────────────────────────────────────────
+  // A distributor order reuses the same /orders/create/ endpoint (so it saves in
+  // the same tables), but with order_type DISTRIBUTOR + company 3. Pass an
+  // orderId (as order_id in the payload) to update an existing one from the
+  // Mart Approval screen.
+  createMartOrder: async (payload: MartOrderPayload) => {
+    const response = await api.post("/orders/create/", payload);
+    return response.data;
+  },
+
+  getMartOrders: async (tab?: "pending" | "approved" | "rejected") => {
+    const response = await api.get("/orders/mart/list/", {
+      params: tab ? { tab } : undefined,
+    });
+    return response.data as MartOrderSummary[];
+  },
+
+  getMartOrderDetail: async (orderId: number) => {
+    const response = await api.get(`/orders/mart/${orderId}/`);
+    return response.data as MartOrderDetail;
+  },
+
+  approveMartOrder: async (orderId: number) => {
+    const response = await api.post(`/orders/mart/${orderId}/approve/`, {});
+    return response.data;
+  },
+
+  rejectMartOrder: async (orderId: number, reason: string) => {
+    const response = await api.post(`/orders/mart/${orderId}/reject/`, { reason });
     return response.data;
   },
 

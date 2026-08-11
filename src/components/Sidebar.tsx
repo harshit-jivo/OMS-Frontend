@@ -819,6 +819,26 @@ export default function Sidebar({ children }: SidebarProps) {
             </li>
           )}
 
+          {/* Visible to admins, users granted the "Distributor" page, and the Distributor role. */}
+          {(canSee("Distributor") || userRole?.toLowerCase() === "distributor") && (
+            <li className={location.pathname === "/Distributor" ? "active" : ""}>
+              <Link to="/Distributor" onClick={closeSidebar}>
+                <SidebarIcon><HiTruck /></SidebarIcon>
+                Distributor
+              </Link>
+            </li>
+          )}
+
+          {/* Visible to admins, users granted the "Mart_Approval" page, and the Mart Approval role. */}
+          {(canSee("Mart_Approval") || userRole?.toLowerCase() === "mart_approval") && (
+            <li className={location.pathname === "/Mart_Approval" ? "active" : ""}>
+              <Link to="/Mart_Approval" onClick={closeSidebar}>
+                <SidebarIcon><HiClipboardDocumentCheck /></SidebarIcon>
+                Mart Approval
+              </Link>
+            </li>
+          )}
+
           {canSeeTracker("Tracker_Entry") && (
             <li className={location.pathname === "/Tracker_Entry" ? "active" : ""}>
               <Link to="/Tracker_Entry" onClick={closeSidebar}>

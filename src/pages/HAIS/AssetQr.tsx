@@ -1,4 +1,5 @@
 import { QRCodeCanvas } from "qrcode.react";
+import { API_ORIGIN } from "../../services/api";
 import { qrValueFor, type Asset } from "../../services/haisService";
 
 type Props = {
@@ -12,13 +13,20 @@ type Props = {
  * Scanning it with any phone camera shows a tappable URL; opening it runs the API
  * and shows all the device details. A Print button lays out the QR + labels so it
  * can be stuck on the physical asset.
+ *
+ * The link's base comes from the env file: API_ORIGIN is derived from
+ * VITE_API_BASE_URL (its host without the trailing /api). So the QR always
+ * points at whatever server the env is configured for — no hardcoded URL.
+ * (Falls back to the current site origin only if the env base is relative.)
  */
+const QR_BASE = (API_ORIGIN || window.location.origin).replace(/\/+$/, "");
+
 export default function AssetQr({ asset, size = 128 }: Props) {
   const serial = asset.qr_code || qrValueFor(asset.serial_num);
   if (!serial) return null;
   // The QR carries a URL to the standalone device page, so a plain camera scan
   // yields a clickable link (not just raw text).
-  const value = `${window.location.origin}/hais/device/${encodeURIComponent(serial)}`;
+  const value = `${QR_BASE}/hais/device/${encodeURIComponent(serial)}`;
 
   const print = () => {
     const win = window.open("", "_blank", "width=360,height=460");

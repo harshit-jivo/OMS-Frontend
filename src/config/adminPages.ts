@@ -21,6 +21,8 @@ export const GRANTABLE_ADMIN_PAGES: GrantablePage[] = [
   { key: "Einvoice", label: "e-Invoice (IRN)", path: "/Einvoice" },
   { key: "Ewaybill", label: "e-Way Bill", path: "/Ewaybill" },
   { key: "HAIS", label: "Hardware Assets (HAIS)", path: "/HAIS" },
+  { key: "Distributor", label: "Distributor", path: "/Distributor" },
+  { key: "Mart_Approval", label: "Mart Approval", path: "/Mart_Approval" },
   // System — one page carrying live device activity and version analytics.
   // "Device_Activity" and "Version_Management" are deliberately no longer
   // grantable: the pages they gated are gone, so offering those permissions

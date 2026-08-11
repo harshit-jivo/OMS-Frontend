@@ -1664,7 +1664,12 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
       )
       .map((p) => ({ value: p.item_name, label: p.item_name }));
 
-  const renderSchemePanel = (row: SalesRow, index: number) => (
+  // Mart (company 3) orders never carry schemes — hide the whole promotion panel.
+  const isMartOrder = Number(formData.company) === 3;
+
+  const renderSchemePanel = (row: SalesRow, index: number) => {
+    if (isMartOrder) return null;
+    return (
     <div className={`sl-scheme-panel${row.isScheme ? " is-active" : ""}`}>
       <div className="sl-scheme-panel-head">
         <div>
@@ -1772,7 +1777,8 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
         </div>
       )}
     </div>
-  );
+    );
+  };
 
   const openAddItem = () => {
     const existing = rows.findIndex((r) => !r.confirmed);
