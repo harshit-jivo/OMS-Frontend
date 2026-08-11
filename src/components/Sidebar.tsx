@@ -769,6 +769,24 @@ export default function Sidebar({ children }: SidebarProps) {
             </li>
           )}
 
+          {canSee("Scheme_Manager") && (
+            <li className={location.pathname === "/Scheme_Manager" ? "active" : ""}>
+              <Link to="/Scheme_Manager" onClick={closeSidebar}>
+                <SidebarIcon><HiReceiptPercent /></SidebarIcon>
+                Schemes
+              </Link>
+            </li>
+          )}
+
+          {(canSee("Combo_Mapping") || userRole?.toLowerCase() === "billing") && (
+            <li className={location.pathname === "/Combo_Mapping" ? "active" : ""}>
+              <Link to="/Combo_Mapping" onClick={closeSidebar}>
+                <SidebarIcon><HiGift /></SidebarIcon>
+                Combo Mapping
+              </Link>
+            </li>
+          )}
+
           {canSee("Order_Flow_Settings") && (
             <li className={location.pathname === "/Order_Flow_Settings" ? "active" : ""}>
               <Link to="/Order_Flow_Settings" onClick={closeSidebar}>

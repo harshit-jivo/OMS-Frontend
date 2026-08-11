@@ -22,6 +22,8 @@ import "./styles/UIConsistency.css";
 import Party_Assignment from "./pages/Party_Assignment";
 import Party_Product_Assignment from "./pages/Party_Product_Assignment";
 import Add_Scheme from "./pages/Add_Scheme";
+import Scheme_Manager from "./pages/Scheme_Manager";
+import Combo_Mapping from "./pages/Combo_Mapping";
 import FOC from "./pages/FOC";
 import SalesInvoice from "./pages/Sales_Invoice";    
 import SkuGalleryPage from "./pages/SalesInvoice/SkuGalleryPage";
@@ -295,6 +297,24 @@ function App() {
           element={
             <Sidebar>
               <Add_Scheme />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Scheme_Manager"
+          element={
+            <Sidebar>
+              <Scheme_Manager />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Combo_Mapping"
+          element={
+            <Sidebar>
+              <Combo_Mapping />
             </Sidebar>
           }
         />
