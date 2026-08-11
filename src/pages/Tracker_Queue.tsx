@@ -103,7 +103,26 @@ const DECISION_TABS: Record<string, string> = {
   ok: "OK",
   hold: "HOLD",
   debit: "DEBIT",
+  approved: "APPROVED",
+  rejected_log: "REJECTED",
+  sent_back: "RETURN",
   transport: "TRANSPORT_APPROVAL",
+};
+/**
+ * Send-back tabs. A rejection stops being outstanding once the invoice comes
+ * back to the desk, so those rows drop out unless "show resolved" is ticked.
+ */
+const SENT_BACK_TABS = new Set(["rejected_log", "sent_back"]);
+/** Tabs where the amount column means something. */
+const AMOUNT_TABS = new Set(["hold", "debit"]);
+
+/** Display names for tabs whose key isn't just a capitalised word. */
+const TAB_LABELS: Record<string, string> = {
+  ok: "OK",
+  transport: "Transport Approval",
+  rejected: "Awaiting Remarks",
+  rejected_log: "Rejected",
+  sent_back: "Sent Back",
 };
 const TRANSPORT_APPROVAL_CODE = "transport_approval";
 
@@ -156,7 +175,10 @@ export default function Tracker_Queue() {
   const [toast, setToast] = useState("");
   const [subTab, setSubTab] = useState<
     "current" | "returned" | "advanced" | "rejected" | "partial"
-    | "ok" | "hold" | "debit" | "transport">("current");
+    | "ok" | "hold" | "debit" | "transport"
+    | "approved" | "rejected_log" | "sent_back">("current");
+  // Send-back tabs: also list rejections the invoice has already come back from.
+  const [showResolved, setShowResolved] = useState(false);
   const [advancedRows, setAdvancedRows] = useState<Invoice[]>([]);
   // Decision-log rows for the OK / Hold / Debit / Transport Approval tabs.
   const [decisionRows, setDecisionRows] = useState<StageDecision[]>([]);
@@ -285,12 +307,12 @@ export default function Tracker_Queue() {
     if (decision) {
       setLoadingDecisions(true);
       setDecisionRows([]);
-      trackerService.getStageDecisions(activeStage, decision)
+      trackerService.getStageDecisions(activeStage, decision, showResolved)
         .then(setDecisionRows)
         .catch(() => flash("Failed to load the decision log"))
         .finally(() => setLoadingDecisions(false));
     }
-  }, [subTab, activeStage]);
+  }, [subTab, activeStage, showResolved]);
 
   // JSAP desk: fetch each parked invoice's budget verdict so the handler can
   // see WHY something is sitting here without opening it one by one.
@@ -388,10 +410,8 @@ export default function Tracker_Queue() {
   // from the same `exports.build_workbook`, so the two sheets match column for
   // column. A decision log can list an invoice twice; the register is one row
   // per invoice, so the ids are de-duplicated server-side.
-  const tabLabel =
-    subTab === "transport" ? "Transport Approval"
-      : subTab === "ok" ? "OK"
-      : subTab.charAt(0).toUpperCase() + subTab.slice(1);
+  const tabLabel = TAB_LABELS[subTab]
+    ?? subTab.charAt(0).toUpperCase() + subTab.slice(1);
   const exportIds = isDecisionTab
     ? [...new Set(decRows.map((d) => d.invoice_id))]
     : rows.map((i) => i.id);
@@ -510,10 +530,12 @@ export default function Tracker_Queue() {
                 Partial<span className="trk-tab-count">{partialRows.length}</span>
               </button>
             )}
+            {/* Live: rejected here but the reason is still owed. Distinct from
+                the Rejected *log* below, which is what was actually sent back. */}
             {(isSapApproval || isJsap || rejectedRows.length > 0) && (
               <button className={"trk-tab" + (subTab === "rejected" ? " active" : "")}
                 onClick={() => setSubTab("rejected")}>
-                Rejected<span className="trk-tab-count">{rejectedRows.length}</span>
+                Awaiting Remarks<span className="trk-tab-count">{rejectedRows.length}</span>
               </button>
             )}
             {isEntry && (
@@ -541,6 +563,26 @@ export default function Tracker_Queue() {
               <button className={"trk-tab" + (subTab === "debit" ? " active" : "")}
                 onClick={() => setSubTab("debit")}>
                 Debit{subTab === "debit" && <span className="trk-tab-count">{decRows.length}</span>}
+              </button>
+            )}
+            {/* Verdict logs: what this desk approved, and what it sent back
+                and has not seen since. */}
+            {decisionChoices.includes("APPROVED") && (
+              <button className={"trk-tab" + (subTab === "approved" ? " active" : "")}
+                onClick={() => setSubTab("approved")}>
+                Approved{subTab === "approved" && <span className="trk-tab-count">{decRows.length}</span>}
+              </button>
+            )}
+            {decisionChoices.includes("REJECTED") && (
+              <button className={"trk-tab" + (subTab === "rejected_log" ? " active" : "")}
+                onClick={() => setSubTab("rejected_log")}>
+                Rejected{subTab === "rejected_log" && <span className="trk-tab-count">{decRows.length}</span>}
+              </button>
+            )}
+            {decisionChoices.includes("RETURN") && (
+              <button className={"trk-tab" + (subTab === "sent_back" ? " active" : "")}
+                onClick={() => setSubTab("sent_back")}>
+                Sent Back{subTab === "sent_back" && <span className="trk-tab-count">{decRows.length}</span>}
               </button>
             )}
             {isPreAudit && hasTransportDesk && (
@@ -675,9 +717,21 @@ export default function Tracker_Queue() {
                   ? "Every hold recorded at this desk. A full hold keeps the invoice here; a partial hold advances it with the amount withheld."
                   : subTab === "debit"
                   ? "Every debit recorded at this desk, with the amount debited. Debits accumulate on the invoice."
+                  : subTab === "approved"
+                  ? "Every invoice this desk approved and passed on."
+                  : SENT_BACK_TABS.has(subTab)
+                  ? `Invoices this desk ${subTab === "rejected_log" ? "rejected" : "sent back"}, with the reason. Once one comes back to this desk it is no longer outstanding and drops off this list.`
                   : "Every invoice this desk passed as OK."}
                 {" "}Read-only log — the invoice may have moved on since.
               </span>
+              {SENT_BACK_TABS.has(subTab) && (
+                <label style={{ display: "flex", alignItems: "center", gap: 6,
+                                marginLeft: "auto", fontSize: 12, cursor: "pointer" }}>
+                  <input type="checkbox" checked={showResolved}
+                    onChange={(e) => setShowResolved(e.target.checked)} />
+                  Also show ones that came back
+                </label>
+              )}
             </div>
           )}
 
@@ -703,7 +757,7 @@ export default function Tracker_Queue() {
                     <th>Inv. Date</th>
                     <th>Value</th>
                     <th>{subTab === "transport" ? "Approval" : "Decision"}</th>
-                    {subTab !== "transport" && <th>Amount</th>}
+                    {AMOUNT_TABS.has(subTab) && <th>Amount</th>}
                     <th>Remarks</th>
                     <th>By</th>
                     <th>{subTab === "transport" ? "Sent / Decided" : "Decided"}</th>
@@ -722,14 +776,22 @@ export default function Tracker_Queue() {
                           <VerdictBadge v={d.verdict} />
                         ) : (
                           <span className={"trk-badge " + (
-                            d.decision === "OK" ? "trk-badge-success"
-                              : d.decision === "DEBIT" ? "trk-badge-danger"
+                            d.decision === "OK" || d.decision === "APPROVED" ? "trk-badge-success"
+                              : d.decision === "DEBIT" || d.decision === "REJECTED" ? "trk-badge-danger"
                               : "trk-badge-warn")}>
                             {d.decision}{d.hold_type ? ` · ${d.hold_type}` : ""}
                           </span>
                         )}
+                        {d.awaiting_remarks && (
+                          <div className="trk-sub" style={{ fontSize: 11 }}>reason still owed</div>
+                        )}
+                        {d.came_back && SENT_BACK_TABS.has(subTab) && (
+                          <div className="trk-sub" style={{ fontSize: 11, color: "#047857" }}>
+                            came back since
+                          </div>
+                        )}
                       </td>
-                      {subTab !== "transport" && (
+                      {AMOUNT_TABS.has(subTab) && (
                         <td>
                           {d.amount ? `₹${money(d.amount)}` : "—"}
                           {d.decision === "HOLD" && d.hold_type === "FULL" && (
@@ -762,6 +824,10 @@ export default function Tracker_Queue() {
                     <tr><td colSpan={10}><div className="trk-empty">
                       {loadingDecisions ? "Loading…"
                         : subTab === "transport" ? "Nothing sent for transport approval yet."
+                        : SENT_BACK_TABS.has(subTab)
+                        ? (showResolved
+                          ? "This desk has not sent anything back."
+                          : "Nothing outstanding — anything sent back has since come back here.")
                         : `No ${DECISION_TABS[subTab].toLowerCase()} decisions recorded at this stage.`}
                     </div></td></tr>
                   )}
