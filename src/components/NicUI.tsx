@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { HiCheckCircle, HiExclamationCircle, HiChevronDown } from "react-icons/hi2";
-import type { ValidationError } from "../services/einvoiceService";
+import { einvoiceService } from "../services/einvoiceService";
+import type { CompanyChoice, ValidationError } from "../services/einvoiceService";
 
 /* ---- Field (label + control) ---- */
 type FieldProps = {
@@ -20,18 +21,48 @@ export function NicField({ label, hint, children, full }: FieldProps) {
   );
 }
 
-/* ---- Company DB dropdown (shared across e-Invoice / e-Way Bill) ---- */
-export const COMPANY_DBS = [
-  "Jivo_All_Branches_Live",
-  "JIVO_BEVERAGES_HANADB",
-  "JIVO_OIL_HANADB",
-  "TEST_OIL_15122025",
-] as const;
+/* ---- Company DB dropdown (shared across e-Invoice / e-Way Bill) ----
+   The selected company DB decides BOTH which company's Service Layer the invoice
+   is read from AND which schema's OMS_IRN_LOG the IRN is mirrored into, so the
+   options come from the server (settings) rather than a hardcoded list. */
+let companyCache: CompanyChoice[] | null = null;
 
 export function CompanyDbSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [companies, setCompanies] = useState<CompanyChoice[]>(companyCache ?? []);
+
+  useEffect(() => {
+    if (companyCache) return;
+    let alive = true;
+    einvoiceService
+      .listCompanies()
+      .then((data) => {
+        if (!alive) return;
+        companyCache = data.results;
+        setCompanies(data.results);
+        // Adopt the server default when nothing valid is selected yet.
+        if (data.results.length && !data.results.some((c) => c.company_db === value)) {
+          onChange(data.default || data.results[0].company_db);
+        }
+      })
+      .catch(() => {
+        /* keep whatever is selected; the field stays usable */
+      });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Always include the current value so the select never shows a blank option.
+  const options = companies.length
+    ? companies
+    : [{ label: "", company_db: value }].filter((c) => c.company_db);
+
   return (
     <select className="nic-select" value={value} onChange={(e) => onChange(e.target.value)}>
-      {COMPANY_DBS.map((db) => <option key={db} value={db}>{db}</option>)}
+      {options.map((c) => (
+        <option key={c.company_db} value={c.company_db}>
+          {c.label ? `${c.label} — ${c.company_db}` : c.company_db}
+        </option>
+      ))}
     </select>
   );
 }

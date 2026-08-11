@@ -144,6 +144,7 @@ export interface OrderItem {
   variety_type?: string;
   sub_group?: string;
   item_type: string;
+  last_purchase_price?: number | string | null;
   is_scheme_visible?: boolean;
   approval_approvers?: { id: number; name: string }[];
   scheme_name?: string;

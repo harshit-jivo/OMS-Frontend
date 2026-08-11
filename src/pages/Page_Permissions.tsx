@@ -9,7 +9,11 @@ import {
 } from "react-icons/hi2";
 import { userService } from "../services/userService";
 import type { User } from "../services/userService";
-import { GRANTABLE_ADMIN_PAGES, GRANTABLE_PAGE_KEYS } from "../config/adminPages";
+import {
+  ALL_GRANTABLE_KEYS,
+  GRANTABLE_ADMIN_PAGES,
+  PAYMENT_ACTION_PERMISSIONS,
+} from "../config/adminPages";
 import "../styles/Order_Flow_Settings.css";
 import "../styles/Page_Permissions.css";
 
@@ -110,7 +114,9 @@ export default function Page_Permissions() {
     users.forEach((user) => {
       if (!ids.includes(user.id) || isAdminRole(user.role)) return;
       (user.extra_pages || []).forEach((key) => {
-        if (GRANTABLE_PAGE_KEYS.includes(key)) granted.add(key);
+        // Action permissions live in the same list, so filter on the FULL key
+        // set — using the page-only list would silently drop them on save.
+        if (ALL_GRANTABLE_KEYS.includes(key)) granted.add(key);
       });
     });
     return Array.from(granted);
@@ -134,7 +140,7 @@ export default function Page_Permissions() {
   };
 
   const setAll = (grantAll: boolean) => {
-    setPages(grantAll ? [...GRANTABLE_PAGE_KEYS] : []);
+    setPages(grantAll ? [...ALL_GRANTABLE_KEYS] : []);
   };
 
   const triggerLabel = () => {
@@ -308,13 +314,13 @@ export default function Page_Permissions() {
               ) : null}
               <div className="pp-quick-actions">
                 <button type="button" className="ofs-secondary" onClick={() => setAll(true)}>
-                  Grant all pages
+                  Grant all
                 </button>
                 <button type="button" className="ofs-secondary" onClick={() => setAll(false)}>
                   Clear all
                 </button>
                 <span className="pp-count">
-                  {pages.length} / {GRANTABLE_ADMIN_PAGES.length} granted
+                  {pages.length} / {ALL_GRANTABLE_KEYS.length} granted
                 </span>
               </div>
             </>
@@ -341,6 +347,40 @@ export default function Page_Permissions() {
                 />
               ))}
             </div>
+          )}
+        </section>
+
+        {/* Action permissions — what a user may DO, not which page they open. */}
+        <section className="ofs-card ofs-card--wide">
+          <div className="ofs-card-head">
+            <span className="ofs-card-mark" />
+            <h2>Payment Permissions</h2>
+          </div>
+
+          {nonAdminSelected.length === 0 ? (
+            <p className="pp-hint">
+              Pick one or more non-admin users above to choose what they can do
+              in the Payments module.
+            </p>
+          ) : (
+            <>
+              <p className="pp-hint">
+                These control actions rather than page access. Granting
+                &ldquo;Create&rdquo; lets a user raise and submit an entry;
+                &ldquo;Approve&rdquo; lets them decide one — and still only on
+                the workflow levels they are assigned to.
+              </p>
+              <div className="ofs-condition-grid">
+                {PAYMENT_ACTION_PERMISSIONS.map((perm) => (
+                  <ToggleRow
+                    key={perm.key}
+                    title={perm.label}
+                    checked={pages.includes(perm.key)}
+                    onChange={() => togglePage(perm.key)}
+                  />
+                ))}
+              </div>
+            </>
           )}
         </section>
       </div>

@@ -23,7 +23,7 @@ import Party_Assignment from "./pages/Party_Assignment";
 import Party_Product_Assignment from "./pages/Party_Product_Assignment";
 import Add_Scheme from "./pages/Add_Scheme";
 import FOC from "./pages/FOC";
-import SalesInvoice from "./pages/Sales_Invoice";
+import SalesInvoice from "./pages/Sales_Invoice";    
 import SkuGalleryPage from "./pages/SalesInvoice/SkuGalleryPage";
 import InvoiceReview from "./pages/InvoiceReview";
 import Staff from "./pages/Staff";
@@ -33,6 +33,8 @@ import Product_Stock from "./pages/Product_Stock";
 import Order_Flow_Settings from "./pages/Order_Flow_Settings";
 import Page_Permissions from "./pages/Page_Permissions";
 import UI_Labels from "./pages/UI_Labels";
+import PaymentsDashboard from "./pages/Payments/ApprovalManagement";
+import RequirePermission from "./components/RequirePermission";
 import Sales_Quotation from "./pages/Sales_Quotation";
 import LabelChecker from "./pages/Label_Checker";
 import NutritionManager from "./pages/Nutrition_Manager";
@@ -361,6 +363,11 @@ function App() {
           }
         />
 
+       
+
+       
+        
+       
         <Route
           path="/Label_Checker"
           element={
@@ -386,6 +393,25 @@ function App() {
               <UI_Labels />
             </Sidebar>
           }
+        />
+
+        <Route
+          path="/Payments_Dashboard"
+          element={
+            <RequirePermission permission="Payments_Dashboard">
+              <Sidebar>
+                <PaymentsDashboard />
+              </Sidebar>
+            </RequirePermission>
+          }
+        />
+
+        {/* The page was called Approval Management until it became the
+            dashboard. Redirected rather than dropped so existing bookmarks and
+            the page-permission rows that still carry the old path keep working. */}
+        <Route
+          path="/Approval_Management"
+          element={<Navigate to="/Payments_Dashboard" replace />}
         />
 
         {/* Any unknown path falls back to the dashboard instead of a blank page. */}

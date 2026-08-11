@@ -181,6 +181,17 @@ updateUser: async (id: number, data: CreateUserData) => {
   const mainGroups = data.mainGroups || [];
   const states = data.states || [];
 
+  // The edit form has a single Category select, so `category` is the source of
+  // truth and `categories` is derived from it. Sending a bare `categories: []`
+  // (which is what happened while the form never filled `categories`) made the
+  // backend clear the m2m AND null the `category` FK on every save.
+  const category = data.category ?? data.categories?.[0] ?? null;
+  const categories = data.categories?.length
+    ? data.categories
+    : category
+      ? [category]
+      : [];
+
   const payload = {
     name: data.name,
     username: data.username,
@@ -193,8 +204,8 @@ updateUser: async (id: number, data: CreateUserData) => {
     main_groups: mainGroups,
     state: states[0] || data.state || null,
     states: states,
-    category: data.category || (data.categories && data.categories[0]) || null,
-    categories: data.categories || [],
+    category,
+    categories,
     sub_group: data.variety || null,
   };
 

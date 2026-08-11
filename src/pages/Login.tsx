@@ -4,7 +4,7 @@ import { landingPathFor } from "../config/pageAccess";
 import { loginUser } from "../services/authService";
 import { resolveStartupSession } from "../services/api";
 import { webDeviceService } from "../services/webDeviceService";
-import { loadUILabels } from "../services/uiConfig";
+import { loadUILabels, loadUIFields } from "../services/uiConfig";
 import "../styles/Login.css";
 
 type ToastProps = {
@@ -100,7 +100,7 @@ export default function Login() {
       if (cancelled || outcome !== "authenticated") return;
       // Same landing rule as a fresh login (see handleLogin) — one shared helper,
       // so a restored session can never land somewhere a new login wouldn't.
-      const landing = landingPathFor(localStorage.getItem("role"));
+      let landing = landingPathFor(localStorage.getItem("role"));
       // Preserve any notification deep-link params (openOrderId / notificationId)
       // that a service-worker "openWindow" put on the "/" URL, so the Sidebar's
       // openOrderId effect on the landing route can open the exact Sales Order
@@ -172,6 +172,7 @@ const handleLogin = async () => {
     // fire-and-forget contract: never blocks login, and any screen falls back
     // to hardcoded text until it resolves.
     void loadUILabels(true);
+    void loadUIFields(true);
 
     showToast("Login successful. Redirecting...", "success");
 

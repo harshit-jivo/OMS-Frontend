@@ -1,4 +1,11 @@
 import { useEffect, useState } from "react";
+import {
+  HiArrowPath,
+  HiBuildingOffice2,
+  HiCube,
+  HiMapPin,
+  HiUsers,
+} from "react-icons/hi2";
 import { sapService } from "../services/sapService";
 import "../styles/Status.css";
 
@@ -109,109 +116,98 @@ export default function Status() {
     }
   };
 
-  const syncActions = [
-    { key: "all", label: "Sync All", hint: "Refresh everything" },
-    { key: "products", label: "Products", hint: "Items and rates" },
-    { key: "parties", label: "Parties", hint: "Customers and groups" },
-    { key: "addresses", label: "Addresses", hint: "Billing and shipping" },
-    { key: "branches", label: "Branches", hint: "Branch mapping" },
+  // The KPI row and the sync buttons are keyed off the same list, so a count and
+  // the button that refreshes it always describe the same module.
+  const modules = [
+    { key: "products", label: "Products", hint: "Items and rates", icon: HiCube, count: products.length },
+    { key: "parties", label: "Parties", hint: "Customers and groups", icon: HiUsers, count: parties.length },
+    { key: "addresses", label: "Addresses", hint: "Billing and shipping", icon: HiMapPin, count: addresses.length },
+    { key: "branches", label: "Branches", hint: "Branch mapping", icon: HiBuildingOffice2, count: branches.length },
   ] as const;
 
-  const syncMetrics = [
-    { label: "Products", value: products.length },
-    { label: "Parties", value: parties.length },
-    { label: "Addresses", value: addresses.length },
-    { label: "Branches", value: branches.length },
-  ];
+  const totalRecords = modules.reduce((sum, module) => sum + module.count, 0);
+  const busy = loading !== null;
 
   return (
     <div className="st-page app-page">
-      <section className="st-hero">
-        <div className="st-hero-copy">
-          <span className="app-chip st-chip">SAP Sync</span>
-          <div className="st-hero-strip">
-            <div className="st-hero-strip-item">
-              <span className="st-hero-strip-label">Sources</span>
-              <strong className="st-hero-strip-value">4 Modules</strong>
-            </div>
-            <div className="st-hero-strip-item">
-              <span className="st-hero-strip-label">Latest Run</span>
-              <strong className="st-hero-strip-value">{lastSync?.type || "No sync yet"}</strong>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <div className="st-layout">
-        <section className="st-panel st-sync-panel">
-          <div className="st-panel-head">
-            <div>
-              <div className="st-section-label">Manual Sync</div>
-              <h2 className="st-panel-title">Choose an action</h2>
-            </div>
-          </div>
-          <div className="st-sync-grid">
-            {syncActions.map((action) => (
-              <button
-                key={action.key}
-                className={`st-sync-btn ${loading === action.key ? "st-sync-active" : ""}`}
-                onClick={() => syncData(action.key)}
-                disabled={loading !== null}
-              >
-                <span className="st-sync-btn-title">
-                  {loading === action.key ? "Syncing..." : action.label}
-                </span>
-                <span className="st-sync-btn-hint">{action.hint}</span>
-              </button>
-            ))}
-          </div>
-        </section>
-
-        <aside className="st-side-stack">
-          <section className="st-panel st-data-panel">
-            <div className="st-panel-head">
-              <div>
-                <div className="st-section-label">Current Data</div>
-                <h2 className="st-panel-title">Synced records</h2>
+      {/* ── KPI cards ── */}
+      <div className="st-kpi-row">
+        {modules.map((module) => {
+          const Icon = module.icon;
+          return (
+            <article className={`st-kpi ${loading === module.key ? "st-kpi-busy" : ""}`} key={module.key}>
+              <span className="st-kpi-icon" aria-hidden="true">
+                <Icon />
+              </span>
+              <div className="st-kpi-body">
+                <span className="st-kpi-value">{module.count.toLocaleString("en-IN")}</span>
+                <span className="st-kpi-label">{module.label}</span>
+                <span className="st-kpi-hint">{module.hint}</span>
               </div>
-            </div>
-            <div className="st-stats-grid">
-              {syncMetrics.map((metric) => (
-                <div className="st-stat-card" key={metric.label}>
-                  <div className="st-stat-number">{metric.value}</div>
-                  <div className="st-stat-label">{metric.label}</div>
-                </div>
-              ))}
-            </div>
-          </section>
+            </article>
+          );
+        })}
+      </div>
 
-          <section className="st-panel st-last-sync">
-          <div className="st-last-title">Last Sync</div>
-          <div className="st-last-row">
-            <span className="st-last-label">Type</span>
-            <span className="st-last-value">{lastSync?.type || "—"}</span>
+      {/* ── Sync actions ── */}
+      <section className="st-panel st-sync-panel">
+        <div className="st-panel-head">
+          <div>
+            <div className="st-section-label">Manual Sync</div>
+            <h2 className="st-panel-title">Pull fresh data from SAP</h2>
           </div>
-          <div className="st-last-row">
-            <span className="st-last-label">Date</span>
-            <span className="st-last-value">{lastSync?.date || "—"}</span>
-          </div>
-          <div className="st-last-row">
-            <span className="st-last-label">Time</span>
-            <span className="st-last-value">{lastSync?.time || "—"}</span>
-          </div>
-          <div className="st-last-row">
-            <span className="st-last-label">Status</span>
-            {lastSync?.status ? (
+          <button
+            type="button"
+            className={`st-sync-all ${loading === "all" ? "st-sync-all-busy" : ""}`}
+            onClick={() => syncData("all")}
+            disabled={busy}
+          >
+            <HiArrowPath className={loading === "all" ? "st-spin" : ""} aria-hidden="true" />
+            {loading === "all" ? "Syncing everything…" : "Sync All"}
+          </button>
+        </div>
+
+        <div className="st-sync-grid">
+          {modules.map((module) => {
+            const Icon = module.icon;
+            const isActive = loading === module.key;
+            return (
+              <button
+                key={module.key}
+                type="button"
+                className={`st-sync-btn ${isActive ? "st-sync-active" : ""}`}
+                onClick={() => syncData(module.key)}
+                disabled={busy}
+              >
+                <span className="st-sync-btn-icon" aria-hidden="true">
+                  <Icon className={isActive ? "st-spin" : ""} />
+                </span>
+                <span className="st-sync-btn-copy">
+                  <span className="st-sync-btn-title">
+                    {isActive ? "Syncing…" : `Sync ${module.label}`}
+                  </span>
+                  <span className="st-sync-btn-hint">{module.hint}</span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="st-sync-foot">
+          <span>
+            <strong>{totalRecords.toLocaleString("en-IN")}</strong> records held locally across 4 modules
+          </span>
+          <span className="st-last-inline">
+            Last run:{" "}
+            <strong>{lastSync ? `${lastSync.type} · ${lastSync.date} ${lastSync.time}` : "No sync yet"}</strong>
+            {lastSync?.status && (
               <span className={`st-status-badge st-status-${lastSync.status}`}>
                 {lastSync.status === "success" ? "Success" : "Failed"}
               </span>
-            ) : (
-              <span className="st-last-value">—</span>
             )}
-          </div>
-          </section>
-        </aside>
-      </div>
+          </span>
+        </div>
+      </section>
     </div>
   );
 }

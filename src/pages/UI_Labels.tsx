@@ -4,8 +4,11 @@ import { HiPencilSquare, HiTrash, HiPlus } from "react-icons/hi2";
 import { showToast } from "../components/NotificationToaster";
 import {
   applyLabelUpdate,
+  applyFieldUpdate,
   loadUILabels,
+  loadUIFields,
   removeLabel,
+  removeField,
   uiLabelAdminService,
   type UILabelRow,
 } from "../services/uiConfig";
@@ -38,6 +41,9 @@ export default function UILabels() {
   const [displayName, setDisplayName] = useState("");
   const [description, setDescription] = useState("");
   const [isActive, setIsActive] = useState(true);
+  // Field-behaviour flags (apply when the key is an input field, e.g. po_number).
+  const [isEnabled, setIsEnabled] = useState(true);
+  const [isRequired, setIsRequired] = useState(false);
   const [formError, setFormError] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
@@ -85,6 +91,8 @@ export default function UILabels() {
     setDisplayName("");
     setDescription("");
     setIsActive(true);
+    setIsEnabled(true);
+    setIsRequired(false);
     setFormError("");
     setShowForm(true);
   };
@@ -96,6 +104,8 @@ export default function UILabels() {
     setDisplayName(row.display_name);
     setDescription(row.description || "");
     setIsActive(row.is_active);
+    setIsEnabled(row.is_enabled);
+    setIsRequired(row.is_required);
     setFormError("");
     setShowForm(true);
   };
@@ -107,17 +117,31 @@ export default function UILabels() {
     setFormError("");
   };
 
-  // Reflect a saved row into the live label cache so open screens update now.
-  // Active → publish the wording; inactive → clients fall back to the hardcoded
-  // default, so drop it from the cache.
+  // Reflect a saved row into the live caches so open screens update now.
+  //
+  // Labels: inactive → drop so the wording falls back to the hardcoded default.
+  // Fields: NEVER drop on inactive — an absent key would make the client fall
+  // back to its built-in default (enabled), re-showing a field the admin just
+  // turned off. Instead keep the key with the EFFECTIVE flags: inactive OR not
+  // enabled ⇒ enabled:false (and a hidden field can't be required). This
+  // mirrors the backend /fields/ logic exactly.
   const syncCache = (row: UILabelRow) => {
     if (row.is_active) {
       applyLabelUpdate(row.field_key, row.display_name);
     } else {
       removeLabel(row.field_key);
     }
-    // Reconcile with the server's canonical active map in the background.
+
+    const effectiveEnabled = row.is_active && row.is_enabled;
+    applyFieldUpdate(row.field_key, {
+      label: row.display_name,
+      enabled: effectiveEnabled,
+      required: effectiveEnabled && row.is_required,
+    });
+
+    // Reconcile with the server's canonical maps in the background.
     void loadUILabels(true);
+    void loadUIFields(true);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -160,6 +184,8 @@ export default function UILabels() {
           display_name: trimmedName,
           description: description.trim(),
           is_active: isActive,
+          is_enabled: isEnabled,
+          is_required: isRequired,
         });
         setLabelRows((rows) =>
           rows.map((row) => (row.id === updated.id ? updated : row)),
@@ -175,6 +201,8 @@ export default function UILabels() {
           display_name: trimmedName,
           description: description.trim(),
           is_active: isActive,
+          is_enabled: isEnabled,
+          is_required: isRequired,
         });
         setLabelRows((rows) => [...rows, created]);
         syncCache(created);
@@ -202,9 +230,11 @@ export default function UILabels() {
     try {
       await uiLabelAdminService.deleteLabel(deleteRow.id);
       setLabelRows((rows) => rows.filter((row) => row.id !== deleteRow.id));
-      // Drop from the live cache — clients fall back to the hardcoded default.
+      // Drop from the live caches — clients fall back to the hardcoded default.
       removeLabel(deleteRow.field_key);
+      removeField(deleteRow.field_key);
       void loadUILabels(true);
+      void loadUIFields(true);
       showToast({
         title: "Label deleted",
         message: `"${deleteRow.field_key}" was removed.`,
@@ -300,6 +330,7 @@ export default function UILabels() {
                   <th>Display Name</th>
                   <th>Description</th>
                   <th>Status</th>
+                  <th>Behaviour</th>
                   <th>Actions</th>
                 </tr>
               </thead>
@@ -319,6 +350,26 @@ export default function UILabels() {
                       >
                         {row.is_active ? "Active" : "Inactive"}
                       </span>
+                    </td>
+                    <td>
+                      <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                        <span
+                          className={`au-chip ${
+                            row.is_enabled ? "au-active" : "au-inactive"
+                          }`}
+                        >
+                          {row.is_enabled ? "Enabled" : "Disabled"}
+                        </span>
+                        {row.is_enabled && (
+                          <span
+                            className={`au-chip ${
+                              row.is_required ? "au-active" : "au-inactive"
+                            }`}
+                          >
+                            {row.is_required ? "Required" : "Optional"}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td>
                       <div style={{ display: "flex", gap: "8px" }}>
@@ -457,6 +508,71 @@ export default function UILabels() {
                       style={{ width: "auto" }}
                     />
                     Active (uncheck to fall back to the built-in default)
+                  </label>
+                </div>
+
+                {/* Field behaviour — only meaningful for input-field keys such
+                    as po_number. Ignored by pure text labels like price_list. */}
+                <div className="au-field au-full">
+                  <label
+                    className="au-label"
+                    style={{ marginBottom: "8px", color: "#334155" }}
+                  >
+                    Field behaviour
+                  </label>
+                  <span
+                    style={{
+                      fontSize: "12px",
+                      color: "#94a3b8",
+                      margin: "0 0 10px",
+                    }}
+                  >
+                    For input fields (e.g. <code>po_number</code>): control
+                    whether the field shows and whether it is mandatory. Text-only
+                    labels can ignore these.
+                  </span>
+
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                      fontSize: "14px",
+                      color: "#0f172a",
+                      marginBottom: "8px",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isEnabled}
+                      onChange={(e) => {
+                        const next = e.target.checked;
+                        setIsEnabled(next);
+                        // A hidden field cannot be required.
+                        if (!next) setIsRequired(false);
+                      }}
+                      style={{ width: "auto" }}
+                    />
+                    Field enabled (show this field on the form)
+                  </label>
+
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                      fontSize: "14px",
+                      color: isEnabled ? "#0f172a" : "#94a3b8",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isRequired}
+                      disabled={!isEnabled}
+                      onChange={(e) => setIsRequired(e.target.checked)}
+                      style={{ width: "auto" }}
+                    />
+                    Field required (mandatory when shown)
                   </label>
                 </div>
               </div>
