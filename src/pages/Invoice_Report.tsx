@@ -16,14 +16,34 @@ const BILLPRINT_BASE = String(
   import.meta.env.VITE_BILLPRINT_API_URL || "http://103.89.45.75:8008",
 ).replace(/\/+$/, "");
 
-const billPdfUrl = (docEntry: string) =>
-  `${BILLPRINT_BASE}/api/billprint/${encodeURIComponent(docEntry)}`;
+/**
+ * Companies the bill-print service can render, in the order they're offered.
+ * `slug` is the path segment it expects; each maps to that company's ODBC DSN
+ * and HANA schema on the service side.
+ *
+ * DocEntry is a PER-COMPANY sequence — the same number is a different invoice
+ * in each company — so the company is part of the lookup, never a cosmetic
+ * label. Getting it wrong prints someone else's invoice, not an error.
+ */
+const COMPANIES = [
+  { slug: "oil", label: "Oil", schema: "JIVO_OIL_HANADB" },
+  { slug: "bev", label: "Beverages", schema: "JIVO_BEVERAGES_HANADB" },
+  { slug: "mart", label: "Mart", schema: "JIVO_MART_HANADB" },
+] as const;
+
+type CompanySlug = (typeof COMPANIES)[number]["slug"];
+
+const billPdfUrl = (company: CompanySlug, docEntry: string) =>
+  `${BILLPRINT_BASE}/api/billprint/${company}/${encodeURIComponent(docEntry)}`;
 
 export default function Invoice_Report() {
   const role = (localStorage.getItem("role") || "").toLowerCase();
 
+  const [company, setCompany] = useState<CompanySlug>("oil");
   const [docEntry, setDocEntry] = useState("");
-  const [activeDocEntry, setActiveDocEntry] = useState("");
+  // What the viewer is currently showing — company included, since the same
+  // DocEntry in another company is a different invoice.
+  const [active, setActive] = useState<{ company: CompanySlug; docEntry: string } | null>(null);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -42,18 +62,21 @@ export default function Invoice_Report() {
     }
     setError("");
     setPdfLoading(true);
-    // Re-setting the same value must still reload the iframe, so clear first.
-    if (trimmed === activeDocEntry) {
-      setActiveDocEntry("");
-      window.setTimeout(() => setActiveDocEntry(trimmed), 0);
+    // Re-submitting the same company + DocEntry must still reload the iframe,
+    // so clear first.
+    if (active && active.company === company && active.docEntry === trimmed) {
+      setActive(null);
+      window.setTimeout(() => setActive({ company, docEntry: trimmed }), 0);
     } else {
-      setActiveDocEntry(trimmed);
+      setActive({ company, docEntry: trimmed });
     }
   };
 
+  const activeCompany = COMPANIES.find((c) => c.slug === active?.company);
+
   const handleClear = () => {
     setDocEntry("");
-    setActiveDocEntry("");
+    setActive(null);
     setError("");
     setPdfLoading(false);
   };
@@ -70,6 +93,23 @@ export default function Invoice_Report() {
       </div>
 
       <form className="invr-form-card" onSubmit={handleSubmit}>
+        <div className="invr-field">
+          <label className="invr-label" htmlFor="invr-company">
+            Company
+          </label>
+          <select
+            id="invr-company"
+            className="invr-input"
+            value={company}
+            onChange={(e) => setCompany(e.target.value as CompanySlug)}
+          >
+            {COMPANIES.map((c) => (
+              <option key={c.slug} value={c.slug}>
+                {c.label}
+              </option>
+            ))}
+          </select>
+        </div>
         <div className="invr-field">
           <label className="invr-label" htmlFor="invr-docentry">
             Doc Entry
@@ -90,7 +130,7 @@ export default function Invoice_Report() {
             <HiMagnifyingGlass aria-hidden="true" />
             Get Invoice
           </button>
-          {activeDocEntry && (
+          {active && (
             <button
               className="invr-btn invr-btn-ghost"
               type="button"
@@ -104,16 +144,17 @@ export default function Invoice_Report() {
         {error && <p className="invr-error">{error}</p>}
       </form>
 
-      {activeDocEntry ? (
+      {active ? (
         <div className="invr-viewer-card">
           <div className="invr-viewer-head">
             <span className="invr-viewer-title">
               <HiDocumentText aria-hidden="true" />
-              Bill_{activeDocEntry}.pdf
+              Bill_{activeCompany?.label}_{active.docEntry}.pdf
+              <span className="invr-viewer-schema">{activeCompany?.schema}</span>
             </span>
             <a
               className="invr-btn invr-btn-ghost"
-              href={billPdfUrl(activeDocEntry)}
+              href={billPdfUrl(active.company, active.docEntry)}
               target="_blank"
               rel="noopener noreferrer"
             >
@@ -123,10 +164,10 @@ export default function Invoice_Report() {
           </div>
           {pdfLoading && <div className="invr-loading">Loading invoice…</div>}
           <iframe
-            key={activeDocEntry}
+            key={`${active.company}:${active.docEntry}`}
             className="invr-pdf-frame"
-            title={`Invoice ${activeDocEntry}`}
-            src={billPdfUrl(activeDocEntry)}
+            title={`Invoice ${active.docEntry} (${activeCompany?.label})`}
+            src={billPdfUrl(active.company, active.docEntry)}
             onLoad={() => setPdfLoading(false)}
           />
         </div>
