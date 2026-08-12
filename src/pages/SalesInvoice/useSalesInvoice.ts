@@ -56,6 +56,15 @@ export type FreightMaster = {
   ExpnsName: string;
 };
 
+/** A sales order already carried by an in-flight invoice log. */
+export type UsedSalesOrder = {
+  so_number: string;
+  log_id: number;
+  status: string;
+  sap_doc_num?: string;
+  created_at?: string;
+};
+
 export type NextDocNumber = {
   NextNumber: number | string | null;
 };
@@ -489,6 +498,9 @@ export function useSalesInvoice() {
   const [selectedLines, setSelectedLines] = useState<Record<string, SelectedLine>>({});
   const [freightOptions, setFreightOptions] = useState<FreightMaster[]>([]);
   const [nextDocNumber, setNextDocNumber] = useState("");
+  // SOs an invoice log already covers. SAP only closes an order once its
+  // invoice posts, so without this two people can invoice the same SO twice.
+  const [usedSalesOrders, setUsedSalesOrders] = useState<Record<string, UsedSalesOrder>>({});
   const [freightRows, setFreightRows] = useState<FreightRow[]>([]);
   const [customerDetails, setCustomerDetails] = useState<CustomerDetails | null>(null);
   const [salespersonDetails, setSalespersonDetails] = useState<SalespersonDetails | null>(null);
@@ -627,6 +639,23 @@ export function useSalesInvoice() {
       const orders = Array.isArray(data) ? data : data.data || data.results || [];
       const normalized = orders.map(normalizeOrder);
       setSalesOrders(normalized);
+
+      // Best effort: the SO list is still usable without the badges, so a
+      // failure here must not fail the step.
+      try {
+        const used = await apiFetch<{ data?: UsedSalesOrder[] }>(
+          `/api/invoice/used-sales-orders/?card_code=${encodeURIComponent(party.CardCode)}&branch=${encodeURIComponent(branch || "")}`,
+        );
+        const byNumber: Record<string, UsedSalesOrder> = {};
+        (used?.data || []).forEach((row) => {
+          if (row?.so_number) byNumber[String(row.so_number)] = row;
+        });
+        setUsedSalesOrders(byNumber);
+      } catch (error) {
+        console.error("Unable to load in-flight invoice logs", error);
+        setUsedSalesOrders({});
+      }
+
       return normalized;
     } catch (error) {
       console.error(error);
@@ -1185,6 +1214,7 @@ export function useSalesInvoice() {
     salespersonDetails,
     billToAddresses,
     shipToAddresses,
+    usedSalesOrders,
     nextDocNumber,
     form,
     totals,

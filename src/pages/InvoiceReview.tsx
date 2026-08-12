@@ -74,6 +74,10 @@ type InvoiceRecord = {
   branch?: string;
   warehouse?: string;
   invoice_payload?: InvoicePayload | string;
+  /** {item_code: product name} for the payload's lines, resolved by the API from
+   *  the synced catalogue. The payload itself still carries only codes — it is
+   *  the record of what went to SAP. */
+  item_names?: Record<string, string>;
   // SAP identifiers recorded when the invoice posted; drive the bill print.
   sap_doc_num?: string | null;
   sap_doc_entry?: string | null;
@@ -485,6 +489,13 @@ export default function InvoiceReview() {
 
   const selectedPayload = useMemo(
     () => (selected ? parsePayload(selected.invoice_payload) : {}),
+    [selected],
+  );
+
+  // Product name for a line's code. Empty when the catalogue has no row for it,
+  // in which case the table falls back to showing the code on its own.
+  const itemNameOf = useCallback(
+    (itemCode?: string) => (itemCode ? selected?.item_names?.[itemCode] || "" : ""),
     [selected],
   );
 
@@ -1301,7 +1312,7 @@ export default function InvoiceReview() {
                 <table className="ir-table ir-table-compact">
                   <thead>
                     <tr>
-                      <th>Item Code</th>
+                      <th>Item</th>
                       <th>Warehouse</th>
                       <th className="ir-num">Qty</th>
                       <th>Tax Code</th>
@@ -1311,7 +1322,16 @@ export default function InvoiceReview() {
                   <tbody>
                     {(selectedPayload.DocumentLines || []).map((line, index) => (
                       <tr key={line.LineNum ?? index}>
-                        <td className="ir-cell-code">{line.ItemCode || "—"}</td>
+                        <td className="ir-cell-item">
+                          {itemNameOf(line.ItemCode) ? (
+                            <>
+                              <span className="ir-item-name">{itemNameOf(line.ItemCode)}</span>
+                              <span className="ir-item-code">{line.ItemCode}</span>
+                            </>
+                          ) : (
+                            <span className="ir-item-name">{line.ItemCode || "—"}</span>
+                          )}
+                        </td>
                         <td>{line.WarehouseCode || "—"}</td>
                         <td className="ir-num">{toNumber(line.Quantity).toLocaleString("en-IN")}</td>
                         <td>{line.TaxCode || "—"}</td>

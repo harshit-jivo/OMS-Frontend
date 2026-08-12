@@ -822,6 +822,28 @@ a.ir-btn {
   color: #0f172a;
 }
 
+/* Product name leads, with the FG code kept underneath — reviewers read names,
+   but the code is still what SAP was sent. */
+.ir-cell-item {
+  min-width: 200px;
+}
+
+.ir-item-name {
+  display: block;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.35;
+}
+
+.ir-item-code {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+  letter-spacing: 0.02em;
+}
+
 .ir-batch-chips {
   display: flex;
   flex-wrap: wrap;

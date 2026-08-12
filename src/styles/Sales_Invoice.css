@@ -667,6 +667,50 @@
   overflow: hidden;
 }
 
+/* An SO another invoice log already covers. Lightened rather than disabled —
+   SAP keeps reporting it open until that invoice posts, so this is a warning,
+   not a block. Full strength again once lines on it are selected, so a
+   deliberate choice does not stay greyed out. */
+.si-so-card.is-already-logged {
+  border-style: dashed;
+  border-color: #fcd34d;
+  transition: opacity 0.15s ease;
+}
+
+.si-so-card.is-already-logged:hover {
+  opacity: 1 !important;
+}
+
+/* Lightened, not disabled: SAP still reports the order open, so this is a
+   warning. Full strength on hover, and once its lines are selected, so a
+   deliberate choice never stays greyed out. */
+.si-so-list-row.is-already-logged {
+  opacity: 0.6;
+}
+
+.si-so-list-row.is-already-logged:hover,
+.si-so-list-row.is-already-logged.is-active {
+  opacity: 1;
+}
+
+.si-so-used-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #b45309;
+  font-size: 10.5px;
+  font-weight: 850;
+  font-style: normal;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
 .si-so-head {
   display: flex;
   align-items: center;
@@ -730,6 +774,7 @@
   border: 1px solid #2563eb;
   background: #2563eb;
   color: #fff;
+  margin-left : 38vw;
 }
 
 .si-btn-primary:hover:not(:disabled) {
@@ -2748,10 +2793,9 @@
 
 .si-draft-summary-dates {
   display: grid;
-  /* flex-direction: column; */
-  /* Wrap to fewer columns when the header is cramped instead of overflowing. */
-  /* grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); */
-  grid-template-columns: repeat(2, 1fr);
+  /* Posting Date is the only date here now; auto-fit keeps it from stretching
+     across a two-column track it no longer fills. */
+  grid-template-columns: repeat(auto-fit, minmax(140px, max-content));
   gap: 12px 16px;
   min-width: 0;
 }
@@ -3886,6 +3930,43 @@
   outline-offset: 2px;
 }
 
+/* The customer's outstanding balance, alongside this invoice's total. Amber
+   only when they actually owe something. */
+.si-action-outstanding {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 220px;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.si-action-outstanding.is-due {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+
+.si-action-outstanding span {
+  color: #475569;
+  font-size: 12px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.si-action-outstanding strong {
+  color: #334155;
+  font-size: 18px;
+  font-weight: 950;
+}
+
+.si-action-outstanding.is-due strong {
+  color: #b45309;
+}
+
 .si-action-total-btn span {
   color: #475569;
   font-size: 12px;
@@ -4529,7 +4610,7 @@
 .si-action-bar-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 12px;
   padding: 12px;
 }
@@ -5504,7 +5585,8 @@
     grid-template-columns: 1fr;
   }
 
-  .si-action-total-btn {
+  .si-action-total-btn,
+  .si-action-outstanding {
     width: 100%;
   }
 
