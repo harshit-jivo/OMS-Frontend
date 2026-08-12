@@ -373,7 +373,7 @@ export default function SO_Invoice_Report() {
     <div className="sovi-page">
       <div className="sovi-header">
         <div>
-          <h1 className="sovi-title">Sales Order vs AR Invoice</h1>
+          <h1 className="sovi-title">Open And SO</h1>
           <p className="sovi-subtitle">
             Every open sales order in SAP with the invoices punched against it
             and the quantity still to go out. Read straight from SAP — open an

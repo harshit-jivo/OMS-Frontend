@@ -929,18 +929,6 @@ export default function Sidebar({ children }: SidebarProps) {
                   Invoice Report
                 </Link>
               </li>
-              <li className={location.pathname === "/Inventory_Report" ? "active" : ""}>
-                <Link to="/Inventory_Report" onClick={closeSidebar}>
-                  <SidebarIcon><HiCube /></SidebarIcon>
-                  Inventory Report
-                </Link>
-              </li>
-              <li className={location.pathname === "/SO_Invoice_Report" ? "active" : ""}>
-                <Link to="/SO_Invoice_Report" onClick={closeSidebar}>
-                  <SidebarIcon><HiClipboardDocumentCheck /></SidebarIcon>
-                  SO vs Invoice
-                </Link>
-              </li>
             </>
           )}
 
@@ -985,7 +973,15 @@ export default function Sidebar({ children }: SidebarProps) {
                   <li><Link to="/PersonWise_Report" onClick={closeSidebar}><SidebarIcon><HiUserCircle /></SidebarIcon>Person Wise Report</Link></li>
                   <li><Link to="/Sales_Report" onClick={closeSidebar}><SidebarIcon><HiChartBar /></SidebarIcon>Sales Report</Link></li>
                   <li><Link to="/StateWise_Report" onClick={closeSidebar}><SidebarIcon><HiMap /></SidebarIcon>State Wise Report</Link></li>
-                  
+                  {/* Both SAP reports are billing-only (the pages themselves
+                      bounce anyone else), so they are not shown to a user who
+                      merely holds the "Reports" grant. */}
+                  {userRole?.toLowerCase() === "billing" && (
+                    <>
+                      <li><Link to="/Inventory_Report" onClick={closeSidebar}><SidebarIcon><HiCube /></SidebarIcon>Inventory Report</Link></li>
+                      <li><Link to="/SO_Invoice_Report" onClick={closeSidebar}><SidebarIcon><HiClipboardDocumentCheck /></SidebarIcon>Open SO</Link></li>
+                    </>
+                  )}
                 </ul>
               )}
             </li>
