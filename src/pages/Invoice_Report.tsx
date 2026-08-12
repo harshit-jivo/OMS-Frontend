@@ -10,15 +10,21 @@ import {
 import { API_BASE_URL } from "../services/api";
 import "../styles/Invoice_Report.css";
 
-// Oil and beverage are separate SAP company databases with separate Crystal
-// reports, and the same DocNum can exist in both — so the branch travels with
-// the request and decides which one is resolved and rendered.
+// Oil, beverage and mart are separate SAP company databases with separate
+// Crystal reports, and the same DocNum exists in all three meaning a DIFFERENT
+// invoice — so the branch travels with the request and decides which one is
+// resolved and rendered. Getting it wrong prints someone else's invoice, not an
+// error.
 const BRANCHES = [
   { value: "OIL", label: "Oil" },
   { value: "BEVERAGE", label: "Beverage" },
+  { value: "MART", label: "Mart" },
 ] as const;
 
 type Branch = (typeof BRANCHES)[number]["value"];
+
+const branchLabel = (value: Branch) =>
+  BRANCHES.find((b) => b.value === value)?.label ?? value;
 
 // Bill prints are proxied through our own backend (it resolves DocNum ->
 // DocEntry against the branch's OINV, then streams the Crystal PDF back). The
@@ -149,9 +155,7 @@ export default function Invoice_Report() {
             <span className="invr-viewer-title">
               <HiDocumentText aria-hidden="true" />
               Bill_{activeDocNum}.pdf
-              <span className="invr-viewer-branch">
-                {activeBranch === "BEVERAGE" ? "Beverage" : "Oil"}
-              </span>
+              <span className="invr-viewer-branch">{branchLabel(activeBranch)}</span>
             </span>
             <a
               className="invr-btn invr-btn-ghost"
