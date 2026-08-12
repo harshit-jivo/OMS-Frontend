@@ -929,6 +929,18 @@ export default function Sidebar({ children }: SidebarProps) {
                   Invoice Report
                 </Link>
               </li>
+              <li className={location.pathname === "/Inventory_Report" ? "active" : ""}>
+                <Link to="/Inventory_Report" onClick={closeSidebar}>
+                  <SidebarIcon><HiCube /></SidebarIcon>
+                  Inventory Report
+                </Link>
+              </li>
+              <li className={location.pathname === "/SO_Invoice_Report" ? "active" : ""}>
+                <Link to="/SO_Invoice_Report" onClick={closeSidebar}>
+                  <SidebarIcon><HiClipboardDocumentCheck /></SidebarIcon>
+                  SO vs Invoice
+                </Link>
+              </li>
             </>
           )}
 

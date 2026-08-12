@@ -21,6 +21,141 @@ export interface Product  {
   left_over_stock?: string | number | null;
 };
 
+/* ---------------------------------------------------------------- *
+ * Inventory Report — warehouse-wise FG stock, pivoted by the backend.
+ * `stock` / `totals` are keyed by warehouse code; a missing key means the
+ * item holds nothing in that warehouse (the API drops zero rows).
+ * ---------------------------------------------------------------- */
+
+export interface InventoryWarehouse {
+  code: string;
+  name: string;
+}
+
+export interface InventoryItem {
+  item_code: string;
+  item_name: string;
+  sku: string;
+  sub_group: string;
+  variety: string;
+  brand: string;
+  stock: Record<string, number>;
+  total: number;
+}
+
+export interface InventoryGroup {
+  sub_group: string;
+  items: InventoryItem[];
+  totals: Record<string, number>;
+  total: number;
+}
+
+export interface InventoryReport {
+  branch: string;
+  warehouses: InventoryWarehouse[];
+  groups: InventoryGroup[];
+  totals: Record<string, number>;
+  grand_total: number;
+  item_count: number;
+}
+
+/* ---------------------------------------------------------------- *
+ * Sales Order vs AR Invoice — open orders, their lines, and the invoices
+ * raised against them. Read wholly from SAP: nothing here is entered or
+ * maintained by hand. `qty_pcs` is the PENDING quantity (SAP's OpenQty)
+ * and the litre/box figures are derived from it.
+ *
+ * Every line of an open order is returned, including ones already billed
+ * in full (qty_pcs === 0), so ordered − invoiced = pending reconciles at
+ * both line and order level.
+ * ---------------------------------------------------------------- */
+
+export interface PendingDispatchRow {
+  order_date: string | null;
+  delivery_date: string | null;
+  dispatch_from: string;
+  so_name: string;
+  card_code: string;
+  party_name: string;
+  location: string;
+  chain: string;
+  item_code: string;
+  item_name: string;
+  sku: string;
+  qty_ordered: number;
+  qty_invoiced: number;
+  qty_pcs: number;
+  total_ltr: number;
+  qty_boxes: number;
+  sales_order: number;
+  so_doc_entry: number;
+  line_num: number;
+  /** Invoice number(s) billing THIS line. */
+  invoice: string;
+  /** Every invoice raised against the sales order, whichever line it billed. */
+  order_invoices: string;
+  case_pack: number;
+  per_ltr: number;
+  box_ltr: number;
+  brand: string;
+  oil_category: string;
+  category: string;
+  case_pack_type: string;
+  variety: string;
+  warehouse_code: string;
+  line_total: number;
+  line_status: string;
+  status: "PENDING" | "PARTLY INVOICED" | "INVOICED";
+}
+
+/** One AR invoice raised against a sales order — a node of SAP's doc flow. */
+export interface PendingOrderInvoice {
+  invoice_num: number;
+  invoice_entry: number;
+  invoice_date: string | null;
+  invoice_status: string;
+  invoice_total: number;
+  /** Quantity and value drawn from THIS order, not the invoice's own total. */
+  qty: number;
+  amount: number;
+  line_count: number;
+}
+
+export interface PendingOrder {
+  so_doc_entry: number;
+  sales_order: number;
+  order_date: string | null;
+  delivery_date: string | null;
+  card_code: string;
+  party_name: string;
+  so_name: string;
+  location: string;
+  chain: string;
+  dispatch_from: string;
+  lines: PendingDispatchRow[];
+  invoices: PendingOrderInvoice[];
+  qty_ordered: number;
+  qty_invoiced: number;
+  qty_pending: number;
+  ltr_pending: number;
+  boxes_pending: number;
+  value_pending: number;
+  invoiced_value: number;
+  invoiced_pct: number;
+  line_count: number;
+  pending_line_count: number;
+  invoice_count: number;
+  status: "NOT INVOICED" | "PARTLY INVOICED";
+}
+
+export interface PendingDispatchResponse {
+  branch: string;
+  order_count: number;
+  line_count: number;
+  invoice_count: number;
+  orders: PendingOrder[];
+}
+
 export interface Address {
   id: number;
   card_code: string;
@@ -138,6 +273,30 @@ export const sapService = {
   getProductStock: async () => {
     const response = await api.get("/hana/product-stock/");
     return response.data;
+  },
+
+  getInventoryReport: async (branch: string, warehouses?: string[]) => {
+    const response = await api.get("/hana/inventory-report/", {
+      params: {
+        branch,
+        ...(warehouses?.length ? { warehouses: warehouses.join(",") } : {}),
+      },
+    });
+    return response.data as InventoryReport;
+  },
+
+  getPendingDispatch: async (
+    branch: string,
+    range?: { from?: string; to?: string },
+  ) => {
+    const response = await api.get("/hana/pending-dispatch/", {
+      params: {
+        branch,
+        ...(range?.from ? { from_date: range.from } : {}),
+        ...(range?.to ? { to_date: range.to } : {}),
+      },
+    });
+    return response.data as PendingDispatchResponse;
   },
 
   getAddresses: async () => {

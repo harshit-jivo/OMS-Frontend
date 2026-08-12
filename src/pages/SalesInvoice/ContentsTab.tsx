@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { HiTrash, HiXMark } from "react-icons/hi2";
 import { API_ORIGIN } from "../../services/api";
 import { formatMoney, lineKey, toNumber, type SelectedLine } from "./salesInvoice.utils";
-import { apiFetch, hanaUrl, type SalesInvoiceState } from "./useSalesInvoice";
+import { apiFetch, hanaUrl, reservedBatchKey, type SalesInvoiceState } from "./useSalesInvoice";
 
 type Props = {
   state: SalesInvoiceState;
@@ -195,12 +195,31 @@ const getBatchSortTime = (batch: BatchDetail) => {
   return Number.isFinite(inTime) ? inTime : Number.POSITIVE_INFINITY;
 };
 
-const allocateNearestExpiryBatches = (batches: BatchDetail[], requiredQty: number): BatchAllocation[] => {
+/**
+ * Nearest-expiry-first allocation.
+ *
+ * `reserved` holds the batches another in-flight invoice log has already
+ * committed — SAP does not know they are spoken for until that invoice posts,
+ * so without skipping them two drafts allocate the same stock. A rejected log
+ * releases its batches, so those never appear here. They are only skipped for
+ * *automatic* selection; the picker still lists them so a user can choose one
+ * deliberately.
+ */
+const allocateNearestExpiryBatches = (
+  batches: BatchDetail[],
+  requiredQty: number,
+  options: { itemCode?: string; whsCode?: string; reserved?: Set<string> } = {},
+): BatchAllocation[] => {
   let remainingQty = toNumber(requiredQty);
   const allocations: BatchAllocation[] = [];
+  const reserved = options.reserved;
 
   [...batches]
     .filter((batch) => toNumber(batch.Quantity) > 0)
+    .filter(
+      (batch) =>
+        !reserved?.has(reservedBatchKey(options.itemCode, options.whsCode, getBatchNumber(batch))),
+    )
     .sort((a, b) => getBatchSortTime(a) - getBatchSortTime(b))
     .some((batch) => {
       const allocatedQty = Math.min(remainingQty, toNumber(batch.Quantity));
@@ -244,6 +263,7 @@ function BatchPickerModal({
   onClose,
   onAutoSelect,
   onQuantityChange,
+  reservedBatchKeys,
 }: {
   context: BatchPickerContext;
   onClose: () => void;
@@ -254,6 +274,8 @@ function BatchPickerModal({
     hasBatches?: boolean,
   ) => void | Promise<void>;
   onQuantityChange: (quantity: number) => void;
+  /** Batches another in-flight log holds; skipped by the auto-suggestion. */
+  reservedBatchKeys: Set<string>;
 }) {
   const [warehouses, setWarehouses] = useState<InventoryWarehouse[]>([]);
   const [selectedWhsCode, setSelectedWhsCode] = useState(context.whsCode);
@@ -366,7 +388,18 @@ function BatchPickerModal({
   }, [context.itemCode, warehouseOptions]);
 
   const selectedBatches = warehouseBatches[selectedWhsCode] || [];
-  const allocations = allocateNearestExpiryBatches(selectedBatches, context.quantity);
+  const allocations = allocateNearestExpiryBatches(selectedBatches, context.quantity, {
+    itemCode: context.itemCode,
+    whsCode: selectedWhsCode,
+    reserved: reservedBatchKeys,
+  });
+  // Batches skipped because another draft holds them. Counted so the panel can
+  // say why the quantity fell short instead of just showing a mismatch.
+  const reservedSkipped = selectedBatches.filter(
+    (batch) =>
+      toNumber(batch.Quantity) > 0 &&
+      reservedBatchKeys.has(reservedBatchKey(context.itemCode, selectedWhsCode, getBatchNumber(batch))),
+  ).length;
   const allocatedQty = getAllocationQuantity(allocations);
   const quantityMatches = Math.abs(allocatedQty - context.quantity) < 0.0001;
   const allocationSignature = `${context.quantity}|${selectedWhsCode}|${allocations
@@ -473,6 +506,12 @@ function BatchPickerModal({
                     </span>
                     <strong>{quantityMatches ? "Quantity matched" : "Quantity mismatch"}</strong>
                   </div>
+                  {reservedSkipped > 0 && (
+                    <p className="si-batch-reserved-note">
+                      {reservedSkipped} batch{reservedSkipped === 1 ? "" : "es"} skipped — held by
+                      another invoice awaiting review.
+                    </p>
+                  )}
                   {allocations.length > 0 && (
                     <div className="si-batch-auto-list">
                     {allocations.map(({ batch, quantity }) => (
@@ -590,7 +629,11 @@ export default function ContentsTab({ state }: Props) {
         hanaUrl(`/api/hana/batch-details/?item_code=${encodeURIComponent(line.ItemCode)}&whs_code=${encodeURIComponent(whsCode)}`),
       );
       const batches = Array.isArray(data) ? data : [];
-      const allocations = allocateNearestExpiryBatches(batches, toNumber(line.invoiceQty));
+      const allocations = allocateNearestExpiryBatches(batches, toNumber(line.invoiceQty), {
+        itemCode: line.ItemCode,
+        whsCode,
+        reserved: state.reservedBatchKeys,
+      });
       const failureReason = batches.length === 0
         ? "missing"
         : hasEnoughAllocation(allocations, toNumber(line.invoiceQty))
@@ -783,6 +826,7 @@ export default function ContentsTab({ state }: Props) {
 
       {batchPickerContext && (
         <BatchPickerModal
+          reservedBatchKeys={state.reservedBatchKeys}
           context={batchPickerContext}
           onClose={() => setBatchPickerContext(null)}
           onAutoSelect={(allocations, whsCode, applyToAll, hasBatches) => {

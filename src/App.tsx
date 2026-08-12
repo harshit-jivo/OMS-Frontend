@@ -47,6 +47,8 @@ import Tracker_Invoices from "./pages/Tracker_Invoices";
 import Profile from "./pages/Profile";
 import Device_Management from "./pages/Device_Management";
 import Invoice_Report from "./pages/Invoice_Report";
+import Inventory_Report from "./pages/Inventory_Report";
+import SO_Invoice_Report from "./pages/SO_Invoice_Report";
 
 function App() {
   return (
@@ -160,6 +162,24 @@ function App() {
           element={
             <Sidebar>
               <Invoice_Report />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Inventory_Report"
+          element={
+            <Sidebar>
+              <Inventory_Report />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/SO_Invoice_Report"
+          element={
+            <Sidebar>
+              <SO_Invoice_Report />
             </Sidebar>
           }
         />
