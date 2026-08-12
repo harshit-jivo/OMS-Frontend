@@ -305,12 +305,6 @@
   color: #64748b;
 }
 
-.ir-lineage-chip-deleted {
-  background: #fef2f2;
-  border-color: #fecaca;
-  color: #b91c1c;
-}
-
 .ir-lineage-chip svg {
   font-size: 0.8rem;
 }
@@ -425,15 +419,6 @@ a.ir-btn {
   background: #fef2f2;
   border-color: #fecaca;
   color: #dc2626;
-}
-
-.ir-btn-restore {
-  background: #0f766e;
-  color: #fff;
-}
-
-.ir-btn-restore:hover:not(:disabled) {
-  background: #115e59;
 }
 
 /* Bill print / invoice report */

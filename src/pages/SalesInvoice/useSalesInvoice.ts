@@ -580,15 +580,25 @@ export function useSalesInvoice() {
     void loadReservedBatches();
   }, [loadReservedBatches]);
 
-  const reservedBatchKeys = useMemo(
-    () =>
-      new Set(
-        reservedBatches.map((row) =>
-          reservedBatchKey(row.item_code, row.warehouse_code, row.batch_number),
-        ),
-      ),
-    [reservedBatches],
-  );
+  /**
+   * How much of each batch other in-flight drafts hold — a QUANTITY per batch,
+   * not a flag.
+   *
+   * One batch commonly carries thousands of pieces and is shared across many
+   * invoices. Treating it as taken the moment another draft touched it locked
+   * the whole batch away over a handful of pieces, which in practice meant the
+   * batch could not be used at all. Netting the held quantity off the batch's
+   * stock leaves the rest available, and the batch only drops out once it is
+   * genuinely exhausted.
+   */
+  const reservedBatchQty = useMemo(() => {
+    const held = new Map<string, number>();
+    for (const row of reservedBatches) {
+      const key = reservedBatchKey(row.item_code, row.warehouse_code, row.batch_number);
+      held.set(key, (held.get(key) || 0) + toNumber(row.quantity));
+    }
+    return held;
+  }, [reservedBatches]);
 
   useEffect(() => {
     if (!branch) return;
@@ -1268,7 +1278,7 @@ export function useSalesInvoice() {
     shipToAddresses,
     usedSalesOrders,
     reservedBatches,
-    reservedBatchKeys,
+    reservedBatchQty,
     refreshReservedBatches: loadReservedBatches,
     nextDocNumber,
     form,

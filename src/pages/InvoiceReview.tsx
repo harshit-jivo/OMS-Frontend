@@ -107,10 +107,10 @@ type ApiMessageResponse = {
   [key: string]: unknown;
 };
 
-// "DELETED" is not a backend status — a soft-deleted invoice keeps the status it
-// had when it was removed. It is a tab of its own so a mistaken delete can be
-// found again and restored.
-type FilterKey = InvoiceStatus | "ALL" | "DELETED";
+// Deleting is a soft delete on the backend — the log and its history survive,
+// and it stays queryable with ?include_deleted=true — but the review screen
+// simply stops listing the row. There is no Deleted tab.
+type FilterKey = InvoiceStatus | "ALL";
 
 const STATUS_FILTERS: Array<{ key: FilterKey; label: string }> = [
   { key: "PENDING", label: "Pending" },
@@ -121,7 +121,6 @@ const STATUS_FILTERS: Array<{ key: FilterKey; label: string }> = [
   { key: "ERROR", label: "Error" },
   { key: "CL_RAISED", label: "CL Raised" },
   { key: "ALL", label: "All" },
-  { key: "DELETED", label: "Deleted" },
 ];
 
 // Human-readable label for a status (e.g. POSTED_TO_SAP -> "POSTED TO SAP").
@@ -140,7 +139,6 @@ const createEmptyCounts = (): StatusCounts => ({
   ERROR: 0,
   CL_RAISED: 0,
   ALL: 0,
-  DELETED: 0,
 });
 
 const formatAmount = (value: unknown) => {
@@ -366,19 +364,16 @@ const updateInvoiceStatus = (
 
 /**
  * Remove an entry from the review screen. This is a soft delete: the backend
- * hides the row and stamps who removed it and why, but the invoice log and its
- * whole history survive, so a mistake can be undone with `restoreInvoice`.
- * Refused with 409 for APPROVED and POSTED_TO_SAP.
+ * hides the row and stamps who removed it, but the invoice log and its whole
+ * history survive — a row removed by mistake is still in the database and can
+ * be brought back with POST /api/invoice/<id>/delete/, which this screen no
+ * longer offers. Refused with 409 for APPROVED and POSTED_TO_SAP.
  */
-const deleteInvoice = (id: InvoiceRecord["id"], reason: string) =>
+const deleteInvoice = (id: InvoiceRecord["id"]) =>
   apiFetch<ApiMessageResponse>(`/api/invoice/${id}/delete/`, {
     method: "DELETE",
-    body: JSON.stringify({ delete_reason: reason }),
+    body: JSON.stringify({}),
   });
-
-/** Put a soft-deleted entry back on the review screen. */
-const restoreInvoice = (id: InvoiceRecord["id"]) =>
-  apiFetch<ApiMessageResponse>(`/api/invoice/${id}/delete/`, { method: "POST" });
 
 export default function InvoiceReview() {
   const [statusFilter, setStatusFilter] = useState<FilterKey>("PENDING");
@@ -426,8 +421,7 @@ export default function InvoiceReview() {
           f.key === "PENDING"
           || f.key === "APPROVED"
           || f.key === "REJECTED"
-          || f.key === "EDITED"
-          || f.key === "DELETED",
+          || f.key === "EDITED",
       )
     : STATUS_FILTERS;
 
@@ -436,17 +430,13 @@ export default function InvoiceReview() {
   // full unfiltered list once and count each status client-side.
   const loadCounts = useCallback(async () => {
     try {
-      // include_deleted so the Deleted tab gets a badge too. Deleted rows are
-      // counted only there — they are not part of their old status' count, nor
-      // of ALL, because neither tab lists them.
-      const data = await apiFetch<unknown>(`/api/invoice/logs/all/?include_deleted=true`);
+      // Deleted rows are left out entirely: the endpoint hides them by default,
+      // and no tab lists them, so counting them would badge a tab with rows the
+      // reviewer cannot see.
+      const data = await apiFetch<unknown>(`/api/invoice/logs/all/`);
       const all = extractRecords(data);
       const next = createEmptyCounts();
       all.forEach((record) => {
-        if (record.is_deleted) {
-          next.DELETED += 1;
-          return;
-        }
         next[normalizeStatus(record.status)] += 1;
         next.ALL += 1;
       });
@@ -460,18 +450,11 @@ export default function InvoiceReview() {
     setLoading(true);
     setError("");
     try {
-      // The backend has no "deleted only" filter — it hides deleted rows unless
-      // include_deleted is set — so that one tab asks for everything and keeps
-      // the deleted rows. Every other tab is filtered server-side as before.
-      const query =
-        statusFilter === "DELETED"
-          ? "?include_deleted=true"
-          : statusFilter === "ALL"
-            ? ""
-            : `?status=${statusFilter}`;
+      // Deleted rows never come back: the endpoint hides them unless
+      // include_deleted is set, which nothing here asks for.
+      const query = statusFilter === "ALL" ? "" : `?status=${statusFilter}`;
       const data = await apiFetch<unknown>(`/api/invoice/logs/all/${query}`);
-      const rows = extractRecords(data);
-      setRecords(statusFilter === "DELETED" ? rows.filter((row) => row.is_deleted) : rows);
+      setRecords(extractRecords(data));
     } catch (err) {
       console.error(err);
       setRecords([]);
@@ -555,8 +538,12 @@ export default function InvoiceReview() {
   };
 
   // Remove an entry from the review screen. Nothing is erased — the backend soft
-  // deletes, so the log and its history survive and the row can be restored from
-  // the Deleted tab. The reason is optional; it is archived on the timeline.
+  // deletes, so the log and its history survive — but the row is gone from every
+  // tab here, which is why the confirmation says so plainly.
+  //
+  // One confirmation, no reason prompt: the reviewer deleting the row is already
+  // recorded against it, and the delete is reversible, so making them type a
+  // reason bought nothing.
   const handleDelete = async (record: InvoiceRecord) => {
     if (record.id === undefined || record.id === null) {
       setActionError("This invoice has no identifier and cannot be deleted.");
@@ -565,50 +552,23 @@ export default function InvoiceReview() {
     const label = `SO #${record.so_number || record.id}`;
     if (
       !window.confirm(
-        `Remove ${label} from the review screen?\n\nIt will move to the Deleted tab, where it can be restored.`,
+        `Remove ${label} from the review screen?\n\nIt will no longer appear on any tab.`,
       )
     ) {
       return;
     }
-    const reason = window.prompt(`Reason for deleting ${label} (optional):`, "");
-    if (reason === null) return; // reviewer cancelled at the reason step
 
     setActionId(record.id);
     setActionError("");
     setActionMessage("");
     try {
-      const data = await deleteInvoice(record.id, reason.trim());
+      const data = await deleteInvoice(record.id);
       setActionMessage(extractMessage(data, "Invoice deleted."));
       setSelected(null);
       await loadInvoices();
     } catch (err) {
       console.error(err);
       setActionError(extractMessage(err, "Unable to delete the invoice."));
-    } finally {
-      setActionId(null);
-    }
-  };
-
-  // Undo a delete: the row returns to the tab for whatever status it still holds.
-  const handleRestore = async (record: InvoiceRecord) => {
-    if (record.id === undefined || record.id === null) {
-      setActionError("This invoice has no identifier and cannot be restored.");
-      return;
-    }
-    const label = `SO #${record.so_number || record.id}`;
-    if (!window.confirm(`Restore ${label} to the review screen?`)) return;
-
-    setActionId(record.id);
-    setActionError("");
-    setActionMessage("");
-    try {
-      const data = await restoreInvoice(record.id);
-      setActionMessage(extractMessage(data, "Invoice restored."));
-      setSelected(null);
-      await loadInvoices();
-    } catch (err) {
-      console.error(err);
-      setActionError(extractMessage(err, "Unable to restore the invoice."));
     } finally {
       setActionId(null);
     }
@@ -965,11 +925,7 @@ export default function InvoiceReview() {
         ) : records.length === 0 ? (
           <div className="ir-empty">
             <HiInbox aria-hidden="true" />
-            <span>
-              {statusFilter === "DELETED"
-                ? "No deleted invoices."
-                : "No invoices found for this status."}
-            </span>
+            <span>No invoices found for this status.</span>
           </div>
         ) : (
           <div className="ir-table-wrap">
@@ -989,7 +945,6 @@ export default function InvoiceReview() {
                   const status = normalizeStatus(record.status);
                   const busy = actionId === record.id;
                   const reportRef = invoiceReportRef(record);
-                  const deleted = Boolean(record.is_deleted);
                   // The backend decides which statuses may be removed and says so
                   // per row; older responses without the flag simply show no
                   // Delete button rather than offering one that would be refused.
@@ -1010,18 +965,6 @@ export default function InvoiceReview() {
                           <span className="ir-lineage-chip ir-lineage-chip-muted">
                             <HiArrowUturnLeft aria-hidden="true" />
                             Replaced by #{record.superseded_by_id}
-                          </span>
-                        )}
-                        {/* Only ever shown on the Deleted tab; carries who removed
-                            it, and the reason in the tooltip. */}
-                        {deleted && (
-                          <span
-                            className="ir-lineage-chip ir-lineage-chip-deleted"
-                            title={record.delete_reason || "No reason given"}
-                          >
-                            <HiTrash aria-hidden="true" />
-                            Deleted{record.deleted_by_name ? ` by ${record.deleted_by_name}` : ""}
-                            {statusLabel(status) ? ` · was ${statusLabel(status)}` : ""}
                           </span>
                         )}
                       </td>
@@ -1049,21 +992,6 @@ export default function InvoiceReview() {
                             <HiClock aria-hidden="true" />
                             History
                           </button>
-                          {/* A deleted entry is frozen: the backend refuses to
-                              approve, reject, post or edit it. Offer only the way
-                              back rather than buttons that would be rejected. */}
-                          {deleted ? (
-                            <button
-                              type="button"
-                              className="ir-btn ir-btn-restore ir-btn-sm"
-                              disabled={busy}
-                              onClick={() => handleRestore(record)}
-                            >
-                              <HiArrowUturnLeft aria-hidden="true" />
-                              {busy ? "…" : "Restore"}
-                            </button>
-                          ) : (
-                          <>
                           {(status === "PENDING" || status === "EDITED") && (
                             canApproveReject ? (
                               <>
@@ -1179,13 +1107,11 @@ export default function InvoiceReview() {
                               className="ir-btn ir-btn-delete ir-btn-sm"
                               disabled={busy}
                               onClick={() => handleDelete(record)}
-                              title="Remove this entry from the review screen (it can be restored)"
+                              title="Remove this entry from the review screen"
                             >
                               <HiTrash aria-hidden="true" />
                               {busy ? "…" : "Delete"}
                             </button>
-                          )}
-                          </>
                           )}
                         </div>
                       </td>
@@ -1361,23 +1287,7 @@ export default function InvoiceReview() {
               </details>
             </div>
 
-            {/* Every action footer is suppressed for a deleted entry — it is
-                frozen until restored, and the backend refuses these anyway. */}
-            {selected.is_deleted && (
-              <footer className="ir-modal-foot">
-                <button
-                  type="button"
-                  className="ir-btn ir-btn-restore"
-                  disabled={actionId === selected.id}
-                  onClick={() => handleRestore(selected)}
-                >
-                  <HiArrowUturnLeft aria-hidden="true" />
-                  Restore
-                </button>
-              </footer>
-            )}
-
-            {!selected.is_deleted && ["PENDING", "EDITED"].includes(normalizeStatus(selected.status)) && (
+            {["PENDING", "EDITED"].includes(normalizeStatus(selected.status)) && (
               <footer className="ir-modal-foot">
                 {canApproveReject ? (
                   <>
@@ -1406,7 +1316,7 @@ export default function InvoiceReview() {
               </footer>
             )}
 
-            {!selected.is_deleted && normalizeStatus(selected.status) === "APPROVED" && canPostToSap && (
+            {normalizeStatus(selected.status) === "APPROVED" && canPostToSap && (
               <footer className="ir-modal-foot">
                 <button
                   type="button"
@@ -1420,7 +1330,7 @@ export default function InvoiceReview() {
               </footer>
             )}
 
-            {!selected.is_deleted && normalizeStatus(selected.status) === "POSTED_TO_SAP" && (
+            {normalizeStatus(selected.status) === "POSTED_TO_SAP" && (
               <footer className="ir-modal-foot">
                 {invoiceReportRef(selected) ? (
                   <a
@@ -1446,7 +1356,7 @@ export default function InvoiceReview() {
               </footer>
             )}
 
-            {!selected.is_deleted && ["ERROR", "CL_RAISED"].includes(normalizeStatus(selected.status)) && canPostToSap && (
+            {["ERROR", "CL_RAISED"].includes(normalizeStatus(selected.status)) && canPostToSap && (
               <footer className="ir-modal-foot">
                 {normalizeStatus(selected.status) === "ERROR" && isCreditLimitError(selected) && (
                   <button
@@ -1482,7 +1392,7 @@ export default function InvoiceReview() {
               </footer>
             )}
 
-            {!selected.is_deleted && normalizeStatus(selected.status) === "REJECTED" && canPostToSap && (
+            {normalizeStatus(selected.status) === "REJECTED" && canPostToSap && (
               <footer className="ir-modal-foot">
                 <button
                   type="button"
