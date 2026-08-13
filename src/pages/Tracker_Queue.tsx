@@ -106,7 +106,6 @@ const DECISION_TABS: Record<string, string> = {
   approved: "APPROVED",
   rejected_log: "REJECTED",
   sent_back: "RETURN",
-  transport: "TRANSPORT_APPROVAL",
 };
 /**
  * Send-back tabs. A rejection stops being outstanding once the invoice comes
@@ -119,38 +118,18 @@ const AMOUNT_TABS = new Set(["hold", "debit"]);
 /** Display names for tabs whose key isn't just a capitalised word. */
 const TAB_LABELS: Record<string, string> = {
   ok: "OK",
-  transport: "Transport Approval",
   rejected: "Awaiting Remarks",
   rejected_log: "Rejected",
   sent_back: "Sent Back",
 };
-const TRANSPORT_APPROVAL_CODE = "transport_approval";
-
 const decMatch = (d: StageDecision, q: string) =>
   [
     d.invoice_number, d.party_name, d.category_name, d.unit_name, d.branch_name,
     d.remarks, d.acted_by_name, d.amount, d.current_stage_name,
   ].some((v) => (v ?? "").toString().toLowerCase().includes(q));
 
-const verdictLabel = (v?: StageDecision["verdict"]) =>
-  v === "APPROVED" ? "Approved"
-    : v === "REJECTED" ? "Rejected"
-    : v === "REJECTION_PENDING" ? "Rejected (awaiting reason)"
-    : "Awaiting approval";
-
-/** Verdict badge for a trip to the Transport Approval desk. */
-function VerdictBadge({ v }: { v?: StageDecision["verdict"] }) {
-  const cls = v === "APPROVED" ? "trk-badge-success"
-    : v === "REJECTED" ? "trk-badge-danger"
-    : v === "REJECTION_PENDING" ? "trk-badge-warn" : "trk-badge-muted";
-  return <span className={"trk-badge " + cls}>{verdictLabel(v)}</span>;
-}
-
-
 // Statuses that mean "send back" / "need a written reason".
 const RETURN_STATUSES = new Set(["RETURN", "REJECTED"]);
-/** Pre-Audit disposition that hands the invoice to the Transport Approval desk. */
-const TRANSPORT_STATUS = "TRANSPORT_APPROVAL";
 /** Stage statuses are stored as keys; show them without the underscores. */
 const statusLabel = (s: string) => s.replace(/_/g, " ");
 const REASON_STATUSES = new Set(["RETURN", "REJECTED", "HOLD", "DEBIT"]);
@@ -179,12 +158,12 @@ export default function Tracker_Queue() {
   const [toast, setToast] = useState("");
   const [subTab, setSubTab] = useState<
     "current" | "returned" | "advanced" | "rejected" | "partial"
-    | "ok" | "hold" | "debit" | "transport"
+    | "ok" | "hold" | "debit"
     | "approved" | "rejected_log" | "sent_back">("current");
   // Send-back tabs: also list rejections the invoice has already come back from.
   const [showResolved, setShowResolved] = useState(false);
   const [advancedRows, setAdvancedRows] = useState<Invoice[]>([]);
-  // Decision-log rows for the OK / Hold / Debit / Transport Approval tabs.
+  // Decision-log rows for the OK / Hold / Debit / verdict tabs.
   const [decisionRows, setDecisionRows] = useState<StageDecision[]>([]);
   const [loadingDecisions, setLoadingDecisions] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -235,15 +214,9 @@ export default function Tracker_Queue() {
 
   const isEntry = activeStage === "entry";
   const isSapApproval = activeStage === "sap_approval";
-  // Pre-Audit: the desk with dispositions worth logging, and the one that
-  // branches Transport invoices off to the approval desk.
-  const isPreAudit = activeStage === "pre_audit";
-  const isTransportApproval = activeStage === TRANSPORT_APPROVAL_CODE;
   // Which decision tabs this desk offers — driven by its configured statuses,
   // so a retuned stage picks them up without a code change.
   const decisionChoices = stageCfg?.status_choices ?? [];
-  const hasTransportDesk = !!lookups?.stages.some(
-    (s) => s.code === TRANSPORT_APPROVAL_CODE && s.is_active);
   const isDecisionTab = subTab in DECISION_TABS;
   // The JSAP desk mirrors a decision taken in JSAP — nobody approves here, so
   // it gets a read-only status panel and a refresh button instead of the
@@ -613,13 +586,6 @@ export default function Tracker_Queue() {
                 Sent Back{subTab === "sent_back" && <span className="trk-tab-count">{decRows.length}</span>}
               </button>
             )}
-            {isPreAudit && hasTransportDesk && (
-              <button className={"trk-tab" + (subTab === "transport" ? " active" : "")}
-                onClick={() => setSubTab("transport")}>
-                Transport Approval
-                {subTab === "transport" && <span className="trk-tab-count">{decRows.length}</span>}
-              </button>
-            )}
             {/* Exports exactly what this tab shows, search filter included. */}
             <button className="trk-btn trk-btn-success" style={{ marginLeft: "auto" }}
               onClick={onExport} disabled={exporting || !exportIds.length}
@@ -700,16 +666,10 @@ export default function Tracker_Queue() {
                       ? <><HiArrowUturnLeft /> {remarks.trim() ? "Reject & return" : "Reject"}</>
                       : RETURN_STATUSES.has(statusPick) ? <><HiArrowUturnLeft /> Return</>
                       : statusPick === "HOLD" && holdType === "FULL" ? <>⏸ Hold</>
-                      : statusPick === TRANSPORT_STATUS ? <><HiArrowRight /> Send for approval</>
                       : <><HiArrowRight /> Apply</>}
                   </button>
                   {statusPick === "HOLD" && holdType === "PARTIAL" && (
                     <span className="trk-sub" style={{ fontSize: 11 }}>Amount required (except RM-PM)</span>
-                  )}
-                  {statusPick === TRANSPORT_STATUS && (
-                    <span className="trk-sub" style={{ fontSize: 11 }}>
-                      Goes to the Transport Approval desk and comes back here once approved
-                    </span>
                   )}
                 </>
               ) : (
@@ -745,9 +705,7 @@ export default function Tracker_Queue() {
           {isDecisionTab && (
             <div className="trk-actionbar" style={{ background: "#f8fafc" }}>
               <span className="trk-sub" style={{ fontSize: 11 }}>
-                {subTab === "transport"
-                  ? "Transport invoices sent from this desk for approval — one row per trip. Approved ones come back here to be advanced to Data Entry."
-                  : subTab === "hold"
+                {subTab === "hold"
                   ? "Every hold recorded at this desk. A full hold keeps the invoice here; a partial hold advances it with the amount withheld."
                   : subTab === "debit"
                   ? "Every debit recorded at this desk, with the amount debited. Debits accumulate on the invoice."
@@ -786,25 +744,9 @@ export default function Tracker_Queue() {
                 <HiArrowRight /> Release as OK
                 {stageCfg && !stageCfg.is_terminal && " → next stage"}
               </button>
-              {(stageCfg?.status_choices ?? []).includes(TRANSPORT_STATUS) && (
-                <button className="trk-btn trk-btn-primary"
-                  onClick={() => onReleaseHold(TRANSPORT_STATUS)} disabled={!selected.size}>
-                  <HiArrowRight /> Release for transport approval
-                </button>
-              )}
               <span className="trk-sub" style={{ fontSize: 11 }}>
                 Clears the hold and advances the invoice — same as dispositioning
                 it from the Current tab.
-              </span>
-            </div>
-          )}
-
-          {/* Transport Approval desk: what the two verdicts actually do. */}
-          {isTransportApproval && !readOnly && (
-            <div className="trk-actionbar" style={{ background: "#ecfeff", borderColor: "#a5f3fc" }}>
-              <span className="trk-sub" style={{ fontSize: 11 }}>
-                Approving sends the invoice back to <b>Pre-Audit</b>, which then advances it
-                to Data Entry. Rejecting sends it back to Pre-Audit with your reason.
               </span>
             </div>
           )}
@@ -830,11 +772,11 @@ export default function Tracker_Queue() {
                     <th>Party</th>
                     <th>Inv. Date</th>
                     <th>Value</th>
-                    <th>{subTab === "transport" ? "Approval" : "Decision"}</th>
+                    <th>Decision</th>
                     {AMOUNT_TABS.has(subTab) && <th>Amount</th>}
                     <th>Remarks</th>
                     <th>By</th>
-                    <th>{subTab === "transport" ? "Sent / Decided" : "Decided"}</th>
+                    <th>Decided</th>
                     <th>Now At</th>
                   </tr>
                 </thead>
@@ -854,16 +796,12 @@ export default function Tracker_Queue() {
                       <td>{fmtDate(d.invoice_date)}</td>
                       <td>₹{money(d.net_invoice_value ?? d.invoice_value)}</td>
                       <td>
-                        {subTab === "transport" ? (
-                          <VerdictBadge v={d.verdict} />
-                        ) : (
-                          <span className={"trk-badge " + (
-                            d.decision === "OK" || d.decision === "APPROVED" ? "trk-badge-success"
-                              : d.decision === "DEBIT" || d.decision === "REJECTED" ? "trk-badge-danger"
-                              : "trk-badge-warn")}>
-                            {d.decision}{d.hold_type ? ` · ${d.hold_type}` : ""}
-                          </span>
-                        )}
+                        <span className={"trk-badge " + (
+                          d.decision === "OK" || d.decision === "APPROVED" ? "trk-badge-success"
+                            : d.decision === "DEBIT" || d.decision === "REJECTED" ? "trk-badge-danger"
+                            : "trk-badge-warn")}>
+                          {d.decision}{d.hold_type ? ` · ${d.hold_type}` : ""}
+                        </span>
                         {d.awaiting_remarks && (
                           <div className="trk-sub" style={{ fontSize: 11 }}>reason still owed</div>
                         )}
@@ -885,11 +823,6 @@ export default function Tracker_Queue() {
                       <td>{d.acted_by_name || "—"}</td>
                       <td>
                         {fmtDT(d.decided_at)}
-                        {subTab === "transport" && d.verdict !== "AWAITING" && d.sent_at && (
-                          <div className="trk-sub" style={{ fontSize: 11 }}>
-                            sent {fmtDT(d.sent_at)}
-                          </div>
-                        )}
                       </td>
                       <td>
                         <span className={"trk-badge " + (d.is_still_here
@@ -905,7 +838,6 @@ export default function Tracker_Queue() {
                   {decRows.length === 0 && (
                     <tr><td colSpan={11}><div className="trk-empty">
                       {loadingDecisions ? "Loading…"
-                        : subTab === "transport" ? "Nothing sent for transport approval yet."
                         : SENT_BACK_TABS.has(subTab)
                         ? (showResolved
                           ? "This desk has not sent anything back."
@@ -934,7 +866,6 @@ export default function Tracker_Queue() {
                     <th>Category</th>
                     <th>Unit / Branch</th>
                     {subTab === "returned" && <><th>Sent Back By</th><th>Reason</th></>}
-                    {isPreAudit && hasTransportDesk && <th>Advances To</th>}
                     {isJsap && subTab !== "advanced" && <th>JSAP Status</th>}
                     {subTab === "advanced" ? (
                       <><th>Now At</th><th>Advanced On</th></>
@@ -980,22 +911,6 @@ export default function Tracker_Queue() {
                             </span>
                           </td>
                         </>
-                      )}
-                      {/* Where Advance sends it: a Transport invoice detours to
-                          the approval desk until that desk has approved it. */}
-                      {isPreAudit && hasTransportDesk && (
-                        <td>
-                          <span className={"trk-badge " + (
-                            inv.next_stage_code === TRANSPORT_APPROVAL_CODE
-                              ? "trk-badge-warn" : "trk-badge-stage")}>
-                            {inv.next_stage_name || "—"}
-                          </span>
-                          {inv.next_stage_code === TRANSPORT_APPROVAL_CODE && (
-                            <div className="trk-sub" style={{ fontSize: 11 }}>
-                              needs approval first
-                            </div>
-                          )}
-                        </td>
                       )}
                       {isJsap && subTab !== "advanced" && (
                         <td style={{ maxWidth: 240, whiteSpace: "normal" }}>
