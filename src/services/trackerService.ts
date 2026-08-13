@@ -137,17 +137,12 @@ export interface Invoice {
   returned_at?: string;
   // Present in the stage-advanced payload:
   advanced_at?: string;
-  // Present in the my-queue payload: where an Advance would send this invoice.
-  // At Pre-Audit a Transport invoice goes to Transport Approval first, and only
-  // to Data Entry once that desk has approved it.
-  next_stage_code?: string | null;
-  next_stage_name?: string | null;
 }
 
 /**
  * One row of a desk's decision log (`/tracker/stage-decisions/`). A log of
- * events, not invoices: an invoice debited twice appears twice, and a trip to
- * the Transport Approval desk is its own row with a verdict.
+ * events, not invoices: an invoice debited twice appears twice, each row
+ * carrying its own amount, reason and handler.
  */
 export interface StageDecision {
   event_id: number;
@@ -160,8 +155,7 @@ export interface StageDecision {
   category_name: string;
   unit_name: string;
   branch_name: string;
-  decision: "OK" | "HOLD" | "DEBIT" | "APPROVED" | "REJECTED" | "RETURN"
-    | "TRANSPORT_APPROVAL";
+  decision: "OK" | "HOLD" | "DEBIT" | "APPROVED" | "REJECTED" | "RETURN";
   hold_type: "" | "FULL" | "PARTIAL";
   amount: string | null;          // held / debited on THIS decision
   remarks: string;
@@ -182,9 +176,6 @@ export interface StageDecision {
   came_back: boolean;
   /** A rejection parked here until the written reason arrives. */
   awaiting_remarks?: boolean;
-  // TRANSPORT_APPROVAL rows only:
-  verdict?: "AWAITING" | "APPROVED" | "REJECTED" | "REJECTION_PENDING";
-  sent_at?: string;
 }
 
 export interface InvoiceWrite {
@@ -354,8 +345,8 @@ export const trackerService = {
   },
 
   /**
-   * A desk's decision log — what it marked OK / HOLD / DEBIT, and what it sent
-   * for Transport Approval. Omit `decision` for every disposition.
+   * A desk's decision log — what it marked OK / HOLD / DEBIT, and what it
+   * approved, rejected or sent back. Omit `decision` for all of them.
    */
   async getStageDecisions(
     stageCode: string,
