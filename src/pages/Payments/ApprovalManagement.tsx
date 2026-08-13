@@ -580,15 +580,13 @@ function WorkflowsTab({
                             >
                               <HiPencilSquare />
                             </button>
-                            <button
-                              type="button"
-                              className="apv-btn apv-btn-icon apv-btn-danger"
-                              title="Delete"
-                              aria-label={`Delete ${w.name}`}
-                              onClick={() => setDeleting(w)}
-                            >
-                              <HiTrash />
-                            </button>
+                            {/* Delete removed deliberately. A workflow is the
+                                ladder in-flight documents are standing on —
+                                removing it (or its levels) strands every
+                                pending request at a rung that no longer
+                                exists, invisible to every approver. Set the
+                                workflow Inactive instead: new documents stop
+                                using it while the ones already in it finish. */}
                           </>
                         )}
                       </div>
@@ -1019,14 +1017,12 @@ function LevelsTab({
                     >
                       <HiPencilSquare />
                     </button>
-                    <button
-                      type="button"
-                      className="apv-btn apv-btn-icon apv-btn-danger"
-                      aria-label="Delete"
-                      onClick={() => setDeleting(level)}
-                    >
-                      <HiTrash />
-                    </button>
+                    {/* Delete removed deliberately — see the Workflows tab.
+                        Deleting a level renumbers the ladder under documents
+                        already waiting on it: six payment approvals were
+                        stranded exactly this way, matched to a position that
+                        no longer existed and shown to nobody. Untick Active
+                        to retire a level safely. */}
                   </div>
                 )}
               </div>
