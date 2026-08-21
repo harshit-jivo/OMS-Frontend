@@ -5,7 +5,7 @@ import { haisService, WORKING_STATUSES, holderLabel, type Asset } from "../../se
 import AssetHistory from "./AssetHistory";
 import AssetActionModal from "./AssetActionModal";
 import AssetDetails from "./AssetDetails";
-import "../../styles/HAIS.css";
+import "../../styles/HAIS/HAIS.css";
 
 type Props = {
   /** Parent hook to jump into the edit form for a given asset. */

@@ -13,6 +13,10 @@ export const GRANTABLE_ADMIN_PAGES: GrantablePage[] = [
   { key: "Party_Assignment", label: "Party Assignment", path: "/Party_Assignment" },
   { key: "Party_Product_Assignment", label: "Party Product Assignment", path: "/Party_Product_Assignment" },
   { key: "Add_Scheme", label: "Add Scheme", path: "/Add_Scheme" },
+  // Scheme engine v2 — targeting, triggers and benefits. Granted separately from
+  // "Add Scheme" (the legacy flat form) so the two can be rolled out apart.
+  { key: "Scheme_Manager", label: "Schemes", path: "/Scheme_Manager" },
+  { key: "Combo_Mapping", label: "Combo Mapping", path: "/Combo_Mapping" },
   { key: "Order_Flow_Settings", label: "Order Flow Settings", path: "/Order_Flow_Settings" },
   { key: "Product_Stock", label: "Stock", path: "/Product_Stock" },
   { key: "Reports", label: "Reports", path: "/Daily_Report" },
@@ -21,6 +25,8 @@ export const GRANTABLE_ADMIN_PAGES: GrantablePage[] = [
   { key: "Einvoice", label: "e-Invoice (IRN)", path: "/Einvoice" },
   { key: "Ewaybill", label: "e-Way Bill", path: "/Ewaybill" },
   { key: "HAIS", label: "Hardware Assets (HAIS)", path: "/HAIS" },
+  { key: "Distributor", label: "Distributor", path: "/Distributor" },
+  { key: "Mart_Approval", label: "Mart Approval", path: "/Mart_Approval" },
   // System — one page carrying live device activity and version analytics.
   // "Device_Activity" and "Version_Management" are deliberately no longer
   // grantable: the pages they gated are gone, so offering those permissions

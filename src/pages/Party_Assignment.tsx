@@ -128,7 +128,8 @@ export default function Party_Assignment() {
           Number(u.role) === 2 ||
           Number(u.role) === 4 ||
           u.role?.toLowerCase() === "manager" ||
-          u.role?.toLowerCase() === "billing",
+          u.role?.toLowerCase() === "billing" ||
+          u.role?.toLowerCase() === "distributor",
       );
       setUsers(data2);
     } catch (error) {

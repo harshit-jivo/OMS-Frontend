@@ -144,6 +144,7 @@ export default function Sidebar({ children }: SidebarProps) {
     }
   });
   const [reportsOpen, setReportsOpen] = useState(false);
+  const [distributorOpen, setDistributorOpen] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
@@ -508,6 +509,10 @@ export default function Sidebar({ children }: SidebarProps) {
         location.pathname === "/Sales_Report" ||
         location.pathname === "/StateWise_Report"
     );
+    setDistributorOpen(
+      location.pathname === "/Distributor" ||
+        location.pathname === "/Distributor_Order_Tracking"
+    );
   }, [location.pathname]);
 
   const handleOpenNotifications = () => {
@@ -813,6 +818,24 @@ export default function Sidebar({ children }: SidebarProps) {
             </li>
           )}
 
+          {canSee("Scheme_Manager") && (
+            <li className={location.pathname === "/Scheme_Manager" ? "active" : ""}>
+              <Link to="/Scheme_Manager" onClick={closeSidebar}>
+                <SidebarIcon><HiReceiptPercent /></SidebarIcon>
+                Schemes
+              </Link>
+            </li>
+          )}
+
+          {(canSee("Combo_Mapping") || userRole?.toLowerCase() === "billing") && (
+            <li className={location.pathname === "/Combo_Mapping" ? "active" : ""}>
+              <Link to="/Combo_Mapping" onClick={closeSidebar}>
+                <SidebarIcon><HiGift /></SidebarIcon>
+                Combo Mapping
+              </Link>
+            </li>
+          )}
+
           {canSee("Order_Flow_Settings") && (
             <li className={location.pathname === "/Order_Flow_Settings" ? "active" : ""}>
               <Link to="/Order_Flow_Settings" onClick={closeSidebar}>
@@ -858,6 +881,46 @@ export default function Sidebar({ children }: SidebarProps) {
               <Link to="/HAIS" onClick={closeSidebar}>
                 <SidebarIcon><HiComputerDesktop /></SidebarIcon>
                 Hardware Assets
+              </Link>
+            </li>
+          )}
+
+          {/* Distributor — a collapsible group with two sub-pages: Create Order
+              (the line-item form) and Order Tracker (view + track own orders, no
+              staff edit flow). Visible to admins, users granted the "Distributor"
+              page, and the Distributor role. */}
+          {(canSee("Distributor") || userRole?.toLowerCase() === "distributor") && (
+            <li>
+              <div className="dropdown-toggle" onClick={() => setDistributorOpen(!distributorOpen)}>
+                <SidebarIcon><HiTruck /></SidebarIcon>
+                Distributor
+                <HiChevronDown className={`sb-chevron ${distributorOpen ? "open" : ""}`} />
+              </div>
+              {distributorOpen && (
+                <ul className="dropdown-list">
+                  <li className={location.pathname === "/Distributor" ? "active" : ""}>
+                    <Link to="/Distributor" onClick={closeSidebar}>
+                      <SidebarIcon><HiPlusCircle /></SidebarIcon>
+                      Create Order
+                    </Link>
+                  </li>
+                  <li className={location.pathname === "/Distributor_Order_Tracking" ? "active" : ""}>
+                    <Link to="/Distributor_Order_Tracking" onClick={closeSidebar}>
+                      <SidebarIcon><HiPresentationChartLine /></SidebarIcon>
+                      Order Tracker
+                    </Link>
+                  </li>
+                </ul>
+              )}
+            </li>
+          )}
+
+          {/* Visible to admins, users granted the "Mart_Approval" page, and the Mart Approval role. */}
+          {(canSee("Mart_Approval") || userRole?.toLowerCase() === "mart_approval") && (
+            <li className={location.pathname === "/Mart_Approval" ? "active" : ""}>
+              <Link to="/Mart_Approval" onClick={closeSidebar}>
+                <SidebarIcon><HiClipboardDocumentCheck /></SidebarIcon>
+                Mart Approval
               </Link>
             </li>
           )}

@@ -22,6 +22,8 @@ import "./styles/UIConsistency.css";
 import Party_Assignment from "./pages/Party_Assignment";
 import Party_Product_Assignment from "./pages/Party_Product_Assignment";
 import Add_Scheme from "./pages/Add_Scheme";
+import Scheme_Manager from "./pages/Scheme_Manager";
+import Combo_Mapping from "./pages/Combo_Mapping";
 import FOC from "./pages/FOC";
 import SalesInvoice from "./pages/Sales_Invoice";    
 import SkuGalleryPage from "./pages/SalesInvoice/SkuGalleryPage";
@@ -51,6 +53,9 @@ import Device_Management from "./pages/Device_Management";
 import Invoice_Report from "./pages/Invoice_Report";
 import HAIS from "./pages/HAIS";
 import AssetPublicView from "./pages/HAIS/AssetPublicView";
+import Distributor from "./pages/Distributor";
+import Distributor_Order_Tracking from "./pages/Distributor/Order_Tracking";
+import MartApproval from "./pages/MartApproval";
 
 function App() {
   return (
@@ -280,6 +285,15 @@ function App() {
         />
 
         <Route
+          path="/Distributor_Order_Tracking"
+          element={
+            <Sidebar>
+              <Distributor_Order_Tracking />
+            </Sidebar>
+          }
+        />
+
+        <Route
           path="/Party_Assignment"
           element={
             <Sidebar>
@@ -302,6 +316,24 @@ function App() {
           element={
             <Sidebar>
               <Add_Scheme />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Scheme_Manager"
+          element={
+            <Sidebar>
+              <Scheme_Manager />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Combo_Mapping"
+          element={
+            <Sidebar>
+              <Combo_Mapping />
             </Sidebar>
           }
         />
@@ -444,6 +476,24 @@ function App() {
           element={
             <Sidebar>
               <HAIS />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Distributor"
+          element={
+            <Sidebar>
+              <Distributor />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Mart_Approval"
+          element={
+            <Sidebar>
+              <MartApproval />
             </Sidebar>
           }
         />

@@ -1,6 +1,8 @@
 import { Fragment, useState, useEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { ordersService } from "../services/ordersService";
+import { schemeService } from "../services/schemeService";
+import type { PreviewLine, SchemeProposal } from "../services/schemeService";
 import { userService } from "../services/userService";
 import { getCurrentUser } from "../services/authService";
 import { useUILabels, useFieldConfig } from "../services/uiConfig";
@@ -30,6 +32,10 @@ type RowDropdownOption = {
   value: string;
   label: string;
 };
+
+/** The Add Item facet rail, widest first — picking one clears the ones below. */
+type PickerFacet = "category" | "brand" | "variety" | "type";
+const PICKER_FACETS: PickerFacet[] = ["category", "brand", "variety", "type"];
 
 const createEmptyRow = (): SalesRow => ({
   category: "",
@@ -77,6 +83,36 @@ const getUserCategoryText = (user: any) =>
       user?.category ||
       "",
   ).trim();
+
+/** Landing Price = Basic Price inclusive of tax: basic * (1 + tax%/100).
+ *  e.g. 170 @ 5% -> "178.50". Returns "" when there is no basic price yet.
+ *  Basic Price stays the pre-tax rate (what SAP receives as UnitPrice); Landing
+ *  is a display-only, tax-inclusive figure derived from it. */
+const computeLandingPrice = (
+  basic: string | number | null | undefined,
+  tax: string | number | null | undefined,
+) => {
+  const base = Number(basic) || 0;
+  const taxRate = Number(tax) || 0;
+  return base > 0 ? (base * (1 + taxRate / 100)).toFixed(2) : "";
+};
+
+/** Remove every "(card_code)" occurrence from a party name. The party list's
+ *  label is "Name (CODE)", and saving that label back into card_name — then
+ *  re-appending the code on the next edit — makes the code pile up
+ *  ("Name (CODE) (CODE) (CODE)"). Stripping first keeps card_name the clean name. */
+const stripCardCode = (
+  name: string | null | undefined,
+  code: string | null | undefined,
+) => {
+  const text = String(name ?? "").trim();
+  const trimmedCode = String(code ?? "").trim();
+  if (!text || !trimmedCode) return text;
+  const escaped = trimmedCode.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return text
+    .replace(new RegExp(`\\s*\\(\\s*${escaped}\\s*\\)`, "g"), "")
+    .trim();
+};
 
 type EditOrderLocationState = {
   editOrderId?: number;
@@ -162,6 +198,11 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
     Record<number, SchemeProduct[]>
   >({});
   const [stateCode, setStateCode] = useState<string | null>(null);
+  // v2 engine proposals, keyed by row index. Resolved from the party's targeting
+  // (vendor / state / main group), not chosen by the user. See schemeService.
+  const [schemeProposals, setSchemeProposals] = useState<
+    Record<number, SchemeProposal[]>
+  >({});
   const [editOrderFallback, setEditOrderFallback] = useState<EditOrderFallback>(
     emptyEditOrderFallback,
   );
@@ -190,6 +231,9 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
     poNumber: "",
     company: "",
     comment: "",
+    // Company-3 (Mart) orders pick a dispatch warehouse. Display-only for now —
+    // not sent to the backend. Defaults to GP-FGM.
+    warehouse: "GP-FGM",
   });
 
   const [rows, setRows] = useState<SalesRow[]>([createEmptyRow()]);
@@ -198,6 +242,11 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
   const [itemModalIndex, setItemModalIndex] = useState<number | null>(null);
   const [itemModalSnapshot, setItemModalSnapshot] = useState<SalesRow | null>(null);
   const [itemModalIsNew, setItemModalIsNew] = useState(false);
+  // The Add Item modal opens on the product picker — one search box over the
+  // whole party catalogue, with the facet rail as the slower route to the same
+  // place. Once a product is picked the modal switches to its quantity fields.
+  const [isPickingItem, setIsPickingItem] = useState(false);
+  const [itemSearch, setItemSearch] = useState("");
   const isFocOrder = isFocMode || editOrderIsFoc;
   // Admin-controlled PO field behaviour (label + enabled + required). Defaults
   // preserve the original hardcoded behaviour if config hasn't loaded yet.
@@ -214,7 +263,8 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
     poField.enabled &&
     (!isEditMode || locationState?.allowPoNumber === true);
   // The guided 4-step wizard is used for both the standard create flow and the
-  // FOC create flow, so Add Sales and Add FOC share the same UI.
+  // FOC create flow, so Add Sales and Add FOC share the same UI. FOC-specific
+  // behaviour (price forced to 0, no scheme panel) is handled via `isFocOrder`.
   // Edit and Duplicate modes keep the original single-page form.
   const useWizard = mode === "create" && !isLoadingFromOrder;
 
@@ -267,6 +317,21 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
       company: prev.company || String(jivoCompany.id || ""),
     }));
   }, [company, formData.company, isLoadingFromOrder]);
+
+  // For a Mart order (party category MART) auto-select the Mart company so the
+  // Company field shows "Mart" rather than a blank picker, and the Warehouse panel
+  // (company 3 = mart) shows with its default. Runs in create AND edit. Company 3
+  // is already treated as Mart, so it is left untouched.
+  useEffect(() => {
+    if (company.length === 0) return;
+    if (normalizeOptionText(selectedPartyCategory) !== "mart") return;
+    if (Number(formData.company) === 3) return;
+    const mart = company.find((item) =>
+      normalizeOptionText(item?.name).includes("mart"),
+    );
+    if (!mart || String(formData.company) === String(mart.id)) return;
+    setFormData((prev) => ({ ...prev, company: String(mart.id) }));
+  }, [company, selectedPartyCategory, formData.company]);
 
   useEffect(() => {
     if (isLoadingFromOrder || !userDefaultCategory) return;
@@ -339,12 +404,13 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
 
   const fetchCompany = async () => {
     try {
-      let data = await userService.getCompany();
+      const data = await userService.getCompany();
       setCompany(data);
     } catch (error) {
       console.log("Error fetching Company:", error);
     }
   };
+
 
   const fetchPartyName = async () => {
     try {
@@ -357,7 +423,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
 
   const fetchBranch = async () => {
     try {
-      let data = await ordersService.getBranches();
+      const data = await ordersService.getBranches();
       setBranch(data);
     } catch (error) {
       console.log("Error fetching dispatch data:", error);
@@ -366,7 +432,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
 
   const fetchPartyAddresses = async (card_code: string, partyCategory = "") => {
     try {
-      let data = await ordersService.getPartyAdd(card_code, partyCategory);
+      const data = await ordersService.getPartyAdd(card_code, partyCategory);
       const billTo = Array.isArray(data.bill_to) ? data.bill_to : [];
       const shipTo = Array.isArray(data.ship_to) ? data.ship_to : [];
       setBillAddress(billTo.length > 0 ? billTo : shipTo);
@@ -404,7 +470,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
   };
 
   const fetchProducts = async () => {
-    let data = await ordersService.getProducts();
+    const data = await ordersService.getProducts();
     setProducts(data);
   };
 
@@ -462,7 +528,12 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
   };
 
   const mapOrderToRows = (order: Order): SalesRow[] => {
-    const orderItems = Array.isArray(order.items) ? order.items : [];
+    // Combo companion lines are re-derived from their parent on every render, so
+    // loading them back as editable rows would both duplicate them in the list
+    // and send them twice on save.
+    const orderItems = (Array.isArray(order.items) ? order.items : []).filter(
+      (item) => !item.is_auto_free,
+    );
 
     return orderItems.length > 0
       ? orderItems.map((item) => {
@@ -504,8 +575,10 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
             qty: valueToString(item.qty),
             ltrs: valueToString(item.ltrs),
             boxes: valueToString(item.boxes),
-            priceListBasic: valueToString(item.price_list_basic),
+            // Landing is always basic + tax% (recomputed, not the stored value)
+            // so the edit side shows the same figure the create side does.
             basicPrice: valueToString(item.basic_price),
+            priceListBasic: computeLandingPrice(item.basic_price, item.tax_rate),
             tax: valueToString(item.tax_rate),
             amount: valueToString(item.total),
             confirmed: true,
@@ -547,10 +620,14 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
         );
         setSelectedPartyCategory(orderCategory);
 
+        // Strip any codes a previous save may have baked into card_name so they
+        // don't accumulate on this (and every subsequent) edit.
+        const cleanCardName = stripCardCode(order.card_name, order.card_code);
+
         setEditOrderFallback({
-          cardName: order.card_name || "",
-          partyLabel: order.card_name
-            ? [order.card_name, `(${order.card_code})`, orderCategory]
+          cardName: cleanCardName,
+          partyLabel: cleanCardName
+            ? [cleanCardName, `(${order.card_code})`, orderCategory]
                 .filter(Boolean)
                 .join(" ")
             : order.card_code || "",
@@ -568,8 +645,10 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
             : [
                 {
                   value: order.card_code,
-                  label: order.card_name
-                    ? `${order.card_name} (${order.card_code})`
+                  card_code: order.card_code,
+                  card_name: cleanCardName,
+                  label: cleanCardName
+                    ? `${cleanCardName} (${order.card_code})`
                     : order.card_code,
                   category: orderCategory,
                   state: "",
@@ -612,6 +691,9 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
           Deliverydate: isDuplicateMode ? getDefaultDeliveryDate() : order.delivery_date || "",
           poNumber: isDuplicateMode ? "" : order.po_number || "",
           company: order.company ? String(order.company) : "",
+          // Pick the warehouse straight from the saved order; default to GP-FGM
+          // for orders placed before the picker existed.
+          warehouse: order.warehouse_code || "GP-FGM",
           comment: isDuplicateMode ? "" : order.remarks || "",
         });
         const orderStateCode = order.party_state || "";
@@ -683,6 +765,13 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
   const validateBeforeSave = () => {
     const confirmedRows = rows.filter((row) => row.confirmed);
 
+    // Only enforced where the field is actually shown — an edit that hides it
+    // must not be blocked by a PO it cannot type.
+    if (canEditPoNumber && !formData.poNumber.trim()) {
+      alert("PO Number is required.");
+      return false;
+    }
+
     if (confirmedRows.length === 0) {
       alert("Please confirm at least one item before submitting the order.");
       return false;
@@ -743,6 +832,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
         )?.id || "",
       ),
       comment: "",
+      warehouse: "GP-FGM",
     });
 
     setSelectedPartyCategory(userDefaultCategory);
@@ -757,9 +847,62 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
     setItemModalIsNew(false);
   };
 
-  const submitOrder = async () => {
-    const confirmedRows = rows.filter((row) => row.confirmed);
+  /** The zero-priced companion lines a combo pack contributes to the payload.
+   *
+   * Scheme giveaways are deliberately absent: they ride on the parent line's
+   * `schemes[]`, which sync_service already fans out into its own zero-priced
+   * SAP line. Adding them here as well would ship the free stock twice.
+   */
+  const buildComboFreeItems = () =>
+    rows.flatMap((row, index) => {
+      if (!row.confirmed) return [];
+      const parent = getRowProduct(row);
+      return getDerivedLines(row, index)
+        .filter((line) => line.kind === "combo")
+        .map((line) => ({
+          item_code: line.itemCode,
+          item_name: line.itemName,
+          category: row.category,
+          brand: row.brand,
+          variety: row.variety,
+          item_type: row.type,
 
+          qty: line.qty,
+          pcs: 0,
+          boxes: 0,
+          ltrs: 0,
+
+          price_list_basic: 0,
+          basic_price: 0,
+          tax_rate: Number(row.tax) || 0,
+          total: 0,
+          scheme_id: undefined as number | undefined,
+          scheme_qty: 0,
+          schemes: [] as { scheme_id: number; scheme_qty: number }[],
+          is_scheme: false,
+          total_ltrs: 0,
+
+          is_auto_free: true,
+          combo_source_code: parent?.item_code || "",
+        }));
+    });
+
+  /** The address string to persist for a selected id. Mirrors how the address is
+   *  shown on screen (name first, then the full address), so an address that has
+   *  a full_address but a blank address_name is still saved instead of "". */
+  const resolveAddressText = (
+    list: Array<{
+      id: number | string;
+      address_name?: string | null;
+      full_address?: string | null;
+    }>,
+    id: string,
+  ) => {
+    const match = list.find((address) => String(address.id) === String(id));
+    return match?.address_name || match?.full_address || "";
+  };
+
+  const submitOrder = async () => {
     const selectedParty = parties.find(
       (p) =>
         p.value === formData.parties &&
@@ -771,15 +914,16 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
     const payload = {
       ...(isEditMode ? { order_id: editOrderId } : {}),
       card_code: formData.parties,
-      card_name: selectedParty?.label || editOrderFallback.cardName || "",
+      // Save the clean party name (never the "Name (CODE)" label), stripped of any
+      // code so it cannot pile up across edits.
+      card_name: stripCardCode(
+        selectedParty?.card_name || editOrderFallback.cardName || "",
+        formData.parties,
+      ),
       bill_to_id: Number(formData.billAddress),
-      bill_to_address:
-        billAddress.find((b) => b.id === Number(formData.billAddress))
-          ?.address_name || "",
+      bill_to_address: resolveAddressText(billAddress, formData.billAddress),
       ship_to_id: Number(formData.shipAddress),
-      ship_to_address:
-        shipAddress.find((s) => s.id === Number(formData.shipAddress))
-          ?.address_name || "",
+      ship_to_address: resolveAddressText(shipAddress, formData.shipAddress),
       dispatch_from_id: Number(formData.dispatch),
       dispatch_from_name:
         branch.find(
@@ -788,6 +932,9 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
 
       delivery_date: formData.Deliverydate,
       ...(canEditPoNumber ? { po_number: formData.poNumber.trim() } : {}),
+      // Warehouse is only chosen on Mart orders; others send "" so SAP sync
+      // falls back to the per-category default.
+      warehouse_code: isMartOrder ? formData.warehouse : "",
       remarks: formData.comment.trim(),
       is_foc: isFocOrder,
       company: Number(formData.company),
@@ -796,7 +943,8 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
       tax_amount: taxAmount,
       grand_total: grandTotal,
 
-      items: confirmedRows.map((row) => ({
+      items: rows.map((row, rowIndex) => ({
+        _confirmed: row.confirmed,
         item_code:
           partyProducts.find(
             (p) =>
@@ -825,20 +973,40 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
         scheme_qty: row.isScheme
           ? row.schemes.reduce((sum, scheme) => sum + Number(scheme.schemeQty || 0), 0)
           : 0,
-        schemes: row.isScheme
-          ? row.schemes
-              .filter((scheme) => scheme.scheme && Number(scheme.schemeQty || 0) > 0)
-              .map((scheme) => ({
-                scheme_id: Number(scheme.scheme),
-                scheme_qty: Number(scheme.schemeQty || 0),
-              }))
-          : [],
+        // Hand-picked legacy schemes, plus whatever the v2 engine resolved for
+        // this line. Both travel on `schemes[]`; the backend distinguishes them
+        // by which id is set and fans each out into its own zero-priced SAP line.
+        schemes: [
+          ...(row.isScheme
+            ? row.schemes
+                .filter((scheme) => scheme.scheme && Number(scheme.schemeQty || 0) > 0)
+                .map((scheme) => ({
+                  scheme_id: Number(scheme.scheme),
+                  scheme_qty: Number(scheme.schemeQty || 0),
+                }))
+            : []),
+          ...(schemeProposals[rowIndex] || []).map((proposal) => ({
+            scheme_v2_id: proposal.scheme_id,
+            benefit_id: proposal.benefit_id,
+            // Snapshot: SAP ships this exact item, so editing the scheme later
+            // cannot change what an already-approved order sends.
+            benefit_item_code: proposal.benefit_item_code,
+            scheme_qty: Number(proposal.qty),
+            computed_qty: Number(proposal.qty),
+            is_manual_override: false,
+            scope_type: proposal.scope_type,
+            scope_value: proposal.scope_value,
+          })),
+        ],
         // scheme_ltrs: row.isScheme ? Number(row.schemeLtrs || 0) : 0,
-        is_scheme: row.isScheme,
+        is_scheme: row.isScheme || (schemeProposals[rowIndex] || []).length > 0,
         total_ltrs:
           Number(row.ltrs) +
           (row.isScheme ? row.schemes.reduce((sum, scheme) => sum + Number(scheme.schemeQty || 0), 0) : 0),
-      })),
+      }))
+        .filter((item) => item._confirmed)
+        .map(({ _confirmed, ...item }) => item)
+        .concat(buildComboFreeItems()),
     };
 
     try {
@@ -902,13 +1070,14 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
 
     const payload: Record<string, unknown> = {
       card_code: formData.parties,
-      card_name: selectedPartyForDraft?.label || editOrderFallback.cardName || "",
+      card_name: stripCardCode(
+        selectedPartyForDraft?.card_name || editOrderFallback.cardName || "",
+        formData.parties,
+      ),
       bill_to_id: Number(formData.billAddress) || 0,
-      bill_to_address:
-        billAddress.find((b) => b.id === Number(formData.billAddress))?.address_name || "",
+      bill_to_address: resolveAddressText(billAddress, formData.billAddress),
       ship_to_id: Number(formData.shipAddress) || 0,
-      ship_to_address:
-        shipAddress.find((s) => s.id === Number(formData.shipAddress))?.address_name || "",
+      ship_to_address: resolveAddressText(shipAddress, formData.shipAddress),
       dispatch_from_id: Number(formData.dispatch) || 0,
       dispatch_from_name:
         branch.find(
@@ -916,6 +1085,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
         )?.bpl_name || "",
       delivery_date: formData.Deliverydate || null,
       ...(canEditPoNumber ? { po_number: formData.poNumber.trim() } : {}),
+      warehouse_code: isMartOrder ? formData.warehouse : "",
       remarks: formData.comment.trim(),
       is_foc: isFocOrder,
       company: Number(formData.company) || 0,
@@ -1096,6 +1266,117 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
     );
   };
 
+  // ---------------------------------------------------------------------
+  // Free lines derived from a confirmed row.
+  //
+  // Two different things arrive here and they are NOT symmetric:
+  //
+  //  * A combo pack ("A + B") ships B free. That is a real order line — the SAP
+  //    push emits it as a zero-priced DocumentLine — so it goes into the payload
+  //    as its own item carrying `is_auto_free` / `combo_source_code`.
+  //
+  //  * A scheme giveaway is already carried by the parent line's `schemes[]`,
+  //    which `sync_service` fans out into its own zero-priced SAP line. Sending
+  //    it a second time as an item would ship the stock twice, so the scheme row
+  //    below is display-only: it makes the giveaway visible in the item list
+  //    without touching what goes over the wire.
+  //
+  // Both are derived from `rows` on every render rather than stored, so editing
+  // a quantity or deleting the parent can never leave a stale free line behind
+  // (and row indices, which `schemeOptions` is keyed by, stay untouched).
+  // ---------------------------------------------------------------------
+  type DerivedLine = {
+    kind: "combo" | "scheme";
+    key: string;
+    itemCode: string;
+    itemName: string;
+    qty: number;
+    note: string;
+  };
+
+  const findPartyProduct = (row: SalesRow) =>
+    partyProducts.find(
+      (p) =>
+        p.item_name === row.item &&
+        p.category === row.category &&
+        (p.brand || "") === (row.brand || "") &&
+        (p.variety || "") === (row.variety || ""),
+    );
+
+  /** The combo companion a row contributes, or null. Shared by the item list and
+   *  by the scheme preview, so the engine sees the same free half the user does. */
+  const getComboCompanion = (row: SalesRow) => {
+    const product = findPartyProduct(row);
+    if (!product?.is_combo || !product.free_item_code) return null;
+    const perUnit = Number(product.free_qty_per_unit ?? 1) || 1;
+    const qty = Number(row.qty || 0) * perUnit;
+    if (qty <= 0) return null;
+    return {
+      parentItemCode: product.item_code,
+      itemCode: product.free_item_code,
+      itemName: product.free_item?.item_name || product.free_item_code,
+      qty,
+    };
+  };
+
+  const getDerivedLines = (row: SalesRow, index: number): DerivedLine[] => {
+    const lines: DerivedLine[] = [];
+
+    // Combo free half. `free_item` is null until the pack is mapped on the
+    // Combo Mapping page, and then nothing is added — same as before.
+    const companion = getComboCompanion(row);
+    if (companion) {
+      lines.push({
+        kind: "combo",
+        key: `combo-${index}-${companion.itemCode}`,
+        itemCode: companion.itemCode,
+        itemName: companion.itemName,
+        qty: companion.qty,
+        note: `Free with ${row.item}`,
+      });
+    }
+
+    // Scheme giveaways the v2 engine resolved for this row. These come from
+    // targeting (a vendor, or a whole state) rather than from the picker, so the
+    // salesperson never chooses them — they just appear.
+    (schemeProposals[index] || []).forEach((proposal) => {
+      lines.push({
+        kind: "scheme",
+        key: `v2-${index}-${proposal.scheme_id}-${proposal.benefit_id}`,
+        itemCode: proposal.benefit_item_code,
+        itemName:
+          products.find((p) => p.item_code === proposal.benefit_item_code)?.item_name ||
+          partyProducts.find((p) => p.item_code === proposal.benefit_item_code)?.item_name ||
+          proposal.benefit_item_code,
+        qty: Number(proposal.qty),
+        note: `${proposal.scheme_name} · via ${proposal.scope_type}${
+          proposal.scope_value ? ` ${proposal.scope_value}` : ""
+        }`,
+      });
+    });
+
+    // Scheme giveaways picked by hand from the legacy picker.
+    if (row.isScheme) {
+      row.schemes.forEach((entry, schemeIndex) => {
+        const qty = Number(entry.schemeQty || 0);
+        if (!entry.scheme || qty <= 0) return;
+        const option = (schemeOptions[index] || []).find(
+          (s) => String(s.scheme_id) === String(entry.scheme),
+        );
+        lines.push({
+          kind: "scheme",
+          key: `scheme-${index}-${schemeIndex}-${entry.scheme}`,
+          itemCode: option?.item_code || "",
+          itemName: option?.item_name || option?.scheme_name || "Scheme item",
+          qty,
+          note: option?.scheme_name ? `Scheme: ${option.scheme_name}` : "Scheme",
+        });
+      });
+    }
+
+    return lines;
+  };
+
   const getRowProduct = (row: SalesRow) =>
     partyProducts.find(
       (p) =>
@@ -1148,9 +1429,10 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
 
     row.ltrs = qty > 0 ? String(packUnit * qty) : "";
 
-    const basic = Number(row.priceListBasic) || 0;
-    const market = Number(row.basicPrice) || 0;
-    const price = market > 0 ? market : basic;
+    // Basic Price is the unit rate; keep Landing (tax-inclusive) in step with it,
+    // and price the line off the Basic rate so the amount stays pre-tax.
+    const price = Number(row.basicPrice) || 0;
+    row.priceListBasic = computeLandingPrice(price, row.tax);
     row.amount = qty > 0 && price > 0 ? (price * qty).toFixed(2) : "";
 
     return applyFocPricing(row);
@@ -1162,7 +1444,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
   ) => {
     const { name, value } = e.target;
 
-    let updatedRows = [...rows];
+    const updatedRows = [...rows];
     let row = { ...updatedRows[index] };
     row.confirmed = false;
 
@@ -1202,7 +1484,18 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
         row.type = match ? `${match[1]} ${match[2].toUpperCase()}` : "Others";
         row.pcs = String(partyProduct.sal_factor2 ?? "");
         row.tax = String(getProductTaxRate(partyProduct));
-        row.priceListBasic = isFocOrder ? "0" : String(partyProduct.basic_rate ?? "");
+        // Basic Price = the product's basic rate (pre-tax). Landing Price is that
+        // rate plus tax. Both must fill on select — the Basic column was blank
+        // before because only Landing (priceListBasic) was being set.
+        row.basicPrice =
+          isFocOrder || partyProduct.basic_rate == null
+            ? isFocOrder
+              ? "0"
+              : ""
+            : String(partyProduct.basic_rate);
+        row.priceListBasic = isFocOrder
+          ? "0"
+          : computeLandingPrice(row.basicPrice, row.tax);
         void fetchSchemesForRow(index, true);
       } else {
         void fetchSchemesForRow(index, false);
@@ -1329,15 +1622,20 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
   const handleDeleteRow = (index: number) => {
     const updatedRows = rows.filter((_, i) => i !== index);
     setRows(updatedRows.length > 0 ? updatedRows : [createEmptyRow()]);
-    setSchemeOptions((prev) => {
-      const next: Record<number, SchemeProduct[]> = {};
+    // Both maps are keyed by row index, so removing a row means shifting every
+    // key above it down by one — otherwise a later row inherits the deleted
+    // row's scheme options / engine proposals.
+    const shiftByIndex = <T,>(prev: Record<number, T>) => {
+      const next: Record<number, T> = {};
       Object.entries(prev).forEach(([key, value]) => {
         const currentIndex = Number(key);
         if (currentIndex < index) next[currentIndex] = value;
         if (currentIndex > index) next[currentIndex - 1] = value;
       });
       return next;
-    });
+    };
+    setSchemeOptions(shiftByIndex);
+    setSchemeProposals(shiftByIndex);
   };
 
   const handlePartySelect = (value: string, partyCategory = "") => {
@@ -1415,10 +1713,11 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
     setCompanyDropdownOpen(false);
   };
 
+  // Brand and sub-group are metadata copied off the chosen product, and part of
+  // the catalogue legitimately leaves them blank — requiring them here made
+  // those products impossible to order. The item itself is what must be set.
   const isRowValid = (row: SalesRow) =>
     row.category &&
-    row.brand &&
-    row.variety &&
     row.type &&
     row.item &&
     Number(row.pcs) > 0 &&
@@ -1450,8 +1749,122 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
     );
   };
 
+  // ---------------------------------------------------------------------
+  // v2 scheme engine
+  //
+  // The engine decides which schemes reach this party (by vendor, state, main
+  // group, ...) and how much each gives, so the order form asks it rather than
+  // making the salesperson pick from a dropdown. The call is a dry run — it
+  // writes nothing — and is keyed on a signature of the confirmed lines so it
+  // only re-fires when something it cares about actually changed.
+  // ---------------------------------------------------------------------
+  const buildPreviewLines = () => {
+    const lines: PreviewLine[] = [];
+    const rowIndexByLine: number[] = [];
+
+    rows.forEach((row, index) => {
+      if (!row.confirmed) return;
+      const product = findPartyProduct(row);
+      const itemCode = product?.item_code || "";
+      if (!itemCode) return;
+
+      lines.push({
+        item_code: itemCode,
+        item_name: row.item,
+        category: row.category,
+        sub_group: row.variety,
+        brand: row.brand,
+        item_type: row.type,
+        qty: Number(row.qty) || 0,
+        pcs: Number(row.pcs) || 0,
+        boxes: Number(row.boxes) || 0,
+        ltrs: Number(row.ltrs) || 0,
+      });
+      rowIndexByLine.push(index);
+
+      // The combo's free half has to be in the payload for FREE_LINE triggers to
+      // have anything to measure. It is attributed back to the parent row.
+      const companion = getComboCompanion(row);
+      if (companion) {
+        lines.push({
+          item_code: companion.itemCode,
+          item_name: companion.itemName,
+          category: row.category,
+          qty: companion.qty,
+          is_auto_free: true,
+          combo_source_code: companion.parentItemCode,
+        });
+        rowIndexByLine.push(index);
+      }
+    });
+
+    return { lines, rowIndexByLine };
+  };
+
+  const previewSignature = JSON.stringify({
+    card: formData.parties,
+    category: selectedPartyCategory,
+    lines: buildPreviewLines().lines.map((l) => [l.item_code, l.qty, l.is_auto_free ?? false]),
+  });
+
+  useEffect(() => {
+    const { lines, rowIndexByLine } = buildPreviewLines();
+
+    if (!formData.parties || lines.length === 0) {
+      setSchemeProposals({});
+      return;
+    }
+
+    let cancelled = false;
+    // Debounced: quantities are typed, and every keystroke would otherwise be a
+    // round trip.
+    const timer = window.setTimeout(async () => {
+      try {
+        // Gate on the PARTY's category (its business line / company), not on a
+        // product row's category. The engine then only proposes schemes whose
+        // own category matches the party's, and its per-line guard drops any
+        // product line of a different category — so a scheme is auto-fetched
+        // only when party category == product category == scheme category.
+        const response = await schemeService.preview(
+          formData.parties,
+          selectedPartyCategory || "",
+          lines,
+        );
+        if (cancelled) return;
+
+        const byRow: Record<number, SchemeProposal[]> = {};
+        response.proposals.forEach((proposal) => {
+          const rowIndex = rowIndexByLine[proposal.line_index];
+          if (rowIndex === undefined) return;
+          // A scheme with no rule leaves the quantity to the user; there is
+          // nothing to show as a line until someone types one.
+          if (proposal.qty_is_user_supplied || Number(proposal.qty) <= 0) return;
+          (byRow[rowIndex] = byRow[rowIndex] || []).push(proposal);
+        });
+        setSchemeProposals(byRow);
+      } catch (error) {
+        // A failed preview must never block order entry — the form simply shows
+        // no engine-resolved schemes.
+        console.error("Error previewing schemes:", error);
+        if (!cancelled) setSchemeProposals({});
+      }
+    }, 400);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewSignature]);
+
   const confirmedRows = rows.filter((row) => row.confirmed);
   const canAddMoreItems = rows.length > 0 && rows.every((row) => row.confirmed);
+
+  // Paid lines + the free lines derived from them.
+  const visibleLineCount = rows.reduce(
+    (sum, row, index) => (row.confirmed ? sum + 1 + getDerivedLines(row, index).length : sum),
+    0,
+  );
 
   const calculatedTotalAmount = confirmedRows.reduce((sum, row) => {
     const amount = Number(row.amount);
@@ -1521,6 +1934,18 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
   const selectedCompany = company.find(
     (item) => String(item.id) === formData.company,
   );
+  // The Mart company from the list, and whether this is a Mart order. "Company 3
+  // means mart": it's Mart when company is 3, when the selected company is the
+  // Mart row, OR when the party's category is MART. Driving it partly off the
+  // party category keeps the Warehouse panel visible even after the Company
+  // dropdown is opened/changed (it no longer hides the moment company drifts off 3).
+  const martCompany = company.find((item) =>
+    normalizeOptionText(item?.name).includes("mart"),
+  );
+  const isMartOrder =
+    Number(formData.company) === 3 ||
+    (!!martCompany && String(formData.company) === String(martCompany.id)) ||
+    normalizeOptionText(selectedPartyCategory) === "mart";
   const selectedBillAddressLabel =
     selectedBillAddress?.address_name ||
     selectedBillAddress?.full_address ||
@@ -1534,7 +1959,12 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
     (formData.shipAddress ? editOrderFallback.shipAddress : "") ||
     "";
   const selectedDispatchLabel = selectedDispatch?.bpl_name || "";
-  const selectedCompanyLabel = selectedCompany?.name || "";
+  // Fall back to the Mart company name (or literally "Mart") for a Mart order
+  // whose company id isn't in the list, so the field never shows "Select Company".
+  const selectedCompanyLabel =
+    selectedCompany?.name ||
+    (isMartOrder ? martCompany?.name || "Mart" : "") ||
+    "";
   const renderRowDropdown = (
     rowIndex: number,
     name: keyof SalesRow,
@@ -1627,58 +2057,168 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
     </svg>
   );
 
-  const categoryOptions = category.map((c) => ({ value: c, label: c }));
-  const brandOptionsFor = (row: SalesRow) =>
-    [
-      ...new Set(
-        partyProducts.filter((p) => p.category === row.category).map((p) => p.brand),
-      ),
-    ].map((b) => ({ value: b ?? "", label: b || "Unknown" }));
-  const varietyOptionsFor = (row: SalesRow) =>
-    [
-      ...new Set(
-        partyProducts
-          .filter(
-            (p) =>
-              p.category === row.category && (p.brand || "") === (row.brand || ""),
-          )
-          .map((p) => p.variety),
-      ),
-    ].map((v) => ({ value: v ?? "", label: v || "Unknown" }));
-  const typeOptionsFor = (row: SalesRow) =>
-    [
-      ...new Set(
-        partyProducts
-          .filter(
-            (p) =>
-              p.category === row.category &&
-              (p.brand || "") === (row.brand || "") &&
-              (p.variety || "") === (row.variety || ""),
-          )
-          .map((p) => {
-            const match = p.item_name.match(/(\d+\.?\d*)\s*(LTR|ML|KG|GM|GMS|L)/i);
-            return match ? `${match[1]} ${match[2].toUpperCase()}` : "Others";
-          }),
-      ),
-    ]
-      .sort((a, b) => {
-        if (a === "Others") return 1;
-        if (b === "Others") return -1;
-        return parseFloat(a) - parseFloat(b);
-      })
-      .map((t) => ({ value: t, label: t }));
-  const itemOptionsFor = (row: SalesRow) =>
-    partyProducts
-      .filter(
-        (p) =>
-          p.category === row.category &&
-          (p.brand || "") === (row.brand || "") &&
-          (p.variety || "") === (row.variety || "") &&
-          (row.type ? getProductType(p.item_name) === row.type : true),
-      )
-      .map((p) => ({ value: p.item_name, label: p.item_name }));
+  // ---------------------------------------------------------------------------
+  // Add Item picker — search first, filters second.
+  // ---------------------------------------------------------------------------
 
-  const renderSchemePanel = (row: SalesRow, index: number) => (
+  /** Every typed word must appear somewhere in the product, in any order. */
+  const matchesItemSearch = (product: PartyProduct, term: string) => {
+    if (!term) return true;
+    const haystack = [
+      product.item_name,
+      product.item_code,
+      product.category,
+      product.brand,
+      product.variety,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    return term.split(/\s+/).every((word) => haystack.includes(word));
+  };
+
+  /**
+   * Set one facet and drop everything below it. `handleRowChange` only clears
+   * the item when a facet changes, which would leave e.g. a brand from the
+   * previous category still selected and the result list empty.
+   */
+  const setPickerFacet = (index: number, facet: PickerFacet, value: string) => {
+    setRows((prev) =>
+      prev.map((current, rowIndex) => {
+        if (rowIndex !== index) return current;
+        const next: SalesRow = { ...current, confirmed: false };
+        next[facet] = value;
+        PICKER_FACETS.slice(PICKER_FACETS.indexOf(facet) + 1).forEach((lower) => {
+          next[lower] = "";
+        });
+        return {
+          ...next,
+          item: "",
+          pcs: "",
+          qty: "",
+          ltrs: "",
+          boxes: "",
+          priceListBasic: "",
+          basicPrice: "",
+          tax: "",
+          amount: "",
+          isScheme: false,
+          scheme: "",
+          schemeQty: "",
+          schemes: [],
+        };
+      }),
+    );
+    setSchemeOptions((prev) => ({ ...prev, [index]: [] }));
+  };
+
+  const clearPickerFacets = (index: number) => setPickerFacet(index, "category", "");
+
+  /**
+   * Pick a whole product in one go. The `item` branch of `handleRowChange`
+   * assumes category / brand / sub-group are already chosen, so a search hit
+   * back-fills all four facets from the product itself before applying the
+   * same item-side fields.
+   */
+  const selectProductForRow = (index: number, product: PartyProduct) => {
+    setRows((prev) =>
+      prev.map((current, rowIndex) => {
+        if (rowIndex !== index) return current;
+        return applyFocPricing({
+          ...current,
+          confirmed: false,
+          category: product.category,
+          brand: product.brand || "",
+          variety: product.variety || "",
+          type: getProductType(product.item_name),
+          item: product.item_name,
+          pcs: String(product.sal_factor2 ?? ""),
+          tax: String(getProductTaxRate(product)),
+          // Basic Price = pre-tax basic rate; Landing = basic + tax%.
+          basicPrice:
+            isFocOrder || product.basic_rate == null
+              ? isFocOrder
+                ? "0"
+                : ""
+              : String(product.basic_rate),
+          priceListBasic: isFocOrder
+            ? "0"
+            : computeLandingPrice(product.basic_rate, getProductTaxRate(product)),
+          qty: "",
+          ltrs: "",
+          boxes: "",
+          amount: "",
+          isScheme: false,
+          scheme: "",
+          schemeQty: "",
+          schemes: [],
+        });
+      }),
+    );
+    void fetchSchemesForRow(index, true);
+    setIsPickingItem(false);
+  };
+
+  /** Distinct values of one facet, with how many products carry each. */
+  const facetsOf = (
+    list: PartyProduct[],
+    valueOf: (product: PartyProduct) => string,
+  ) => {
+    const counts = new Map<string, number>();
+    list.forEach((product) => {
+      const value = valueOf(product) || "";
+      // Products with no brand / sub-group stay reachable through search and
+      // through leaving the facet unset; an "" option here would be
+      // indistinguishable from "no filter".
+      if (!value) return;
+      counts.set(value, (counts.get(value) || 0) + 1);
+    });
+    return [...counts.entries()].map(([value, count]) => ({ value, count }));
+  };
+
+  // `isMartOrder` is defined above (near selectedCompanyLabel).
+  // Company-3 (Mart) orders also choose a dispatch warehouse. Display-only for
+  // now — the value is not persisted.
+  const WAREHOUSE_OPTIONS = ["DL-MP", "GP-FGM"];
+  const renderWarehouseField = () => (
+    <div className="sl-field">
+      <label className="sl-label">Warehouse</label>
+      <div className="sl-input-wrap">
+        <select
+          name="warehouse"
+          value={formData.warehouse}
+          onChange={handleChange}
+          className="sl-warehouse-select"
+        >
+          {WAREHOUSE_OPTIONS.map((code) => (
+            <option key={code} value={code}>
+              {code}
+            </option>
+          ))}
+        </select>
+        <div className="sl-focus-line" />
+      </div>
+    </div>
+  );
+
+  // The legacy "Optional promotion" picker reads `scheme_product`, which is NOT
+  // category-aware — it lists every scheme in the party's state regardless of
+  // business line. MART has no schemes, so the panel must be hidden for a MART
+  // line/party (as it already is for a company-3 Mart order); otherwise an
+  // OIL/BEVERAGES scheme from the same state would leak into a MART order. The
+  // category-gated auto-fetch (v2 engine) is unaffected — this only governs the
+  // manual picker's visibility.
+  const isSchemePanelHidden = (row: SalesRow) => {
+    if (isMartOrder) return true;
+    const category = String(row.category || selectedPartyCategory || "")
+      .trim()
+      .toUpperCase();
+    return category === "MART";
+  };
+
+  const renderSchemePanel = (row: SalesRow, index: number) => {
+    if (isSchemePanelHidden(row)) return null;
+    return (
     <div className={`sl-scheme-panel${row.isScheme ? " is-active" : ""}`}>
       <div className="sl-scheme-panel-head">
         <div>
@@ -1786,13 +2326,16 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
         </div>
       )}
     </div>
-  );
+    );
+  };
 
   const openAddItem = () => {
+    setItemSearch("");
     const existing = rows.findIndex((r) => !r.confirmed);
     if (existing !== -1) {
       setItemModalSnapshot(null);
       setItemModalIsNew(true);
+      setIsPickingItem(!rows[existing].item);
       setItemModalIndex(existing);
       return;
     }
@@ -1802,12 +2345,17 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
     ]);
     setItemModalSnapshot(null);
     setItemModalIsNew(true);
+    setIsPickingItem(true);
     setItemModalIndex(rows.length);
   };
 
   const openEditItem = (index: number) => {
     setItemModalSnapshot(rows[index]);
     setItemModalIsNew(false);
+    setItemSearch("");
+    // An existing item opens on its quantities; "Change item" goes back to the
+    // picker.
+    setIsPickingItem(!rows[index].item);
     handleEditRow(index);
     setItemModalIndex(index);
   };
@@ -1838,6 +2386,152 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
     setOpenRowDropdown(null);
   };
 
+  /** Left 30% facet rail, right 70% result list under one omni-search. */
+  const renderItemPicker = (row: SalesRow, index: number) => {
+    const term = itemSearch.trim().toLowerCase();
+    const searched = partyProducts.filter((p) => matchesItemSearch(p, term));
+
+    // Each facet level offers what is still reachable given the levels above it.
+    const afterCategory = searched.filter(
+      (p) => !row.category || p.category === row.category,
+    );
+    const afterBrand = afterCategory.filter(
+      (p) => !row.brand || (p.brand || "") === row.brand,
+    );
+    const afterVariety = afterBrand.filter(
+      (p) => !row.variety || (p.variety || "") === row.variety,
+    );
+    const results = afterVariety.filter(
+      (p) => !row.type || getProductType(p.item_name) === row.type,
+    );
+
+    const facetGroups: { key: PickerFacet; label: string; options: { value: string; count: number }[] }[] = [
+      { key: "category", label: "Category", options: facetsOf(searched, (p) => p.category) },
+      { key: "brand", label: "Brand", options: facetsOf(afterCategory, (p) => p.brand || "") },
+      { key: "variety", label: "Sub Group", options: facetsOf(afterBrand, (p) => p.variety || "") },
+      {
+        key: "type",
+        label: "Size",
+        options: facetsOf(afterVariety, (p) => getProductType(p.item_name)).sort((a, b) => {
+          if (a.value === "Others") return 1;
+          if (b.value === "Others") return -1;
+          return parseFloat(a.value) - parseFloat(b.value);
+        }),
+      },
+    ];
+
+    const activeFacetCount = PICKER_FACETS.filter((facet) => row[facet]).length;
+
+    return (
+      <div className="sl-pick">
+        <aside className="sl-pick-filters">
+          <div className="sl-pick-filters-head">
+            <span>Filters</span>
+            {activeFacetCount > 0 && (
+              <button type="button" onClick={() => clearPickerFacets(index)}>
+                Clear all
+              </button>
+            )}
+          </div>
+          {facetGroups.map((group) => (
+            <div className="sl-pick-facet" key={group.key}>
+              <div className="sl-pick-facet-title">{group.label}</div>
+              {group.options.length === 0 ? (
+                <div className="sl-pick-facet-empty">—</div>
+              ) : (
+                <div className="sl-pick-facet-list">
+                  {group.options.map((option) => (
+                    <button
+                      type="button"
+                      key={`${group.key}-${option.value}`}
+                      className={`sl-pick-facet-option${
+                        row[group.key] === option.value ? " is-active" : ""
+                      }`}
+                      onClick={() =>
+                        setPickerFacet(
+                          index,
+                          group.key,
+                          row[group.key] === option.value ? "" : option.value,
+                        )
+                      }
+                    >
+                      <span>{option.value}</span>
+                      <em>{option.count}</em>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </aside>
+
+        <div className="sl-pick-results">
+          <div className="sl-pick-search">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <circle cx="7" cy="7" r="4.6" stroke="#94a3b8" strokeWidth="1.5" />
+              <path d="M10.5 10.5L14 14" stroke="#94a3b8" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+            <input
+              type="text"
+              autoFocus
+              value={itemSearch}
+              onChange={(e) => setItemSearch(e.target.value)}
+              placeholder="Search any product — name, code, brand, sub group..."
+            />
+            {itemSearch && (
+              <button
+                type="button"
+                className="sl-pick-search-clear"
+                onClick={() => setItemSearch("")}
+                aria-label="Clear search"
+              >
+                ×
+              </button>
+            )}
+          </div>
+
+          <div className="sl-pick-count">
+            {results.length} product{results.length === 1 ? "" : "s"}
+            {activeFacetCount > 0 || term ? " matching" : " available"}
+          </div>
+
+          <div className="sl-pick-list">
+            {results.length === 0 ? (
+              <div className="sl-pick-empty">
+                <p>Nothing matches that.</p>
+                <span>Try fewer words, or clear a filter on the left.</span>
+              </div>
+            ) : (
+              results.map((product) => (
+                <button
+                  type="button"
+                  key={`${product.item_code}-${product.category}`}
+                  className={`sl-pick-item${product.item_name === row.item ? " is-active" : ""}`}
+                  onClick={() => selectProductForRow(index, product)}
+                >
+                  <span className="sl-pick-item-main">
+                    <span className="sl-pick-item-name">{product.item_name}</span>
+                    <span className="sl-pick-item-meta">
+                      {[product.category, product.brand, product.variety]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </span>
+                  </span>
+                  <span className="sl-pick-item-side">
+                    <span className="sl-pick-item-size">{getProductType(product.item_name)}</span>
+                    {!isFocOrder && product.basic_rate !== null && product.basic_rate !== "" && (
+                      <span className="sl-pick-item-rate">₹ {product.basic_rate}</span>
+                    )}
+                  </span>
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderItemModal = () => {
     if (itemModalIndex === null) return null;
     const row = rows[itemModalIndex];
@@ -1847,7 +2541,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
     return (
       <div className="sl-modal-overlay">
         <div
-          className="sl-wiz-modal"
+          className={`sl-wiz-modal${isPickingItem ? " is-picking" : ""}`}
           role="dialog"
           aria-modal="true"
           aria-label={itemModalIsNew ? "Add item" : "Edit item"}
@@ -1855,7 +2549,9 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
           <div className="sl-wiz-modal-head">
             <div>
               <div className="sl-wiz-eyebrow">{itemModalIsNew ? "Add item" : "Edit item"}</div>
-              <h3 className="sl-wiz-modal-title">{row.item || "Select a product"}</h3>
+              <h3 className="sl-wiz-modal-title">
+                {isPickingItem ? "Choose a product" : row.item || "Select a product"}
+              </h3>
             </div>
             <button
               type="button"
@@ -1870,28 +2566,36 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
             </button>
           </div>
 
-          <div className="sl-wiz-modal-body">
+          <div className={`sl-wiz-modal-body${isPickingItem ? " is-picking" : ""}`}>
+            {isPickingItem ? (
+              renderItemPicker(row, index)
+            ) : (
+              <>
+            <div className="sl-pick-chosen">
+              <div className="sl-pick-chosen-main">
+                <div className="sl-pick-chosen-name">{row.item}</div>
+                <div className="sl-pick-chosen-meta">
+                  {[row.category, row.brand, row.variety, row.type]
+                    .filter(Boolean)
+                    .map((part) => (
+                      <span className="sl-pick-tag" key={part}>
+                        {part}
+                      </span>
+                    ))}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="sl-wiz-btn sl-wiz-btn-ghost"
+                onClick={() => {
+                  setItemSearch("");
+                  setIsPickingItem(true);
+                }}
+              >
+                Change item
+              </button>
+            </div>
             <div className="sl-wiz-item-fields">
-              <div className="sl-wiz-input">
-                <label>Category</label>
-                {renderRowDropdown(index, "category", row.category, categoryOptions, false)}
-              </div>
-              <div className="sl-wiz-input">
-                <label>Brand</label>
-                {renderRowDropdown(index, "brand", row.brand, brandOptionsFor(row), false)}
-              </div>
-              <div className="sl-wiz-input">
-                <label>Sub Group</label>
-                {renderRowDropdown(index, "variety", row.variety, varietyOptionsFor(row), false)}
-              </div>
-              <div className="sl-wiz-input">
-                <label>Type</label>
-                {renderRowDropdown(index, "type", row.type, typeOptionsFor(row), false)}
-              </div>
-              <div className="sl-wiz-input sl-wiz-input-wide">
-                <label>Item</label>
-                {renderRowDropdown(index, "item", row.item, itemOptionsFor(row), false)}
-              </div>
               <div className="sl-wiz-input">
                 <label>Boxes</label>
                 <input
@@ -1941,9 +2645,20 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
               </div>
             </div>
             {row.item && !isFocOrder && renderSchemePanel(row, index)}
+              </>
+            )}
           </div>
 
           <div className="sl-wiz-modal-foot">
+            {isPickingItem && row.item && (
+              <button
+                type="button"
+                className="sl-wiz-btn sl-wiz-btn-ghost sl-pick-back"
+                onClick={() => setIsPickingItem(false)}
+              >
+                ← Back to quantities
+              </button>
+            )}
             <button
               type="button"
               className="sl-wiz-btn sl-wiz-btn-ghost"
@@ -1951,13 +2666,15 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
             >
               Cancel
             </button>
-            <button
-              type="button"
-              className="sl-wiz-btn sl-wiz-btn-primary"
-              onClick={confirmItemModal}
-            >
-              {itemModalIsNew ? "Add Item" : "Save Changes"}
-            </button>
+            {!isPickingItem && (
+              <button
+                type="button"
+                className="sl-wiz-btn sl-wiz-btn-primary"
+                onClick={confirmItemModal}
+              >
+                {itemModalIsNew ? "Add Item" : "Save Changes"}
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -1965,38 +2682,60 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
   };
 
   const renderItemSummaryCard = (row: SalesRow, index: number) => (
-    <div className="sl-wiz-item-summary" key={`sum-${index}`}>
-      <div className="sl-wiz-item-summary-main">
-        <span className="sl-wiz-item-summary-name">{row.item || "Item"}</span>
-        <span className="sl-wiz-item-summary-meta">
-          {row.type ? `${row.type} · ` : ""}
-          {row.boxes ? `${row.boxes} box · ` : ""}
-          Qty {row.qty || 0}
-          {row.isScheme && row.schemes.some((s) => s.scheme) ? " · Scheme" : ""}
-        </span>
+    <Fragment key={`sum-${index}`}>
+      <div className="sl-wiz-item-summary">
+        <div className="sl-wiz-item-summary-main">
+          <span className="sl-wiz-item-summary-name">{row.item || "Item"}</span>
+          <span className="sl-wiz-item-summary-meta">
+            {row.type ? `${row.type} · ` : ""}
+            {row.boxes ? `${row.boxes} box · ` : ""}
+            Qty {row.qty || 0}
+          </span>
+        </div>
+        <span className="sl-wiz-item-summary-amount">₹ {Number(row.amount || 0).toFixed(2)}</span>
+        <div className="sl-wiz-item-summary-actions">
+          <button
+            type="button"
+            className="sl-wiz-icon-btn"
+            onClick={() => openEditItem(index)}
+            aria-label="Edit item"
+            title="Edit item"
+          >
+            {pencilIcon}
+          </button>
+          <button
+            type="button"
+            className="sl-wiz-icon-btn sl-wiz-danger"
+            onClick={() => handleDeleteRow(index)}
+            aria-label="Delete item"
+            title="Delete item"
+          >
+            {trashIcon}
+          </button>
+        </div>
       </div>
-      <span className="sl-wiz-item-summary-amount">₹ {Number(row.amount || 0).toFixed(2)}</span>
-      <div className="sl-wiz-item-summary-actions">
-        <button
-          type="button"
-          className="sl-wiz-icon-btn"
-          onClick={() => openEditItem(index)}
-          aria-label="Edit item"
-          title="Edit item"
-        >
-          {pencilIcon}
-        </button>
-        <button
-          type="button"
-          className="sl-wiz-icon-btn sl-wiz-danger"
-          onClick={() => handleDeleteRow(index)}
-          aria-label="Delete item"
-          title="Delete item"
-        >
-          {trashIcon}
-        </button>
-      </div>
-    </div>
+
+      {/* Free lines belonging to the item above. No edit/delete: they follow the
+          parent, so you change them by changing it. */}
+      {getDerivedLines(row, index).map((line) => (
+        <div className="sl-wiz-item-summary is-free" key={line.key}>
+          <div className="sl-wiz-item-summary-main">
+            <span className="sl-wiz-item-summary-name">
+              {line.itemName}
+              <span className={`sl-wiz-free-badge is-${line.kind}`}>
+                {line.kind === "combo" ? "Combo" : "Scheme"}
+              </span>
+            </span>
+            <span className="sl-wiz-item-summary-meta">
+              {line.note}
+              {line.itemCode ? ` · ${line.itemCode}` : ""} · Qty {line.qty}
+            </span>
+          </div>
+          <span className="sl-wiz-item-summary-amount">₹ 0.00</span>
+          <div className="sl-wiz-item-summary-actions" />
+        </div>
+      ))}
+    </Fragment>
   );
 
   const renderCombo = (config: {
@@ -2269,7 +3008,8 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
         </div>
         <div className="sl-wiz-items-meta">
           <span>
-            {confirmedRows.length} item{confirmedRows.length === 1 ? "" : "s"}
+            {/* Counts the free lines too, so the number matches what is listed. */}
+            {visibleLineCount} item{visibleLineCount === 1 ? "" : "s"}
           </span>
           <strong>₹ {totalAmount.toFixed(2)}</strong>
         </div>
@@ -2315,11 +3055,13 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
                 value={formData.poNumber}
                 onChange={handleChange}
                 placeholder="Enter PO number"
+                required
               />
               <div className="sl-focus-line" />
             </div>
           </div>
         )}
+        {isMartOrder && renderWarehouseField()}
         <div className="sl-field">
           <label className="sl-label">Company</label>
           <div
@@ -2334,30 +3076,30 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
               <span>{selectedCompanyLabel || "Select Company"}</span>
               {chevronIcon}
             </button>
-            {companyDropdownOpen && (
-              <div className="sl-party-menu">
-                <div className="sl-party-options">
-                  {company.length > 0 ? (
-                    company.map((item) => (
-                      <button
-                        type="button"
-                        key={item.id}
-                        className={`sl-party-option${
-                          String(item.id) === formData.company ? " is-selected" : ""
-                        }`}
-                        onClick={() => handleCompanySelect(String(item.id))}
-                      >
-                        <span className="sl-party-option-label">{item.name}</span>
-                      </button>
-                    ))
-                  ) : (
-                    <div className="sl-party-empty">No companies found</div>
-                  )}
+              {companyDropdownOpen && (
+                <div className="sl-party-menu">
+                  <div className="sl-party-options">
+                    {company.length > 0 ? (
+                      company.map((item) => (
+                        <button
+                          type="button"
+                          key={item.id}
+                          className={`sl-party-option${
+                            String(item.id) === formData.company ? " is-selected" : ""
+                          }`}
+                          onClick={() => handleCompanySelect(String(item.id))}
+                        >
+                          <span className="sl-party-option-label">{item.name}</span>
+                        </button>
+                      ))
+                    ) : (
+                      <div className="sl-party-empty">No companies found</div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
-        </div>
       </div>
 
       <div className="sl-wiz-totals">
@@ -2429,17 +3171,35 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
         <div className="sl-wiz-review-items">
           <div className="sl-wiz-review-items-head">
             <span>Items</span>
-            <span>{confirmedRows.length}</span>
+            <span>{visibleLineCount}</span>
           </div>
-          {confirmedRows.map((row, i) => (
-            <div className="sl-wiz-review-item" key={`rev-${i}`}>
-              <strong>{row.item || "Item"}</strong>
-              <span>Qty {row.qty || 0}</span>
-              <span className="sl-wiz-review-item-amt">
-                ₹ {Number(row.amount || 0).toFixed(2)}
-              </span>
-            </div>
-          ))}
+          {/* Free lines are listed here too. This is the last screen before the
+              order is saved, so it has to match what actually gets sent. */}
+          {rows.map((row, index) =>
+            row.confirmed ? (
+              <Fragment key={`rev-${index}`}>
+                <div className="sl-wiz-review-item">
+                  <strong>{row.item || "Item"}</strong>
+                  <span>Qty {row.qty || 0}</span>
+                  <span className="sl-wiz-review-item-amt">
+                    ₹ {Number(row.amount || 0).toFixed(2)}
+                  </span>
+                </div>
+                {getDerivedLines(row, index).map((line) => (
+                  <div className="sl-wiz-review-item is-free" key={line.key}>
+                    <strong>
+                      {line.itemName}
+                      <span className={`sl-wiz-free-badge is-${line.kind}`}>
+                        {line.kind === "combo" ? "Combo" : "Scheme"}
+                      </span>
+                    </strong>
+                    <span>Qty {line.qty}</span>
+                    <span className="sl-wiz-review-item-amt">₹ 0.00</span>
+                  </div>
+                ))}
+              </Fragment>
+            ) : null,
+          )}
         </div>
         <div className="sl-wiz-review-foot">
           {formData.poNumber && (
@@ -2483,7 +3243,10 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
       return (
         confirmedRows.length > 0 && !rows.some((r) => !r.confirmed && r.item)
       );
-    if (step === 3) return Boolean(formData.company);
+    if (step === 3)
+      return Boolean(
+        formData.company && (!canEditPoNumber || formData.poNumber.trim()),
+      );
     return true;
   };
 
@@ -2616,13 +3379,12 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
           </div>
         </div> */}
 
-      {isEditMode && isLoadingEditOrder && (
-        <div className="sl-section-label">
-          Loading existing order details...
+      {isEditMode && isLoadingEditOrder ? (
+        <div className="sl-loading-overlay" role="status" aria-live="polite">
+          <div className="sl-spinner" aria-hidden="true" />
+          <span className="sl-loading-text">Loading order details…</span>
         </div>
-      )}
-
-      {useWizard ? (
+      ) : useWizard ? (
         renderWizard()
       ) : (
       <form className="sl-form" onSubmit={handleSubmit}>
@@ -3177,7 +3939,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
                     </td>
                   </tr>
 
-                  {row.item && !isFocOrder && (
+                  {row.item && !isFocOrder && !isSchemePanelHidden(row) && (
                     <tr key={`scheme-${index}`} className="sl-scheme-row-wrap">
                       <td colSpan={14}>
                         <div
@@ -3389,11 +4151,14 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
                   value={formData.poNumber}
                   onChange={handleChange}
                   placeholder="Enter PO number"
+                  required
                 />
                 <div className="sl-focus-line" />
               </div>
             </div>
           )}
+
+          {isMartOrder && renderWarehouseField()}
 
           <div className="sl-field">
             <label className="sl-label">Company</label>
@@ -3401,52 +4166,52 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
               className={`sl-party-dropdown${companyDropdownOpen ? " open" : ""}`}
               ref={companyDropdownRef}
             >
-              <button
-                type="button"
-                className="sl-party-trigger"
-                onClick={() => setCompanyDropdownOpen((prev) => !prev)}
-              >
-                <span>{selectedCompanyLabel || "Select Company"}</span>
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                  <path
-                    d="M3 4.5L6 7.5L9 4.5"
-                    stroke="#64748b"
-                    strokeWidth="1.4"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </button>
-              {companyDropdownOpen && (
-                <div className="sl-party-menu">
-                  <div className="sl-party-options">
-                    <button
-                      type="button"
-                      className={`sl-party-option${!formData.company ? " is-selected" : ""}`}
-                      onClick={() => handleCompanySelect("")}
-                    >
-                      <span className="sl-party-option-label">Select Company</span>
-                    </button>
-                    {company.length > 0 ? (
-                      company.map((item) => (
-                        <button
-                          type="button"
-                          key={item.id}
-                          className={`sl-party-option${
-                            String(item.id) === formData.company ? " is-selected" : ""
-                          }`}
-                          onClick={() => handleCompanySelect(String(item.id))}
-                        >
-                          <span className="sl-party-option-label">{item.name}</span>
-                        </button>
-                      ))
-                    ) : (
-                      <div className="sl-party-empty">No companies found</div>
-                    )}
+                <button
+                  type="button"
+                  className="sl-party-trigger"
+                  onClick={() => setCompanyDropdownOpen((prev) => !prev)}
+                >
+                  <span>{selectedCompanyLabel || "Select Company"}</span>
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                    <path
+                      d="M3 4.5L6 7.5L9 4.5"
+                      stroke="#64748b"
+                      strokeWidth="1.4"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+                {companyDropdownOpen && (
+                  <div className="sl-party-menu">
+                    <div className="sl-party-options">
+                      <button
+                        type="button"
+                        className={`sl-party-option${!formData.company ? " is-selected" : ""}`}
+                        onClick={() => handleCompanySelect("")}
+                      >
+                        <span className="sl-party-option-label">Select Company</span>
+                      </button>
+                      {company.length > 0 ? (
+                        company.map((item) => (
+                          <button
+                            type="button"
+                            key={item.id}
+                            className={`sl-party-option${
+                              String(item.id) === formData.company ? " is-selected" : ""
+                            }`}
+                            onClick={() => handleCompanySelect(String(item.id))}
+                          >
+                            <span className="sl-party-option-label">{item.name}</span>
+                          </button>
+                        ))
+                      ) : (
+                        <div className="sl-party-empty">No companies found</div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
-              <input type="hidden" name="company" value={formData.company} required />
+                )}
+                <input type="hidden" name="company" value={formData.company} required />
             </div>
           </div>
 
