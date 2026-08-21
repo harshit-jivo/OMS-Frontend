@@ -52,6 +52,7 @@ import Invoice_Report from "./pages/Invoice_Report";
 import HAIS from "./pages/HAIS";
 import AssetPublicView from "./pages/HAIS/AssetPublicView";
 import Distributor from "./pages/Distributor";
+import Distributor_Order_Tracking from "./pages/Distributor/Order_Tracking";
 import MartApproval from "./pages/MartApproval";
 
 function App() {
@@ -277,6 +278,15 @@ function App() {
           element={
             <Sidebar>
               <Order_Tracking />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Distributor_Order_Tracking"
+          element={
+            <Sidebar>
+              <Distributor_Order_Tracking />
             </Sidebar>
           }
         />

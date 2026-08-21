@@ -6,6 +6,7 @@ import {
   HiCheckCircle,
   HiXCircle,
   HiArrowDownTray,
+  HiArrowPath,
 } from "react-icons/hi2";
 import {
   ordersService,
@@ -13,6 +14,7 @@ import {
   type MartOrderSummary,
   type Order,
   type OrderItem,
+  type SalesOrderSapStatus,
 } from "../../services/ordersService";
 import { startExcelExport, exportDateStamp } from "../../utils/excelExport";
 import ItemSection from "../../components/order-items/ItemSection";
@@ -65,18 +67,79 @@ function MartApproval() {
   const [rejectReason, setRejectReason] = useState("");
   const [busy, setBusy] = useState(false);
 
+  // Latest SAP push result per order (only fetched for the Approved tab, where a
+  // failed SAP push leaves the order "Mart Approved" instead of "Completed").
+  const [sapStatuses, setSapStatuses] = useState<Record<string, SalesOrderSapStatus>>({});
+  const [resendingId, setResendingId] = useState<number | null>(null);
+
+  const sapFor = (orderId: number) => sapStatuses[String(orderId)] ?? null;
+  const isSapFailed = (orderId: number) => sapFor(orderId)?.status === "FAILED";
+  const isCompletedStatus = (statusDisplay?: string) =>
+    String(statusDisplay || "").toLowerCase().includes("complete");
+  // In the Approved tab an order that reached 'Completed' pushed to SAP
+  // successfully — it stays visible but only gets a View action.
+  const isApprovedSuccess = (o: { status_display?: string }) =>
+    tab === "approved" && isCompletedStatus(o.status_display);
+
   const loadList = async (tabKey: TabKey) => {
     setLoading(true);
     setError("");
     try {
       const data = await ordersService.getMartOrders(tabKey);
-      setOrders(Array.isArray(data) ? data : []);
+      const list = Array.isArray(data) ? data : [];
+      setOrders(list);
+      // Only the Approved tab can hold orders whose SAP push failed; fetch their
+      // SAP status so we can flag failures and offer a resend.
+      if (tabKey === "approved" && list.length) {
+        try {
+          const statuses = await ordersService.getSalesOrderSapStatus(
+            list.map((o) => o.id),
+          );
+          setSapStatuses(statuses);
+        } catch {
+          setSapStatuses({});
+        }
+      } else {
+        setSapStatuses({});
+      }
     } catch (e: any) {
       setError(
         e?.response?.data?.error || "Failed to load orders. Please try again.",
       );
     } finally {
       setLoading(false);
+    }
+  };
+
+  const onResend = async (target: ActionTarget) => {
+    setResendingId(target.id);
+    setMsg(null);
+    try {
+      const res = await ordersService.resendMartOrderToSap(target.id);
+      setMsg({
+        kind: "ok",
+        text: res?.message || `Order ${target.order_number} sent to SAP.`,
+      });
+      setDetailOrder(null);
+      await loadList(tab);
+    } catch (e: any) {
+      const detail =
+        e?.response?.data?.sap_error ||
+        e?.response?.data?.error ||
+        e?.response?.data?.message ||
+        "Failed to resend the order to SAP. Please try again.";
+      setMsg({ kind: "err", text: detail });
+      // Refresh SAP statuses so the (possibly new) error message shows.
+      try {
+        const statuses = await ordersService.getSalesOrderSapStatus(
+          orders.map((o) => o.id),
+        );
+        setSapStatuses(statuses);
+      } catch {
+        /* keep the previous statuses */
+      }
+    } finally {
+      setResendingId(null);
     }
   };
 
@@ -210,6 +273,29 @@ function MartApproval() {
             >
               <HiArrowDownTray /> Export Excel
             </button>
+            {/* SAP push failed → edit + retry from the detail view too. */}
+            {isSapFailed(detailOrder.id) && (
+              <>
+                <button
+                  className="ao-d-action-btn"
+                  onClick={() =>
+                    onEdit({ id: detailOrder.id, order_number: detailOrder.order_number })
+                  }
+                >
+                  <HiPencilSquare /> Edit
+                </button>
+                <button
+                  className="ao-d-action-btn ao-d-approve"
+                  onClick={() =>
+                    onResend({ id: detailOrder.id, order_number: detailOrder.order_number })
+                  }
+                  disabled={resendingId === detailOrder.id}
+                >
+                  <HiArrowPath />{" "}
+                  {resendingId === detailOrder.id ? "Sending…" : "Resend to SAP"}
+                </button>
+              </>
+            )}
             {detailPending && (
               <>
                 <button
@@ -249,6 +335,46 @@ function MartApproval() {
         </div>
 
         <PartyHeader order={detailOrder} />
+
+        {String(detailOrder.status_display || "")
+          .toLowerCase()
+          .includes("reject") &&
+          detailOrder.rejection_reason && (
+            <div
+              style={{
+                margin: "12px 0",
+                padding: "12px 14px",
+                borderRadius: 10,
+                border: "1px solid #FECACA",
+                background: "#FEF2F2",
+                color: "#7F1D1D",
+              }}
+            >
+              <strong style={{ color: "#B91C1C" }}>Rejection reason:</strong>{" "}
+              <span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                {detailOrder.rejection_reason}
+              </span>
+            </div>
+          )}
+
+        {isSapFailed(detailOrder.id) && (
+          <div
+            style={{
+              margin: "12px 0",
+              padding: "12px 14px",
+              borderRadius: 10,
+              border: "1px solid #FECACA",
+              background: "#FEF2F2",
+              color: "#7F1D1D",
+            }}
+          >
+            <strong style={{ color: "#B91C1C" }}>SAP push failed.</strong>{" "}
+            <span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+              {sapFor(detailOrder.id)?.error_message ||
+                "SAP did not return an error message."}
+            </span>
+          </div>
+        )}
 
         <div className="ao-d-items">
           <div className="ao-d-items-head">
@@ -414,7 +540,51 @@ function MartApproval() {
               orders.map((o) => (
                 <tr key={o.id}>
                   <td className="mart-cell-id">{o.order_number}</td>
-                  <td>{o.card_name}</td>
+                  <td>
+                    {o.card_name}
+                    {isSapFailed(o.id) && (
+                      <span
+                        title={sapFor(o.id)?.error_message || "SAP push failed"}
+                        style={{
+                          display: "inline-block",
+                          marginLeft: 8,
+                          padding: "2px 8px",
+                          borderRadius: 20,
+                          fontSize: "0.68rem",
+                          fontWeight: 700,
+                          color: "#fff",
+                          background: "#DC2626",
+                          verticalAlign: "middle",
+                          cursor: "help",
+                        }}
+                      >
+                        SAP Failed
+                      </span>
+                    )}
+                    {isApprovedSuccess(o) && (
+                      <span
+                        title={
+                          sapFor(o.id)?.doc_num != null
+                            ? `SAP Doc Num ${sapFor(o.id)?.doc_num}`
+                            : "Created in SAP"
+                        }
+                        style={{
+                          display: "inline-block",
+                          marginLeft: 8,
+                          padding: "2px 8px",
+                          borderRadius: 20,
+                          fontSize: "0.68rem",
+                          fontWeight: 700,
+                          color: "#fff",
+                          background: "#16A34A",
+                          verticalAlign: "middle",
+                        }}
+                      >
+                        Created in SAP
+                        {sapFor(o.id)?.doc_num != null ? ` #${sapFor(o.id)?.doc_num}` : ""}
+                      </span>
+                    )}
+                  </td>
                   <td className="mart-num">{o.items_count}</td>
                   <td>{fmtDateTime(o.created_at)}</td>
                   <td>{o.delivery_date || "—"}</td>
@@ -428,6 +598,34 @@ function MartApproval() {
                       >
                         <HiEye size={18} />
                       </button>
+                      {/* A successfully-approved (Completed in SAP) order only
+                          gets a View action — no edit/resend/download. */}
+                      {!isApprovedSuccess(o) && (
+                        <>
+                      {/* SAP push failed → let the approver edit and retry the push. */}
+                      {isSapFailed(o.id) && (
+                        <>
+                          <button
+                            className="mart-icon-btn edit"
+                            title="Edit"
+                            onClick={() =>
+                              onEdit({ id: o.id, order_number: o.order_number })
+                            }
+                          >
+                            <HiPencilSquare size={18} />
+                          </button>
+                          <button
+                            className="mart-row-btn mart-approve"
+                            onClick={() =>
+                              onResend({ id: o.id, order_number: o.order_number })
+                            }
+                            disabled={resendingId === o.id}
+                          >
+                            <HiArrowPath size={16} />{" "}
+                            {resendingId === o.id ? "Sending…" : "Resend to SAP"}
+                          </button>
+                        </>
+                      )}
                       {isPendingTab && (
                         <>
                           <button
@@ -471,6 +669,8 @@ function MartApproval() {
                       >
                         <HiArrowDownTray size={18} />
                       </button>
+                        </>
+                      )}
                     </div>
                   </td>
                 </tr>

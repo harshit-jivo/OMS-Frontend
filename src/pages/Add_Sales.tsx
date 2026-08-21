@@ -4,7 +4,6 @@ import { ordersService } from "../services/ordersService";
 import { schemeService } from "../services/schemeService";
 import type { PreviewLine, SchemeProposal } from "../services/schemeService";
 import { userService } from "../services/userService";
-import { sapService } from "../services/sapService";
 import { getCurrentUser } from "../services/authService";
 import { useUILabels } from "../services/uiConfig";
 import type {
@@ -85,6 +84,36 @@ const getUserCategoryText = (user: any) =>
       "",
   ).trim();
 
+/** Landing Price = Basic Price inclusive of tax: basic * (1 + tax%/100).
+ *  e.g. 170 @ 5% -> "178.50". Returns "" when there is no basic price yet.
+ *  Basic Price stays the pre-tax rate (what SAP receives as UnitPrice); Landing
+ *  is a display-only, tax-inclusive figure derived from it. */
+const computeLandingPrice = (
+  basic: string | number | null | undefined,
+  tax: string | number | null | undefined,
+) => {
+  const base = Number(basic) || 0;
+  const taxRate = Number(tax) || 0;
+  return base > 0 ? (base * (1 + taxRate / 100)).toFixed(2) : "";
+};
+
+/** Remove every "(card_code)" occurrence from a party name. The party list's
+ *  label is "Name (CODE)", and saving that label back into card_name — then
+ *  re-appending the code on the next edit — makes the code pile up
+ *  ("Name (CODE) (CODE) (CODE)"). Stripping first keeps card_name the clean name. */
+const stripCardCode = (
+  name: string | null | undefined,
+  code: string | null | undefined,
+) => {
+  const text = String(name ?? "").trim();
+  const trimmedCode = String(code ?? "").trim();
+  if (!text || !trimmedCode) return text;
+  const escaped = trimmedCode.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return text
+    .replace(new RegExp(`\\s*\\(\\s*${escaped}\\s*\\)`, "g"), "")
+    .trim();
+};
+
 type EditOrderLocationState = {
   editOrderId?: number;
   returnTo?: string;
@@ -157,9 +186,6 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
   const [shipSearch, setShipSearch] = useState("");
   const [shipDropdownOpen, setShipDropdownOpen] = useState(false);
   const [companyDropdownOpen, setCompanyDropdownOpen] = useState(false);
-  // One warehouse for the whole order — every SAP line, free stock included,
-  // is stamped with it. Blank lets the backend fall back to its category default.
-  const [warehouses, setWarehouses] = useState<{ code: string; name: string }[]>([]);
   const [openRowDropdown, setOpenRowDropdown] = useState<string | null>(null);
   const [branch, setBranch] = useState<any[]>([]);
   const [billAddress, setBillAddress] = useState<any[]>([]);
@@ -206,6 +232,9 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
     company: "",
     warehouse: "",
     comment: "",
+    // Company-3 (Mart) orders pick a dispatch warehouse. Display-only for now —
+    // not sent to the backend. Defaults to GP-FGM.
+    warehouse: "GP-FGM",
   });
 
   const [rows, setRows] = useState<SalesRow[]>([createEmptyRow()]);
@@ -238,7 +267,6 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
     fetchProducts();
     fetchCompany();
     fetchCurrentUserProfile();
-    fetchWarehouses("");
   }, []);
 
   useEffect(() => {
@@ -247,13 +275,6 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
       setEditOrderIsDraft(false);
     }
   }, [isLoadingFromOrder]);
-
-  // The two company databases have separate warehouse masters, so the list is
-  // refetched whenever the party's category changes.
-  useEffect(() => {
-    void fetchWarehouses(selectedPartyCategory);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedPartyCategory]);
 
   const fetchCurrentUserProfile = async () => {
     try {
@@ -291,6 +312,21 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
       company: prev.company || String(jivoCompany.id || ""),
     }));
   }, [company, formData.company, isLoadingFromOrder]);
+
+  // For a Mart order (party category MART) auto-select the Mart company so the
+  // Company field shows "Mart" rather than a blank picker, and the Warehouse panel
+  // (company 3 = mart) shows with its default. Runs in create AND edit. Company 3
+  // is already treated as Mart, so it is left untouched.
+  useEffect(() => {
+    if (company.length === 0) return;
+    if (normalizeOptionText(selectedPartyCategory) !== "mart") return;
+    if (Number(formData.company) === 3) return;
+    const mart = company.find((item) =>
+      normalizeOptionText(item?.name).includes("mart"),
+    );
+    if (!mart || String(formData.company) === String(mart.id)) return;
+    setFormData((prev) => ({ ...prev, company: String(mart.id) }));
+  }, [company, selectedPartyCategory, formData.company]);
 
   useEffect(() => {
     if (isLoadingFromOrder || !userDefaultCategory) return;
@@ -363,23 +399,13 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
 
   const fetchCompany = async () => {
     try {
-      let data = await userService.getCompany();
+      const data = await userService.getCompany();
       setCompany(data);
     } catch (error) {
       console.log("Error fetching Company:", error);
     }
   };
 
-  const fetchWarehouses = async (category: string) => {
-    // The two company databases have separate warehouse masters.
-    const branch = String(category || "").toUpperCase() === "BEVERAGES" ? "BEVERAGE" : "OIL";
-    try {
-      setWarehouses(await sapService.getWarehouses(branch));
-    } catch (error) {
-      console.log("Error fetching warehouses:", error);
-      setWarehouses([]);
-    }
-  };
 
   const fetchPartyName = async () => {
     try {
@@ -392,7 +418,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
 
   const fetchBranch = async () => {
     try {
-      let data = await ordersService.getBranches();
+      const data = await ordersService.getBranches();
       setBranch(data);
     } catch (error) {
       console.log("Error fetching dispatch data:", error);
@@ -401,7 +427,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
 
   const fetchPartyAddresses = async (card_code: string, partyCategory = "") => {
     try {
-      let data = await ordersService.getPartyAdd(card_code, partyCategory);
+      const data = await ordersService.getPartyAdd(card_code, partyCategory);
       const billTo = Array.isArray(data.bill_to) ? data.bill_to : [];
       const shipTo = Array.isArray(data.ship_to) ? data.ship_to : [];
       setBillAddress(billTo.length > 0 ? billTo : shipTo);
@@ -439,7 +465,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
   };
 
   const fetchProducts = async () => {
-    let data = await ordersService.getProducts();
+    const data = await ordersService.getProducts();
     setProducts(data);
   };
 
@@ -544,8 +570,10 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
             qty: valueToString(item.qty),
             ltrs: valueToString(item.ltrs),
             boxes: valueToString(item.boxes),
-            priceListBasic: valueToString(item.price_list_basic),
+            // Landing is always basic + tax% (recomputed, not the stored value)
+            // so the edit side shows the same figure the create side does.
             basicPrice: valueToString(item.basic_price),
+            priceListBasic: computeLandingPrice(item.basic_price, item.tax_rate),
             tax: valueToString(item.tax_rate),
             amount: valueToString(item.total),
             confirmed: true,
@@ -587,10 +615,14 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
         );
         setSelectedPartyCategory(orderCategory);
 
+        // Strip any codes a previous save may have baked into card_name so they
+        // don't accumulate on this (and every subsequent) edit.
+        const cleanCardName = stripCardCode(order.card_name, order.card_code);
+
         setEditOrderFallback({
-          cardName: order.card_name || "",
-          partyLabel: order.card_name
-            ? [order.card_name, `(${order.card_code})`, orderCategory]
+          cardName: cleanCardName,
+          partyLabel: cleanCardName
+            ? [cleanCardName, `(${order.card_code})`, orderCategory]
                 .filter(Boolean)
                 .join(" ")
             : order.card_code || "",
@@ -608,8 +640,10 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
             : [
                 {
                   value: order.card_code,
-                  label: order.card_name
-                    ? `${order.card_name} (${order.card_code})`
+                  card_code: order.card_code,
+                  card_name: cleanCardName,
+                  label: cleanCardName
+                    ? `${cleanCardName} (${order.card_code})`
                     : order.card_code,
                   category: orderCategory,
                   state: "",
@@ -652,7 +686,9 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
           Deliverydate: isDuplicateMode ? getDefaultDeliveryDate() : order.delivery_date || "",
           poNumber: isDuplicateMode ? "" : order.po_number || "",
           company: order.company ? String(order.company) : "",
-          warehouse: order.warehouse_code || "",
+          // Pick the warehouse straight from the saved order; default to GP-FGM
+          // for orders placed before the picker existed.
+          warehouse: order.warehouse_code || "GP-FGM",
           comment: isDuplicateMode ? "" : order.remarks || "",
         });
         const orderStateCode = order.party_state || "";
@@ -785,6 +821,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
       ),
       warehouse: "",
       comment: "",
+      warehouse: "GP-FGM",
     });
 
     setSelectedPartyCategory(userDefaultCategory);
@@ -839,6 +876,21 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
         }));
     });
 
+  /** The address string to persist for a selected id. Mirrors how the address is
+   *  shown on screen (name first, then the full address), so an address that has
+   *  a full_address but a blank address_name is still saved instead of "". */
+  const resolveAddressText = (
+    list: Array<{
+      id: number | string;
+      address_name?: string | null;
+      full_address?: string | null;
+    }>,
+    id: string,
+  ) => {
+    const match = list.find((address) => String(address.id) === String(id));
+    return match?.address_name || match?.full_address || "";
+  };
+
   const submitOrder = async () => {
     const selectedParty = parties.find(
       (p) =>
@@ -851,15 +903,16 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
     const payload = {
       ...(isEditMode ? { order_id: editOrderId } : {}),
       card_code: formData.parties,
-      card_name: selectedParty?.label || editOrderFallback.cardName || "",
+      // Save the clean party name (never the "Name (CODE)" label), stripped of any
+      // code so it cannot pile up across edits.
+      card_name: stripCardCode(
+        selectedParty?.card_name || editOrderFallback.cardName || "",
+        formData.parties,
+      ),
       bill_to_id: Number(formData.billAddress),
-      bill_to_address:
-        billAddress.find((b) => b.id === Number(formData.billAddress))
-          ?.address_name || "",
+      bill_to_address: resolveAddressText(billAddress, formData.billAddress),
       ship_to_id: Number(formData.shipAddress),
-      ship_to_address:
-        shipAddress.find((s) => s.id === Number(formData.shipAddress))
-          ?.address_name || "",
+      ship_to_address: resolveAddressText(shipAddress, formData.shipAddress),
       dispatch_from_id: Number(formData.dispatch),
       dispatch_from_name:
         branch.find(
@@ -868,7 +921,9 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
 
       delivery_date: formData.Deliverydate,
       ...(canEditPoNumber ? { po_number: formData.poNumber.trim() } : {}),
-      warehouse_code: formData.warehouse,
+      // Warehouse is only chosen on Mart orders; others send "" so SAP sync
+      // falls back to the per-category default.
+      warehouse_code: isMartOrder ? formData.warehouse : "",
       remarks: formData.comment.trim(),
       is_foc: isFocOrder,
       company: Number(formData.company),
@@ -1004,13 +1059,14 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
 
     const payload: Record<string, unknown> = {
       card_code: formData.parties,
-      card_name: selectedPartyForDraft?.label || editOrderFallback.cardName || "",
+      card_name: stripCardCode(
+        selectedPartyForDraft?.card_name || editOrderFallback.cardName || "",
+        formData.parties,
+      ),
       bill_to_id: Number(formData.billAddress) || 0,
-      bill_to_address:
-        billAddress.find((b) => b.id === Number(formData.billAddress))?.address_name || "",
+      bill_to_address: resolveAddressText(billAddress, formData.billAddress),
       ship_to_id: Number(formData.shipAddress) || 0,
-      ship_to_address:
-        shipAddress.find((s) => s.id === Number(formData.shipAddress))?.address_name || "",
+      ship_to_address: resolveAddressText(shipAddress, formData.shipAddress),
       dispatch_from_id: Number(formData.dispatch) || 0,
       dispatch_from_name:
         branch.find(
@@ -1018,7 +1074,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
         )?.bpl_name || "",
       delivery_date: formData.Deliverydate || null,
       ...(canEditPoNumber ? { po_number: formData.poNumber.trim() } : {}),
-      warehouse_code: formData.warehouse,
+      warehouse_code: isMartOrder ? formData.warehouse : "",
       remarks: formData.comment.trim(),
       is_foc: isFocOrder,
       company: Number(formData.company) || 0,
@@ -1362,9 +1418,10 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
 
     row.ltrs = qty > 0 ? String(packUnit * qty) : "";
 
-    const basic = Number(row.priceListBasic) || 0;
-    const market = Number(row.basicPrice) || 0;
-    const price = market > 0 ? market : basic;
+    // Basic Price is the unit rate; keep Landing (tax-inclusive) in step with it,
+    // and price the line off the Basic rate so the amount stays pre-tax.
+    const price = Number(row.basicPrice) || 0;
+    row.priceListBasic = computeLandingPrice(price, row.tax);
     row.amount = qty > 0 && price > 0 ? (price * qty).toFixed(2) : "";
 
     return applyFocPricing(row);
@@ -1376,7 +1433,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
   ) => {
     const { name, value } = e.target;
 
-    let updatedRows = [...rows];
+    const updatedRows = [...rows];
     let row = { ...updatedRows[index] };
     row.confirmed = false;
 
@@ -1416,7 +1473,18 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
         row.type = match ? `${match[1]} ${match[2].toUpperCase()}` : "Others";
         row.pcs = String(partyProduct.sal_factor2 ?? "");
         row.tax = String(getProductTaxRate(partyProduct));
-        row.priceListBasic = isFocOrder ? "0" : String(partyProduct.basic_rate ?? "");
+        // Basic Price = the product's basic rate (pre-tax). Landing Price is that
+        // rate plus tax. Both must fill on select — the Basic column was blank
+        // before because only Landing (priceListBasic) was being set.
+        row.basicPrice =
+          isFocOrder || partyProduct.basic_rate == null
+            ? isFocOrder
+              ? "0"
+              : ""
+            : String(partyProduct.basic_rate);
+        row.priceListBasic = isFocOrder
+          ? "0"
+          : computeLandingPrice(row.basicPrice, row.tax);
         void fetchSchemesForRow(index, true);
       } else {
         void fetchSchemesForRow(index, false);
@@ -1543,15 +1611,20 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
   const handleDeleteRow = (index: number) => {
     const updatedRows = rows.filter((_, i) => i !== index);
     setRows(updatedRows.length > 0 ? updatedRows : [createEmptyRow()]);
-    setSchemeOptions((prev) => {
-      const next: Record<number, SchemeProduct[]> = {};
+    // Both maps are keyed by row index, so removing a row means shifting every
+    // key above it down by one — otherwise a later row inherits the deleted
+    // row's scheme options / engine proposals.
+    const shiftByIndex = <T,>(prev: Record<number, T>) => {
+      const next: Record<number, T> = {};
       Object.entries(prev).forEach(([key, value]) => {
         const currentIndex = Number(key);
         if (currentIndex < index) next[currentIndex] = value;
         if (currentIndex > index) next[currentIndex - 1] = value;
       });
       return next;
-    });
+    };
+    setSchemeOptions(shiftByIndex);
+    setSchemeProposals(shiftByIndex);
   };
 
   const handlePartySelect = (value: string, partyCategory = "") => {
@@ -1719,6 +1792,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
 
   const previewSignature = JSON.stringify({
     card: formData.parties,
+    category: selectedPartyCategory,
     lines: buildPreviewLines().lines.map((l) => [l.item_code, l.qty, l.is_auto_free ?? false]),
   });
 
@@ -1735,9 +1809,14 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
     // round trip.
     const timer = window.setTimeout(async () => {
       try {
+        // Gate on the PARTY's category (its business line / company), not on a
+        // product row's category. The engine then only proposes schemes whose
+        // own category matches the party's, and its per-line guard drops any
+        // product line of a different category — so a scheme is auto-fetched
+        // only when party category == product category == scheme category.
         const response = await schemeService.preview(
           formData.parties,
-          rows.find((row) => row.confirmed)?.category || "",
+          selectedPartyCategory || "",
           lines,
         );
         if (cancelled) return;
@@ -1844,6 +1923,18 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
   const selectedCompany = company.find(
     (item) => String(item.id) === formData.company,
   );
+  // The Mart company from the list, and whether this is a Mart order. "Company 3
+  // means mart": it's Mart when company is 3, when the selected company is the
+  // Mart row, OR when the party's category is MART. Driving it partly off the
+  // party category keeps the Warehouse panel visible even after the Company
+  // dropdown is opened/changed (it no longer hides the moment company drifts off 3).
+  const martCompany = company.find((item) =>
+    normalizeOptionText(item?.name).includes("mart"),
+  );
+  const isMartOrder =
+    Number(formData.company) === 3 ||
+    (!!martCompany && String(formData.company) === String(martCompany.id)) ||
+    normalizeOptionText(selectedPartyCategory) === "mart";
   const selectedBillAddressLabel =
     selectedBillAddress?.address_name ||
     selectedBillAddress?.full_address ||
@@ -1857,7 +1948,12 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
     (formData.shipAddress ? editOrderFallback.shipAddress : "") ||
     "";
   const selectedDispatchLabel = selectedDispatch?.bpl_name || "";
-  const selectedCompanyLabel = selectedCompany?.name || "";
+  // Fall back to the Mart company name (or literally "Mart") for a Mart order
+  // whose company id isn't in the list, so the field never shows "Select Company".
+  const selectedCompanyLabel =
+    selectedCompany?.name ||
+    (isMartOrder ? martCompany?.name || "Mart" : "") ||
+    "";
   const renderRowDropdown = (
     rowIndex: number,
     name: keyof SalesRow,
@@ -2027,11 +2123,19 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
           item: product.item_name,
           pcs: String(product.sal_factor2 ?? ""),
           tax: String(getProductTaxRate(product)),
-          priceListBasic: isFocOrder ? "0" : String(product.basic_rate ?? ""),
+          // Basic Price = pre-tax basic rate; Landing = basic + tax%.
+          basicPrice:
+            isFocOrder || product.basic_rate == null
+              ? isFocOrder
+                ? "0"
+                : ""
+              : String(product.basic_rate),
+          priceListBasic: isFocOrder
+            ? "0"
+            : computeLandingPrice(product.basic_rate, getProductTaxRate(product)),
           qty: "",
           ltrs: "",
           boxes: "",
-          basicPrice: "",
           amount: "",
           isScheme: false,
           scheme: "",
@@ -2061,11 +2165,48 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
     return [...counts.entries()].map(([value, count]) => ({ value, count }));
   };
 
-  // Mart (company 3) orders never carry schemes — hide the whole promotion panel.
-  const isMartOrder = Number(formData.company) === 3;
+  // `isMartOrder` is defined above (near selectedCompanyLabel).
+  // Company-3 (Mart) orders also choose a dispatch warehouse. Display-only for
+  // now — the value is not persisted.
+  const WAREHOUSE_OPTIONS = ["DL-MP", "GP-FGM"];
+  const renderWarehouseField = () => (
+    <div className="sl-field">
+      <label className="sl-label">Warehouse</label>
+      <div className="sl-input-wrap">
+        <select
+          name="warehouse"
+          value={formData.warehouse}
+          onChange={handleChange}
+          className="sl-warehouse-select"
+        >
+          {WAREHOUSE_OPTIONS.map((code) => (
+            <option key={code} value={code}>
+              {code}
+            </option>
+          ))}
+        </select>
+        <div className="sl-focus-line" />
+      </div>
+    </div>
+  );
+
+  // The legacy "Optional promotion" picker reads `scheme_product`, which is NOT
+  // category-aware — it lists every scheme in the party's state regardless of
+  // business line. MART has no schemes, so the panel must be hidden for a MART
+  // line/party (as it already is for a company-3 Mart order); otherwise an
+  // OIL/BEVERAGES scheme from the same state would leak into a MART order. The
+  // category-gated auto-fetch (v2 engine) is unaffected — this only governs the
+  // manual picker's visibility.
+  const isSchemePanelHidden = (row: SalesRow) => {
+    if (isMartOrder) return true;
+    const category = String(row.category || selectedPartyCategory || "")
+      .trim()
+      .toUpperCase();
+    return category === "MART";
+  };
 
   const renderSchemePanel = (row: SalesRow, index: number) => {
-    if (isMartOrder) return null;
+    if (isSchemePanelHidden(row)) return null;
     return (
     <div className={`sl-scheme-panel${row.isScheme ? " is-active" : ""}`}>
       <div className="sl-scheme-panel-head">
@@ -2906,28 +3047,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
             </div>
           </div>
         )}
-        <div className="sl-field">
-          <label className="sl-label" htmlFor="wiz-warehouse">
-            Warehouse
-          </label>
-          <div className="sl-input-wrap">
-            <select
-              id="wiz-warehouse"
-              name="warehouse"
-              value={formData.warehouse}
-              onChange={handleChange}
-            >
-              <option value="">Default warehouse</option>
-              {warehouses.map((warehouse) => (
-                <option key={warehouse.code} value={warehouse.code}>
-                  {warehouse.name} ({warehouse.code})
-                </option>
-              ))}
-            </select>
-            <div className="sl-focus-line" />
-          </div>
-          <div className="sl-field-note">Used for every item on this order.</div>
-        </div>
+        {isMartOrder && renderWarehouseField()}
         <div className="sl-field">
           <label className="sl-label">Company</label>
           <div
@@ -2942,30 +3062,30 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
               <span>{selectedCompanyLabel || "Select Company"}</span>
               {chevronIcon}
             </button>
-            {companyDropdownOpen && (
-              <div className="sl-party-menu">
-                <div className="sl-party-options">
-                  {company.length > 0 ? (
-                    company.map((item) => (
-                      <button
-                        type="button"
-                        key={item.id}
-                        className={`sl-party-option${
-                          String(item.id) === formData.company ? " is-selected" : ""
-                        }`}
-                        onClick={() => handleCompanySelect(String(item.id))}
-                      >
-                        <span className="sl-party-option-label">{item.name}</span>
-                      </button>
-                    ))
-                  ) : (
-                    <div className="sl-party-empty">No companies found</div>
-                  )}
+              {companyDropdownOpen && (
+                <div className="sl-party-menu">
+                  <div className="sl-party-options">
+                    {company.length > 0 ? (
+                      company.map((item) => (
+                        <button
+                          type="button"
+                          key={item.id}
+                          className={`sl-party-option${
+                            String(item.id) === formData.company ? " is-selected" : ""
+                          }`}
+                          onClick={() => handleCompanySelect(String(item.id))}
+                        >
+                          <span className="sl-party-option-label">{item.name}</span>
+                        </button>
+                      ))
+                    ) : (
+                      <div className="sl-party-empty">No companies found</div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
-        </div>
       </div>
 
       <div className="sl-wiz-totals">
@@ -3245,13 +3365,12 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
           </div>
         </div> */}
 
-      {isEditMode && isLoadingEditOrder && (
-        <div className="sl-section-label">
-          Loading existing order details...
+      {isEditMode && isLoadingEditOrder ? (
+        <div className="sl-loading-overlay" role="status" aria-live="polite">
+          <div className="sl-spinner" aria-hidden="true" />
+          <span className="sl-loading-text">Loading order details…</span>
         </div>
-      )}
-
-      {useWizard ? (
+      ) : useWizard ? (
         renderWizard()
       ) : (
       <form className="sl-form" onSubmit={handleSubmit}>
@@ -3806,7 +3925,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
                     </td>
                   </tr>
 
-                  {row.item && !isFocOrder && (
+                  {row.item && !isFocOrder && !isSchemePanelHidden(row) && (
                     <tr key={`scheme-${index}`} className="sl-scheme-row-wrap">
                       <td colSpan={14}>
                         <div
@@ -4022,28 +4141,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
             </div>
           )}
 
-          <div className="sl-field">
-            <label className="sl-label" htmlFor="warehouse">
-              Warehouse
-            </label>
-            <div className="sl-input-wrap">
-              <select
-                id="warehouse"
-                name="warehouse"
-                value={formData.warehouse}
-                onChange={handleChange}
-              >
-                <option value="">Default warehouse</option>
-                {warehouses.map((warehouse) => (
-                  <option key={warehouse.code} value={warehouse.code}>
-                    {warehouse.name} ({warehouse.code})
-                  </option>
-                ))}
-              </select>
-              <div className="sl-focus-line" />
-            </div>
-            <div className="sl-field-note">Used for every item on this order.</div>
-          </div>
+          {isMartOrder && renderWarehouseField()}
 
           <div className="sl-field">
             <label className="sl-label">Company</label>
@@ -4051,52 +4149,52 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
               className={`sl-party-dropdown${companyDropdownOpen ? " open" : ""}`}
               ref={companyDropdownRef}
             >
-              <button
-                type="button"
-                className="sl-party-trigger"
-                onClick={() => setCompanyDropdownOpen((prev) => !prev)}
-              >
-                <span>{selectedCompanyLabel || "Select Company"}</span>
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                  <path
-                    d="M3 4.5L6 7.5L9 4.5"
-                    stroke="#64748b"
-                    strokeWidth="1.4"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </button>
-              {companyDropdownOpen && (
-                <div className="sl-party-menu">
-                  <div className="sl-party-options">
-                    <button
-                      type="button"
-                      className={`sl-party-option${!formData.company ? " is-selected" : ""}`}
-                      onClick={() => handleCompanySelect("")}
-                    >
-                      <span className="sl-party-option-label">Select Company</span>
-                    </button>
-                    {company.length > 0 ? (
-                      company.map((item) => (
-                        <button
-                          type="button"
-                          key={item.id}
-                          className={`sl-party-option${
-                            String(item.id) === formData.company ? " is-selected" : ""
-                          }`}
-                          onClick={() => handleCompanySelect(String(item.id))}
-                        >
-                          <span className="sl-party-option-label">{item.name}</span>
-                        </button>
-                      ))
-                    ) : (
-                      <div className="sl-party-empty">No companies found</div>
-                    )}
+                <button
+                  type="button"
+                  className="sl-party-trigger"
+                  onClick={() => setCompanyDropdownOpen((prev) => !prev)}
+                >
+                  <span>{selectedCompanyLabel || "Select Company"}</span>
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                    <path
+                      d="M3 4.5L6 7.5L9 4.5"
+                      stroke="#64748b"
+                      strokeWidth="1.4"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+                {companyDropdownOpen && (
+                  <div className="sl-party-menu">
+                    <div className="sl-party-options">
+                      <button
+                        type="button"
+                        className={`sl-party-option${!formData.company ? " is-selected" : ""}`}
+                        onClick={() => handleCompanySelect("")}
+                      >
+                        <span className="sl-party-option-label">Select Company</span>
+                      </button>
+                      {company.length > 0 ? (
+                        company.map((item) => (
+                          <button
+                            type="button"
+                            key={item.id}
+                            className={`sl-party-option${
+                              String(item.id) === formData.company ? " is-selected" : ""
+                            }`}
+                            onClick={() => handleCompanySelect(String(item.id))}
+                          >
+                            <span className="sl-party-option-label">{item.name}</span>
+                          </button>
+                        ))
+                      ) : (
+                        <div className="sl-party-empty">No companies found</div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
-              <input type="hidden" name="company" value={formData.company} required />
+                )}
+                <input type="hidden" name="company" value={formData.company} required />
             </div>
           </div>
 

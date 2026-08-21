@@ -5,6 +5,7 @@ import SearchableSelect from "./SearchableSelect";
 import "../../styles/Distributor/Distributor.css";
 
 const COMPANY_MART = 3; // company 3 = Mart, stamped on every distributor order
+const DEFAULT_WAREHOUSE_CODE = "GP-FGM"; // distributor orders default to GP-FGM
 
 type PartyAddress = { id: number; full_address: string };
 
@@ -35,6 +36,13 @@ const getProductType = (itemName: string) => {
   return m ? `${m[1]} ${m[2].toUpperCase()}` : "Others";
 };
 
+// Indian grouping (e.g. 12,34,567.00) for the footer totals.
+const inr = (n: number, decimals = 2) =>
+  n.toLocaleString("en-IN", {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+
 type PartyProduct = {
   item_code: string;
   item_name: string;
@@ -46,12 +54,33 @@ type PartyProduct = {
   sal_factor2: number;
   sal_pack_unit: number;
   tax_rate: number;
+  // When this party-product assignment was last updated (ISO string). Used to
+  // block ordering products not refreshed in the current month.
+  updated_at: string | null;
 };
 
 type Row = {
   id: number;
   item_code: string;
-  quantity: number;
+  // Boxes and Qty are BOTH editable and kept in sync: editing one recomputes
+  // the other via the product's sal_factor2 (qty = boxes * factor). Ltrs /
+  // amount derive from qty, matching Add Sales.
+  boxes: number;
+  qty: number;
+  // Per-row validation message (e.g. stale product blocked from ordering).
+  error?: string;
+};
+
+// True when an ISO datetime falls in the current calendar month/year. A product
+// whose party-product assignment wasn't updated this month cannot be ordered.
+const isCurrentMonth = (iso: string | null | undefined): boolean => {
+  if (!iso) return false;
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return false;
+  const now = new Date();
+  return (
+    d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()
+  );
 };
 
 function Distributor() {
@@ -68,7 +97,8 @@ function Distributor() {
   const makeRow = (): Row => ({
     id: nextId.current++,
     item_code: "",
-    quantity: 0,
+    boxes: 0,
+    qty: 0,
   });
 
   // First bill-to (B) and ship-to (S) address for the party — auto-picked.
@@ -131,12 +161,15 @@ function Distributor() {
             sal_factor2: Number(p.sal_factor2) || 0,
             sal_pack_unit: Number(p.sal_pack_unit) || 0,
             tax_rate: Number(p.tax_rate) || 0,
+            updated_at: p.updated_at ?? null,
           }));
         if (alive) setMartProducts(list);
 
-        // 3. Auto-pick the party's first bill-to and ship-to address.
+        // 3. Auto-pick the party's first MART bill-to and ship-to address.
+        //    Scope to the MART category so a party that also has addresses in
+        //    other categories can't surface a non-MART (wrong) address here.
         try {
-          const addr = await ordersService.getPartyAdd(assigned.card_code);
+          const addr = await ordersService.getPartyAdd(assigned.card_code, CATEGORY);
           if (alive) {
             setBillTo((addr?.bill_to ?? [])[0] ?? null);
             setShipTo((addr?.ship_to ?? [])[0] ?? null);
@@ -169,16 +202,6 @@ function Distributor() {
     [martProducts],
   );
 
-  // item_code -> basic_rate, for quick auto-fill.
-  const rateLookup = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const p of martProducts) map.set(p.item_code, p.basic_rate);
-    return map;
-  }, [martProducts]);
-
-  const basicRateOf = (item_code: string) =>
-    item_code ? rateLookup.get(item_code) ?? 0 : 0;
-
   // --- row mutations --------------------------------------------------------
   const addRow = () => setRows((prev) => [...prev, makeRow()]);
 
@@ -190,20 +213,89 @@ function Distributor() {
 
   const setProduct = (id: number, item_code: string) =>
     setRows((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, item_code } : r)),
+      prev.map((r) => {
+        if (r.id !== id) return r;
+        if (!item_code) return { ...r, item_code: "", error: undefined };
+
+        // Freshness gate: the product's party-product assignment must have been
+        // updated in the current month, otherwise it cannot be ordered.
+        const product = martProducts.find((p) => p.item_code === item_code);
+        if (product && !isCurrentMonth(product.updated_at)) {
+          return {
+            ...r,
+            item_code: "",
+            boxes: 0,
+            qty: 0,
+            error:
+              "This product wasn't updated this month and can't be ordered. Please contact an administrator.",
+          };
+        }
+
+        // Re-sync qty from any existing box count against the new product.
+        const factor = Number(product?.sal_factor2) || 1;
+        return { ...r, item_code, qty: r.boxes * factor, error: undefined };
+      }),
     );
 
+  const factorFor = (id: number, rows: Row[]) => {
+    const row = rows.find((r) => r.id === id);
+    const product = martProducts.find((p) => p.item_code === row?.item_code);
+    return Number(product?.sal_factor2) || 1;
+  };
+
+  // Boxes and Qty stay in sync: qty = boxes * factor. Editing either recomputes
+  // the other so the distributor can enter whichever is convenient.
+  const setBoxes = (id: number, raw: string) => {
+    const boxes = Math.max(0, Number(raw) || 0);
+    setRows((prev) =>
+      prev.map((r) =>
+        r.id === id ? { ...r, boxes, qty: boxes * factorFor(id, prev) } : r,
+      ),
+    );
+  };
+
   const setQty = (id: number, raw: string) => {
-    const quantity = Math.max(0, Number(raw) || 0);
-    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, quantity } : r)));
+    const qty = Math.max(0, Number(raw) || 0);
+    setRows((prev) =>
+      prev.map((r) => {
+        if (r.id !== id) return r;
+        const factor = factorFor(id, prev);
+        return { ...r, qty, boxes: factor ? qty / factor : qty };
+      }),
+    );
+  };
+
+  // One row's derived figures, computed exactly like Add Sales'
+  // `recalculateRowTotals` so a distributor order saves identical numbers to a
+  // billing order:
+  //   pcs   = sal_factor2 (units per case, shown as-is)
+  //   qty   = boxes * sal_factor2   (factor falls back to 1, mirroring Add Sales)
+  //   ltrs  = sal_pack_unit * qty
+  //   amount = basic_rate * qty     (tax is applied on the order total, not here)
+  const deriveRow = (row: Row) => {
+    const product = martProducts.find((p) => p.item_code === row.item_code);
+    const rate = product?.basic_rate ?? 0;
+    const pcs = Number(product?.sal_factor2) || 0;
+    const factor = Number(product?.sal_factor2) || 1;
+    const pack = Number(product?.sal_pack_unit) || 0;
+    // qty is stored on the row (kept in sync with boxes); ltrs / amount follow.
+    const boxes = row.boxes || 0;
+    const qty = row.qty || 0;
+    const ltrs = pack * qty;
+    const amount = rate * qty;
+    return { product, rate, pcs, factor, pack, boxes, qty, ltrs, amount };
   };
 
   // --- totals / submit ------------------------------------------------------
-  const completedRows = rows.filter((r) => r.item_code);
+  // A line counts once it has a product AND a box count — a zero-box row is not
+  // yet an order line.
+  const completedRows = rows.filter((r) => r.item_code && r.qty > 0);
   const totalProducts = completedRows.length;
-  const totalQty = completedRows.reduce((sum, r) => sum + r.quantity, 0);
+  const totalBoxes = completedRows.reduce((sum, r) => sum + (r.boxes || 0), 0);
+  const totalQty = completedRows.reduce((sum, r) => sum + deriveRow(r).qty, 0);
+  const totalLtrs = completedRows.reduce((sum, r) => sum + deriveRow(r).ltrs, 0);
   const totalAmount = completedRows.reduce(
-    (sum, r) => sum + r.quantity * basicRateOf(r.item_code),
+    (sum, r) => sum + deriveRow(r).amount,
     0,
   );
 
@@ -236,21 +328,13 @@ function Distributor() {
       delivery_date: today,
       po_number: "",
       company: COMPANY_MART,
+      // Every distributor order ships from GP-FGM by default. Mart Approval can
+      // change it later on the Add Sales edit screen.
+      warehouse_code: DEFAULT_WAREHOUSE_CODE,
       total_amount: totalAmount,
       items: completedRows.map((r) => {
-        const p = martProducts.find((x) => x.item_code === r.item_code);
-        const rate = p?.basic_rate ?? 0;
-        const qty = r.quantity;
-        // Same derivation as Add Sales' recalculateRowTotals:
-        //   pcs   = sal_factor2 (units per box)
-        //   boxes = qty / sal_factor2
-        //   ltrs  = sal_pack_unit * qty
-        //   total = price * qty
-        const factor = p?.sal_factor2 || 0;
-        const pack = p?.sal_pack_unit || 0;
-        const pcs = factor;
-        const boxes = factor > 0 ? qty / factor : 0;
-        const ltrs = pack * qty;
+        // Boxes-driven derivation, identical to Add Sales (see deriveRow).
+        const { product: p, rate, pcs, boxes, qty, ltrs, amount } = deriveRow(r);
         return {
           item_code: r.item_code,
           item_name: p?.item_name || r.item_code,
@@ -266,7 +350,7 @@ function Distributor() {
           price_list_basic: rate,
           basic_price: rate,
           tax_rate: p?.tax_rate || 0,
-          total: rate * qty,
+          total: amount,
           total_ltrs: ltrs,
         };
       }),
@@ -305,6 +389,9 @@ function Distributor() {
         </p>
       )}
 
+      {/* Bill To / Ship To are resolved internally for the order payload but not
+          shown to the distributor. */}
+
       {error && <div className="distributor-error">{error}</div>}
       {noProducts && (
         <div className="distributor-error">
@@ -320,13 +407,18 @@ function Distributor() {
                 <tr>
                   <th className="distributor-prod-col">Product</th>
                   <th className="distributor-rate-col">Basic Rate</th>
-                  <th className="distributor-qty-col">Qty</th>
+                  <th className="distributor-num-col">PCS</th>
+                  <th className="distributor-qty-col">Boxes</th>
+                  <th className="distributor-num-col">Qty</th>
+                  <th className="distributor-num-col">Ltrs</th>
+                  <th className="distributor-num-col">Amount</th>
                   <th className="distributor-action-col"></th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((row) => {
-                  const rate = basicRateOf(row.item_code);
+                  const { rate, pcs, ltrs, amount } = deriveRow(row);
+                  const hasItem = Boolean(row.item_code);
                   return (
                     <tr key={row.id}>
                       <td className="distributor-prod-col">
@@ -339,18 +431,43 @@ function Distributor() {
                             loading ? "Loading…" : "Search product…"
                           }
                         />
+                        {row.error && (
+                          <div className="distributor-row-error">
+                            {row.error}
+                          </div>
+                        )}
                       </td>
                       <td className="distributor-rate-col">
-                        {row.item_code ? rate.toFixed(2) : "—"}
+                        {hasItem ? rate.toFixed(2) : "—"}
+                      </td>
+                      <td className="distributor-num-col">
+                        {hasItem ? pcs : "—"}
                       </td>
                       <td className="distributor-qty-col">
                         <input
                           type="number"
                           min={0}
-                          value={row.quantity || ""}
+                          value={row.boxes || ""}
+                          onChange={(e) => setBoxes(row.id, e.target.value)}
+                          placeholder="0"
+                          disabled={!hasItem}
+                        />
+                      </td>
+                      <td className="distributor-qty-col">
+                        <input
+                          type="number"
+                          min={0}
+                          value={row.qty || ""}
                           onChange={(e) => setQty(row.id, e.target.value)}
                           placeholder="0"
+                          disabled={!hasItem}
                         />
+                      </td>
+                      <td className="distributor-num-col">
+                        {hasItem ? ltrs.toFixed(2) : "—"}
+                      </td>
+                      <td className="distributor-num-col">
+                        {hasItem ? amount.toFixed(2) : "—"}
                       </td>
                       <td className="distributor-action-col">
                         <button
@@ -387,10 +504,16 @@ function Distributor() {
                 Total Products: <strong>{totalProducts}</strong>
               </span>
               <span>
-                Total Quantity: <strong>{totalQty}</strong>
+                Total Boxes: <strong>{totalBoxes}</strong>
               </span>
               <span>
-                Total Amount: <strong>{totalAmount.toFixed(2)}</strong>
+                Total Quantity: <strong>{inr(totalQty, 0)}</strong>
+              </span>
+              <span>
+                Total Ltrs: <strong>{inr(totalLtrs)}</strong>
+              </span>
+              <span>
+                Total Amount: <strong>{inr(totalAmount)}</strong>
               </span>
             </div>
             <button

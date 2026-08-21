@@ -128,6 +128,7 @@ export default function Sidebar({ children }: SidebarProps) {
     }
   });
   const [reportsOpen, setReportsOpen] = useState(false);
+  const [distributorOpen, setDistributorOpen] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
@@ -480,6 +481,10 @@ export default function Sidebar({ children }: SidebarProps) {
         location.pathname === "/PersonWise_Report" ||
         location.pathname === "/Sales_Report" ||
         location.pathname === "/StateWise_Report"
+    );
+    setDistributorOpen(
+      location.pathname === "/Distributor" ||
+        location.pathname === "/Distributor_Order_Tracking"
     );
   }, [location.pathname]);
 
@@ -837,13 +842,33 @@ export default function Sidebar({ children }: SidebarProps) {
             </li>
           )}
 
-          {/* Visible to admins, users granted the "Distributor" page, and the Distributor role. */}
+          {/* Distributor — a collapsible group with two sub-pages: Create Order
+              (the line-item form) and Order Tracker (view + track own orders, no
+              staff edit flow). Visible to admins, users granted the "Distributor"
+              page, and the Distributor role. */}
           {(canSee("Distributor") || userRole?.toLowerCase() === "distributor") && (
-            <li className={location.pathname === "/Distributor" ? "active" : ""}>
-              <Link to="/Distributor" onClick={closeSidebar}>
+            <li>
+              <div className="dropdown-toggle" onClick={() => setDistributorOpen(!distributorOpen)}>
                 <SidebarIcon><HiTruck /></SidebarIcon>
                 Distributor
-              </Link>
+                <HiChevronDown className={`sb-chevron ${distributorOpen ? "open" : ""}`} />
+              </div>
+              {distributorOpen && (
+                <ul className="dropdown-list">
+                  <li className={location.pathname === "/Distributor" ? "active" : ""}>
+                    <Link to="/Distributor" onClick={closeSidebar}>
+                      <SidebarIcon><HiPlusCircle /></SidebarIcon>
+                      Create Order
+                    </Link>
+                  </li>
+                  <li className={location.pathname === "/Distributor_Order_Tracking" ? "active" : ""}>
+                    <Link to="/Distributor_Order_Tracking" onClick={closeSidebar}>
+                      <SidebarIcon><HiPresentationChartLine /></SidebarIcon>
+                      Order Tracker
+                    </Link>
+                  </li>
+                </ul>
+              )}
             </li>
           )}
 

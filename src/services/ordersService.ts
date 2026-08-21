@@ -261,6 +261,7 @@ export interface MartOrderPayload {
   delivery_date: string;
   po_number?: string;
   company: number;
+  warehouse_code?: string;
   total_amount: number;
   items: MartOrderItemPayload[];
 }
@@ -340,6 +341,7 @@ export interface Order {
   created_at: string;
   created_by: string | number;
   rejected_by?: string | null;
+  rejection_reason?: string | null;
   total_amount: number;
   sap_doc_number?: string;
   quotation_cancelled?: boolean;
@@ -392,6 +394,15 @@ export interface OrderLog {
   remarks: string;
   performed_by_name: string | null;
   created_at: string;
+}
+
+// Latest SAP Sales Order push result for a distributor order (SalesOrderLog).
+export interface SalesOrderSapStatus {
+  status: "STARTED" | "SUCCESS" | "FAILED";
+  doc_entry: number | null;
+  doc_num: number | null;
+  error_message: string | null;
+  completed_at: string | null;
 }
 
 export interface OrderStockCheckItem {
@@ -660,6 +671,29 @@ export const ordersService = {
   rejectMartOrder: async (orderId: number, reason: string) => {
     const response = await api.post(`/orders/mart/${orderId}/reject/`, { reason });
     return response.data;
+  },
+
+  // Batch lookup of the latest SAP Sales Order result for distributor orders.
+  // Returns a map keyed by order id (as string). Used by the Distributor Order
+  // Tracking page to show DocEntry/DocNum (success) or the SAP error (failure).
+  getSalesOrderSapStatus: async (orderIds: number[]) => {
+    if (!orderIds.length) return {} as Record<string, SalesOrderSapStatus>;
+    const response = await api.get("/orders/sales-order-status/", {
+      params: { order_ids: orderIds.join(",") },
+    });
+    return (response.data?.statuses ?? {}) as Record<string, SalesOrderSapStatus>;
+  },
+
+  // Retry pushing an already-approved distributor order to SAP (mart approver /
+  // admin only). Resolves on success; throws with the SAP error on failure.
+  resendMartOrderToSap: async (orderId: number) => {
+    const response = await api.post(`/orders/mart/${orderId}/resend-sap/`, {});
+    return response.data as {
+      message: string;
+      order_number: string;
+      status?: string;
+      sap?: { doc_entry: number | null; doc_num: number | null };
+    };
   },
 
   // Save a (possibly incomplete) order as a draft. Drafts skip the approval

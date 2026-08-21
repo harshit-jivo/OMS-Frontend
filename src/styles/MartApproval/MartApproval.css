@@ -5,6 +5,18 @@
   color: #1e293b;
 }
 
+/* The grand-total bar is position:fixed at the bottom. On the Mart detail the
+   items are card blocks (not a compact table), so let them flow with the page
+   and reserve enough bottom clearance that the last card is never hidden behind
+   that fixed bar. Scoped to .mart-page so the Auditor detail is untouched. */
+.mart-page.ao-detail {
+  padding-bottom: 150px;
+}
+.mart-page .ao-d-items-scroll {
+  max-height: none;
+  overflow: visible;
+}
+
 .mart-header {
   border-left: 4px solid #2563eb;
   padding-left: 12px;
