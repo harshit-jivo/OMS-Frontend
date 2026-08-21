@@ -1,7 +1,6 @@
 import { defineConfig, loadEnv } from 'vite'
 import type { Connect, ViteDevServer, PreviewServer } from 'vite'
 import react from '@vitejs/plugin-react'
-import basicSsl from '@vitejs/plugin-basic-ssl'
 import { readFileSync } from 'node:fs'
 
 // ---------------------------------------------------------------------------
@@ -132,13 +131,14 @@ export default defineConfig(({ mode, command }) => {
       __APP_VERSION__: JSON.stringify(version),
       __APP_BUILD_NUMBER__: JSON.stringify(buildNumber),
     },
-    // basicSsl only affects the dev server (serves over self-signed HTTPS) so a
-    // phone on the LAN can use the camera, which browsers block on plain HTTP.
-    // It is not added for `build`, so production output is unchanged.
+    // Dev server runs over plain HTTP so it matches the http:// API origin and
+    // there is no mixed-content blocking (an HTTPS page calling an http:// API
+    // is refused by the browser, which broke login). Trade-off: a phone on the
+    // LAN cannot use the browser camera over HTTP — re-enable basicSsl() below
+    // only if that is needed. Not added for `build`, so production is unchanged.
     plugins: [
       react(),
       serviceWorkerNoCache(),
-      ...(command === 'serve' ? [basicSsl()] : []),
     ],
     server: {
       // Listen on all interfaces so the phone can reach it by the PC's LAN IP.
