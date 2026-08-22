@@ -630,6 +630,12 @@
   color: #b91c1c;
 }
 
+/* Not an error — a working fallback that is very likely not what was wanted. */
+.apv-pill.warn {
+  background: #fffbeb;
+  color: #b45309;
+}
+
 .apv-note-err {
   background: #fef2f2;
   border-color: #fecaca;

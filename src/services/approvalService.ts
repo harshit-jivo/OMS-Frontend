@@ -272,6 +272,16 @@ export interface CompanyMapping {
    * nothing to pick from and the account must be named directly.
    */
   cash_gl_account: string;
+  /**
+   * SAP G/L a DEPOSIT credits — the drawer being emptied.
+   *
+   * A second field rather than a reuse of `cash_gl_account` because SAP
+   * validates the two roles differently: a receipt's CashAccount must be a
+   * cash-flow account (OACT.Finanse='Y'), while a deposit posts as a DocType
+   * 'A' transfer whose CardCode must NOT be one. Blank falls back to
+   * `cash_gl_account` on the server.
+   */
+  deposit_source_gl_account: string;
   is_active: boolean;
   sort_order: number;
 }
@@ -285,6 +295,7 @@ export type CompanyMappingPayload = Partial<
     | "hana_schema"
     | "default_bpl_id"
     | "cash_gl_account"
+    | "deposit_source_gl_account"
     | "is_active"
     | "sort_order"
   >
