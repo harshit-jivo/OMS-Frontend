@@ -13,7 +13,7 @@ import "../styles/Invoice_Report.css";
 // always answers 200 + application/pdf (Content-Disposition: inline) and sends
 // no CORS headers, so the PDF is embedded via an <iframe> instead of fetched.
 const BILLPRINT_BASE = String(
-  import.meta.env.VITE_BILLPRINT_API_URL || "http://103.89.45.75:8008",
+  import.meta.env.VITE_BILLPRINT_API_URL || "http://138.252.101.118:8008",
 ).replace(/\/+$/, "");
 
 /**
