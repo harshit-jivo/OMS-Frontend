@@ -4,7 +4,7 @@ import { KeyValues, StatusBadge, ErrorAlert, apiErrorMessage } from "../../compo
 import { haisService, configSummary, holderLabel, type Asset } from "../../services/haisService";
 import AssetHistory from "./AssetHistory";
 import "../../styles/Einvoice.css";
-import "../../styles/HAIS.css";
+import "../../styles/HAIS/HAIS.css";
 
 function statusTone(status?: string): "ok" | "err" | "warn" | "muted" {
   switch ((status || "").toLowerCase()) {

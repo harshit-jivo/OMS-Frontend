@@ -61,6 +61,8 @@ export function trackerLandingPath(pages: Set<string>): string | null {
  *   • tracker sub-roles -> their highest-priority tracker page
  *   • legal reviewers   -> their own workspace
  *   • HAIS role         -> the Hardware Assets page
+ *   • Distributor role  -> the Distributor page
+ *   • Mart Approval role -> the Mart Approval queue
  *   • everyone else     -> the Dashboard
  *
  * Both entry points in `pages/Login.tsx` (the login submit and the
@@ -74,5 +76,7 @@ export function landingPathFor(role?: string | null): string {
   }
   if (normalizeRole(role) === "legal") return "/Label_Checker";
   if (normalizeRole(role) === "hais") return "/HAIS";
+  if (normalizeRole(role) === "distributor") return "/Distributor";
+  if (normalizeRole(role) === "mart_approval") return "/Mart_Approval";
   return "/Dashboard";
 }

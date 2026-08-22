@@ -68,6 +68,10 @@ type InvoiceRecord = {
   invoice_log?: number | string;
   created_by?: number | string;
   created_by_name?: string;
+  // History rows only: the device the action was taken from, stamped server-side
+  // from the caller's X-Device-Id header. Corroborates a disputed approval.
+  device_id?: string;
+  device_name?: string;
   created_at?: string;
   updated_at?: string;
   branch?: string;
@@ -1347,6 +1351,12 @@ export default function InvoiceReview() {
                             </div>
                             {entry.created_by_name && (
                               <p className="ir-timeline-note ir-timeline-by">By: {entry.created_by_name}</p>
+                            )}
+                            {(entry.device_name || entry.device_id) && (
+                              <p className="ir-timeline-note ir-timeline-device">
+                                From: {entry.device_name || "Unknown device"}
+                                {entry.device_id ? ` · ${entry.device_id.slice(0, 8)}` : ""}
+                              </p>
                             )}
                             {entry.rejection_reason && (
                               <p className="ir-timeline-note">Reason: {entry.rejection_reason}</p>

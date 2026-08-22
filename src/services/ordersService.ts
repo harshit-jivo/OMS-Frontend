@@ -92,6 +92,25 @@ export interface PartyProduct {
   sal_pack_unit: string | null;
   tax_rate: string | number;
   basic_rate: string | number;
+  // Combo packs ("A + B") ship B free of cost. `free_item` is present only when
+  // the combo has a mapping configured on the party-product assignment.
+  is_combo?: boolean;
+  free_item_code?: string | null;
+  free_qty_per_unit?: number | null;
+  free_item?: ComboFreeProduct | null;
+}
+
+export interface ComboFreeProduct {
+  item_code: string;
+  item_name: string;
+  category: string;
+  brand: string | null;
+  variety: string | null;
+  sub_group: string | null;
+  sal_factor2: string | number;
+  sal_pack_unit: string | null;
+  tax_rate: string | number;
+  basic_rate: string | number;
 }
   
 export interface SchemeProduct {
@@ -127,11 +146,23 @@ export interface RowType {
 
 export interface OrderItemScheme {
   id?: number;
-  scheme_id: number;
+  /** Legacy `scheme_product` id — absent on a giveaway resolved by the v2 engine. */
+  scheme_id?: number;
   scheme_name?: string | null;
   scheme_item_code?: string | null;
   scheme_qty?: number | string;
   qty_scheme?: number | string;
+
+  // Scheme engine v2 (Backend/docs/scheme-architecture.md). `benefit_item_code`
+  // is the snapshot SAP actually ships, so editing a scheme later cannot change
+  // what an already-approved order sends.
+  scheme_v2_id?: number;
+  benefit_id?: number;
+  benefit_item_code?: string | null;
+  computed_qty?: number | string;
+  is_manual_override?: boolean;
+  scope_type?: string;
+  scope_value?: string;
 }
 
 export interface OrderItem {
@@ -164,6 +195,9 @@ export interface OrderItem {
   scheme_id?: number;
   schemes?: OrderItemScheme[];
   total_ltrs: number;
+  // Zero-priced line auto-added for the free half of a combo pack.
+  is_auto_free?: boolean;
+  combo_source_code?: string | null;
 }
 
 export interface CreateOrder {
@@ -181,6 +215,8 @@ export interface CreateOrder {
 
   delivery_date: string;
   po_number?: string;
+  /** One warehouse for the whole order; blank uses the backend's default. */
+  warehouse_code?: string;
   is_foc?: boolean;
   company: number;
 
@@ -189,6 +225,83 @@ export interface CreateOrder {
   grand_total: number;
 
   items: OrderItem[];
+}
+
+// ── Distributor / Mart flow payload + read models ───────────────────────────
+// Billing-shaped item so a distributor sales order carries the SAME data as a
+// normal order (pcs/boxes/ltrs/landing/tax all computed like Add Sales).
+export interface MartOrderItemPayload {
+  item_code: string;
+  item_name: string;
+  category: string;
+  brand: string;
+  variety: string;
+  sub_group: string;
+  item_type: string;
+  pcs: number;
+  boxes: number;
+  qty: number;
+  ltrs: number;
+  price_list_basic: number;
+  basic_price: number;
+  tax_rate: number;
+  total: number;
+  total_ltrs: number;
+}
+
+export interface MartOrderPayload {
+  order_id?: number;
+  order_type: "DISTRIBUTOR";
+  card_code: string;
+  card_name: string;
+  bill_to_id: number;
+  bill_to_address: string;
+  ship_to_id: number;
+  ship_to_address: string;
+  delivery_date: string;
+  po_number?: string;
+  company: number;
+  warehouse_code?: string;
+  total_amount: number;
+  items: MartOrderItemPayload[];
+}
+
+export interface MartOrderSummary {
+  id: number;
+  order_number: string;
+  order_type: string;
+  card_code: string;
+  card_name: string;
+  company: string;
+  total_amount: string;
+  status: string;
+  status_id: number;
+  is_pending: boolean;
+  status_display: string;
+  po_number?: string;
+  delivery_date?: string | null;
+  created_by?: string | null;
+  created_at?: string;
+  rejection_reason?: string;
+  items_count: number;
+}
+
+export interface MartOrderDetailItem {
+  id: number;
+  item_code: string;
+  item_name: string;
+  category: string;
+  qty: string;
+  basic_price: string;
+  total: string;
+}
+
+export interface MartOrderDetail extends MartOrderSummary {
+  bill_to_id: number;
+  bill_to_address: string;
+  ship_to_id: number;
+  ship_to_address: string;
+  items: MartOrderDetailItem[];
 }
 
 export interface RateApproval {
@@ -219,6 +332,7 @@ export interface Order {
   dispatch_from_id?: number;
   dispatch_from_name?: string;
   po_number: string;
+  warehouse_code?: string;
   is_foc?: boolean;
   company?: string | number;
   remarks?: string;
@@ -227,6 +341,7 @@ export interface Order {
   created_at: string;
   created_by: string | number;
   rejected_by?: string | null;
+  rejection_reason?: string | null;
   total_amount: number;
   sap_doc_number?: string;
   quotation_cancelled?: boolean;
@@ -279,6 +394,15 @@ export interface OrderLog {
   remarks: string;
   performed_by_name: string | null;
   created_at: string;
+}
+
+// Latest SAP Sales Order push result for a distributor order (SalesOrderLog).
+export interface SalesOrderSapStatus {
+  status: "STARTED" | "SUCCESS" | "FAILED";
+  doc_entry: number | null;
+  doc_num: number | null;
+  error_message: string | null;
+  completed_at: string | null;
 }
 
 export interface OrderStockCheckItem {
@@ -515,6 +639,61 @@ export const ordersService = {
     };
     const response = await api.post("/orders/create/", payload);
     return response.data;
+  },
+
+  // ── Distributor / Mart flow ───────────────────────────────────────────────
+  // A distributor order reuses the same /orders/create/ endpoint (so it saves in
+  // the same tables), but with order_type DISTRIBUTOR + company 3. Pass an
+  // orderId (as order_id in the payload) to update an existing one from the
+  // Mart Approval screen.
+  createMartOrder: async (payload: MartOrderPayload) => {
+    const response = await api.post("/orders/create/", payload);
+    return response.data;
+  },
+
+  getMartOrders: async (tab?: "pending" | "approved" | "rejected") => {
+    const response = await api.get("/orders/mart/list/", {
+      params: tab ? { tab } : undefined,
+    });
+    return response.data as MartOrderSummary[];
+  },
+
+  getMartOrderDetail: async (orderId: number) => {
+    const response = await api.get(`/orders/mart/${orderId}/`);
+    return response.data as MartOrderDetail;
+  },
+
+  approveMartOrder: async (orderId: number) => {
+    const response = await api.post(`/orders/mart/${orderId}/approve/`, {});
+    return response.data;
+  },
+
+  rejectMartOrder: async (orderId: number, reason: string) => {
+    const response = await api.post(`/orders/mart/${orderId}/reject/`, { reason });
+    return response.data;
+  },
+
+  // Batch lookup of the latest SAP Sales Order result for distributor orders.
+  // Returns a map keyed by order id (as string). Used by the Distributor Order
+  // Tracking page to show DocEntry/DocNum (success) or the SAP error (failure).
+  getSalesOrderSapStatus: async (orderIds: number[]) => {
+    if (!orderIds.length) return {} as Record<string, SalesOrderSapStatus>;
+    const response = await api.get("/orders/sales-order-status/", {
+      params: { order_ids: orderIds.join(",") },
+    });
+    return (response.data?.statuses ?? {}) as Record<string, SalesOrderSapStatus>;
+  },
+
+  // Retry pushing an already-approved distributor order to SAP (mart approver /
+  // admin only). Resolves on success; throws with the SAP error on failure.
+  resendMartOrderToSap: async (orderId: number) => {
+    const response = await api.post(`/orders/mart/${orderId}/resend-sap/`, {});
+    return response.data as {
+      message: string;
+      order_number: string;
+      status?: string;
+      sap?: { doc_entry: number | null; doc_num: number | null };
+    };
   },
 
   // Save a (possibly incomplete) order as a draft. Drafts skip the approval
