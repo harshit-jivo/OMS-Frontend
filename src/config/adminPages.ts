@@ -20,6 +20,8 @@ export const GRANTABLE_ADMIN_PAGES: GrantablePage[] = [
   // not by per-user extra_pages, so they are intentionally not listed here.
   { key: "Einvoice", label: "e-Invoice (IRN)", path: "/Einvoice" },
   { key: "Ewaybill", label: "e-Way Bill", path: "/Ewaybill" },
+  { key: "Distributor", label: "Distributor", path: "/Distributor" },
+  { key: "Mart_Approval", label: "Mart Approval", path: "/Mart_Approval" },
   // System — one page carrying live device activity and version analytics.
   // "Device_Activity" and "Version_Management" are deliberately no longer
   // grantable: the pages they gated are gone, so offering those permissions

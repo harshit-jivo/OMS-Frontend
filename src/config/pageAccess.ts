@@ -60,6 +60,8 @@ export function trackerLandingPath(pages: Set<string>): string | null {
  * The landing path for ANY role, after a fresh login or a restored session:
  *   • tracker sub-roles -> their highest-priority tracker page
  *   • legal reviewers   -> their own workspace
+ *   • Distributor role  -> the Distributor page
+ *   • Mart Approval role -> the Mart Approval queue
  *   • everyone else     -> the Dashboard
  *
  * Both entry points in `pages/Login.tsx` (the login submit and the
@@ -72,5 +74,7 @@ export function landingPathFor(role?: string | null): string {
     return trackerLandingPath(trackerPagesFor(role)) || TRACKER_PAGES.Tracker_Queue.path;
   }
   if (normalizeRole(role) === "legal") return "/Label_Checker";
+  if (normalizeRole(role) === "distributor") return "/Distributor";
+  if (normalizeRole(role) === "mart_approval") return "/Mart_Approval";
   return "/Dashboard";
 }

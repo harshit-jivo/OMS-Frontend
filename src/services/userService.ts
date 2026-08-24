@@ -55,6 +55,31 @@ export interface BulkPartyUserAssignmentRow {
   card_code: string;
 }
 
+/** A combo pack ("A + B") and the free-of-cost item it carries. */
+export interface ComboMapping {
+  item_code: string;
+  item_name: string;
+  category: string;
+  sal_factor2: string | number | null;
+  party_count: number;
+  mapped_party_count: number;
+  free_item_code: string | null;
+  free_qty_per_unit: number | null;
+  free_item: {
+    item_code: string;
+    item_name: string | null;
+    sal_factor2: string | number | null;
+  } | null;
+  is_partially_mapped: boolean;
+}
+
+export interface ComboMappingPayload {
+  item_code: string;
+  category: string;
+  free_item_code: string;
+  free_qty_per_unit?: number | null;
+}
+
 /* ================= SERVICE ================= */
 
 export const userService = {
@@ -223,6 +248,18 @@ updateUser: async (id: number, data: CreateUserData) => {
       extra_pages: extraPages,
     });
     return response.data;
-  }
+  },
+
+  /* ---- Combo pack -> free item mapping ---- */
+
+  getComboMappings: async () => {
+    const response = await api.get("/auth/combo-mappings/");
+    return (response.data?.data?.combos || []) as ComboMapping[];
+  },
+
+  saveComboMapping: async (payload: ComboMappingPayload) => {
+    const response = await api.post("/auth/combo-mappings/", payload);
+    return response.data;
+  },
 
 };
