@@ -877,8 +877,13 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
       tax_amount: taxAmount,
       grand_total: grandTotal,
 
-      items: rows.map((row, rowIndex) => ({
-        _confirmed: row.confirmed,
+      // Paired with the original row index before filtering, because
+      // `schemeProposals` is keyed by it and dropping the unconfirmed rows
+      // first would renumber them.
+      items: rows
+        .map((row, rowIndex) => ({ row, rowIndex }))
+        .filter((entry) => entry.row.confirmed)
+        .map(({ row, rowIndex }) => ({
         item_code:
           partyProducts.find(
             (p) =>
@@ -925,8 +930,13 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
             // Snapshot: SAP ships this exact item, so editing the scheme later
             // cannot change what an already-approved order sends.
             benefit_item_code: proposal.benefit_item_code,
-            scheme_qty: Number(proposal.qty),
-            computed_qty: Number(proposal.qty),
+            // A SAP DocumentLine quantity is always pieces, so a scheme written
+            // in cartons ships as qty x pack size. `benefit_uom`/`benefit_qty`
+            // keep the original wording for the UI and for audit.
+            scheme_qty: Number(proposal.qty_pieces),
+            computed_qty: Number(proposal.qty_pieces),
+            benefit_uom: proposal.free_uom,
+            benefit_qty: Number(proposal.qty),
             is_manual_override: false,
             scope_type: proposal.scope_type,
             scope_value: proposal.scope_value,
@@ -937,9 +947,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
         total_ltrs:
           Number(row.ltrs) +
           (row.isScheme ? row.schemes.reduce((sum, scheme) => sum + Number(scheme.schemeQty || 0), 0) : 0),
-      }))
-        .filter((item) => item._confirmed)
-        .map(({ _confirmed, ...item }) => item)
+        }))
         .concat(buildComboFreeItems()),
     };
 
@@ -1224,6 +1232,8 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
     itemCode: string;
     itemName: string;
     qty: number;
+    /** How the quantity reads to a human — carries the unit when it is not pieces. */
+    qtyLabel: string;
     note: string;
   };
 
@@ -1265,6 +1275,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
         itemCode: companion.itemCode,
         itemName: companion.itemName,
         qty: companion.qty,
+        qtyLabel: String(companion.qty),
         note: `Free with ${row.item}`,
       });
     }
@@ -1281,7 +1292,15 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
           products.find((p) => p.item_code === proposal.benefit_item_code)?.item_name ||
           partyProducts.find((p) => p.item_code === proposal.benefit_item_code)?.item_name ||
           proposal.benefit_item_code,
+        // Shown in the unit the scheme was written in. A carton giveaway also
+        // spells out the pieces, because that is the number that ships.
         qty: Number(proposal.qty),
+        qtyLabel:
+          proposal.free_uom === "BOX"
+            ? `${Number(proposal.qty)} box${Number(proposal.qty) === 1 ? "" : "es"} (${Number(
+                proposal.qty_pieces,
+              )} pcs)`
+            : `${Number(proposal.qty)}`,
         note: `${proposal.scheme_name} · via ${proposal.scope_type}${
           proposal.scope_value ? ` ${proposal.scope_value}` : ""
         }`,
@@ -1302,6 +1321,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
           itemCode: option?.item_code || "",
           itemName: option?.item_name || option?.scheme_name || "Scheme item",
           qty,
+          qtyLabel: String(qty),
           note: option?.scheme_name ? `Scheme: ${option.scheme_name}` : "Scheme",
         });
       });
@@ -2570,7 +2590,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
             </span>
             <span className="sl-wiz-item-summary-meta">
               {line.note}
-              {line.itemCode ? ` · ${line.itemCode}` : ""} · Qty {line.qty}
+              {line.itemCode ? ` · ${line.itemCode}` : ""} · Qty {line.qtyLabel}
             </span>
           </div>
           <span className="sl-wiz-item-summary-amount">₹ 0.00</span>
@@ -3053,7 +3073,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
                         {line.kind === "combo" ? "Combo" : "Scheme"}
                       </span>
                     </strong>
-                    <span>Qty {line.qty}</span>
+                    <span>Qty {line.qtyLabel}</span>
                     <span className="sl-wiz-review-item-amt">₹ 0.00</span>
                   </div>
                 ))}

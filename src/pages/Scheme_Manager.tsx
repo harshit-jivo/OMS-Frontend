@@ -35,6 +35,12 @@ type PartyOption = { card_code: string; card_name: string };
 type MainGroupOption = { id: number; name: string };
 type CatalogueItem = { item_code: string; item_name: string; category?: string };
 
+/** SAP item codes are prefixed by kind: FG finished goods, PM packing material,
+ *  RM raw material, plus CG and SC. Only FG is sellable, so only FG can appear
+ *  in a scheme. */
+const isFinishedGood = (itemCode: string | undefined | null) =>
+  !!itemCode && itemCode.trim().toUpperCase().startsWith("FG");
+
 const CATEGORIES = ["OIL", "BEVERAGES", "MART"];
 
 /** Pull the API's message / errors out of an axios rejection without `any`. */
@@ -231,6 +237,9 @@ export default function Scheme_Manager() {
   const [draft, setDraft] = useState<SchemeWritePayload>(emptyScheme());
   const [isSaving, setIsSaving] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  // The editor is a wizard: one question per screen, so a half-built offer never
+  // looks finished. Step 4 reads the whole thing back before it is saved.
+  const [editorStep, setEditorStep] = useState(1);
 
   // One row expanded at a time keeps the list scannable.
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -293,12 +302,15 @@ export default function Scheme_Manager() {
       try {
         const data = await sapService.getProducts();
         const list: CatalogueItem[] = Array.isArray(data) ? data : data?.results || data?.data || [];
-        // The same item_code exists once per category; the picker only needs it
-        // once, since a scheme matches on the code alone.
+        // Finished goods only. The catalogue also carries PM (packing material),
+        // RM (raw material), CG and SC — about two thirds of it — and none of
+        // those can be sold, so none can trigger a scheme or be given away.
+        // Also de-duplicated: the same item_code exists once per category, and a
+        // scheme matches on the code alone.
         const seen = new Set<string>();
         setProducts(
           list.filter((p) => {
-            if (!p.item_code || seen.has(p.item_code)) return false;
+            if (!isFinishedGood(p.item_code) || seen.has(p.item_code)) return false;
             seen.add(p.item_code);
             return true;
           }),
@@ -312,7 +324,7 @@ export default function Scheme_Manager() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Escape closes whichever drawer is open — both cover the page.
+  // Escape closes whichever modal is open — both cover the page.
   useEffect(() => {
     if (editingId === null && !checkOpen) return;
     const onKey = (event: KeyboardEvent) => {
@@ -330,6 +342,7 @@ export default function Scheme_Manager() {
     setEditingId(0);
     setDraft(emptyScheme());
     setShowAdvanced(false);
+    setEditorStep(1);
     setNotice(null);
   };
 
@@ -350,6 +363,7 @@ export default function Scheme_Manager() {
       assignments: scheme.assignments,
     });
     setShowAdvanced(false);
+    setEditorStep(1);
     setNotice(null);
   };
 
@@ -379,19 +393,51 @@ export default function Scheme_Manager() {
       assignments: prev.assignments.map((row, i) => (i === index ? { ...row, ...patch } : row)),
     }));
 
-  /** What is still missing before this can be saved, in plain words. */
-  const missing = useMemo(() => {
-    const gaps: string[] = [];
-    if (!draft.name.trim()) gaps.push("a name");
-    if (!draft.code.trim()) gaps.push("a short code");
+  const EDITOR_STEPS = [
+    { n: 1, label: "Name" },
+    { n: 2, label: "Offer" },
+    { n: 3, label: "Who" },
+    { n: 4, label: "Review" },
+  ];
+
+  /** What each step is still missing, in plain words. Keyed by step so the
+   *  wizard can block Next on the screen that owns the gap rather than only
+   *  complaining at the end. */
+  const gapsByStep = useMemo<Record<number, string[]>>(() => {
+    const step1: string[] = [];
+    if (!draft.name.trim()) step1.push("a name");
+    if (!draft.code.trim()) step1.push("a short code");
+
+    const step2: string[] = [];
     if (draft.triggers.some((t) => t.match_type !== "ALL" && !t.match_value.trim()))
-      gaps.push("what earns it");
+      step2.push("what earns it");
+
+    const step3: string[] = [];
     if (draft.assignments.some((a) => a.scope_type !== "ALL" && !a.scope_value.trim()))
-      gaps.push("who each rule sends it to");
-    return gaps;
+      step3.push("who each rule sends it to");
+
+    return { 1: step1, 2: step2, 3: step3, 4: [] };
   }, [draft]);
 
+  /** Everything still missing anywhere — what the Save button waits on. */
+  const missing = useMemo(
+    () => Object.values(gapsByStep).flat(),
+    [gapsByStep],
+  );
+
   const canSave = missing.length === 0;
+  const currentStepGaps = gapsByStep[editorStep] ?? [];
+  const canLeaveStep = currentStepGaps.length === 0;
+
+  /** The first step that still has a gap — where "fix it" should land you. */
+  const firstIncompleteStep =
+    EDITOR_STEPS.find((step) => (gapsByStep[step.n] ?? []).length > 0)?.n ?? 4;
+
+  const goToStep = (step: number) => {
+    // Jumping backwards is always allowed; forwards only as far as the first
+    // unfinished step, so Review can never show a half-built offer.
+    if (step <= editorStep || step <= firstIncompleteStep) setEditorStep(step);
+  };
 
   const saveScheme = async () => {
     setIsSaving(true);
@@ -740,12 +786,12 @@ export default function Scheme_Manager() {
         )}
       </div>
 
-      {/* ---- editor drawer ------------------------------------------- */}
+      {/* ---- editor modal -------------------------------------------- */}
       {editingId !== null && (
         <>
           <div className="sch-scrim" onClick={closeEditor} />
-          <aside className="sch-drawer" role="dialog" aria-modal="true">
-            <div className="sch-drawer-head">
+          <div className="sch-modal" role="dialog" aria-modal="true">
+            <div className="sch-modal-head">
               <div>
                 <h2>{editingId ? editingScheme?.name || "Edit scheme" : "New scheme"}</h2>
                 <p>An offer, what earns it, and who gets it.</p>
@@ -755,9 +801,34 @@ export default function Scheme_Manager() {
               </button>
             </div>
 
-            <div className="sch-drawer-body">
+            <ol className="sch-stepper">
+              {EDITOR_STEPS.map((step) => {
+                const done = step.n < editorStep && (gapsByStep[step.n] ?? []).length === 0;
+                const reachable = step.n <= editorStep || step.n <= firstIncompleteStep;
+                return (
+                  <li
+                    key={step.n}
+                    className={`sch-stepper-item${step.n === editorStep ? " is-current" : ""}${
+                      done ? " is-done" : ""
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => goToStep(step.n)}
+                      disabled={!reachable}
+                      aria-current={step.n === editorStep ? "step" : undefined}
+                    >
+                      <span className="sch-stepper-n">{done ? "✓" : step.n}</span>
+                      <span className="sch-stepper-label">{step.label}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ol>
+
+            <div className="sch-modal-body">
               {/* 1 — the offer -------------------------------------- */}
-              <section className="sch-section">
+              <section className="sch-section" hidden={editorStep !== 1}>
                 <div className="sch-step">
                   <span className="sch-step-n">1</span>
                   <div>
@@ -822,7 +893,7 @@ export default function Scheme_Manager() {
               </section>
 
               {/* 2 — the rule --------------------------------------- */}
-              <section className="sch-section">
+              <section className="sch-section" hidden={editorStep !== 2}>
                 <div className="sch-step">
                   <span className="sch-step-n">2</span>
                   <div>
@@ -981,7 +1052,7 @@ export default function Scheme_Manager() {
               </section>
 
               {/* 3 — who gets it ------------------------------------ */}
-              <section className="sch-section">
+              <section className="sch-section" hidden={editorStep !== 3}>
                 <div className="sch-step">
                   <span className="sch-step-n">3</span>
                   <div>
@@ -1070,6 +1141,68 @@ export default function Scheme_Manager() {
                   </div>
                 )}
               </section>
+
+              {/* 4 — read it back ----------------------------------- */}
+              <section className="sch-section" hidden={editorStep !== 4}>
+                <div className="sch-step">
+                  <span className="sch-step-n">4</span>
+                  <div>
+                    <h3>Check it over</h3>
+                    <p>This is the whole offer. Nothing is saved until you press Create.</p>
+                  </div>
+                </div>
+
+                <dl className="sch-review">
+                  <div>
+                    <dt>Offer</dt>
+                    <dd>
+                      <strong>{draft.name || "—"}</strong>
+                      {draft.code ? ` · ${draft.code}` : ""}
+                      {draft.category ? ` · ${draft.category} only` : " · every category"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Runs</dt>
+                    <dd>
+                      {draft.valid_from || draft.valid_to
+                        ? `${draft.valid_from || "any time"} to ${draft.valid_to || "no end"}`
+                        : "No date limit"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Earns it</dt>
+                    <dd>{draft.triggers.map((t) => describeTrigger(t, itemNameOf)).join(", or ")}</dd>
+                  </div>
+                  <div>
+                    <dt>Gives</dt>
+                    <dd className="sch-review-gives">
+                      {draft.benefits.map((b) => describeBenefit(b, itemNameOf)).join(" and ")}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Goes to</dt>
+                    <dd>
+                      {draft.assignments.length === 0 ? (
+                        <span className="sch-review-warn">
+                          Nobody yet — it will exist but never apply.
+                        </span>
+                      ) : (
+                        draft.assignments
+                          .map(
+                            (a) =>
+                              `${a.is_exclusion ? "except " : ""}${describeScope(a)}`,
+                          )
+                          .join(", ")
+                      )}
+                    </dd>
+                  </div>
+                  {!draft.is_active && (
+                    <div>
+                      <dt>Status</dt>
+                      <dd className="sch-review-warn">Off — it will not apply until switched on.</dd>
+                    </div>
+                  )}
+                </dl>
 
               {/* everything most people never touch ------------------ */}
               <details
@@ -1161,32 +1294,73 @@ export default function Scheme_Manager() {
                   </div>
                 </div>
               </details>
+              </section>
             </div>
 
-            <div className="sch-drawer-foot">
-              <button
-                type="button"
-                className="sch-btn-primary"
-                disabled={!canSave || isSaving}
-                onClick={saveScheme}
-              >
-                {isSaving ? "Saving..." : editingId ? "Save" : "Create scheme"}
-              </button>
+            <div className="sch-modal-foot">
+              {editorStep > 1 && (
+                <button
+                  type="button"
+                  className="sch-btn"
+                  onClick={() => setEditorStep(editorStep - 1)}
+                >
+                  Back
+                </button>
+              )}
+
+              {editorStep < 4 ? (
+                <button
+                  type="button"
+                  className="sch-btn-primary"
+                  disabled={!canLeaveStep}
+                  onClick={() => setEditorStep(editorStep + 1)}
+                >
+                  Next
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="sch-btn-primary"
+                  disabled={!canSave || isSaving}
+                  onClick={saveScheme}
+                >
+                  {isSaving ? "Saving..." : editingId ? "Save" : "Create scheme"}
+                </button>
+              )}
+
               <button type="button" className="sch-btn" onClick={closeEditor}>
                 Cancel
               </button>
-              {!canSave && <span className="sch-missing">Still needs {missing.join(", ")}.</span>}
+
+              {!canLeaveStep ? (
+                <span className="sch-missing">Still needs {currentStepGaps.join(", ")}.</span>
+              ) : (
+                editorStep === 4 &&
+                !canSave && (
+                  <span className="sch-missing">
+                    Still needs {missing.join(", ")} —{" "}
+                    <button
+                      type="button"
+                      className="sch-linkish"
+                      onClick={() => setEditorStep(firstIncompleteStep)}
+                    >
+                      go fix it
+                    </button>
+                    .
+                  </span>
+                )
+              )}
             </div>
-          </aside>
+          </div>
         </>
       )}
 
-      {/* ---- vendor check drawer ------------------------------------- */}
+      {/* ---- vendor check modal -------------------------------------- */}
       {checkOpen && (
         <>
           <div className="sch-scrim" onClick={() => setCheckOpen(false)} />
-          <aside className="sch-drawer" role="dialog" aria-modal="true">
-            <div className="sch-drawer-head">
+          <div className="sch-modal" role="dialog" aria-modal="true">
+            <div className="sch-modal-head">
               <div>
                 <h2>Check a vendor</h2>
                 <p>What reaches them, and what a line would actually give. Nothing is saved.</p>
@@ -1200,10 +1374,10 @@ export default function Scheme_Manager() {
                 ×
               </button>
             </div>
-            <div className="sch-drawer-body">
+            <div className="sch-modal-body">
               <VendorCheck products={products} itemNameOf={itemNameOf} />
             </div>
-          </aside>
+          </div>
         </>
       )}
     </div>
