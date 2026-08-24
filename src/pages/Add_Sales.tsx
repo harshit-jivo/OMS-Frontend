@@ -759,13 +759,6 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
   const validateBeforeSave = () => {
     const confirmedRows = rows.filter((row) => row.confirmed);
 
-    // Only enforced where the field is actually shown — an edit that hides it
-    // must not be blocked by a PO it cannot type.
-    if (canEditPoNumber && !formData.poNumber.trim()) {
-      alert("PO Number is required.");
-      return false;
-    }
-
     if (confirmedRows.length === 0) {
       alert("Please confirm at least one item before submitting the order.");
       return false;
@@ -3029,7 +3022,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
         {canEditPoNumber && (
           <div className="sl-field">
             <label className="sl-label" htmlFor="wiz-po">
-              PO Number <span className="sl-required">*</span>
+              PO Number
             </label>
             <div className="sl-input-wrap">
               <input
@@ -3228,9 +3221,8 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
         confirmedRows.length > 0 && !rows.some((r) => !r.confirmed && r.item)
       );
     if (step === 3)
-      return Boolean(
-        formData.company && (!canEditPoNumber || formData.poNumber.trim()),
-      );
+      // PO Number is optional, so step 3 only needs the company.
+      return Boolean(formData.company);
     return true;
   };
 
@@ -4122,7 +4114,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
           {canEditPoNumber && (
             <div className="sl-field">
               <label className="sl-label" htmlFor="poNumber">
-                PO Number <span className="sl-required">*</span>
+                PO Number
               </label>
               <div className="sl-input-wrap">
                 <input
