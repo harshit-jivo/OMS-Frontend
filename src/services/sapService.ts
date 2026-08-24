@@ -299,6 +299,16 @@ export const sapService = {
     return response.data as PendingDispatchResponse;
   },
 
+  /** Warehouses an order can ship from. `branch` picks the HANA schema. */
+  getWarehouses: async (branch: "OIL" | "BEVERAGE" | "MART" = "OIL") => {
+    const response = await api.get("/hana/warehouses/", { params: { branch } });
+    const rows = Array.isArray(response.data) ? response.data : [];
+    return rows.map((row: { WhsCode?: string; WhsName?: string }) => ({
+      code: String(row.WhsCode || ""),
+      name: String(row.WhsName || row.WhsCode || ""),
+    })) as { code: string; name: string }[];
+  },
+
   getAddresses: async () => {
     const response = await api.get("/sap/addresses/");
     return response.data;

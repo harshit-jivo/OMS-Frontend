@@ -49,6 +49,9 @@ import Device_Management from "./pages/Device_Management";
 import Invoice_Report from "./pages/Invoice_Report";
 import Inventory_Report from "./pages/Inventory_Report";
 import SO_Invoice_Report from "./pages/SO_Invoice_Report";
+import Distributor from "./pages/Distributor";
+import Distributor_Order_Tracking from "./pages/Distributor/Order_Tracking";
+import MartApproval from "./pages/MartApproval";
 
 function App() {
   return (
@@ -56,6 +59,7 @@ function App() {
       <ErrorBoundary>
       <Routes>
         <Route path="/" element={<Login />} />
+
 
         <Route
           path="/Dashboard"
@@ -293,6 +297,15 @@ function App() {
         />
 
         <Route
+          path="/Distributor_Order_Tracking"
+          element={
+            <Sidebar>
+              <Distributor_Order_Tracking />
+            </Sidebar>
+          }
+        />
+
+        <Route
           path="/Party_Assignment"
           element={
             <Sidebar>
@@ -429,6 +442,24 @@ function App() {
           element={
             <Sidebar>
               <Ewaybill />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Distributor"
+          element={
+            <Sidebar>
+              <Distributor />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Mart_Approval"
+          element={
+            <Sidebar>
+              <MartApproval />
             </Sidebar>
           }
         />
