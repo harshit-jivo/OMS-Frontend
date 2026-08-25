@@ -125,6 +125,22 @@ export interface SchemeProduct {
   sal_pack_unit: string | null;
 }
 
+// A row of the scheme_product catalogue, as returned by /orders/schemes/manage/.
+// scheme_id is the only unique identifier — scheme_name is reused across states.
+export interface SchemeRow {
+  scheme_id: number;
+  scheme_name: string;
+  item_code: string | null;
+  item_name: string | null;
+  state?: number | null;
+  state_code?: string | null;
+  state_name?: string | null;
+  is_active: boolean;
+  product_id?: number | null;
+  sal_factor2?: string | number | null;
+  sal_pack_unit?: string | null;
+}
+
 export interface RowType {
   category: string;
   brand: string;
@@ -836,6 +852,47 @@ export const ordersService = {
   });
 
   return response.data;
-}
+},
+
+  // Full scheme rows (incl. item_code + is_active) for the Add Scheme manage table.
+  // Distinct from getSchemeProducts(), which feeds the Add Sales picker.
+  getSchemesForManage: async (params?: {
+    state_code?: string;
+    search?: string;
+    include_inactive?: boolean;
+  }) => {
+    const response = await api.get("/orders/schemes/manage/", {
+      params: {
+        ...(params?.state_code ? { state_code: params.state_code } : {}),
+        ...(params?.search ? { search: params.search } : {}),
+        ...(params?.include_inactive ? { include_inactive: "true" } : {}),
+      },
+    });
+    return (response.data?.data ?? []) as SchemeRow[];
+  },
+
+  updateScheme: async (
+    schemeId: number,
+    data: {
+      scheme_name?: string;
+      item_code?: string;
+      state_code?: string;
+      is_active?: boolean;
+    },
+  ) => {
+    const response = await api.patch(`/orders/schemes/${schemeId}/`, data, {
+      headers: { "Content-Type": "application/json" },
+    });
+    return response.data;
+  },
+
+  // Deactivates by default (historical order lines keep pointing at the scheme).
+  // hard=true only succeeds when no order line references it.
+  deleteScheme: async (schemeId: number, hard = false) => {
+    const response = await api.delete(`/orders/schemes/${schemeId}/`, {
+      params: hard ? { hard: "true" } : undefined,
+    });
+    return response.data;
+  },
 
 };

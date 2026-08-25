@@ -407,6 +407,20 @@ a.ir-btn {
   background: #b45309;
 }
 
+/* Destructive, but recoverable — outlined rather than solid red, so it never
+   competes with Approve/Post for attention in a crowded row. */
+.ir-btn-delete {
+  background: #fff;
+  border-color: #e2e8f0;
+  color: #94a3b8;
+}
+
+.ir-btn-delete:hover:not(:disabled) {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #dc2626;
+}
+
 /* Bill print / invoice report */
 .ir-btn-report {
   background: #0f766e;
@@ -791,6 +805,28 @@ a.ir-btn {
 .ir-cell-code {
   font-weight: 700;
   color: #0f172a;
+}
+
+/* Product name leads, with the FG code kept underneath — reviewers read names,
+   but the code is still what SAP was sent. */
+.ir-cell-item {
+  min-width: 200px;
+}
+
+.ir-item-name {
+  display: block;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.35;
+}
+
+.ir-item-code {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+  letter-spacing: 0.02em;
 }
 
 .ir-batch-chips {

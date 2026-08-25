@@ -234,7 +234,6 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
     comment: "",
     // Company-3 (Mart) orders pick a dispatch warehouse. Display-only for now —
     // not sent to the backend. Defaults to GP-FGM.
-    warehouse: "GP-FGM",
   });
 
   const [rows, setRows] = useState<SalesRow[]>([createEmptyRow()]);
@@ -819,7 +818,6 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
           normalizeOptionText(item?.name).includes("jivo wellness"),
         )?.id || "",
       ),
-      warehouse: "",
       comment: "",
       warehouse: "GP-FGM",
     });
@@ -3230,9 +3228,8 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
         confirmedRows.length > 0 && !rows.some((r) => !r.confirmed && r.item)
       );
     if (step === 3)
-      return Boolean(
-        formData.company && (!canEditPoNumber || formData.poNumber.trim()),
-      );
+      // PO Number is optional, so step 3 only needs the company.
+      return Boolean(formData.company);
     return true;
   };
 

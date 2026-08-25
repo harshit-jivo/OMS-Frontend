@@ -55,6 +55,25 @@ const urlBase64ToUint8Array = (base64String: string): Uint8Array => {
   return outputArray;
 };
 
+/**
+ * Bounded `navigator.serviceWorker.ready`.
+ *
+ * That promise resolves only once a worker is ACTIVE for this scope. When none
+ * was ever registered it does not reject -- it simply never settles, so a plain
+ * `await` hangs forever and no try/catch can see it. `isWebPushSupported()` does
+ * not help: it reports whether the browser *has* the API, not whether a worker
+ * is registered. Callers treat a null result as "no usable worker, carry on".
+ */
+const serviceWorkerReady = (
+  timeoutMs = 2000,
+): Promise<ServiceWorkerRegistration | null> =>
+  Promise.race([
+    navigator.serviceWorker.ready,
+    new Promise<null>((resolve) =>
+      window.setTimeout(() => resolve(null), timeoutMs),
+    ),
+  ]);
+
 let registrationPromise: Promise<ServiceWorkerRegistration | null> | null = null;
 
 export const registerServiceWorker =
@@ -119,7 +138,8 @@ export const subscribeToPush = async (): Promise<boolean> => {
   if (!registration) return false;
 
   try {
-    const ready = await navigator.serviceWorker.ready;
+    const ready = await serviceWorkerReady();
+    if (!ready) return false;
     const publicKey = await fetchPublicKey();
     if (!publicKey) return false;
     const desiredKey = urlBase64ToUint8Array(publicKey);
@@ -180,13 +200,19 @@ export const persistSubscription = async (
 export const unsubscribeFromPush = async (): Promise<void> => {
   if (!isWebPushSupported()) return;
   try {
-    const ready = await navigator.serviceWorker.ready;
+    const ready = await serviceWorkerReady();
+    // No worker was ever registered (push never enabled on this browser), so
+    // there is nothing to unsubscribe -- and waiting on it would hang sign-out.
+    if (!ready) return;
     const subscription = await ready.pushManager.getSubscription();
     if (!subscription) return;
 
     try {
+      // Bounded: `api` is created without a timeout (axios defaults to 0 =
+      // wait forever), and this runs on the sign-out path.
       await api.delete("/orders/web-push/subscribe/", {
         data: { subscription: subscription.toJSON() },
+        timeout: 3000,
       });
     } catch {
       /* backend cleanup is best-effort */

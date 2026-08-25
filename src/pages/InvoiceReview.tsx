@@ -14,6 +14,7 @@ import {
   HiBanknotes,
   HiArrowUturnLeft,
   HiDocumentText,
+  HiTrash,
 } from "react-icons/hi2";
 import { API_BASE_URL } from "../services/api";
 import { apiFetch, apiUpload, EDIT_RESTORE_STORAGE_KEY } from "./SalesInvoice/useSalesInvoice";
@@ -68,15 +69,15 @@ type InvoiceRecord = {
   invoice_log?: number | string;
   created_by?: number | string;
   created_by_name?: string;
-  // History rows only: the device the action was taken from, stamped server-side
-  // from the caller's X-Device-Id header. Corroborates a disputed approval.
-  device_id?: string;
-  device_name?: string;
   created_at?: string;
   updated_at?: string;
   branch?: string;
   warehouse?: string;
   invoice_payload?: InvoicePayload | string;
+  /** {item_code: product name} for the payload's lines, resolved by the API from
+   *  the synced catalogue. The payload itself still carries only codes — it is
+   *  the record of what went to SAP. */
+  item_names?: Record<string, string>;
   // SAP identifiers recorded when the invoice posted; drive the bill print.
   sap_doc_num?: string | null;
   sap_doc_entry?: string | null;
@@ -87,6 +88,14 @@ type InvoiceRecord = {
   supersedes_status?: string | null;
   supersedes_rejection_reason?: string | null;
   superseded_by_id?: number | string | null;
+  // Soft delete. `can_delete` is decided by the backend from the row's status,
+  // so the deletable-status list lives in one place and this screen does not
+  // keep a second copy of it.
+  is_deleted?: boolean;
+  can_delete?: boolean;
+  deleted_at?: string | null;
+  deleted_by_name?: string | null;
+  delete_reason?: string | null;
   [key: string]: unknown;
 };
 
@@ -98,7 +107,12 @@ type ApiMessageResponse = {
   [key: string]: unknown;
 };
 
-const STATUS_FILTERS: Array<{ key: InvoiceStatus | "ALL"; label: string }> = [
+// Deleting is a soft delete on the backend — the log and its history survive,
+// and it stays queryable with ?include_deleted=true — but the review screen
+// simply stops listing the row. There is no Deleted tab.
+type FilterKey = InvoiceStatus | "ALL";
+
+const STATUS_FILTERS: Array<{ key: FilterKey; label: string }> = [
   { key: "PENDING", label: "Pending" },
   { key: "APPROVED", label: "Approved" },
   { key: "POSTED_TO_SAP", label: "Posted to SAP" },
@@ -114,7 +128,7 @@ const statusLabel = (status: InvoiceStatus) => status.replace(/_/g, " ");
 
 // Per-tab count map used for the number badges on the filter tabs. "ALL" holds
 // the grand total across every status.
-type StatusCounts = Record<InvoiceStatus | "ALL", number>;
+type StatusCounts = Record<FilterKey, number>;
 
 const createEmptyCounts = (): StatusCounts => ({
   PENDING: 0,
@@ -301,23 +315,31 @@ const hasRef = (value: unknown) => value !== undefined && value !== null && valu
 
 const trimmed = (value: unknown) => String(value ?? "").trim();
 
-type ReportRef = { docEntry: string; docNum: string; party: string };
+type ReportRef = { docEntry: string; docNum: string; party: string; branch: string };
 
 // The report can only be generated once we know which SAP document to print.
 const invoiceReportRef = (record: InvoiceRecord): ReportRef | null => {
   const docEntry = trimmed(record.sap_doc_entry);
   const docNum = trimmed(record.sap_doc_num);
   if (!docEntry && !docNum) return null;
-  return { docEntry, docNum, party: trimmed(record.party_name) };
+  return {
+    docEntry,
+    docNum,
+    party: trimmed(record.party_name),
+    branch: trimmed(record.branch),
+  };
 };
 
 // The party name only travels so the backend can name the download
 // "<DocNum> <Party Name>.pdf"; it plays no part in resolving the document.
+// The branch does: oil and beverage are separate company databases with
+// separate Crystal reports, and the backend defaults to oil without it.
 const invoiceReportUrl = (ref: ReportRef) => {
   const params = new URLSearchParams();
   if (ref.docNum) params.set("docNum", ref.docNum);
   if (ref.docEntry) params.set("docEntry", ref.docEntry);
   if (ref.party) params.set("party", ref.party);
+  if (ref.branch) params.set("branch", ref.branch);
   return `${API_BASE_URL}/invoice/crystal/?${params.toString()}`;
 };
 
@@ -340,8 +362,21 @@ const updateInvoiceStatus = (
     body: JSON.stringify({ status, ...(extra || {}) }),
   });
 
+/**
+ * Remove an entry from the review screen. This is a soft delete: the backend
+ * hides the row and stamps who removed it, but the invoice log and its whole
+ * history survive — a row removed by mistake is still in the database and can
+ * be brought back with POST /api/invoice/<id>/delete/, which this screen no
+ * longer offers. Refused with 409 for APPROVED and POSTED_TO_SAP.
+ */
+const deleteInvoice = (id: InvoiceRecord["id"]) =>
+  apiFetch<ApiMessageResponse>(`/api/invoice/${id}/delete/`, {
+    method: "DELETE",
+    body: JSON.stringify({}),
+  });
+
 export default function InvoiceReview() {
-  const [statusFilter, setStatusFilter] = useState<InvoiceStatus | "ALL">("PENDING");
+  const [statusFilter, setStatusFilter] = useState<FilterKey>("PENDING");
   const [records, setRecords] = useState<InvoiceRecord[]>([]);
   const [counts, setCounts] = useState<StatusCounts>(createEmptyCounts);
   const [loading, setLoading] = useState(false);
@@ -382,7 +417,11 @@ export default function InvoiceReview() {
   const canApproveReject = isFactoryApprover;
   const visibleFilters = isFactoryApprover
     ? STATUS_FILTERS.filter(
-        (f) => f.key === "PENDING" || f.key === "APPROVED" || f.key === "REJECTED" || f.key === "EDITED",
+        (f) =>
+          f.key === "PENDING"
+          || f.key === "APPROVED"
+          || f.key === "REJECTED"
+          || f.key === "EDITED",
       )
     : STATUS_FILTERS;
 
@@ -391,13 +430,16 @@ export default function InvoiceReview() {
   // full unfiltered list once and count each status client-side.
   const loadCounts = useCallback(async () => {
     try {
+      // Deleted rows are left out entirely: the endpoint hides them by default,
+      // and no tab lists them, so counting them would badge a tab with rows the
+      // reviewer cannot see.
       const data = await apiFetch<unknown>(`/api/invoice/logs/all/`);
       const all = extractRecords(data);
       const next = createEmptyCounts();
       all.forEach((record) => {
         next[normalizeStatus(record.status)] += 1;
+        next.ALL += 1;
       });
-      next.ALL = all.length;
       setCounts(next);
     } catch (err) {
       console.error(err);
@@ -408,6 +450,8 @@ export default function InvoiceReview() {
     setLoading(true);
     setError("");
     try {
+      // Deleted rows never come back: the endpoint hides them unless
+      // include_deleted is set, which nothing here asks for.
       const query = statusFilter === "ALL" ? "" : `?status=${statusFilter}`;
       const data = await apiFetch<unknown>(`/api/invoice/logs/all/${query}`);
       setRecords(extractRecords(data));
@@ -428,6 +472,13 @@ export default function InvoiceReview() {
 
   const selectedPayload = useMemo(
     () => (selected ? parsePayload(selected.invoice_payload) : {}),
+    [selected],
+  );
+
+  // Product name for a line's code. Empty when the catalogue has no row for it,
+  // in which case the table falls back to showing the code on its own.
+  const itemNameOf = useCallback(
+    (itemCode?: string) => (itemCode ? selected?.item_names?.[itemCode] || "" : ""),
     [selected],
   );
 
@@ -481,6 +532,43 @@ export default function InvoiceReview() {
     } catch (err) {
       console.error(err);
       setActionError(extractMessage(err, `Unable to ${status === "APPROVED" ? "approve" : "reject"} the invoice.`));
+    } finally {
+      setActionId(null);
+    }
+  };
+
+  // Remove an entry from the review screen. Nothing is erased — the backend soft
+  // deletes, so the log and its history survive — but the row is gone from every
+  // tab here, which is why the confirmation says so plainly.
+  //
+  // One confirmation, no reason prompt: the reviewer deleting the row is already
+  // recorded against it, and the delete is reversible, so making them type a
+  // reason bought nothing.
+  const handleDelete = async (record: InvoiceRecord) => {
+    if (record.id === undefined || record.id === null) {
+      setActionError("This invoice has no identifier and cannot be deleted.");
+      return;
+    }
+    const label = `SO #${record.so_number || record.id}`;
+    if (
+      !window.confirm(
+        `Remove ${label} from the review screen?\n\nIt will no longer appear on any tab.`,
+      )
+    ) {
+      return;
+    }
+
+    setActionId(record.id);
+    setActionError("");
+    setActionMessage("");
+    try {
+      const data = await deleteInvoice(record.id);
+      setActionMessage(extractMessage(data, "Invoice deleted."));
+      setSelected(null);
+      await loadInvoices();
+    } catch (err) {
+      console.error(err);
+      setActionError(extractMessage(err, "Unable to delete the invoice."));
     } finally {
       setActionId(null);
     }
@@ -723,7 +811,12 @@ export default function InvoiceReview() {
   const loaderReportUrl = (() => {
     const { docNum, docEntry } = sapPost.state;
     if (!docNum && !docEntry) return undefined;
-    return invoiceReportUrl({ docNum, docEntry, party: trimmed(postingRecord?.party_name) });
+    return invoiceReportUrl({
+      docNum,
+      docEntry,
+      party: trimmed(postingRecord?.party_name),
+      branch: trimmed(postingRecord?.branch),
+    });
   })();
 
   // Dismiss the loader; refresh the list once the run has settled so the row
@@ -852,6 +945,10 @@ export default function InvoiceReview() {
                   const status = normalizeStatus(record.status);
                   const busy = actionId === record.id;
                   const reportRef = invoiceReportRef(record);
+                  // The backend decides which statuses may be removed and says so
+                  // per row; older responses without the flag simply show no
+                  // Delete button rather than offering one that would be refused.
+                  const canDelete = Boolean(record.can_delete);
                   return (
                     <tr key={record.id ?? index}>
                       <td>
@@ -1002,6 +1099,20 @@ export default function InvoiceReview() {
                               {busy ? "…" : "Edit"}
                             </button>
                           )}
+                          {/* Last, so it never sits where Approve/Post used to be
+                              and gets hit by muscle memory. */}
+                          {canDelete && (
+                            <button
+                              type="button"
+                              className="ir-btn ir-btn-delete ir-btn-sm"
+                              disabled={busy}
+                              onClick={() => handleDelete(record)}
+                              title="Remove this entry from the review screen"
+                            >
+                              <HiTrash aria-hidden="true" />
+                              {busy ? "…" : "Delete"}
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -1127,7 +1238,7 @@ export default function InvoiceReview() {
                 <table className="ir-table ir-table-compact">
                   <thead>
                     <tr>
-                      <th>Item Code</th>
+                      <th>Item</th>
                       <th>Warehouse</th>
                       <th className="ir-num">Qty</th>
                       <th>Tax Code</th>
@@ -1137,7 +1248,16 @@ export default function InvoiceReview() {
                   <tbody>
                     {(selectedPayload.DocumentLines || []).map((line, index) => (
                       <tr key={line.LineNum ?? index}>
-                        <td className="ir-cell-code">{line.ItemCode || "—"}</td>
+                        <td className="ir-cell-item">
+                          {itemNameOf(line.ItemCode) ? (
+                            <>
+                              <span className="ir-item-name">{itemNameOf(line.ItemCode)}</span>
+                              <span className="ir-item-code">{line.ItemCode}</span>
+                            </>
+                          ) : (
+                            <span className="ir-item-name">{line.ItemCode || "—"}</span>
+                          )}
+                        </td>
                         <td>{line.WarehouseCode || "—"}</td>
                         <td className="ir-num">{toNumber(line.Quantity).toLocaleString("en-IN")}</td>
                         <td>{line.TaxCode || "—"}</td>
@@ -1351,12 +1471,6 @@ export default function InvoiceReview() {
                             </div>
                             {entry.created_by_name && (
                               <p className="ir-timeline-note ir-timeline-by">By: {entry.created_by_name}</p>
-                            )}
-                            {(entry.device_name || entry.device_id) && (
-                              <p className="ir-timeline-note ir-timeline-device">
-                                From: {entry.device_name || "Unknown device"}
-                                {entry.device_id ? ` · ${entry.device_id.slice(0, 8)}` : ""}
-                              </p>
                             )}
                             {entry.rejection_reason && (
                               <p className="ir-timeline-note">Reason: {entry.rejection_reason}</p>

@@ -56,6 +56,29 @@ export type FreightMaster = {
   ExpnsName: string;
 };
 
+/** A batch another in-flight invoice log is already holding. */
+export type ReservedBatch = {
+  item_code: string;
+  warehouse_code: string;
+  batch_number: string;
+  quantity: number;
+  log_id: number;
+  status: string;
+};
+
+/** Key a batch is reserved under: item, warehouse and batch number together. */
+export const reservedBatchKey = (itemCode?: string, whsCode?: string, batchNumber?: string) =>
+  `${String(itemCode || "").trim().toUpperCase()}|${String(whsCode || "").trim().toUpperCase()}|${String(batchNumber || "").trim().toUpperCase()}`;
+
+/** A sales order already carried by an in-flight invoice log. */
+export type UsedSalesOrder = {
+  so_number: string;
+  log_id: number;
+  status: string;
+  sap_doc_num?: string;
+  created_at?: string;
+};
+
 export type NextDocNumber = {
   NextNumber: number | string | null;
 };
@@ -489,6 +512,13 @@ export function useSalesInvoice() {
   const [selectedLines, setSelectedLines] = useState<Record<string, SelectedLine>>({});
   const [freightOptions, setFreightOptions] = useState<FreightMaster[]>([]);
   const [nextDocNumber, setNextDocNumber] = useState("");
+  // SOs an invoice log already covers. SAP only closes an order once its
+  // invoice posts, so without this two people can invoice the same SO twice.
+  const [usedSalesOrders, setUsedSalesOrders] = useState<Record<string, UsedSalesOrder>>({});
+  // Batches another draft already holds. SAP does not know a batch is spoken
+  // for until the invoice posts, so without this two drafts allocate the same
+  // stock. A rejected log releases its batches — the backend leaves those out.
+  const [reservedBatches, setReservedBatches] = useState<ReservedBatch[]>([]);
   const [freightRows, setFreightRows] = useState<FreightRow[]>([]);
   const [customerDetails, setCustomerDetails] = useState<CustomerDetails | null>(null);
   const [salespersonDetails, setSalespersonDetails] = useState<SalespersonDetails | null>(null);
@@ -528,6 +558,47 @@ export function useSalesInvoice() {
 
     loadParties();
   }, [branch]);
+
+  const loadReservedBatches = useCallback(async () => {
+    if (!branch) {
+      setReservedBatches([]);
+      return;
+    }
+    try {
+      const data = await apiFetch<{ data?: ReservedBatch[] }>(
+        `/api/invoice/reserved-batches/?branch=${encodeURIComponent(branch)}`,
+      );
+      setReservedBatches(Array.isArray(data?.data) ? data.data : []);
+    } catch (error) {
+      // Best effort: without it auto-allocation simply behaves as before.
+      console.error("Unable to load reserved batches", error);
+      setReservedBatches([]);
+    }
+  }, [branch]);
+
+  useEffect(() => {
+    void loadReservedBatches();
+  }, [loadReservedBatches]);
+
+  /**
+   * How much of each batch other in-flight drafts hold — a QUANTITY per batch,
+   * not a flag.
+   *
+   * One batch commonly carries thousands of pieces and is shared across many
+   * invoices. Treating it as taken the moment another draft touched it locked
+   * the whole batch away over a handful of pieces, which in practice meant the
+   * batch could not be used at all. Netting the held quantity off the batch's
+   * stock leaves the rest available, and the batch only drops out once it is
+   * genuinely exhausted.
+   */
+  const reservedBatchQty = useMemo(() => {
+    const held = new Map<string, number>();
+    for (const row of reservedBatches) {
+      const key = reservedBatchKey(row.item_code, row.warehouse_code, row.batch_number);
+      held.set(key, (held.get(key) || 0) + toNumber(row.quantity));
+    }
+    return held;
+  }, [reservedBatches]);
 
   useEffect(() => {
     if (!branch) return;
@@ -627,6 +698,23 @@ export function useSalesInvoice() {
       const orders = Array.isArray(data) ? data : data.data || data.results || [];
       const normalized = orders.map(normalizeOrder);
       setSalesOrders(normalized);
+
+      // Best effort: the SO list is still usable without the badges, so a
+      // failure here must not fail the step.
+      try {
+        const used = await apiFetch<{ data?: UsedSalesOrder[] }>(
+          `/api/invoice/used-sales-orders/?card_code=${encodeURIComponent(party.CardCode)}&branch=${encodeURIComponent(branch || "")}`,
+        );
+        const byNumber: Record<string, UsedSalesOrder> = {};
+        (used?.data || []).forEach((row) => {
+          if (row?.so_number) byNumber[String(row.so_number)] = row;
+        });
+        setUsedSalesOrders(byNumber);
+      } catch (error) {
+        console.error("Unable to load in-flight invoice logs", error);
+        setUsedSalesOrders({});
+      }
+
       return normalized;
     } catch (error) {
       console.error(error);
@@ -1158,6 +1246,9 @@ export function useSalesInvoice() {
       // session must not try to retire anything again.
       if (editedFrom !== null) setEditLink(null);
       setPostSuccess(extractApiMessage(data, "Invoice submitted for review and approval."));
+      // The batches this invoice just claimed are now held — pick them up so the
+      // next draft in this session does not allocate them again.
+      void loadReservedBatches();
     } catch (error) {
       console.error(error);
       setPostError(formatApiErrorMessage(error instanceof Error ? error.message : error, "Unable to submit invoice for review."));
@@ -1185,6 +1276,10 @@ export function useSalesInvoice() {
     salespersonDetails,
     billToAddresses,
     shipToAddresses,
+    usedSalesOrders,
+    reservedBatches,
+    reservedBatchQty,
+    refreshReservedBatches: loadReservedBatches,
     nextDocNumber,
     form,
     totals,

@@ -3,6 +3,18 @@ import { HiArrowRight } from "react-icons/hi2";
 import { formatDateDisplay, formatMoney, lineKey, toNumber } from "./salesInvoice.utils";
 import { apiFetch, hanaUrl, type SalesInvoiceState } from "./useSalesInvoice";
 
+/** What an in-flight invoice log's status means for someone about to invoice
+ *  this SO. SAP keeps reporting the order open until that invoice posts, so
+ *  without the warning the same SO gets invoiced twice. */
+const USED_STATUS_LABELS: Record<string, string> = {
+  PENDING: "Awaiting review",
+  APPROVED: "Approved, not posted",
+  EDITED: "Being reworked",
+  ERROR: "Failed, in a log",
+  CL_RAISED: "Credit limit raised",
+  POSTED_TO_SAP: "Already invoiced",
+};
+
 type Props = {
   state: SalesInvoiceState;
   continueLabel?: string;
@@ -132,6 +144,9 @@ export default function OrdersStep({
     .find((entry) => entry.key === activeOrderKey);
   const activeOrder = activeOrderEntry?.order || filteredOrders[0] || null;
   const activeOrderIndex = activeOrderEntry?.index || 0;
+  const activeUsedBy = activeOrder
+    ? state.usedSalesOrders?.[String(activeOrder.DocNum || activeOrder.DocEntry || activeOrderIndex + 1)]
+    : undefined;
   const activeOrderLines = activeOrder ? state.getOrderLines(activeOrder) : [];
   const activeOpenLines = activeOrderLines.filter((line) => toNumber(line.OpenQty) > 0);
   const selectedActiveOpenLineCount = activeOrder
@@ -228,10 +243,13 @@ export default function OrdersStep({
                   const isActive = activeOrderKey === docKey;
                   const isSelected = selectedCount > 0;
                   const docNum = order.DocNum || order.DocEntry || index + 1;
+                  const usedBy = state.usedSalesOrders?.[String(docNum)];
 
                   return (
                     <div
-                      className={`si-so-list-row${isActive ? " is-active" : ""}${isSelected ? " is-selected" : ""}`}
+                      className={`si-so-list-row${isActive ? " is-active" : ""}${isSelected ? " is-selected" : ""}${
+                        usedBy && !isSelected ? " is-already-logged" : ""
+                      }`}
                       role="button"
                       tabIndex={0}
                       key={docKey}
@@ -252,7 +270,19 @@ export default function OrdersStep({
                         aria-label={`Select sales order ${docNum}`}
                       />
                       <span>
-                        <strong>SO #{docNum}</strong>
+                        <strong>
+                          SO #{docNum}
+                          {usedBy && (
+                            <em
+                              className="si-so-used-badge"
+                              title={`Invoice log #${usedBy.log_id}${
+                                usedBy.sap_doc_num ? ` · SAP invoice ${usedBy.sap_doc_num}` : ""
+                              }${usedBy.created_at ? ` · ${formatDateDisplay(usedBy.created_at)}` : ""}`}
+                            >
+                              {USED_STATUS_LABELS[usedBy.status] || "Already in a log"}
+                            </em>
+                          )}
+                        </strong>
                         <small>
                           {formatDateDisplay(order.DocDate)} - Due {formatDateDisplay(order.DocDueDate)}
                         </small>
@@ -267,9 +297,18 @@ export default function OrdersStep({
                   <>
                     <header className="si-so-lines-head">
                       <div>
-                        <strong>SO #{activeOrder.DocNum || activeOrder.DocEntry || activeOrderIndex + 1}</strong>
+                        <strong>
+                          SO #{activeOrder.DocNum || activeOrder.DocEntry || activeOrderIndex + 1}
+                          {activeUsedBy && (
+                            <em className="si-so-used-badge">
+                              {USED_STATUS_LABELS[activeUsedBy.status] || "Already in a log"}
+                            </em>
+                          )}
+                        </strong>
                         <span>
-                          {formatDateDisplay(activeOrder.DocDate)} - Due {formatDateDisplay(activeOrder.DocDueDate)}
+                          {activeUsedBy
+                            ? `Invoice log #${activeUsedBy.log_id} already covers this order`
+                            : `${formatDateDisplay(activeOrder.DocDate)} - Due ${formatDateDisplay(activeOrder.DocDueDate)}`}
                         </span>
                       </div>
                       {/* <div className="si-so-lines-actions">

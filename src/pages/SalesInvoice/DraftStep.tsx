@@ -89,16 +89,6 @@ function DraftDocumentStrip({ state }: { state: SalesInvoiceState }) {
   return (
     <div className="si-draft-summary-dates">
       <EditableDate label="Posting Date" value={state.form.postingDate} onChange={updatePostingDate} />
-      <EditableDate
-        label="Appointment Date"
-        value={state.form.receivedDate}
-        onChange={(value) => state.updateForm({ receivedDate: value })}
-      />
-      <EditableDate
-        label="Dispatch Date"
-        value={state.form.dispatchDate}
-        onChange={(value) => state.updateForm({ dispatchDate: value })}
-      />
     </div>
   );
 }
@@ -109,6 +99,11 @@ export default function DraftStep({ state, onReset, onCreateNew, onAddItems, onC
   const [successModalOpen, setSuccessModalOpen] = useState(false);
   const customerName = state.customerDetails?.CardName || state.selectedParty?.CardName || "-";
   const postDisabledReason = state.selectedLineBatchError;
+  // What this customer still owes, straight off their SAP account balance.
+  // `null` when SAP did not report one — better a missing tile than a
+  // confident zero that isn't true.
+  const parsedBalance = Number(state.customerDetails?.Balance);
+  const outstanding = Number.isFinite(parsedBalance) ? parsedBalance : null;
 
   const addFreightRow = () => {
     state.addFreightRow();
@@ -389,6 +384,15 @@ export default function DraftStep({ state, onReset, onCreateNew, onAddItems, onC
             <span>Total</span>
             <strong>{formatMoney(state.totals.grandTotal)}</strong>
           </button>
+          {outstanding !== null && (
+            <div
+              className={`si-action-outstanding${outstanding > 0 ? " is-due" : ""}`}
+              title={`Account balance for ${state.selectedParty?.CardCode || customerName}`}
+            >
+              <span>Outstanding</span>
+              <strong>{formatMoney(outstanding)}</strong>
+            </div>
+          )}
           <div className="si-action-buttons">
             <button
               className="si-btn si-btn-primary"
