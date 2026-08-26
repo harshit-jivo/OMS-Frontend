@@ -223,10 +223,10 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
     Deliverydate: getDefaultDeliveryDate(),
     poNumber: "",
     company: "",
+    warehouse: "",
     comment: "",
     // Company-3 (Mart) orders pick a dispatch warehouse. Display-only for now —
     // not sent to the backend. Defaults to GP-FGM.
-    warehouse: "GP-FGM",
   });
 
   const [rows, setRows] = useState<SalesRow[]>([createEmptyRow()]);
@@ -751,6 +751,13 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
 
   const validateBeforeSave = () => {
     const confirmedRows = rows.filter((row) => row.confirmed);
+
+    // Only enforced where the field is actually shown — an edit that hides it
+    // must not be blocked by a PO it cannot type.
+    if (canEditPoNumber && !formData.poNumber.trim()) {
+      alert("PO Number is required.");
+      return false;
+    }
 
     if (confirmedRows.length === 0) {
       alert("Please confirm at least one item before submitting the order.");
@@ -2784,7 +2791,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
         {canEditPoNumber && (
           <div className="sl-field">
             <label className="sl-label" htmlFor="wiz-po">
-              PO Number
+              PO Number <span className="sl-required">*</span>
             </label>
             <div className="sl-input-wrap">
               <input
@@ -3876,7 +3883,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
           {canEditPoNumber && (
             <div className="sl-field">
               <label className="sl-label" htmlFor="poNumber">
-                PO Number
+                PO Number <span className="sl-required">*</span>
               </label>
               <div className="sl-input-wrap">
                 <input

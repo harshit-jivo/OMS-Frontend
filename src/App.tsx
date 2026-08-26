@@ -22,6 +22,8 @@ import "./styles/UIConsistency.css";
 import Party_Assignment from "./pages/Party_Assignment";
 import Party_Product_Assignment from "./pages/Party_Product_Assignment";
 import Add_Scheme from "./pages/Add_Scheme";
+import Scheme_Manager from "./pages/Scheme_Manager";
+import Combo_Mapping from "./pages/Combo_Mapping";
 import FOC from "./pages/FOC";
 import SalesInvoice from "./pages/Sales_Invoice";    
 import SkuGalleryPage from "./pages/SalesInvoice/SkuGalleryPage";
@@ -47,6 +49,8 @@ import Tracker_Invoices from "./pages/Tracker_Invoices";
 import Profile from "./pages/Profile";
 import Device_Management from "./pages/Device_Management";
 import Invoice_Report from "./pages/Invoice_Report";
+import HAIS from "./pages/HAIS";
+import AssetPublicView from "./pages/HAIS/AssetPublicView";
 import Inventory_Report from "./pages/Inventory_Report";
 import SO_Invoice_Report from "./pages/SO_Invoice_Report";
 import Distributor from "./pages/Distributor";
@@ -60,6 +64,8 @@ function App() {
       <Routes>
         <Route path="/" element={<Login />} />
 
+        {/* Standalone device page opened by scanning a device QR (no sidebar). */}
+        <Route path="/hais/device/:code" element={<AssetPublicView />} />
 
         <Route
           path="/Dashboard"
@@ -333,6 +339,24 @@ function App() {
         />
 
         <Route
+          path="/Scheme_Manager"
+          element={
+            <Sidebar>
+              <Scheme_Manager />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/Combo_Mapping"
+          element={
+            <Sidebar>
+              <Combo_Mapping />
+            </Sidebar>
+          }
+        />
+
+        <Route
           path="/Staff"
           element={
             <Sidebar>
@@ -442,6 +466,15 @@ function App() {
           element={
             <Sidebar>
               <Ewaybill />
+            </Sidebar>
+          }
+        />
+
+        <Route
+          path="/HAIS"
+          element={
+            <Sidebar>
+              <HAIS />
             </Sidebar>
           }
         />
