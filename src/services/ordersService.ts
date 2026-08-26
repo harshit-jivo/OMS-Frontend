@@ -92,25 +92,6 @@ export interface PartyProduct {
   sal_pack_unit: string | null;
   tax_rate: string | number;
   basic_rate: string | number;
-  // Combo packs ("A + B") ship B free of cost. `free_item` is present only when
-  // the combo has a mapping configured on the party-product assignment.
-  is_combo?: boolean;
-  free_item_code?: string | null;
-  free_qty_per_unit?: number | null;
-  free_item?: ComboFreeProduct | null;
-}
-
-export interface ComboFreeProduct {
-  item_code: string;
-  item_name: string;
-  category: string;
-  brand: string | null;
-  variety: string | null;
-  sub_group: string | null;
-  sal_factor2: string | number;
-  sal_pack_unit: string | null;
-  tax_rate: string | number;
-  basic_rate: string | number;
 }
   
 export interface SchemeProduct {
@@ -168,17 +149,6 @@ export interface OrderItemScheme {
   scheme_item_code?: string | null;
   scheme_qty?: number | string;
   qty_scheme?: number | string;
-
-  // Scheme engine v2 (Backend/docs/scheme-architecture.md). `benefit_item_code`
-  // is the snapshot SAP actually ships, so editing a scheme later cannot change
-  // what an already-approved order sends.
-  scheme_v2_id?: number;
-  benefit_id?: number;
-  benefit_item_code?: string | null;
-  computed_qty?: number | string;
-  is_manual_override?: boolean;
-  scope_type?: string;
-  scope_value?: string;
 }
 
 export interface OrderItem {
@@ -211,9 +181,9 @@ export interface OrderItem {
   scheme_id?: number;
   schemes?: OrderItemScheme[];
   total_ltrs: number;
-  // Zero-priced line auto-added for the free half of a combo pack.
+  // Legacy: zero-priced companion line written by the old combo feature. Kept
+  // read-only so editing an order created back then still filters it out.
   is_auto_free?: boolean;
-  combo_source_code?: string | null;
 }
 
 export interface CreateOrder {

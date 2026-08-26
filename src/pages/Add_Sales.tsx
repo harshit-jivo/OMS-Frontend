@@ -1,8 +1,6 @@
 import { Fragment, useState, useEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { ordersService } from "../services/ordersService";
-import { schemeService } from "../services/schemeService";
-import type { PreviewLine, SchemeProposal } from "../services/schemeService";
 import { userService } from "../services/userService";
 import { getCurrentUser } from "../services/authService";
 import { useUILabels } from "../services/uiConfig";
@@ -198,11 +196,6 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
     Record<number, SchemeProduct[]>
   >({});
   const [stateCode, setStateCode] = useState<string | null>(null);
-  // v2 engine proposals, keyed by row index. Resolved from the party's targeting
-  // (vendor / state / main group), not chosen by the user. See schemeService.
-  const [schemeProposals, setSchemeProposals] = useState<
-    Record<number, SchemeProposal[]>
-  >({});
   const [editOrderFallback, setEditOrderFallback] = useState<EditOrderFallback>(
     emptyEditOrderFallback,
   );
@@ -522,9 +515,9 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
   };
 
   const mapOrderToRows = (order: Order): SalesRow[] => {
-    // Combo companion lines are re-derived from their parent on every render, so
-    // loading them back as editable rows would both duplicate them in the list
-    // and send them twice on save.
+    // Legacy combo companion lines: orders created while the combo feature was
+    // live carry a zero-priced free half. It is not editable, so keep it out of
+    // the row list rather than letting it be edited or re-sent.
     const orderItems = (Array.isArray(order.items) ? order.items : []).filter(
       (item) => !item.is_auto_free,
     );
@@ -827,46 +820,6 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
     setItemModalIsNew(false);
   };
 
-  /** The zero-priced companion lines a combo pack contributes to the payload.
-   *
-   * Scheme giveaways are deliberately absent: they ride on the parent line's
-   * `schemes[]`, which sync_service already fans out into its own zero-priced
-   * SAP line. Adding them here as well would ship the free stock twice.
-   */
-  const buildComboFreeItems = () =>
-    rows.flatMap((row, index) => {
-      if (!row.confirmed) return [];
-      const parent = getRowProduct(row);
-      return getDerivedLines(row, index)
-        .filter((line) => line.kind === "combo")
-        .map((line) => ({
-          item_code: line.itemCode,
-          item_name: line.itemName,
-          category: row.category,
-          brand: row.brand,
-          variety: row.variety,
-          item_type: row.type,
-
-          qty: line.qty,
-          pcs: 0,
-          boxes: 0,
-          ltrs: 0,
-
-          price_list_basic: 0,
-          basic_price: 0,
-          tax_rate: Number(row.tax) || 0,
-          total: 0,
-          scheme_id: undefined as number | undefined,
-          scheme_qty: 0,
-          schemes: [] as { scheme_id: number; scheme_qty: number }[],
-          is_scheme: false,
-          total_ltrs: 0,
-
-          is_auto_free: true,
-          combo_source_code: parent?.item_code || "",
-        }));
-    });
-
   /** The address string to persist for a selected id. Mirrors how the address is
    *  shown on screen (name first, then the full address), so an address that has
    *  a full_address but a blank address_name is still saved instead of "". */
@@ -923,7 +876,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
       tax_amount: taxAmount,
       grand_total: grandTotal,
 
-      items: rows.map((row, rowIndex) => ({
+      items: rows.map((row) => ({
         _confirmed: row.confirmed,
         item_code:
           partyProducts.find(
@@ -953,40 +906,24 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
         scheme_qty: row.isScheme
           ? row.schemes.reduce((sum, scheme) => sum + Number(scheme.schemeQty || 0), 0)
           : 0,
-        // Hand-picked legacy schemes, plus whatever the v2 engine resolved for
-        // this line. Both travel on `schemes[]`; the backend distinguishes them
-        // by which id is set and fans each out into its own zero-priced SAP line.
-        schemes: [
-          ...(row.isScheme
-            ? row.schemes
-                .filter((scheme) => scheme.scheme && Number(scheme.schemeQty || 0) > 0)
-                .map((scheme) => ({
-                  scheme_id: Number(scheme.scheme),
-                  scheme_qty: Number(scheme.schemeQty || 0),
-                }))
-            : []),
-          ...(schemeProposals[rowIndex] || []).map((proposal) => ({
-            scheme_v2_id: proposal.scheme_id,
-            benefit_id: proposal.benefit_id,
-            // Snapshot: SAP ships this exact item, so editing the scheme later
-            // cannot change what an already-approved order sends.
-            benefit_item_code: proposal.benefit_item_code,
-            scheme_qty: Number(proposal.qty),
-            computed_qty: Number(proposal.qty),
-            is_manual_override: false,
-            scope_type: proposal.scope_type,
-            scope_value: proposal.scope_value,
-          })),
-        ],
+        // Hand-picked schemes. The backend fans each out into its own
+        // zero-priced SAP line.
+        schemes: row.isScheme
+          ? row.schemes
+              .filter((scheme) => scheme.scheme && Number(scheme.schemeQty || 0) > 0)
+              .map((scheme) => ({
+                scheme_id: Number(scheme.scheme),
+                scheme_qty: Number(scheme.schemeQty || 0),
+              }))
+          : [],
         // scheme_ltrs: row.isScheme ? Number(row.schemeLtrs || 0) : 0,
-        is_scheme: row.isScheme || (schemeProposals[rowIndex] || []).length > 0,
+        is_scheme: row.isScheme,
         total_ltrs:
           Number(row.ltrs) +
           (row.isScheme ? row.schemes.reduce((sum, scheme) => sum + Number(scheme.schemeQty || 0), 0) : 0),
       }))
         .filter((item) => item._confirmed)
-        .map(({ _confirmed, ...item }) => item)
-        .concat(buildComboFreeItems()),
+        .map(({ _confirmed, ...item }) => item),
     };
 
     try {
@@ -1249,24 +1186,18 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
   // ---------------------------------------------------------------------
   // Free lines derived from a confirmed row.
   //
-  // Two different things arrive here and they are NOT symmetric:
+  // A scheme giveaway is already carried by the parent line's `schemes[]`, which
+  // `sync_service` fans out into its own zero-priced SAP line. Sending it a
+  // second time as an item would ship the stock twice, so the rows below are
+  // display-only: they make the giveaway visible in the item list without
+  // touching what goes over the wire.
   //
-  //  * A combo pack ("A + B") ships B free. That is a real order line — the SAP
-  //    push emits it as a zero-priced DocumentLine — so it goes into the payload
-  //    as its own item carrying `is_auto_free` / `combo_source_code`.
-  //
-  //  * A scheme giveaway is already carried by the parent line's `schemes[]`,
-  //    which `sync_service` fans out into its own zero-priced SAP line. Sending
-  //    it a second time as an item would ship the stock twice, so the scheme row
-  //    below is display-only: it makes the giveaway visible in the item list
-  //    without touching what goes over the wire.
-  //
-  // Both are derived from `rows` on every render rather than stored, so editing
+  // They are derived from `rows` on every render rather than stored, so editing
   // a quantity or deleting the parent can never leave a stale free line behind
   // (and row indices, which `schemeOptions` is keyed by, stay untouched).
   // ---------------------------------------------------------------------
   type DerivedLine = {
-    kind: "combo" | "scheme";
+    kind: "scheme";
     key: string;
     itemCode: string;
     itemName: string;
@@ -1274,68 +1205,10 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
     note: string;
   };
 
-  const findPartyProduct = (row: SalesRow) =>
-    partyProducts.find(
-      (p) =>
-        p.item_name === row.item &&
-        p.category === row.category &&
-        (p.brand || "") === (row.brand || "") &&
-        (p.variety || "") === (row.variety || ""),
-    );
-
-  /** The combo companion a row contributes, or null. Shared by the item list and
-   *  by the scheme preview, so the engine sees the same free half the user does. */
-  const getComboCompanion = (row: SalesRow) => {
-    const product = findPartyProduct(row);
-    if (!product?.is_combo || !product.free_item_code) return null;
-    const perUnit = Number(product.free_qty_per_unit ?? 1) || 1;
-    const qty = Number(row.qty || 0) * perUnit;
-    if (qty <= 0) return null;
-    return {
-      parentItemCode: product.item_code,
-      itemCode: product.free_item_code,
-      itemName: product.free_item?.item_name || product.free_item_code,
-      qty,
-    };
-  };
-
   const getDerivedLines = (row: SalesRow, index: number): DerivedLine[] => {
     const lines: DerivedLine[] = [];
 
-    // Combo free half. `free_item` is null until the pack is mapped on the
-    // Combo Mapping page, and then nothing is added — same as before.
-    const companion = getComboCompanion(row);
-    if (companion) {
-      lines.push({
-        kind: "combo",
-        key: `combo-${index}-${companion.itemCode}`,
-        itemCode: companion.itemCode,
-        itemName: companion.itemName,
-        qty: companion.qty,
-        note: `Free with ${row.item}`,
-      });
-    }
-
-    // Scheme giveaways the v2 engine resolved for this row. These come from
-    // targeting (a vendor, or a whole state) rather than from the picker, so the
-    // salesperson never chooses them — they just appear.
-    (schemeProposals[index] || []).forEach((proposal) => {
-      lines.push({
-        kind: "scheme",
-        key: `v2-${index}-${proposal.scheme_id}-${proposal.benefit_id}`,
-        itemCode: proposal.benefit_item_code,
-        itemName:
-          products.find((p) => p.item_code === proposal.benefit_item_code)?.item_name ||
-          partyProducts.find((p) => p.item_code === proposal.benefit_item_code)?.item_name ||
-          proposal.benefit_item_code,
-        qty: Number(proposal.qty),
-        note: `${proposal.scheme_name} · via ${proposal.scope_type}${
-          proposal.scope_value ? ` ${proposal.scope_value}` : ""
-        }`,
-      });
-    });
-
-    // Scheme giveaways picked by hand from the legacy picker.
+    // Scheme giveaways picked by hand from the picker.
     if (row.isScheme) {
       row.schemes.forEach((entry, schemeIndex) => {
         const qty = Number(entry.schemeQty || 0);
@@ -1602,9 +1475,9 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
   const handleDeleteRow = (index: number) => {
     const updatedRows = rows.filter((_, i) => i !== index);
     setRows(updatedRows.length > 0 ? updatedRows : [createEmptyRow()]);
-    // Both maps are keyed by row index, so removing a row means shifting every
-    // key above it down by one — otherwise a later row inherits the deleted
-    // row's scheme options / engine proposals.
+    // `schemeOptions` is keyed by row index, so removing a row means shifting
+    // every key above it down by one — otherwise a later row inherits the
+    // deleted row's scheme options.
     const shiftByIndex = <T,>(prev: Record<number, T>) => {
       const next: Record<number, T> = {};
       Object.entries(prev).forEach(([key, value]) => {
@@ -1615,7 +1488,6 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
       return next;
     };
     setSchemeOptions(shiftByIndex);
-    setSchemeProposals(shiftByIndex);
   };
 
   const handlePartySelect = (value: string, partyCategory = "") => {
@@ -1728,114 +1600,6 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
       ),
     );
   };
-
-  // ---------------------------------------------------------------------
-  // v2 scheme engine
-  //
-  // The engine decides which schemes reach this party (by vendor, state, main
-  // group, ...) and how much each gives, so the order form asks it rather than
-  // making the salesperson pick from a dropdown. The call is a dry run — it
-  // writes nothing — and is keyed on a signature of the confirmed lines so it
-  // only re-fires when something it cares about actually changed.
-  // ---------------------------------------------------------------------
-  const buildPreviewLines = () => {
-    const lines: PreviewLine[] = [];
-    const rowIndexByLine: number[] = [];
-
-    rows.forEach((row, index) => {
-      if (!row.confirmed) return;
-      const product = findPartyProduct(row);
-      const itemCode = product?.item_code || "";
-      if (!itemCode) return;
-
-      lines.push({
-        item_code: itemCode,
-        item_name: row.item,
-        category: row.category,
-        sub_group: row.variety,
-        brand: row.brand,
-        item_type: row.type,
-        qty: Number(row.qty) || 0,
-        pcs: Number(row.pcs) || 0,
-        boxes: Number(row.boxes) || 0,
-        ltrs: Number(row.ltrs) || 0,
-      });
-      rowIndexByLine.push(index);
-
-      // The combo's free half has to be in the payload for FREE_LINE triggers to
-      // have anything to measure. It is attributed back to the parent row.
-      const companion = getComboCompanion(row);
-      if (companion) {
-        lines.push({
-          item_code: companion.itemCode,
-          item_name: companion.itemName,
-          category: row.category,
-          qty: companion.qty,
-          is_auto_free: true,
-          combo_source_code: companion.parentItemCode,
-        });
-        rowIndexByLine.push(index);
-      }
-    });
-
-    return { lines, rowIndexByLine };
-  };
-
-  const previewSignature = JSON.stringify({
-    card: formData.parties,
-    category: selectedPartyCategory,
-    lines: buildPreviewLines().lines.map((l) => [l.item_code, l.qty, l.is_auto_free ?? false]),
-  });
-
-  useEffect(() => {
-    const { lines, rowIndexByLine } = buildPreviewLines();
-
-    if (!formData.parties || lines.length === 0) {
-      setSchemeProposals({});
-      return;
-    }
-
-    let cancelled = false;
-    // Debounced: quantities are typed, and every keystroke would otherwise be a
-    // round trip.
-    const timer = window.setTimeout(async () => {
-      try {
-        // Gate on the PARTY's category (its business line / company), not on a
-        // product row's category. The engine then only proposes schemes whose
-        // own category matches the party's, and its per-line guard drops any
-        // product line of a different category — so a scheme is auto-fetched
-        // only when party category == product category == scheme category.
-        const response = await schemeService.preview(
-          formData.parties,
-          selectedPartyCategory || "",
-          lines,
-        );
-        if (cancelled) return;
-
-        const byRow: Record<number, SchemeProposal[]> = {};
-        response.proposals.forEach((proposal) => {
-          const rowIndex = rowIndexByLine[proposal.line_index];
-          if (rowIndex === undefined) return;
-          // A scheme with no rule leaves the quantity to the user; there is
-          // nothing to show as a line until someone types one.
-          if (proposal.qty_is_user_supplied || Number(proposal.qty) <= 0) return;
-          (byRow[rowIndex] = byRow[rowIndex] || []).push(proposal);
-        });
-        setSchemeProposals(byRow);
-      } catch (error) {
-        // A failed preview must never block order entry — the form simply shows
-        // no engine-resolved schemes.
-        console.error("Error previewing schemes:", error);
-        if (!cancelled) setSchemeProposals({});
-      }
-    }, 400);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [previewSignature]);
 
   const confirmedRows = rows.filter((row) => row.confirmed);
   const canAddMoreItems = rows.length > 0 && rows.every((row) => row.confirmed);
@@ -2702,9 +2466,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
           <div className="sl-wiz-item-summary-main">
             <span className="sl-wiz-item-summary-name">
               {line.itemName}
-              <span className={`sl-wiz-free-badge is-${line.kind}`}>
-                {line.kind === "combo" ? "Combo" : "Scheme"}
-              </span>
+              <span className={`sl-wiz-free-badge is-${line.kind}`}>Scheme</span>
             </span>
             <span className="sl-wiz-item-summary-meta">
               {line.note}
@@ -3167,7 +2929,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
                     <strong>
                       {line.itemName}
                       <span className={`sl-wiz-free-badge is-${line.kind}`}>
-                        {line.kind === "combo" ? "Combo" : "Scheme"}
+                        Scheme
                       </span>
                     </strong>
                     <span>Qty {line.qty}</span>
