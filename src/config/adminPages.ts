@@ -15,7 +15,6 @@ export const GRANTABLE_ADMIN_PAGES: GrantablePage[] = [
   { key: "Add_Scheme", label: "Add Scheme", path: "/Add_Scheme" },
   // Scheme engine v2 — targeting, triggers and benefits. Granted separately from
   // "Add Scheme" (the legacy flat form) so the two can be rolled out apart.
-  { key: "Combo_Mapping", label: "Combo Mapping", path: "/Combo_Mapping" },
   { key: "Order_Flow_Settings", label: "Order Flow Settings", path: "/Order_Flow_Settings" },
   { key: "Product_Stock", label: "Stock", path: "/Product_Stock" },
   { key: "Reports", label: "Reports", path: "/Daily_Report" },
