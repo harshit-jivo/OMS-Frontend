@@ -1,6 +1,6 @@
 /* Scheme Manager — plain-language, progressive disclosure.
    The list is one sentence per scheme; everything that needs a form lives in a
-   drawer, and the editor is written as a sentence you fill in rather than a
+   modal, and the editor is written as a sentence you fill in rather than a
    grid of jargon fields. */
 
 .sch-page {
@@ -474,35 +474,59 @@
   100% { background-position: 0 50%; }
 }
 
-/* ── drawer (editor) ────────────────────────────────────────────────── */
+/* ── modal (editor + vendor check) ─────────────────────────────────── */
 
 .sch-scrim {
   position: fixed;
   inset: 0;
   background: rgba(15, 23, 42, 0.32);
   backdrop-filter: blur(2px);
-  z-index: 60;
+  z-index: 1000;
   animation: sch-fade 0.18s ease;
 }
 
-.sch-drawer {
+/* Centred modal. `inset: 0` + `margin: auto` centres a fixed element on both
+   axes without a wrapper, so the scrim and the dialog stay siblings.
+   `max-height` plus a scrolling body keeps a long form inside the viewport. */
+.sch-modal {
   position: fixed;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: min(760px, 96vw);
+  inset: 0;
+  margin: auto;
+  width: min(760px, 94vw);
+  height: fit-content;
+  max-height: min(88vh, 940px);
   display: flex;
-  flex-direction: column  ;
+  flex-direction: column;
   background: #fff;
-  box-shadow: -24px 0 60px rgba(15, 23, 42, 0.18);
+  border-radius: 16px;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.28);
+  overflow: hidden;
   z-index: 1001;
-  animation: sch-slide 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+  animation: sch-pop 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Phones get the full sheet — a centred card with margins wastes the space a
+   four-step form needs. */
+@media (max-width: 640px) {
+  .sch-modal {
+    width: 100vw;
+    max-height: 100vh;
+    height: 100%;
+    border-radius: 0;
+  }
 }
 
 @keyframes sch-fade { from { opacity: 0; } }
-@keyframes sch-slide { from { transform: translateX(24px); opacity: 0; } }
+@keyframes sch-pop {
+  from { transform: scale(0.97); opacity: 0; }
+}
 
-.sch-drawer-head {
+@media (prefers-reduced-motion: reduce) {
+  .sch-modal,
+  .sch-scrim { animation: none; }
+}
+
+.sch-modal-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -511,14 +535,14 @@
   border-bottom: 1px solid var(--sch-line);
 }
 
-.sch-drawer-head h2 {
+.sch-modal-head h2 {
   margin: 0;
   font-size: 18px;
   font-weight: 700;
   color: var(--app-text);
 }
 
-.sch-drawer-head p { margin: 4px 0 0; font-size: 12.5px; color: var(--app-muted); }
+.sch-modal-head p { margin: 4px 0 0; font-size: 12.5px; color: var(--app-muted); }
 
 .sch-x {
   flex: none;
@@ -535,13 +559,17 @@
 
 .sch-x:hover { background: #f8fafc; color: #0f172a; }
 
-.sch-drawer-body {
-  flex: 1;
+.sch-modal-body {
+  /* `1 1 auto` not `1`: the modal is height:fit-content, and a 0% flex-basis
+     would let the body collapse instead of sizing to its content. min-height:0
+     is what lets it shrink — and therefore scroll — once max-height is hit. */
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   padding: 4px 24px 24px;
 }
 
-.sch-drawer-foot {
+.sch-modal-foot {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -551,7 +579,7 @@
   background: #fbfdff;
 }
 
-/* drawer sections */
+/* modal sections */
 
 .sch-section { padding: 20px 0; }
 .sch-section + .sch-section { border-top: 1px solid var(--sch-line); }.sch-grid {
@@ -781,5 +809,145 @@
 @media (max-width: 700px) {
   .sch-detail { padding-left: 18px; }
   .sch-row-side { display: none; }
-  .sch-drawer { width: 100vw; }
+  .sch-modal { width: 100vw; }
+}
+
+/* ── editor wizard ──────────────────────────────────────────────────────
+   The editor asks one question per screen. The stepper doubles as progress
+   and as navigation: finished steps are clickable, unreached ones are not,
+   so Review can never be opened on a half-built offer. */
+
+.sch-stepper {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 12px 24px;
+  list-style: none;
+  border-bottom: 1px solid var(--sch-line);
+  background: #fbfdff;
+}
+
+.sch-stepper-item { flex: 1; min-width: 0; }
+
+.sch-stepper-item + .sch-stepper-item { position: relative; }
+
+.sch-stepper-item + .sch-stepper-item::before {
+  content: "";
+  position: absolute;
+  left: -4px;
+  top: 50%;
+  width: 4px;
+  height: 1px;
+  background: var(--sch-line);
+}
+
+.sch-stepper-item button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  color: #94a3b8;
+  text-align: left;
+}
+
+.sch-stepper-item button:hover:not(:disabled) { background: #f1f5f9; }
+.sch-stepper-item button:disabled { cursor: default; opacity: 0.55; }
+
+.sch-stepper-n {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid var(--sch-line);
+  background: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  color: #94a3b8;
+}
+
+.sch-stepper-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sch-stepper-item.is-current button { color: var(--app-text); }
+
+.sch-stepper-item.is-current .sch-stepper-n {
+  border-color: var(--app-accent);
+  background: var(--app-accent);
+  color: #fff;
+}
+
+.sch-stepper-item.is-done button { color: #15803d; }
+
+.sch-stepper-item.is-done .sch-stepper-n {
+  border-color: #bbf7d0;
+  background: #dcfce7;
+  color: #15803d;
+}
+
+/* Only one section is on screen at a time, so the divider between them —
+   which assumed a stacked form — would draw a stray line above the step. */
+.sch-section[hidden] { display: none; }
+.sch-section + .sch-section { border-top: none; }
+
+/* ── review step ────────────────────────────────────────────────────── */
+
+.sch-review {
+  margin: 0;
+  border: 1px solid var(--sch-line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.sch-review > div {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 12px;
+  padding: 11px 14px;
+}
+
+.sch-review > div + div { border-top: 1px solid var(--sch-line); }
+
+.sch-review dt {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  padding-top: 2px;
+}
+
+.sch-review dd {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--app-text);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.sch-review-gives { color: #15803d; font-weight: 600; }
+.sch-review-warn { color: #b45309; font-weight: 600; }
+
+.sch-linkish {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--app-accent);
+  text-decoration: underline;
+  cursor: pointer;
 }

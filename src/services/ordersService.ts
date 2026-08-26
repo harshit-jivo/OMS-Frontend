@@ -175,6 +175,10 @@ export interface OrderItemScheme {
   scheme_v2_id?: number;
   benefit_id?: number;
   benefit_item_code?: string | null;
+  /** The giveaway as the scheme spelled it ("1 BOX"); `scheme_qty` is the same
+   *  amount in pieces, which is the only unit SAP accepts. */
+  benefit_uom?: string;
+  benefit_qty?: number | string;
   computed_qty?: number | string;
   is_manual_override?: boolean;
   scope_type?: string;

@@ -10,13 +10,14 @@ import api from "./api";
  * See Backend/docs/scheme-architecture.md.
  */
 
-export type Uom = "QTY" | "PCS" | "BOX" | "LTR";
+/** Schemes are written in pieces or cartons only. Litres is derived (pack size x
+ *  pieces) and a bare "qty" was pieces under another name; offering all four only
+ *  invited picking the wrong one. Mirrors UOM_CHOICES in orders/models.py. */
+export type Uom = "PCS" | "BOX";
 
 export const UOM_OPTIONS: { value: Uom; label: string }[] = [
-  { value: "QTY", label: "qty" },
   { value: "PCS", label: "pieces" },
   { value: "BOX", label: "boxes" },
-  { value: "LTR", label: "litres" },
 ];
 
 export type MatchType = "ITEM" | "SUB_GROUP" | "VARIETY" | "BRAND" | "CATEGORY" | "ALL";
@@ -154,7 +155,11 @@ export type SchemeProposal = {
   benefit_id: number;
   benefit_item_code: string;
   free_uom: Uom;
+  /** In `free_uom` — what the scheme was written in, and what the UI shows. */
   qty: string;
+  /** The same giveaway in single units. SAP DocumentLine quantities are always
+   *  pieces, so this — not `qty` — is what an order line must carry. */
+  qty_pieces: string;
   qualifying_qty: string;
   scope_type: ScopeType;
   scope_value: string;
@@ -213,7 +218,7 @@ export const emptyTrigger = (): SchemeTrigger => ({
   match_type: "ITEM",
   match_value: "",
   min_qty: "",
-  min_uom: "QTY",
+  min_uom: "PCS",
   applies_to: "PAID_LINE",
 });
 

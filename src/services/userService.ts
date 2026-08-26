@@ -63,19 +63,29 @@ export interface ComboMapping {
   sal_factor2: string | number | null;
   party_count: number;
   mapped_party_count: number;
+  /** The paid half, before the "+". Set together with `free_item_code`. */
+  parent_item_code: string | null;
+  parent_item: ComboHalf | null;
   free_item_code: string | null;
   free_qty_per_unit: number | null;
-  free_item: {
-    item_code: string;
-    item_name: string | null;
-    sal_factor2: string | number | null;
-  } | null;
+  free_item: ComboHalf | null;
   is_partially_mapped: boolean;
+}
+
+/** One resolved side of a combo. `item_name` is null when the code no longer
+ *  matches an active SAP product, so the page can show it as broken. */
+export interface ComboHalf {
+  item_code: string;
+  item_name: string | null;
+  sal_factor2: string | number | null;
 }
 
 export interface ComboMappingPayload {
   item_code: string;
   category: string;
+  /** Both halves travel together -- the API rejects a half-filled mapping.
+   *  Send both as "" to clear. */
+  parent_item_code: string;
   free_item_code: string;
   free_qty_per_unit?: number | null;
 }

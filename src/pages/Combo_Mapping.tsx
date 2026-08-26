@@ -17,6 +17,12 @@ const comboKey = (combo: Pick<ComboMapping, "item_code" | "category">) =>
 /** The half of a combo name that names the free product: everything after "+". */
 const freeHalfOf = (itemName: string) => asText(itemName.split("+").slice(1).join("+"));
 
+/** The half that names the paid product: everything before the first "+". */
+const parentHalfOf = (itemName: string) => asText(itemName.split("+")[0] || "");
+
+/** Which half of the combo the product list is currently choosing for. */
+type PickerTarget = "parent" | "free";
+
 export default function Combo_Mapping() {
   const [combos, setCombos] = useState<ComboMapping[]>([]);
   const [products, setProducts] = useState<CatalogueProduct[]>([]);
@@ -28,7 +34,10 @@ export default function Combo_Mapping() {
 
   // Editor state for the one combo currently open.
   const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [draftParentItem, setDraftParentItem] = useState("");
   const [draftFreeItem, setDraftFreeItem] = useState("");
+  // One product list serves both halves; this says which one a click fills.
+  const [pickerTarget, setPickerTarget] = useState<PickerTarget>("parent");
   const [draftQty, setDraftQty] = useState("");
   const [pickerSearch, setPickerSearch] = useState("");
   const [savingKey, setSavingKey] = useState<string | null>(null);
@@ -69,19 +78,24 @@ export default function Combo_Mapping() {
   const visibleCombos = useMemo(() => {
     const term = search.trim().toLowerCase();
     return combos.filter((combo) => {
-      if (showUnmappedOnly && combo.free_item_code) return false;
+      if (showUnmappedOnly && combo.parent_item_code && combo.free_item_code)
+        return false;
       if (!term) return true;
       return (
         combo.item_name?.toLowerCase().includes(term) ||
         combo.item_code.toLowerCase().includes(term) ||
         combo.category.toLowerCase().includes(term) ||
         (combo.free_item?.item_name || "").toLowerCase().includes(term) ||
-        (combo.free_item_code || "").toLowerCase().includes(term)
+        (combo.free_item_code || "").toLowerCase().includes(term) ||
+        (combo.parent_item?.item_name || "").toLowerCase().includes(term) ||
+        (combo.parent_item_code || "").toLowerCase().includes(term)
       );
     });
   }, [combos, search, showUnmappedOnly]);
 
-  const mappedCount = combos.filter((combo) => combo.free_item_code).length;
+  const mappedCount = combos.filter(
+    (combo) => combo.parent_item_code && combo.free_item_code,
+  ).length;
 
   // Products whose name shares words with the combo's post-"+" half float to the
   // top, so the likely free item is the first thing in the list.
@@ -99,7 +113,11 @@ export default function Combo_Mapping() {
 
     if (term || !combo) return matches.slice(0, 60);
 
-    const hintWords = freeHalfOf(combo.item_name || "")
+    const hintWords = (
+      pickerTarget === "parent"
+        ? parentHalfOf(combo.item_name || "")
+        : freeHalfOf(combo.item_name || "")
+    )
       .toLowerCase()
       .split(/\s+/)
       .filter((word) => word.length > 2 && !/^\d+$/.test(word));
@@ -115,11 +133,13 @@ export default function Combo_Mapping() {
       .sort((a, b) => b.score - a.score)
       .slice(0, 60)
       .map((entry) => entry.product);
-  }, [combos, editingKey, pickerSearch, products]);
+  }, [combos, editingKey, pickerSearch, pickerTarget, products]);
 
   const openEditor = (combo: ComboMapping) => {
     setEditingKey(comboKey(combo));
+    setDraftParentItem(combo.parent_item_code || "");
     setDraftFreeItem(combo.free_item_code || "");
+    setPickerTarget("parent");
     setDraftQty(combo.free_qty_per_unit != null ? String(combo.free_qty_per_unit) : "");
     setPickerSearch("");
     setNotice(null);
@@ -128,12 +148,18 @@ export default function Combo_Mapping() {
 
   const closeEditor = () => {
     setEditingKey(null);
+    setDraftParentItem("");
     setDraftFreeItem("");
+    setPickerTarget("parent");
     setDraftQty("");
     setPickerSearch("");
   };
 
-  const save = async (combo: ComboMapping, freeItemCode: string) => {
+  const save = async (
+    combo: ComboMapping,
+    parentItemCode: string,
+    freeItemCode: string,
+  ) => {
     const key = comboKey(combo);
     setSavingKey(key);
     setNotice(null);
@@ -141,6 +167,7 @@ export default function Combo_Mapping() {
       const response = await userService.saveComboMapping({
         item_code: combo.item_code,
         category: combo.category,
+        parent_item_code: parentItemCode,
         free_item_code: freeItemCode,
         free_qty_per_unit: draftQty.trim() ? Number(draftQty) : null,
       });
@@ -159,7 +186,8 @@ export default function Combo_Mapping() {
   };
 
   const clearMapping = async (combo: ComboMapping) => {
-    if (!window.confirm(`Remove the free item from ${combo.item_name}?`)) return;
+    if (!window.confirm(`Remove the parent and free item from ${combo.item_name}?`))
+      return;
     const key = comboKey(combo);
     setSavingKey(key);
     setNotice(null);
@@ -167,6 +195,7 @@ export default function Combo_Mapping() {
       const response = await userService.saveComboMapping({
         item_code: combo.item_code,
         category: combo.category,
+        parent_item_code: "",
         free_item_code: "",
         free_qty_per_unit: null,
       });
@@ -304,6 +333,9 @@ export default function Combo_Mapping() {
               const key = comboKey(combo);
               const isEditing = editingKey === key;
               const isSaving = savingKey === key;
+              // Both halves or neither -- the API refuses a half-filled mapping
+              // because ordering needs a parent to price and a free item to give.
+              const bothHalvesChosen = Boolean(draftParentItem && draftFreeItem);
 
               return (
                 <div
@@ -334,7 +366,26 @@ export default function Combo_Mapping() {
                       </div>
                     </div>
 
-                    <div style={{ flex: "1 1 280px", minWidth: 0 }}>
+                    <div style={{ flex: "1 1 220px", minWidth: 0 }}>
+                      <div style={labelStyle}>Parent (paid) item</div>
+                      {combo.parent_item_code ? (
+                        <>
+                          <div style={{ fontSize: "14px", fontWeight: 600, color: "#1d4ed8" }}>
+                            {combo.parent_item?.item_name ||
+                              `${combo.parent_item_code} (not in SAP)`}
+                          </div>
+                          <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>
+                            {combo.parent_item_code} · priced line
+                          </div>
+                        </>
+                      ) : (
+                        <div style={{ fontSize: "14px", color: "#b45309", fontWeight: 600 }}>
+                          Not mapped
+                        </div>
+                      )}
+                    </div>
+
+                    <div style={{ flex: "1 1 220px", minWidth: 0 }}>
                       <div style={labelStyle}>Free item</div>
                       {combo.free_item_code ? (
                         <>
@@ -409,6 +460,58 @@ export default function Combo_Mapping() {
                         borderTop: "1px solid #e2e8f0",
                       }}
                     >
+                      {/* Two halves, picked one at a time from the list below.
+                          Nothing is pre-selected: the names are inconsistent
+                          enough that a guess is wrong often enough to matter. */}
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "8px",
+                          flexWrap: "wrap",
+                          marginBottom: "12px",
+                        }}
+                      >
+                        {(
+                          [
+                            ["parent", "Parent (paid)", draftParentItem],
+                            ["free", "Free", draftFreeItem],
+                          ] as [PickerTarget, string, string][]
+                        ).map(([target, label, value]) => {
+                          const active = pickerTarget === target;
+                          return (
+                            <button
+                              key={target}
+                              type="button"
+                              onClick={() => {
+                                setPickerTarget(target);
+                                setPickerSearch("");
+                                window.setTimeout(
+                                  () => pickerInputRef.current?.focus(),
+                                  0,
+                                );
+                              }}
+                              style={{
+                                padding: "8px 14px",
+                                borderRadius: "8px",
+                                border: active
+                                  ? "1px solid #2563eb"
+                                  : "1px solid #cbd5e1",
+                                background: active ? "#eff6ff" : "#fff",
+                                color: active ? "#1d4ed8" : "#334155",
+                                fontWeight: 600,
+                                fontSize: "13px",
+                                cursor: "pointer",
+                              }}
+                            >
+                              {label}:{" "}
+                              <span style={{ fontWeight: 500 }}>
+                                {value || "not selected"}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+
                       <div
                         style={{
                           display: "flex",
@@ -422,7 +525,13 @@ export default function Combo_Mapping() {
                           type="text"
                           value={pickerSearch}
                           onChange={(event) => setPickerSearch(event.target.value)}
-                          placeholder={`Search a product — suggestions match "${freeHalfOf(combo.item_name || "") || combo.item_name}"`}
+                          placeholder={`Search the ${
+                            pickerTarget === "parent" ? "paid (parent)" : "free"
+                          } product — suggestions match "${
+                            (pickerTarget === "parent"
+                              ? parentHalfOf(combo.item_name || "")
+                              : freeHalfOf(combo.item_name || "")) || combo.item_name
+                          }"`}
                           style={{
                             flex: "1 1 320px",
                             padding: "9px 12px",
@@ -464,12 +573,18 @@ export default function Combo_Mapping() {
                           </div>
                         ) : (
                           pickerResults.map((product) => {
-                            const isChosen = draftFreeItem === product.item_code;
+                            const activeValue =
+                              pickerTarget === "parent" ? draftParentItem : draftFreeItem;
+                            const isChosen = activeValue === product.item_code;
                             return (
                               <button
                                 key={`${product.item_code}-${product.category}`}
                                 type="button"
-                                onClick={() => setDraftFreeItem(product.item_code)}
+                                onClick={() =>
+                                  pickerTarget === "parent"
+                                    ? setDraftParentItem(product.item_code)
+                                    : setDraftFreeItem(product.item_code)
+                                }
                                 style={{
                                   display: "block",
                                   width: "100%",
@@ -508,15 +623,16 @@ export default function Combo_Mapping() {
                       >
                         <button
                           type="button"
-                          onClick={() => save(combo, draftFreeItem)}
-                          disabled={!draftFreeItem || isSaving}
+                          onClick={() => save(combo, draftParentItem, draftFreeItem)}
+                          disabled={!bothHalvesChosen || isSaving}
                           style={{
                             padding: "9px 16px",
                             border: "none",
-                            background: draftFreeItem ? "#2563eb" : "#cbd5e1",
+                            background: bothHalvesChosen ? "#2563eb" : "#cbd5e1",
                             color: "#fff",
                             borderRadius: "8px",
-                            cursor: !draftFreeItem || isSaving ? "not-allowed" : "pointer",
+                            cursor:
+                              !bothHalvesChosen || isSaving ? "not-allowed" : "pointer",
                             fontWeight: 600,
                             fontSize: "13px",
                           }}
@@ -524,11 +640,15 @@ export default function Combo_Mapping() {
                           {isSaving ? "Saving..." : "Save mapping"}
                         </button>
                         <span style={{ fontSize: "13px", color: "#64748b" }}>
-                          {draftFreeItem
-                            ? `Applies ${draftFreeItem} to all ${combo.party_count} ${
-                                combo.party_count === 1 ? "party" : "parties"
-                              }`
-                            : "Pick the product this combo gives away"}
+                          {bothHalvesChosen
+                            ? `Splits into ${draftParentItem} + ${draftFreeItem} for all ${
+                                combo.party_count
+                              } ${combo.party_count === 1 ? "party" : "parties"}`
+                            : !draftParentItem && !draftFreeItem
+                              ? "Pick the paid product, then the one it gives away"
+                              : !draftParentItem
+                                ? "Still needs the paid (parent) product"
+                                : "Still needs the free product"}
                         </span>
                       </div>
                     </div>
