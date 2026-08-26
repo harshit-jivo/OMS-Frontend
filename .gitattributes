@@ -1,0 +1,56 @@
+# Line-ending policy for OMS-Frontend.
+#
+# Added 2026-08-26 while merging harshit, kamal, Mukesh and rathod-updates into
+# `test`. Several branches were committing CRLF *into the blobs* while `test`
+# held the same files as LF. Git compares blobs byte for byte, so every single
+# line read as changed and merges degenerated into whole-file conflicts on top
+# of a real diff of a few lines: src/services/ordersService.ts conflicted over
+# all 703 lines to deliver 4 new ones, and src/pages/Add_Sales.tsx over all
+# 4,290 to deliver 29. Both merged cleanly under `git merge -Xrenormalize`.
+#
+# `text=auto` makes git normalise to LF on check-in regardless of what the
+# contributor's editor or core.autocrlf produced, so this cannot recur. Working
+# copies on Windows are unaffected: core.autocrlf=true still checks files out
+# with CRLF locally.
+#
+# Diagnosing a recurrence -- beware two false negatives seen while writing this:
+#   * `git ls-files --eol` reports the *index/worktree* state and happily shows
+#     `i/lf` for a file whose committed blob is CRLF.
+#   * mingw awk and grep strip \r before matching, so `/\r$/` never fires.
+# What actually works:
+#   git show <ref>:<path> | tr -cd '\r' | wc -c        # non-zero => CRLF blob
+#   git diff --numstat --ignore-cr-at-eol A B -- <path> # the real change size
+
+* text=auto
+
+*.ts    text eol=lf
+*.tsx   text eol=lf
+*.js    text eol=lf
+*.jsx   text eol=lf
+*.mjs   text eol=lf
+*.cjs   text eol=lf
+*.css   text eol=lf
+*.scss  text eol=lf
+*.html  text eol=lf
+*.json  text eol=lf
+*.md    text eol=lf
+*.svg   text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+
+# Windows-only helpers genuinely need CRLF.
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.webp  binary
+*.pdf   binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.eot   binary
+*.xlsx  binary
