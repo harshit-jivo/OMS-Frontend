@@ -231,8 +231,9 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
     poNumber: "",
     company: "",
     comment: "",
-    // Company-3 (Mart) orders pick a dispatch warehouse. Display-only for now —
-    // not sent to the backend. Defaults to GP-FGM.
+    // Company-3 (Mart) orders pick a dispatch warehouse, sent as
+    // `warehouse_code` on submit. Defaults to GP-FGM.
+    warehouse: "GP-FGM",
   });
 
   const [rows, setRows] = useState<SalesRow[]>([createEmptyRow()]);

@@ -58,6 +58,7 @@ import SO_Invoice_Report from "./pages/SO_Invoice_Report";
 import Distributor from "./pages/Distributor";
 import Distributor_Order_Tracking from "./pages/Distributor/Order_Tracking";
 import MartApproval from "./pages/MartApproval";
+import Ap_Invoice_Entry from "./pages/Ap_Invoice_Entry";
 
 function App() {
   return (
@@ -470,6 +471,17 @@ function App() {
           path="/Approval_Management"
           element={<Navigate to="/Payments_Dashboard" replace />}
         />
+
+        {/* AP (vendor) invoice entry — copy from GRPO */}
+        <Route
+          path="/Ap_Invoice_Entry"
+          element={
+            <Sidebar>
+              <Ap_Invoice_Entry />
+            </Sidebar>
+          }
+        />
+
 
         {/* Any unknown path falls back to the dashboard instead of a blank page. */}
         <Route path="*" element={<Navigate to="/Dashboard" replace />} />
