@@ -1679,6 +1679,7 @@ const EMPTY_MAPPING: CompanyMappingPayload = {
   hana_schema: "",
   default_bpl_id: null,
   cash_gl_account: "",
+  deposit_source_gl_account: "",
   is_active: true,
 };
 
@@ -1840,6 +1841,7 @@ function MastersTab({ canEdit, flash }: { canEdit: boolean; flash: Flash }) {
                 <th>SAP database</th>
                 <th>HANA schema</th>
                 <th>Cash G/L</th>
+                <th>Deposit source G/L</th>
                 <th>Status</th>
                 <th />
               </tr>
@@ -1882,6 +1884,17 @@ function MastersTab({ canEdit, flash }: { canEdit: boolean; flash: Flash }) {
                         // Cash cannot post without it, so an empty value is
                         // flagged rather than shown as a blank cell.
                         <span className="apv-pill err">Not set</span>
+                      )}
+                    </td>
+                    <td>
+                      {c.deposit_source_gl_account ? (
+                        <code>{c.deposit_source_gl_account}</code>
+                      ) : (
+                        // Blank falls back to the cash G/L on the server, which
+                        // SAP rejects for a deposit — so show what will be used.
+                        <span className="apv-pill warn">
+                          Falls back to cash G/L
+                        </span>
                       )}
                     </td>
                     <td>
@@ -2049,6 +2062,28 @@ function MastersTab({ canEdit, flash }: { canEdit: boolean; flash: Flash }) {
                 Where cash receipts post in SAP. Typed rather than picked:
                 every other tender lands in a bank account SAP publishes, but a
                 cash drawer is not a bank and has no such record.
+              </span>
+            </div>
+
+            <div className="apv-field">
+              <label htmlFor="cm-deposit-gl">Deposit source G/L account</label>
+              <input
+                id="cm-deposit-gl"
+                className="apv-input"
+                value={editing.deposit_source_gl_account ?? ""}
+                onChange={(e) =>
+                  setEditing({
+                    ...editing,
+                    deposit_source_gl_account: e.target.value,
+                  })
+                }
+                placeholder="2191001"
+              />
+              <span className="apv-hint">
+                The account a deposit credits — the drawer being emptied. It
+                must NOT be the cash G/L: SAP refuses a cash-flow account as
+                the CardCode of a deposit transfer. Leave blank and the cash
+                G/L is used, which SAP will reject.
               </span>
             </div>
 
