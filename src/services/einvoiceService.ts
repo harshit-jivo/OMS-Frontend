@@ -65,8 +65,8 @@ export interface InvoiceListResponse {
 /** A selectable SAP company DB — decides which company an IRN is generated
  *  against and which schema's OMS_IRN_LOG it is mirrored into. */
 export interface CompanyChoice {
-  label: string;        // OIL | BEVERAGE
-  company_db: string;   // JIVO_OIL_HANADB | JIVO_BEVERAGES_HANADB
+  label: string;        // OIL | BEVERAGE | MART
+  company_db: string;   // JIVO_OIL_HANADB | JIVO_BEVERAGES_HANADB | JIVO_MART_HANADB
 }
 
 export interface CompanyListResponse {

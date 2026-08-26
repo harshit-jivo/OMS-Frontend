@@ -49,6 +49,44 @@
   letter-spacing: 0.04em;
 }
 
+.invr-field-branch {
+  min-width: 0;
+}
+
+.invr-segmented {
+  display: inline-flex;
+  padding: 3px;
+  gap: 3px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.invr-segment {
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  padding: 6px 16px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #475569;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.invr-segment:hover {
+  color: #0f172a;
+}
+
+.invr-segment-active {
+  background: #2563eb;
+  color: #fff;
+}
+
+.invr-segment-active:hover {
+  color: #fff;
+}
+
 .invr-input {
   border: 1px solid #cbd5e1;
   border-radius: 8px;
@@ -140,6 +178,17 @@
   font-size: 0.9rem;
   font-weight: 600;
   color: #0f172a;
+}
+
+.invr-viewer-branch {
+  border-radius: 999px;
+  padding: 2px 9px;
+  background: #e0e7ff;
+  color: #3730a3;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .invr-viewer-title svg {

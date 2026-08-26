@@ -2,13 +2,16 @@ import { useEffect, useMemo, useState } from "react";
 import {
   HiArrowUturnLeft,
   HiArrowRight,
+  HiArrowDownTray,
   HiClock,
   HiBanknotes,
   HiEye,
   HiMapPin,
   HiMagnifyingGlass,
 } from "react-icons/hi2";
+import { saveAs } from "file-saver";
 import trackerService from "../services/trackerService";
+import { exportDateStamp } from "../utils/excelExport";
 import type {
   Invoice,
   JsapStatus,
@@ -16,6 +19,7 @@ import type {
   PaymentDetail,
   QueueStage,
   Stage,
+  StageDecision,
 } from "../services/trackerService";
 import "../styles/Tracker.css";
 
@@ -90,8 +94,44 @@ function JsapCell({ status }: { status?: JsapStatus | null }) {
   );
 }
 
+/**
+ * Sub-tabs backed by the desk's decision log rather than by the live queue.
+ * A desk's OK / DEBIT / partial-HOLD invoices have already moved on, so these
+ * are read-only histories: tab key -> the `decision` the API filters on.
+ */
+const DECISION_TABS: Record<string, string> = {
+  ok: "OK",
+  hold: "HOLD",
+  debit: "DEBIT",
+  approved: "APPROVED",
+  rejected_log: "REJECTED",
+  sent_back: "RETURN",
+};
+/**
+ * Send-back tabs. A rejection stops being outstanding once the invoice comes
+ * back to the desk, so those rows drop out unless "show resolved" is ticked.
+ */
+const SENT_BACK_TABS = new Set(["rejected_log", "sent_back"]);
+/** Tabs where the amount column means something. */
+const AMOUNT_TABS = new Set(["hold", "debit"]);
+
+/** Display names for tabs whose key isn't just a capitalised word. */
+const TAB_LABELS: Record<string, string> = {
+  ok: "OK",
+  rejected: "Awaiting Remarks",
+  rejected_log: "Rejected",
+  sent_back: "Sent Back",
+};
+const decMatch = (d: StageDecision, q: string) =>
+  [
+    d.invoice_number, d.party_name, d.category_name, d.unit_name, d.branch_name,
+    d.remarks, d.acted_by_name, d.amount, d.current_stage_name,
+  ].some((v) => (v ?? "").toString().toLowerCase().includes(q));
+
 // Statuses that mean "send back" / "need a written reason".
 const RETURN_STATUSES = new Set(["RETURN", "REJECTED"]);
+/** Stage statuses are stored as keys; show them without the underscores. */
+const statusLabel = (s: string) => s.replace(/_/g, " ");
 const REASON_STATUSES = new Set(["RETURN", "REJECTED", "HOLD", "DEBIT"]);
 
 // The payment form now captures only the three inputs; every amount, the open
@@ -116,8 +156,17 @@ export default function Tracker_Queue() {
   const [holdType, setHoldType] = useState("");   // FULL | PARTIAL
   const [amount, setAmount] = useState("");        // hold / debit amount
   const [toast, setToast] = useState("");
-  const [subTab, setSubTab] = useState<"current" | "returned" | "advanced" | "rejected" | "partial">("current");
+  const [subTab, setSubTab] = useState<
+    "current" | "returned" | "advanced" | "rejected" | "partial"
+    | "ok" | "hold" | "debit"
+    | "approved" | "rejected_log" | "sent_back">("current");
+  // Send-back tabs: also list rejections the invoice has already come back from.
+  const [showResolved, setShowResolved] = useState(false);
   const [advancedRows, setAdvancedRows] = useState<Invoice[]>([]);
+  // Decision-log rows for the OK / Hold / Debit / verdict tabs.
+  const [decisionRows, setDecisionRows] = useState<StageDecision[]>([]);
+  const [loadingDecisions, setLoadingDecisions] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [search, setSearch] = useState("");
   // JSAP desk: per-invoice budget verdict, keyed by invoice id (null = lookup failed).
   const [jsapStatuses, setJsapStatuses] = useState<Record<number, JsapStatus | null>>({});
@@ -165,6 +214,10 @@ export default function Tracker_Queue() {
 
   const isEntry = activeStage === "entry";
   const isSapApproval = activeStage === "sap_approval";
+  // Which decision tabs this desk offers — driven by its configured statuses,
+  // so a retuned stage picks them up without a code change.
+  const decisionChoices = stageCfg?.status_choices ?? [];
+  const isDecisionTab = subTab in DECISION_TABS;
   // The JSAP desk mirrors a decision taken in JSAP — nobody approves here, so
   // it gets a read-only status panel and a refresh button instead of the
   // usual status/advance controls.
@@ -203,25 +256,47 @@ export default function Tracker_Queue() {
     subTab === "returned" ? returnedRows :
     subTab === "rejected" ? rejectedRows :
     subTab === "partial" ? partialRows : currentRows;
-  const readOnly = subTab === "advanced";
+  // History views are look-only: no checkboxes, no action bar.
+  const readOnly = subTab === "advanced" || isDecisionTab;
   // Omni search filters whatever the active sub-tab shows.
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
     return q ? baseRows.filter((i) => invMatch(i, q)) : baseRows;
   }, [baseRows, search]);
+  const decRows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return q ? decisionRows.filter((d) => decMatch(d, q)) : decisionRows;
+  }, [decisionRows, search]);
 
   // Reset sub-tab + selection whenever the stage changes.
   useEffect(() => {
     setSelected(new Set()); setRemarks(""); setStatusPick("");
     setHoldType(""); setAmount(""); setSubTab("current");
   }, [activeStage]);
-  // Reset selection when the sub-tab changes; lazy-load the advanced history.
+  const loadDecisions = async (clear = false) => {
+    const decision = DECISION_TABS[subTab];
+    if (!decision || !activeStage) return;
+    setLoadingDecisions(true);
+    if (clear) setDecisionRows([]);
+    try {
+      setDecisionRows(
+        await trackerService.getStageDecisions(activeStage, decision, showResolved));
+    } catch {
+      flash("Failed to load the decision log");
+    } finally {
+      setLoadingDecisions(false);
+    }
+  };
+
+  // Reset selection when the sub-tab changes; lazy-load the history tabs.
   useEffect(() => {
     setSelected(new Set());
-    if (subTab === "advanced" && activeStage) {
+    if (!activeStage) return;
+    if (subTab === "advanced") {
       trackerService.getStageAdvanced(activeStage).then(setAdvancedRows).catch(() => {});
     }
-  }, [subTab, activeStage]);
+    loadDecisions(true);
+  }, [subTab, activeStage, showResolved]);
 
   // JSAP desk: fetch each parked invoice's budget verdict so the handler can
   // see WHY something is sitting here without opening it one by one.
@@ -275,13 +350,30 @@ export default function Tracker_Queue() {
         (res.errors.length ? `, ${res.errors.length} failed: ${res.errors[0]?.error}` : "")
       );
       setRemarks(""); setStatusPick(""); setHoldType(""); setAmount("");
+      setSelected(new Set());
       load();
+      if (isDecisionTab) loadDecisions();   // the log the action just changed
     } catch (err: any) {
       flash(err?.response?.data?.detail || "Action failed");
     }
   };
 
+  // Full holds are the only decision-log rows still sitting at this desk, so
+  // they are the only ones that can be released from the Hold tab.
+  const heldHere = useMemo(
+    () => decRows.filter((d) => d.is_still_here && d.hold_type === "FULL"),
+    [decRows]
+  );
+  const canReleaseHolds = subTab === "hold" && heldHere.length > 0;
+  const allHeldSelected =
+    heldHere.length > 0 && heldHere.every((d) => selected.has(d.invoice_id));
+
   const onAdvance = () => runBulk({ action: "ADVANCE", remarks });
+  /** Release the selected full holds: mark them OK and let them move on. */
+  const onReleaseHold = (status: string) => {
+    if (!selected.size) { flash("Select at least one held invoice"); return; }
+    runBulk({ stage_status: status, remarks });
+  };
   const onReturn = () => {
     if (!remarks.trim()) { flash("Remarks are mandatory to return"); return; }
     runBulk({ action: "RETURN", remarks });
@@ -312,6 +404,30 @@ export default function Tracker_Queue() {
       ...(statusPick === "HOLD" ? { hold_type: holdType } : {}),
       ...(amount.trim() ? { amount } : {}),
     });
+  };
+
+  // Export exactly what the active tab is showing (search filter included), in
+  // the same register layout as the All-Invoices export — the server builds it
+  // from the same `exports.build_workbook`, so the two sheets match column for
+  // column. A decision log can list an invoice twice; the register is one row
+  // per invoice, so the ids are de-duplicated server-side.
+  const tabLabel = TAB_LABELS[subTab]
+    ?? subTab.charAt(0).toUpperCase() + subTab.slice(1);
+  const exportIds = isDecisionTab
+    ? [...new Set(decRows.map((d) => d.invoice_id))]
+    : rows.map((i) => i.id);
+
+  const onExport = async () => {
+    if (!exportIds.length) { flash("Nothing to export in this tab"); return; }
+    setExporting(true);
+    try {
+      const blob = await trackerService.exportStageTab(activeStage, subTab, exportIds);
+      saveAs(blob, `${activeStage}-${subTab}-${exportDateStamp()}.xlsx`);
+    } catch {
+      flash("Export failed");
+    } finally {
+      setExporting(false);
+    }
   };
 
   const openTimeline = async (id: number) => {
@@ -415,10 +531,12 @@ export default function Tracker_Queue() {
                 Partial<span className="trk-tab-count">{partialRows.length}</span>
               </button>
             )}
+            {/* Live: rejected here but the reason is still owed. Distinct from
+                the Rejected *log* below, which is what was actually sent back. */}
             {(isSapApproval || isJsap || rejectedRows.length > 0) && (
               <button className={"trk-tab" + (subTab === "rejected" ? " active" : "")}
                 onClick={() => setSubTab("rejected")}>
-                Rejected<span className="trk-tab-count">{rejectedRows.length}</span>
+                Awaiting Remarks<span className="trk-tab-count">{rejectedRows.length}</span>
               </button>
             )}
             {isEntry && (
@@ -427,6 +545,56 @@ export default function Tracker_Queue() {
                 Advanced{subTab === "advanced" && <span className="trk-tab-count">{advancedRows.length}</span>}
               </button>
             )}
+            {/* Decision log — what this desk decided. OK, DEBIT and partial
+                HOLDs have already advanced, so these read the event history
+                rather than the live queue. */}
+            {decisionChoices.includes("HOLD") && (
+              <button className={"trk-tab" + (subTab === "hold" ? " active" : "")}
+                onClick={() => setSubTab("hold")}>
+                Hold{subTab === "hold" && <span className="trk-tab-count">{decRows.length}</span>}
+              </button>
+            )}
+            {decisionChoices.includes("OK") && (
+              <button className={"trk-tab" + (subTab === "ok" ? " active" : "")}
+                onClick={() => setSubTab("ok")}>
+                OK{subTab === "ok" && <span className="trk-tab-count">{decRows.length}</span>}
+              </button>
+            )}
+            {decisionChoices.includes("DEBIT") && (
+              <button className={"trk-tab" + (subTab === "debit" ? " active" : "")}
+                onClick={() => setSubTab("debit")}>
+                Debit{subTab === "debit" && <span className="trk-tab-count">{decRows.length}</span>}
+              </button>
+            )}
+            {/* Verdict logs: what this desk approved, and what it sent back
+                and has not seen since. */}
+            {decisionChoices.includes("APPROVED") && (
+              <button className={"trk-tab" + (subTab === "approved" ? " active" : "")}
+                onClick={() => setSubTab("approved")}>
+                Approved{subTab === "approved" && <span className="trk-tab-count">{decRows.length}</span>}
+              </button>
+            )}
+            {decisionChoices.includes("REJECTED") && (
+              <button className={"trk-tab" + (subTab === "rejected_log" ? " active" : "")}
+                onClick={() => setSubTab("rejected_log")}>
+                Rejected{subTab === "rejected_log" && <span className="trk-tab-count">{decRows.length}</span>}
+              </button>
+            )}
+            {decisionChoices.includes("RETURN") && (
+              <button className={"trk-tab" + (subTab === "sent_back" ? " active" : "")}
+                onClick={() => setSubTab("sent_back")}>
+                Sent Back{subTab === "sent_back" && <span className="trk-tab-count">{decRows.length}</span>}
+              </button>
+            )}
+            {/* Exports exactly what this tab shows, search filter included. */}
+            <button className="trk-btn trk-btn-success" style={{ marginLeft: "auto" }}
+              onClick={onExport} disabled={exporting || !exportIds.length}
+              title={`Export the ${tabLabel} tab in the invoice-register layout`}>
+              <HiArrowDownTray /> {exporting ? "Exporting…" : "Export Excel"}
+              {exportIds.length > 0 && (
+                <span className="trk-tab-count">{exportIds.length}</span>
+              )}
+            </button>
           </div>
 
           {/* Rejected tab: supply the reason now to send these back to the previous stage */}
@@ -471,7 +639,7 @@ export default function Tracker_Queue() {
                   <select value={statusPick} onChange={(e) => { setStatusPick(e.target.value); setHoldType(""); setAmount(""); }}>
                     <option value="">Status…</option>
                     {stageCfg.status_choices.map((s) => (
-                      <option key={s} value={s}>{s}</option>
+                      <option key={s} value={s}>{statusLabel(s)}</option>
                     ))}
                   </select>
                   {statusPick === "HOLD" && (
@@ -533,9 +701,153 @@ export default function Tracker_Queue() {
             </div>
           )}
 
+          {/* Decision-log banner: these tabs are history, not a worklist. */}
+          {isDecisionTab && (
+            <div className="trk-actionbar" style={{ background: "#f8fafc" }}>
+              <span className="trk-sub" style={{ fontSize: 11 }}>
+                {subTab === "hold"
+                  ? "Every hold recorded at this desk. A full hold keeps the invoice here; a partial hold advances it with the amount withheld."
+                  : subTab === "debit"
+                  ? "Every debit recorded at this desk, with the amount debited. Debits accumulate on the invoice."
+                  : subTab === "approved"
+                  ? "Every invoice this desk approved and passed on."
+                  : SENT_BACK_TABS.has(subTab)
+                  ? `Invoices this desk ${subTab === "rejected_log" ? "rejected" : "sent back"}, with the reason. Once one comes back to this desk it is no longer outstanding and drops off this list.`
+                  : "Every invoice this desk passed as OK."}
+                {" "}Read-only log — the invoice may have moved on since.
+              </span>
+              {subTab === "hold" && heldHere.length > 0 && (
+                <span className="trk-sub" style={{ fontSize: 11, color: "#b45309" }}>
+                  {heldHere.length} still held here — tick them below to release.
+                </span>
+              )}
+              {SENT_BACK_TABS.has(subTab) && (
+                <label style={{ display: "flex", alignItems: "center", gap: 6,
+                                marginLeft: "auto", fontSize: 12, cursor: "pointer" }}>
+                  <input type="checkbox" checked={showResolved}
+                    onChange={(e) => setShowResolved(e.target.checked)} />
+                  Also show ones that came back
+                </label>
+              )}
+            </div>
+          )}
+
+          {/* Hold tab: release a full hold — it is still parked at this desk,
+              so it can be dispositioned straight from the log. */}
+          {canReleaseHolds && (
+            <div className="trk-actionbar" style={{ background: "#fffbeb", borderColor: "#fde68a" }}>
+              <span className="trk-count">{selected.size} selected</span>
+              <input className="trk-remarks" placeholder="Remarks (optional)"
+                value={remarks} onChange={(e) => setRemarks(e.target.value)} />
+              <button className="trk-btn trk-btn-success"
+                onClick={() => onReleaseHold("OK")} disabled={!selected.size}>
+                <HiArrowRight /> Release as OK
+                {stageCfg && !stageCfg.is_terminal && " → next stage"}
+              </button>
+              <span className="trk-sub" style={{ fontSize: 11 }}>
+                Clears the hold and advances the invoice — same as dispositioning
+                it from the Current tab.
+              </span>
+            </div>
+          )}
+
           {/* Table */}
           <div className="trk-card">
             <div className="trk-table-wrap">
+              {isDecisionTab ? (
+              <table className="trk-table">
+                <thead>
+                  <tr>
+                    {canReleaseHolds && (
+                      <th>
+                        <input type="checkbox" checked={allHeldSelected}
+                          onChange={(e) =>
+                            setSelected(e.target.checked
+                              ? new Set(heldHere.map((d) => d.invoice_id))
+                              : new Set())
+                          } />
+                      </th>
+                    )}
+                    <th>Invoice No.</th>
+                    <th>Party</th>
+                    <th>Inv. Date</th>
+                    <th>Value</th>
+                    <th>Decision</th>
+                    {AMOUNT_TABS.has(subTab) && <th>Amount</th>}
+                    <th>Remarks</th>
+                    <th>By</th>
+                    <th>Decided</th>
+                    <th>Now At</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {decRows.map((d) => (
+                    <tr key={d.event_id}>
+                      {canReleaseHolds && (
+                        <td>
+                          {d.is_still_here && d.hold_type === "FULL" && (
+                            <input type="checkbox" checked={selected.has(d.invoice_id)}
+                              onChange={() => toggle(d.invoice_id)} />
+                          )}
+                        </td>
+                      )}
+                      <td>{d.invoice_number}</td>
+                      <td>{d.party_name}</td>
+                      <td>{fmtDate(d.invoice_date)}</td>
+                      <td>₹{money(d.net_invoice_value ?? d.invoice_value)}</td>
+                      <td>
+                        <span className={"trk-badge " + (
+                          d.decision === "OK" || d.decision === "APPROVED" ? "trk-badge-success"
+                            : d.decision === "DEBIT" || d.decision === "REJECTED" ? "trk-badge-danger"
+                            : "trk-badge-warn")}>
+                          {d.decision}{d.hold_type ? ` · ${d.hold_type}` : ""}
+                        </span>
+                        {d.awaiting_remarks && (
+                          <div className="trk-sub" style={{ fontSize: 11 }}>reason still owed</div>
+                        )}
+                        {d.came_back && SENT_BACK_TABS.has(subTab) && (
+                          <div className="trk-sub" style={{ fontSize: 11, color: "#047857" }}>
+                            came back since
+                          </div>
+                        )}
+                      </td>
+                      {AMOUNT_TABS.has(subTab) && (
+                        <td>
+                          {d.amount ? `₹${money(d.amount)}` : "—"}
+                          {d.decision === "HOLD" && d.hold_type === "FULL" && (
+                            <div className="trk-sub" style={{ fontSize: 11 }}>full value</div>
+                          )}
+                        </td>
+                      )}
+                      <td style={{ maxWidth: 260, whiteSpace: "normal" }}>{d.remarks || "—"}</td>
+                      <td>{d.acted_by_name || "—"}</td>
+                      <td>
+                        {fmtDT(d.decided_at)}
+                      </td>
+                      <td>
+                        <span className={"trk-badge " + (d.is_still_here
+                          ? "trk-badge-warn" : "trk-badge-stage")}>
+                          {d.invoice_status === "COMPLETED" ? "Completed" : d.current_stage_name}
+                        </span>
+                        {d.is_still_here && (
+                          <div className="trk-sub" style={{ fontSize: 11 }}>still here</div>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                  {decRows.length === 0 && (
+                    <tr><td colSpan={11}><div className="trk-empty">
+                      {loadingDecisions ? "Loading…"
+                        : SENT_BACK_TABS.has(subTab)
+                        ? (showResolved
+                          ? "This desk has not sent anything back."
+                          : "Nothing outstanding — anything sent back has since come back here.")
+                        : `No ${DECISION_TABS[subTab].toLowerCase()} decisions recorded at this stage.`}
+                    </div></td></tr>
+                  )}
+                </tbody>
+              </table>
+              ) : (
               <table className="trk-table">
                 <thead>
                   <tr>
@@ -652,6 +964,7 @@ export default function Tracker_Queue() {
                   )}
                 </tbody>
               </table>
+              )}
             </div>
           </div>
         </>

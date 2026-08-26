@@ -8,6 +8,16 @@ type Props = {
   state: SalesInvoiceState;
 };
 
+/** What an in-flight log's status means for someone about to invoice the SO. */
+const USED_STATUS_LABELS: Record<string, string> = {
+  PENDING: "Awaiting review",
+  APPROVED: "Approved, not posted",
+  EDITED: "Being reworked",
+  ERROR: "Failed, in a log",
+  CL_RAISED: "Credit limit raised",
+  POSTED_TO_SAP: "Already invoiced",
+};
+
 export default function SOCard({ order, state }: Props) {
   const [expanded, setExpanded] = useState(false);
   const lines = state.getOrderLines(order);
@@ -15,8 +25,18 @@ export default function SOCard({ order, state }: Props) {
   const selectedCount = openLines.filter((line) => state.selectedLines[lineKey(order.DocEntry, line.LineNum)]).length;
   const docNum = order.DocNum || order.DocEntry;
 
+  // Already carried by another invoice log. SAP still reports the SO as open
+  // until that invoice posts, so without this the same order gets invoiced
+  // twice. Dimmed and badged rather than disabled — a supervisor may still have
+  // a legitimate reason to proceed.
+  const usedBy = state.usedSalesOrders?.[String(docNum)];
+  const usedLabel = usedBy ? USED_STATUS_LABELS[usedBy.status] || "Already in a log" : "";
+
   return (
-    <article className={`si-so-card ${expanded ? "is-expanded" : ""}`} style={{ display: "block", background: "#fff", color: "#0f172a" }}>
+    <article
+      className={`si-so-card ${expanded ? "is-expanded" : ""} ${usedBy ? "is-already-logged" : ""}`}
+      style={{ display: "block", background: "#fff", color: "#0f172a", opacity: usedBy && !selectedCount ? 0.62 : 1 }}
+    >
       <header
         className="si-so-head"
         role="button"
@@ -37,6 +57,14 @@ export default function SOCard({ order, state }: Props) {
               <HiChevronRight />
             </span>
             SO #{docNum}
+            {usedBy && (
+              <span
+                className="si-so-used-badge"
+                title={`Invoice log #${usedBy.log_id}${usedBy.sap_doc_num ? ` · SAP invoice ${usedBy.sap_doc_num}` : ""}${usedBy.created_at ? ` · ${formatDateDisplay(usedBy.created_at)}` : ""}`}
+              >
+                {usedLabel}
+              </span>
+            )}
           </h3>
           <p style={{ display: "block", color: "#64748b", fontSize: 12, marginTop: 4 }}>
             DocEntry {order.DocEntry} - {formatDateDisplay(order.DocDate)} - Due {formatDateDisplay(order.DocDueDate)}

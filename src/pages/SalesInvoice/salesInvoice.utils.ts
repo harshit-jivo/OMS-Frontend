@@ -59,8 +59,6 @@ export type InvoiceForm = {
   postingDate: string;
   dueDate: string;
   documentDate: string;
-  receivedDate: string;
-  dispatchDate: string;
   driverName: string;
   vehicleNumber: string;
   billNumber: string;
@@ -100,6 +98,12 @@ export type CustomerDetails = {
   U_Chain?: string;
   BillToDef?: string;
   ShipToDef?: string;
+  /**
+   * Running AR balance from OCRD, already net of payments and credit memos.
+   * Positive means the customer still owes us. Absent on the fallback path,
+   * which builds the customer from the party list without hitting OCRD.
+   */
+  Balance?: number | string | null;
 };
 
 export type PartyAddress = {
@@ -122,8 +126,6 @@ export const emptyForm = (): InvoiceForm => ({
   postingDate: todayInput(),
   dueDate: todayInput(),
   documentDate: todayInput(),
-  receivedDate: todayInput(),
-  dispatchDate: todayInput(),
   driverName: "",
   vehicleNumber: "",
   billNumber: "",
@@ -192,9 +194,6 @@ export const buildInvoicePayload = (
     DocDate: form.postingDate,
     DocDueDate: form.dueDate,
     TaxDate: form.documentDate,
-    // SAP UDFs — a date-only value with the fixed SAP datetime suffix.
-    U_Recv_Date: `${normalizeDateInput(form.receivedDate)} 00:00:00.0000000`,
-    U_Dipatch_Date: `${normalizeDateInput(form.dispatchDate)} 00:00:00.0000000`,
     NumAtCard: form.billNumber,
     SalesPersonCode: firstLine?.SlpCode ?? null,
     ShipToCode: form.shipTo,
