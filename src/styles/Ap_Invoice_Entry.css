@@ -1,0 +1,197 @@
+/* ==========================================================================
+   AP Invoice Entry — copy-from-GRPO data entry
+   Design tokens mirror Tracker.css (the most refined page styling in the app).
+   The core visual idea: COPIED fields are muted/greyed and inert; EDITABLE
+   fields carry .ap-edit — a white background and an accent ring on focus — so a
+   user can see at a glance what is theirs to change.
+   ========================================================================== */
+:root {
+  --ap-primary: #4f46e5;
+  --ap-primary-600: #4338ca;
+  --ap-primary-50: #eef2ff;
+  --ap-ink: #0f172a;
+  --ap-ink-2: #475569;
+  --ap-muted: #6b7280;
+  --ap-line: #e5e7eb;
+  --ap-bg: #f6f7fb;
+  --ap-ro-bg: #f3f4f6;      /* read-only / copied surface */
+  --ap-ok: #059669;
+  --ap-ok-bg: #ecfdf5;
+  --ap-err: #dc2626;
+  --ap-radius: 12px;
+  --ap-radius-sm: 8px;
+  --ap-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.06);
+  --ap-shadow-lg: 0 24px 48px rgba(16, 24, 40, 0.22);
+  --ap-focus: 0 0 0 3px rgba(99, 102, 241, 0.18);
+}
+
+.ap-page {
+  padding: 22px 26px;
+  color: var(--ap-ink);
+  background: var(--ap-bg);
+  min-height: 100%;
+}
+
+/* ---- Header ---- */
+.ap-header { margin-bottom: 18px; }
+.ap-title { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; margin: 0; }
+.ap-sub { color: var(--ap-muted); font-size: 13px; margin: 4px 0 0; max-width: 70ch; }
+
+/* ---- Cards ---- */
+.ap-card {
+  background: #fff;
+  border: 1px solid var(--ap-line);
+  border-radius: var(--ap-radius);
+  box-shadow: var(--ap-shadow);
+  padding: 18px;
+  margin-bottom: 16px;
+}
+
+/* ---- Lookup row ---- */
+.ap-lookup { display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-end; }
+.ap-grow { flex: 1 1 380px; }
+.ap-inline { display: flex; gap: 8px; flex-wrap: wrap; }
+.ap-inline .ap-input { flex: 1 1 200px; }
+
+.ap-field { display: flex; flex-direction: column; gap: 6px; }
+.ap-label { font-size: 12px; font-weight: 700; color: var(--ap-ink-2); text-transform: uppercase; letter-spacing: 0.03em; }
+.ap-req::after { content: " *"; color: var(--ap-err); }
+
+.ap-input {
+  border: 1px solid #d1d5db;
+  border-radius: var(--ap-radius-sm);
+  padding: 9px 12px;
+  font-size: 13px;
+  outline: none;
+  background: var(--ap-ro-bg);
+  color: var(--ap-ink);
+  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+}
+/* Editable fields read as clearly interactive. */
+.ap-input.ap-edit, .ap-cell-input.ap-edit { background: #fff; }
+.ap-input:focus, .ap-cell-input:focus { border-color: var(--ap-primary); box-shadow: var(--ap-focus); }
+.ap-input-err { border-color: var(--ap-err); }
+.ap-err { color: var(--ap-err); font-size: 12px; }
+
+/* ---- Segmented company picker ---- */
+.ap-segmented { display: inline-flex; background: var(--ap-ro-bg); border-radius: var(--ap-radius-sm); padding: 3px; gap: 3px; }
+.ap-segment {
+  border: 0; background: transparent; cursor: pointer;
+  padding: 7px 14px; border-radius: 6px;
+  font-size: 13px; font-weight: 600; color: var(--ap-ink-2);
+}
+.ap-segment-active { background: #fff; color: var(--ap-primary); box-shadow: var(--ap-shadow); }
+
+/* ---- Buttons ---- */
+.ap-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  border-radius: var(--ap-radius-sm); border: 1px solid transparent;
+  padding: 9px 14px; font-size: 13px; font-weight: 600; cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+}
+.ap-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.ap-btn-primary { background: var(--ap-primary); color: #fff; }
+.ap-btn-primary:hover:not(:disabled) { background: var(--ap-primary-600); }
+.ap-btn-ghost { background: #fff; border-color: var(--ap-line); color: var(--ap-ink-2); }
+.ap-btn-ghost:hover:not(:disabled) { background: var(--ap-ro-bg); }
+.ap-btn-sm { padding: 5px 10px; font-size: 12px; background: var(--ap-primary-50); color: var(--ap-primary-600); }
+.ap-icon-btn { border: 0; background: transparent; cursor: pointer; color: var(--ap-muted); font-size: 18px; display: inline-flex; }
+
+/* ---- Browse panel ---- */
+.ap-browse { margin-top: 16px; border-top: 1px solid var(--ap-line); padding-top: 14px; }
+.ap-browse-list { margin-top: 10px; max-height: 320px; overflow: auto; }
+.ap-muted-row { color: var(--ap-muted); font-size: 13px; padding: 14px 4px; }
+
+/* ---- Copied banner / read-only vendor block ---- */
+.ap-copied-banner {
+  background: var(--ap-primary-50); color: var(--ap-primary-600);
+  border-radius: var(--ap-radius-sm); padding: 9px 12px;
+  font-size: 12.5px; font-weight: 600; margin-bottom: 14px;
+}
+.ap-vendor { display: flex; gap: 28px; flex-wrap: wrap; padding-bottom: 14px; border-bottom: 1px solid var(--ap-line); margin-bottom: 16px; }
+.ap-ro { display: flex; flex-direction: column; gap: 3px; }
+.ap-ro-label { font-size: 11px; font-weight: 700; color: var(--ap-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.ap-ro-value { font-size: 14px; font-weight: 600; }
+.ap-dim { color: var(--ap-muted); font-weight: 400; }
+.ap-strong { font-weight: 700; }
+
+/* ---- Form grid ---- */
+.ap-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+.ap-col-span { grid-column: 1 / -1; }
+
+/* ---- TDS ---- */
+.ap-tds { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--ap-line); display: flex; gap: 20px; align-items: flex-end; flex-wrap: wrap; }
+.ap-tds-code { min-width: 320px; flex: 1 1 320px; }
+.ap-check { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--ap-ink-2); cursor: pointer; margin-top: 12px; }
+.ap-check input { width: 16px; height: 16px; accent-color: var(--ap-primary); cursor: pointer; }
+.ap-check-off { opacity: 0.6; cursor: not-allowed; }
+.ap-check span { display: inline-flex; align-items: center; gap: 6px; }
+.ap-pill { background: var(--ap-ok-bg); color: var(--ap-ok); border-radius: 999px; padding: 2px 8px; font-size: 11px; font-weight: 700; margin-left: 6px; }
+
+/* ---- Lines table ---- */
+.ap-lines-head { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; }
+.ap-lines-head h3 { margin: 0; font-size: 16px; font-weight: 700; }
+.ap-lines-head .ap-dim { font-size: 12px; display: inline-flex; align-items: center; gap: 5px; }
+.ap-table-wrap { overflow-x: auto; }
+.ap-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ap-table th {
+  text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--ap-muted); font-weight: 700; padding: 8px 10px; border-bottom: 1px solid var(--ap-line);
+  white-space: nowrap;
+}
+.ap-table td { padding: 9px 10px; border-bottom: 1px solid #f1f2f4; vertical-align: middle; }
+.ap-table tfoot td { border-bottom: 0; padding-top: 12px; }
+.ap-r { text-align: right; }
+/* copied cells sit visually behind the editable inputs */
+.ap-ro-cell { color: var(--ap-ink-2); background: #fbfbfc; }
+.ap-cell-input {
+  width: 110px; text-align: right;
+  border: 1px solid #d1d5db; border-radius: 6px; padding: 6px 8px;
+  font-size: 13px; outline: none; background: #fff;
+}
+.ap-uom { color: var(--ap-muted); font-size: 11px; margin-left: 5px; }
+
+/* ---- Actions ---- */
+.ap-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+
+/* ---- Success banner ---- */
+.ap-success {
+  display: flex; align-items: center; gap: 9px;
+  background: var(--ap-ok-bg); color: #065f46;
+  border: 1px solid #a7f3d0; border-radius: var(--ap-radius);
+  padding: 12px 14px; font-size: 13.5px; margin-bottom: 16px;
+}
+
+/* ---- Modal ---- */
+.ap-modal-overlay {
+  position: fixed; inset: 0; background: rgba(15, 23, 42, 0.45);
+  display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 60;
+}
+.ap-modal {
+  background: #fff; border-radius: var(--ap-radius); box-shadow: var(--ap-shadow-lg);
+  width: min(560px, 100%); max-height: 88vh; display: flex; flex-direction: column;
+}
+.ap-modal-head, .ap-modal-foot { padding: 14px 18px; display: flex; align-items: center; }
+.ap-modal-head { justify-content: space-between; border-bottom: 1px solid var(--ap-line); }
+.ap-modal-head h3 { margin: 0; font-size: 16px; font-weight: 700; }
+.ap-modal-body { padding: 18px; overflow: auto; }
+.ap-modal-foot { justify-content: flex-end; gap: 10px; border-top: 1px solid var(--ap-line); }
+.ap-review { margin: 0; display: grid; gap: 9px; }
+.ap-review > div { display: flex; justify-content: space-between; gap: 16px; font-size: 13px; }
+.ap-review dt { color: var(--ap-muted); font-weight: 600; }
+.ap-review dd { margin: 0; font-weight: 600; text-align: right; }
+.ap-note { color: var(--ap-muted); font-size: 12px; margin: 14px 0 0; }
+
+/* ---- Toast ---- */
+.ap-toast {
+  position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
+  background: var(--ap-ink); color: #fff; border-radius: 999px;
+  padding: 10px 18px; font-size: 13px; font-weight: 600;
+  box-shadow: var(--ap-shadow-lg); z-index: 80;
+}
+
+@media (max-width: 720px) {
+  .ap-page { padding: 16px 14px; }
+  .ap-vendor { gap: 16px; }
+  .ap-cell-input { width: 88px; }
+}

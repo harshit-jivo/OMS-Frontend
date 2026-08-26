@@ -817,6 +817,15 @@ export default function Sidebar({ children }: SidebarProps) {
             </li>
           )}
 
+          {canSeeTracker("Ap_Invoice_Entry") && (
+            <li className={location.pathname === "/Ap_Invoice_Entry" ? "active" : ""}>
+              <Link to="/Ap_Invoice_Entry" onClick={closeSidebar}>
+                <SidebarIcon><HiDocumentText /></SidebarIcon>
+                AP Invoice Entry
+              </Link>
+            </li>
+          )}
+
           {canSeeTracker("Tracker_Queue") && (
             <li className={location.pathname === "/Tracker_Queue" ? "active" : ""}>
               <Link to="/Tracker_Queue" onClick={closeSidebar}>

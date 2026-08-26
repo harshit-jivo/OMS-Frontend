@@ -47,6 +47,7 @@ import Tracker_Invoices from "./pages/Tracker_Invoices";
 import Profile from "./pages/Profile";
 import Device_Management from "./pages/Device_Management";
 import Invoice_Report from "./pages/Invoice_Report";
+import Ap_Invoice_Entry from "./pages/Ap_Invoice_Entry";
 
 function App() {
   return (
@@ -389,6 +390,16 @@ function App() {
           element={
             <Sidebar>
               <UI_Labels />
+            </Sidebar>
+          }
+        />
+
+        {/* AP (vendor) invoice entry — copy from GRPO */}
+        <Route
+          path="/Ap_Invoice_Entry"
+          element={
+            <Sidebar>
+              <Ap_Invoice_Entry />
             </Sidebar>
           }
         />
