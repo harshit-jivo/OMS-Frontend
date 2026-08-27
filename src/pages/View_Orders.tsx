@@ -254,47 +254,69 @@ export default function View_Orders() {
     };
   }, [orders]);
 
-  // For completed orders that have a SAP quotation, look up whether the quotation
-  // is still open in SAP — the Cancel button only shows while it's open.
-  useEffect(() => {
-    let isCancelled = false;
+  // Sales Quotation — DISABLED 2026-08-27. The flow is closed and no longer
+  // used; `GET /orders/quotation-status/` is commented out on the backend, so
+  // this effect would now 404 on every render of the orders list.
+  //
+  // Note it had already stopped working: the backend view called
+  // `get_quotation_status(doc_entries)` without its required `branch`
+  // argument, raising TypeError inside an `except Exception` that returns the
+  // same empty map as "SAP is unreachable". The Cancel button therefore never
+  // appeared, and the failure was indistinguishable from SAP being down —
+  // which is why nobody noticed.
+  //
+  // useEffect(() => {
+  //   let isCancelled = false;
+  //
+  //   const fetchQuotationStatuses = async () => {
+  //     // The actual quotation DocNum lives in SalesQuotationLog (resolved by the
+  //     // backend), not on Order.sap_doc_number — so query every completed,
+  //     // not-yet-cancelled order and let the backend report which have a quotation.
+  //     const completedIds = orders
+  //       .filter((order) => isCompletedOrder(order) && !order.quotation_cancelled)
+  //       .map((order) => order.id);
+  //
+  //     if (completedIds.length === 0) {
+  //       setQuotationStatusByOrderId({});
+  //       return;
+  //     }
+  //
+  //     try {
+  //       const statuses = await ordersService.getQuotationStatus(completedIds);
+  //       if (!isCancelled) {
+  //         const byId: Record<number, QuotationStatus> = {};
+  //         Object.entries(statuses).forEach(([orderId, status]) => {
+  //           byId[Number(orderId)] = status;
+  //         });
+  //         setQuotationStatusByOrderId(byId);
+  //       }
+  //     } catch (error) {
+  //       console.log("Error fetching quotation statuses:", error);
+  //       if (!isCancelled) setQuotationStatusByOrderId({});
+  //     }
+  //   };
+  //
+  //   void fetchQuotationStatuses();
+  //
+  //   return () => {
+  //     isCancelled = true;
+  //   };
+  // }, [orders]);
 
-    const fetchQuotationStatuses = async () => {
-      // The actual quotation DocNum lives in SalesQuotationLog (resolved by the
-      // backend), not on Order.sap_doc_number — so query every completed,
-      // not-yet-cancelled order and let the backend report which have a quotation.
-      const completedIds = orders
-        .filter((order) => isCompletedOrder(order) && !order.quotation_cancelled)
-        .map((order) => order.id);
-
-      if (completedIds.length === 0) {
-        setQuotationStatusByOrderId({});
-        return;
-      }
-
-      try {
-        const statuses = await ordersService.getQuotationStatus(completedIds);
-        if (!isCancelled) {
-          const byId: Record<number, QuotationStatus> = {};
-          Object.entries(statuses).forEach(([orderId, status]) => {
-            byId[Number(orderId)] = status;
-          });
-          setQuotationStatusByOrderId(byId);
-        }
-      } catch (error) {
-        console.log("Error fetching quotation statuses:", error);
-        if (!isCancelled) setQuotationStatusByOrderId({});
-      }
-    };
-
-    void fetchQuotationStatuses();
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [orders]);
+  // The single switch. False hides every "Cancel Sales Quotation" control, so
+  // the confirm modal can never open and `handleCancelQuotation` below is
+  // unreachable — no call is made to the commented-out backend route.
+  //
+  // A flag rather than deleting the conditions: it keeps every reference live
+  // (so nothing becomes an unused-variable error), documents itself, and makes
+  // re-enabling one line here plus the effect above.
+  //
+  // Deliberately still rendered: the `order.quotation_cancelled` badge, for
+  // orders cancelled BEFORE the flow closed. That is history worth showing.
+  const QUOTATION_FLOW_ENABLED = false;
 
   const canCancelQuotation = (order: Order) =>
+    QUOTATION_FLOW_ENABLED &&
     isCompletedOrder(order) &&
     !order.quotation_cancelled &&
     Boolean(quotationStatusByOrderId[order.id]?.is_open);

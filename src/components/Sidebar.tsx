@@ -729,6 +729,7 @@ export default function Sidebar({ children }: SidebarProps) {
             </li>
           )}
 
+          {/* Sales Quotation — DISABLED 2026-08-27, the flow is closed.
           {isAdmin && (
             <li className={location.pathname === "/Sales_Quotation" ? "active" : ""}>
               <Link to="/Sales_Quotation" onClick={closeSidebar}>
@@ -737,6 +738,7 @@ export default function Sidebar({ children }: SidebarProps) {
               </Link>
             </li>
           )}
+          */}
 
           {/* Payments — visible to admins and to anyone granted the
               Payments_Dashboard permission. The server enforces the same key

@@ -37,7 +37,7 @@ import Page_Permissions from "./pages/Page_Permissions";
 import UI_Labels from "./pages/UI_Labels";
 import PaymentsDashboard from "./pages/Payments/ApprovalManagement";
 import RequirePermission from "./components/RequirePermission";
-import Sales_Quotation from "./pages/Sales_Quotation";
+// import Sales_Quotation from "./pages/Sales_Quotation";  // DISABLED 2026-08-27 — quotation flow closed
 import LabelChecker from "./pages/Label_Checker";
 import NutritionManager from "./pages/Nutrition_Manager";
 import Einvoice from "./pages/Einvoice";
@@ -412,6 +412,10 @@ function App() {
           }
         />
 
+        {/* Sales Quotation — DISABLED 2026-08-27. The quotation flow is
+            closed and no longer used; its backend routes and views are
+            commented out in OMS-Backend (orders/urls.py, sap_sync/urls.py).
+            The SalesQuotationLog table is kept, so history stays queryable.
         <Route
           path="/Sales_Quotation"
           element={
@@ -420,6 +424,7 @@ function App() {
             </Sidebar>
           }
         />
+        */}
 
        
 

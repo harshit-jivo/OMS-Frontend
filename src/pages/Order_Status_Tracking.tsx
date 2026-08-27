@@ -226,6 +226,11 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
       ? { ...order, sap_doc_number: quotationNo }
       : order;
 
+  // Sales Quotation — DISABLED 2026-08-27, the flow is closed and its backend
+  // routes are commented out. Flip to true here and re-enable
+  // `/sap/quotation-log/<id>/` to restore the per-order fallback lookup.
+  const QUOTATION_FLOW_ENABLED = false;
+
   const cacheQuotationNumber = (orderId: number, quotationNo?: string) => {
     if (!quotationNo) return;
     setOrders((prev) =>
@@ -237,6 +242,17 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
     const existingValue = String(order.sap_doc_number || "").trim();
     if (existingValue) return existingValue;
     if (!isCompletedStatus(order)) return "";
+
+    // Sales Quotation — DISABLED 2026-08-27, the flow is closed. Only the
+    // per-order FALLBACK fetch is switched off; historical numbers still show,
+    // because `OrderListView` already resolves `sap_doc_number` from
+    // SalesQuotationLog when it builds the list (orders/views.py, the
+    // `sap_doc_map` block). That table is kept precisely so this keeps working.
+    //
+    // What is gone is the extra round trip for orders the list could not
+    // resolve, which would now 404 against the commented-out
+    // `/sap/quotation-log/<id>/` route.
+    if (!QUOTATION_FLOW_ENABLED) return "";
 
     try {
       const quotationLog = await sapService.getQuotationLog(order.id);
