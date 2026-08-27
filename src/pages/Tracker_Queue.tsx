@@ -335,7 +335,13 @@ export default function Tracker_Queue() {
   };
 
   const toggle = (id: number) =>
-    setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+    setSelected((s) => {
+      const n = new Set(s);
+      // See Tracker_Entry: a ternary used purely for its side effects.
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
   const allSelected = rows.length > 0 && rows.every((r) => selected.has(r.id));
 
   const runBulk = async (payload: {

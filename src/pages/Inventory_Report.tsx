@@ -1,5 +1,4 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Navigate } from "react-router-dom";
 import {
   HiArrowDownTray,
   HiArrowPath,
@@ -30,7 +29,6 @@ const formatQty = (value: number): string =>
   value.toLocaleString("en-IN", { maximumFractionDigits: 2 });
 
 export default function Inventory_Report() {
-  const role = (localStorage.getItem("role") || "").toLowerCase();
 
   const [branch, setBranch] = useState<Branch>("OIL");
   const [report, setReport] = useState<InventoryReportData | null>(null);
@@ -65,9 +63,8 @@ export default function Inventory_Report() {
   }, []);
 
   useEffect(() => {
-    if (role !== "billing") return;
     void loadReport(branch);
-  }, [branch, loadReport, role]);
+  }, [branch, loadReport]);
 
   // Close the warehouse dropdown on an outside click, the way a native select
   // would — otherwise it stays open over the table.
@@ -237,11 +234,20 @@ export default function Inventory_Report() {
     });
   };
 
-  // Page is restricted to the billing role; anyone else is bounced to the
-  // dashboard (mirrors how the sidebar hides the link).
-  if (role !== "billing") {
-    return <Navigate to="/Dashboard" replace />;
-  }
+  // ── Route access: now decided once, in components/ProtectedPage.tsx ───────
+  // The guard that used to sit here is commented out below rather than removed.
+  //
+  // It was not merely redundant, it was WRONG, and in the direction that hurts:
+  // `role !== "billing"` bounced an administrator off a page the sidebar showed
+  // them and the API served them, because it compared the primary role string
+  // alone — no `extra_roles`, no `is_superuser`, no `is_staff`. Two guards that
+  // disagree are worse than one, and this was the one that was mistaken.
+  //
+  //   const role = (localStorage.getItem("role") || "").toLowerCase();
+  //   if (role !== "billing") return <Navigate to="/Dashboard" replace />;
+  //
+  // `auth/routeAccess.ts` carries the same rule (`roles: ["billing"]`) with the
+  // admin bypass every other route gets.
 
   const columnCount = warehouses.length + 4;
   const allSelected =

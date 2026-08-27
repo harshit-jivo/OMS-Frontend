@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import ErrorBoundary from "./components/ErrorBoundary";
 import Login from "./pages/Login";
-import Sidebar from "./components/Sidebar";
+import ProtectedPage from "./components/ProtectedPage";
 import Dashboard from "./pages/Dashboard";
 import App_User from "./pages/App_User";
 import Sap_sync from "./pages/Sap_Sync";
@@ -36,7 +36,6 @@ import Order_Flow_Settings from "./pages/Order_Flow_Settings";
 import Page_Permissions from "./pages/Page_Permissions";
 import UI_Labels from "./pages/UI_Labels";
 import PaymentsDashboard from "./pages/Payments/ApprovalManagement";
-import RequirePermission from "./components/RequirePermission";
 // import Sales_Quotation from "./pages/Sales_Quotation";  // DISABLED 2026-08-27 — quotation flow closed
 import LabelChecker from "./pages/Label_Checker";
 import NutritionManager from "./pages/Nutrition_Manager";
@@ -80,18 +79,18 @@ function App() {
         <Route
           path="/Dashboard"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Dashboard />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Profile"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Profile />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
@@ -99,323 +98,323 @@ function App() {
         <Route
           path="/Device_Management"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Device_Management />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/App_User"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <App_User />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Sap_Sync"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Sap_sync />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Add_Sales"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Add_Sales />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Drafts"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Drafts />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/FOC"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <FOC />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Sales_Invoice"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <SalesInvoice />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Sales_Invoice/SKU_Images"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <SkuGalleryPage />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Invoice_Review"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <InvoiceReview />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Invoice_Report"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Invoice_Report />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Inventory_Report"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Inventory_Report />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/SO_Invoice_Report"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <SO_Invoice_Report />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/View_Orders"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <View_Orders />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Auditor_orders"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Auditor_orders />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Billing_orders"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Billing_orders />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Rate_Approver_orders"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <RateApproverOrders />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Auditor_status_tracking"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Order_Status_Tracking mode="auditor" />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Billing_status_tracking"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Order_Status_Tracking mode="billing" />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Rate_Approver_status_tracking"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Order_Status_Tracking mode="rate_approver" />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Daily_Report"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Daily_Report />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/PersonWise_Report"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <PersonWise_Report />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Sales_Report"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Sales_Report />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/StateWise_Report"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <StateWise_Report />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Order_Tracking"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Order_Tracking />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Distributor_Order_Tracking"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Distributor_Order_Tracking />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Party_Assignment"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Party_Assignment />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Party_Product_Assignment"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Party_Product_Assignment />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Add_Scheme"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Add_Scheme />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Scheme_Manager"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Scheme_Manager />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Combo_Mapping"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Combo_Mapping />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Staff"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Staff />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Staff_Rate_Assignment"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Staff_Rate_Assignment />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
         <Route
           path="/Product_Stock"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Product_Stock />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Order_Stock_Check"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Order_Stock_Check />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Order_Flow_Settings"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Order_Flow_Settings />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Page_Permissions"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Page_Permissions />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
@@ -426,9 +425,9 @@ function App() {
         <Route
           path="/Sales_Quotation"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Sales_Quotation />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
         */}
@@ -441,38 +440,36 @@ function App() {
         <Route
           path="/Label_Checker"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <LabelChecker />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Nutrition_Manager"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <NutritionManager />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/UI_Labels"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <UI_Labels />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Payments_Dashboard"
           element={
-            <RequirePermission permission="Payments_Dashboard">
-              <Sidebar>
-                <PaymentsDashboard />
-              </Sidebar>
-            </RequirePermission>
+            <ProtectedPage>
+              <PaymentsDashboard />
+            </ProtectedPage>
           }
         />
 
@@ -488,9 +485,9 @@ function App() {
         <Route
           path="/Ap_Invoice_Entry"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Ap_Invoice_Entry />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
@@ -500,99 +497,99 @@ function App() {
         <Route
           path="/Einvoice"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Einvoice />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Ewaybill"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Ewaybill />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/HAIS"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <HAIS />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Distributor"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Distributor />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Mart_Approval"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <MartApproval />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Tracker_Entry"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Tracker_Entry />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Tracker_Queue"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Tracker_Queue />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Tracker_Admin"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Tracker_Admin />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Tracker_Reports"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Tracker_Reports />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Tracker_Alerts"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Tracker_Alerts />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Tracker_Invoices"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Tracker_Invoices />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
       </Routes>

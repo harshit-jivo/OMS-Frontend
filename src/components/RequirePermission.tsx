@@ -6,6 +6,16 @@ import { useAuth } from "../auth";
 /**
  * Route guard for a page that needs a granted permission key.
  *
+ * SUPERSEDED for routes by `ProtectedPage`, which reads `auth/routeAccess.ts`
+ * keyed on the path. This was applied to exactly one route out of fifty-nine
+ * because the decision sat at the call site, where it could be — and was —
+ * omitted fifty-eight times. Wrapping the shell removes the call site.
+ *
+ * Kept for the case it is still right for: a guarded region that is not a
+ * whole route, on a page reached without the shell. If nothing uses it after
+ * Phase 3, it should go rather than sit here as a second guard that could
+ * disagree with the table.
+ *
  * The sidebar already hides links a user cannot use, but hiding a link is not
  * access control — typing the URL would otherwise render the page. This is the
  * client-side half of the check.

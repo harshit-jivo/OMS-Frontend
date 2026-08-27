@@ -1,16 +1,14 @@
 import axios from "axios";
 import type { AxiosRequestConfig } from "axios";
 
-export const API_BASE_URL = String(import.meta.env.VITE_API_BASE_URL || "")
-  .trim()
-  .replace(/\/+$/, "");
+import { newRequestId, REQUEST_ID_HEADER } from "./requestId";
 
-if (!API_BASE_URL) {
-  throw new Error("VITE_API_BASE_URL is not configured. Add it to your .env file.");
-}
-
-// Used for backend-served media paths (for example, sale-invoice SKU images).
-export const API_ORIGIN = API_BASE_URL.replace(/\/api$/i, "");
+// Where the API lives, and how a path becomes a URL — see services/apiPaths.ts.
+// Re-exported from here because this module was the app's single source for
+// both constants and roughly a dozen files import them from it; moving the
+// derivation without moving the import site keeps that change to one file.
+export { API_BASE_URL, API_ORIGIN, API_VERSION, resolveApiUrl } from "./apiPaths";
+import { API_BASE_URL } from "./apiPaths";
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -88,6 +86,18 @@ api.interceptors.request.use((config) => {
     }
   }
 
+  // One correlation ID per request, so a failure the user reports can be found
+  // in the server log by string match instead of by timestamp. The server
+  // accepts ours and echoes it back; if we sent none it would mint its own,
+  // which correlates the log to itself but not to anything the user can see.
+  //
+  // Set only when absent, so a RETRY after a token refresh reuses the ID of the
+  // attempt that failed. Those two requests are one event from the user's point
+  // of view and sharing an ID is what makes the log say so.
+  if (!config.headers.get(REQUEST_ID_HEADER)) {
+    config.headers.set(REQUEST_ID_HEADER, newRequestId());
+  }
+
   const token = localStorage.getItem("access");
   if (token && config.url !== "/auth/login/") {
     config.headers.Authorization = `Bearer ${token}`;
@@ -139,7 +149,16 @@ const doRefresh = async (): Promise<RefreshResult> => {
     const res = await axios.post(
       `${API_BASE_URL}/auth/refresh/`,
       { refresh },
-      { headers: { "Content-Type": "application/json" } },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          // This call is made with a BARE axios so it cannot re-enter the
+          // interceptors, which means it would otherwise be the one request
+          // the app makes with no correlation ID — and a refresh failure is
+          // exactly the kind of thing worth correlating.
+          [REQUEST_ID_HEADER]: newRequestId(),
+        },
+      },
     );
     const newAccess: string | undefined = res.data?.access;
     const newRefresh: string | undefined = res.data?.refresh;
@@ -154,8 +173,8 @@ const doRefresh = async (): Promise<RefreshResult> => {
       /* the device hook must never impact the auth path */
     }
     return { ok: true, access: newAccess };
-  } catch (error: any) {
-    const status = error?.response?.status;
+  } catch (error: unknown) {
+    const status = (error as { response?: { status?: number } })?.response?.status;
     // ONLY a genuine auth rejection ends the session. Anything without a 401/400
     // response (timeout, offline, DNS, 5xx) is transient → keep the tokens.
     if (status === 401 || status === 400) return { ok: false, reason: "invalid" };
@@ -177,7 +196,12 @@ const refreshAccessToken = async (
   if (current && current !== failedToken) return { ok: true, access: current };
 
   // Cross-tab mutex via the Web Locks API when supported.
-  const locks = (navigator as any).locks;
+  // The Web Locks API is not in this project's DOM lib, and is absent in
+  // Safari before 15.4 and in every non-secure context — hence the feature
+  // test rather than a declaration merge that would claim it always exists.
+  const locks = (navigator as Navigator & {
+    locks?: { request?: (name: string, fn: () => Promise<RefreshResult>) => Promise<RefreshResult> };
+  }).locks;
   if (locks && typeof locks.request === "function") {
     return locks.request("oms-token-refresh", async () => {
       const latest = localStorage.getItem("access");
@@ -243,11 +267,64 @@ const endSession = () => {
 };
 
 /* ------------------------------------------------------------------ *
+ * Deprecated endpoints — RFC 8594
+ *
+ * The backend marks a retiring endpoint with `Deprecation: true`, an optional
+ * `Sunset` date and a `Link: rel="successor-version"` pointing at what replaces
+ * it (see core/deprecation.py). Those headers are useless unless someone reads
+ * them, and nobody reads response headers — so they are surfaced here, in the
+ * console, where the people who have to do the migrating already look.
+ *
+ * Once per path per page load. A deprecated endpoint the app polls would
+ * otherwise fill the console with the same line and get muted like any other
+ * noise, which is the failure mode this is meant to avoid.
+ *
+ * Console only, never the UI: the endpoint still works, and a warning aimed at
+ * developers is not something to put in front of a user who cannot act on it.
+ * ------------------------------------------------------------------ */
+const warnedPaths = new Set<string>();
+
+const warnIfDeprecated = (response: unknown) => {
+  try {
+    const source = response as
+      | { headers?: Record<string, unknown> & { get?: (name: string) => unknown }; config?: { url?: string } }
+      | null
+      | undefined;
+    const headers = source?.headers;
+    if (!headers) return;
+    const read = (name: string): string => {
+      const value =
+        typeof headers.get === "function" ? headers.get(name) : headers[name];
+      return typeof value === "string" ? value : "";
+    };
+    if (!read("deprecation")) return;
+
+    const path = String(source?.config?.url || "unknown");
+    if (warnedPaths.has(path)) return;
+    warnedPaths.add(path);
+
+    const sunset = read("sunset");
+    const successor = /<([^>]+)>/.exec(read("link"))?.[1] || "";
+    console.warn(
+      `[deprecated] ${path} is being retired.`
+        + (sunset ? ` It stops working after ${sunset}.` : "")
+        + (successor ? ` Use ${successor} instead.` : ""),
+    );
+  } catch {
+    /* a warning must never be able to break a real response */
+  }
+};
+
+/* ------------------------------------------------------------------ *
  * Response interceptor — automatic refresh on 401 (Task 3)
  * ------------------------------------------------------------------ */
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    warnIfDeprecated(response);
+    return response;
+  },
   async (error) => {
+    warnIfDeprecated(error?.response);
     const response = error?.response;
     const config = error?.config as
       | (AxiosRequestConfig & { _retry?: boolean })

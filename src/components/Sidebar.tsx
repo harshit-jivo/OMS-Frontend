@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect } from "react";
 import type { ReactNode } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import {
   HiArrowPath,
   HiArrowRightOnRectangle,
@@ -34,35 +34,14 @@ import {
 } from "react-icons/hi2";
 import api from "../services/api";
 import { webDeviceService } from "../services/webDeviceService";
-import { loadUILabels, loadUIFields } from "../services/uiConfig";
-import NotificationToaster, { showToast } from "./NotificationToaster";
-import {
-  initNotificationBus,
-  onNotificationEvent,
-  broadcastNotificationEvent,
-} from "../services/notificationBus";
-import type { NotificationPayload } from "../services/notificationBus";
-import {
-  initNotificationSound,
-  playNotificationSound,
-} from "../utils/notificationSound";
-import {
-  getCurrentPermission,
-  isWebPushSupported,
-  persistSubscription,
-  registerServiceWorker,
-  requestPermission,
-  subscribeToPush,
-  unsubscribeFromPush,
-} from "../services/webPushClient";
-import {
-  getPromptState,
-  savePromptState,
-  shouldShowPrompt,
-} from "../utils/notificationPermission";
+import NotificationToaster from "./NotificationToaster";
+import { isWebPushSupported, unsubscribeFromPush } from "../services/webPushClient";
 import NotificationPermissionModal from "./NotificationPermissionModal";
-import { isTrackerRole, trackerPagesFor } from "../config/pageAccess";
+import { isTrackerRole } from "../config/pageAccess";
 import { useAuth } from "../auth";
+import { canOpen } from "../auth/routeAccess";
+import { groupNotifications } from "./sidebar/notificationGrouping";
+import { useNotifications } from "./sidebar/useNotifications";
 import "./Sidebar.css";
 
 
@@ -70,28 +49,6 @@ type SidebarProps = {
   children: ReactNode;
 };
 
-type Notification = {
-  id: number;
-  message: string;
-  is_read: boolean;
-  order_id?: number;
-  created_at: string;
-};
-
-/**
- * Window events that ask the bell to re-count.
- *
- * Two spellings exist in the codebase and both are dispatched in practice:
- * `ordersService` uses the camelCase name, while the auditor / billing /
- * rate-approver pages use the hyphenated one. Only camelCase was ever
- * listened for, so those pages' refreshes were silently lost. Accepting both
- * is the smallest correct fix and removes the chance of the same mismatch
- * recurring.
- */
-const REFRESH_EVENT_NAMES = [
-  "refreshNotifications",
-  "refresh-notifications",
-] as const;
 
 const SidebarIcon = ({ children }: { children: ReactNode }) => (
   <span className="sb-nav-icon" aria-hidden="true">
@@ -99,32 +56,6 @@ const SidebarIcon = ({ children }: { children: ReactNode }) => (
   </span>
 );
 
-// Bucket a notification's timestamp into Today / Yesterday / Older (Task 9).
-const dateGroupLabel = (isoDate: string): "Today" | "Yesterday" | "Older" => {
-  const date = new Date(isoDate);
-  if (Number.isNaN(date.getTime())) return "Older";
-  const startOfToday = new Date();
-  startOfToday.setHours(0, 0, 0, 0);
-  const startOfYesterday = new Date(startOfToday);
-  startOfYesterday.setDate(startOfYesterday.getDate() - 1);
-  if (date >= startOfToday) return "Today";
-  if (date >= startOfYesterday) return "Yesterday";
-  return "Older";
-};
-
-const groupNotifications = (items: Notification[]) => {
-  const groups: { label: string; items: Notification[] }[] = [
-    { label: "Today", items: [] },
-    { label: "Yesterday", items: [] },
-    { label: "Older", items: [] },
-  ];
-  for (const item of items) {
-    const label = dateGroupLabel(item.created_at);
-    const bucket = groups.find((g) => g.label === label);
-    if (bucket) bucket.items.push(item);
-  }
-  return groups.filter((g) => g.items.length > 0);
-};
 
 export default function Sidebar({ children }: SidebarProps) {
 
@@ -137,50 +68,73 @@ export default function Sidebar({ children }: SidebarProps) {
   // localStorage reads kept in local state. The Sidebar used to be the ONLY
   // thing that loaded the user's grants — which is why route guards, running
   // earlier, had nothing to read. It is now a consumer like everything else.
-  const { session, isAdmin, can: canSee } = useAuth();
+  const { session, isAdmin } = useAuth();
   const userRole = session?.role ?? "";
   const userName = session?.name || session?.username || "";
   const [reportsOpen, setReportsOpen] = useState(false);
   const [distributorOpen, setDistributorOpen] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const location = useLocation();
-  const navigate = useNavigate();
   const roleLabel = userRole ? userRole.toUpperCase() : "USER";
   const displayName = userName || "User";
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [showNotificationsModal, setShowNotificationsModal] = useState(false);
-  // Web Push + real-time state (Phase 3).
-  const [showPushPrompt, setShowPushPrompt] = useState(false);
-  const [permissionSubmitting, setPermissionSubmitting] = useState(false);
-  // OS permission for the Settings section: "default" | "granted" | "denied" | "unsupported".
-  const [notifPermission, setNotifPermission] = useState<string>(() =>
-    getCurrentPermission(),
-  );
-  // Full history (modal): grouped/paginated, not just unread.
-  const [historyItems, setHistoryItems] = useState<Notification[]>([]);
-  const [historyFilter, setHistoryFilter] = useState<"all" | "unread">("all");
-  const [historyOffset, setHistoryOffset] = useState(0);
-  const [historyHasMore, setHistoryHasMore] = useState(false);
-  const [historyLoading, setHistoryLoading] = useState(false);
-  // Latest order-navigation fn, so long-lived bus handlers always route with
-  // the current role without needing to re-subscribe.
-  const goToOrderRef = useRef<(orderId?: number | string | null) => void>(
-    () => {},
-  );
   const normalizedRole = userRole?.toLowerCase().replace(/[_-]+/g, " ").trim() || "";
   const isRateApprover =
     normalizedRole === "rate approver" ||
     normalizedRole === "rateapprover" ||
     normalizedRole === "approver";
+  /**
+   * The bell, the history modal and web push — all of it, in one hook.
+   *
+   * Roughly 340 lines of network calls, cross-tab bus subscriptions,
+   * service-worker wiring, polling fallback and OS-permission prompting used
+   * to sit interleaved with the navigation markup below. It shares nothing
+   * with the nav tree but the user's role, which decides where an order
+   * deep-link lands and who gets asked to enable notifications.
+   */
+  const {
+    unreadCount,
+    showNotificationsModal,
+    historyItems,
+    historyFilter,
+    historyHasMore,
+    historyLoading,
+    notifPermission,
+    showPushPrompt,
+    permissionSubmitting,
+    fetchHistory,
+    handleOpenNotifications,
+    handleCloseNotifications,
+    handleMarkAllRead,
+    handleNotificationClick,
+    changeHistoryFilter,
+    enablePush,
+    dismissPushPrompt,
+  } = useNotifications({ normalizedRole, isRateApprover });
+
   // `isAdmin` and `canSee` now come from the auth module, which counts
   // `extra_roles`, `is_superuser` and `is_staff` — the local version compared
   // the primary role string alone, so a user granted admin through
   // `extra_roles` saw an almost-empty sidebar over an API that allowed them
   // everything. See src/auth/permissions.ts.
 
-  // Tracker access is centralized by role (see config/pageAccess.ts).
-  const trackerPages = trackerPagesFor(userRole, isAdmin);
-  const canSeeTracker = (pageKey: string) => trackerPages.has(pageKey);
+  /**
+   * Should this link be shown?
+   *
+   * Asks the SAME table the router uses (`auth/routeAccess.ts`), keyed on the
+   * path the link points at. Previously the sidebar carried its own copy of
+   * every rule — `canSee("Einvoice") || role === "billing"` and so on — and
+   * the router carried none, so the two could not even disagree: only one of
+   * them had an opinion.
+   *
+   * Now a link is visible exactly when the route behind it would open. Adding
+   * a page in one place and forgetting the other is no longer possible,
+   * because there is only one place.
+   */
+  const show = (path: string) => canOpen(session, path);
+
+  // Tracker access is centralized by role (see config/pageAccess.ts), and is
+  // reached through `show()` like everything else — the table's `trackerPage`
+  // rules resolve to the same `trackerPagesFor` call.
   // Pure tracker users (the three tracker sub-roles) get a trimmed sidebar —
   // no OMS Dashboard.
   const trackerOnly = isTrackerRole(userRole);
@@ -203,279 +157,6 @@ export default function Sidebar({ children }: SidebarProps) {
   // Removing it from here is what makes one source of truth possible; leaving
   // a second fetch would just recreate the drift more quietly.
 
-  const authConfig = () => {
-    const token = localStorage.getItem("access");
-    return token ? { headers: { Authorization: `Bearer ${token}` } } : {};
-  };
-
-  // Lightweight unread snapshot for the bell badge (also the polling fallback).
-  const fetchNotifications = useCallback(async () => {
-    try {
-      const response = await api.get("/orders/notifications/", authConfig());
-      let data = response.data ?? response;
-      if (data && !Array.isArray(data)) {
-        if (Array.isArray(data.data)) data = data.data;
-        else if (Array.isArray(data.results)) data = data.results;
-        else if (Array.isArray(data.notifications)) data = data.notifications;
-      }
-      if (Array.isArray(data)) {
-        const unreadOnly = data.filter((n: any) => !n.is_read);
-        setUnreadCount(unreadOnly.length);
-      }
-    } catch (error) {
-      console.error("Error fetching notifications:", error);
-    }
-  }, []);
-
-  // Resolve the correct role route for a Sales Order deep-link (unchanged
-  // routing — reused by clicks, toasts, and service-worker taps).
-  const routeForRole = useCallback((): string => {
-    if (normalizedRole === "auditor") return "/Auditor_orders";
-    if (normalizedRole === "billing") return "/Billing_orders";
-    if (isRateApprover) return "/Rate_Approver_orders";
-    if (normalizedRole === "manager") return "/Order_Tracking";
-    return "/View_Orders";
-  }, [normalizedRole, isRateApprover]);
-
-  const goToOrder = useCallback(
-    (orderId?: number | string | null) => {
-      const navState = orderId
-        ? { state: { openOrderId: Number(orderId) } }
-        : {};
-      navigate(routeForRole(), navState as any);
-    },
-    [navigate, routeForRole],
-  );
-
-  useEffect(() => {
-    goToOrderRef.current = goToOrder;
-  }, [goToOrder]);
-
-  // Apply a single read to the badge + history list. Called only from the bus
-  // listener so there is exactly one update path (no double-decrement).
-  const applyRead = useCallback((id: number) => {
-    setUnreadCount((c) => Math.max(0, c - 1));
-    setHistoryItems((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)),
-    );
-  }, []);
-
-  // Marks read on the server, then broadcasts so THIS tab and every other tab
-  // update through the single bus path. Only call for a currently-unread item.
-  const markNotificationRead = useCallback(async (id: number) => {
-    try {
-      await api.patch(`/orders/notifications/${id}/`, {}, authConfig());
-    } catch (error) {
-      console.error("Error marking as read:", error);
-    }
-    broadcastNotificationEvent({ type: "read", id });
-  }, []);
-
-  // Paginated history for the modal (Task 9): unread/read + Today/Yesterday/
-  // Older grouping (grouped client-side), with "load more".
-  const fetchHistory = useCallback(
-    async (reset: boolean, filterOverride?: "all" | "unread") => {
-      setHistoryLoading(true);
-      try {
-        const offset = reset ? 0 : historyOffset;
-        const filter = filterOverride ?? historyFilter;
-        const response = await api.get("/orders/notifications/history/", {
-          ...authConfig(),
-          params: { limit: 20, offset, filter },
-        });
-        const payload = response.data ?? response;
-        const results: Notification[] = Array.isArray(payload.results)
-          ? payload.results
-          : [];
-        setHistoryItems((prev) => (reset ? results : [...prev, ...results]));
-        setHistoryOffset(offset + results.length);
-        setHistoryHasMore(payload.next_offset != null);
-        if (typeof payload.unread_count === "number") {
-          setUnreadCount(payload.unread_count);
-        }
-      } catch (error) {
-        console.error("Error loading notification history:", error);
-      } finally {
-        setHistoryLoading(false);
-      }
-    },
-    [historyOffset, historyFilter],
-  );
-
-  // --- Real-time wiring (replaces 30s polling) ------------------------------
-  useEffect(() => {
-    const token = localStorage.getItem("access");
-    if (!token) {
-      window.location.href = "/";
-      return;
-    }
-
-    // An authenticated session is active on this page load (fresh login or a
-    // restored session). Register/refresh this browser in the background — a
-    // no-op if it already succeeded, so route changes don't re-POST.
-    void webDeviceService.onAuthenticated("startup");
-
-    // Load dynamic UI labels once per authenticated session (covers a page
-    // reload / restored session where Login didn't run). De-duped internally.
-    void loadUILabels();
-    void loadUIFields();
-
-    initNotificationBus();
-    initNotificationSound();
-    fetchNotifications();
-
-    let interval: number | undefined;
-    const startFallbackPolling = () => {
-      if (interval) return;
-      interval = window.setInterval(() => fetchNotifications(), 30000);
-    };
-
-    const off = onNotificationEvent((event) => {
-      if (event.type === "push") {
-        const data: NotificationPayload = event.data || {};
-        fetchNotifications();
-        playNotificationSound();
-        showToast({
-          title: data.title || "New notification",
-          message: data.message || data.body || "",
-          orderNumber:
-            (data as any).order_number != null
-              ? String((data as any).order_number)
-              : data.order_id != null
-                ? String(data.order_id)
-                : null,
-          onAction: () => goToOrderRef.current(data.order_id ?? null),
-        });
-      } else if (event.type === "click") {
-        goToOrderRef.current(event.data?.order_id ?? null);
-      } else if (event.type === "read") {
-        applyRead(event.id);
-      } else if (event.type === "read-all" || event.type === "cleared") {
-        setUnreadCount(0);
-        setHistoryItems((prev) => prev.map((n) => ({ ...n, is_read: true })));
-      } else if (event.type === "resubscribe") {
-        persistSubscription(event.subscription).catch(() => undefined);
-      }
-    });
-
-    const handleRefresh = () => fetchNotifications();
-    const handleFocus = () => fetchNotifications();
-    // Both spellings are honoured deliberately. Order pages dispatch the
-    // hyphenated name (Auditor_Order, Billing_Order, Rate_Approver_Order) while
-    // ordersService dispatches the camelCase one; only the latter was listened
-    // for, so those pages' badge refreshes silently did nothing. Listening for
-    // both fixes them without editing every dispatcher, and keeps working if a
-    // future page picks either spelling.
-    REFRESH_EVENT_NAMES.forEach((name) =>
-      window.addEventListener(name, handleRefresh),
-    );
-    window.addEventListener("focus", handleFocus);
-
-    (async () => {
-      if (isWebPushSupported()) {
-        await registerServiceWorker();
-        if (getCurrentPermission() === "granted") {
-          // Already granted (incl. existing users): subscribe silently and
-          // record it so our modal is never shown.
-          savePromptState({ status: "granted" });
-          const ok = await subscribeToPush();
-          if (!ok) startFallbackPolling();
-        } else {
-          startFallbackPolling();
-        }
-      } else {
-        // Insecure http (non-localhost) or unsupported browser: only here do we
-        // fall back to polling.
-        startFallbackPolling();
-      }
-    })();
-
-    return () => {
-      off();
-      REFRESH_EVENT_NAMES.forEach((name) =>
-        window.removeEventListener(name, handleRefresh),
-      );
-      window.removeEventListener("focus", handleFocus);
-      if (interval) window.clearInterval(interval);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Handle a cold open from a service-worker notification tap (new tab carries
-  // ?openOrderId=). Focused-tab taps arrive via the bus "click" event instead.
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const openOrderId = params.get("openOrderId");
-    const notificationId = params.get("notificationId");
-    if (!openOrderId) return;
-
-    if (notificationId) markNotificationRead(Number(notificationId));
-    goToOrder(openOrderId);
-
-    params.delete("openOrderId");
-    params.delete("notificationId");
-    const clean =
-      window.location.pathname + (params.toString() ? `?${params}` : "");
-    window.history.replaceState({}, "", clean);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Show OUR modal as soon as the app is actually loaded — no arbitrary wait.
-  // Only when appropriate: never asked, or 7 days since last dismissal.
-  // Already-granted and denied users are skipped by shouldShowPrompt().
-  useEffect(() => {
-    if (!isWebPushSupported()) return;
-    const eligible =
-      ["auditor", "billing", "manager"].includes(normalizedRole) ||
-      isRateApprover;
-    if (!eligible) return;
-    if (!shouldShowPrompt(getCurrentPermission())) return;
-
-    // Wait for "app is interactive", not a fixed timer: the role is resolved by
-    // now (this effect depends on it), so we only need to clear the first paint
-    // so the modal never lands on the splash screen. A double rAF fires right
-    // after the browser has committed that paint — typically a few ms, versus
-    // the 3s hardcoded delay this replaces.
-    let raf2 = 0;
-    const raf1 = window.requestAnimationFrame(() => {
-      raf2 = window.requestAnimationFrame(() => setShowPushPrompt(true));
-    });
-    return () => {
-      window.cancelAnimationFrame(raf1);
-      if (raf2) window.cancelAnimationFrame(raf2);
-    };
-  }, [normalizedRole, isRateApprover]);
-
-  // "Allow Notifications" → request the OS permission, then subscribe. Persists
-  // the outcome so we never prompt again once granted, and back off if denied.
-  const enablePush = async () => {
-    setPermissionSubmitting(true);
-    try {
-      const permission = await requestPermission();
-      setNotifPermission(permission);
-      if (permission === "granted") {
-        savePromptState({ status: "granted", lastPromptAt: Date.now() });
-        await subscribeToPush();
-      } else if (permission === "denied") {
-        savePromptState({ status: "denied", lastPromptAt: Date.now() });
-      } else {
-        savePromptState({ lastPromptAt: Date.now() });
-      }
-    } finally {
-      setPermissionSubmitting(false);
-      setShowPushPrompt(false);
-    }
-  };
-
-  const dismissPushPrompt = () => {
-    setShowPushPrompt(false);
-    const current = getPromptState();
-    savePromptState({
-      status: "dismissed",
-      lastPromptAt: Date.now(),
-      dismissCount: current.dismissCount + 1,
-    });
-  };
 
   useEffect(() => {
     setSalesOpen(
@@ -497,14 +178,6 @@ export default function Sidebar({ children }: SidebarProps) {
     );
   }, [location.pathname]);
 
-  const handleOpenNotifications = () => {
-    setShowNotificationsModal(true);
-    fetchHistory(true);
-  };
-
-  const handleCloseNotifications = () => {
-    setShowNotificationsModal(false);
-  };
 
   // NOTE: `device_id` / `device_last_sync` are deliberately ABSENT from this
   // list and must stay that way — one browser keeps ONE device id across
@@ -544,32 +217,6 @@ export default function Sidebar({ children }: SidebarProps) {
     window.location.href = "/";
   };
 
-  const changeHistoryFilter = (filter: "all" | "unread") => {
-    setHistoryFilter(filter);
-    setHistoryOffset(0);
-    fetchHistory(true, filter);
-  };
-
-  const handleMarkAllRead = async () => {
-    if (unreadCount <= 0) return;
-    try {
-      await api.post("/orders/notifications/", {}, authConfig());
-    } catch (error) {
-      console.error("Error marking all as read:", error);
-    }
-    // Single update path: the bus listener updates this tab and every other.
-    broadcastNotificationEvent({ type: "read-all" });
-  };
-
-  const handleNotificationClick = async (notification: Notification) => {
-    if (!notification.is_read) {
-      // Always mark read on open — regardless of role (fixes the bug where
-      // actionable roles left notifications unread).
-      await markNotificationRead(notification.id);
-    }
-    setShowNotificationsModal(false);
-    goToOrder(notification.order_id);
-  };
 
   return (
     <>
@@ -667,7 +314,7 @@ export default function Sidebar({ children }: SidebarProps) {
             </li>
           )}
 
-          {(userRole?.toLowerCase() === "billing" || userRole?.toLowerCase() === "factory_approver") && (
+          {show("/Invoice_Review") && (
             <li className={location.pathname === "/Invoice_Review" ? "active" : ""}>
               <Link to="/Invoice_Review" onClick={closeSidebar}>
                 <SidebarIcon><HiClipboardDocumentCheck /></SidebarIcon>
@@ -676,7 +323,7 @@ export default function Sidebar({ children }: SidebarProps) {
             </li>
           )} 
 
-          {userRole?.toLowerCase() === "legal" && (
+          {show("/Label_Checker") && (
             <>
               <li className={location.pathname === "/Label_Checker" ? "active" : ""}>
                 <Link to="/Label_Checker" onClick={closeSidebar}>
@@ -693,7 +340,7 @@ export default function Sidebar({ children }: SidebarProps) {
             </>
           )}
 
-          {canSee("App_User") && (
+          {show("/App_User") && (
             <li className={location.pathname === "/App_User" ? "active" : ""}>
               <Link to="/App_User" onClick={closeSidebar}>
                 <SidebarIcon><HiUsers /></SidebarIcon>
@@ -725,11 +372,11 @@ export default function Sidebar({ children }: SidebarProps) {
           {/* Payments — visible to admins and to anyone granted the
               Payments_Dashboard permission. The server enforces the same key
               on every analytics endpoint; this only decides the menu. */}
-          {canSee("Payments_Dashboard") && (
+          {show("/Payments_Dashboard") && (
             <li className="sidebar-section">Payments</li>
           )}
 
-          {canSee("Payments_Dashboard") && (
+          {show("/Payments_Dashboard") && (
             <li className={location.pathname === "/Payments_Dashboard" ? "active" : ""}>
               <Link to="/Payments_Dashboard" onClick={closeSidebar}>
                 <SidebarIcon><HiChartPie /></SidebarIcon>
@@ -751,13 +398,12 @@ export default function Sidebar({ children }: SidebarProps) {
           )}
 
           {/* System — one screen: live device activity and version analytics.
-              Gated by the same canSee() grant mechanism as every other admin
-              page. */}
-          {canSee("Device_Management") && (
+              Gated through the shared route table like every other link. */}
+          {show("/Device_Management") && (
             <li className="sidebar-section">System</li>
           )}
 
-          {canSee("Device_Management") && (
+          {show("/Device_Management") && (
             <li className={location.pathname === "/Device_Management" ? "active" : ""}>
               <Link to="/Device_Management" onClick={closeSidebar}>
                 <SidebarIcon><HiDevicePhoneMobile /></SidebarIcon>
@@ -766,7 +412,7 @@ export default function Sidebar({ children }: SidebarProps) {
             </li>
           )}
 
-          {canSee("Sap_Sync") && (
+          {show("/Sap_Sync") && (
             <li className={location.pathname === "/Sap_Sync" ? "active" : ""}>
               <Link to="/Sap_Sync" onClick={closeSidebar}>
                 <SidebarIcon><HiArrowPath /></SidebarIcon>
@@ -775,7 +421,7 @@ export default function Sidebar({ children }: SidebarProps) {
             </li>
           )}
 
-          {canSee("Party_Assignment") && (
+          {show("/Party_Assignment") && (
             <li className={location.pathname === "/Party_Assignment" ? "active" : ""}>
               <Link to="/Party_Assignment" onClick={closeSidebar}>
                 <SidebarIcon><HiUserGroup /></SidebarIcon>
@@ -784,7 +430,7 @@ export default function Sidebar({ children }: SidebarProps) {
             </li>
           )}
 
-          {canSee("Party_Product_Assignment") && (
+          {show("/Party_Product_Assignment") && (
             <li className={location.pathname === "/Party_Product_Assignment" ? "active" : ""}>
               <Link to="/Party_Product_Assignment" onClick={closeSidebar}>
                 <SidebarIcon><HiCube /></SidebarIcon>
@@ -793,7 +439,7 @@ export default function Sidebar({ children }: SidebarProps) {
             </li>
           )}
 
-          {canSee("Add_Scheme") && (
+          {show("/Add_Scheme") && (
             <li className={location.pathname === "/Add_Scheme" ? "active" : ""}>
               <Link to="/Add_Scheme" onClick={closeSidebar}>
                 <SidebarIcon><HiReceiptPercent /></SidebarIcon>
@@ -802,7 +448,7 @@ export default function Sidebar({ children }: SidebarProps) {
             </li>
           )}
 
-          {canSee("Scheme_Manager") && (
+          {show("/Scheme_Manager") && (
             <li className={location.pathname === "/Scheme_Manager" ? "active" : ""}>
               <Link to="/Scheme_Manager" onClick={closeSidebar}>
                 <SidebarIcon><HiReceiptPercent /></SidebarIcon>
@@ -811,7 +457,7 @@ export default function Sidebar({ children }: SidebarProps) {
             </li>
           )}
 
-          {(canSee("Combo_Mapping") || userRole?.toLowerCase() === "billing") && (
+          {show("/Combo_Mapping") && (
             <li className={location.pathname === "/Combo_Mapping" ? "active" : ""}>
               <Link to="/Combo_Mapping" onClick={closeSidebar}>
                 <SidebarIcon><HiGift /></SidebarIcon>
@@ -820,7 +466,7 @@ export default function Sidebar({ children }: SidebarProps) {
             </li>
           )}
 
-          {canSee("Order_Flow_Settings") && (
+          {show("/Order_Flow_Settings") && (
             <li className={location.pathname === "/Order_Flow_Settings" ? "active" : ""}>
               <Link to="/Order_Flow_Settings" onClick={closeSidebar}>
                 <SidebarIcon><HiCog6Tooth /></SidebarIcon>
@@ -829,7 +475,7 @@ export default function Sidebar({ children }: SidebarProps) {
             </li>
           )}
 
-          {canSee("Product_Stock") && (
+          {show("/Product_Stock") && (
             <li className={location.pathname === "/Product_Stock" ? "active" : ""}>
               <Link to="/Product_Stock" onClick={closeSidebar}>
                 <SidebarIcon><HiClipboardDocumentList /></SidebarIcon>
@@ -841,7 +487,7 @@ export default function Sidebar({ children }: SidebarProps) {
           
 
           
-          {(canSee("Einvoice") || userRole?.toLowerCase() === "billing") && (
+          {show("/Einvoice") && (
             <li className={location.pathname === "/Einvoice" ? "active" : ""}>
               <Link to="/Einvoice" onClick={closeSidebar}>
                 <SidebarIcon><HiDocumentCheck /></SidebarIcon>
@@ -850,7 +496,7 @@ export default function Sidebar({ children }: SidebarProps) {
             </li>
           )}
 
-          {canSee("Ewaybill") && (
+          {show("/Ewaybill") && (
             <li className={location.pathname === "/Ewaybill" ? "active" : ""}>
               <Link to="/Ewaybill" onClick={closeSidebar}>
                 <SidebarIcon><HiTruck /></SidebarIcon>
@@ -860,7 +506,7 @@ export default function Sidebar({ children }: SidebarProps) {
           )}
 
           {/* Visible to admins, users granted the "HAIS" page, and the HAIS role. */}
-          {(canSee("HAIS") || userRole?.toLowerCase() === "hais") && (
+          {show("/HAIS") && (
             <li className={location.pathname === "/HAIS" ? "active" : ""}>
               <Link to="/HAIS" onClick={closeSidebar}>
                 <SidebarIcon><HiComputerDesktop /></SidebarIcon>
@@ -873,7 +519,7 @@ export default function Sidebar({ children }: SidebarProps) {
               (the line-item form) and Order Tracker (view + track own orders, no
               staff edit flow). Visible to admins, users granted the "Distributor"
               page, and the Distributor role. */}
-          {(canSee("Distributor") || userRole?.toLowerCase() === "distributor") && (
+          {show("/Distributor") && (
             <li>
               <div className="dropdown-toggle" onClick={() => setDistributorOpen(!distributorOpen)}>
                 <SidebarIcon><HiTruck /></SidebarIcon>
@@ -900,7 +546,7 @@ export default function Sidebar({ children }: SidebarProps) {
           )}
 
           {/* Visible to admins, users granted the "Mart_Approval" page, and the Mart Approval role. */}
-          {(canSee("Mart_Approval") || userRole?.toLowerCase() === "mart_approval") && (
+          {show("/Mart_Approval") && (
             <li className={location.pathname === "/Mart_Approval" ? "active" : ""}>
               <Link to="/Mart_Approval" onClick={closeSidebar}>
                 <SidebarIcon><HiClipboardDocumentCheck /></SidebarIcon>
@@ -909,7 +555,7 @@ export default function Sidebar({ children }: SidebarProps) {
             </li>
           )}
 
-          {canSeeTracker("Tracker_Entry") && (
+          {show("/Tracker_Entry") && (
             <li className={location.pathname === "/Tracker_Entry" ? "active" : ""}>
               <Link to="/Tracker_Entry" onClick={closeSidebar}>
                 <SidebarIcon><HiDocumentText /></SidebarIcon>
@@ -918,7 +564,7 @@ export default function Sidebar({ children }: SidebarProps) {
             </li>
           )}
 
-          {canSeeTracker("Ap_Invoice_Entry") && (
+          {show("/Ap_Invoice_Entry") && (
             <li className={location.pathname === "/Ap_Invoice_Entry" ? "active" : ""}>
               <Link to="/Ap_Invoice_Entry" onClick={closeSidebar}>
                 <SidebarIcon><HiDocumentText /></SidebarIcon>
@@ -927,7 +573,7 @@ export default function Sidebar({ children }: SidebarProps) {
             </li>
           )}
 
-          {canSeeTracker("Tracker_Queue") && (
+          {show("/Tracker_Queue") && (
             <li className={location.pathname === "/Tracker_Queue" ? "active" : ""}>
               <Link to="/Tracker_Queue" onClick={closeSidebar}>
                 <SidebarIcon><HiClipboardDocumentCheck /></SidebarIcon>
@@ -936,7 +582,7 @@ export default function Sidebar({ children }: SidebarProps) {
             </li>
           )}
 
-          {canSeeTracker("Tracker_Invoices") && (
+          {show("/Tracker_Invoices") && (
             <li className={location.pathname === "/Tracker_Invoices" ? "active" : ""}>
               <Link to="/Tracker_Invoices" onClick={closeSidebar}>
                 <SidebarIcon><HiClipboardDocumentList /></SidebarIcon>
@@ -945,7 +591,7 @@ export default function Sidebar({ children }: SidebarProps) {
             </li>
           )}
 
-          {canSeeTracker("Tracker_Alerts") && (
+          {show("/Tracker_Alerts") && (
             <li className={location.pathname === "/Tracker_Alerts" ? "active" : ""}>
               <Link to="/Tracker_Alerts" onClick={closeSidebar}>
                 <SidebarIcon><HiClock /></SidebarIcon>
@@ -954,7 +600,7 @@ export default function Sidebar({ children }: SidebarProps) {
             </li>
           )}
 
-          {canSeeTracker("Tracker_Reports") && (
+          {show("/Tracker_Reports") && (
             <li className={location.pathname === "/Tracker_Reports" ? "active" : ""}>
               <Link to="/Tracker_Reports" onClick={closeSidebar}>
                 <SidebarIcon><HiChartBar /></SidebarIcon>
@@ -963,7 +609,7 @@ export default function Sidebar({ children }: SidebarProps) {
             </li>
           )}
 
-          {canSeeTracker("Tracker_Admin") && (
+          {show("/Tracker_Admin") && (
             <li className={location.pathname === "/Tracker_Admin" ? "active" : ""}>
               <Link to="/Tracker_Admin" onClick={closeSidebar}>
                 <SidebarIcon><HiCog6Tooth /></SidebarIcon>
@@ -972,7 +618,7 @@ export default function Sidebar({ children }: SidebarProps) {
             </li>
           )}
 
-          {(userRole?.toLowerCase() === "manager" || userRole?.toLowerCase() == "billing") && (
+          {show("/Add_Sales") && (
             <li>
               <div className="dropdown-toggle" onClick={() => setSalesOpen(!salesOpen)}>
                 <SidebarIcon><HiShoppingCart /></SidebarIcon>
@@ -983,10 +629,10 @@ export default function Sidebar({ children }: SidebarProps) {
                 <ul className="dropdown-list">
                   <li><Link to="/Add_Sales" onClick={closeSidebar}><SidebarIcon><HiPlusCircle /></SidebarIcon>Add Sales</Link></li>
                   {/* <li><Link to="/Drafts" onClick={closeSidebar}><SidebarIcon><HiDocumentText /></SidebarIcon>Drafts</Link></li> */}
-                  {(userRole?.toLowerCase() === "manager" || userRole?.toLowerCase() == "billing") && (
+                  {show("/Add_Sales") && (
                     <li><Link to="/FOC" onClick={closeSidebar}><SidebarIcon><HiGift /></SidebarIcon>FOC</Link></li>
                   )}
-                   {userRole?.toLowerCase() === "billing" && (
+                   {show("/Sales_Invoice") && (
                     <li><Link to="/Sales_Invoice" onClick={closeSidebar}><SidebarIcon><HiDocumentText /></SidebarIcon>Sales Invoice</Link></li>
                   )} 
                
@@ -996,7 +642,7 @@ export default function Sidebar({ children }: SidebarProps) {
             </li>
           )}
 
-          {(userRole?.toLowerCase() ===  "auditor") && (
+          {show("/Auditor_orders") && (
             <>
               <li className={location.pathname === "/Auditor_orders" ? "active" : ""}>
                 <Link to="/Auditor_orders" onClick={closeSidebar}>
@@ -1013,7 +659,7 @@ export default function Sidebar({ children }: SidebarProps) {
             </>
           )}
 
-          {(userRole?.toLowerCase() ===  "billing" ) && (
+          {show("/Billing_orders") && (
             <>
               <li className={location.pathname === "/Billing_orders" ? "active" : ""}>
                 <Link to="/Billing_orders" onClick={closeSidebar}>
@@ -1042,7 +688,7 @@ export default function Sidebar({ children }: SidebarProps) {
             </>
           )}
 
-          {isRateApprover && (
+          {show("/Rate_Approver_orders") && (
             <>
               <li className={location.pathname === "/Rate_Approver_orders" ? "active" : ""}>
                 <Link to="/Rate_Approver_orders" onClick={closeSidebar}>
@@ -1059,7 +705,7 @@ export default function Sidebar({ children }: SidebarProps) {
             </>
           )}
 
-          {(userRole?.toLowerCase() ===  "manager" ) && (
+          {show("/Order_Tracking") && (
             <>
               <li className={location.pathname === "/Order_Tracking" ? "active" : ""}>
                 <Link to="/Order_Tracking" onClick={closeSidebar}>
@@ -1070,7 +716,7 @@ export default function Sidebar({ children }: SidebarProps) {
             </>
           )}
 
-          {(userRole?.toLowerCase() ===  "billing" || canSee("Reports")) && (
+          {show("/Daily_Report") && (
             <li>
               <div className="dropdown-toggle" onClick={() => setReportsOpen(!reportsOpen)}>
                 <SidebarIcon><HiChartBar /></SidebarIcon>
@@ -1086,7 +732,7 @@ export default function Sidebar({ children }: SidebarProps) {
                   {/* Both SAP reports are billing-only (the pages themselves
                       bounce anyone else), so they are not shown to a user who
                       merely holds the "Reports" grant. */}
-                  {userRole?.toLowerCase() === "billing" && (
+                  {show("/Sales_Invoice") && (
                     <>
                       <li><Link to="/Inventory_Report" onClick={closeSidebar}><SidebarIcon><HiCube /></SidebarIcon>Inventory Report</Link></li>
                       <li><Link to="/SO_Invoice_Report" onClick={closeSidebar}><SidebarIcon><HiClipboardDocumentCheck /></SidebarIcon>Open SO</Link></li>

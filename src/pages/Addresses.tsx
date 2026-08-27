@@ -18,7 +18,7 @@ export default function Addresses() {
   const fetchAddresses = async () => {
     setLoading(true);
     try {
-      let data = await sapService.getAddresses();
+      const data = await sapService.getAddresses();
       setAddresses(data);
     } catch (error) {
       console.log("Error fetching addresses:", error);

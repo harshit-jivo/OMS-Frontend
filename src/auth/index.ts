@@ -12,6 +12,8 @@
  */
 export { AuthProvider } from "./AuthProvider";
 export { useAuth, useCan } from "./useAuth";
+export { ACTIONS, actionAccess, canDo, useAction } from "./actions";
+export type { ActionAccess, ActionName } from "./actions";
 export type { AuthStatus, AuthValue } from "./context";
 export {
   ADMIN_ROLE,

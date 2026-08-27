@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { Navigate } from "react-router-dom";
 import {
   HiMagnifyingGlass,
   HiArrowPath,
@@ -8,7 +7,6 @@ import {
   HiPencilSquare,
   HiXMark,
 } from "react-icons/hi2";
-import { trackerPagesFor } from "../config/pageAccess";
 import apInvoiceService, {
   AP_BRANCHES,
   type ApBranch,
@@ -31,13 +29,6 @@ interface LineEdit {
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
 export default function Ap_Invoice_Entry() {
-  // Access is role-driven and centralized in config/pageAccess.ts (mirroring
-  // tracker/permissions.py): tracker_ap and tracker_admin only. The backend
-  // enforces the same rule via IsTrackerAP, so this guard is UX, not security.
-  const role = localStorage.getItem("role");
-  const isAdmin = (role || "").toLowerCase() === "admin";
-  const allowed = trackerPagesFor(role, isAdmin).has("Ap_Invoice_Entry");
-
   const [branch, setBranch] = useState<ApBranch>("OIL");
 
   // GRPO lookup
@@ -240,8 +231,22 @@ export default function Ap_Invoice_Entry() {
     }
   }
 
-  // Placed after every hook so the hook order stays stable (rules of hooks).
-  if (!allowed) return <Navigate to="/Dashboard" replace />;
+  // ── Route access: now decided once, in components/ProtectedPage.tsx ───────
+  // Commented out rather than removed. It asked the right question — the same
+  // `trackerPagesFor` the route table asks — but answered it from a raw
+  // `localStorage` read, so `isAdmin` was true only for a user whose PRIMARY
+  // role is literally "admin": a superuser, a staff account, or an admin held
+  // through `extra_roles` was bounced off a page the server would have served.
+  //
+  //   const role = localStorage.getItem("role");
+  //   const isAdmin = (role || "").toLowerCase() === "admin";
+  //   const allowed = trackerPagesFor(role, isAdmin).has("Ap_Invoice_Entry");
+  //   // Placed after every hook so the hook order stays stable (rules of hooks).
+  //   if (!allowed) return <Navigate to="/Dashboard" replace />;
+  //
+  // `auth/routeAccess.ts` maps this path to `trackerPage: "Ap_Invoice_Entry"`,
+  // which reaches the same `trackerPagesFor` through the session rather than
+  // through storage. The backend still enforces it for real, via IsTrackerAP.
 
   const branchLabel = AP_BRANCHES.find((b) => b.value === branch)?.label ?? branch;
   const money = (n: number | null | undefined) =>

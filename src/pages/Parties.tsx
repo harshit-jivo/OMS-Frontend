@@ -18,7 +18,7 @@ export default function Parties() {
   const fetchParties = async () => {
     setLoading(true);
     try {
-      let data = await sapService.getParties();
+      const data = await sapService.getParties();
       setParties(data);
     } catch (error) {
       console.log("Error fetching parties:", error);

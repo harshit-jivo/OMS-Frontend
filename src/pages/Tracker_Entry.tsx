@@ -276,7 +276,11 @@ export default function Tracker_Entry() {
   const toggle = (id: number) =>
     setSelected((s) => {
       const n = new Set(s);
-      n.has(id) ? n.delete(id) : n.add(id);
+      // Statement, not an expression. A ternary evaluated for its side effects
+      // reads as if its value mattered, and the linter flags it for exactly
+      // that reason; both branches here are mutations.
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
       return n;
     });
 

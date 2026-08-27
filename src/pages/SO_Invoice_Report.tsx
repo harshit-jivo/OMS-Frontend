@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Navigate } from "react-router-dom";
 import {
   HiArrowDownTray,
   HiArrowPath,
@@ -186,7 +185,6 @@ const daysOpen = (orderDate: string | null): number | null => {
 };
 
 export default function SO_Invoice_Report() {
-  const role = (localStorage.getItem("role") || "").toLowerCase();
 
   const [branch, setBranch] = useState<Branch>("OIL");
   // Defaults to the last month of orders. Lazy initialisers so the dates are
@@ -229,11 +227,10 @@ export default function SO_Invoice_Report() {
   );
 
   useEffect(() => {
-    if (role !== "billing") return;
     void loadOrders(branch, { from: fromDate, to: toDate });
     // The date range is applied by the Apply button, not on every keystroke.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [branch, loadOrders, role]);
+  }, [branch, loadOrders]);
 
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -365,9 +362,20 @@ export default function SO_Invoice_Report() {
     });
   };
 
-  if (role !== "billing") {
-    return <Navigate to="/Dashboard" replace />;
-  }
+  // ── Route access: now decided once, in components/ProtectedPage.tsx ───────
+  // The guard that used to sit here is commented out below rather than removed.
+  //
+  // It was not merely redundant, it was WRONG, and in the direction that hurts:
+  // `role !== "billing"` bounced an administrator off a page the sidebar showed
+  // them and the API served them, because it compared the primary role string
+  // alone — no `extra_roles`, no `is_superuser`, no `is_staff`. Two guards that
+  // disagree are worse than one, and this was the one that was mistaken.
+  //
+  //   const role = (localStorage.getItem("role") || "").toLowerCase();
+  //   if (role !== "billing") return <Navigate to="/Dashboard" replace />;
+  //
+  // `auth/routeAccess.ts` carries the same rule (`roles: ["billing"]`) with the
+  // admin bypass every other route gets.
 
   return (
     <div className="sovi-page">

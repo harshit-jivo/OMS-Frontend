@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { landingPathFor } from "../config/pageAccess";
 import { loginUser } from "../services/authService";
-import { saveTokens, useAuth } from "../auth";
+import { loadSession, saveTokens, useAuth } from "../auth";
 import { resolveStartupSession } from "../services/api";
 import { webDeviceService } from "../services/webDeviceService";
 import { loadUILabels, loadUIFields } from "../services/uiConfig";
@@ -102,7 +102,10 @@ export default function Login() {
       if (cancelled || outcome !== "authenticated") return;
       // Same landing rule as a fresh login (see handleLogin) — one shared helper,
       // so a restored session can never land somewhere a new login wouldn't.
-      let landing = landingPathFor(localStorage.getItem("role"));
+      // Read through `loadSession` rather than reaching for the raw "role"
+      // key: same value, but one loader owns the storage layout, so a change
+      // to it cannot leave this line silently landing everyone on /Dashboard.
+      const landing = landingPathFor(loadSession()?.role ?? null);
       // Preserve any notification deep-link params (openOrderId / notificationId)
       // that a service-worker "openWindow" put on the "/" URL, so the Sidebar's
       // openOrderId effect on the landing route can open the exact Sales Order

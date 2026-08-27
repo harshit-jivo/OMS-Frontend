@@ -134,7 +134,7 @@ export default function App_User() {
 
   const fetchMainGroup = async () => {
     try {
-      let data2 = await userService.getMainGroup();
+      const data2 = await userService.getMainGroup();
       setMainGroup(data2);
     } catch (error) {
       console.log("Error fetching main group:", error);
@@ -143,7 +143,7 @@ export default function App_User() {
 
   const fetchState = async () => {
     try {
-      let data3 = await userService.getState();
+      const data3 = await userService.getState();
       setState(data3);
     } catch (error) {
       console.log("Error fetching State:", error);
@@ -152,7 +152,7 @@ export default function App_User() {
 
   const fetchRole = async () => {
     try {
-      let data4 = await userService.getRole();
+      const data4 = await userService.getRole();
       setRole(data4);
 
     } catch (error) {
@@ -163,7 +163,7 @@ export default function App_User() {
 
   const fetchCompany = async () => {
     try {
-      let data5 = await userService.getCompany();
+      const data5 = await userService.getCompany();
       setCompany(data5);
     } catch (error) {
       console.log("Error fetching Company:", error);

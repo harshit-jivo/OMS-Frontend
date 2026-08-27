@@ -16,6 +16,7 @@ import {
   HiDocumentText,
   HiTrash,
 } from "react-icons/hi2";
+import { useAction } from "../auth/actions";
 import { API_BASE_URL } from "../services/api";
 import { apiFetch, apiUpload, EDIT_RESTORE_STORAGE_KEY } from "./SalesInvoice/useSalesInvoice";
 import { useSapPost } from "./SalesInvoice/useSapPost";
@@ -408,14 +409,23 @@ export default function InvoiceReview() {
   const sapPost = useSapPost();
   const navigate = useNavigate();
 
-  // Factory approvers only review (Pending/Approved/Rejected) and cannot post to
-  // SAP — that's the billing role's job.
-  const userRole = (localStorage.getItem("role") || "").toLowerCase();
-  const isFactoryApprover = userRole === "factory_approver";
-  const canPostToSap = !isFactoryApprover;
-  // Only the factory approver approves/rejects; billing just sees "Pending Approval".
-  const canApproveReject = isFactoryApprover;
-  const visibleFilters = isFactoryApprover
+  // Two desks share this screen and do opposite halves of the job: the factory
+  // approver decides Approve/Reject, billing posts the approved invoice to SAP.
+  // Both rules now come from `auth/actions.ts` rather than from a raw
+  // `localStorage.getItem("role")` read, which saw only the primary role and so
+  // ignored a desk granted through `extra_roles`.
+  //
+  // WARNING, and it is a real one: the entry for `invoice.approve` records that
+  // the server does NOT enforce this. `InvoicelogStatusUpdateView` carries only
+  // the project-wide `IsAuthenticated`, so any signed-in user can PATCH an
+  // invoice to APPROVED directly. These booleans are therefore the only thing
+  // in front of that endpoint, which is not a job a browser can do. The fix is
+  // a permission class on the view; this comment stays until there is one.
+  const canApproveReject = useAction("invoice.approve");
+  const canPostToSap = useAction("invoice.postToSap");
+  // Which status tabs to show. The approver's workflow ends at the decision, so
+  // the SAP-side statuses would only ever be empty for them.
+  const visibleFilters = canApproveReject
     ? STATUS_FILTERS.filter(
         (f) =>
           f.key === "PENDING"

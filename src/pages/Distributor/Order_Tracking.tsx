@@ -3,14 +3,9 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { ordersService } from "../../services/ordersService";
 import type { Order, OrderLog, SalesOrderSapStatus } from "../../services/ordersService";
 import { loadCurrentUserOrderSummaries } from "../../utils/orderHistory";
+import { useAction } from "../../auth/actions";
 import "../../styles/Order_Tracking.css";
 
-// Only the Mart approver / admin may edit a failed order or resend it to SAP;
-// everyone else sees the SAP details read-only. Mirrors the backend
-// MART_APPROVER_ROLES check in orders/views.py.
-const MART_APPROVER_ROLES = new Set(["mart_approval", "admin"]);
-const canManageSap = () =>
-  MART_APPROVER_ROLES.has((localStorage.getItem("role") || "").trim().toLowerCase());
 
 // Distributor-facing Order Tracking page.
 //
@@ -69,7 +64,14 @@ export default function Distributor_Order_Tracking() {
   const [statusFilter, setStatusFilter] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
-  const isSapManager = canManageSap();
+  // Only the Mart approver / admin may edit a failed order or resend it to SAP;
+  // everyone else sees the SAP details read-only. The rule and its server
+  // counterpart (`orders/views/mart.py:_is_mart_approver`) are recorded
+  // together in `auth/actions.ts` — including the fact that the server's own
+  // check accepts `is_staff` but not `is_superuser`, and reads the primary role
+  // only. Previously this file compared a raw `localStorage` role string, which
+  // matched neither.
+  const isSapManager = useAction("mart.manageSap");
 
   useEffect(() => {
     void fetchOrders();
