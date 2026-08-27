@@ -3704,6 +3704,7 @@
 
 .si-totals-modal-foot {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 14px;
   border-top: 1px solid #e2e8f0;
@@ -3741,6 +3742,7 @@
 }
 
 .si-totals-modal-post {
+  flex: 0 0 auto;
   min-width: 180px;
 }
 
@@ -5740,7 +5742,8 @@
   .si-party-modal,
   .si-item-modal,
   .si-batch-modal,
-  .si-sku-add-modal {
+  .si-sku-add-modal,
+  .si-totals-modal {
     width: min(100%, calc(100vw - 32px));
     max-height: calc(100vh - 32px);
   }
@@ -5781,7 +5784,8 @@
   .si-sku-add-modal,
   .si-filter-options-modal,
   .si-sku-detail-modal,
-  .si-sku-delete-modal {
+  .si-sku-delete-modal,
+  .si-totals-modal {
     width: calc(100vw - 24px);
     max-height: calc(100vh - 24px);
   }
