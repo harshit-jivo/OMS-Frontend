@@ -32,7 +32,6 @@ import {
   HiUsers,
   HiClipboardDocumentCheck
 } from "react-icons/hi2";
-import { getCurrentUser } from "../services/authService";
 import api from "../services/api";
 import { webDeviceService } from "../services/webDeviceService";
 import { loadUILabels, loadUIFields } from "../services/uiConfig";
@@ -63,6 +62,7 @@ import {
 } from "../utils/notificationPermission";
 import NotificationPermissionModal from "./NotificationPermissionModal";
 import { isTrackerRole, trackerPagesFor } from "../config/pageAccess";
+import { useAuth } from "../auth";
 import "./Sidebar.css";
 
 
@@ -133,16 +133,13 @@ export default function Sidebar({ children }: SidebarProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     localStorage.getItem("sidebar_collapsed") === "true"
   );
-  const [userRole, setUserRole] = useState(localStorage.getItem("role") || "");
-  const [userName, setUserName] = useState(localStorage.getItem("name") || localStorage.getItem("username") || "");
-  const [extraPages, setExtraPages] = useState<string[]>(() => {
-    try {
-      const stored = JSON.parse(localStorage.getItem("extra_pages") || "[]");
-      return Array.isArray(stored) ? stored : [];
-    } catch {
-      return [];
-    }
-  });
+  // Role, name and grants come from AuthProvider, not from three separate
+  // localStorage reads kept in local state. The Sidebar used to be the ONLY
+  // thing that loaded the user's grants — which is why route guards, running
+  // earlier, had nothing to read. It is now a consumer like everything else.
+  const { session, isAdmin, can: canSee } = useAuth();
+  const userRole = session?.role ?? "";
+  const userName = session?.name || session?.username || "";
   const [reportsOpen, setReportsOpen] = useState(false);
   const [distributorOpen, setDistributorOpen] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
@@ -175,10 +172,11 @@ export default function Sidebar({ children }: SidebarProps) {
     normalizedRole === "rate approver" ||
     normalizedRole === "rateapprover" ||
     normalizedRole === "approver";
-  const isAdmin = userRole?.toLowerCase() === "admin";
-  // An admin page link shows for admins, or for any user explicitly granted it
-  // on the Permissions page.
-  const canSee = (pageKey: string) => isAdmin || extraPages.includes(pageKey);
+  // `isAdmin` and `canSee` now come from the auth module, which counts
+  // `extra_roles`, `is_superuser` and `is_staff` — the local version compared
+  // the primary role string alone, so a user granted admin through
+  // `extra_roles` saw an almost-empty sidebar over an API that allowed them
+  // everything. See src/auth/permissions.ts.
 
   // Tracker access is centralized by role (see config/pageAccess.ts).
   const trackerPages = trackerPagesFor(userRole, isAdmin);
@@ -199,27 +197,11 @@ export default function Sidebar({ children }: SidebarProps) {
     });
   };
 
-  useEffect(() => {
-    fetchCurrentUser();
-  }, []);
-
-  const fetchCurrentUser = async () => {
-    try {
-      const data = await getCurrentUser();
-      const role = data.role || data.role_name || data.role_display || "";
-      const roleName = typeof role === "object" ? role.name : role;
-      const name = data.full_name || data.name || data.username || "";
-      const grantedPages = Array.isArray(data.extra_pages) ? data.extra_pages : [];
-      setUserRole(roleName);
-      setUserName(name);
-      setExtraPages(grantedPages);
-      localStorage.setItem("role", roleName);
-      localStorage.setItem("name", name);
-      localStorage.setItem("extra_pages", JSON.stringify(grantedPages));
-    } catch (error) {
-      console.error("Failed to fetch user:", error);
-    }
-  };
+  // `fetchCurrentUser` lived here and was the only thing in the app that
+  // loaded the user's grants. AuthProvider now does it, above the router, so
+  // the data exists before any guard runs — see src/auth/AuthContext.tsx.
+  // Removing it from here is what makes one source of truth possible; leaving
+  // a second fetch would just recreate the drift more quietly.
 
   const authConfig = () => {
     const token = localStorage.getItem("access");

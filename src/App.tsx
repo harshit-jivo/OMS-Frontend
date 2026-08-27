@@ -60,10 +60,17 @@ import Distributor_Order_Tracking from "./pages/Distributor/Order_Tracking";
 import MartApproval from "./pages/MartApproval";
 import Ap_Invoice_Entry from "./pages/Ap_Invoice_Entry";
 
+import { AuthProvider } from "./auth";
+
 function App() {
   return (
     <BrowserRouter>
       <ErrorBoundary>
+      {/* Resolves the session ABOVE the router, so a route guard has the
+          user's grants when it runs. Previously the only thing that loaded
+          them was Sidebar.fetchCurrentUser — which runs after routing has
+          already decided what to render. See src/auth/AuthContext.tsx. */}
+      <AuthProvider>
       <Routes>
         <Route path="/" element={<Login />} />
 
@@ -589,6 +596,7 @@ function App() {
           }
         />
       </Routes>
+      </AuthProvider>
       </ErrorBoundary>
     </BrowserRouter>
   );

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { landingPathFor } from "../config/pageAccess";
 import { loginUser } from "../services/authService";
+import { saveTokens, useAuth } from "../auth";
 import { resolveStartupSession } from "../services/api";
 import { webDeviceService } from "../services/webDeviceService";
 import { loadUILabels, loadUIFields } from "../services/uiConfig";
@@ -89,6 +90,7 @@ function Toast({ message, type, onClose }: ToastProps) {
 export default function Login() {
 
   const navigate = useNavigate();
+  const { signIn } = useAuth();
 
   // If a valid session already exists (or an expired access token can be
   // silently refreshed), skip the Login screen and go straight into the app.
@@ -151,17 +153,17 @@ const handleLogin = async () => {
     const user = data.data.user;
     const tokens = data.data.tokens;
 
-    localStorage.setItem("access", tokens.access);
-    localStorage.setItem("refresh", tokens.refresh);
-    localStorage.setItem("user_id", String(user.id));
-    localStorage.setItem("username", user.username);
-    localStorage.setItem("name", user.name);
-    localStorage.setItem("role", user.role);
-    localStorage.setItem("role_display", user.role_display || user.role);
-    localStorage.setItem("company_id", String(user.company?.id || ""));
-    localStorage.setItem("company_name", user.company?.name || "");
-    localStorage.setItem("main_group_id", String(user.main_group?.id || ""));
-    localStorage.setItem("main_group_name", user.main_group?.name || "");
+    // Tokens first: `signIn` persists the rest of the session, and the api
+    // interceptor needs the token in place before anything else fires.
+    saveTokens(tokens.access, tokens.refresh);
+
+    // One call writes the WHOLE session — including `extra_pages` and
+    // `extra_roles`, which this function never used to store at all. That gap
+    // is what made route guards unusable: they read grants that nothing had
+    // written until the Sidebar mounted, long after routing had decided.
+    // Going through the auth module means login and the profile refresh
+    // populate the session identically, so the two cannot drift again.
+    signIn(user);
 
     // Register this browser with the backend. Fire-and-forget: best-effort
     // telemetry that must never block, delay or fail login. Retries by itself
