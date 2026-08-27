@@ -62,14 +62,62 @@ html {
    ───────────────────────────────────────────────────────────── */
 @media (min-width: 1920px) {
   body { zoom: 1.12; }
+  :root { --app-zoom: 1.12; }
 }
 
 @media (min-width: 2560px) {
   body { zoom: 1.25; }
+  :root { --app-zoom: 1.25; }
 }
 
 @media (min-width: 3200px) {
   body { zoom: 1.4; }
+  :root { --app-zoom: 1.4; }
+}
+
+/* Full-screen `position: fixed` overlays and the zoom above.
+
+   A fixed element's containing block is the viewport, so `inset: 0` sizes it
+   from the *unzoomed* viewport -- and the zoom on <body> then scales that box
+   up. The overlay ends up ~Z times the width of the screen, spilling off the
+   right and bottom edges. `top`/`left` stay correct (0 scales to 0), which is
+   why the damage is always on the right: whatever the overlay centres is
+   pushed right by (Z-1)/2 of the viewport, and its right-hand side -- Close
+   buttons, action columns, the primary submit button -- is clipped by the
+   window edge.
+
+   Sizing each overlay to viewport/Z cancels the scale exactly, so it covers
+   the screen and centres on it again. Children keep scaling with the rest of
+   the UI, which is the point of the zoom.
+
+   Only large screens are touched: below 1920px there is no zoom and these
+   rules do not apply, so `inset: 0` keeps working untouched.
+
+   ADD ANY NEW full-screen fixed overlay to this list. */
+@media (min-width: 1920px) {
+  .si-modal-backdrop,
+  .si-posting-overlay,
+  .sl-modal-overlay,
+  .au-modal-overlay,
+  .ao-detail-overlay,
+  .ao-modal-overlay,
+  .bo-detail-overlay,
+  .bo-modal-overlay,
+  .db-status-modal-backdrop,
+  .dm-drawer-backdrop,
+  .ir-posting-overlay,
+  .ir-modal-backdrop,
+  .mart-modal-overlay,
+  .mcl-backdrop,
+  .nm-modal-overlay,
+  .ofs-modal-backdrop,
+  .sovi-modal-overlay,
+  .trk-modal-overlay,
+  .vo-modal-overlay,
+  .sb-modal-overlay {
+    width: calc(100vw / var(--app-zoom));
+    height: calc(100svh / var(--app-zoom));
+  }
 }
 
 
