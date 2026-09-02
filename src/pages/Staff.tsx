@@ -1,11 +1,20 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import type { ChangeEvent, FormEvent } from "react";
 import { ordersService } from "../services/ordersService";
 import type { Product } from "../services/ordersService";
 import { userService } from "../services/userService";
 import { useUILabels } from "../services/uiConfig";
 import "../styles/Add_Sales.css";
-
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 
 type StaffRow = {
   category: string;
@@ -47,22 +56,32 @@ const getProductType = (itemName: string) => {
   return match ? `${match[1]} ${match[2].toUpperCase()}` : "Others";
 };
 
-const asArray = (value: any) => {
+/** The three envelopes this API has used for a list: bare, `{data}`, and
+ *  `{results}` (DRF pagination). */
+const asArray = (value: unknown): unknown[] => {
   if (Array.isArray(value)) return value;
-  if (Array.isArray(value?.data)) return value.data;
-  if (Array.isArray(value?.results)) return value.results;
+  const envelope = value as { data?: unknown; results?: unknown } | null | undefined;
+  if (Array.isArray(envelope?.data)) return envelope.data;
+  if (Array.isArray(envelope?.results)) return envelope.results;
   return [];
 };
 
-const getCategoryText = (value: any) => {
+const getCategoryText = (value: unknown) => {
   if (typeof value === "string" || typeof value === "number") {
     return String(value).trim();
   }
 
-  return String(value?.category || value?.name || value?.label || "").trim();
+  const row = value as { category?: unknown; name?: unknown; label?: unknown } | null | undefined;
+  return String(row?.category || row?.name || row?.label || "").trim();
 };
 
-const normalizeCategory = (value: any) => getCategoryText(value).toUpperCase();
+const normalizeCategory = (value: unknown) => getCategoryText(value).toUpperCase();
+
+/** Stable empties, so the row/total memos settle. */
+type BranchOption = { bpl_id: number | string; bpl_name: string };
+const NO_ROWS: BranchOption[] = [];
+const NO_PRODUCTS: Product[] = [];
+const NO_CATEGORIES: string[] = [];
 
 export default function Staff() {
   const { t } = useUILabels();
@@ -71,9 +90,40 @@ export default function Staff() {
   const typeTriggerRefs = useRef<Record<number, HTMLButtonElement | null>>({});
   const itemTriggerRefs = useRef<Record<number, HTMLButtonElement | null>>({});
   const [employeeName, setEmployeeName] = useState("");
-  const [branches, setBranches] = useState<any[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
-  const [categoryOptions, setCategoryOptions] = useState<string[]>([]);
+  /*
+   * One query for all three, matching the original `Promise.all`. That grouping
+   * is load-bearing: `categoryOptions` is the UNION of the master category list
+   * and the categories present on the products, so the two must be read
+   * together or the dropdown can show a category no product has.
+   *
+   * The old version wrapped all three in a single try whose catch was a
+   * `console.log` with no state written — one failing endpoint silently blanked
+   * the Dispatch From select, the Category select and the whole item catalogue
+   * at once, with nothing on screen to say so.
+   */
+  const { data: staffData, isError: staffLoadFailed } = useQuery({
+    queryKey: ["staff", "page"],
+    queryFn: async () => {
+      const [branchData, productData, categoryData] = await Promise.all([
+        ordersService.getBranches(),
+        ordersService.getStaffProducts(),
+        userService.getCategories(),
+      ]);
+      const products = asArray(productData) as Product[];
+      const productCategories = products
+        .map((product) => getCategoryText(product.category))
+        .filter(Boolean);
+      const masterCategories = asArray(categoryData).map(getCategoryText).filter(Boolean);
+      return {
+        branches: asArray(branchData) as BranchOption[],
+        products,
+        categoryOptions: [...new Set([...masterCategories, ...productCategories])],
+      };
+    },
+  });
+  const branches = staffData?.branches ?? NO_ROWS;
+  const products = staffData?.products ?? NO_PRODUCTS;
+  const categoryOptions = staffData?.categoryOptions ?? NO_CATEGORIES;
   const [showSuccess, setShowSuccess] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [savedOrderNumber, setSavedOrderNumber] = useState("");
@@ -89,33 +139,6 @@ export default function Staff() {
     date: formatDateInput(new Date()),
   });
   const [rows, setRows] = useState<StaffRow[]>([createEmptyRow()]);
-
-  useEffect(() => {
-    const loadStaffPage = async () => {
-      try {
-        const [branchData, productData, categoryData] = await Promise.all([
-          ordersService.getBranches(),
-          ordersService.getStaffProducts(),
-          userService.getCategories(),
-        ]);
-        const nextProducts = asArray(productData) as Product[];
-        const productCategories = nextProducts
-          .map((product) => getCategoryText(product.category))
-          .filter(Boolean);
-        const masterCategories = asArray(categoryData)
-          .map(getCategoryText)
-          .filter(Boolean);
-
-        setBranches(asArray(branchData));
-        setProducts(nextProducts);
-        setCategoryOptions([...new Set([...masterCategories, ...productCategories])]);
-      } catch (error) {
-        console.log("Error loading staff page:", error);
-      }
-    };
-
-    void loadStaffPage();
-  }, []);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -135,20 +158,13 @@ export default function Staff() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const categories = useMemo(
-    () => categoryOptions,
-    [categoryOptions],
-  );
+  const categories = useMemo(() => categoryOptions, [categoryOptions]);
 
   const confirmedRows = rows.filter((row) => row.confirmed);
   const canAddMoreItems = rows.length > 0 && rows.every((row) => row.confirmed);
-  const totalAmount = confirmedRows.reduce(
-    (sum, row) => sum + Number(row.amount || 0),
-    0,
-  );
+  const totalAmount = confirmedRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
   const taxAmount = confirmedRows.reduce(
-    (sum, row) =>
-      sum + (Number(row.amount || 0) * Number(row.tax || 0)) / 100,
+    (sum, row) => sum + (Number(row.amount || 0) * Number(row.tax || 0)) / 100,
     0,
   );
   const grandTotal = totalAmount + taxAmount;
@@ -186,11 +202,7 @@ export default function Staff() {
     return row;
   };
 
-  const updateRowField = (
-    index: number,
-    name: string,
-    value: string,
-  ) => {
+  const updateRowField = (index: number, name: string, value: string) => {
     setRows((currentRows) => {
       const nextRows = [...currentRows];
       let row = { ...nextRows[index], [name]: value, confirmed: false };
@@ -271,19 +283,12 @@ export default function Staff() {
     }
   };
 
-  const handleRowChange = (
-    index: number,
-    e: ChangeEvent<HTMLInputElement | HTMLSelectElement>,
-  ) => {
+  const handleRowChange = (index: number, e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     updateRowField(index, e.target.name, e.target.value);
   };
 
   const isRowValid = (row: StaffRow) =>
-    row.category &&
-    row.type &&
-    row.item &&
-    Number(row.qty) > 0 &&
-    Number(row.priceListBasic) >= 0;
+    row.category && row.type && row.item && Number(row.qty) > 0 && Number(row.priceListBasic) >= 0;
 
   const handleConfirmRow = (index: number) => {
     if (!isRowValid(rows[index])) {
@@ -292,17 +297,13 @@ export default function Staff() {
     }
 
     setRows((currentRows) =>
-      currentRows.map((row, rowIndex) =>
-        rowIndex === index ? { ...row, confirmed: true } : row,
-      ),
+      currentRows.map((row, rowIndex) => (rowIndex === index ? { ...row, confirmed: true } : row)),
     );
   };
 
   const handleEditRow = (index: number) => {
     setRows((currentRows) =>
-      currentRows.map((row, rowIndex) =>
-        rowIndex === index ? { ...row, confirmed: false } : row,
-      ),
+      currentRows.map((row, rowIndex) => (rowIndex === index ? { ...row, confirmed: false } : row)),
     );
   };
 
@@ -451,6 +452,15 @@ export default function Staff() {
         </div>
       </div>
 
+      {/* One failing endpoint used to blank the branch list, the category list
+          AND the item catalogue at once, with only a console.log to show for
+          it — three empty dropdowns that look like configuration, not failure. */}
+      {staffLoadFailed && (
+        <div className="sl-field-error" role="alert">
+          Could not load branches, categories or the item catalogue. Refresh to try again.
+        </div>
+      )}
+
       <form className="sl-form" onSubmit={handleSubmit}>
         <div className="sl-section-label">Order Details</div>
         <div className="sl-grid sl-order-grid">
@@ -479,9 +489,7 @@ export default function Staff() {
                 id="dispatch"
                 name="dispatch"
                 value={formData.dispatch}
-                onChange={(e) =>
-                  setFormData((prev) => ({ ...prev, dispatch: e.target.value }))
-                }
+                onChange={(e) => setFormData((prev) => ({ ...prev, dispatch: e.target.value }))}
                 required
               >
                 <option value="">--select--</option>
@@ -505,7 +513,7 @@ export default function Staff() {
         </div>
 
         <div className="sl-table-wrap">
-          <table className="sl-table staff-order-table">
+          <Table density="compact">
             <colgroup>
               <col className="sl-col-category" />
               <col className="sl-col-type" />
@@ -519,30 +527,29 @@ export default function Staff() {
               <col className="sl-col-amount" />
               <col className="sl-col-actions" />
             </colgroup>
-            <thead>
-              <tr>
-                <th>Category</th>
-                <th>Type</th>
-                <th>Item</th>
-                <th>Pcs</th>
-                <th>Boxes</th>
-                <th>Qty</th>
-                <th>Ltrs</th>
-                <th>{t("price_list", "Price List (Basic)")}</th>
-                <th>Tax %</th>
-                <th>Amount</th>
-                <th>X</th>
-              </tr>
-            </thead>
-            <tbody>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Category</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead>Item</TableHead>
+                <TableHead>Pcs</TableHead>
+                <TableHead>Boxes</TableHead>
+                <TableHead>Qty</TableHead>
+                <TableHead>Ltrs</TableHead>
+                <TableHead>{t("price_list", "Price List (Basic)")}</TableHead>
+                <TableHead>Tax %</TableHead>
+                <TableHead>Amount</TableHead>
+                <TableHead>X</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {rows.map((row, index) => {
                 const typeOptions = [
                   ...new Set(
                     products
                       .filter(
                         (product) =>
-                          normalizeCategory(product.category) ===
-                          normalizeCategory(row.category),
+                          normalizeCategory(product.category) === normalizeCategory(row.category),
                       )
                       .map((product) => getProductType(product.item_name)),
                   ),
@@ -552,31 +559,24 @@ export default function Staff() {
                   return parseFloat(a) - parseFloat(b);
                 });
                 const filteredTypeOptions = typeOptions.filter((type) =>
-                  type
-                    .toLowerCase()
-                    .includes((typeSearch[index] || "").toLowerCase()),
+                  type.toLowerCase().includes((typeSearch[index] || "").toLowerCase()),
                 );
                 const itemOptions = products.filter((product) => {
                   const sameCategory =
-                    normalizeCategory(product.category) ===
-                    normalizeCategory(row.category);
+                    normalizeCategory(product.category) === normalizeCategory(row.category);
 
-                  const sameType = row.type
-                    ? getProductType(product.item_name) === row.type
-                    : true;
+                  const sameType = row.type ? getProductType(product.item_name) === row.type : true;
 
                   return sameCategory && sameType;
                 });
                 const filteredItemOptions = itemOptions.filter((product) =>
-                  product.item_name
-                    .toLowerCase()
-                    .includes((itemSearch[index] || "").toLowerCase()),
+                  product.item_name.toLowerCase().includes((itemSearch[index] || "").toLowerCase()),
                 );
 
                 return (
                   <Fragment key={index}>
-                    <tr>
-                      <td>
+                    <TableRow>
+                      <TableCell>
                         <select
                           name="category"
                           value={row.category}
@@ -591,9 +591,9 @@ export default function Staff() {
                             </option>
                           ))}
                         </select>
-                      </td>
+                      </TableCell>
 
-                      <td>
+                      <TableCell>
                         <div
                           className={`sl-party-dropdown${typeDropdownOpen[index] ? " open" : ""}`}
                           ref={(node) => {
@@ -661,9 +661,9 @@ export default function Staff() {
                             </div>
                           )}
                         </div>
-                      </td>
+                      </TableCell>
 
-                      <td>
+                      <TableCell>
                         <div
                           className={`sl-party-dropdown${itemDropdownOpen[index] ? " open" : ""}`}
                           ref={(node) => {
@@ -740,18 +740,18 @@ export default function Staff() {
                             </div>
                           )}
                         </div>
-                      </td>
+                      </TableCell>
 
-                      <td className="sl-pcs-cell">
+                      <TableCell className="sl-pcs-cell">
                         <input
                           className="sl-compact-number-input"
                           type="number"
                           value={row.pcs ? Number(row.pcs).toFixed(1) : ""}
                           readOnly
                         />
-                      </td>
+                      </TableCell>
 
-                      <td className="sl-boxes-cell">
+                      <TableCell className="sl-boxes-cell">
                         <input
                           className="sl-size-input"
                           type="number"
@@ -761,9 +761,9 @@ export default function Staff() {
                           disabled={row.confirmed}
                           required
                         />
-                      </td>
+                      </TableCell>
 
-                      <td className="sl-qty-cell">
+                      <TableCell className="sl-qty-cell">
                         <input
                           className="sl-size-input"
                           type="number"
@@ -773,39 +773,39 @@ export default function Staff() {
                           disabled={row.confirmed}
                           required
                         />
-                      </td>
+                      </TableCell>
 
-                      <td className="sl-ltrs-cell">
+                      <TableCell className="sl-ltrs-cell">
                         <input
                           className="sl-compact-number-input"
                           type="number"
                           value={row.ltrs}
                           readOnly
                         />
-                      </td>
+                      </TableCell>
 
-                      <td className="sl-price-list-basic-cell">
+                      <TableCell className="sl-price-list-basic-cell">
                         <input
                           className="sl-compact-number-input"
                           type="number"
                           value={row.priceListBasic}
                           readOnly
                         />
-                      </td>
+                      </TableCell>
 
-                      <td>
+                      <TableCell>
                         <input
                           type="text"
                           value={row.tax ? Number(row.tax).toFixed(2) : ""}
                           readOnly
                         />
-                      </td>
+                      </TableCell>
 
-                      <td>
+                      <TableCell>
                         <input type="number" value={row.amount} readOnly />
-                      </td>
+                      </TableCell>
 
-                      <td className="sl-row-actions">
+                      <TableCell className="sl-row-actions">
                         {!row.confirmed ? (
                           <button
                             type="button"
@@ -816,9 +816,7 @@ export default function Staff() {
                           </button>
                         ) : (
                           <>
-                            <span className="sl-row-confirmed-badge">
-                              Confirmed
-                            </span>
+                            <span className="sl-row-confirmed-badge">Confirmed</span>
                             <button
                               type="button"
                               className="sl-edit-item-btn"
@@ -841,11 +839,7 @@ export default function Staff() {
                             stroke="currentColor"
                             strokeWidth="1.8"
                           >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              d="M3 6h18"
-                            />
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M3 6h18" />
                             <path
                               strokeLinecap="round"
                               strokeLinejoin="round"
@@ -863,13 +857,13 @@ export default function Staff() {
                             />
                           </svg>
                         </button>
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   </Fragment>
                 );
               })}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
 
         {canAddMoreItems && (
@@ -920,9 +914,20 @@ export default function Staff() {
         </div>
       </form>
 
-      {showSuccess && (
-        <div className="sl-modal-overlay">
-          <div className="sl-modal sl-success-modal">
+      <Dialog
+        open={Boolean(showSuccess)}
+        onOpenChange={(next) => {
+          if (!next) setShowSuccess(false);
+        }}
+      >
+        {showSuccess && (
+          <DialogContent
+            title="Saved"
+            variant="bare"
+            size="auto"
+            showClose={false}
+            className="sl-modal sl-success-modal"
+          >
             <div className="sl-success-mark" aria-hidden="true" />
             <div className="sl-modal-title">Staff order prepared successfully</div>
             <div className="sl-success-details">
@@ -940,17 +945,13 @@ export default function Staff() {
               </div>
             </div>
             <div className="sl-modal-actions">
-              <button
-                type="button"
-                className="sl-modal-btn"
-                onClick={() => setShowSuccess(false)}
-              >
+              <button type="button" className="sl-modal-btn" onClick={() => setShowSuccess(false)}>
                 OK
               </button>
             </div>
-          </div>
-        </div>
-      )}
+          </DialogContent>
+        )}
+      </Dialog>
     </div>
   );
 }

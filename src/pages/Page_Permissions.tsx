@@ -7,8 +7,10 @@ import {
   HiMagnifyingGlass,
   HiShieldCheck,
 } from "react-icons/hi2";
+import { useQueryClient } from "@tanstack/react-query";
 import { userService } from "../services/userService";
 import type { User } from "../services/userService";
+import { useUserList } from "../lib/authQueries";
 import {
   ALL_GRANTABLE_KEYS,
   GRANTABLE_ADMIN_PAGES,
@@ -16,8 +18,12 @@ import {
 } from "../config/adminPages";
 import "../styles/Order_Flow_Settings.css";
 import "../styles/Page_Permissions.css";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 
-const isAdminRole = (role?: string) => String(role || "").trim().toLowerCase() === "admin";
+const isAdminRole = (role?: string) =>
+  String(role || "")
+    .trim()
+    .toLowerCase() === "admin";
 
 type ToggleRowProps = {
   title: string;
@@ -31,6 +37,8 @@ function ToggleRow({ title, subtitle, checked, disabled, onChange }: ToggleRowPr
   return (
     <button
       type="button"
+      role="checkbox"
+      aria-checked={checked}
       className={`ofs-toggle-row${checked ? " is-checked" : ""}${disabled ? " is-disabled" : ""}`}
       onClick={onChange}
       disabled={disabled}
@@ -47,35 +55,24 @@ function ToggleRow({ title, subtitle, checked, disabled, onChange }: ToggleRowPr
 }
 
 export default function Page_Permissions() {
-  const [users, setUsers] = useState<User[]>([]);
+  const queryClient = useQueryClient();
+  // Shared with App_User, Party_Assignment and the three manager reports under
+  // ["users"]. This page's tolerant unwrap is the one that moved into the hook —
+  // the other two consumers assumed the `{data}` envelope and threw without it.
+  const { users, isLoading: loading, isError: loadFailed } = useUserList();
+
   const [selectedUserIds, setSelectedUserIds] = useState<number[]>([]);
   const [pages, setPages] = useState<string[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [userSearch, setUserSearch] = useState("");
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
+  /** Save failures only. The load failure is the query's, so the two no longer
+   *  overwrite each other. */
+  const [saveError, setSaveError] = useState("");
   const [successVisible, setSuccessVisible] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  const fetchUsers = async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const response = await userService.getUsers();
-      const list: User[] = Array.isArray(response) ? response : response?.data ?? [];
-      setUsers(list);
-    } catch (err) {
-      console.error("Error fetching users:", err);
-      setError("Unable to load users.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    void fetchUsers();
-  }, []);
+  const error = saveError || (loadFailed ? "Unable to load users." : "");
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -89,11 +86,11 @@ export default function Page_Permissions() {
 
   const selectedUsers = useMemo(
     () => users.filter((user) => selectedUserIds.includes(user.id)),
-    [users, selectedUserIds]
+    [users, selectedUserIds],
   );
   const nonAdminSelected = useMemo(
     () => selectedUsers.filter((user) => !isAdminRole(user.role)),
-    [selectedUsers]
+    [selectedUsers],
   );
   const adminSelectedCount = selectedUsers.length - nonAdminSelected.length;
 
@@ -102,8 +99,10 @@ export default function Page_Permissions() {
     if (!term) return users;
     return users.filter((user) =>
       [user.name, user.username, user.role].some((value) =>
-        String(value || "").toLowerCase().includes(term)
-      )
+        String(value || "")
+          .toLowerCase()
+          .includes(term),
+      ),
     );
   }, [users, userSearch]);
 
@@ -123,19 +122,25 @@ export default function Page_Permissions() {
   };
 
   const toggleUser = (user: User) => {
-    setSelectedUserIds((current) => {
-      const next = current.includes(user.id)
-        ? current.filter((id) => id !== user.id)
-        : [...current, user.id];
-      setPages(computePagesFor(next));
-      return next;
-    });
-    setError("");
+    /*
+     * `next` is computed OUTSIDE the updater. It used to be computed inside
+     * one, with `setPages(computePagesFor(next))` called from within — a
+     * setState in another setState's updater, which StrictMode double-invokes.
+     * `computePagesFor` also closes over `users`, so with the list now coming
+     * from a cache that can refetch underneath the page, deriving the grants
+     * from a stale closure would have let Save write the wrong permissions.
+     */
+    const next = selectedUserIds.includes(user.id)
+      ? selectedUserIds.filter((id) => id !== user.id)
+      : [...selectedUserIds, user.id];
+    setSelectedUserIds(next);
+    setPages(computePagesFor(next));
+    setSaveError("");
   };
 
   const togglePage = (key: string) => {
     setPages((current) =>
-      current.includes(key) ? current.filter((value) => value !== key) : [...current, key]
+      current.includes(key) ? current.filter((value) => value !== key) : [...current, key],
     );
   };
 
@@ -155,21 +160,30 @@ export default function Page_Permissions() {
   const handleSave = async () => {
     if (nonAdminSelected.length === 0) return;
     setSaving(true);
-    setError("");
+    setSaveError("");
     try {
       await Promise.all(
-        nonAdminSelected.map((user) => userService.updatePagePermissions(user.id, pages))
+        nonAdminSelected.map((user) => userService.updatePagePermissions(user.id, pages)),
       );
+      /*
+       * This patch IS the persistence — nothing refetches after a save, and the
+       * page reads `user.extra_pages` back out of the list to seed the next
+       * selection. It was a local `setUsers`; as `setQueryData(["users"])` it
+       * keeps working here AND becomes visible to App_User, Party_Assignment
+       * and the three reports, which is correct but is new cross-page
+       * behaviour: those pages will now show the grant before any of them has
+       * re-read the server.
+       */
       const savedIds = nonAdminSelected.map((user) => user.id);
-      setUsers((current) =>
-        current.map((user) =>
-          savedIds.includes(user.id) ? { ...user, extra_pages: pages } : user
-        )
+      queryClient.setQueryData<User[]>(["users"], (current) =>
+        (current ?? []).map((user) =>
+          savedIds.includes(user.id) ? { ...user, extra_pages: pages } : user,
+        ),
       );
       setSuccessVisible(true);
     } catch (err) {
       console.error("Error saving page permissions:", err);
-      setError("Unable to save page access. Make sure you are logged in as admin.");
+      setSaveError("Unable to save page access. Make sure you are logged in as admin.");
     } finally {
       setSaving(false);
     }
@@ -194,7 +208,7 @@ export default function Page_Permissions() {
           <h1>Page Permissions</h1>
           <p>Grant access to admin pages for any user. Granted pages appear in their sidebar.</p>
         </div>
-        <button type="button" className="ofs-refresh" onClick={() => void fetchUsers()}>
+        <button type="button" className="ofs-refresh" onClick={() => void queryClient.invalidateQueries({ queryKey: ["users"] })}>
           Refresh
         </button>
       </div>
@@ -214,7 +228,13 @@ export default function Page_Permissions() {
           </div>
 
           <div className="ofs-flow-select" ref={menuRef}>
-            <button type="button" className="ofs-flow-trigger" onClick={() => setMenuOpen((open) => !open)}>
+            <button
+              type="button"
+              className="ofs-flow-trigger"
+              aria-haspopup="listbox"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen((open) => !open)}
+            >
               <span>
                 <small>Selected Users</small>
                 <strong>{triggerLabel()}</strong>
@@ -224,16 +244,17 @@ export default function Page_Permissions() {
             {menuOpen ? (
               <div className="ofs-flow-menu pp-user-menu">
                 <label className="pp-user-search">
-                  <HiMagnifyingGlass />
+                  <HiMagnifyingGlass aria-hidden="true" />
                   <input
                     type="text"
                     value={userSearch}
                     onChange={(event) => setUserSearch(event.target.value)}
                     placeholder="Search by name, username or role"
+                    aria-label="Search by name, username or role"
                     autoFocus
                   />
                 </label>
-                <div className="pp-user-options">
+                <div className="pp-user-options" role="listbox" aria-multiselectable="true">
                   {filteredUsers.length === 0 ? (
                     <div className="pp-user-empty">No users found</div>
                   ) : (
@@ -243,6 +264,8 @@ export default function Page_Permissions() {
                         <button
                           key={user.id}
                           type="button"
+                          role="option"
+                          aria-selected={checked}
                           className={`ofs-flow-option${checked ? " is-selected" : ""}`}
                           onClick={() => toggleUser(user)}
                         >
@@ -283,8 +306,8 @@ export default function Page_Permissions() {
 
           {selectedUsers.length > 1 ? (
             <p className="pp-hint">
-              Saving applies the selected pages to all {selectedUsers.length} users (replacing
-              their current access).
+              Saving applies the selected pages to all {selectedUsers.length} users (replacing their
+              current access).
             </p>
           ) : null}
         </section>
@@ -334,7 +357,10 @@ export default function Page_Permissions() {
           </div>
 
           {nonAdminSelected.length === 0 ? (
-            <p className="pp-hint">Pick one or more non-admin users from the dropdown above to choose which admin pages they can open.</p>
+            <p className="pp-hint">
+              Pick one or more non-admin users from the dropdown above to choose which admin pages
+              they can open.
+            </p>
           ) : (
             <div className="ofs-condition-grid">
               {GRANTABLE_ADMIN_PAGES.map((page) => (
@@ -359,16 +385,15 @@ export default function Page_Permissions() {
 
           {nonAdminSelected.length === 0 ? (
             <p className="pp-hint">
-              Pick one or more non-admin users above to choose what they can do
-              in the Payments module.
+              Pick one or more non-admin users above to choose what they can do in the Payments
+              module.
             </p>
           ) : (
             <>
               <p className="pp-hint">
-                These control actions rather than page access. Granting
-                &ldquo;Create&rdquo; lets a user raise and submit an entry;
-                &ldquo;Approve&rdquo; lets them decide one — and still only on
-                the workflow levels they are assigned to.
+                These control actions rather than page access. Granting &ldquo;Create&rdquo; lets a
+                user raise and submit an entry; &ldquo;Approve&rdquo; lets them decide one — and
+                still only on the workflow levels they are assigned to.
               </p>
               <div className="ofs-condition-grid">
                 {PAYMENT_ACTION_PERMISSIONS.map((perm) => (
@@ -396,9 +421,20 @@ export default function Page_Permissions() {
         </button>
       </div>
 
-      {successVisible ? (
-        <div className="ofs-modal-backdrop" onClick={() => setSuccessVisible(false)}>
-          <div className="ofs-modal" onClick={(event) => event.stopPropagation()}>
+      <Dialog
+        open={Boolean(successVisible)}
+        onOpenChange={(next) => {
+          if (!next) (() => setSuccessVisible(false))();
+        }}
+      >
+        {successVisible && (
+          <DialogContent
+            title="Page permissions"
+            variant="bare"
+            size="auto"
+            showClose={false}
+            className="ofs-modal"
+          >
             <div className="ofs-success-icon">
               <HiCheck />
             </div>
@@ -408,13 +444,17 @@ export default function Page_Permissions() {
               {nonAdminSelected.length > 1 ? "s" : ""}.
             </p>
             <div className="ofs-modal-actions">
-              <button type="button" className="ofs-primary" onClick={() => setSuccessVisible(false)}>
+              <button
+                type="button"
+                className="ofs-primary"
+                onClick={() => setSuccessVisible(false)}
+              >
                 Done
               </button>
             </div>
-          </div>
-        </div>
-      ) : null}
+          </DialogContent>
+        )}
+      </Dialog>
     </div>
   );
 }

@@ -1,8 +1,14 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
-*, *::before, *::after {
-  margin: 0; padding: 0; box-sizing: border-box;
-}
+/*
+ * A duplicate of the universal reset that also sat in styles/Login.css. Both
+ * have moved to styles/tailwind.css, inside `@layer base` — see the note there.
+ * Short version: unlayered CSS beats every cascade layer, so `* { padding: 0 }`
+ * silently zeroed every Tailwind padding and margin utility app-wide.
+ *
+ * Deleted rather than moved, because the copy in tailwind.css is identical and
+ * this file is loaded on every protected page anyway.
+ */
 
 html, body {
   background:
@@ -78,24 +84,35 @@ html, body {
   gap: .18rem;
   padding: 0;
   line-height: 1;
+  /* Were inline on the <Link>. The three flex properties there duplicated the
+     three above exactly; these two did not exist here at all. */
+  margin-right: 16px;
+  text-decoration: none;
 }
 
 .header-profile-name {
   font-family: 'Inter', sans-serif;
-  font-size: .88rem;
+  /* .88rem / #334155 until now — and never once rendered. The inline style on
+     this element set .9rem / #0f172a and an inline style beats any rule here,
+     so those were the dead values and these are what the header has always
+     actually shown. Changed to keep the render identical, not to restyle it. */
+  font-size: .9rem;
   font-weight: 600;
   letter-spacing: -.02em;
-  color: #334155;
+  color: #0f172a;
   line-height: 1.1;
 }
 
 .header-profile-role {
   font-family: 'Inter', sans-serif;
-  font-size: .58rem;
+  /* Same story as `.header-profile-name`: .58rem / #0f766e were overridden by
+     the inline .75rem / #64748b on every render. The uppercase, the tracking
+     and the weight below were never overridden and are unchanged. */
+  font-size: .75rem;
   font-weight: 700;
   letter-spacing: .18em;
   text-transform: uppercase;
-  color: #0f766e;
+  color: #64748b;
   opacity: .92;
 }
 
@@ -496,12 +513,25 @@ html, body {
 }
 
 @media (max-width: 480px) {
+  /*
+   * Dead before this conversion and deliberately kept dead.
+   *
+   * An inline style beats a media query too, so the .9rem / .75rem that used
+   * to sit on these two elements won at EVERY viewport — these rules have
+   * never applied. Now that the values live in the base classes, uncommenting
+   * these would genuinely shrink the header profile below 480px for the first
+   * time. That may well be what was intended, but it is a visual change at a
+   * breakpoint no baseline watches (the suite runs at 1440x900), so it is a
+   * decision to take deliberately rather than a side effect of moving a style
+   * off an element.
+   *
   .header-profile-name {
     font-size: .78rem;
   }
   .header-profile-role {
     font-size: .52rem;
   }
+  */
   .sidebar {
     width: 100%;
     left: -100%;
@@ -575,4 +605,257 @@ body {
 }
 .sidebar.collapsed ul li.sidebar-section {
   display: none;
+}
+
+/* ==========================================================================
+   Notifications — the bell and its dialog
+   ==========================================================================
+   Gated on `["auditor","billing","manager"].includes(normalizedRole) ||
+   isRateApprover`, so none of this rendered for the suite's `admin` session
+   until `asRole` (e2e/harness.ts) existed. 26 inline styles lived here.
+   ========================================================================== */
+
+.header-bell-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  margin-right: 12px;
+  background: none;
+  border: none;
+  color: #475569;
+  cursor: pointer;
+}
+
+.sb-bell-icon {
+  width: 24px;
+  height: 24px;
+}
+
+.sb-bell-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background-color: #ef4444;
+  color: #fff;
+  font-size: 10px;
+  font-weight: bold;
+}
+
+/*
+ * Two classes — `0,2,0` — and not a change to `.sb-modal-title` itself.
+ *
+ * That class is on two elements: this <h3> and the Logout modal's
+ * (Sidebar.tsx:1228). The inline style being replaced here overrode its
+ * font-size, colour and margin for THIS one only, so folding the values into
+ * `.sb-modal-title` would have restyled the Logout title as a side effect.
+ * `font-weight: 700` was never overridden and still comes from the base class.
+ */
+.sb-modal-title.sb-notif-title {
+  margin: 0;
+  font-size: 1.25rem;
+  color: #0f172a;
+}
+
+.sb-notif-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.sb-notif-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.sb-notif-markall {
+  padding: 0;
+  background: none;
+  border: none;
+  color: #3b82f6;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.sb-notif-close {
+  padding: 0;
+  background: none;
+  border: none;
+  color: #64748b;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.sb-notif-filters {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.sb-notif-chip {
+  padding: 6px 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  background: #fff;
+  color: #475569;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sb-notif-chip.is-active {
+  border-color: #2563eb;
+  background: #2563eb;
+  color: #fff;
+}
+
+.sb-notif-settings {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+}
+
+.sb-notif-dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #94a3b8;
+}
+
+.sb-notif-dot.is-on {
+  background: #22c55e;
+}
+
+/* The text column beside a dot or an icon: takes the space, and `min-width: 0`
+   so a long message can ellipsis instead of forcing the row wider. */
+.sb-notif-grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.sb-notif-settings-title {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.sb-notif-hint {
+  margin: 2px 0 0;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: #64748b;
+}
+
+.sb-notif-enable {
+  flex-shrink: 0;
+  padding: 7px 12px;
+  border: none;
+  border-radius: 8px;
+  background: #2563eb;
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.sb-notif-list {
+  max-height: 60vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.sb-notif-empty {
+  margin: 0;
+  padding: 30px 0;
+  color: #64748b;
+  text-align: center;
+}
+
+.sb-notif-group {
+  margin-bottom: 8px;
+}
+
+.sb-notif-group-label {
+  margin: 8px 4px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.sb-notif-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px;
+  margin-bottom: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background-color: #f8fafc;
+  cursor: pointer;
+}
+
+.sb-notif-item.is-unread {
+  border-color: #bae6fd;
+  background-color: #f0f9ff;
+}
+
+.sb-notif-item-dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: #2563eb;
+}
+
+.sb-notif-message {
+  margin: 0 0 8px 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: #0f172a;
+}
+
+.sb-notif-time {
+  font-size: 0.75rem;
+  color: #64748b;
+}
+
+.sb-notif-more {
+  width: 100%;
+  margin-top: 6px;
+  padding: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #2563eb;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* `disabled` is the attribute the button already carries, so the cursor does
+   not need a second source of truth in JS. */
+.sb-notif-more:disabled,
+.sb-notif-enable:disabled {
+  cursor: default;
 }

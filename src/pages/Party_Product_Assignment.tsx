@@ -1,10 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import * as XLSX from "xlsx"; // reading uploaded workbooks only; writing goes through excelExport
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSapProducts } from "../lib/sapQueries";
+// SheetJS (422 kB) is fetched at import time, not page-load time — see
+// utils/xlsxLoader.ts. Reading uploaded workbooks only; writing goes
+// through excelExport.
+import { loadXlsx, type WorkBook, type XlsxModule } from "../utils/xlsxLoader";
 import { startSheetsExport } from "../utils/excelExport";
 import type { Product } from "../services/ordersService";
 import { sapService, type Party } from "../services/sapService";
 import { userService } from "../services/userService";
 import api from "../services/api";
+import "../styles/Party_Product_Assignment.css";
 
 interface PartyProduct {
   id: number;
@@ -102,7 +108,7 @@ const getImportValue = (row: Record<string, unknown>, aliases: string[]) => {
   return match ? match[1] : "";
 };
 
-const getWorksheetRows = (workbook: XLSX.WorkBook, sheetNames: string[]) => {
+const getWorksheetRows = (XLSX: XlsxModule, workbook: WorkBook, sheetNames: string[]) => {
   const normalizedNames = sheetNames.map(normalizeHeader);
   const sheetName = workbook.SheetNames.find((name) => normalizedNames.includes(normalizeHeader(name)));
   if (!sheetName) return [];
@@ -115,14 +121,54 @@ const parseRate = (value: unknown) => {
   return Number.isFinite(parsed) ? parsed : NaN;
 };
 
+/** Stable empty, so the counters and `availableProducts` memo settle. */
+const NO_PARTY_PRODUCTS: PartyProduct[] = [];
+
 export default function Party_Product_Assignment() {
   const [parties, setParties] = useState<Party[]>([]);
   const [allParties, setAllParties] = useState<Party[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
+  const queryClient = useQueryClient();
+  /* Shared ["sap","products"] key. The old code did `setProducts(await
+     sapService.getProducts())` with NO Array.isArray guard — the only consumer
+     in the repo that did not coerce — so a non-array body made every product
+     lookup below throw. */
+  //
+  // The cast is the pre-existing situation made visible, not a new risk: this
+  // page types its catalogue as `ordersService.Product` (which adds
+  // sal_factor2 / tax_rate / basic_rate) while `/sap/products/` is typed as
+  // `sapService.Product`. The old code assigned the untyped `response.data`
+  // straight into the richer type, so the same assumption was already being
+  // made — silently.
+  const { items: sapProducts } = useSapProducts();
+  const products = sapProducts as unknown as Product[];
   const [selectedParties, setSelectedParties] = useState<string[]>([]);
   const [partySearch, setPartySearch] = useState("");
   const [showDropdown, setShowDropdown] = useState(false);
-  const [assignedProducts, setAssignedProducts] = useState<PartyProduct[]>([]);
+  /*
+   * Exactly one party selected -> that party's products. `enabled` replaces the
+   * effect that used to do this, INCLUDING its `else { setAssignedProducts([]) }`
+   * branch: with the query disabled there is no data and every reader falls back
+   * to the same stable empty.
+   */
+  const singleSelection =
+    selectedParties.length === 1 ? getSelectionFromKey(selectedParties[0]) : null;
+  const partyProductsKey = [
+    "party",
+    "products",
+    singleSelection?.card_code ?? null,
+    singleSelection?.category ?? null,
+  ] as const;
+  const { data: assignedProducts = NO_PARTY_PRODUCTS } = useQuery({
+    queryKey: partyProductsKey,
+    enabled: Boolean(singleSelection),
+    queryFn: async () => {
+      const res = await userService.getPartyProducts(
+        singleSelection!.card_code,
+        singleSelection!.category,
+      );
+      return (res.data?.products || res.products || []) as PartyProduct[];
+    },
+  });
   const [categoryFilter, setCategoryFilter] = useState("ALL");
 
   const [showAddModal, setShowAddModal] = useState(false);
@@ -139,7 +185,8 @@ export default function Party_Product_Assignment() {
 
   useEffect(() => {
     fetchParties();
-    fetchProducts();
+    // `fetchProducts` is gone — products come from the shared ["sap","products"]
+    // query above, which the five Sap Sync tabs also render from.
   }, []);
 
   useEffect(() => {
@@ -149,15 +196,6 @@ export default function Party_Product_Assignment() {
 
     return () => window.clearTimeout(timeout);
   }, [partySearch]);
-
-  useEffect(() => {
-    if (selectedParties.length === 1) {
-      const selectedParty = getSelectionFromKey(selectedParties[0]);
-      fetchPartyProducts(selectedParty.card_code, selectedParty.category);
-    } else {
-      setAssignedProducts([]);
-    }
-  }, [selectedParties]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -194,25 +232,10 @@ export default function Party_Product_Assignment() {
     }
   };
 
-  const fetchProducts = async () => {
-    try {
-      const data = await sapService.getProducts();
-      setProducts(data);
-    } catch (error) {
-      console.error("Error fetching products:", error);
-    }
-  };
-  console.log("Products:", products);
+  /** Re-read the selected party's products. Was a direct fetch + setState. */
+  const fetchPartyProducts = () =>
+    queryClient.invalidateQueries({ queryKey: ["party", "products"] });
 
-  const fetchPartyProducts = async (card_code: string, category?: string | null) => {
-    try {
-      const res = await userService.getPartyProducts(card_code, category);
-      setAssignedProducts(res.data?.products || res.products || []);
-    } catch (error) {
-      console.error("Error fetching party products:", error);
-      setAssignedProducts([]);
-    }
-  };
 
   const handleRemoveProduct = async (product: PartyProduct) => {
     if (selectedParties.length !== 1) return;
@@ -221,7 +244,7 @@ export default function Party_Product_Assignment() {
       const selectedParty = getSelectionFromKey(selectedParties[0]);
       await userService.removePartyProduct(selectedParty.card_code, product.item_code, product.category);
       alert("Product removed successfully");
-      fetchPartyProducts(selectedParty.card_code, selectedParty.category);
+      fetchPartyProducts();
     } catch (error) {
       console.error("Error removing product:", error);
     }
@@ -257,8 +280,7 @@ export default function Party_Product_Assignment() {
       setModalSearch("");
 
       if (selectedParties.length === 1) {
-        const selectedParty = getSelectionFromKey(selectedParties[0]);
-        fetchPartyProducts(selectedParty.card_code, selectedParty.category);
+        void fetchPartyProducts();
       }
     } catch (error) {
       console.error("Error assigning products:", error);
@@ -306,9 +328,10 @@ export default function Party_Product_Assignment() {
 
     try {
       const buffer = await file.arrayBuffer();
-      const workbook = XLSX.read(buffer, { type: "array" });
-      const partyRows = getWorksheetRows(workbook, ["Parties", "Party"]);
-      const productRows = getWorksheetRows(workbook, ["Products", "Product"]);
+      const XLSX = await loadXlsx();
+    const workbook = XLSX.read(buffer, { type: "array" });
+      const partyRows = getWorksheetRows(XLSX, workbook, ["Parties", "Party"]);
+      const productRows = getWorksheetRows(XLSX, workbook, ["Products", "Product"]);
       const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
       const singleSheetRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet, { defval: "" });
       const errors: string[] = [];
@@ -478,8 +501,7 @@ export default function Party_Product_Assignment() {
       });
 
       if (selectedParties.length === 1) {
-        const selectedParty = getSelectionFromKey(selectedParties[0]);
-        fetchPartyProducts(selectedParty.card_code, selectedParty.category);
+        void fetchPartyProducts();
       }
 
       alert(`Excel import complete. Added: ${added}, Updated: ${updated}`);
@@ -507,12 +529,14 @@ export default function Party_Product_Assignment() {
     try {
       await userService.editRate(selectedParty.card_code, product.item_code, product.category, parsedRate);
       alert("Rate updated successfully");
-      setAssignedProducts((prev) =>
-        prev.map((p) =>
+      // The ONLY mutation on this page that patches instead of refetching —
+      // drop it and the rate edit disappears from the screen entirely.
+      queryClient.setQueryData<PartyProduct[]>(partyProductsKey, (prev) =>
+        (prev ?? []).map((p) =>
           p.item_code === product.item_code && p.category === product.category
             ? { ...p, basic_rate: parsedRate }
-            : p
-        )
+            : p,
+        ),
       );
     } catch (error) {
       console.error("Error updating rate:", error);
@@ -585,74 +609,27 @@ export default function Party_Product_Assignment() {
     <div className="pa-page app-page">
 
       {/* Party Selector Card */}
-      <div
-        style={{
-          background: "#fff",
-          borderRadius: "12px",
-          padding: "24px",
-          boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
-          marginBottom: "24px",
-        }}
-      >
-        <div style={{ marginBottom: "24px" }}>
-          <h1 style={{ margin: "0 0 4px", fontSize: "24px", fontWeight: 800, color: "#0f172a", letterSpacing: "-0.02em" }}>
-            Party Product Assignment
-          </h1>
-          {/* <p style={{ margin: 0, fontSize: "13px", color: "#64748b" }}>Search &amp; select one or more parties to assign products.</p> */}
+      <div className="ppa-card">
+        <div className="ppa-head">
+          <h1 className="ppa-title">Party Product Assignment</h1>
         </div>
 
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: "16px",
-            flexWrap: "wrap",
-            padding: "16px",
-            marginBottom: "24px",
-            background: "#f8fafc",
-            border: "1px solid #e2e8f0",
-            borderRadius: "8px",
-          }}
-        >
+        <div className="ppa-upload">
           <div>
-            <h2 style={{ margin: "0 0 4px", fontSize: "16px", fontWeight: 700, color: "#0f172a" }}>
-              Excel Upload
-            </h2>
-            <p style={{ margin: 0, fontSize: "13px", color: "#64748b" }}>
+            <h2 className="ppa-upload-title">Excel Upload</h2>
+            <p className="ppa-upload-hint">
               Use separate sheets: Parties has Party Code and optional Party Category; Products has Item Code, Product Category and Basic Rate.
             </p>
           </div>
-          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-            <button
-              type="button"
-              onClick={handleDownloadTemplate}
-              style={{
-                padding: "9px 14px",
-                border: "1px solid #cbd5e1",
-                background: "#fff",
-                color: "#334155",
-                borderRadius: "8px",
-                cursor: "pointer",
-                fontWeight: 600,
-              }}
-            >
+          <div className="ppa-upload-actions">
+            <button type="button" onClick={handleDownloadTemplate} className="ppa-btn-template">
               Download Template
             </button>
             <button
               type="button"
               onClick={() => importInputRef.current?.click()}
               disabled={isImporting}
-              style={{
-                padding: "9px 14px",
-                border: "none",
-                background: "#16a34a",
-                color: "#fff",
-                borderRadius: "8px",
-                cursor: isImporting ? "not-allowed" : "pointer",
-                fontWeight: 600,
-                opacity: isImporting ? 0.75 : 1,
-              }}
+              className="ppa-btn-upload"
             >
               {isImporting ? "Importing..." : "Upload Excel"}
             </button>
@@ -660,7 +637,7 @@ export default function Party_Product_Assignment() {
               ref={importInputRef}
               type="file"
               accept=".xlsx,.xls,.csv"
-              style={{ display: "none" }}
+              className="ppa-file-input"
               onChange={(event) => {
                 const file = event.target.files?.[0];
                 if (file) {
@@ -670,21 +647,13 @@ export default function Party_Product_Assignment() {
             />
           </div>
           {importSummary && (
-            <div
-              style={{
-                flexBasis: "100%",
-                paddingTop: "12px",
-                borderTop: "1px solid #e2e8f0",
-                fontSize: "13px",
-                color: "#475569",
-              }}
-            >
+            <div className="ppa-import-summary">
               {importSummary.parties !== undefined && importSummary.products !== undefined
                 ? `Mapped ${importSummary.products} products to ${importSummary.parties} parties. `
                 : `Imported ${importSummary.imported} of ${importSummary.totalRows} rows. `}
               Assignments processed {importSummary.imported}. Added {importSummary.added}, updated {importSummary.updated}.
               {importSummary.errors.length > 0 && (
-                <div style={{ marginTop: "8px", color: "#b91c1c" }}>
+                <div className="ppa-import-errors">
                   {importSummary.errors.slice(0, 5).map((error) => (
                     <div key={error}>{error}</div>
                   ))}
@@ -697,34 +666,13 @@ export default function Party_Product_Assignment() {
           )}
         </div>
 
-        <div ref={dropdownRef} style={{ position: "relative", maxWidth: "480px", zIndex: 10 }}>
-          <label
-            style={{
-              display: "block",
-              fontSize: "0.875rem",
-              fontWeight: 500,
-              color: "#334155",
-              marginBottom: "8px",
-            }}
-          >
-            Search &amp; select one or more parties
-          </label>
-          <div style={{ position: "relative" }}>
+        <div ref={dropdownRef} className="ppa-picker">
+          <label className="ppa-picker-label">Search &amp; select one or more parties</label>
+          <div className="ppa-picker-field">
             <input
               type="text"
-              placeholder="Type name or code to search..."
-              style={{
-                width: "100%",
-                height: "var(--input-h, 40px)",
-                padding: "0 12px",
-                background: "rgba(248, 250, 252, 0.9)",
-                border: "1px solid #cbd5e1",
-                borderRadius: "var(--radius-sm, 8px)",
-                fontSize: "var(--font-ui, 13px)",
-              color: "#0f172a",
-                outline: "none",
-                boxSizing: "border-box",
-              }}
+              placeholder="Type name or code to search..." aria-label="Type name or code to search"
+              className="ppa-input"
               value={partySearch}
               onChange={(e) => {
                 setPartySearch(e.target.value);
@@ -735,21 +683,7 @@ export default function Party_Product_Assignment() {
           </div>
 
           {showDropdown && (
-            <div
-              style={{
-                position: "absolute",
-                top: "100%",
-                left: 0,
-                right: 0,
-                marginTop: "4px",
-                background: "#fff",
-                border: "1px solid #e2e8f0",
-                borderRadius: "var(--radius-md, 12px)",
-                boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
-                maxHeight: "250px",
-                overflowY: "auto",
-              }}
-            >
+            <div className="ppa-dropdown">
               {filteredParties.length > 0 ? (
                 filteredParties.map((party) => {
                   const partyName = getPartyName(party);
@@ -758,47 +692,24 @@ export default function Party_Product_Assignment() {
                   return (
                     <div
                       key={getPartyKey(party)}
-                      style={{
-                        padding: "10px 14px",
-                        cursor: "pointer",
-                        borderBottom: "1px solid #f1f5f9",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "10px",
-                        background: isChecked ? "#eff6ff" : "transparent",
-                      }}
-                      onMouseEnter={(e) => {
-                        if (!isChecked) e.currentTarget.style.backgroundColor = "#f8fafc";
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.backgroundColor = isChecked ? "#eff6ff" : "transparent";
-                      }}
+                      className={`ppa-dropdown-row${isChecked ? " is-checked" : ""}`}
                       onClick={() => toggleParty(partyKey)}
                     >
                       <input
                         type="checkbox"
                         checked={isChecked}
                         readOnly
-                        style={{
-                          width: "15px",
-                          height: "15px",
-                          accentColor: "#2563eb",
-                          pointerEvents: "none",
-                          flexShrink: 0,
-                        }}
+                        className="ppa-dropdown-check"
                       />
                       <div>
-                        <div style={{ fontWeight: 500, color: "#0f172a" }}>{partyName || "Unnamed party"}</div>
-                        <div style={{ fontSize: "0.75rem", color: "#64748b", fontFamily: "monospace" }}>
-                          {getPartyMetaLine(party)}
-                        </div>
-
+                        <div className="ppa-dropdown-name">{partyName || "Unnamed party"}</div>
+                        <div className="ppa-dropdown-meta">{getPartyMetaLine(party)}</div>
                       </div>
                     </div>
                   );
                 })
               ) : (
-                <div style={{ padding: "10px 14px", color: "#64748b" }}>No parties found</div>
+                <div className="ppa-dropdown-empty">No parties found</div>
               )}
             </div>
           )}
@@ -806,43 +717,19 @@ export default function Party_Product_Assignment() {
 
         {/* Selected party chips */}
         {selectedParties.length > 0 && (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "16px" }}>
+          <div className="ppa-chips">
             {selectedParties.map((partyKey) => {
               const p = partyOptions.find((x) => getPartySelectionKey(x) === partyKey);
               const fallback = getSelectionFromKey(partyKey);
               return (
-                <span
-                  key={partyKey}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "6px",
-                    background: "#eff6ff",
-                    border: "1px solid #bfdbfe",
-                    borderRadius: "20px",
-                    padding: "4px 10px",
-                    fontSize: "0.85rem",
-                    fontWeight: 500,
-                    color: "#1d4ed8",
-                  }}
-                >
+                <span key={partyKey} className="ppa-chip">
                   {p ? getPartyName(p) || fallback.card_code : fallback.card_code}
-                  <span style={{ color: "#64748b", fontSize: "0.75rem", fontWeight: 600 }}>
+                  <span className="ppa-chip-category">
                     {p ? getPartyCategory(p) : fallback.category}
                   </span>
                   <button
                     onClick={() => removeSelectedParty(partyKey)}
-                    style={{
-                      background: "none",
-                      border: "none",
-                      cursor: "pointer",
-                      color: "#64748b",
-                      fontSize: "1rem",
-                      lineHeight: 1,
-                      padding: 0,
-                      display: "flex",
-                      alignItems: "center",
-                    }}
+                    className="ppa-chip-remove"
                     title="Remove"
                   >
                     ×
@@ -851,18 +738,7 @@ export default function Party_Product_Assignment() {
               );
             })}
             {selectedParties.length > 1 && (
-              <button
-                onClick={() => setSelectedParties([])}
-                style={{
-                  background: "none",
-                  border: "1px solid #fca5a5",
-                  borderRadius: "20px",
-                  padding: "4px 10px",
-                  fontSize: "0.8rem",
-                  color: "#ef4444",
-                  cursor: "pointer",
-                }}
-              >
+              <button onClick={() => setSelectedParties([])} className="ppa-chip-clear">
                 Clear all
               </button>
             )}
@@ -872,67 +748,29 @@ export default function Party_Product_Assignment() {
 
       {/* Multi-party assignment panel */}
       {selectedParties.length > 1 && (
-        <div
-          style={{
-            background: "#fff",
-            borderRadius: "12px",
-            padding: "24px",
-            boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
-            marginBottom: "24px",
-            border: "1px solid #bfdbfe",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              flexWrap: "wrap",
-              gap: "12px",
-            }}
-          >
+        <div className="ppa-card ppa-card--multi">
+          <div className="ppa-panel-head">
             <div>
-          <h2 style={{ fontSize: "24px", fontWeight: 800, color: "#0f172a", margin: "0 0 4px", letterSpacing: "-0.02em" }}>
-                Multi-Party Assignment
-              </h2>
-              <p style={{ margin: 0, fontSize: "0.9rem", color: "#475569" }}>
+              <h2 className="ppa-title">Multi-Party Assignment</h2>
+              <p className="ppa-panel-sub">
                 {selectedParties.length} parties selected — products will be assigned to all of them at once.
               </p>
             </div>
-            <button
-              style={{
-                background: "#2563eb",
-                color: "#fff",
-                padding: "10px 20px",
-                borderRadius: "8px",
-                border: "none",
-                fontWeight: 600,
-                cursor: "pointer",
-                fontSize: "0.95rem",
-              }}
-              onClick={() => setShowAddModal(true)}
-            >
+            <button className="ppa-btn-add-all" onClick={() => setShowAddModal(true)}>
               + Add Products to All
             </button>
           </div>
 
-          <div style={{ marginTop: "16px", display: "flex", flexWrap: "wrap", gap: "8px" }}>
+          <div className="ppa-party-list">
             {selectedParties.map((partyKey) => {
               const p = partyOptions.find((x) => getPartySelectionKey(x) === partyKey);
               const fallback = getSelectionFromKey(partyKey);
               return (
-                <div
-                  key={partyKey}
-                  style={{
-                    background: "#f8fafc",
-                    border: "1px solid #e2e8f0",
-                    borderRadius: "8px",
-                    padding: "8px 14px",
-                    fontSize: "0.85rem",
-                  }}
-                >
-                  <span style={{ fontWeight: 600, color: "#0f172a" }}>{p ? getPartyName(p) || fallback.card_code : fallback.card_code}</span>
-                  <span style={{ color: "#64748b", marginLeft: "6px" }}>
+                <div key={partyKey} className="ppa-party-pill">
+                  <span className="ppa-party-pill-name">
+                    {p ? getPartyName(p) || fallback.card_code : fallback.card_code}
+                  </span>
+                  <span className="ppa-party-pill-meta">
                     {p ? getPartyMetaLine(p) : [fallback.card_code, fallback.category].filter(Boolean).join(" | ")}
                   </span>
                 </div>
@@ -944,119 +782,43 @@ export default function Party_Product_Assignment() {
 
       {/* Single-party product details */}
       {selectedPartyDetails && (
-        <div
-          style={{
-            background: "#fff",
-            borderRadius: "12px",
-            padding: "24px",
-            boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
-            marginBottom: "24px",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "flex-start",
-              marginBottom: "24px",
-              flexWrap: "wrap",
-              gap: "16px",
-            }}
-          >
+        <div className="ppa-card">
+          <div className="ppa-detail-head">
             <div>
-          <h2 style={{ fontSize: "24px", fontWeight: 800, color: "#0f172a", margin: "0 0 4px", letterSpacing: "-0.02em" }}>
-                {getPartyName(selectedPartyDetails)}
-              </h2>
-              <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
-                <span
-                  style={{
-                    fontSize: "0.875rem",
-                    color: "#475569",
-                    fontWeight: 600,
-                    background: "#f1f5f9",
-                    padding: "4px 8px",
-                    borderRadius: "4px",
-                  }}
-                >
-                  {getPartyCode(selectedPartyDetails)}
-                </span>
-                <span style={{ fontSize: "0.875rem", color: "#64748b" }}>
+              <h2 className="ppa-title">{getPartyName(selectedPartyDetails)}</h2>
+              <div className="ppa-detail-meta">
+                <span className="ppa-detail-code">{getPartyCode(selectedPartyDetails)}</span>
+                <span className="ppa-detail-where">
                   {selectedPartyDetails.state || "Unknown State"} •{" "}
                   {selectedPartyDetails.main_group || "Unknown Group"} •{" "}
                   {getPartyCategory(selectedPartyDetails) || "Unknown Category"}
                 </span>
               </div>
             </div>
-            <button
-              style={{
-                background: "#2563eb",
-                color: "#fff",
-                padding: "8px 16px",
-                borderRadius: "8px",
-                border: "none",
-                fontWeight: 500,
-                cursor: "pointer",
-              }}
-              onClick={() => setShowAddModal(true)}
-            >
+            <button className="ppa-btn-add" onClick={() => setShowAddModal(true)}>
               + Add Products
             </button>
           </div>
 
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
-              gap: "16px",
-              marginBottom: "24px",
-            }}
-          >
+          <div className="ppa-stats">
             {[
-              { label: "Total Assigned", value: totalProducts, bg: "#f8fafc", border: "#e2e8f0", color: "#0f172a", labelColor: "#64748b" },
-              { label: "Oil", value: oilCount, bg: "#fffbeb", border: "#fde68a", color: "#d97706", labelColor: "#b45309" },
-              { label: "Beverages", value: beverageCount, bg: "#eff6ff", border: "#bfdbfe", color: "#2563eb", labelColor: "#1d4ed8" },
-              { label: "Mart", value: martCount, bg: "#f1f5f9", border: "#cbd5e1", color: "#334155", labelColor: "#475569" },
-            ].map(({ label, value, bg, border, color, labelColor }) => (
-              <div
-                key={label}
-                style={{
-                  background: bg,
-                  padding: "16px",
-                  borderRadius: "8px",
-                  border: `1px solid ${border}`,
-                  textAlign: "center",
-                }}
-              >
-                <div style={{ fontSize: "1.5rem", fontWeight: 700, color }}>{value}</div>
-                <div
-                  style={{
-                    fontSize: "0.75rem",
-                    color: labelColor,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.05em",
-                    marginTop: "4px",
-                  }}
-                >
-                  {label}
-                </div>
+              { label: "Total Assigned", value: totalProducts, tone: "total" },
+              { label: "Oil", value: oilCount, tone: "oil" },
+              { label: "Beverages", value: beverageCount, tone: "beverages" },
+              { label: "Mart", value: martCount, tone: "mart" },
+            ].map(({ label, value, tone }) => (
+              <div key={label} className={`ppa-stat ppa-stat--${tone}`}>
+                <div className="ppa-stat-value">{value}</div>
+                <div className="ppa-stat-label">{label}</div>
               </div>
             ))}
           </div>
 
-          <div style={{ display: "flex", gap: "8px", marginBottom: "16px", flexWrap: "wrap" }}>
+          <div className="ppa-filters">
             {["ALL", "OIL", "BEVERAGES", "MART"].map((cat) => (
               <button
                 key={cat}
-                style={{
-                  padding: "6px 16px",
-                  borderRadius: "20px",
-                  border: categoryFilter === cat ? "none" : "1px solid #cbd5e1",
-                  background: categoryFilter === cat ? "#1e293b" : "#fff",
-                  color: categoryFilter === cat ? "#fff" : "#475569",
-                  fontSize: "0.85rem",
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
+                className={`ppa-filter${categoryFilter === cat ? " is-active" : ""}`}
                 onClick={() => setCategoryFilter(cat)}
               >
                 {cat}
@@ -1065,66 +827,26 @@ export default function Party_Product_Assignment() {
           </div>
 
           {displayProducts.length > 0 ? (
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
-                gap: "16px",
-              }}
-            >
+            <div className="ppa-grid">
               {displayProducts.map((product) => (
-                <div
-                  key={`${product.item_code}-${product.category}`}
-                  style={{
-                    background: "#fff",
-                    border: "1px solid #e2e8f0",
-                    borderRadius: "8px",
-                    padding: "16px",
-                    display: "flex",
-                    flexDirection: "column",
-                    justifyContent: "space-between",
-                  }}
-                >
+                <div key={`${product.item_code}-${product.category}`} className="ppa-product">
                   <div>
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "flex-start",
-                        marginBottom: "8px",
-                      }}
-                    >
-                      <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "#64748b", fontFamily: "monospace" }}>
-                        {product.item_code}
-                      </span>
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <div className="ppa-product-top">
+                      <span className="ppa-product-code">{product.item_code}</span>
+                      <div className="ppa-product-tags">
                         <span
-                          style={{
-                            fontSize: "0.7rem",
-                            fontWeight: 700,
-                            padding: "2px 6px",
-                            borderRadius: "4px",
-                            color: "#fff",
-                            background:
-                              product.category === "OIL"
-                                ? "#f59e0b"
-                                : product.category === "BEVERAGES"
-                                ? "#3b82f6"
-                                : "#1e3a5f",
-                          }}
+                          className={`ppa-badge ppa-badge--${
+                            product.category === "OIL"
+                              ? "oil"
+                              : product.category === "BEVERAGES"
+                              ? "beverages"
+                              : "mart"
+                          }`}
                         >
                           {product.category}
                         </span>
                         <button
-                          style={{
-                            background: "none",
-                            border: "none",
-                            color: "#ef4444",
-                            fontSize: "1.25rem",
-                            cursor: "pointer",
-                            lineHeight: 1,
-                            padding: 0,
-                          }}
+                          className="ppa-product-remove"
                           onClick={() => handleRemoveProduct(product)}
                           title="Remove Product"
                         >
@@ -1132,40 +854,19 @@ export default function Party_Product_Assignment() {
                         </button>
                       </div>
                     </div>
-                    <div style={{ fontSize: "1rem", fontWeight: 600, color: "#0f172a", marginBottom: "4px", lineHeight: 1.4 }}>
-                      {product.item_name}
-                    </div>
-                    <div style={{ fontSize: "0.8rem", color: "#64748b" }}>
+                    <div className="ppa-product-name">{product.item_name}</div>
+                    <div className="ppa-product-meta">
                       {product.brand || "-"} • {product.variety || "-"} • {product.sal_pack_unit || "-"}
                     </div>
                   </div>
-                  <div
-                    style={{
-                      marginTop: "16px",
-                      paddingTop: "12px",
-                      borderTop: "1px solid #f1f5f9",
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                    }}
-                  >
+                  <div className="ppa-product-foot">
                     <div>
-                      <div style={{ fontSize: "0.75rem", color: "#64748b", textTransform: "uppercase" }}>Rate</div>
-                      <div style={{ fontSize: "1.1rem", fontWeight: 700, color: "#16a34a" }}>
+                      <div className="ppa-rate-label">Rate</div>
+                      <div className="ppa-rate-value">
                         ₹{Number(product.basic_rate || 0).toFixed(2)}
                       </div>
                     </div>
-                    <button
-                      style={{
-                        background: "none",
-                        border: "none",
-                        color: "#2563eb",
-                        cursor: "pointer",
-                        fontSize: "0.875rem",
-                        fontWeight: 500,
-                      }}
-                      onClick={() => handleEditRate(product)}
-                    >
+                    <button className="ppa-rate-edit" onClick={() => handleEditRate(product)}>
                       Edit Rate
                     </button>
                   </div>
@@ -1173,61 +874,17 @@ export default function Party_Product_Assignment() {
               ))}
             </div>
           ) : (
-            <div
-              style={{
-                padding: "40px",
-                textAlign: "center",
-                background: "#f8fafc",
-                borderRadius: "8px",
-                border: "1px dashed #cbd5e1",
-                color: "#64748b",
-              }}
-            >
-              No products found for the selected filter.
-            </div>
+            <div className="ppa-empty">No products found for the selected filter.</div>
           )}
         </div>
       )}
 
       {/* Add Products Modal */}
       {showAddModal && (
-        <div
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: "rgba(15, 23, 42, 0.6)",
-            zIndex: 9999,
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
-            padding: "20px",
-          }}
-        >
-          <div
-            style={{
-              background: "#fff",
-              borderRadius: "12px",
-              width: "100%",
-              maxWidth: "800px",
-              maxHeight: "90vh",
-              display: "flex",
-              flexDirection: "column",
-              boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1)",
-            }}
-          >
-            <div
-              style={{
-                padding: "20px 24px",
-                borderBottom: "1px solid #e2e8f0",
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-              }}
-            >
-              <h2 style={{ margin: 0, fontSize: "1.25rem", color: "#0f172a" }}>{modalTitle}</h2>
+        <div className="ppa-modal-overlay">
+          <div className="ppa-modal">
+            <div className="ppa-modal-head">
+              <h2 className="ppa-modal-title">{modalTitle}</h2>
               <button
                 onClick={() => {
                   setShowAddModal(false);
@@ -1235,42 +892,25 @@ export default function Party_Product_Assignment() {
                   setNewProductRates({});
                   setModalSearch("");
                 }}
-                style={{ background: "none", border: "none", fontSize: "1.5rem", cursor: "pointer", color: "#64748b" }}
+                className="ppa-modal-close"
               >
                 ×
               </button>
             </div>
 
-            <div style={{ padding: "20px 24px", borderBottom: "1px solid #e2e8f0" }}>
+            <div className="ppa-modal-search">
               <input
                 type="text"
-                placeholder="Search available products..."
+                placeholder="Search available products..." aria-label="Search available products"
                 value={modalSearch}
                 onChange={(e) => setModalSearch(e.target.value)}
-                style={{
-                  width: "100%",
-                  height: "var(--input-h, 40px)",
-                  padding: "0 12px",
-                  background: "rgba(248, 250, 252, 0.9)",
-                  border: "1px solid #cbd5e1",
-                  borderRadius: "var(--radius-sm, 8px)",
-                  fontSize: "var(--font-ui, 13px)",
-              color: "#0f172a",
-                  outline: "none",
-                  boxSizing: "border-box",
-                }}
+                className="ppa-input"
               />
             </div>
 
-            <div style={{ flex: 1, overflowY: "auto", padding: "12px 24px", background: "#f8fafc" }}>
+            <div className="ppa-modal-body">
               {filteredAvailable.length > 0 ? (
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
-                    gap: "12px",
-                  }}
-                >
+                <div className="ppa-modal-grid">
                   {filteredAvailable.map((product) => {
                     const isSelected = selectedNewProducts.some(
                       (p) => p.item_code === product.item_code && p.category === product.category
@@ -1278,15 +918,7 @@ export default function Party_Product_Assignment() {
                     return (
                       <div
                         key={`${product.item_code}-${product.category}`}
-                        style={{
-                          display: "flex",
-                          alignItems: "flex-start",
-                          padding: "12px",
-                          border: `1px solid ${isSelected ? "#bfdbfe" : "#e2e8f0"}`,
-                          borderRadius: "8px",
-                          cursor: "pointer",
-                          background: isSelected ? "#eff6ff" : "#fff",
-                        }}
+                        className={`ppa-modal-row${isSelected ? " is-selected" : ""}`}
                         onClick={() => {
                           if (isSelected) {
                             setSelectedNewProducts(
@@ -1303,40 +935,22 @@ export default function Party_Product_Assignment() {
                           type="checkbox"
                           checked={isSelected}
                           readOnly
-                          style={{
-                            marginTop: "4px",
-                            marginRight: "12px",
-                            width: "16px",
-                            height: "16px",
-                            accentColor: "#2563eb",
-                            pointerEvents: "none",
-                          }}
+                          className="ppa-modal-check"
                         />
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontSize: "0.85rem", fontWeight: 600, color: "#0f172a" }}>
-                            {product.item_name}
-                          </div>
-                          <div style={{ fontSize: "0.75rem", color: "#64748b", marginTop: "4px" }}>
+                        <div className="ppa-modal-row-body">
+                          <div className="ppa-modal-row-name">{product.item_name}</div>
+                          <div className="ppa-modal-row-meta">
                             {product.item_code} • {product.category}
                           </div>
                           {isSelected && (
-                            <div style={{ marginTop: "12px" }} onClick={(e) => e.stopPropagation()}>
-                              <label
-                                style={{
-                                  fontSize: "0.75rem",
-                                  color: "#475569",
-                                  display: "block",
-                                  marginBottom: "4px",
-                                  fontWeight: 500,
-                                }}
-                              >
-                                Rate (₹)
-                              </label>
+                            <div className="ppa-modal-rate" onClick={(e) => e.stopPropagation()}>
+                              <label className="ppa-modal-rate-label">Rate (₹)</label>
                               <input
                                 type="number"
                                 min="0"
                                 step="0.01"
                                 placeholder="0.00"
+                                aria-label={`Rate for ${product.item_name}`}
                                 value={newProductRates[`${product.item_code}-${product.category}`] || ""}
                                 onChange={(e) =>
                                   setNewProductRates((prev) => ({
@@ -1344,18 +958,7 @@ export default function Party_Product_Assignment() {
                                     [`${product.item_code}-${product.category}`]: e.target.value,
                                   }))
                                 }
-                                style={{
-                                  width: "100%",
-                                  height: "var(--input-h, 40px)",
-                                  padding: "0 12px",
-                                  background: "rgba(248, 250, 252, 0.9)",
-                                  border: "1px solid #cbd5e1",
-                                  borderRadius: "var(--radius-sm, 8px)",
-                                  fontSize: "var(--font-ui, 13px)",
-                              color: "#0f172a",
-                                  outline: "none",
-                                  boxSizing: "border-box",
-                                }}
+                                className="ppa-input"
                               />
                             </div>
                           )}
@@ -1365,21 +968,11 @@ export default function Party_Product_Assignment() {
                   })}
                 </div>
               ) : (
-                <div style={{ padding: "40px 0", textAlign: "center", color: "#64748b" }}>
-                  No products match your search
-                </div>
+                <div className="ppa-modal-empty">No products match your search</div>
               )}
             </div>
 
-            <div
-              style={{
-                padding: "20px 24px",
-                borderTop: "1px solid #e2e8f0",
-                display: "flex",
-                justifyContent: "flex-end",
-                gap: "12px",
-              }}
-            >
+            <div className="ppa-modal-foot">
               <button
                 onClick={() => {
                   setShowAddModal(false);
@@ -1387,31 +980,14 @@ export default function Party_Product_Assignment() {
                   setNewProductRates({});
                   setModalSearch("");
                 }}
-                style={{
-                  padding: "10px 20px",
-                  border: "1px solid #cbd5e1",
-                  background: "#fff",
-                  borderRadius: "8px",
-                  cursor: "pointer",
-                  fontWeight: 500,
-                  color: "#475569",
-                }}
+                className="ppa-btn-cancel"
               >
                 Cancel
               </button>
               <button
                 onClick={handleBulkAssign}
                 disabled={isSaving || selectedNewProducts.length === 0}
-                style={{
-                  padding: "10px 20px",
-                  border: "none",
-                  background: "#2563eb",
-                  color: "#fff",
-                  borderRadius: "8px",
-                  cursor: "pointer",
-                  fontWeight: 500,
-                  opacity: isSaving || selectedNewProducts.length === 0 ? 0.7 : 1,
-                }}
+                className="ppa-btn-save"
               >
                 {isSaving
                   ? "Saving..."

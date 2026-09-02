@@ -2,6 +2,9 @@ import { memo, useEffect, useState, type ReactNode } from "react";
 import { LuInfo, LuX } from "react-icons/lu";
 import type { Order } from "../../services/ordersService";
 import "./party-header.css";
+import { Badge } from "@/components/ui/badge";
+import { toneForStatus } from "@/components/ui/statusTone";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 
 const formatDateTime = (value?: string | null) => {
   if (!value) return "";
@@ -16,8 +19,16 @@ const formatDateTime = (value?: string | null) => {
   });
 };
 
-const statusSlug = (value?: string) =>
-  String(value || "").toLowerCase().trim().replace(/\s+/g, "-");
+/*
+ * Was: turn a status into a CSS class suffix (`vo-badge-pending-approval`).
+ * Phase 2.2 replaced that with `toneForStatus`, which normalises the same
+ * spellings but returns a COLOUR rather than a class name — so the status is
+ * only slugified once, in one file, instead of at every call site.
+ *
+ * Commented out rather than deleted, per the standing instruction.
+ */
+/* const statusSlug = (value?: string) =>
+     String(value || "").toLowerCase().trim().replace(/\s+/g, "-"); */
 
 type PartyHeaderProps = {
   order: Order;
@@ -62,9 +73,7 @@ function PartyHeader({ order, statusExtra }: PartyHeaderProps) {
         <div className="ph-title-row">
           <h2 className="ph-name">{order.card_name}</h2>
           {order.status_display ? (
-            <span className={`vo-badge vo-badge-${statusSlug(order.status_display)}`}>
-              {order.status_display}
-            </span>
+            <Badge tone={toneForStatus(order.status_display)}>{order.status_display}</Badge>
           ) : null}
           {order.is_foc ? <span className="ph-foc">FOC</span> : null}
           {statusExtra}
@@ -84,18 +93,19 @@ function PartyHeader({ order, statusExtra }: PartyHeaderProps) {
         <LuInfo />
       </button>
 
-      {open && (
-        <div
-          className="ph-modal-overlay"
-          onClick={() => setOpen(false)}
-          role="presentation"
-        >
-          <div
+      <Dialog
+        open={Boolean(open)}
+        onOpenChange={(next) => {
+          if (!next) setOpen(false);
+        }}
+      >
+        {open && (
+          <DialogContent
+            title="Party details"
+            variant="bare"
+            size="auto"
+            showClose={false}
             className="ph-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Party details"
-            onClick={(event) => event.stopPropagation()}
           >
             <div className="ph-modal-head">
               <div className="ph-modal-heading">
@@ -103,9 +113,7 @@ function PartyHeader({ order, statusExtra }: PartyHeaderProps) {
                 <div className="ph-modal-meta">
                   <span className="ph-modal-ordnum">{order.order_number}</span>
                   {order.status_display ? (
-                    <span className={`vo-badge vo-badge-${statusSlug(order.status_display)}`}>
-                      {order.status_display}
-                    </span>
+                    <Badge tone={toneForStatus(order.status_display)}>{order.status_display}</Badge>
                   ) : null}
                 </div>
               </div>
@@ -127,9 +135,9 @@ function PartyHeader({ order, statusExtra }: PartyHeaderProps) {
                 </div>
               ))}
             </div>
-          </div>
-        </div>
-      )}
+          </DialogContent>
+        )}
+      </Dialog>
     </div>
   );
 }

@@ -432,8 +432,8 @@
 
 /* ---- Collection performance table --------------------------------------- */
 
-.pdash-table th { white-space: nowrap; }
-.pdash-table td { vertical-align: middle; }
+/* .pdash-table th { white-space: nowrap; } */
+/* .pdash-table td { vertical-align: middle; } */
 .pdash-num { text-align: right; }
 
 .pdash-person { display: flex; align-items: center; gap: 10px; }

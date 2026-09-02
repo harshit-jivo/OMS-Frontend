@@ -1,0 +1,350 @@
+/*
+ * Combo_Mapping — Phase 6.3.
+ *
+ * Another page with no stylesheet: 45 inline objects, two of them (`cardStyle`,
+ * `labelStyle`) hoisted into consts inside the component and spread onto
+ * several elements each. Everything here is a move, checked by
+ * `combo-mapping.png` staying pixel-identical.
+ *
+ * The row states — mapped, partially mapped, untouched — are what that
+ * baseline covers. The EDITOR below a row opens on a click and is not in any
+ * screenshot yet, so its classes are a faithful transcription rather than a
+ * verified one.
+ */
+
+.cmb-card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  margin-bottom: 24px;
+}
+
+.cmb-head {
+  margin-bottom: 20px;
+}
+
+.cmb-title {
+  margin: 0 0 4px;
+  font-size: 24px;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: -0.02em;
+}
+
+.cmb-intro {
+  margin: 0;
+  font-size: 13px;
+  color: #64748b;
+}
+
+/* The uppercase column caption above each half of a row. Was `labelStyle`,
+   spread onto three elements per row. */
+.cmb-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+/* ---- filter bar ------------------------------------------------------ */
+
+.cmb-filters {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 14px 16px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.cmb-search {
+  flex: 1 1 260px;
+  padding: 9px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.cmb-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #334155;
+  cursor: pointer;
+}
+
+.cmb-count {
+  font-size: 13px;
+  color: #64748b;
+}
+
+/* ---- notice / empty states ------------------------------------------- */
+
+.cmb-notice {
+  margin-top: 16px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.cmb-notice--ok {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.cmb-notice--error {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.cmb-state {
+  padding: 32px;
+  text-align: center;
+  color: #64748b;
+}
+
+.cmb-state--error {
+  color: #b91c1c;
+}
+
+/* ---- rows ------------------------------------------------------------ */
+
+.cmb-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.cmb-row {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 16px;
+  background: #fff;
+}
+
+.cmb-row.is-editing {
+  border-color: #3b82f6;
+  background: #f8fbff;
+}
+
+.cmb-row-main {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.cmb-col {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.cmb-col--combo {
+  flex: 1 1 320px;
+}
+
+.cmb-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.cmb-name--parent {
+  color: #1d4ed8;
+}
+
+.cmb-name--free {
+  color: #15803d;
+}
+
+.cmb-sub {
+  font-size: 12px;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+.cmb-unmapped {
+  font-size: 14px;
+  color: #b45309;
+  font-weight: 600;
+}
+
+.cmb-partial {
+  font-size: 12px;
+  color: #b45309;
+  margin-top: 4px;
+}
+
+.cmb-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.cmb-btn {
+  padding: 8px 14px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #334155;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.cmb-btn--clear {
+  border-color: #fecaca;
+  color: #b91c1c;
+}
+
+/* Was `cursor: isSaving ? "not-allowed" : "pointer"` on both row buttons,
+   which already carried `disabled={isSaving}`. */
+.cmb-btn:disabled {
+  cursor: not-allowed;
+}
+
+/* ---- editor ---------------------------------------------------------- */
+
+.cmb-editor {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.cmb-targets {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.cmb-target {
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #334155;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.cmb-target.is-active {
+  border-color: #2563eb;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.cmb-target-value {
+  font-weight: 500;
+}
+
+.cmb-editor-fields {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.cmb-picker-search {
+  flex: 1 1 320px;
+  padding: 9px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.cmb-qty-wrap {
+  flex: 0 1 220px;
+}
+
+.cmb-qty {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.cmb-picker {
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.cmb-picker-empty {
+  padding: 16px;
+  font-size: 13px;
+  color: #64748b;
+}
+
+.cmb-picker-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 9px 12px;
+  border: none;
+  border-bottom: 1px solid #f1f5f9;
+  background: #fff;
+  cursor: pointer;
+  font-size: 13px;
+  color: #0f172a;
+}
+
+.cmb-picker-row.is-chosen {
+  background: #eff6ff;
+}
+
+.cmb-picker-name {
+  font-weight: 500;
+}
+
+.cmb-picker-row.is-chosen .cmb-picker-name {
+  font-weight: 700;
+}
+
+.cmb-picker-meta {
+  color: #64748b;
+}
+
+.cmb-save-bar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.cmb-btn-save {
+  padding: 9px 16px;
+  border: none;
+  background: #cbd5e1;
+  color: #fff;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+/* Blue only once BOTH halves are chosen — the same `bothHalvesChosen` the
+   button's `disabled` is built from, but not the same condition: `disabled`
+   also covers mid-save, and mid-save the button stayed blue. Keeping the fill
+   on its own modifier preserves that exactly, where `:disabled` would not. */
+.cmb-btn-save.is-ready {
+  background: #2563eb;
+}
+
+.cmb-btn-save:disabled {
+  cursor: not-allowed;
+}
+
+.cmb-save-hint {
+  font-size: 13px;
+  color: #64748b;
+}

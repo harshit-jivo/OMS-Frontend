@@ -76,13 +76,13 @@ export default function QrScanner({ onDecode, onClose }: Props) {
     <div className="hais-scanner-overlay" onClick={onClose}>
       <div className="hais-scanner-modal" onClick={(e) => e.stopPropagation()}>
         <div className="hais-scanner-head">
-          <h3 style={{ margin: 0 }}>Scan device QR</h3>
+          <h3 className="nic-modal-title">Scan device QR</h3>
           <button className="hais-detail-close" onClick={onClose} aria-label="Close">
             &times;
           </button>
         </div>
         <div id={READER_ID} className="hais-scanner-reader" />
-        <p className="nic-note" style={{ marginTop: 10 }}>
+        <p className="nic-note hais-scanner-hint">
           Point the camera at the QR sticker on the device.
         </p>
         <ErrorAlert>{error}</ErrorAlert>

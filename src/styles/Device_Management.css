@@ -257,19 +257,19 @@
   border: 1px solid #e2e8f0;
   border-radius: 12px;
 }
-.dm-table {
+/* .dm-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.78rem;
   white-space: nowrap;
 }
-.dm-table th,
+ *//* .dm-table th,
 .dm-table td {
   text-align: left;
   padding: 9px 12px;
   border-bottom: 1px solid #f1f5f9;
 }
-.dm-table th {
+ *//* .dm-table th {
   background: #f8fafc;
   color: #475569;
   font-weight: 700;
@@ -279,7 +279,7 @@
   position: sticky;
   top: 0;
 }
-/* ---- sortable headers ---- */
+ *//* ---- sortable headers ---- */
 .dm-th-sort {
   cursor: pointer;
   user-select: none;
@@ -304,39 +304,39 @@
 .dm-th-active { color: #0f766e; background: #f0fdfa; }
 .dm-th-active .dm-sort-icon { color: #0f766e; }
 
-.dm-table tbody tr:last-child td { border-bottom: none; }
-.dm-row { cursor: pointer; transition: background 0.12s ease; }
+/* .dm-table tbody tr:last-child td { border-bottom: none; }
+ */.dm-row { cursor: pointer; transition: background 0.12s ease; }
 .dm-row:hover { background: #f0fdfa; }
 /* Build is numeric — tabular figures so digits line up column-wise when
    scanning a sorted list. */
-.dm-table td.dm-num { font-variant-numeric: tabular-nums; }
-/* Relative time is secondary to the row's identity — recede it, and keep it on
+/* .dm-table td.dm-num { font-variant-numeric: tabular-nums; }
+ *//* Relative time is secondary to the row's identity — recede it, and keep it on
    one line so "20 hours ago" never wraps. */
-.dm-table td.dm-rel { color: #64748b; white-space: nowrap; }
-.dm-empty {
+/* .dm-table td.dm-rel { color: #64748b; white-space: nowrap; }
+ */.dm-empty {
   text-align: center;
   color: #94a3b8;
   padding: 28px 0;
 }
-.dm-badge-ok,
-.dm-badge-off {
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 0.68rem;
-  font-weight: 700;
-}
-.dm-badge-ok { background: #dcfce7; color: #166534; }
-.dm-badge-off { background: #fee2e2; color: #991b1b; }
+/* .dm-badge-ok,
+   .dm-badge-off {
+   padding: 2px 8px;
+   border-radius: 999px;
+   font-size: 0.68rem;
+   font-weight: 700;
+   } */
+/* .dm-badge-ok { background: #dcfce7; color: #166534; } */
+/* .dm-badge-off { background: #fee2e2; color: #991b1b; } */
 
 /* ---- pagination ---- */
-.dm-pagination {
+/* .dm-pagination {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 12px;
   margin-top: 14px;
 }
-.dm-pg-btn {
+ *//* .dm-pg-btn {
   border: 1px solid #d7dee8;
   background: #fff;
   border-radius: 8px;
@@ -346,9 +346,9 @@
   color: #334155;
   cursor: pointer;
 }
-.dm-pg-btn:disabled { opacity: 0.45; cursor: not-allowed; }
-.dm-pg-info { font-size: 0.78rem; color: #64748b; font-variant-numeric: tabular-nums; }
-
+ *//* .dm-pg-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+ *//* .dm-pg-info { font-size: 0.78rem; color: #64748b; font-variant-numeric: tabular-nums; }
+ */
 /* ---- detail modal ---- */
 /* ---- device detail: right-side drawer ----
    A side panel rather than a centred modal: the row stays in place behind it,

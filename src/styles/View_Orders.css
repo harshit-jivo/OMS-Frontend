@@ -78,88 +78,119 @@
         .vo-table-wrap::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
         .vo-table-wrap::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 
-        .vo-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-
-        .vo-table thead {
+        /* .vo-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+ */
+        /* .vo-table thead {
           background: #1e293b; position: sticky; top: 0; z-index: 2;
         }
-        .vo-table th {
+ */        /* .vo-table th {
           color: #e2e8f0; padding: 11px 14px;
           font-size: 11px; font-weight: 600; text-align: left;
           text-transform: uppercase; letter-spacing: .04em; white-space: nowrap;
           border-bottom: 2px solid #334155; text-align: center;
         }
-        .vo-table th:first-child { border-radius: var(--radius-md, 12px) 0 0 0; }
-        .vo-table th:last-child { border-radius: 0 var(--radius-md, 12px) 0 0; }
-
-        .vo-table td {
+ */        /* .vo-table th:first-child { border-radius: var(--radius-md, 12px) 0 0 0; }
+ */        /* .vo-table th:last-child { border-radius: 0 var(--radius-md, 12px) 0 0; }
+ */
+        /* .vo-table td {
           padding: 10px 14px; color: #334155;
           border-bottom: 1px solid #e5e7eb;
           font-variant-numeric: tabular-nums;
           transition: background .1s;
         }
-        .vo-table tbody tr { transition: background .1s; }
-        .vo-table tbody tr:hover { background: #eff6ff; }
-        .vo-table tbody tr:nth-child(even) { background: #f8fafc; }
-        .vo-table tbody tr:nth-child(even):hover { background: #eff6ff; }
-        .vo-table tbody tr:active { background: #dbeafe; }
-        .vo-table tbody tr.vo-foc-row,
+ */        /* .vo-table tbody tr { transition: background .1s; }
+ */        /* .vo-table tbody tr:hover { background: #eff6ff; }
+ */        /* .vo-table tbody tr:nth-child(even) { background: #f8fafc; }
+ */        /* .vo-table tbody tr:nth-child(even):hover { background: #eff6ff; }
+ */        /* .vo-table tbody tr:active { background: #dbeafe; }
+ */        /* .vo-table tbody tr.vo-foc-row,
         .vo-table tbody tr.vo-foc-row:nth-child(even) {
           background: #fff7ed;
           box-shadow: inset 4px 0 0 #f97316;
         }
-        .vo-table tbody tr.vo-foc-row:hover,
+ */        /* .vo-table tbody tr.vo-foc-row:hover,
         .vo-table tbody tr.vo-foc-row:nth-child(even):hover {
           background: #ffedd5;
         }
-
+ */
         /* Minimal table styling (matches pending / tracking pages) — scoped to
            .vo-table-wrap so the shared .vo-table on the Order Tracker is untouched. */
-        .vo-table-wrap .vo-table thead { background: #f8fafc; }
-        .vo-table-wrap .vo-table th { color: #64748b; font-weight: 600; border-bottom: 1px solid #e5e7eb; }
-        .vo-table-wrap .vo-table td { border-bottom: 1px solid #f1f5f9; }
-        .vo-table-wrap .vo-table tbody tr:nth-child(even) { background: transparent; }
-        .vo-table-wrap .vo-table tbody tr:hover,
+        /* .vo-table-wrap .vo-table thead { background: #f8fafc; }
+ */        /* .vo-table-wrap .vo-table th { color: #64748b; font-weight: 600; border-bottom: 1px solid #e5e7eb; }
+ */        /* .vo-table-wrap .vo-table td { border-bottom: 1px solid #f1f5f9; }
+ */        /* .vo-table-wrap .vo-table tbody tr:nth-child(even) { background: transparent; }
+ */        /* .vo-table-wrap .vo-table tbody tr:hover,
         .vo-table-wrap .vo-table tbody tr:nth-child(even):hover { background: #f8fafc; }
-        /* Re-assert FOC highlight above the minimal even-row rule */
-        .vo-table-wrap .vo-table tbody tr.vo-foc-row,
+ */        /* Re-assert FOC highlight above the minimal even-row rule */
+        /* .vo-table-wrap .vo-table tbody tr.vo-foc-row,
         .vo-table-wrap .vo-table tbody tr.vo-foc-row:nth-child(even) {
           background: #fff7ed;
           box-shadow: inset 4px 0 0 #f97316;
         }
-        .vo-table-wrap .vo-table tbody tr.vo-foc-row:hover,
+ */        /* .vo-table-wrap .vo-table tbody tr.vo-foc-row:hover,
         .vo-table-wrap .vo-table tbody tr.vo-foc-row:nth-child(even):hover {
           background: #ffedd5;
         }
-        .vo-table-wrap .vo-table td.ao-cell-id,
+ */        /* .vo-table-wrap .vo-table td.ao-cell-id,
         .vo-table-wrap .vo-table td.ao-cell-name { text-align: left; }
-
-        .vo-pagination { display:flex; align-items:center; justify-content:flex-end; gap:4px; margin-top:16px; }
-        .vo-pg-btn { height: 36px; padding: 0 14px; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; font-family: 'Inter', sans-serif; border: 1px solid #e2e8f0; border-radius: var(--radius-sm, 8px); background: #fff; color: #64748b; cursor: pointer; transition: all .15s; }
-        .vo-pg-btn:hover:not(:disabled) { background:#f8fafc; border-color:#cbd5e1; color:#1e293b; }
-        .vo-pg-btn:disabled { opacity:.4; cursor:not-allowed; }
-        .vo-pg-info { font-size:12px; font-weight:600; color:#1e293b; font-family:'Inter',sans-serif; padding:0 4px; }
-
+ */
+        /* .vo-pagination { display:flex; align-items:center; justify-content:flex-end; gap:4px; margin-top:16px; }
+ */        /* .vo-pg-btn { height: 36px; padding: 0 14px; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; font-family: 'Inter', sans-serif; border: 1px solid #e2e8f0; border-radius: var(--radius-sm, 8px); background: #fff; color: #64748b; cursor: pointer; transition: all .15s; }
+ */        /* .vo-pg-btn:hover:not(:disabled) { background:#f8fafc; border-color:#cbd5e1; color:#1e293b; }
+ */        /* .vo-pg-btn:disabled { opacity:.4; cursor:not-allowed; }
+ */        /* .vo-pg-info { font-size:12px; font-weight:600; color:#1e293b; font-family:'Inter',sans-serif; padding:0 4px; }
+ */
         .vo-empty {
           text-align: center; color: #94a3b8; padding: 40px 24px !important;
           font-size: 13px; font-style: italic;
         }
 
+        /* View_Orders.tsx "no orders found" panel only. Compound selector
+           (0,2,0) so `color` reliably beats the shared `.vo-empty` rule above
+           regardless of stylesheet order; `.vo-empty`'s own `padding: 40px
+           24px !important`, `font-size` and `font-style: italic` still win
+           through untouched — matches the pre-conversion inline style's
+           actual computed result (its `padding: 40px` was already being
+           overridden by that `!important`, so the left/right padding was
+           24px, not 40px, even inline). Do not extend the base `.vo-empty`
+           rule itself: it is also used by Order_Tracking.tsx and
+           Distributor/Order_Tracking.tsx, outside this group. */
+        .vo-empty.vo-empty-panel {
+          color: #64748b;
+          background: #f8fafc;
+          border-radius: 8px;
+          border: 1px dashed #cbd5e1;
+          margin: 20px 0;
+        }
+
         /* ═══════════════════════════════════════════
            STATUS BADGES
         ═══════════════════════════════════════════ */
-        .vo-badge {
-          display: inline-flex; align-items: center; gap: 4px;
-          padding: 3px 10px; border-radius: 4px;
-          font-size: 11px; font-weight: 600; letter-spacing: .02em;
-          background: #dbeafe; color: #1e40af; white-space: nowrap;
-        }
-        .vo-badge-approved { background: #dcfce7; color: #166534; }
-        .vo-badge-rejected { background: #fee2e2; color: #991b1b; }
-        .vo-badge-pending,
-        .vo-badge-pending-approval { background: #fef3c7; color: #92400e; }
-        .vo-badge-need-approval { background: #ede9fe; color: #5b21b6; }
-        .vo-badge-billed { background: #d1fae5; color: #065f46; }
+        /*
+         * Replaced by components/ui/badge.tsx — Phase 2.2. Commented out
+         * rather than deleted, per the standing instruction.
+         *
+         * Every one of these statuses was ALSO given a colour in
+         * UIConsistency.css, and the two files disagreed. `.vo-badge-approved`
+         * is #dcfce7 green here and #ccfbf1 teal there; both are unlayered and
+         * equally specific, so which one a user saw came down to stylesheet
+         * import order. That is the clearest possible argument for
+         * components/ui/statusTone.ts: not that two greens were slightly off,
+         * but that nobody could say what colour "approved" was without knowing
+         * the bundler's ordering.
+         */
+        /* .vo-badge {
+             display: inline-flex; align-items: center; gap: 4px;
+             padding: 3px 10px; border-radius: 4px;
+             font-size: 11px; font-weight: 600; letter-spacing: .02em;
+             background: #dbeafe; color: #1e40af; white-space: nowrap;
+           }
+           .vo-badge-approved { background: #dcfce7; color: #166534; }
+           .vo-badge-rejected { background: #fee2e2; color: #991b1b; }
+           .vo-badge-pending,
+           .vo-badge-pending-approval { background: #fef3c7; color: #92400e; }
+           .vo-badge-need-approval { background: #ede9fe; color: #5b21b6; }
+           .vo-badge-billed { background: #d1fae5; color: #065f46; } */
         .vo-status-stack {
           display: inline-flex;
           flex-direction: column;
@@ -201,7 +232,7 @@
           color: #b91c1c;
           white-space: nowrap;
         }
-        .vo-modal-overlay {
+        /* .vo-modal-overlay {
           position: fixed;
           inset: 0;
           background: rgba(15, 23, 42, .5);
@@ -211,7 +242,7 @@
           z-index: 1000;
           padding: 16px;
         }
-        .vo-modal {
+ */        .vo-modal {
           background: #fff;
           border-radius: 12px;
           padding: 24px;
@@ -291,11 +322,11 @@
           letter-spacing: .04em;
           white-space: nowrap;
         }
-        .vo-foc-badge-detail {
-          background: #fb923c;
-          border-color: rgba(255,255,255,.32);
-          box-shadow: 0 0 0 3px rgba(251,146,60,.18);
-        }
+                /* .vo-foc-badge-detail {
+           background: #fb923c;
+           border-color: rgba(255,255,255,.32);
+           box-shadow: 0 0 0 3px rgba(251,146,60,.18);
+           } */
         .vo-foc-empty { color: #94a3b8; font-weight: 600; }
 
         /* ═══════════════════════════════════════════
@@ -396,10 +427,10 @@
         .vo-d-ordnum {
           font-size: 24px; font-weight: 800; color: #fff; letter-spacing: -.02em; line-height: 1.2;
         }
-        .vo-d-header-card .vo-badge {
-          background: rgba(255,255,255,.12); color: rgba(255,255,255,.9);
-          border: 1px solid rgba(255,255,255,.15); backdrop-filter: blur(4px);
-        }
+                /* .vo-d-header-card .vo-badge {
+           background: rgba(255,255,255,.12); color: rgba(255,255,255,.9);
+           border: 1px solid rgba(255,255,255,.15); backdrop-filter: blur(4px);
+           } */
 
         .vo-d-hf-label {
           font-size: 9px; font-weight: 600; color: #64748b;
@@ -437,25 +468,25 @@
         .vo-d-items-scroll::-webkit-scrollbar-track { background: transparent; }
         .vo-d-items-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
 
-        .vo-d-tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
-        .vo-d-tbl thead { position: sticky; top: 0; z-index: 1; }
-        .vo-d-tbl th {
+        /* .vo-d-tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+ */        /* .vo-d-tbl thead { position: sticky; top: 0; z-index: 1; }
+ */        /* .vo-d-tbl th {
           background: #1e293b; color: #e2e8f0;
           padding: 10px 14px; font-size: 10px; font-weight: 600;
           text-align: left; text-transform: uppercase; letter-spacing: .05em;
           white-space: nowrap; border-bottom: 2px solid #334155;
         }
-        .vo-d-tbl td {
+ */        /* .vo-d-tbl td {
           padding: 10px 14px; color: #475569;
           border-bottom: 1px solid #e5e7eb;
           font-variant-numeric: tabular-nums;
           transition: background .1s;
         }
-        .vo-d-tbl tbody tr { transition: background .1s; }
-        .vo-d-tbl tbody tr:hover { background: #eff6ff; }
-        .vo-d-tbl tbody tr:nth-child(even) { background: #f8fafc; }
-        .vo-d-tbl tbody tr:nth-child(even):hover { background: #eff6ff; }
-
+ */        /* .vo-d-tbl tbody tr { transition: background .1s; }
+ */        /* .vo-d-tbl tbody tr:hover { background: #eff6ff; }
+ */        /* .vo-d-tbl tbody tr:nth-child(even) { background: #f8fafc; }
+ */        /* .vo-d-tbl tbody tr:nth-child(even):hover { background: #eff6ff; }
+ */
         .vo-d-item-code {
           display: inline-block;
           background: #f1f5f9; padding: 2px 7px; border-radius: 4px;
@@ -511,7 +542,7 @@
             max-height: none;
           }
 
-          .vo-d-tbl,
+          /* .vo-d-tbl,
           .vo-d-tbl tbody,
           .vo-d-tbl tr,
           .vo-d-tbl td {
@@ -519,26 +550,26 @@
             width: 100%;
             min-width: 0 !important;
           }
-
-          .vo-d-tbl {
+ */
+          /* .vo-d-tbl {
             border-collapse: separate;
             border-spacing: 0;
             font-size: 12px;
           }
-
-          .vo-d-tbl thead {
+ */
+          /* .vo-d-tbl thead {
             display: none;
           }
-
-          .vo-d-tbl tbody {
+ */
+          /* .vo-d-tbl tbody {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(min(560px, 100%), 1fr));
             gap: 26px 14px;
             padding: 24px 14px 14px;
             background: linear-gradient(180deg, #f8fafc 0%, #eef4fb 100%);
           }
-
-          .vo-d-tbl tbody tr {
+ */
+          /* .vo-d-tbl tbody tr {
             position: relative;
             display: grid;
             grid-template-columns: repeat(12, minmax(0, 1fr));
@@ -550,14 +581,14 @@
             background: #ffffff !important;
             box-shadow: 0 10px 24px rgba(15, 23, 42, 0.07);
           }
-
-          .vo-d-tbl tbody tr:hover,
+ */
+          /* .vo-d-tbl tbody tr:hover,
           .vo-d-tbl tbody tr:nth-child(even),
           .vo-d-tbl tbody tr:nth-child(even):hover {
             background: #ffffff !important;
           }
-
-          .vo-d-tbl td {
+ */
+          /* .vo-d-tbl td {
             display: flex;
             flex-direction: column;
             align-items: flex-start;
@@ -573,14 +604,14 @@
             white-space: normal;
             word-break: break-word;
           }
-
-          .vo-d-tbl td:last-child {
+ */
+          /* .vo-d-tbl td:last-child {
             border-bottom: none;
             padding-top: 4px !important;
             font-size: 14px;
           }
-
-          .vo-d-tbl td::before {
+ */
+          /* .vo-d-tbl td::before {
             content: "";
             flex: none;
             color: #64748b;
@@ -590,23 +621,23 @@
             text-align: left;
             text-transform: uppercase;
           }
-
-          .vo-d-tbl td:nth-child(1)::before { content: "#"; }
-          .vo-d-tbl td:nth-child(2)::before { content: "Item Code"; }
-          .vo-d-tbl td:nth-child(3)::before { content: "Item Name"; }
-          .vo-d-tbl td:nth-child(4)::before { content: "Category"; }
-          .vo-d-tbl td:nth-child(5)::before { content: "Scheme"; }
-          .vo-d-tbl td:nth-child(6)::before { content: "Qty"; }
-          .vo-d-tbl td:nth-child(7)::before { content: "Pcs"; }
-          .vo-d-tbl td:nth-child(8)::before { content: "Boxes"; }
-          .vo-d-tbl td:nth-child(9)::before { content: "Ltrs"; }
-          .vo-d-tbl td:nth-child(10)::before { content: "Total Ltrs"; }
-          .vo-d-tbl td:nth-child(11)::before { content: "Price List (Basic)"; }
-          .vo-d-tbl td:nth-child(12)::before { content: "Basic Price"; }
-          .vo-d-tbl td:nth-child(13)::before { content: "Tax %"; }
-          .vo-d-tbl td:nth-child(14)::before { content: "Amount"; }
-
-          .vo-d-tbl td:nth-child(1) {
+ */
+          /* .vo-d-tbl td:nth-child(1)::before { content: "#"; }
+ */          /* .vo-d-tbl td:nth-child(2)::before { content: "Item Code"; }
+ */          /* .vo-d-tbl td:nth-child(3)::before { content: "Item Name"; }
+ */          /* .vo-d-tbl td:nth-child(4)::before { content: "Category"; }
+ */          /* .vo-d-tbl td:nth-child(5)::before { content: "Scheme"; }
+ */          /* .vo-d-tbl td:nth-child(6)::before { content: "Qty"; }
+ */          /* .vo-d-tbl td:nth-child(7)::before { content: "Pcs"; }
+ */          /* .vo-d-tbl td:nth-child(8)::before { content: "Boxes"; }
+ */          /* .vo-d-tbl td:nth-child(9)::before { content: "Ltrs"; }
+ */          /* .vo-d-tbl td:nth-child(10)::before { content: "Total Ltrs"; }
+ */          /* .vo-d-tbl td:nth-child(11)::before { content: "Price List (Basic)"; }
+ */          /* .vo-d-tbl td:nth-child(12)::before { content: "Basic Price"; }
+ */          /* .vo-d-tbl td:nth-child(13)::before { content: "Tax %"; }
+ */          /* .vo-d-tbl td:nth-child(14)::before { content: "Amount"; }
+ */
+          /* .vo-d-tbl td:nth-child(1) {
             position: absolute;
             top: -26px;
             left: 0;
@@ -625,20 +656,20 @@
             font-size: 11px;
             font-weight: 800;
           }
-
-          .vo-d-tbl td:nth-child(1)::before { content: "Item"; color: #1d4ed8; }
-
-          .vo-d-tbl td:nth-child(2) {
+ */
+          /* .vo-d-tbl td:nth-child(1)::before { content: "Item"; color: #1d4ed8; }
+ */
+          /* .vo-d-tbl td:nth-child(2) {
             grid-column: span 2;
             order: 2;
           }
-
-          .vo-d-tbl td:nth-child(2),
+ */
+          /* .vo-d-tbl td:nth-child(2),
           .vo-d-tbl td:nth-child(3) {
             align-items: center;
           }
-
-          .vo-d-tbl td:nth-child(3) {
+ */
+          /* .vo-d-tbl td:nth-child(3) {
             grid-column: span 10;
             order: 3;
             align-items: flex-start;
@@ -649,19 +680,19 @@
             font-weight: 700 !important;
             text-align: left !important;
           }
-
-          .vo-d-tbl td:nth-child(3)::before {
+ */
+          /* .vo-d-tbl td:nth-child(3)::before {
             color: #64748b;
           }
-
-          .vo-d-tbl td:nth-child(5) {
+ */
+          /* .vo-d-tbl td:nth-child(5) {
             grid-column: span 3;
             background: transparent;
             border-radius: 0;
             padding: 4px 0 !important;
           }
-
-          .vo-d-tbl td:nth-child(4),
+ */
+          /* .vo-d-tbl td:nth-child(4),
           .vo-d-tbl td:nth-child(6),
           .vo-d-tbl td:nth-child(7),
           .vo-d-tbl td:nth-child(8),
@@ -673,12 +704,12 @@
           .vo-d-tbl td:nth-child(14) {
             grid-column: span 2;
           }
-
-          .vo-d-tbl td:nth-child(4) {
+ */
+          /* .vo-d-tbl td:nth-child(4) {
             grid-column: span 3;
           }
-
-          .vo-d-tbl td:nth-child(4),
+ */
+          /* .vo-d-tbl td:nth-child(4),
           .vo-d-tbl td:nth-child(5),
           .vo-d-tbl td:nth-child(6),
           .vo-d-tbl td:nth-child(7),
@@ -693,37 +724,37 @@
             border-top: none;
             padding-top: 8px !important;
           }
-
-          .vo-d-tbl td:nth-child(14) {
+ */
+          /* .vo-d-tbl td:nth-child(14) {
             color: #065f46 !important;
             font-weight: 800 !important;
             font-size: 14px;
           }
-
-          .vo-d-tbl td:nth-child(n + 6):not(:nth-child(14)) {
+ */
+          /* .vo-d-tbl td:nth-child(n + 6):not(:nth-child(14)) {
             color: #0f172a;
             font-weight: 700;
           }
-
-          .vo-d-tbl td.vo-empty {
+ */
+          /* .vo-d-tbl td.vo-empty {
             grid-column: 1 / -1;
             display: block;
             text-align: center !important;
             border-bottom: none;
           }
-
-          .vo-d-tbl td.vo-empty::before {
+ */
+          /* .vo-d-tbl td.vo-empty::before {
             content: none;
           }
-
+ */
           .vo-d-item-code {
             max-width: 100%;
           }
 
-          .vo-d-items .vo-d-tbl {
+          /* .vo-d-items .vo-d-tbl {
             display: none !important;
           }
-
+ */
           .vo-d-item-cards {
             display: grid;
             grid-template-columns: 1fr;
@@ -901,27 +932,27 @@
           }
 
         @media (max-width: 480px) {
-          .vo-table th,
+          /* .vo-table th,
           .vo-table td,
           .vo-d-tbl th,
           .vo-d-tbl td { padding: 8px 10px; }
-          .vo-d-info-grid { grid-template-columns: 1fr; }
+ */          .vo-d-info-grid { grid-template-columns: 1fr; }
           .vo-d-info-span2 { grid-column: span 1; }
           .vo-d-header-card { padding: 18px; }
           .vo-d-ordnum { font-size: 17px; }
-          .vo-d-tbl tbody {
+          /* .vo-d-tbl tbody {
             grid-template-columns: 1fr;
             padding: 10px;
           }
-          .vo-d-tbl tbody tr {
+ */          /* .vo-d-tbl tbody tr {
             grid-template-columns: repeat(2, minmax(0, 1fr));
             padding: 10px;
           }
-          .vo-d-tbl td:nth-child(3),
+ */          /* .vo-d-tbl td:nth-child(3),
           .vo-d-tbl td:nth-child(5) {
             grid-column: 1 / -1;
           }
-          .vo-d-item-cards {
+ */          .vo-d-item-cards {
             grid-template-columns: 1fr;
             padding: 12px;
           }

@@ -1,23 +1,24 @@
 import { configSummary, type AssetHistoryEntry } from "../../services/haisService";
 
-/** Accent colour for the timeline dot, by the kind of movement. */
-function dotColor(action?: string): string {
+/** Accent colour (as a `.hais-history-dot--*` modifier) for the timeline dot,
+ *  by the kind of movement. */
+function dotTone(action?: string): "handover" | "maintenance" | "eol" | "default" {
   switch ((action || "").toLowerCase()) {
     case "assigned":
     case "reassigned":
     case "handover":
-      return "#2563eb"; // blue — handover
+      return "handover"; // blue — handover
     case "config updated":
     case "sent for service":
     case "service":
-      return "#f59e0b"; // amber — maintenance
+      return "maintenance"; // amber — maintenance
     case "scrapped":
     case "not working":
-      return "#ef4444"; // red — end of life
+      return "eol"; // red — end of life
     case "returned":
-      return "#94a3b8"; // slate — back to store
+      return "default"; // slate — back to store
     default:
-      return "#94a3b8";
+      return "default";
   }
 }
 
@@ -64,43 +65,31 @@ export default function AssetHistory({ history }: { history?: AssetHistoryEntry[
       {entries.length === 0 ? (
         <p className="nic-note">No history recorded yet.</p>
       ) : (
-        <div style={{ marginTop: 8 }}>
+        <div className="hais-history-list">
           {entries.map((h, i) => {
             const last = i === entries.length - 1;
             const metaLine = meta(h);
             return (
-              <div key={i} style={{ display: "flex", gap: 14, alignItems: "stretch" }}>
+              <div key={i} className="hais-history-row">
                 {/* marker column: dot + connecting line */}
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 12 }}>
-                  <span
-                    style={{
-                      width: 11,
-                      height: 11,
-                      borderRadius: "50%",
-                      background: dotColor(h.action),
-                      marginTop: 5,
-                      flexShrink: 0,
-                    }}
-                  />
-                  {!last && <span style={{ flex: 1, width: 2, background: "#e2e8f0", marginTop: 4 }} />}
+                <div className="hais-history-marker">
+                  <span className={`hais-history-dot hais-history-dot--${dotTone(h.action)}`} />
+                  {!last && <span className="hais-history-connector" />}
                 </div>
 
                 {/* content column */}
-                <div style={{ paddingBottom: last ? 0 : 22, flex: 1 }}>
-                  <div
-                    className="nic-note"
-                    style={{ fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}
-                  >
+                <div className={`hais-history-content${last ? " hais-history-content--last" : ""}`}>
+                  <div className="nic-note hais-history-date">
                     {h.date || "—"}
                   </div>
-                  <div style={{ fontWeight: 600 }}>{title(h)}</div>
-                  {metaLine && <div className="nic-note" style={{ marginTop: 2 }}>{metaLine}</div>}
-                  {h.reason && <div className="nic-note" style={{ marginTop: 2, fontStyle: "italic" }}>{h.reason}</div>}
+                  <div className="hais-history-title">{title(h)}</div>
+                  {metaLine && <div className="nic-note hais-history-sub">{metaLine}</div>}
+                  {h.reason && <div className="nic-note hais-history-reason">{h.reason}</div>}
                   {h.config_change && (
-                    <div className="nic-note" style={{ marginTop: 2 }}>Change: {h.config_change}</div>
+                    <div className="nic-note hais-history-sub">Change: {h.config_change}</div>
                   )}
                   {h.config && configSummary(h.config) && (
-                    <div className="nic-note" style={{ marginTop: 2 }}>Config: {configSummary(h.config)}</div>
+                    <div className="nic-note hais-history-sub">Config: {configSummary(h.config)}</div>
                   )}
                 </div>
               </div>

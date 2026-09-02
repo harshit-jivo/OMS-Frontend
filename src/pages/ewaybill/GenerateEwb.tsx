@@ -3,9 +3,10 @@ import { HiDocumentMagnifyingGlass, HiTruck } from "react-icons/hi2";
 import { ewaybillService } from "../../services/ewaybillService";
 import type { EwbFromInvoicePreview, EwbGenerateResponse, TransportOverrides } from "../../services/ewaybillService";
 import {
-  NicField, KeyValues, JsonView, ValidationList, ErrorAlert, SuccessAlert, StatusBadge, apiErrorMessage,
+  NicField, KeyValues, JsonView, ValidationList, ErrorAlert, SuccessAlert, StatusBadge,
   CompanyDbSelect,
 } from "../../components/NicUI";
+import { messageFrom } from "@/lib/apiError";
 import DateInput from "../../components/DateInput";
 
 const TRANS_MODES = [["", "—"], ["1", "1 — Road"], ["2", "2 — Rail"], ["3", "3 — Air"], ["4", "4 — Ship"]];
@@ -38,7 +39,7 @@ export default function GenerateEwb() {
         companyDb: companyDb.trim() || undefined, mode,
       }));
     } catch (err) {
-      setError(apiErrorMessage(err));
+      setError(messageFrom(err, "Request failed"));
     } finally {
       setBusy("");
     }
@@ -55,8 +56,8 @@ export default function GenerateEwb() {
       if (r.error) setError(r.error);
     } catch (err) {
       const e = err as { response?: { data?: EwbGenerateResponse } };
-      if (e.response?.data) { setResp(e.response.data); setError(e.response.data.error || apiErrorMessage(err)); }
-      else setError(apiErrorMessage(err));
+      if (e.response?.data) { setResp(e.response.data); setError(e.response.data.error || messageFrom(err, "Request failed")); }
+      else setError(messageFrom(err, "Request failed"));
     } finally {
       setBusy("");
     }
@@ -77,7 +78,7 @@ export default function GenerateEwb() {
         standalone GENEWAYBILL. Transport details are usually entered at dispatch — fill them below.
       </p>
 
-      <div className="nic-form-grid" style={{ marginTop: 14 }}>
+      <div className="nic-form-grid nic-form-grid--spaced-wide">
         <NicField label="Invoice DocEntry">
           <input className="nic-input" value={docentry} inputMode="numeric"
             onChange={(e) => setDocentry(e.target.value)} placeholder="76029" />
@@ -94,9 +95,9 @@ export default function GenerateEwb() {
         </NicField>
       </div>
 
-      <div className="ofs-card-head" style={{ marginTop: 18 }}>
+      <div className="ofs-card-head nic-head--offset">
         <span className="ofs-card-mark" />
-        <h2 style={{ fontSize: 15 }}>Transport (Part-B)</h2>
+        <h2 className="nic-head-sub">Transport (Part-B)</h2>
       </div>
       <div className="nic-form-grid">
         <NicField label="Transport Mode">
@@ -133,11 +134,11 @@ export default function GenerateEwb() {
 
       <div className="nic-actions-row">
         <button className="ofs-secondary" onClick={() => void doPreview()} disabled={!!busy}>
-          <HiDocumentMagnifyingGlass style={{ verticalAlign: "-3px", marginRight: 6 }} />
+          <HiDocumentMagnifyingGlass className="nic-icon-lead" />
           {busy === "preview" ? "Loading…" : "Preview & Validate"}
         </button>
         <button className="ofs-primary" onClick={() => void doGenerate()} disabled={!!busy}>
-          <HiTruck style={{ verticalAlign: "-3px", marginRight: 6 }} />
+          <HiTruck className="nic-icon-lead" />
           {busy === "generate" ? "Generating…" : "Generate e-Way Bill"}
         </button>
       </div>
@@ -147,7 +148,7 @@ export default function GenerateEwb() {
 
       {preview ? (
         <div className="nic-result">
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+          <div className="nic-row-inline">
             <StatusBadge tone={preview.valid ? "ok" : "err"}>
               {preview.valid ? "Valid" : `${preview.error_count} issue(s)`}
             </StatusBadge>
@@ -171,7 +172,7 @@ export default function GenerateEwb() {
             ]}
           />
           {resp?.persistence_warning ? (
-            <div className="nic-alert nic-alert--err" style={{ marginTop: 12 }}><span>{resp.persistence_warning}</span></div>
+            <div className="nic-alert nic-alert--err nic-alert--offset"><span>{resp.persistence_warning}</span></div>
           ) : null}
           <JsonView data={result} title="Full NIC response" />
         </div>

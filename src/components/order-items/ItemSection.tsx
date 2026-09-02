@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from "react";
+import { memo, useState } from "react";
 import { LuChevronDown } from "react-icons/lu";
 import type { OrderItem } from "../../services/ordersService";
 import ItemCard from "./ItemCard";
@@ -28,10 +28,16 @@ const groupKeyOf = (item: OrderItem): GroupKey => {
 function ItemSection({ items }: { items: OrderItem[] }) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
-  // Fully expand whenever a different order's items load.
-  useEffect(() => {
+  // Fully expand whenever a DIFFERENT order's items load. Keyed on the item
+  // codes rather than on `items` itself: the parent hands over a new array on
+  // every render, so the effect this replaces re-ran — and threw away the
+  // user's collapsed groups — on renders where nothing had actually changed.
+  const itemsKey = items.map((item) => item.item_code).join("|");
+  const [collapsedFor, setCollapsedFor] = useState(itemsKey);
+  if (collapsedFor !== itemsKey) {
+    setCollapsedFor(itemsKey);
     setCollapsed({});
-  }, [items]);
+  }
 
   if (!items || items.length === 0) {
     return (

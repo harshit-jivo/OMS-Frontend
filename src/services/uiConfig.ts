@@ -298,8 +298,10 @@ export interface UILabelInput {
 }
 
 /** Unwrap the backend's `{success, message, data}` admin envelope. */
-const unwrap = <T,>(payload: any): T =>
-  (payload && "data" in payload ? payload.data : payload) as T;
+const unwrap = <T,>(payload: unknown): T =>
+  (payload && typeof payload === "object" && "data" in payload
+    ? (payload as { data: unknown }).data
+    : payload) as T;
 
 export const uiLabelAdminService = {
   listLabels: async (): Promise<UILabelRow[]> => {

@@ -122,8 +122,8 @@
   border-radius: var(--trk-radius-sm);
   border: 1px solid var(--trk-line);
 }
-.trk-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.trk-table th {
+/* .trk-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+ *//* .trk-table th {
   position: sticky;
   top: 0;
   z-index: 1;
@@ -138,36 +138,49 @@
   border-bottom: 1px solid var(--trk-line);
   white-space: nowrap;
 }
-.trk-table td {
+ *//* .trk-table td {
   padding: 11px 14px;
   border-bottom: 1px solid var(--trk-line-soft);
   white-space: nowrap;
   color: #1f2937;
 }
-.trk-table tbody tr { transition: background 0.12s; }
-.trk-table tbody tr:nth-child(even) { background: #fcfcfd; }
-.trk-table tbody tr:hover { background: var(--trk-primary-50); }
-.trk-table tbody tr:last-child td { border-bottom: none; }
-.trk-row-overdue { background: #fef2f2 !important; box-shadow: inset 3px 0 0 #f87171; }
+ *//* .trk-table tbody tr { transition: background 0.12s; }
+ *//* .trk-table tbody tr:nth-child(even) { background: #fcfcfd; }
+ *//* .trk-table tbody tr:hover { background: var(--trk-primary-50); }
+ *//* .trk-table tbody tr:last-child td { border-bottom: none; }
+ */.trk-row-overdue { background: #fef2f2 !important; box-shadow: inset 3px 0 0 #f87171; }
 .trk-row-locked { color: var(--trk-muted); }
 
 /* ---- Badges ---- */
-.trk-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 10px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 600;
-  border: 1px solid transparent;
-}
-.trk-badge-stage  { background: var(--trk-primary-50); color: var(--trk-primary-600); border-color: #e0e7ff; }
-.trk-badge-ok     { background: #ecfdf5; color: #047857; border-color: #a7f3d0; }
-.trk-badge-warn   { background: #fffbeb; color: #b45309; border-color: #fde68a; }
-.trk-badge-danger { background: #fef2f2; color: #b91c1c; border-color: #fecaca; }
-.trk-badge-muted  { background: #f3f4f6; color: var(--trk-muted); border-color: #e5e7eb; }
-.trk-badge-late   { background: #fef3c7; color: #92400e; border-color: #fcd34d; }
+/*
+ * Replaced by components/ui/badge.tsx — Phase 2.2. Commented out rather than
+ * deleted, per the standing instruction on this refactor.
+ *
+ * This was the largest badge family in the app: 37 uses across all six Tracker
+ * files. The tones map onto the shared set with nothing lost —
+ * stage->info, ok/success->ok, warn/late->hold, danger->bad, muted->neutral —
+ * and `-late` here is byte-identical to the shared `--color-hold` pair, which
+ * is where those tokens were read from in the first place.
+ *
+ * Verified dead, not assumed: with these rules live the six tracker screenshots
+ * are identical to the ones taken after commenting them out.
+ */
+/* .trk-badge {
+     display: inline-flex;
+     align-items: center;
+     gap: 4px;
+     padding: 3px 10px;
+     border-radius: 999px;
+     font-size: 11px;
+     font-weight: 600;
+     border: 1px solid transparent;
+   }
+   .trk-badge-stage  { background: var(--trk-primary-50); color: var(--trk-primary-600); border-color: #e0e7ff; }
+   .trk-badge-ok     { background: #ecfdf5; color: #047857; border-color: #a7f3d0; }
+   .trk-badge-warn   { background: #fffbeb; color: #b45309; border-color: #fde68a; }
+   .trk-badge-danger { background: #fef2f2; color: #b91c1c; border-color: #fecaca; }
+   .trk-badge-muted  { background: #f3f4f6; color: var(--trk-muted); border-color: #e5e7eb; }
+   .trk-badge-late   { background: #fef3c7; color: #92400e; border-color: #fcd34d; } */
 
 /* ---- Action bar ---- */
 .trk-actionbar {
@@ -226,7 +239,7 @@
 .trk-tab.active .trk-tab-count { background: rgba(255, 255, 255, 0.28); }
 
 /* ---- Modal ---- */
-.trk-modal-overlay {
+/* .trk-modal-overlay {
   position: fixed;
   inset: 0;
   background: rgba(15, 23, 42, 0.5);
@@ -238,7 +251,7 @@
   padding: 20px;
   animation: trk-fade 0.15s ease;
 }
-.trk-modal {
+ *//* .trk-modal {
   background: #fff;
   border-radius: 16px;
   width: 100%;
@@ -248,7 +261,7 @@
   box-shadow: var(--trk-shadow-lg);
   animation: trk-pop 0.16s cubic-bezier(0.2, 0.9, 0.3, 1.2);
 }
-.trk-modal-head {
+ *//* .trk-modal-head {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -259,9 +272,9 @@
   background: #fff;
   border-radius: 16px 16px 0 0;
 }
-.trk-modal-head h3 { margin: 0; font-size: 17px; font-weight: 700; }
-.trk-modal-body { padding: 22px; }
-.trk-modal-foot {
+ *//* .trk-modal-head h3 { margin: 0; font-size: 17px; font-weight: 700; }
+ *//* .trk-modal-body { padding: 22px; }
+ *//* .trk-modal-foot {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
@@ -271,7 +284,7 @@
   bottom: 0;
   background: #fff;
 }
-@keyframes trk-fade { from { opacity: 0; } to { opacity: 1; } }
+ */@keyframes trk-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes trk-pop { from { opacity: 0; transform: translateY(8px) scale(0.98); } to { opacity: 1; transform: none; } }
 
 /* ---- Review grid ---- */
@@ -329,7 +342,7 @@
 
 /* ---- Empty & toast ---- */
 .trk-empty { text-align: center; color: #9ca3af; padding: 44px; font-size: 14px; }
-.trk-toast {
+/* .trk-toast {
   position: fixed;
   bottom: 24px;
   right: 24px;
@@ -342,7 +355,7 @@
   box-shadow: var(--trk-shadow-lg);
   animation: trk-toast-in 0.2s ease;
 }
-@keyframes trk-toast-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+ */@keyframes trk-toast-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 
 /* ---- Scrollbars (subtle) ---- */
 .trk-table-wrap::-webkit-scrollbar,
@@ -359,5 +372,174 @@
   .trk-page { padding: 16px 14px; }
   .trk-header h1 { font-size: 19px; }
   .trk-review-grid { grid-template-columns: 1fr; }
-  .trk-modal { max-height: 92vh; }
+  /* .trk-modal { max-height: 92vh; }
+ */}
+
+/* =====================================================================
+ * Phase 6.3 — Tracker_Queue's inline styles, moved
+ *
+ * 55 objects in one file, and the same one over and over: `.trk-sub` plus
+ * `fontSize: 11` appeared FOURTEEN times. That is one decision written
+ * fourteen times, which is the actual cost of inline styles here.
+ *
+ * Selectors are qualified deliberately. `.trk-field input` (specificity 0,1,1)
+ * sets `background: #fff`, and an inline style used to beat it; a bare
+ * `.trk-ro` (0,1,0) would LOSE and the read-only fields would turn white. Any
+ * modifier that has to override an existing rule carries enough selector to
+ * win outright rather than by load order.
+ * ===================================================================== */
+
+.trk-sub.trk-sub--xs { font-size: 11px; }
+.trk-sub.trk-sub--xxs { font-size: 10px; color: #94a3b8; }
+.trk-sub--wrap { white-space: normal; }
+.trk-sub--warn { color: #b45309; }
+.trk-sub--ok { color: #047857; }
+.trk-sub--indent { margin-left: 8px; }
+.trk-sub--group { font-weight: 600; margin-bottom: 6px; }
+
+.trk-err.trk-err--xs { font-size: 11px; }
+
+/* ---- search box in the page header ---- */
+.trk-search { position: relative; min-width: 260px; }
+.trk-search-icon { position: absolute; left: 10px; top: 9px; opacity: 0.4; }
+/* `.trk-header input` (0,1,1) sets the padding for bare inputs in a header,
+   so this needs the same reach — the first version of this rule lost to it and
+   the placeholder sat under the magnifying glass. Caught by the baseline. */
+.trk-header input.trk-search-input { width: 100%; padding-left: 32px; }
+
+.trk-tabs.trk-tabs--sub { margin-top: -6px; }
+
+.trk-btn.trk-btn--push { margin-left: auto; }
+.trk-btn.trk-btn--sm { padding: 5px 9px; }
+
+/* ---- action bars, one tone per tab ---- */
+.trk-actionbar.trk-actionbar--reject { background: #fef2f2; border-color: #fecaca; }
+.trk-actionbar.trk-actionbar--jsap { background: #eff6ff; border-color: #bfdbfe; }
+.trk-actionbar.trk-actionbar--warn { background: #fffbeb; border-color: #fde68a; }
+.trk-actionbar.trk-actionbar--log { background: #f8fafc; }
+
+.trk-actionbar input.trk-amount-input { width: 130px; }
+
+.trk-checkbox-inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 12px;
+  cursor: pointer;
 }
+
+.trk-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+/* ---- table cells ---- */
+.trk-cell-wrap { max-width: 260px; white-space: normal; }
+.trk-cell-wrap--240 { max-width: 240px; }
+.trk-cell-actions { display: flex; gap: 6px; }
+.trk-badge-wrap { white-space: normal; }
+.trk-icon-clock { vertical-align: -2px; }
+.trk-badge-gap { margin-left: 8px; }
+.trk-badge-gap-6 { margin-left: 6px; }
+
+/* ---- invoice detail dialog ---- */
+.trk-detail-section { margin-bottom: 14px; }
+.trk-detail-value { padding: 6px 0; font-weight: 500; word-break: break-word; }
+
+/* ---- payment dialog ----
+   `ro` was a `const ... as const` object spread onto five read-only inputs.
+   The dialog itself has no screenshot yet (it needs an invoice parked at a
+   terminal stage, which no fixture provides), so these five are a faithful
+   transcription rather than a verified one. */
+.trk-field input.trk-ro { background: #f3f4f6; font-weight: 600; }
+.trk-field input.trk-ro--warn { color: #b45309; }
+.trk-field input.trk-net { background: #eef2ff; font-weight: 700; color: #4338ca; }
+.trk-field input.trk-balance { background: #dcfce7; font-weight: 700; }
+.trk-field input.trk-balance--open { background: #fef3c7; }
+.trk-field.trk-field--end { justify-content: flex-end; }
+
+/* ---- shared across the other four Tracker pages ----
+   `.trk-field` + `gap: 4` appeared FOURTEEN times and the 11px filter label
+   twenty-one. The label needs `.trk-field label` reach (0,1,1) to win. */
+.trk-field.trk-field--tight { gap: 4px; }
+.trk-field.trk-field--row { flex-direction: row; align-items: center; gap: 8px; }
+.trk-field.trk-field--full { grid-column: 1 / -1; }
+.trk-field.trk-field--flush { margin: 0; }
+.trk-field label.trk-label-xs { font-size: 11px; }
+
+.trk-actionbar.trk-actionbar--filters { align-items: flex-end; gap: 14px; }
+.trk-actionbar.trk-actionbar--offset { margin-bottom: 14px; }
+
+.trk-header.trk-header--tight { margin-bottom: 12px; }
+.trk-header.trk-header--offset { margin-bottom: 14px; }
+.trk-tabs.trk-tabs--flush { margin: 0; }
+
+.trk-heading-flush { margin: 0; }
+.trk-heading-top { margin-top: 0; }
+.trk-heading-block { margin: 0 0 8px; }
+.trk-block-offset { margin-top: 18px; }
+.trk-block-tight { margin-bottom: 12px; }
+.trk-sub--top { margin-top: 8px; }
+
+.trk-btn.trk-btn--sm-wide { padding: 5px 10px; }
+.trk-btn.trk-btn--md { padding: 6px 10px; }
+/* Not scoped to `.trk-btn`: the only user is a clickable TABLE ROW in
+   Tracker_Entry, which opens the detail dialog. */
+.trk-clickable { cursor: pointer; }
+
+.trk-badge-mini { margin-left: 8px; font-size: 10px; padding: 1px 7px; }
+.trk-badge-lg { font-size: 13px; padding: 6px 12px; }
+
+.trk-summary-row { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+.trk-row-gap { display: flex; gap: 10px; align-items: center; }
+.trk-row-actions { display: flex; gap: 6px; }
+.trk-cell-center { text-align: center; }
+.trk-col-80 { width: 80px; }
+.trk-col-64 { width: 64px; }
+
+/* Report KPI cards. `tone` was a colour computed per card and passed in; it
+   stays a prop, so only the geometry moves here. */
+.trk-card.trk-kpi { margin: 0; flex: 1; min-width: 150px; }
+.trk-kpi-body { display: flex; align-items: center; gap: 12px; }
+.trk-kpi-icon { font-size: 26px; }
+.trk-kpi-value { font-size: 26px; font-weight: 800; line-height: 1; }
+.trk-kpi-row { display: flex; gap: 14px; margin-bottom: 18px; flex-wrap: wrap; }
+.trk-report-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px;
+}
+
+/* Tracker_Entry's read-only GSTIN field is bold only once it has a value. */
+.trk-field input.trk-ro--faint { font-weight: 400; }
+
+/* =====================================================================
+ * Phase 6.3 — Tracker_Alerts's inline styles, moved
+ *
+ * The "stuck invoices" banner switches between a red/alert look and a green/
+ * all-clear look off one two-state condition (`alerts.length` truthy or not),
+ * so it becomes a modifier pair rather than staying inline. Reuses
+ * `.trk-badge-gap` / `.trk-badge-gap-6` / `.trk-icon-clock` / `.trk-btn--sm`
+ * already established by Tracker_Invoices.tsx and Tracker_Queue.tsx above —
+ * same exact declared values, so no new rule needed for those.
+ * ===================================================================== */
+
+.trk-alert-banner { display: flex; align-items: center; gap: 14px; }
+.trk-alert-banner.trk-alert-banner--bad { background: #fef2f2; border-color: #fecaca; }
+.trk-alert-banner.trk-alert-banner--ok { background: #ecfdf5; border-color: #a7f3d0; }
+.trk-alert-icon { font-size: 32px; }
+.trk-alert-icon.trk-alert-icon--bad { color: #dc2626; }
+.trk-alert-icon.trk-alert-icon--ok { color: #059669; }
+.trk-alert-count { font-size: 22px; font-weight: 800; }
+
+/* Same idea as `.trk-cell-wrap--240` above, just a narrower cap for this
+   column's "Mailed To" cell. */
+.trk-cell-wrap.trk-cell-wrap--220 { max-width: 220px; }
+
+/* `.trk-badge-gap` / `-6` (existing, above) only ever pushed things left;
+   this cell needs the mail-count badge pushed left of the names that follow
+   it, i.e. its own right-hand margin. */
+.trk-badge-gap-right-4 { margin-right: 4px; }

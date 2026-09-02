@@ -2,8 +2,20 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { ordersService } from "../services/ordersService";
 import type { Order, OrderLog } from "../services/ordersService";
-import { loadCurrentUserOrderSummaries } from "../utils/orderHistory";
+import { useCurrentUserOrders } from "../lib/orderQueries";
 import "../styles/Order_Tracking.css";
+import { Badge } from "@/components/ui/badge";
+import { toneForStatus } from "@/components/ui/statusTone";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Pagination } from "@/components/ui/pagination";
+import { TableSkeleton } from "@/components/ui/skeleton";
 
 const formatCreatedDateTime = (value?: string | null) => {
   if (!value) return "-";
@@ -39,36 +51,20 @@ const compareLogsByDisplayOrder = (
 export default function Order_Tracking() {
   const navigate = useNavigate();
   const location = useLocation();
-  const [orders, setOrders] = useState<Order[]>([]);
+  // One shared query with View_Orders and the distributor tracker — all three
+  // pulled the same order history separately, and people move between them.
+  const { orders, isOrdersLoading: loading } = useCurrentUserOrders();
   const [logs, setLogs] = useState<OrderLog[]>([]);
-  const [loading, setLoading] = useState(true);
   const [logsLoading, setLogsLoading] = useState(false);
   const [tracker, setTracker] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [statusFilter, setStatusFilter] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
-  
-  useEffect(() => {
-    void fetchOrders();
-  }, []);
-
-  const fetchOrders = async () => {
-    try {
-      setLoading(true);
-      const data = await loadCurrentUserOrderSummaries();
-      setOrders(data || []);
-    } catch (error) {
-      console.log("Error fetching orders:", error);
-      setOrders([]);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   useEffect(() => {
     if (location.state?.openOrderId && orders.length > 0) {
-      const targetOrder = orders.find(o => o.id === location.state.openOrderId);
+      const targetOrder = orders.find((o) => o.id === location.state.openOrderId);
       if (targetOrder) {
         void handleTrack(targetOrder);
         navigate(location.pathname, { replace: true, state: {} });
@@ -94,9 +90,7 @@ export default function Order_Tracking() {
         const second = new Date(a.created_at || "").getTime();
 
         if (Number.isNaN(first) || Number.isNaN(second)) {
-          return String(b.order_number || "").localeCompare(
-            String(a.order_number || "")
-          );
+          return String(b.order_number || "").localeCompare(String(a.order_number || ""));
         }
 
         return first - second;
@@ -124,16 +118,24 @@ export default function Order_Tracking() {
   }, [logs]);
 
   const visibleLogs = useMemo(() => {
-    const currentStatus = String(selectedOrder?.status_display || "").trim().toLowerCase();
+    const currentStatus = String(selectedOrder?.status_display || "")
+      .trim()
+      .toLowerCase();
     const isCurrentRatePending = currentStatus.includes("rate");
     const getPerformerKey = (log: OrderLog) =>
-      String(log.performed_by_name || "").trim().toLowerCase();
+      String(log.performed_by_name || "")
+        .trim()
+        .toLowerCase();
     const isRealPerformer = (value: string | null | undefined) =>
       Boolean(value && value !== "pending" && value !== "system");
     const isRateLog = (log: OrderLog) =>
-      String(log.status_name || "").toLowerCase().includes("rate");
+      String(log.status_name || "")
+        .toLowerCase()
+        .includes("rate");
     const isRejectedLog = (log: OrderLog) =>
-      String(log.status_name || "").toLowerCase().includes("reject");
+      String(log.status_name || "")
+        .toLowerCase()
+        .includes("reject");
     const isApprovedLog = (log: OrderLog) => {
       const statusName = String(log.status_name || "").toLowerCase();
       const remarks = String(log.remarks || "").toLowerCase();
@@ -176,18 +178,26 @@ export default function Order_Tracking() {
       });
     };
     const hasLaterDuplicateDecision = (log: OrderLog) => {
-      const statusName = String(log.status_name || "").trim().toLowerCase();
+      const statusName = String(log.status_name || "")
+        .trim()
+        .toLowerCase();
       const performer = getPerformerKey(log);
-      const remarks = String(log.remarks || "").trim().toLowerCase();
+      const remarks = String(log.remarks || "")
+        .trim()
+        .toLowerCase();
 
       if (!isRealPerformer(performer) || !isDecisionHistoryLog(log)) {
         return false;
       }
 
       return orderedLogs.some((otherLog) => {
-        const otherStatus = String(otherLog.status_name || "").trim().toLowerCase();
+        const otherStatus = String(otherLog.status_name || "")
+          .trim()
+          .toLowerCase();
         const otherPerformer = getPerformerKey(otherLog);
-        const otherRemarks = String(otherLog.remarks || "").trim().toLowerCase();
+        const otherRemarks = String(otherLog.remarks || "")
+          .trim()
+          .toLowerCase();
         const logTime = new Date(log.created_at || "").getTime();
         const otherTime = new Date(otherLog.created_at || "").getTime();
 
@@ -220,12 +230,11 @@ export default function Order_Tracking() {
             betweenLog.id !== log.id &&
             betweenLog.id !== otherLog.id &&
             (betweenTime > logTime || (betweenTime === logTime && betweenLog.id > log.id)) &&
-            (betweenTime < otherTime || (betweenTime === otherTime && betweenLog.id < otherLog.id)) &&
-            (
-              betweenStatus.includes("billing") ||
+            (betweenTime < otherTime ||
+              (betweenTime === otherTime && betweenLog.id < otherLog.id)) &&
+            (betweenStatus.includes("billing") ||
               betweenStatus.includes("auditor") ||
-              betweenStatus.includes("rate")
-            )
+              betweenStatus.includes("rate"))
           );
         });
 
@@ -257,12 +266,11 @@ export default function Order_Tracking() {
             betweenLog.id !== log.id &&
             betweenLog.id !== otherLog.id &&
             (betweenTime > logTime || (betweenTime === logTime && betweenLog.id > log.id)) &&
-            (betweenTime < otherTime || (betweenTime === otherTime && betweenLog.id < otherLog.id)) &&
-            (
-              betweenStatus.includes("billing") ||
+            (betweenTime < otherTime ||
+              (betweenTime === otherTime && betweenLog.id < otherLog.id)) &&
+            (betweenStatus.includes("billing") ||
               betweenStatus.includes("auditor") ||
-              betweenStatus.includes("rate")
-            )
+              betweenStatus.includes("rate"))
           );
         });
 
@@ -336,21 +344,21 @@ export default function Order_Tracking() {
           return (
             betweenLog.id !== log.id &&
             betweenLog.id !== latestPendingRateLog.id &&
-            (betweenTime > pendingRateTime || (betweenTime === pendingRateTime && betweenLog.id > latestPendingRateLog.id)) &&
+            (betweenTime > pendingRateTime ||
+              (betweenTime === pendingRateTime && betweenLog.id > latestPendingRateLog.id)) &&
             (betweenTime < logTime || (betweenTime === logTime && betweenLog.id < log.id)) &&
-            (
-              betweenStatus.includes("billing") ||
+            (betweenStatus.includes("billing") ||
               betweenStatus.includes("auditor") ||
               betweenStatus.includes("rate") ||
               betweenStatus.includes("reject") ||
-              betweenStatus.includes("complete")
-            )
+              betweenStatus.includes("complete"))
           );
         });
 
         if (
           !hasStageBoundaryBetween &&
-          (logTime > pendingRateTime || (logTime === pendingRateTime && log.id > latestPendingRateLog.id))
+          (logTime > pendingRateTime ||
+            (logTime === pendingRateTime && log.id > latestPendingRateLog.id))
         ) {
           return false;
         }
@@ -389,16 +397,26 @@ export default function Order_Tracking() {
 
   const displayLogs = useMemo(() => {
     const isRealPerformer = (value: string | null | undefined) => {
-      const normalized = String(value || "").trim().toLowerCase();
+      const normalized = String(value || "")
+        .trim()
+        .toLowerCase();
       return Boolean(normalized && normalized !== "pending" && normalized !== "system");
     };
     const isRateLog = (log: OrderLog) =>
-      String(log.status_name || "").toLowerCase().includes("rate");
+      String(log.status_name || "")
+        .toLowerCase()
+        .includes("rate");
     const isBillingLog = (log: OrderLog) =>
-      String(log.status_name || "").toLowerCase().includes("billing") ||
-      String(log.remarks || "").toLowerCase().includes("billing");
+      String(log.status_name || "")
+        .toLowerCase()
+        .includes("billing") ||
+      String(log.remarks || "")
+        .toLowerCase()
+        .includes("billing");
     const isRejectedLog = (log: OrderLog) =>
-      String(log.status_name || "").toLowerCase().includes("reject");
+      String(log.status_name || "")
+        .toLowerCase()
+        .includes("reject");
     const isApprovedLog = (log: OrderLog) => {
       const statusName = String(log.status_name || "").toLowerCase();
       const remarks = String(log.remarks || "").toLowerCase();
@@ -443,47 +461,49 @@ export default function Order_Tracking() {
       return isApprovedLog(log) && getPreviousStageName(log).includes("rate");
     };
 
-    return [...visibleLogs].sort(compareLogsByDisplayOrder).reduce<OrderLog[]>((mergedLogs, log) => {
-      if (!isAcceptedRateApprovalLog(log)) {
-        mergedLogs.push(log);
-        return mergedLogs;
-      }
+    return [...visibleLogs]
+      .sort(compareLogsByDisplayOrder)
+      .reduce<OrderLog[]>((mergedLogs, log) => {
+        if (!isAcceptedRateApprovalLog(log)) {
+          mergedLogs.push(log);
+          return mergedLogs;
+        }
 
-      const previousLog = mergedLogs[mergedLogs.length - 1];
-      if (previousLog && isAcceptedRateApprovalLog(previousLog)) {
-        const names = [
-          ...String(previousLog.performed_by_name || "")
-            .split(",")
-            .map((name) => name.trim())
-            .filter(Boolean),
-          String(log.performed_by_name || "").trim(),
-        ].filter(Boolean);
-
-        // Preserve the actual API remark rather than hardcoding "Approved".
-        // When multiple rate approvers are merged, join their distinct remarks.
-        const remarks = Array.from(
-          new Set(
-            [previousLog.remarks, log.remarks]
-              .map((remark) => String(remark || "").trim())
+        const previousLog = mergedLogs[mergedLogs.length - 1];
+        if (previousLog && isAcceptedRateApprovalLog(previousLog)) {
+          const names = [
+            ...String(previousLog.performed_by_name || "")
+              .split(",")
+              .map((name) => name.trim())
               .filter(Boolean),
-          ),
-        ).join(", ");
+            String(log.performed_by_name || "").trim(),
+          ].filter(Boolean);
 
-        mergedLogs[mergedLogs.length - 1] = {
-          ...previousLog,
-          performed_by_name: Array.from(new Set(names)).join(", "),
-          created_at: log.created_at || previousLog.created_at,
-          remarks,
-        };
+          // Preserve the actual API remark rather than hardcoding "Approved".
+          // When multiple rate approvers are merged, join their distinct remarks.
+          const remarks = Array.from(
+            new Set(
+              [previousLog.remarks, log.remarks]
+                .map((remark) => String(remark || "").trim())
+                .filter(Boolean),
+            ),
+          ).join(", ");
+
+          mergedLogs[mergedLogs.length - 1] = {
+            ...previousLog,
+            performed_by_name: Array.from(new Set(names)).join(", "),
+            created_at: log.created_at || previousLog.created_at,
+            remarks,
+          };
+          return mergedLogs;
+        }
+
+        mergedLogs.push({
+          ...log,
+          status_name: "Rate Approval",
+        });
         return mergedLogs;
-      }
-
-      mergedLogs.push({
-        ...log,
-        status_name: "Rate Approval",
-      });
-      return mergedLogs;
-    }, []);
+      }, []);
   }, [orderedLogs, visibleLogs]);
 
   const timelineLogs = useMemo(() => {
@@ -495,7 +515,9 @@ export default function Order_Tracking() {
     }
 
     const hasBillingStep = displayLogs.some((log) =>
-      String(log.status_name || "").toLowerCase().includes("billing")
+      String(log.status_name || "")
+        .toLowerCase()
+        .includes("billing"),
     );
 
     if (hasBillingStep) {
@@ -534,15 +556,11 @@ export default function Order_Tracking() {
 
     return (
       isSentToAuditorLog(log) ||
-      (
-        statusName.includes("billing") &&
-        (
-          statusName.includes("accepted") ||
+      (statusName.includes("billing") &&
+        (statusName.includes("accepted") ||
           statusName.includes("approved") ||
           remarks.includes("accepted") ||
-          remarks.includes("approved")
-        )
-      ) ||
+          remarks.includes("approved"))) ||
       remarks.includes("accepted by billing") ||
       remarks.includes("approved by billing")
     );
@@ -551,9 +569,10 @@ export default function Order_Tracking() {
   const getLogDisplayTitle = (log: OrderLog) => {
     const statusName = String(log.status_name || "").toLowerCase();
     const remarks = String(log.remarks || "").toLowerCase();
-    const performer = String(log.performed_by_name || "").trim().toLowerCase();
-    const hasRealPerformer =
-      performer && performer !== "pending" && performer !== "system";
+    const performer = String(log.performed_by_name || "")
+      .trim()
+      .toLowerCase();
+    const hasRealPerformer = performer && performer !== "pending" && performer !== "system";
     const isRejected = statusName.includes("reject");
     const isAccepted =
       statusName === "approved" ||
@@ -613,9 +632,7 @@ export default function Order_Tracking() {
     }
 
     if (statusName.includes("rate") && hasRealPerformer) {
-      return isRejected
-        ? "Rate Approval Rejected"
-        : "Accepted by Rate Approver";
+      return isRejected ? "Rate Approval Rejected" : "Accepted by Rate Approver";
     }
 
     if (statusName.includes("billing") && statusName.includes("reject")) {
@@ -728,12 +745,12 @@ export default function Order_Tracking() {
   return (
     <div className="tracker-page">
       <div className="ao-page-head">
-            <span className="ao-page-accent" aria-hidden="true" />
-            <div>
-              <h1 className="ao-page-title">Order tracker</h1>
-              <p className="ao-page-subtitle">Track History of Orders at various stages.</p>
-            </div>
-          </div>
+        <span className="ao-page-accent" aria-hidden="true" />
+        <div>
+          <h1 className="ao-page-title">Order tracker</h1>
+          <p className="ao-page-subtitle">Track History of Orders at various stages.</p>
+        </div>
+      </div>
 
       {!tracker && (
         <div>
@@ -741,19 +758,8 @@ export default function Order_Tracking() {
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              style={{
-                height: 'var(--input-h, 40px)',
-                padding: '0 12px',
-                borderRadius: 'var(--radius-sm, 8px)',
-                border: '1px solid #cbd5e1',
-                backgroundColor: '#fff',
-                color: '#0f172a',
-                cursor: 'pointer',
-                fontWeight: 500,
-                fontSize: 'var(--font-ui, 13px)',
-                outline: 'none',
-                minWidth: '180px'
-              }}
+              className="tracker-filter-select"
+              aria-label="Filter by order status"
             >
               <option value="">All Orders</option>
               {uniqueStatuses.map((status) => (
@@ -762,107 +768,77 @@ export default function Order_Tracking() {
                 </option>
               ))}
             </select>
-            {!loading && (
-              <span className="tracker-count">Total: {filteredOrders.length}</span>
-            )}
+            {!loading && <span className="tracker-count">Total: {filteredOrders.length}</span>}
           </div>
 
           {loading ? (
-            <div className="order-loading-state">
-              <span className="order-loading-spinner" />
-              <span>Loading orders...</span>
-            </div>
+            <TableSkeleton columns={7} label="Loading orders" />
           ) : filteredOrders.length > 0 ? (
             <div className="tracker-table-wrap">
-              <table className="vo-table">
-                <thead>
-                  <tr>
-                    <th>Order ID</th>
-                    <th>Card Name</th>
-                    <th>FOC</th>
-                    <th>Created At</th>
-                    <th>Delivery Date</th>
-                    <th>Status</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
+              <Table density="compact">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Order ID</TableHead>
+                    <TableHead>Card Name</TableHead>
+                    <TableHead>FOC</TableHead>
+                    <TableHead>Created At</TableHead>
+                    <TableHead>Delivery Date</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {paginatedOrders.map((order) => (
-                      <tr key={order.id} className={order.is_foc ? "tracker-foc-row" : ""}>
-                        <td className="ao-cell-id">{order.order_number}</td>
-                        <td className="ao-cell-name">{order.card_name}</td>
-                        <td>
-                          {order.is_foc ? (
-                            <span className="tracker-foc-badge">FOC</span>
-                          ) : (
-                            <span className="tracker-foc-empty">-</span>
-                          )}
-                        </td>
-                        <td>{formatCreatedDateTime(order.created_at)}</td>
-                        <td>{order.delivery_date}</td>
-                        <td>
-                          <span
-                            className={`vo-badge vo-badge-${(
-                              order.status_display || ""
-                            )
-                              .toLowerCase()
-                              .replace(/\s+/g, "-")}`}
+                    <TableRow key={order.id} className={order.is_foc ? "tracker-foc-row" : ""}>
+                      <TableCell className="ao-cell-id">{order.order_number}</TableCell>
+                      <TableCell className="ao-cell-name">{order.card_name}</TableCell>
+                      <TableCell>
+                        {order.is_foc ? (
+                          <span className="tracker-foc-badge">FOC</span>
+                        ) : (
+                          <span className="tracker-foc-empty">-</span>
+                        )}
+                      </TableCell>
+                      <TableCell>{formatCreatedDateTime(order.created_at)}</TableCell>
+                      <TableCell>{order.delivery_date}</TableCell>
+                      <TableCell>
+                        <Badge tone={toneForStatus(order.status_display)}>
+                          {order.status_display}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <div className="ao-row-actions">
+                          <button
+                            type="button"
+                            className="tracker-btn"
+                            onClick={() => void handleTrack(order)}
                           >
-                            {order.status_display}
-                          </span>
-                        </td>
-                        <td>
-                          <div className="ao-row-actions">
+                            Track
+                          </button>
+                          {String(order.status_display || "")
+                            .toLowerCase()
+                            .includes("reject") && (
                             <button
                               type="button"
-                              className="tracker-btn"
-                              onClick={() => void handleTrack(order)}
+                              className="tracker-btn tracker-btn-danger"
+                              onClick={() => handleEditOrder(order)}
                             >
-                              Track
+                              Edit
                             </button>
-                            {String(order.status_display || "").toLowerCase().includes("reject") && (
-                              <button
-                                type="button"
-                                className="tracker-btn"
-                                style={{ backgroundColor: "#ef4444" }}
-                                onClick={() => handleEditOrder(order)}
-                              >
-                                Edit
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                </tbody>
-              </table>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </div>
           ) : (
-            <div className="vo-empty" style={{ padding: "40px", textAlign: "center", color: "#64748b", background: "#f8fafc", borderRadius: "8px", border: "1px dashed #cbd5e1", margin: "20px 0" }}>No orders found</div>
+            <div className="vo-empty tracker-empty-state">No orders found</div>
           )}
 
           {!loading && filteredOrders.length > itemsPerPage && (
-            <div className="tracker-pagination">
-              <button
-                type="button"
-                className="tracker-pg-btn"
-                disabled={currentPage === 1}
-                onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
-              >
-                Prev
-              </button>
-              <span className="tracker-pg-info">
-                {currentPage} / {totalPages}
-              </span>
-              <button
-                type="button"
-                className="tracker-pg-btn"
-                disabled={currentPage === totalPages}
-                onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
-              >
-                Next
-              </button>
-            </div>
+            <Pagination page={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
           )}
         </div>
       )}
@@ -870,34 +846,27 @@ export default function Order_Tracking() {
       {tracker && selectedOrder && (
         <div className="tracker-detail-card">
           <div className="tracker-detail-top">
-            <button
-              type="button"
-              className="tracker-back-btn"
-              onClick={handleBack}
-            >
+            <button type="button" className="tracker-back-btn" onClick={handleBack}>
               Back
             </button>
-            <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-              {String(selectedOrder.status_display || "").toLowerCase().includes("reject") && (
+            <div className="tracker-status-row">
+              {String(selectedOrder.status_display || "")
+                .toLowerCase()
+                .includes("reject") && (
                 <button
                   type="button"
-                  className="tracker-btn"
-                  style={{ backgroundColor: "#ef4444" }}
+                  className="tracker-btn tracker-btn-danger"
                   onClick={() => handleEditOrder(selectedOrder)}
                 >
                   Edit Order
                 </button>
               )}
-              <span
-                className={`vo-badge vo-badge-${(
-                  selectedOrder.status_display || ""
-                )
-                  .toLowerCase()
-                  .replace(/\s+/g, "-")}`}
-              >
+              <Badge tone={toneForStatus(selectedOrder.status_display)}>
                 {selectedOrder.status_display}
-              </span>
-              {selectedOrder.is_foc ? <span className="tracker-foc-badge tracker-foc-badge-detail">FOC ORDER</span> : null}
+              </Badge>
+              {selectedOrder.is_foc ? (
+                <span className="tracker-foc-badge tracker-foc-badge-detail">FOC ORDER</span>
+              ) : null}
             </div>
           </div>
 
@@ -951,11 +920,7 @@ export default function Order_Tracking() {
                   <div key={log.id} className="tracker-timeline-row">
                     <div className="tracker-timeline-left">
                       <div className={`tracker-dot ${tone}`}>
-                        {tone === "approved"
-                          ? "✓"
-                          : tone === "rejected"
-                            ? "✕"
-                            : "•"}
+                        {tone === "approved" ? "✓" : tone === "rejected" ? "✕" : "•"}
                       </div>
                       {index !== timelineLogs.length - 1 ? (
                         <div className={`tracker-line ${tone}`} />
@@ -971,31 +936,38 @@ export default function Order_Tracking() {
                       {(() => {
                         const isLastLog = index === timelineLogs.length - 1;
                         const statusLower = (log.status_name || "").toLowerCase();
-                        const isTerminal = statusLower.includes("completed") || statusLower.includes("rejected");
+                        const isTerminal =
+                          statusLower.includes("completed") || statusLower.includes("rejected");
                         const isPendingLog = isLastLog && !isTerminal;
 
                         if (isPendingLog) {
-                          const isRateApprovalStatus = statusLower.includes("rate") || statusLower.includes("need approval");
-                          const rateApprovalRows = isRateApprovalStatus ? getRateApprovalStatusRows() : [];
+                          const isRateApprovalStatus =
+                            statusLower.includes("rate") || statusLower.includes("need approval");
+                          const rateApprovalRows = isRateApprovalStatus
+                            ? getRateApprovalStatusRows()
+                            : [];
 
                           let holderName = "";
                           if (isRateApprovalStatus) {
                             const pendingApprovers = rateApprovalRows
                               .filter((ra) => ra.status === "PENDING")
                               .map((ra) => ra.name);
-                            holderName = pendingApprovers.length > 0 ? pendingApprovers.join(", ") : "";
+                            holderName =
+                              pendingApprovers.length > 0 ? pendingApprovers.join(", ") : "";
                           }
 
                           if (rateApprovalRows.length > 0) {
                             return (
-                              <div className="tracker-log-meta" style={{ color: "#475569", fontWeight: 600 }}>
+                              <div className="tracker-log-meta tracker-log-meta--approval">
                                 {rateApprovalRows.map((approval) => (
                                   <div key={`${approval.name}-${approval.status}`}>
                                     {approval.name}: {formatApprovalStatus(approval.status)}
                                   </div>
                                 ))}
                                 {holderName ? (
-                                  <span style={{ display: "inline-block", marginTop: 4, background: "#FEF3C7", color: "#D97706", fontSize: "0.72rem", fontWeight: 700, padding: "2px 10px", borderRadius: 20 }}>
+                                  <span
+                                    className="app-chip-amber"
+                                  >
                                     Awaiting Action
                                   </span>
                                 ) : null}
@@ -1004,14 +976,18 @@ export default function Order_Tracking() {
                           }
 
                           return holderName ? (
-                            <div className="tracker-log-meta" style={{ color: "#92400E", fontWeight: 600 }}>
+                            <div className="tracker-log-meta tracker-log-meta--pending">
                               <div>Pending with: {holderName}</div>
-                              <span style={{ display: "inline-block", marginTop: 4, background: "#FEF3C7", color: "#D97706", fontSize: "0.72rem", fontWeight: 700, padding: "2px 10px", borderRadius: 20 }}>
+                              <span
+                                className="app-chip-amber"
+                              >
                                 Awaiting Action
                               </span>
                             </div>
                           ) : (
-                            <p className="tracker-log-meta">Performed By: {log.performed_by_name || "Pending"}</p>
+                            <p className="tracker-log-meta">
+                              Performed By: {log.performed_by_name || "Pending"}
+                            </p>
                           );
                         }
 

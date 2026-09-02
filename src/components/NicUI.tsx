@@ -1,8 +1,18 @@
 import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { HiCheckCircle, HiExclamationCircle, HiChevronDown } from "react-icons/hi2";
 import { einvoiceService } from "../services/einvoiceService";
 import type { CompanyChoice, ValidationError } from "../services/einvoiceService";
+import { Badge, type BadgeTone } from "@/components/ui/badge";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 /* ---- Field (label + control) ---- */
 type FieldProps = {
@@ -25,31 +35,34 @@ export function NicField({ label, hint, children, full }: FieldProps) {
    The selected company DB decides BOTH which company's Service Layer the invoice
    is read from AND which schema's OMS_IRN_LOG the IRN is mirrored into, so the
    options come from the server (settings) rather than a hardcoded list. */
-let companyCache: CompanyChoice[] | null = null;
+/* Was a module-level `companyCache` plus a mount effect. The cache is now the
+   query cache under ["einvoice","companies"], which every instance of this
+   select shares — and, unlike the module variable, it is invalidatable and does
+   not survive a logout. */
+const NO_COMPANIES: CompanyChoice[] = [];
 
 export function CompanyDbSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const [companies, setCompanies] = useState<CompanyChoice[]>(companyCache ?? []);
+  const { data } = useQuery({
+    queryKey: ["einvoice", "companies"],
+    // A failure keeps whatever is selected; the field stays usable.
+    queryFn: () => einvoiceService.listCompanies().catch(() => null),
+  });
+  const companies = data?.results ?? NO_COMPANIES;
 
+  /*
+   * Adopting the server default stays in an effect. It calls the PARENT's
+   * `onChange`, and setting another component's state during render is illegal
+   * — doing it there renders the error boundary, which is exactly what happened
+   * when this was tried. The `adopted` guard keeps it to one call per result.
+   */
+  const [adopted, setAdopted] = useState<CompanyChoice[] | null>(null);
   useEffect(() => {
-    if (companyCache) return;
-    let alive = true;
-    einvoiceService
-      .listCompanies()
-      .then((data) => {
-        if (!alive) return;
-        companyCache = data.results;
-        setCompanies(data.results);
-        // Adopt the server default when nothing valid is selected yet.
-        if (data.results.length && !data.results.some((c) => c.company_db === value)) {
-          onChange(data.default || data.results[0].company_db);
-        }
-      })
-      .catch(() => {
-        /* keep whatever is selected; the field stays usable */
-      });
-    return () => { alive = false; };
+    if (!data || !companies.length || companies === adopted) return;
+    if (companies.some((c) => c.company_db === value)) return;
+    setAdopted(companies);
+    onChange(data.default || companies[0].company_db);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [data]);
 
   // Always include the current value so the select never shows a blank option.
   const options = companies.length
@@ -68,8 +81,31 @@ export function CompanyDbSelect({ value, onChange }: { value: string; onChange: 
 }
 
 /* ---- Status badge ---- */
+
+/**
+ * NIC tone names -> the app's shared badge tones.
+ *
+ * The four names here (`ok` / `err` / `warn` / `muted`) are kept as this
+ * component's public prop, unchanged, because seven e-invoice and e-way-bill
+ * screens pass them. Only the COLOUR is shared now — Phase 2.2. That split is
+ * the point: what counts as an error on a NIC response is NIC's vocabulary and
+ * belongs here, but what colour an error is belongs to the app.
+ */
+const NIC_TONES: Record<"ok" | "err" | "warn" | "muted", BadgeTone> = {
+  ok: "ok",
+  err: "bad",
+  warn: "hold",
+  muted: "neutral",
+};
+
+/**
+ * NOTE — there are two components called `StatusBadge` in this codebase: this
+ * one, and `components/StatusBadge.tsx` for device status. They are namespaced
+ * by import path and neither is wrong, but the collision is worth knowing
+ * before adding a third.
+ */
 export function StatusBadge({ tone, children, title }: { tone: "ok" | "err" | "warn" | "muted"; children: ReactNode; title?: string }) {
-  return <span className={`nic-badge nic-badge--${tone}`} title={title}>{children}</span>;
+  return <Badge tone={NIC_TONES[tone]} outlined title={title}>{children}</Badge>;
 }
 
 /* ---- Collapsible raw JSON ---- */
@@ -147,18 +183,18 @@ export function DetailsView({ data }: { data: unknown }): ReactNode {
       const cols = Array.from(new Set(data.flatMap((r) => Object.keys(r as object))));
       return (
         <div className="nic-table-wrap">
-          <table className="nic-table">
-            <thead>
-              <tr>{cols.map((c) => <th key={c}>{humanizeKey(c)}</th>)}</tr>
-            </thead>
-            <tbody>
+          <Table density="compact">
+            <TableHeader>
+              <TableRow>{cols.map((c) => <TableHead key={c}>{humanizeKey(c)}</TableHead>)}</TableRow>
+            </TableHeader>
+            <TableBody>
               {data.map((row, i) => (
-                <tr key={i}>
-                  {cols.map((c) => <td key={c}>{renderScalar(c, (row as Record<string, unknown>)[c])}</td>)}
-                </tr>
+                <TableRow key={i}>
+                  {cols.map((c) => <TableCell key={c}>{renderScalar(c, (row as Record<string, unknown>)[c])}</TableCell>)}
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       );
     }
@@ -233,7 +269,19 @@ export function SuccessAlert({ children }: { children: ReactNode }) {
   );
 }
 
-/* ---- Pull a clean message out of an axios error ---- */
+/*
+ * Replaced by `messageFrom` in src/lib/apiError.ts, which its 17 callers now
+ * import directly.
+ *
+ * This was the narrower, older version of the same idea — three response keys
+ * against that file's five, no distinction between an HTTP failure and a
+ * TypeError thrown by our own mapping code, and no separate wording for a
+ * request that never completed. `apiError.ts` was written to be the single
+ * place this happens; leaving a second one in a module of UI components also
+ * meant Fast Refresh could not hot-update NicUI at all.
+ *
+ * Kept, commented, so the old key order stays readable next to the new one.
+
 export function apiErrorMessage(err: unknown): string {
   const e = err as { response?: { data?: { error?: string; message?: string; detail?: string } }; message?: string };
   return (
@@ -244,3 +292,4 @@ export function apiErrorMessage(err: unknown): string {
     "Request failed"
   );
 }
+*/

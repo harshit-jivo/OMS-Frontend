@@ -670,6 +670,12 @@
   cursor: pointer;
 }
 
+/* Non-admin roles don't get the two-column charts row split, so this box
+   spans both tracks instead of sitting in the first one. */
+.db-chart-box--full-span {
+  grid-column: 1 / -1;
+}
+
 .db-chart-box--clickable:focus-visible {
   outline: 3px solid rgba(37, 99, 235, 0.28);
   outline-offset: 3px;
@@ -1032,6 +1038,19 @@
   flex-shrink: 0;
 }
 
+/* `statusClickable` is one boolean for the whole chart (role-based), not a
+   per-slice value — unlike `fill`, which stays a prop since it comes from
+   `getStatusColor`'s position in the live, server-ordered `statusItems`
+   array and can't be pinned to a fixed class. */
+.db-pie-cell {
+  outline: none;
+  cursor: default;
+}
+
+.db-pie-cell--clickable {
+  cursor: pointer;
+}
+
 .db-legend-label {
   color: #334155;
   flex: 1;
@@ -1110,6 +1129,13 @@
   padding: 20px;
   background: rgba(15, 23, 42, 0.24);
   backdrop-filter: blur(3px);
+}
+
+/* The order-detail modal is hand-rolled rather than the shared <Dialog>, so
+   it needs to out-rank any Radix dialog already open behind it (e.g. opened
+   from a row inside the state-items modal). Only used from that one modal. */
+.db-status-modal-backdrop--stacked {
+  z-index: 1100;
 }
 
 .db-status-modal {
@@ -1369,13 +1395,14 @@
   border-radius: 10px;
 }
 
-.db-order-detail-table {
+/* .db-order-detail-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 12px;
 }
+ */
 
-.db-order-detail-table thead th {
+/* .db-order-detail-table thead th {
   position: sticky;
   top: 0;
   background: #f1f5f9;
@@ -1385,12 +1412,14 @@
   padding: 9px 12px;
   white-space: nowrap;
 }
+ */
 
-.db-order-detail-table tbody td {
+/* .db-order-detail-table tbody td {
   padding: 9px 12px;
   border-top: 1px solid #eef2f6;
   color: #1e293b;
 }
+ */
 
 .db-order-detail-item-name {
   display: block;
@@ -1403,11 +1432,12 @@
   color: #94a3b8;
 }
 
-.db-order-detail-table th.db-num,
+/* .db-order-detail-table th.db-num,
 .db-order-detail-table td.db-num {
   text-align: right;
   white-space: nowrap;
 }
+ */
 
 .db-order-detail-amount {
   font-weight: 800;
@@ -1553,6 +1583,19 @@
   font-weight: 700;
   flex-shrink: 0;
 }
+
+/* Was `PALETTE[index % PALETTE.length]` inline — `.db-party-list-item` is the
+   only element `.map()` produces as a direct child of its list, so its
+   position always matches `index`, and cycling by :nth-child(8n+k) exactly
+   reproduces the JS modulo. Only used from this one list. */
+.db-party-list-item:nth-child(8n + 1) .db-party-list-badge { background: #0f766e; }
+.db-party-list-item:nth-child(8n + 2) .db-party-list-badge { background: #2563eb; }
+.db-party-list-item:nth-child(8n + 3) .db-party-list-badge { background: #f59e0b; }
+.db-party-list-item:nth-child(8n + 4) .db-party-list-badge { background: #dc2626; }
+.db-party-list-item:nth-child(8n + 5) .db-party-list-badge { background: #7c3aed; }
+.db-party-list-item:nth-child(8n + 6) .db-party-list-badge { background: #0891b2; }
+.db-party-list-item:nth-child(8n + 7) .db-party-list-badge { background: #4f46e5; }
+.db-party-list-item:nth-child(8n + 8) .db-party-list-badge { background: #ea580c; }
 
 .db-party-list-rank {
   font-size: 10px;
@@ -1777,4 +1820,47 @@
     width: 100%;
     text-align: left;
   }
+}
+
+/* ==========================================================================
+   Phase 6.3 — the static half of this page's inline styles
+   ==========================================================================
+   Only these five moved. The other twelve are computed per row —
+   `PALETTE[index % PALETTE.length]`, `getSalesWidth(...)`, `getStatusColor(item)`,
+   `${overviewRate}%` — and belong on the element, not in a stylesheet: a class
+   per palette entry per bar length is not a stylesheet, it is a lookup table
+   written in CSS.
+   ========================================================================== */
+
+.db-highlights-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.db-chart-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+/* `.db-no-data` sets `min-height: 170px`, which is right for a chart panel and
+   too tall for the party list. Two classes so the override does not depend on
+   which rule the bundler emits last. */
+.db-no-data.db-no-data--short {
+  min-height: 80px;
+}
+
+.db-party-figures {
+  text-align: right;
+  line-height: 1.4;
+}
+
+.db-party-completed {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #16a34a;
 }

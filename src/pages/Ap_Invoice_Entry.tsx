@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   HiMagnifyingGlass,
   HiArrowPath,
@@ -15,6 +15,17 @@ import apInvoiceService, {
   type TdsCode,
 } from "../services/apInvoiceService";
 import "../styles/Ap_Invoice_Entry.css";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableFooter,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Toast } from "@/components/ui/toast";
 
 // Editable copy of a GRPO line: only quantity & unit_price can change; the rest
 // is copied from the GRPO and shown read-only.
@@ -69,19 +80,24 @@ export default function Ap_Invoice_Entry() {
     window.setTimeout(() => setToast(""), 3200);
   };
 
-  const readErr = (err: any) =>
-    err?.response?.data?.error ||
-    err?.response?.data?.detail ||
-    (err?.response?.data && Object.values(err.response.data)[0]) ||
-    err?.message ||
-    "Request failed";
+  /** The SAP-facing endpoints return their failure three different ways —
+   *  `{error}`, `{detail}`, or a field-keyed dict — so the first value of the
+   *  body is the last resort before axios's own message. */
+  const readErr = (err: unknown) => {
+    const axiosErr = err as {
+      response?: { data?: { error?: string; detail?: string } & Record<string, unknown> };
+      message?: string;
+    };
+    const data = axiosErr?.response?.data;
+    return (
+      data?.error ||
+      data?.detail ||
+      (data && (Object.values(data)[0] as string)) ||
+      axiosErr?.message ||
+      "Request failed"
+    );
+  };
 
-  // ---- reset when the company changes (a GRPO belongs to one company) -------
-  useEffect(() => {
-    resetForm();
-    setBrowseRows([]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [branch]);
 
   function resetForm() {
     setGrpo(null);
@@ -112,7 +128,7 @@ export default function Ap_Invoice_Entry() {
           unit_price: l.unit_price != null ? String(l.unit_price) : "",
           orig_quantity: l.quantity,
           orig_unit_price: l.unit_price,
-        }))
+        })),
       );
       setAttachGrpoDoc(g.attachment_entry != null);
       setBrowseOpen(false);
@@ -159,9 +175,7 @@ export default function Ap_Invoice_Entry() {
   }
 
   const setLineField = (baseLine: number, field: "quantity" | "unit_price", value: string) =>
-    setLines((ls) =>
-      ls.map((l) => (l.base_line === baseLine ? { ...l, [field]: value } : l))
-    );
+    setLines((ls) => ls.map((l) => (l.base_line === baseLine ? { ...l, [field]: value } : l)));
 
   // Estimated total (qty x price, pre-tax) — SAP computes the authoritative one.
   const estTotal = useMemo(
@@ -171,7 +185,7 @@ export default function Ap_Invoice_Entry() {
         const p = parseFloat(l.unit_price);
         return sum + (isFinite(q) && isFinite(p) ? q * p : 0);
       }, 0),
-    [lines]
+    [lines],
   );
 
   function validate() {
@@ -197,7 +211,10 @@ export default function Ap_Invoice_Entry() {
     setSubmitting(true);
     try {
       const payloadLines = lines.map((l) => {
-        const row: any = { base_line: l.base_line };
+        // Only the changed fields travel, so the row is built up key by key.
+        const row: { base_line: number; quantity?: number; unit_price?: number } = {
+          base_line: l.base_line,
+        };
         // Send an override only when the user actually changed the value.
         if (l.quantity !== "" && parseFloat(l.quantity) !== l.orig_quantity)
           row.quantity = parseFloat(l.quantity);
@@ -250,7 +267,9 @@ export default function Ap_Invoice_Entry() {
 
   const branchLabel = AP_BRANCHES.find((b) => b.value === branch)?.label ?? branch;
   const money = (n: number | null | undefined) =>
-    n == null ? "—" : n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    n == null
+      ? "—"
+      : n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   return (
     <div className="ap-page">
@@ -258,8 +277,8 @@ export default function Ap_Invoice_Entry() {
         <div>
           <h1 className="ap-title">AP Invoice Entry</h1>
           <p className="ap-sub">
-            Raise a vendor (A/P) invoice by copying an open GRPO. Grey fields are
-            copied from the GRPO; only the highlighted fields are yours to edit.
+            Raise a vendor (A/P) invoice by copying an open GRPO. Grey fields are copied from the
+            GRPO; only the highlighted fields are yours to edit.
           </p>
         </div>
       </div>
@@ -277,7 +296,16 @@ export default function Ap_Invoice_Entry() {
                   role="radio"
                   aria-checked={branch === b.value}
                   className={`ap-segment${branch === b.value ? " ap-segment-active" : ""}`}
-                  onClick={() => setBranch(b.value)}
+                  onClick={() => {
+                    setBranch(b.value);
+                    // A GRPO belongs to one company, so switching company clears
+                    // the form and the browse list. This was an effect on
+                    // `[branch]` firing thirteen setters — pure
+                    // derived-state-from-state, and the only suppression on it
+                    // was `exhaustive-deps`, which does not cover that.
+                    resetForm();
+                    setBrowseRows([]);
+                  }}
                 >
                   {b.label}
                 </button>
@@ -314,7 +342,7 @@ export default function Ap_Invoice_Entry() {
             <div className="ap-inline">
               <input
                 className="ap-input"
-                placeholder="Search DocNum or vendor invoice no…"
+                placeholder="Search DocNum or vendor invoice no…" aria-label="Search DocNum or vendor invoice no"
                 value={browseSearch}
                 onChange={(e) => setBrowseSearch(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && openBrowse()}
@@ -322,7 +350,11 @@ export default function Ap_Invoice_Entry() {
               <button className="ap-btn ap-btn-ghost" type="button" onClick={openBrowse}>
                 <HiArrowPath aria-hidden /> Refresh
               </button>
-              <button className="ap-btn ap-btn-ghost" type="button" onClick={() => setBrowseOpen(false)}>
+              <button
+                className="ap-btn ap-btn-ghost"
+                type="button"
+                onClick={() => setBrowseOpen(false)}
+              >
                 <HiXMark aria-hidden /> Close
               </button>
             </div>
@@ -332,29 +364,29 @@ export default function Ap_Invoice_Entry() {
               ) : browseRows.length === 0 ? (
                 <div className="ap-muted-row">No open GRPOs found.</div>
               ) : (
-                <table className="ap-table">
-                  <thead>
-                    <tr>
-                      <th>DocNum</th>
-                      <th>Vendor</th>
-                      <th className="ap-r">Total</th>
-                      <th>Vendor Inv#</th>
-                      <th />
-                    </tr>
-                  </thead>
-                  <tbody>
+                <Table density="compact">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>DocNum</TableHead>
+                      <TableHead>Vendor</TableHead>
+                      <TableHead className="ap-r">Total</TableHead>
+                      <TableHead>Vendor Inv#</TableHead>
+                      <TableHead />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
                     {browseRows.map((r) => (
-                      <tr key={r.doc_entry}>
-                        <td>{r.doc_num}</td>
-                        <td>
+                      <TableRow key={r.doc_entry}>
+                        <TableCell>{r.doc_num}</TableCell>
+                        <TableCell>
                           <div className="ap-strong">{r.card_name}</div>
                           <div className="ap-dim">{r.card_code}</div>
-                        </td>
-                        <td className="ap-r">
+                        </TableCell>
+                        <TableCell className="ap-r">
                           {money(r.doc_total)} {r.currency}
-                        </td>
-                        <td>{r.num_at_card || "—"}</td>
-                        <td>
+                        </TableCell>
+                        <TableCell>{r.num_at_card || "—"}</TableCell>
+                        <TableCell>
                           <button
                             className="ap-btn ap-btn-sm"
                             type="button"
@@ -362,11 +394,11 @@ export default function Ap_Invoice_Entry() {
                           >
                             Select
                           </button>
-                        </td>
-                      </tr>
+                        </TableCell>
+                      </TableRow>
                     ))}
-                  </tbody>
-                </table>
+                  </TableBody>
+                </Table>
               )}
             </div>
           </div>
@@ -389,8 +421,8 @@ export default function Ap_Invoice_Entry() {
         <>
           <div className="ap-card">
             <div className="ap-copied-banner">
-              Copied from GRPO <strong>{grpo.doc_num}</strong> — vendor and line
-              details are locked to the GRPO.
+              Copied from GRPO <strong>{grpo.doc_num}</strong> — vendor and line details are locked
+              to the GRPO.
             </div>
 
             <div className="ap-vendor">
@@ -525,31 +557,31 @@ export default function Ap_Invoice_Entry() {
               </span>
             </div>
             <div className="ap-table-wrap">
-              <table className="ap-table ap-lines">
-                <thead>
-                  <tr>
-                    <th>Item</th>
-                    <th>Description</th>
-                    <th>Whse</th>
-                    <th>Tax</th>
-                    <th className="ap-r">Qty</th>
-                    <th className="ap-r">Unit Price</th>
-                    <th className="ap-r">Line Est.</th>
-                  </tr>
-                </thead>
-                <tbody>
+              <Table density="compact">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Item</TableHead>
+                    <TableHead>Description</TableHead>
+                    <TableHead>Whse</TableHead>
+                    <TableHead>Tax</TableHead>
+                    <TableHead className="ap-r">Qty</TableHead>
+                    <TableHead className="ap-r">Unit Price</TableHead>
+                    <TableHead className="ap-r">Line Est.</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {lines.map((l) => {
                     const src = grpo.lines.find((x) => x.base_line === l.base_line)!;
                     const q = parseFloat(l.quantity);
                     const p = parseFloat(l.unit_price);
                     const lineEst = isFinite(q) && isFinite(p) ? q * p : null;
                     return (
-                      <tr key={l.base_line}>
-                        <td className="ap-ro-cell">{src.item_code}</td>
-                        <td className="ap-ro-cell">{src.item_description}</td>
-                        <td className="ap-ro-cell">{src.warehouse_code}</td>
-                        <td className="ap-ro-cell">{src.tax_code}</td>
-                        <td className="ap-r">
+                      <TableRow key={l.base_line}>
+                        <TableCell className="ap-ro-cell">{src.item_code}</TableCell>
+                        <TableCell className="ap-ro-cell">{src.item_description}</TableCell>
+                        <TableCell className="ap-ro-cell">{src.warehouse_code}</TableCell>
+                        <TableCell className="ap-ro-cell">{src.tax_code}</TableCell>
+                        <TableCell className="ap-r">
                           <input
                             className={`ap-cell-input ap-edit${errors[`q_${l.base_line}`] ? " ap-input-err" : ""}`}
                             inputMode="decimal"
@@ -557,33 +589,44 @@ export default function Ap_Invoice_Entry() {
                             onChange={(e) => setLineField(l.base_line, "quantity", e.target.value)}
                           />
                           {src.uom && <span className="ap-uom">{src.uom}</span>}
-                        </td>
-                        <td className="ap-r">
+                        </TableCell>
+                        <TableCell className="ap-r">
                           <input
                             className={`ap-cell-input ap-edit${errors[`p_${l.base_line}`] ? " ap-input-err" : ""}`}
                             inputMode="decimal"
                             value={l.unit_price}
-                            onChange={(e) => setLineField(l.base_line, "unit_price", e.target.value)}
+                            onChange={(e) =>
+                              setLineField(l.base_line, "unit_price", e.target.value)
+                            }
                           />
-                        </td>
-                        <td className="ap-r ap-ro-cell">{lineEst == null ? "—" : money(lineEst)}</td>
-                      </tr>
+                        </TableCell>
+                        <TableCell className="ap-r ap-ro-cell">
+                          {lineEst == null ? "—" : money(lineEst)}
+                        </TableCell>
+                      </TableRow>
                     );
                   })}
-                </tbody>
-                <tfoot>
-                  <tr>
-                    <td colSpan={6} className="ap-r ap-strong">
+                </TableBody>
+                <TableFooter>
+                  <TableRow>
+                    <TableCell colSpan={6} className="ap-r ap-strong">
                       Estimated (pre-tax)
-                    </td>
-                    <td className="ap-r ap-strong">{money(estTotal)}</td>
-                  </tr>
-                </tfoot>
-              </table>
+                    </TableCell>
+                    <TableCell className="ap-r ap-strong">{money(estTotal)}</TableCell>
+                  </TableRow>
+                </TableFooter>
+              </Table>
             </div>
 
             <div className="ap-actions">
-              <button className="ap-btn ap-btn-ghost" type="button" onClick={() => { resetForm(); setDocNumInput(""); }}>
+              <button
+                className="ap-btn ap-btn-ghost"
+                type="button"
+                onClick={() => {
+                  resetForm();
+                  setDocNumInput("");
+                }}
+              >
                 Cancel
               </button>
               <button className="ap-btn ap-btn-primary" type="button" onClick={onReview}>
@@ -595,45 +638,100 @@ export default function Ap_Invoice_Entry() {
       )}
 
       {/* ---- Review modal --------------------------------------------------- */}
-      {showReview && grpo && (
-        <div className="ap-modal-overlay" onClick={() => !submitting && setShowReview(false)}>
-          <div className="ap-modal" onClick={(e) => e.stopPropagation()}>
+      <Dialog
+        open={Boolean(showReview && grpo)}
+        onOpenChange={(next) => {
+          if (!next) (() => !submitting && setShowReview(false))();
+        }}
+      >
+        {showReview && grpo && (
+          <DialogContent
+            title="Invoice preview"
+            variant="bare"
+            size="auto"
+            showClose={false}
+            className="ap-modal"
+          >
             <div className="ap-modal-head">
               <h3>Confirm A/P Invoice</h3>
-              <button className="ap-icon-btn" onClick={() => !submitting && setShowReview(false)}>
+              <button
+                className="ap-icon-btn"
+                aria-label="Close preview"
+                onClick={() => !submitting && setShowReview(false)}
+              >
                 <HiXMark aria-hidden />
               </button>
             </div>
             <div className="ap-modal-body">
               <dl className="ap-review">
-                <div><dt>Company</dt><dd>{branchLabel}</dd></div>
-                <div><dt>Vendor</dt><dd>{grpo.card_name} ({grpo.card_code})</dd></div>
-                <div><dt>From GRPO</dt><dd>{grpo.doc_num}</dd></div>
-                <div><dt>Vendor Invoice No.</dt><dd>{numAtCard}</dd></div>
-                <div><dt>Invoice Date</dt><dd>{docDate || "—"}</dd></div>
-                <div><dt>Due Date</dt><dd>{dueDate || "—"}</dd></div>
-                <div><dt>TDS</dt><dd>{tdsLiable && tdsCode ? tdsCode : "None"}</dd></div>
-                <div><dt>Attachment</dt><dd>{attachGrpoDoc && grpo.attachment_entry != null ? "GRPO document" : "None"}</dd></div>
-                <div><dt>Lines</dt><dd>{lines.length}</dd></div>
-                <div><dt>Estimated (pre-tax)</dt><dd>{money(estTotal)} {grpo.currency}</dd></div>
+                <div>
+                  <dt>Company</dt>
+                  <dd>{branchLabel}</dd>
+                </div>
+                <div>
+                  <dt>Vendor</dt>
+                  <dd>
+                    {grpo.card_name} ({grpo.card_code})
+                  </dd>
+                </div>
+                <div>
+                  <dt>From GRPO</dt>
+                  <dd>{grpo.doc_num}</dd>
+                </div>
+                <div>
+                  <dt>Vendor Invoice No.</dt>
+                  <dd>{numAtCard}</dd>
+                </div>
+                <div>
+                  <dt>Invoice Date</dt>
+                  <dd>{docDate || "—"}</dd>
+                </div>
+                <div>
+                  <dt>Due Date</dt>
+                  <dd>{dueDate || "—"}</dd>
+                </div>
+                <div>
+                  <dt>TDS</dt>
+                  <dd>{tdsLiable && tdsCode ? tdsCode : "None"}</dd>
+                </div>
+                <div>
+                  <dt>Attachment</dt>
+                  <dd>
+                    {attachGrpoDoc && grpo.attachment_entry != null ? "GRPO document" : "None"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Lines</dt>
+                  <dd>{lines.length}</dd>
+                </div>
+                <div>
+                  <dt>Estimated (pre-tax)</dt>
+                  <dd>
+                    {money(estTotal)} {grpo.currency}
+                  </dd>
+                </div>
               </dl>
               <p className="ap-note">
                 SAP computes the final tax and total from the GRPO. Posting closes the GRPO.
               </p>
             </div>
             <div className="ap-modal-foot">
-              <button className="ap-btn ap-btn-ghost" onClick={() => setShowReview(false)} disabled={submitting}>
+              <button
+                className="ap-btn ap-btn-ghost"
+                onClick={() => setShowReview(false)}
+                disabled={submitting}
+              >
                 Back
               </button>
               <button className="ap-btn ap-btn-primary" onClick={onConfirm} disabled={submitting}>
                 {submitting ? "Posting…" : "Post Invoice"}
               </button>
             </div>
-          </div>
-        </div>
-      )}
+          </DialogContent>
+        )}
+      </Dialog>
 
-      {toast && <div className="ap-toast">{toast}</div>}
+      <Toast message={toast} />
     </div>
   );
 }

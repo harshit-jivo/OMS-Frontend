@@ -19,6 +19,7 @@ import type { Method } from "axios";
 import api from "../../services/api";
 import { resolveApiUrl, toBasePath } from "../../services/apiPaths";
 import { requestIdOf } from "../../services/requestId";
+import { loadSession } from "@/auth";
 
 export type SalesOrderLine = {
   LineNum: number;
@@ -291,7 +292,10 @@ export const apiDelete = async <T,>(url: string): Promise<T | null> => {
   }
 };
 
-export const getCurrentUserId = (): number | null => Number(localStorage.getItem("user_id")) || null;
+/** The signed-in user's id, for the `created_by` on a saved invoice. Reads the
+ *  session rather than the raw key, so a half-written session (a token with no
+ *  user id) answers null here instead of 0. */
+export const getCurrentUserId = (): number | null => Number(loadSession()?.userId) || null;
 
 // The Sales Invoice flow runs against exactly one company branch at a time.
 // Every /api/hana/ endpoint requires it as a query param (OIL | BEVERAGE).

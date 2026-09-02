@@ -1,10 +1,38 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { userService } from "../../services/userService";
 import { ordersService, type MartOrderPayload } from "../../services/ordersService";
 import SearchableSelect from "./SearchableSelect";
 import "../../styles/Distributor/Distributor.css";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { messageFrom } from "@/lib/apiError";
+import { useAuth } from "@/auth";
 
 const COMPANY_MART = 3; // company 3 = Mart, stamped on every distributor order
+/** A `/orders/party-products/` row as it arrives — untyped by the service, and
+ *  read here field by field to build a `PartyProduct`. Only the fields this
+ *  file reads are declared. */
+type PartyProductRow = {
+  item_code?: string;
+  item_name?: string;
+  category?: string;
+  basic_rate?: number | string;
+  brand?: string;
+  variety?: string;
+  sub_group?: string;
+  sal_factor2?: number | string;
+  sal_pack_unit?: number | string;
+  tax_rate?: number | string;
+  updated_at?: string | null;
+};
+
 const DEFAULT_WAREHOUSE_CODE = "GP-FGM"; // distributor orders default to GP-FGM
 
 type PartyAddress = { id: number; full_address: string };
@@ -27,6 +55,9 @@ type PartyAddress = { id: number; full_address: string };
  * nothing is saved yet).
  */
 const CATEGORY = "MART"; // this page only ever deals with the MART category
+
+/** Stable empty, so `productOptions` does not re-sort on every render. */
+const NO_PRODUCTS: PartyProduct[] = [];
 
 // TYPE column in Add Sales is the pack size parsed from the item name (e.g.
 // "1 LTR"), NOT the SAP U_TYPE. Mirror Add_Sales.getProductType exactly so a
@@ -84,13 +115,99 @@ const isCurrentMonth = (iso: string | null | undefined): boolean => {
 };
 
 function Distributor() {
-  const [party, setParty] = useState<{
-    card_code: string;
-    card_name: string;
-  } | null>(null);
-  const [martProducts, setMartProducts] = useState<PartyProduct[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  /*
+   * The whole bootstrap is ONE query, not three chained ones.
+   *
+   * Party -> that party's MART products -> that party's MART addresses is a
+   * strict chain, and the page's own gates are composed from all of it:
+   * `noProducts` is `!loading && !error && martProducts.length === 0`, and the
+   * product picker's placeholder and disabled state read the same flags. Split
+   * into three `enabled`-gated queries, the two downstream ones report
+   * `isPending: true` FOREVER while disabled, so a distributor with no party
+   * assigned would sit on "Loading…" instead of being told what is wrong.
+   *
+   * `userId` is read during render rather than in an effect — the old code did
+   * `if (!userId) { setError(...); setLoading(false); return; }` inside the
+   * fetch effect, which is a setState-in-effect the moment the fetch leaves.
+   */
+  // From the session, not from `localStorage` directly. `Number(undefined)` is
+  // NaN where `Number(null)` was 0, so the `?? ""` keeps the falsy check below
+  // ("no user, no bootstrap") behaving exactly as it did.
+  const { session } = useAuth();
+  const userId = Number(session?.userId ?? "");
+
+  const bootstrap = useQuery({
+    queryKey: ["distributor", "bootstrap", userId],
+    enabled: Boolean(userId),
+    // The party-product assignment carries a month gate (`isCurrentMonth`
+    // below) that decides whether an order may be placed at all, so this must
+    // not be served from a long-lived cache across a month boundary.
+    staleTime: 0,
+    queryFn: async () => {
+      const partiesRes = await userService.getUserParties(userId);
+      const parties = partiesRes?.data?.parties ?? [];
+      // "Every distributor is assigned one party" — take the first.
+      const assigned = parties[0];
+      if (!assigned) return { party: null, martProducts: NO_PRODUCTS, billTo: null, shipTo: null };
+
+      // The RICHER orders endpoint — the same one Add Sales uses — so we get
+      // sal_factor2 / sal_pack_unit / tax_rate / brand / variety needed to
+      // compute the line exactly like a billing order.
+      const prodList = await ordersService.getPartyProduct(assigned.card_code);
+      const martProducts: PartyProduct[] = (Array.isArray(prodList) ? prodList : [])
+        .filter((p: PartyProductRow) => (p.category || "").toUpperCase() === CATEGORY)
+        .map((p: PartyProductRow) => ({
+          // `?? ""` because the row type says these can be absent. They never
+          // are in practice; the coercion is what keeps that assumption from
+          // being made silently, as it was while this was `any`.
+          item_code: p.item_code ?? "",
+          item_name: p.item_name ?? "",
+          category: p.category ?? "",
+          basic_rate: Number(p.basic_rate) || 0,
+          brand: p.brand || "",
+          variety: p.variety || p.sub_group || "",
+          sub_group: p.sub_group || p.variety || "",
+          sal_factor2: Number(p.sal_factor2) || 0,
+          sal_pack_unit: Number(p.sal_pack_unit) || 0,
+          tax_rate: Number(p.tax_rate) || 0,
+          updated_at: p.updated_at ?? null,
+        }));
+
+      // Scope addresses to MART so a party that also has addresses in other
+      // categories cannot surface a non-MART (wrong) one here. A failure is
+      // tolerated: addresses are re-validated at submit time.
+      let billTo: PartyAddress | null = null;
+      let shipTo: PartyAddress | null = null;
+      try {
+        const addr = await ordersService.getPartyAdd(assigned.card_code, CATEGORY);
+        billTo = (addr?.bill_to ?? [])[0] ?? null;
+        shipTo = (addr?.ship_to ?? [])[0] ?? null;
+      } catch {
+        /* ignore */
+      }
+
+      return {
+        party: { card_code: assigned.card_code, card_name: assigned.card_name },
+        martProducts,
+        billTo,
+        shipTo,
+      };
+    },
+  });
+
+  const party = bootstrap.data?.party ?? null;
+  const martProducts = bootstrap.data?.martProducts ?? NO_PRODUCTS;
+  const billTo = bootstrap.data?.billTo ?? null;
+  const shipTo = bootstrap.data?.shipTo ?? null;
+  const loading = Boolean(userId) && bootstrap.isPending;
+
+  const error = !userId
+    ? "Could not identify the logged-in user. Please log in again."
+    : bootstrap.isError
+      ? "Failed to load your assigned party / products. Please try again."
+      : bootstrap.isSuccess && !party
+        ? "No party is assigned to your account. Please contact an administrator."
+        : "";
 
   // Monotonic id so React keys stay stable as rows are added/removed.
   const nextId = useRef(1);
@@ -102,96 +219,12 @@ function Distributor() {
   });
 
   // First bill-to (B) and ship-to (S) address for the party — auto-picked.
-  const [billTo, setBillTo] = useState<PartyAddress | null>(null);
-  const [shipTo, setShipTo] = useState<PartyAddress | null>(null);
 
   const [rows, setRows] = useState<Row[]>([makeRow()]);
   const [submitting, setSubmitting] = useState(false);
   const [submitMsg, setSubmitMsg] = useState<
     { kind: "ok" | "err"; text: string } | null
   >(null);
-
-  useEffect(() => {
-    const userId = Number(localStorage.getItem("user_id"));
-    if (!userId) {
-      setError("Could not identify the logged-in user. Please log in again.");
-      setLoading(false);
-      return;
-    }
-
-    let alive = true;
-    (async () => {
-      try {
-        // 1. Which party is assigned to this distributor?
-        const partiesRes = await userService.getUserParties(userId);
-        const parties = partiesRes?.data?.parties ?? [];
-        if (!parties.length) {
-          if (alive) {
-            setError(
-              "No party is assigned to your account. Please contact an administrator.",
-            );
-          }
-          return;
-        }
-
-        // "Every distributor is assigned one party" — take the first.
-        const assigned = parties[0];
-        if (alive) {
-          setParty({
-            card_code: assigned.card_code,
-            card_name: assigned.card_name,
-          });
-        }
-
-        // 2. That party's assigned products (MART only). Use the RICHER orders
-        //    endpoint — the same one Add Sales uses — so we get sal_factor2 /
-        //    sal_pack_unit / tax_rate / brand / variety needed to compute the
-        //    line exactly like a billing order.
-        const prodList = await ordersService.getPartyProduct(assigned.card_code);
-        const list: PartyProduct[] = (Array.isArray(prodList) ? prodList : [])
-          .filter((p: any) => (p.category || "").toUpperCase() === CATEGORY)
-          .map((p: any) => ({
-            item_code: p.item_code,
-            item_name: p.item_name,
-            category: p.category,
-            basic_rate: Number(p.basic_rate) || 0,
-            brand: p.brand || "",
-            variety: p.variety || p.sub_group || "",
-            sub_group: p.sub_group || p.variety || "",
-            sal_factor2: Number(p.sal_factor2) || 0,
-            sal_pack_unit: Number(p.sal_pack_unit) || 0,
-            tax_rate: Number(p.tax_rate) || 0,
-            updated_at: p.updated_at ?? null,
-          }));
-        if (alive) setMartProducts(list);
-
-        // 3. Auto-pick the party's first MART bill-to and ship-to address.
-        //    Scope to the MART category so a party that also has addresses in
-        //    other categories can't surface a non-MART (wrong) address here.
-        try {
-          const addr = await ordersService.getPartyAdd(assigned.card_code, CATEGORY);
-          if (alive) {
-            setBillTo((addr?.bill_to ?? [])[0] ?? null);
-            setShipTo((addr?.ship_to ?? [])[0] ?? null);
-          }
-        } catch {
-          /* addresses are validated at submit time; ignore load failure here */
-        }
-      } catch {
-        if (alive) {
-          setError(
-            "Failed to load your assigned party / products. Please try again.",
-          );
-        }
-      } finally {
-        if (alive) setLoading(false);
-      }
-    })();
-
-    return () => {
-      alive = false;
-    };
-  }, []);
 
   // Product dropdown options (MART products), sorted by name.
   const productOptions = useMemo(
@@ -365,11 +398,9 @@ function Distributor() {
         text: `Order ${res?.order_number ?? ""} submitted for Mart approval.`,
       });
       setRows([makeRow()]); // reset the form for the next order
-    } catch (e: any) {
+    } catch (e) {
       const detail =
-        e?.response?.data?.error ||
-        e?.response?.data?.message ||
-        "Failed to submit the order. Please try again.";
+        messageFrom(e, "Failed to submit the order. Please try again.");
       setSubmitMsg({ kind: "err", text: detail });
     } finally {
       setSubmitting(false);
@@ -402,26 +433,26 @@ function Distributor() {
       {!error && (
         <>
           <div className="distributor-table-wrap">
-            <table className="distributor-table">
-              <thead>
-                <tr>
-                  <th className="distributor-prod-col">Product</th>
-                  <th className="distributor-rate-col">Basic Rate</th>
-                  <th className="distributor-num-col">PCS</th>
-                  <th className="distributor-qty-col">Boxes</th>
-                  <th className="distributor-num-col">Qty</th>
-                  <th className="distributor-num-col">Ltrs</th>
-                  <th className="distributor-num-col">Amount</th>
-                  <th className="distributor-action-col"></th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table density="compact">
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="distributor-prod-col">Product</TableHead>
+                  <TableHead className="distributor-rate-col">Basic Rate</TableHead>
+                  <TableHead className="distributor-num-col">PCS</TableHead>
+                  <TableHead className="distributor-qty-col">Boxes</TableHead>
+                  <TableHead className="distributor-num-col">Qty</TableHead>
+                  <TableHead className="distributor-num-col">Ltrs</TableHead>
+                  <TableHead className="distributor-num-col">Amount</TableHead>
+                  <TableHead className="distributor-action-col"></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {rows.map((row) => {
                   const { rate, pcs, ltrs, amount } = deriveRow(row);
                   const hasItem = Boolean(row.item_code);
                   return (
-                    <tr key={row.id}>
-                      <td className="distributor-prod-col">
+                    <TableRow key={row.id}>
+                      <TableCell className="distributor-prod-col">
                         <SearchableSelect
                           value={row.item_code}
                           options={productOptions}
@@ -430,46 +461,49 @@ function Distributor() {
                           placeholder={
                             loading ? "Loading…" : "Search product…"
                           }
+                          ariaLabel="Product"
                         />
                         {row.error && (
                           <div className="distributor-row-error">
                             {row.error}
                           </div>
                         )}
-                      </td>
-                      <td className="distributor-rate-col">
+                      </TableCell>
+                      <TableCell className="distributor-rate-col">
                         {hasItem ? rate.toFixed(2) : "—"}
-                      </td>
-                      <td className="distributor-num-col">
+                      </TableCell>
+                      <TableCell className="distributor-num-col">
                         {hasItem ? pcs : "—"}
-                      </td>
-                      <td className="distributor-qty-col">
+                      </TableCell>
+                      <TableCell className="distributor-qty-col">
                         <input
                           type="number"
                           min={0}
                           value={row.boxes || ""}
                           onChange={(e) => setBoxes(row.id, e.target.value)}
                           placeholder="0"
+                          aria-label="Boxes"
                           disabled={!hasItem}
                         />
-                      </td>
-                      <td className="distributor-qty-col">
+                      </TableCell>
+                      <TableCell className="distributor-qty-col">
                         <input
                           type="number"
                           min={0}
                           value={row.qty || ""}
                           onChange={(e) => setQty(row.id, e.target.value)}
                           placeholder="0"
+                          aria-label="Qty"
                           disabled={!hasItem}
                         />
-                      </td>
-                      <td className="distributor-num-col">
+                      </TableCell>
+                      <TableCell className="distributor-num-col">
                         {hasItem ? ltrs.toFixed(2) : "—"}
-                      </td>
-                      <td className="distributor-num-col">
+                      </TableCell>
+                      <TableCell className="distributor-num-col">
                         {hasItem ? amount.toFixed(2) : "—"}
-                      </td>
-                      <td className="distributor-action-col">
+                      </TableCell>
+                      <TableCell className="distributor-action-col">
                         <button
                           type="button"
                           className="distributor-remove"
@@ -478,12 +512,12 @@ function Distributor() {
                         >
                           Cancel
                         </button>
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   );
                 })}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
 
           <div className="distributor-actions">

@@ -1,14 +1,26 @@
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import approvalService, {
   COMPANY_OPTIONS,
-  type BankSyncMeta,
   type Company,
   type MethodMappingRow,
   type SapBank,
 } from "../../services/approvalService";
 import { ConfirmDialog, Modal } from "./ApprovalUI";
+
+/** Stable empties, so `broken` and the row map settle. */
+const NO_ROWS: MethodMappingRow[] = [];
+const NO_BANKS: SapBank[] = [];
 import { messageFrom } from "./useApprovalAdmin";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 type Flash = (text: string, kind?: "ok" | "err") => void;
 
@@ -30,42 +42,58 @@ export default function ConfigTab({
   const [company, setCompany] = useState<Company>(
     (COMPANY_OPTIONS[0]?.value as Company) ?? "OIL",
   );
-  const [rows, setRows] = useState<MethodMappingRow[]>([]);
-  const [banks, setBanks] = useState<SapBank[]>([]);
-  const [meta, setMeta] = useState<BankSyncMeta | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  /*
+   * Mappings and banks stay in ONE queryFn, as the original `Promise.all` did:
+   * every row's dropdown is populated from `banks`, so the two must describe the
+   * same moment or a mapping can point at a bank the list no longer offers.
+   */
+  const {
+    data,
+    isFetching: loading,
+    error: loadError,
+  } = useQuery({
+    queryKey: ["payments", "bank-config", company],
+    queryFn: async () => {
+      const [status, bankList] = await Promise.all([
+        approvalService.methodMappingStatus(company, false),
+        approvalService.listSapBanks(company, false),
+      ]);
+      return { rows: status.rows, meta: status.meta, banks: bankList };
+    },
+  });
+  const rows = data?.rows ?? NO_ROWS;
+  const banks = data?.banks ?? NO_BANKS;
+  const meta = data?.meta ?? null;
+  // Say what happened. An empty table would read as "SAP has no banks", which
+  // is a different and wrong message.
+  const error = loadError ? messageFrom(loadError, "Could not load bank configuration") : null;
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<MethodMappingRow | null>(null);
   const [choice, setChoice] = useState("");
   const [confirming, setConfirming] = useState<MethodMappingRow | null>(null);
 
-  const load = useCallback(
-    async (refresh = false) => {
-      setLoading(true);
-      try {
-        const [status, bankList] = await Promise.all([
-          approvalService.methodMappingStatus(company, refresh),
-          approvalService.listSapBanks(company, refresh),
-        ]);
-        setRows(status.rows);
-        setMeta(status.meta);
-        setBanks(bankList);
-        setError(null);
-      } catch (err) {
-        // Say what happened. An empty table would read as "SAP has no banks",
-        // which is a different and wrong message.
-        setError(messageFrom(err, "Could not load bank configuration"));
-      } finally {
-        setLoading(false);
-      }
-    },
-    [company],
-  );
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  /**
+   * Re-read. `refresh` is NOT a plain refetch: it goes to the server as a query
+   * PARAM telling it to re-pull banks from SAP rather than serve its cache
+   * (approvalService.ts:520-537). `invalidateQueries` cannot send it, so the
+   * Sync button runs the request itself and seeds the cache with the result.
+   */
+  const load = async (refresh = false) => {
+    if (!refresh) {
+      await queryClient.invalidateQueries({ queryKey: ["payments", "bank-config"] });
+      return;
+    }
+    const [status, bankList] = await Promise.all([
+      approvalService.methodMappingStatus(company, true),
+      approvalService.listSapBanks(company, true),
+    ]);
+    queryClient.setQueryData(["payments", "bank-config", company], {
+      rows: status.rows,
+      meta: status.meta,
+      banks: bankList,
+    });
+  };
 
   const save = async () => {
     if (!editing || !choice) return;
@@ -110,7 +138,7 @@ export default function ConfigTab({
       <div className="apv-card">
         <div className="apv-card-head">
           <h3>Payment Method Mapping</h3>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <div className="apv-actions-row apv-actions-row-center">
             <select
               className="apv-select"
               value={company}
@@ -155,38 +183,38 @@ export default function ConfigTab({
           <section>
             <h4 className="apv-sub">Available SAP Bank Accounts</h4>
             <div className="apv-table-wrap">
-              <table className="apv-table">
-                <thead>
-                  <tr>
-                    <th>Bank</th>
-                    <th>Account Number</th>
-                    <th>GL Account</th>
-                    <th>Branch</th>
-                  </tr>
-                </thead>
-                <tbody>
+              <Table density="compact">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Bank</TableHead>
+                    <TableHead>Account Number</TableHead>
+                    <TableHead>GL Account</TableHead>
+                    <TableHead>Branch</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {banks.map((b) => (
-                    <tr key={b.key}>
-                      <td>{b.display_name}</td>
-                      <td>
+                    <TableRow key={b.key}>
+                      <TableCell>{b.display_name}</TableCell>
+                      <TableCell>
                         <code>{b.account_number || "-"}</code>
-                      </td>
-                      <td>
+                      </TableCell>
+                      <TableCell>
                         <code>{b.gl_account}</code>
-                      </td>
-                      <td>{b.branch || "-"}</td>
-                    </tr>
+                      </TableCell>
+                      <TableCell>{b.branch || "-"}</TableCell>
+                    </TableRow>
                   ))}
                   {!banks.length && !loading && (
-                    <tr>
-                      <td colSpan={4}>No accounts returned by SAP.</td>
-                    </tr>
+                    <TableRow>
+                      <TableCell colSpan={4}>No accounts returned by SAP.</TableCell>
+                    </TableRow>
                   )}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
             {meta && (
-              <div className="apv-muted" style={{ marginTop: 8 }}>
+              <div className="apv-muted apv-muted-spaced">
                 Last sync:{" "}
                 {meta.synced_at
                   ? new Date(meta.synced_at).toLocaleString()
@@ -206,23 +234,23 @@ export default function ConfigTab({
           <section>
             <h4 className="apv-sub">Payment Method Mapping</h4>
             <div className="apv-table-wrap">
-              <table className="apv-table">
-                <thead>
-                  <tr>
-                    <th>Payment Method</th>
-                    <th>Company Deposit Account</th>
-                    <th>GL Account</th>
-                    <th>Account Number</th>
-                    <th>Branch</th>
-                    <th>Status</th>
-                    {canEdit && <th />}
-                  </tr>
-                </thead>
-                <tbody>
+              <Table density="compact">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Payment Method</TableHead>
+                    <TableHead>Company Deposit Account</TableHead>
+                    <TableHead>GL Account</TableHead>
+                    <TableHead>Account Number</TableHead>
+                    <TableHead>Branch</TableHead>
+                    <TableHead>Status</TableHead>
+                    {canEdit && <TableHead />}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {rows.map((r) => (
-                    <tr key={r.payment_method}>
-                      <td>{r.label}</td>
-                      <td>
+                    <TableRow key={r.payment_method}>
+                      <TableCell>{r.label}</TableCell>
+                      <TableCell>
                         {r.is_cash ? (
                           <span className="apv-muted">
                             Cash G/L (company mapping)
@@ -230,15 +258,15 @@ export default function ConfigTab({
                         ) : (
                           r.bank_name || "-"
                         )}
-                      </td>
-                      <td>
+                      </TableCell>
+                      <TableCell>
                         <code>{r.gl_account || "-"}</code>
-                      </td>
-                      <td>
+                      </TableCell>
+                      <TableCell>
                         <code>{r.account_number || "-"}</code>
-                      </td>
-                      <td>{r.branch || "-"}</td>
-                      <td>
+                      </TableCell>
+                      <TableCell>{r.branch || "-"}</TableCell>
+                      <TableCell>
                         <span
                           className={`apv-pill${r.valid ? " ok" : " err"}`}
                           title={r.error || undefined}
@@ -249,9 +277,9 @@ export default function ConfigTab({
                               ? "Invalid"
                               : "Not set"}
                         </span>
-                      </td>
+                      </TableCell>
                       {canEdit && (
-                        <td style={{ textAlign: "right" }}>
+                        <TableCell className="apv-cell-right">
                           {/* Cash has no house bank account to choose. */}
                           {r.is_cash ? (
                             <span className="apv-muted">-</span>
@@ -278,12 +306,12 @@ export default function ConfigTab({
                               )}
                             </div>
                           )}
-                        </td>
+                        </TableCell>
                       )}
-                    </tr>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
           </section>
         </div>

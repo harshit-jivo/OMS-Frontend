@@ -1,9 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { HiArrowLeft, HiInformationCircle, HiPencilSquare, HiPhoto, HiPlus, HiTrash, HiXMark } from "react-icons/hi2";
+import {
+  HiArrowLeft,
+  HiInformationCircle,
+  HiPencilSquare,
+  HiPhoto,
+  HiPlus,
+  HiTrash,
+  HiXMark,
+} from "react-icons/hi2";
 import { API_ORIGIN } from "../../services/api";
 import { apiDelete, apiFetch, apiUpload, resolveApiUrl } from "./useSalesInvoice";
 import "../../styles/Sales_Invoice.css";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 
 type SkuRecord = {
   id: number;
@@ -35,7 +45,8 @@ type PendingSkuItem = Partial<FinishedGoodItem> & {
   total_qty?: number | string | null;
 };
 
-type PendingSkuApiResponse = PendingSkuItem[] | { data?: PendingSkuItem[]; results?: PendingSkuItem[] };
+type PendingSkuApiResponse =
+  PendingSkuItem[] | { data?: PendingSkuItem[]; results?: PendingSkuItem[] };
 
 type SquareCropSettings = {
   zoom: number;
@@ -78,7 +89,8 @@ const getSkuImageUrl = (imagePath?: string | null) => {
 };
 
 const SKU_UPLOAD_URL = resolveApiUrl("/api/sku/upload/");
-const skuResourcePath = (itemCode: string) => resolveApiUrl(`/api/sku/${encodeURIComponent(itemCode)}/`);
+const skuResourcePath = (itemCode: string) =>
+  resolveApiUrl(`/api/sku/${encodeURIComponent(itemCode)}/`);
 
 const formatSkuDate = (value?: string) => {
   if (!value) return "-";
@@ -95,7 +107,7 @@ const formatSkuDate = (value?: string) => {
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
-export const cropImageToSquare = async (
+const cropImageToSquare = async (
   imageFile: File,
   crop: SquareCropSettings = { zoom: 1, x: 0, y: 0 },
 ): Promise<File> => {
@@ -113,8 +125,12 @@ export const cropImageToSquare = async (
     const offsetX = clamp(Number(crop.x) || 0, -100, 100) / 100;
     const offsetY = clamp(Number(crop.y) || 0, -100, 100) / 100;
     const sourceSize = Math.min(image.naturalWidth, image.naturalHeight) / zoom;
-    const sourceX = Math.floor((image.naturalWidth - sourceSize) / 2 + ((image.naturalWidth - sourceSize) / 2) * offsetX);
-    const sourceY = Math.floor((image.naturalHeight - sourceSize) / 2 + ((image.naturalHeight - sourceSize) / 2) * offsetY);
+    const sourceX = Math.floor(
+      (image.naturalWidth - sourceSize) / 2 + ((image.naturalWidth - sourceSize) / 2) * offsetX,
+    );
+    const sourceY = Math.floor(
+      (image.naturalHeight - sourceSize) / 2 + ((image.naturalHeight - sourceSize) / 2) * offsetY,
+    );
     const outputSize = Math.round(Math.min(image.naturalWidth, image.naturalHeight));
     const canvas = document.createElement("canvas");
     canvas.width = outputSize;
@@ -123,10 +139,21 @@ export const cropImageToSquare = async (
     const context = canvas.getContext("2d");
     if (!context) throw new Error("Unable to crop selected image.");
 
-    context.drawImage(image, sourceX, sourceY, sourceSize, sourceSize, 0, 0, outputSize, outputSize);
-    const outputType = imageFile.type === "image/png" || imageFile.type === "image/webp"
-      ? imageFile.type
-      : "image/jpeg";
+    context.drawImage(
+      image,
+      sourceX,
+      sourceY,
+      sourceSize,
+      sourceSize,
+      0,
+      0,
+      outputSize,
+      outputSize,
+    );
+    const outputType =
+      imageFile.type === "image/png" || imageFile.type === "image/webp"
+        ? imageFile.type
+        : "image/jpeg";
 
     const blob = await new Promise<Blob>((resolve, reject) => {
       canvas.toBlob(
@@ -153,35 +180,64 @@ async function uploadSkuImage(itemCode: string, itemName: string, imageFile: Fil
   formData.append("item_code", itemCode);
   formData.append("item_name", itemName);
   formData.append("item_image", imageFile);
-  return apiUpload<any>(SKU_UPLOAD_URL, formData, "POST");
+  return apiUpload<unknown>(SKU_UPLOAD_URL, formData, "POST");
 }
 
-async function updateSkuImage(originalItemCode: string, itemCode: string, itemName: string, imageFile?: File | null) {
+async function updateSkuImage(
+  originalItemCode: string,
+  itemCode: string,
+  itemName: string,
+  imageFile?: File | null,
+) {
   const formData = new FormData();
   formData.append("item_code", itemCode);
   formData.append("item_name", itemName);
   if (imageFile) formData.append("item_image", imageFile);
-  return apiUpload<any>(skuResourcePath(originalItemCode), formData, "PATCH");
+  return apiUpload<unknown>(skuResourcePath(originalItemCode), formData, "PATCH");
 }
 
 async function deleteSkuImage(itemCode: string) {
-  return apiDelete<any>(skuResourcePath(itemCode));
+  return apiDelete<unknown>(skuResourcePath(itemCode));
 }
+
+/** Stable empties, so the gallery and picker memos settle. */
+const NO_SKUS: SkuRecord[] = [];
+const NO_FG_ITEMS: FinishedGoodItem[] = [];
 
 export default function SkuGalleryPage() {
   const navigate = useNavigate();
-  const [skus, setSkus] = useState<SkuRecord[]>([]);
-  const [loading, setLoading] = useState(false);
+  const queryClient = useQueryClient();
+  const {
+    data: skus = NO_SKUS,
+    isPending: loading,
+    isError: skusFailed,
+  } = useQuery({
+    queryKey: ["sku", "all"],
+    queryFn: async () => unwrapSkuRecords(await apiFetch<SkuApiResponse>("/api/sku/all/")),
+  });
+  const error = skusFailed ? "Unable to load SKU images." : "";
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
   const [formError, setFormError] = useState("");
   const [success, setSuccess] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [formMode, setFormMode] = useState<"add" | "edit">("add");
   const [editingSku, setEditingSku] = useState<SkuRecord | null>(null);
-  const [fgItems, setFgItems] = useState<FinishedGoodItem[]>([]);
-  const [fgLoading, setFgLoading] = useState(false);
-  const [fgError, setFgError] = useState("");
+  /* The pending-SKU list, fetched only while the form is open. `enabled`
+     replaces `useEffect(() => { if (formOpen) loadFinishedGoods() }, [formOpen])`.
+     `fgLoading` is `enabled && isPending`, NOT `isPending` — a disabled v5 query
+     reports pending forever, which would pin the picker on "Loading…". */
+  const fgQueryResult = useQuery({
+    queryKey: ["sku", "pending"],
+    enabled: formOpen,
+    queryFn: async () =>
+      unwrapPendingSkuItems(await apiFetch<PendingSkuApiResponse>("/api/sku/pending/"))
+        .map(normalizePendingSkuItem)
+        .filter((item): item is FinishedGoodItem => Boolean(item))
+        .sort((a, b) => a.ItemName.localeCompare(b.ItemName)),
+  });
+  const fgItems = fgQueryResult.data ?? NO_FG_ITEMS;
+  const fgLoading = formOpen && fgQueryResult.isPending;
+  const fgError = fgQueryResult.isError ? "Unable to load pending SKU items." : "";
   const [fgQuery, setFgQuery] = useState("");
   const [selectedItemCode, setSelectedItemCode] = useState("");
   const [itemImage, setItemImage] = useState<File | null>(null);
@@ -205,9 +261,11 @@ export default function SkuGalleryPage() {
   const [deleteError, setDeleteError] = useState("");
   const [deleting, setDeleting] = useState(false);
   const selectedItem = fgItems.find((item) => item.ItemCode === selectedItemCode);
-  const selectedFormItem = selectedItem || (formMode === "edit" && editingSku
-    ? { ItemCode: editingSku.item_code, ItemName: editingSku.item_name }
-    : null);
+  const selectedFormItem =
+    selectedItem ||
+    (formMode === "edit" && editingSku
+      ? { ItemCode: editingSku.item_code, ItemName: editingSku.item_name }
+      : null);
   const selectedItemName = selectedFormItem?.ItemName || "";
   const existingEditImageUrl = formMode === "edit" ? getSkuImageUrl(editingSku?.item_image) : "";
   const filteredFgItems = useMemo(() => {
@@ -220,38 +278,8 @@ export default function SkuGalleryPage() {
     );
   }, [fgItems, fgQuery]);
 
-  const loadSkus = async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const data = await apiFetch<SkuApiResponse>("/api/sku/all/");
-      setSkus(unwrapSkuRecords(data));
-    } catch (err) {
-      console.error(err);
-      setError("Unable to load SKU images.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadFinishedGoods = async () => {
-    setFgLoading(true);
-    setFgError("");
-    try {
-      const data = await apiFetch<PendingSkuApiResponse>("/api/sku/pending/");
-      setFgItems(
-        unwrapPendingSkuItems(data)
-          .map(normalizePendingSkuItem)
-          .filter((item): item is FinishedGoodItem => Boolean(item))
-          .sort((a, b) => a.ItemName.localeCompare(b.ItemName)),
-      );
-    } catch (err) {
-      console.error(err);
-      setFgError("Unable to load pending SKU items.");
-    } finally {
-      setFgLoading(false);
-    }
-  };
+  /** Re-read the gallery. Shared ["sku","all"] key. */
+  const loadSkus = () => queryClient.invalidateQueries({ queryKey: ["sku", "all"] });
 
   const resetForm = () => {
     setSelectedItemCode("");
@@ -270,7 +298,6 @@ export default function SkuGalleryPage() {
   const openAddForm = () => {
     resetForm();
     setFormError("");
-    setFgError("");
     setSuccess("");
     setFormOpen(true);
   };
@@ -287,7 +314,6 @@ export default function SkuGalleryPage() {
     setCropDrag(null);
     setImageCropping(false);
     setFormError("");
-    setFgError("");
     setSuccess("");
     setFormOpen(true);
   };
@@ -298,32 +324,6 @@ export default function SkuGalleryPage() {
     setFormOpen(false);
   };
 
-  useEffect(() => {
-    let active = true;
-
-    const loadInitialSkus = async () => {
-      setLoading(true);
-      setError("");
-      try {
-        const data = await apiFetch<SkuApiResponse>("/api/sku/all/");
-        if (active) setSkus(unwrapSkuRecords(data));
-      } catch (err) {
-        console.error(err);
-        if (active) setError("Unable to load SKU images.");
-      } finally {
-        if (active) setLoading(false);
-      }
-    };
-
-    loadInitialSkus();
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (formOpen) loadFinishedGoods();
-  }, [formOpen]);
 
   useEffect(() => {
     if (!imagePreviewUrl) return undefined;
@@ -365,8 +365,12 @@ export default function SkuGalleryPage() {
   const moveCropDrag = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!cropDrag || cropDrag.pointerId !== event.pointerId) return;
     const rect = event.currentTarget.getBoundingClientRect();
-    const nextCropX = cropDrag.startCropX - ((event.clientX - cropDrag.startClientX) / Math.max(rect.width, 1)) * 200;
-    const nextCropY = cropDrag.startCropY - ((event.clientY - cropDrag.startClientY) / Math.max(rect.height, 1)) * 200;
+    const nextCropX =
+      cropDrag.startCropX -
+      ((event.clientX - cropDrag.startClientX) / Math.max(rect.width, 1)) * 200;
+    const nextCropY =
+      cropDrag.startCropY -
+      ((event.clientY - cropDrag.startClientY) / Math.max(rect.height, 1)) * 200;
     setCropX(clamp(nextCropX, -100, 100));
     setCropY(clamp(nextCropY, -100, 100));
   };
@@ -453,7 +457,12 @@ export default function SkuGalleryPage() {
         : null;
       setImageCropping(false);
       if (formMode === "edit" && editingSku) {
-        await updateSkuImage(editingSku.item_code, selectedItemCode, selectedItemName, croppedImage);
+        await updateSkuImage(
+          editingSku.item_code,
+          selectedItemCode,
+          selectedItemName,
+          croppedImage,
+        );
         setSuccess("SKU image updated successfully.");
       } else if (croppedImage) {
         await uploadSkuImage(selectedItemCode, selectedItemName, croppedImage);
@@ -477,9 +486,17 @@ export default function SkuGalleryPage() {
         <div>
           <span className="si-eyebrow">SKU Images</span>
           <h1>Item Image Gallery</h1>
-          <p>{loading ? "Loading SKU cards..." : `${skus.length} SKU ${skus.length === 1 ? "card" : "cards"}`}</p>
+          <p>
+            {loading
+              ? "Loading SKU cards..."
+              : `${skus.length} SKU ${skus.length === 1 ? "card" : "cards"}`}
+          </p>
         </div>
-        <button className="si-header-action-btn" type="button" onClick={() => navigate("/Sales_Invoice")}>
+        <button
+          className="si-header-action-btn"
+          type="button"
+          onClick={() => navigate("/Sales_Invoice")}
+        >
           <HiArrowLeft aria-hidden="true" />
           Back to Invoice
         </button>
@@ -492,11 +509,7 @@ export default function SkuGalleryPage() {
           <div className="si-loader">Loading SKU images...</div>
         ) : (
           <div className="si-sku-card-grid" aria-label="SKU image cards">
-            <button
-              className="si-sku-add-card"
-              type="button"
-              onClick={openAddForm}
-            >
+            <button className="si-sku-add-card" type="button" onClick={openAddForm}>
               <span>
                 <HiPlus aria-hidden="true" />
               </span>
@@ -557,14 +570,19 @@ export default function SkuGalleryPage() {
         )}
       </section>
 
-      {formOpen && (
-        <div className="si-modal-backdrop" role="presentation" onClick={closeSkuForm}>
-          <section
+      <Dialog
+        open={Boolean(formOpen)}
+        onOpenChange={(next) => {
+          if (!next) setFormOpen(false);
+        }}
+      >
+        {formOpen && (
+          <DialogContent
+            title="SKU form"
+            variant="bare"
+            size="auto"
+            showClose={false}
             className="si-so-modal si-sku-add-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Add SKU image"
-            onClick={(event) => event.stopPropagation()}
           >
             <header className="si-so-modal-head">
               <div>
@@ -622,7 +640,9 @@ export default function SkuGalleryPage() {
               </aside>
 
               <form className="si-sku-form si-sku-editor-form" onSubmit={saveSku}>
-                {formError && <div className="si-inline-error si-sku-form-message">{formError}</div>}
+                {formError && (
+                  <div className="si-inline-error si-sku-form-message">{formError}</div>
+                )}
                 <div className="si-sku-editor-row">
                   <section className="si-sku-image-editor" aria-label="Image crop editor">
                     <label>
@@ -641,6 +661,8 @@ export default function SkuGalleryPage() {
                           onPointerUp={endCropDrag}
                           onPointerCancel={endCropDrag}
                         >
+                          {/* cropX/cropY/cropZoom are continuous pointer-drag state
+                              with no fixed set of values — stays inline. */}
                           <img
                             src={imagePreviewUrl}
                             alt="Selected SKU crop preview"
@@ -654,7 +676,10 @@ export default function SkuGalleryPage() {
                       </>
                     ) : existingEditImageUrl ? (
                       <div className="si-sku-current-image">
-                        <img src={existingEditImageUrl} alt={editingSku?.item_name || editingSku?.item_code || "SKU image"} />
+                        <img
+                          src={existingEditImageUrl}
+                          alt={editingSku?.item_name || editingSku?.item_code || "SKU image"}
+                        />
                         <span>Current image</span>
                       </div>
                     ) : (
@@ -689,7 +714,11 @@ export default function SkuGalleryPage() {
                       >
                         Cancel
                       </button>
-                      <button className="si-btn si-btn-primary" type="submit" disabled={saving || imageCropping}>
+                      <button
+                        className="si-btn si-btn-primary"
+                        type="submit"
+                        disabled={saving || imageCropping}
+                      >
                         {saving
                           ? "Saving..."
                           : imageCropping
@@ -703,18 +732,23 @@ export default function SkuGalleryPage() {
                 </div>
               </form>
             </div>
-          </section>
-        </div>
-      )}
+          </DialogContent>
+        )}
+      </Dialog>
 
-      {detailOpen && (
-        <div className="si-modal-backdrop" role="presentation" onClick={closeSkuDetails}>
-          <section
+      <Dialog
+        open={Boolean(detailOpen)}
+        onOpenChange={(next) => {
+          if (!next) setDetailOpen(false);
+        }}
+      >
+        {detailOpen && (
+          <DialogContent
+            title="SKU detail"
+            variant="bare"
+            size="auto"
+            showClose={false}
             className="si-so-modal si-sku-detail-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-label="SKU details"
-            onClick={(event) => event.stopPropagation()}
           >
             <header className="si-so-modal-head">
               <div>
@@ -741,7 +775,10 @@ export default function SkuGalleryPage() {
               <div className="si-sku-detail-body">
                 <div className="si-sku-detail-image">
                   {getSkuImageUrl(detailSku.item_image) ? (
-                    <img src={getSkuImageUrl(detailSku.item_image)} alt={detailSku.item_name || detailSku.item_code} />
+                    <img
+                      src={getSkuImageUrl(detailSku.item_image)}
+                      alt={detailSku.item_name || detailSku.item_code}
+                    />
                   ) : (
                     <HiPhoto aria-hidden="true" />
                   )}
@@ -770,18 +807,23 @@ export default function SkuGalleryPage() {
                 </div>
               </div>
             ) : null}
-          </section>
-        </div>
-      )}
+          </DialogContent>
+        )}
+      </Dialog>
 
-      {deleteTarget && (
-        <div className="si-modal-backdrop" role="presentation" onClick={closeDeleteSku}>
-          <section
+      <Dialog
+        open={Boolean(deleteTarget)}
+        onOpenChange={(next) => {
+          if (!next) setDeleteTarget(null);
+        }}
+      >
+        {deleteTarget && (
+          <DialogContent
+            title="Delete SKU"
+            variant="bare"
+            size="auto"
+            showClose={false}
             className="si-so-modal si-sku-delete-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Delete SKU image"
-            onClick={(event) => event.stopPropagation()}
           >
             <header className="si-so-modal-head">
               <div>
@@ -803,21 +845,22 @@ export default function SkuGalleryPage() {
               {deleteError && <div className="si-inline-error">{deleteError}</div>}
               <p>Delete this SKU image mapping?</p>
               <div className="si-sku-form-actions">
-                <button
-                  className="si-btn si-btn-outline"
-                  type="button"
-                  onClick={closeDeleteSku}
-                >
+                <button className="si-btn si-btn-outline" type="button" onClick={closeDeleteSku}>
                   Cancel
                 </button>
-                <button className="si-btn si-btn-danger" type="button" disabled={deleting} onClick={confirmDeleteSku}>
+                <button
+                  className="si-btn si-btn-danger"
+                  type="button"
+                  disabled={deleting}
+                  onClick={confirmDeleteSku}
+                >
                   {deleting ? "Deleting..." : "Delete"}
                 </button>
               </div>
             </div>
-          </section>
-        </div>
-      )}
+          </DialogContent>
+        )}
+      </Dialog>
     </div>
   );
 }

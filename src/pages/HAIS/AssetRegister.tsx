@@ -1,11 +1,30 @@
-import { useCallback, useEffect, useState } from "react";
-import { HiArrowPath, HiUserPlus, HiClipboardDocumentList, HiMagnifyingGlass, HiPencil, HiPlusCircle, HiQrCode } from "react-icons/hi2";
-import { StatusBadge, ErrorAlert, apiErrorMessage } from "../../components/NicUI";
+import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  HiArrowPath,
+  HiUserPlus,
+  HiClipboardDocumentList,
+  HiMagnifyingGlass,
+  HiPencil,
+  HiPlusCircle,
+  HiQrCode,
+} from "react-icons/hi2";
+import { StatusBadge, ErrorAlert } from "../../components/NicUI";
+import { messageFrom } from "@/lib/apiError";
 import { haisService, WORKING_STATUSES, holderLabel, type Asset } from "../../services/haisService";
 import AssetHistory from "./AssetHistory";
 import AssetActionModal from "./AssetActionModal";
 import AssetDetails from "./AssetDetails";
 import "../../styles/HAIS/HAIS.css";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 
 type Props = {
   /** Parent hook to jump into the edit form for a given asset. */
@@ -30,63 +49,72 @@ function statusTone(status?: string): "ok" | "err" | "warn" | "muted" {
   }
 }
 
+/** Stable empty, so the table does not see a new array each render. */
+const NO_ASSETS: Asset[] = [];
+
 export default function AssetRegister({ onEdit, onAdd, onLookup }: Props) {
-  const [rows, setRows] = useState<Asset[]>([]);
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  /* The COMMITTED filters. Search is applied by the button / Enter / Reset, not
+     on every keystroke — the old Reset was the bug this fixes: it cleared the
+     inputs and then called a `load` still bound to the PREVIOUS filters, so the
+     boxes emptied and the table did not. */
+  const [applied, setApplied] = useState({ search: "", status: "" });
   // Asset whose history is shown in the modal (null = closed).
   const [historyAsset, setHistoryAsset] = useState<Asset | null>(null);
   // Asset + action for the Handover / Update-Config modal (null = closed).
-  const [actionState, setActionState] = useState<{ asset: Asset; mode: "handover" | "config" } | null>(null);
+  const [actionState, setActionState] = useState<{
+    asset: Asset;
+    mode: "handover" | "config";
+  } | null>(null);
   // Asset shown in the full-details popup on row click (null = closed).
   const [detailAsset, setDetailAsset] = useState<Asset | null>(null);
 
-  const load = useCallback(async () => {
-    setBusy(true);
-    setError("");
-    try {
-      const data = await haisService.list({
-        search: search.trim() || undefined,
-        working_status: statusFilter || undefined,
-      });
-      setRows(data.results ?? []);
-    } catch (err) {
-      setError(apiErrorMessage(err));
-      setRows([]);
-    } finally {
-      setBusy(false);
-    }
-  }, [search, statusFilter]);
+  const {
+    data: rows = NO_ASSETS,
+    isFetching: busy,
+    error: loadError,
+  } = useQuery({
+    queryKey: ["hais", "assets", applied],
+    queryFn: async () =>
+      (
+        await haisService.list({
+          search: applied.search.trim() || undefined,
+          working_status: applied.status || undefined,
+        })
+      ).results ?? NO_ASSETS,
+  });
+  const error = loadError ? messageFrom(loadError, "Request failed") : "";
 
-  useEffect(() => {
-    void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  /** Apply the current inputs. Called by Search, Enter and Reset. */
+  const load = async (next?: { search: string; status: string }) => {
+    setApplied(next ?? { search, status: statusFilter });
+    await queryClient.invalidateQueries({ queryKey: ["hais", "assets"] });
+  };
 
   return (
     <section className="ofs-card ofs-card--wide">
-      <div className="ofs-card-head" style={{ justifyContent: "space-between" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div className="ofs-card-head nic-head--split">
+        <div className="nic-head-title">
           <span className="ofs-card-mark" />
           <h2>Asset Register</h2>
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
+        <div className="nic-actions-inline">
           <button className="ofs-primary" onClick={() => onAdd?.()}>
-            <HiPlusCircle style={{ verticalAlign: "-3px", marginRight: 6 }} />
+            <HiPlusCircle className="nic-icon-lead" />
             Add Asset
           </button>
           <button className="nic-tab" onClick={() => onLookup?.()}>
-            <HiQrCode style={{ verticalAlign: "-3px", marginRight: 6 }} />
+            <HiQrCode className="nic-icon-lead" />
             Lookup
           </button>
         </div>
       </div>
 
       {/* Filters — search, status and both buttons on one row. */}
-      <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
-        <label className="nic-field" style={{ flex: "1 1 260px", marginBottom: 0 }}>
+      <div className="nic-filter-row--wide">
+        <label className="nic-field nic-field--grow-260">
           <span className="nic-label">Search</span>
           <input
             className="nic-input"
@@ -97,66 +125,82 @@ export default function AssetRegister({ onEdit, onAdd, onLookup }: Props) {
           />
         </label>
 
-        <label className="nic-field" style={{ flex: "0 1 180px", marginBottom: 0 }}>
+        <label className="nic-field nic-field--fixed-180">
           <span className="nic-label">Status</span>
-          <select className="nic-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+          <select
+            className="nic-select"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+          >
             <option value="">All</option>
             {WORKING_STATUSES.map((s) => (
-              <option key={s} value={s}>{s}</option>
+              <option key={s} value={s}>
+                {s}
+              </option>
             ))}
           </select>
         </label>
 
         <button className="ofs-primary" onClick={() => void load()} disabled={busy}>
-          <HiMagnifyingGlass style={{ verticalAlign: "-3px", marginRight: 6 }} />
+          <HiMagnifyingGlass className="nic-icon-lead" />
           {busy ? "Loading…" : "Search"}
         </button>
-        <button className="nic-tab" onClick={() => { setSearch(""); setStatusFilter(""); void load(); }}>
-          <HiArrowPath style={{ verticalAlign: "-3px", marginRight: 6 }} />
+        <button
+          className="nic-tab"
+          onClick={() => {
+            setSearch("");
+            setStatusFilter("");
+            void load({ search: "", status: "" });
+          }}
+        >
+          <HiArrowPath className="nic-icon-lead" />
           Reset
         </button>
       </div>
 
       <ErrorAlert>{error}</ErrorAlert>
 
-      <div className="nic-table-wrap" style={{ marginTop: 16 }}>
-        <table className="nic-table">
-          <thead>
-            <tr>
-              <th>Asset ID</th>
-              <th>Category</th>
-              <th>Current User</th>
-              <th>Handover</th>
-              <th>Company</th>
-              <th>Model No.</th>
-              <th>Last Service</th>
-              <th>Status</th>
-              <th style={{ textAlign: "right" }}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
+      <div className="nic-table-wrap nic-table-wrap--offset">
+        <Table density="compact">
+          <TableHeader>
+            <TableRow>
+              <TableHead>Asset ID</TableHead>
+              <TableHead>Category</TableHead>
+              <TableHead>Current User</TableHead>
+              <TableHead>Handover</TableHead>
+              <TableHead>Company</TableHead>
+              <TableHead>Model No.</TableHead>
+              <TableHead>Last Service</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead className="nic-num">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {rows.length === 0 ? (
-              <tr>
-                <td colSpan={9} className="nic-note" style={{ textAlign: "center", padding: 24 }}>
+              <TableRow>
+                <TableCell
+                  colSpan={9}
+                  className="nic-note nic-cell-empty"
+                >
                   {busy ? "Loading…" : "No assets found."}
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             ) : (
               rows.map((a) => (
-                <tr key={a.asset_id} className="hais-row" onClick={() => setDetailAsset(a)}>
-                  <td className="nic-mono">{a.asset_id}</td>
-                  <td>{a.asset_type || "—"}</td>
-                  <td>{holderLabel(a)}</td>
-                  <td>{a.handover_date || "—"}</td>
-                  <td>{a.company || "—"}</td>
-                  <td>{a.model_num || "—"}</td>
-                  <td>{a.date_of_last_service || "—"}</td>
-                  <td>
+                <TableRow key={a.asset_id} className="hais-row" onClick={() => setDetailAsset(a)}>
+                  <TableCell className="nic-mono">{a.asset_id}</TableCell>
+                  <TableCell>{a.asset_type || "—"}</TableCell>
+                  <TableCell>{holderLabel(a)}</TableCell>
+                  <TableCell>{a.handover_date || "—"}</TableCell>
+                  <TableCell>{a.company || "—"}</TableCell>
+                  <TableCell>{a.model_num || "—"}</TableCell>
+                  <TableCell>{a.date_of_last_service || "—"}</TableCell>
+                  <TableCell>
                     <StatusBadge tone={statusTone(a.working_status as string)}>
                       {(a.working_status as string) || "—"}
                     </StatusBadge>
-                  </td>
-                  <td onClick={(e) => e.stopPropagation()}>
+                  </TableCell>
+                  <TableCell onClick={(e) => e.stopPropagation()}>
                     <div className="hais-actions">
                       <button
                         className="hais-icon-btn hais-icon-btn--handover"
@@ -180,42 +224,45 @@ export default function AssetRegister({ onEdit, onAdd, onLookup }: Props) {
                         <HiPencil />
                       </button>
                     </div>
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))
             )}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
 
       {/* Device history modal */}
-      {historyAsset && (
-        <div
-          className="sb-modal-overlay"
-          onClick={() => setHistoryAsset(null)}
-          style={{ zIndex: 1000, position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
-        >
-          <div
+      <Dialog
+        open={Boolean(historyAsset)}
+        onOpenChange={(next) => {
+          if (!next) setHistoryAsset(null);
+        }}
+      >
+        {historyAsset && (
+          <DialogContent
+            title="Device history"
+            variant="bare"
+            size="auto"
+            showClose={false}
             className="sb-modal"
-            onClick={(e) => e.stopPropagation()}
-            style={{ width: "100%", maxWidth: 900, maxHeight: "85vh", overflowY: "auto", background: "#fff", borderRadius: 12, padding: 24, boxShadow: "0 10px 25px rgba(0,0,0,0.1)" }}
           >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-              <h3 style={{ margin: 0 }}>
+            <div className="nic-modal-head">
+              <h3 className="nic-modal-title">
                 History — <span className="nic-mono">{historyAsset.asset_id}</span>
                 {historyAsset.asset_type ? ` (${historyAsset.asset_type})` : ""}
               </h3>
               <button
                 onClick={() => setHistoryAsset(null)}
-                style={{ background: "none", border: "none", cursor: "pointer", fontSize: 24, color: "#64748b", lineHeight: 1 }}
+                className="nic-modal-close"
               >
                 &times;
               </button>
             </div>
             <AssetHistory history={historyAsset.history} />
-          </div>
-        </div>
-      )}
+          </DialogContent>
+        )}
+      </Dialog>
 
       {/* Handover / Update-Config modal */}
       {actionState && (
@@ -235,9 +282,18 @@ export default function AssetRegister({ onEdit, onAdd, onLookup }: Props) {
         <AssetDetails
           asset={detailAsset}
           onClose={() => setDetailAsset(null)}
-          onEdit={(id) => { setDetailAsset(null); onEdit?.(id); }}
-          onHandover={(a) => { setDetailAsset(null); setActionState({ asset: a, mode: "handover" }); }}
-          onHistory={(a) => { setDetailAsset(null); setHistoryAsset(a); }}
+          onEdit={(id) => {
+            setDetailAsset(null);
+            onEdit?.(id);
+          }}
+          onHandover={(a) => {
+            setDetailAsset(null);
+            setActionState({ asset: a, mode: "handover" });
+          }}
+          onHistory={(a) => {
+            setDetailAsset(null);
+            setHistoryAsset(a);
+          }}
         />
       )}
     </section>

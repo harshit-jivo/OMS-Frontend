@@ -21,65 +21,18 @@ function Toast({ message, type, onClose }: ToastProps) {
   }, [onClose]);
   
   return (
-    <div
-      style={{
-        position: "fixed",
-        bottom: "1.5rem",
-        right: "1.5rem",
-        zIndex: 9999,
-        display: "flex",
-        alignItems: "flex-start",
-        gap: "12px",
-        background: type === "error" ? "#7f1d1d" : "#14532d",
-        border: `1px solid ${type === "error" ? "#b91c1c" : "#15803d"}`,
-        padding: "14px 18px",
-        borderRadius: "10px",
-        minWidth: "280px",
-        maxWidth: "360px",
-        boxShadow: "0 8px 40px rgba(0,0,0,0.35)",
-        fontFamily: "'Inter', sans-serif",
-        animation: "toastIn .35s cubic-bezier(.22,1,.36,1)",
-      }}
-    >
-      <div style={{ flex: 1 }}>
-        <div
-          style={{
-            fontSize: ".8rem",
-            fontWeight: 700,
-            letterSpacing: ".06em",
-            textTransform: "uppercase",
-            color: type === "error" ? "#fca5a5" : "#86efac",
-            marginBottom: "4px",
-          }}
-        >
+    <div className={`lp-toast lp-toast--${type}`}>
+      <div className="lp-toast-body">
+        <div className={`lp-toast-title lp-toast-title--${type}`}>
           {type === "error" ? "Authentication Failed" : "Success"}
         </div>
 
-        <div
-          style={{
-            fontSize: ".85rem",
-            color: "rgba(255,255,255,.8)",
-            fontWeight: 400,
-            lineHeight: 1.5,
-          }}
-        >
+        <div className="lp-toast-message">
           {message}
         </div>
       </div>
 
-      <button
-        onClick={onClose}
-        style={{
-          background: "none",
-          border: "none",
-          cursor: "pointer",
-          color: "rgba(255,255,255,.4)",
-          fontSize: "14px",
-          padding: 0,
-          lineHeight: 1,
-          marginTop: "1px",
-        }}
-      >
+      <button onClick={onClose} className="lp-toast-close">
         ✕
       </button>
     </div>
@@ -219,9 +172,10 @@ const handleLogin = async () => {
             <p className="lp-subtext">Enter your credentials to continue.</p>
 
             <div className="lp-field">
-              <label className="lp-label">Username</label>
+              <label className="lp-label" htmlFor="lp-username">Username</label>
               <div className="lp-input-wrap">
                 <input
+                  id="lp-username"
                   className="lp-input"
                   type="text"
                   placeholder="username"
@@ -234,9 +188,10 @@ const handleLogin = async () => {
             </div>
 
             <div className="lp-field">
-              <label className="lp-label">Password</label>
+              <label className="lp-label" htmlFor="lp-password">Password</label>
               <div className="lp-input-wrap">
                 <input
+                  id="lp-password"
                   className="lp-input"
                   type={showPass ? "text" : "password"}
                   placeholder="••••••••"
@@ -249,6 +204,7 @@ const handleLogin = async () => {
                 <button
                   className="lp-eye-btn"
                   type="button"
+                  aria-label={showPass ? "Hide password" : "Show password"}
                   onClick={() => setShowPass((prev) => !prev)}
                 >
                   {showPass ? (

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   HiArrowPath,
   HiBuildingOffice2,
@@ -7,10 +7,13 @@ import {
   HiTruck,
   HiUsers,
 } from "react-icons/hi2";
-import { sapService } from "../services/sapService";
-import type { Address, Party } from "../services/sapService";
+import type { Address } from "../services/sapService";
+
+import { useSapAddresses, useSapParties } from "../lib/sapQueries";
 import "../styles/SapData.css";
 import "../styles/PartyDirectory.css";
+import { Badge } from "@/components/ui/badge";
+import { Table, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Parties & Addresses
@@ -59,34 +62,36 @@ const groupByCategory = (addresses: Address[]): CategoryGroup[] => {
 };
 
 export default function PartyDirectory() {
-  const [parties, setParties] = useState<Party[]>([]);
-  const [addresses, setAddresses] = useState<Address[]>([]);
-  const [search, setSearch] = useState("");
-  const [selectedCode, setSelectedCode] = useState<string>("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    loadDirectory();
-  }, []);
-
-  const loadDirectory = async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const [partyData, addressData] = await Promise.all([
-        sapService.getParties(),
-        sapService.getAddresses(),
-      ]);
-      setParties(Array.isArray(partyData) ? partyData : []);
-      setAddresses(Array.isArray(addressData) ? addressData : []);
-    } catch (err) {
-      console.log("Error loading party directory:", err);
-      setError("Unable to load parties and addresses.");
-    } finally {
-      setLoading(false);
-    }
+  // Two queries rather than one `Promise.all`, so a slow address list no longer
+  // holds the party list off the screen — and so each is cached under its own
+  // key, which the (now dead) standalone Parties and Addresses pages also used.
+  const {
+    items: parties,
+    isLoading: partiesLoading,
+    isError: partiesFailed,
+    refetch: reloadParties,
+  } = useSapParties();
+  const {
+    items: addresses,
+    isLoading: addressesLoading,
+    isError: addressesFailed,
+    refetch: reloadAddresses,
+  } = useSapAddresses();
+  const loadDirectory = () => {
+    reloadParties();
+    reloadAddresses();
   };
+  const loading = partiesLoading || addressesLoading;
+  // The message is unchanged; what changed is that it is now driven by the
+  // query's own error state rather than by a `catch` that also swallowed the
+  // reason into `console.log`.
+  const error = partiesFailed || addressesFailed ? "Unable to load parties and addresses." : "";
+
+  const [search, setSearch] = useState("");
+  /**
+   * Which party the user last clicked. NOT which one is shown — see below.
+   */
+  const [requestedCode, setRequestedCode] = useState<string>("");
 
   // card_code → that party's addresses (card_code is a plain string on both
   // tables; there is no FK, so the join happens here).
@@ -106,28 +111,42 @@ export default function PartyDirectory() {
     const needle = search.trim().toLowerCase();
     if (!needle) return parties;
     return parties.filter((party) =>
-      [party.card_code, party.card_name, party.main_group, party.category, party.state]
-        .some((field) => String(field || "").toLowerCase().includes(needle)),
+      [party.card_code, party.card_name, party.main_group, party.category, party.state].some(
+        (field) =>
+          String(field || "")
+            .toLowerCase()
+            .includes(needle),
+      ),
     );
   }, [parties, search]);
 
-  // Keep a valid selection: default to the first match, and follow the search
-  // when the selected party drops out of the filtered list.
-  useEffect(() => {
-    if (filteredParties.length === 0) {
-      if (selectedCode) setSelectedCode("");
-      return;
-    }
-    const stillVisible = filteredParties.some((party) => party.card_code === selectedCode);
-    if (!stillVisible) setSelectedCode(String(filteredParties[0].card_code || ""));
-  }, [filteredParties, selectedCode]);
+  /**
+   * The party actually on screen: the clicked one while it is still in the
+   * filtered list, otherwise the first match.
+   *
+   * This was an effect that wrote `selectedCode` whenever the filter moved
+   * underneath it — a render, then a setState, then a second render, with the
+   * first one painting a detail panel for a party no longer in the list. It
+   * only passed lint because the unanalysable fetch effect above it suppressed
+   * the rule; converting that fetch to a query is what made it visible.
+   */
+  const selectedCode = useMemo(() => {
+    if (filteredParties.length === 0) return "";
+    const stillVisible = filteredParties.some((party) => party.card_code === requestedCode);
+    return stillVisible ? requestedCode : String(filteredParties[0].card_code || "");
+  }, [filteredParties, requestedCode]);
 
   const selectedParty = useMemo(
     () => parties.find((party) => String(party.card_code || "") === selectedCode) || null,
     [parties, selectedCode],
   );
 
-  const selectedAddresses = selectedCode ? addressesByCode.get(selectedCode) || [] : [];
+  // Memoised because `groups` below depends on it: a fresh `[]` on every
+  // render regrouped the addresses on every render.
+  const selectedAddresses = useMemo(
+    () => (selectedCode ? addressesByCode.get(selectedCode) || [] : []),
+    [addressesByCode, selectedCode],
+  );
   const groups = useMemo(() => groupByCategory(selectedAddresses), [selectedAddresses]);
   const billingTotal = addresses.filter((address) => !isShipping(address)).length;
   const selectedBilling = selectedAddresses.filter((address) => !isShipping(address)).length;
@@ -164,7 +183,7 @@ export default function PartyDirectory() {
           <input
             type="text"
             className="sd-search"
-            placeholder="Search party by code, name, group, category or state…"
+            placeholder="Search party by code, name, group, category or state…" aria-label="Search party by code, name, group, category or state"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
@@ -185,7 +204,9 @@ export default function PartyDirectory() {
           <aside className="pd-list-panel">
             <div className="pd-list-head">
               Parties
-              <span className="pd-list-count">{filteredParties.length.toLocaleString("en-IN")}</span>
+              <span className="pd-list-count">
+                {filteredParties.length.toLocaleString("en-IN")}
+              </span>
             </div>
             {filteredParties.length === 0 ? (
               <p className="sd-empty">No parties match this search.</p>
@@ -199,18 +220,20 @@ export default function PartyDirectory() {
                       <button
                         type="button"
                         className={`pd-list-item ${code === selectedCode ? "pd-list-item-active" : ""}`}
-                        onClick={() => setSelectedCode(code)}
+                        onClick={() => setRequestedCode(code)}
                       >
                         <span className="pd-item-top">
                           <span className="pd-item-code">{code}</span>
-                          <span className={`pd-item-count ${count === 0 ? "pd-item-count-zero" : ""}`}>
+                          <span
+                            className={`pd-item-count ${count === 0 ? "pd-item-count-zero" : ""}`}
+                          >
                             {count}
                           </span>
                         </span>
                         <span className="pd-item-name">{dash(party.card_name)}</span>
                         <span className="pd-item-meta">
-                          {party.category && <span className="sd-badge sd-badge-info">{party.category}</span>}
-                          {party.main_group && <span className="sd-badge">{party.main_group}</span>}
+                          {party.category && <Badge tone="info">{party.category}</Badge>}
+                          {party.main_group && <Badge>{party.main_group}</Badge>}
                           {party.state && <span className="pd-item-state">{party.state}</span>}
                         </span>
                       </button>
@@ -256,7 +279,9 @@ export default function PartyDirectory() {
                       <span className="pd-stat-label">Billing</span>
                     </div>
                     <div className="pd-stat pd-stat-shipping">
-                      <span className="pd-stat-value">{selectedAddresses.length - selectedBilling}</span>
+                      <span className="pd-stat-value">
+                        {selectedAddresses.length - selectedBilling}
+                      </span>
                       <span className="pd-stat-label">Shipping</span>
                     </div>
                   </div>
@@ -277,20 +302,20 @@ export default function PartyDirectory() {
                         </span>
                       </div>
                       <div className="sd-table-scroll">
-                        <table className="sd-table">
-                          <thead>
-                            <tr>
-                              <th>Address Name</th>
-                              <th>Full Address</th>
-                              <th>City</th>
-                              <th>State</th>
-                              <th>PIN</th>
-                              <th>GST Number</th>
-                            </tr>
-                          </thead>
+                        <Table density="compact">
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Address Name</TableHead>
+                              <TableHead>Full Address</TableHead>
+                              <TableHead>City</TableHead>
+                              <TableHead>State</TableHead>
+                              <TableHead>PIN</TableHead>
+                              <TableHead>GST Number</TableHead>
+                            </TableRow>
+                          </TableHeader>
                           <AddressRows kind="billing" items={group.billing} />
                           <AddressRows kind="shipping" items={group.shipping} />
-                        </table>
+                        </Table>
                       </div>
                     </div>
                   ))

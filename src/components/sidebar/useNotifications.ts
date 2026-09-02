@@ -42,12 +42,13 @@ import {
   initNotificationSound,
   playNotificationSound,
 } from "../../utils/notificationSound";
-import { showToast } from "../NotificationToaster";
+import { showToast } from "@/lib/toastStore";
 import {
   REFRESH_EVENT_NAMES,
   extractNotifications,
   type Notification,
 } from "./notificationGrouping";
+import { getAccessToken } from "@/auth";
 
 /** Roles that are offered the browser notification prompt. */
 const PROMPTED_ROLES = ["auditor", "billing", "manager"];
@@ -175,7 +176,7 @@ export function useNotifications({
 
   // --- Real-time wiring (replaces 30s polling) ------------------------------
   useEffect(() => {
-    const token = localStorage.getItem("access");
+    const token = getAccessToken();
     if (!token) {
       window.location.href = "/";
       return;

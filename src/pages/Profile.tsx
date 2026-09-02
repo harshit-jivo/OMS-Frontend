@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
 import { webDeviceService } from "../services/webDeviceService";
+import "../styles/Profile.css";
+import { useAuth } from "@/auth";
 
 /**
  * Profile — read-only account and application information.
@@ -25,13 +27,7 @@ const formatDateTime = (value?: string | null): string => {
   }
 };
 
-const readLocal = (key: string): string => {
-  try {
-    return localStorage.getItem(key) || "";
-  } catch {
-    return "";
-  }
-};
+
 
 function InfoRow({
   label,
@@ -45,34 +41,10 @@ function InfoRow({
   action?: React.ReactNode;
 }) {
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: "16px",
-        padding: "12px 0",
-        borderBottom: "1px solid #f1f5f9",
-      }}
-    >
-      <span style={{ fontSize: "0.875rem", color: "#475569", fontWeight: 500 }}>
-        {label}
-      </span>
-      <span style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
-        <span
-          style={{
-            fontSize: "0.875rem",
-            color: "#0f172a",
-            fontWeight: 600,
-            textAlign: "right",
-            wordBreak: "break-all",
-            fontFamily: mono
-              ? "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
-              : undefined,
-          }}
-        >
-          {value || "-"}
-        </span>
+    <div className="prf-row">
+      <span className="prf-row-label">{label}</span>
+      <span className="prf-row-right">
+        <span className={`prf-row-value${mono ? " is-mono" : ""}`}>{value || "-"}</span>
         {action}
       </span>
     </div>
@@ -81,24 +53,10 @@ function InfoRow({
 
 function Card({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
   return (
-    <section
-      style={{
-        background: "#ffffff",
-        borderRadius: "14px",
-        border: "1px solid #e2e8f0",
-        padding: "20px 24px",
-        marginBottom: "20px",
-      }}
-    >
-      <header style={{ marginBottom: "8px" }}>
-        <h2 style={{ margin: 0, fontSize: "1rem", fontWeight: 700, color: "#0f172a" }}>
-          {title}
-        </h2>
-        {subtitle && (
-          <p style={{ margin: "4px 0 0", fontSize: "0.8rem", color: "#64748b" }}>
-            {subtitle}
-          </p>
-        )}
+    <section className="prf-card">
+      <header className="prf-card-head">
+        <h2 className="prf-card-title">{title}</h2>
+        {subtitle && <p className="prf-card-sub">{subtitle}</p>}
       </header>
       <div>{children}</div>
     </section>
@@ -110,8 +68,12 @@ export default function Profile() {
   const device = useMemo(() => webDeviceService.getSummary(), []);
   const [copied, setCopied] = useState(false);
 
-  const displayName = readLocal("name") || readLocal("username") || "User";
-  const roleLabel = readLocal("role_display") || readLocal("role") || "-";
+  /* From the session, not five separate `localStorage` reads. Same values —
+     `AuthProvider` loads them from the same keys — but the page no longer has
+     its own opinion about how a session is stored. */
+  const { session } = useAuth();
+  const displayName = session?.name || session?.username || "User";
+  const roleLabel = session?.roleDisplay || session?.role || "-";
 
   const copyDeviceId = async () => {
     try {
@@ -128,19 +90,17 @@ export default function Profile() {
     : device.os_name;
 
   return (
-    <div style={{ padding: "24px", maxWidth: "760px" }}>
-      <h1 style={{ margin: "0 0 4px", fontSize: "1.4rem", fontWeight: 800, color: "#0f172a" }}>
-        Profile
-      </h1>
-      <p style={{ margin: "0 0 20px", fontSize: "0.85rem", color: "#64748b" }}>
+    <div className="prf-page">
+      <h1 className="prf-title">Profile</h1>
+      <p className="prf-intro">
         Your account and the application build running in this browser.
       </p>
 
       <Card title="Account">
         <InfoRow label="Name" value={displayName} />
-        <InfoRow label="Username" value={readLocal("username")} />
+        <InfoRow label="Username" value={session?.username || ""} />
         <InfoRow label="Role" value={roleLabel} />
-        <InfoRow label="Company" value={readLocal("company_name")} />
+        <InfoRow label="Company" value={session?.companyName || ""} />
       </Card>
 
       <Card
@@ -164,17 +124,7 @@ export default function Profile() {
             <button
               type="button"
               onClick={copyDeviceId}
-              style={{
-                border: "1px solid #cbd5e1",
-                background: copied ? "#dcfce7" : "#f8fafc",
-                color: copied ? "#166534" : "#334155",
-                borderRadius: "8px",
-                padding: "4px 10px",
-                fontSize: "0.75rem",
-                fontWeight: 600,
-                cursor: "pointer",
-                whiteSpace: "nowrap",
-              }}
+              className={`prf-copy${copied ? " is-copied" : ""}`}
               aria-label="Copy device ID"
             >
               {copied ? "Copied" : "Copy"}

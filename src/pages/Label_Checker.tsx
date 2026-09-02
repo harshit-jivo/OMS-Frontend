@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import type { IconType } from "react-icons";
 import { saveAs } from "file-saver";
 import {
@@ -20,6 +21,7 @@ import {
 } from "react-icons/hi2";
 import { apiFetch, apiUpload, resolveApiUrl } from "./SalesInvoice/useSalesInvoice";
 import "../styles/Label_Checker.css";
+import { Tab, TabList } from "@/components/ui/tabs";
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Label Checker (Legal)
@@ -391,41 +393,39 @@ export default function LabelChecker() {
   const [stepIndex, setStepIndex] = useState(0);
   const [openSections, setOpenSections] = useState<Set<string>>(new Set());
   const [activeTab, setActiveTab] = useState("");
-  const [items, setItems] = useState<LegalItem[]>([]);
   const [itemId, setItemId] = useState("");
-  const [itemsLoading, setItemsLoading] = useState(false);
-  const [itemsError, setItemsError] = useState("");
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const isAnalysing = status === "analysing";
 
+  // Reset the step index the moment analysing starts — during render (via a
+  // previous-status identity guard, `useState` rather than a ref: refs can't
+  // be read during render), not as a synchronous setState in the effect
+  // below, which only needs to own the interval subscription now.
+  const [stepResetFor, setStepResetFor] = useState(status);
+  if (stepResetFor !== status) {
+    setStepResetFor(status);
+    if (status === "analysing") setStepIndex(0);
+  }
+
   useEffect(() => {
     if (status !== "analysing") return;
-    setStepIndex(0);
     const timer = setInterval(() => setStepIndex((prev) => (prev + 1) % ANALYSING_STEPS.length), 2500);
     return () => clearInterval(timer);
   }, [status]);
 
-  // Load the list of items the label can be checked against.
-  useEffect(() => {
-    let cancelled = false;
-    const loadItems = async () => {
-      setItemsLoading(true);
-      setItemsError("");
-      try {
-        const data = await apiFetch<LegalItem[]>(ITEMS_URL);
-        if (!cancelled) setItems(Array.isArray(data) ? data : []);
-      } catch (err) {
-        if (!cancelled) setItemsError(err instanceof Error ? err.message : "Could not load the item list.");
-      } finally {
-        if (!cancelled) setItemsLoading(false);
-      }
-    };
-    loadItems();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // The list of items the label can be checked against.
+  const {
+    data: items = [],
+    isPending: itemsLoading,
+    isError: itemsError,
+  } = useQuery({
+    queryKey: ["legal", "items"],
+    queryFn: async () => {
+      const data = await apiFetch<LegalItem[]>(ITEMS_URL);
+      return Array.isArray(data) ? data : [];
+    },
+  });
 
   /* ── Derived data ─────────────────────────────────────────────────────── */
 
@@ -461,10 +461,14 @@ export default function LabelChecker() {
   const availableTabs = TABS.filter((tab) => sections.some((section) => section.title === tab.section));
   const currentTab = activeTab || availableTabs[0]?.label || "";
 
-  // Open only the first section once results land.
-  useEffect(() => {
-    if (status === "done" && sections.length) setOpenSections(new Set([sections[0].title]));
-  }, [status, sections]);
+  // Open only the first section once results land — during render, guarded by
+  // the identity of `sections` (a new array only appears when a fresh result
+  // lands), rather than as a synchronous setState in an effect.
+  const [openedFor, setOpenedFor] = useState<typeof sections | null>(null);
+  if (status === "done" && sections.length && sections !== openedFor) {
+    setOpenedFor(sections);
+    setOpenSections(new Set([sections[0].title]));
+  }
 
   const fileLabel = result?.file ? baseName(result.file) : file?.name ?? "label.pdf";
   const missingNames = missingEntries.map(([key]) => prettifyKey(key)).join(", ");
@@ -628,7 +632,7 @@ export default function LabelChecker() {
             className="lc-select"
             value={itemId}
             onChange={(event) => setItemId(event.target.value)}
-            disabled={isAnalysing || itemsLoading || !!itemsError}
+            disabled={isAnalysing || itemsLoading || itemsError}
           >
             <option value="">
               {itemsLoading ? "Loading items…" : itemsError ? "Couldn’t load items" : "Select an item…"}
@@ -744,20 +748,18 @@ export default function LabelChecker() {
 
           {/* Category tabs */}
           {availableTabs.length > 0 && (
-            <div className="lc-tabs" role="tablist" aria-label="Jump to category">
+            <TabList className="lc-tabs" label="Jump to category">
               {availableTabs.map((tab) => (
-                <button
+                <Tab
                   key={tab.label}
-                  type="button"
-                  role="tab"
-                  aria-selected={currentTab === tab.label}
+                  selected={currentTab === tab.label}
                   className={`lc-tab${currentTab === tab.label ? " is-active" : ""}`}
                   onClick={() => goToTab(tab)}
                 >
                   {tab.label}
-                </button>
+                </Tab>
               ))}
-            </div>
+            </TabList>
           )}
 
           {/* Collapsible sections */}

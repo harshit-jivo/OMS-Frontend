@@ -5,6 +5,14 @@ import type {
   CollectionRow,
   SortField,
 } from "../../services/paymentsDashboardService";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 /**
  * Collection Performance — every participant in the payment workflow.
@@ -161,9 +169,9 @@ export default function CollectionTable({
       ) : (
         <>
           <div className="apv-table-wrap">
-            <table className="apv-table pdash-table">
-              <thead>
-                <tr>
+            <Table density="compact">
+              <TableHeader>
+                <TableRow>
                   <SortHeader
                     field="name"
                     label="Person"
@@ -193,12 +201,12 @@ export default function CollectionTable({
                     onSort={onSort}
                     className="pdash-num"
                   />
-                  <th aria-label="View details" />
-                </tr>
-              </thead>
-              <tbody>
+                  <TableHead aria-label="View details" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {rows.map((row) => (
-                  <tr
+                  <TableRow
                     key={row.key}
                     className="pdash-row-clickable"
                     onClick={() => onOpen(row)}
@@ -210,7 +218,7 @@ export default function CollectionTable({
                       }
                     }}
                   >
-                    <td>
+                    <TableCell>
                       <div className="pdash-person">
                         <span
                           className={`pdash-avatar kind-${row.kind}`}
@@ -233,44 +241,44 @@ export default function CollectionTable({
                           </span>
                         </span>
                       </div>
-                    </td>
+                    </TableCell>
 
-                    <td>
+                    <TableCell>
                       <BarCell
                         amount={row.received}
                         percent={row.received_percent}
                         tone="blue"
                         tooltip={`${row.name} — ${money(row.received)} across ${row.receipt_count} receipt${row.receipt_count === 1 ? "" : "s"}. Includes invoice and advance payments. Bar is ${row.received_percent}% of the highest.`}
                       />
-                    </td>
+                    </TableCell>
 
-                    <td>
+                    <TableCell>
                       <BarCell
                         amount={row.deposited}
                         percent={row.deposit_percent}
                         tone="green"
                         tooltip={`${row.name} — ${money(row.deposited)} across ${row.deposit_count} deposit${row.deposit_count === 1 ? "" : "s"}. Bar is ${row.deposit_percent}% of the highest.`}
                       />
-                    </td>
+                    </TableCell>
 
-                    <td className="pdash-num">
+                    <TableCell className="pdash-num">
                       <span
                         className="pdash-total"
                         title={`Received ${money(row.received)} + deposited ${money(row.deposited)} = ${money(row.total)}`}
                       >
                         {money(row.total)}
                       </span>
-                    </td>
+                    </TableCell>
 
-                    <td className="pdash-num">
+                    <TableCell className="pdash-num">
                       <span className="pdash-view" aria-hidden="true">
                         ›
                       </span>
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
 
           {totalPages > 1 && (

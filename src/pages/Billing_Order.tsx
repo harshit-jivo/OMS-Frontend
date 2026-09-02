@@ -1,33 +1,48 @@
 ﻿import { useState, useEffect } from "react";
-import { getOrderItemSchemeNames, getOrderItemSchemes, getOrderItemSchemeQtyText, getOrderItemTotalLtrs, ordersService } from "../services/ordersService";
+import {
+  getOrderItemSchemeNames,
+  getOrderItemSchemes,
+  getOrderItemSchemeQtyText,
+  getOrderItemTotalLtrs,
+  ordersService,
+} from "../services/ordersService";
 import type { Order, OrderItem } from "../services/ordersService";
 import { exportToExcel } from "../utils/excelExport";
 import "../styles/Billing_Order.css";
 import { useNavigate, useLocation } from "react-router-dom";
-import { sortOrders } from "../utils/orderHistory";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useOrderQueue, useOrderDetailsFetcher } from "../lib/approvalQueries";
 import { useUILabels } from "../services/uiConfig";
 import ItemSection from "../components/order-items/ItemSection";
 import PartyHeader from "../components/order-items/PartyHeader";
 import {
-  HiCheckCircle,   // Approve
-  HiXCircle,       // Reject
-  HiEye,           // View
-  HiArrowDownTray,  // Download
-  // HiEllipsisVertical  
+  HiCheckCircle, // Approve
+  HiXCircle, // Reject
+  HiEye, // View
+  HiArrowDownTray, // Download
+  // HiEllipsisVertical
   HiPencilSquare,
 } from "react-icons/hi2";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Pagination } from "@/components/ui/pagination";
+import { TableSkeleton } from "@/components/ui/skeleton";
+import { messageFrom } from "@/lib/apiError";
 
 const now = new Date();
 
 // First day of current month
-const firstDay = new Date(now.getFullYear(), now.getMonth(), 1)
-  .toISOString()
-  .split("T")[0];
+const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0];
 
 // Last day of current month
-const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 1)
-  .toISOString()
-  .split("T")[0];
+const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString().split("T")[0];
 
 const formatCreatedDateTime = (value?: string | null) => {
   if (!value) return "-";
@@ -48,13 +63,12 @@ const isRejectedBillingOrder = (order: Order) => {
 
   return statusCode === "BILLING_REJECTED" || statusText.includes("reject");
 };
-  
+
 export default function Billing_orders() {
   const { t } = useUILabels();
 
   const navigate = useNavigate();
   const location = useLocation();
-  const [orders, setOrders] = useState<Order[]>([]);
   const [showDetails, setShowDetails] = useState(false);
   const [orderDetails, setOrderDetails] = useState<Order | null>(null);
   const [selectedItems, setSelectedItems] = useState<OrderItem[]>([]);
@@ -68,54 +82,62 @@ export default function Billing_orders() {
   const [reviewStep, setReviewStep] = useState<"review" | "confirm">("review");
   const [fromDate, setFromDate] = useState(firstDay);
   const [toDate, setToDate] = useState(lastDay);
-  const [isOrdersLoading, setIsOrdersLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const fetchOrderDetails_ = useOrderDetailsFetcher();
+  // No `refetchOrders` here: the only caller was the redundant refetch that
+  // followed `removeHandledOrder`'s invalidation, and this page's failure state
+  // is a message rather than a retry button.
+  const { orders, isOrdersLoading, ordersFailed } = useOrderQueue(
+    ["orders", "queue", "billing"],
+    () => ordersService.getOrders(undefined, true) as Promise<Order[]>,
+    (order) => !isRejectedBillingOrder(order),
+  );
 
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
 
   const [showAcceptSuccess, setShowAcceptSuccess] = useState(false);
-  const [acceptSuccessInfo, setAcceptSuccessInfo] = useState<{ orderId: string; message: string; nextStatus: string } | null>(null);
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [acceptSuccessInfo, setAcceptSuccessInfo] = useState<{
+    orderId: string;
+    message: string;
+    nextStatus: string;
+  } | null>(null);
 
-  useEffect(() => {
-    fetchOrders();
-  }, []);
 
-  const fetchOrders = async () => {
-    setIsOrdersLoading(true);
+  const fetchOrderDetails = async (orderId: number) => {
     try {
-      const data: Order[] = await ordersService.getOrders(undefined, true);
-      const activeOrders = (data || []).filter((order) => !isRejectedBillingOrder(order));
-      setOrders(sortOrders(activeOrders));
+      // Shared ["order-details", id] cache: this page fetches the same order
+      // twice — once to open the panel, again inside the Excel export.
+      const data = await fetchOrderDetails_(orderId);
+
+      setOrderDetails(data);
+      setSelectedItems(data.items || []);
+      setShowDetails(true);
     } catch (error) {
-      console.log("Error fetching orders:", error);
-    } finally {
-      setIsOrdersLoading(false);
+      console.log("Error fetching order details:", error);
     }
   };
-  console.log("All Orders:", orders);
 
+  // Declared ABOVE the effect that calls it, not below. It read the other way
+  // round for as long as the file has existed, which works at runtime — the
+  // const is assigned during render, the effect runs after — but it is a
+  // use-before-declare to any static analysis, and it is what surfaces as
+  // `react-hooks/immutability` the moment this component becomes analysable.
   useEffect(() => {
     if (location.state?.openOrderId) {
       fetchOrderDetails(location.state.openOrderId);
       navigate(location.pathname, { replace: true, state: {} });
     }
+    // `fetchOrderDetails` is re-created every render and opens the detail
+    // panel; listing it would re-open the panel on every render. This effect is
+    // a one-shot handoff from a navigation, keyed on the incoming id.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state?.openOrderId, location.pathname, navigate]);
 
-   const fetchOrderDetails = async (orderId: number) => {
-  try {
-    const data = await ordersService.getOrderDetails(orderId);
-
-    setOrderDetails(data);
-    setSelectedItems(data.items || []);
-    setShowDetails(true);
-  } catch (error) {
-    console.log("Error fetching order details:", error);
-  }
-};
-
   const removeHandledOrder = (orderId: number) => {
-    setOrders((current) => current.filter((order) => order.id !== orderId));
+    // Was a local `setOrders` filter. The `fetchOrders()` that follows every
+    // caller made it a double removal; one invalidation does both.
+    void queryClient.invalidateQueries({ queryKey: ["orders", "queue", "billing"] });
     setSelectedItems([]);
     if (orderDetails?.id === orderId) {
       setOrderDetails(null);
@@ -149,39 +171,58 @@ export default function Billing_orders() {
     setReviewStep("confirm");
   };
 
-  // Step 3 — user confirmed: call the API for the chosen action.
-  const submitReview = async () => {
+  /*
+   * Step 3 — the write itself.
+   *
+   * The hand-rolled version owned an `isProcessing` flag and reset it in a
+   * `finally`. `useMutation` owns that flag: `isPending` is true for exactly
+   * the span of the request, and it cannot be left stuck on by a path that
+   * returns without reaching the reset. The buttons keep reading one boolean,
+   * so nothing downstream changed.
+   *
+   * The old body also called `refetchOrders()` right after
+   * `removeHandledOrder`, which already invalidates this queue — two round
+   * trips for one removal. Only the invalidation remains.
+   */
+  const reviewMutation = useMutation({
+    mutationFn: async (vars: { order: Order; action: "approve" | "reject"; reason: string }) => {
+      if (vars.action === "approve") {
+        return await ordersService.UpdateStatus(vars.order.id, 10, vars.reason || undefined);
+      }
+      await ordersService.UpdateStatus(vars.order.id, 8, vars.reason);
+      return null;
+    },
+    onSuccess: (response, vars) => {
+      if (vars.action === "approve") {
+        setAcceptSuccessInfo({
+          orderId: vars.order.order_number,
+          message: response?.message || "Order accepted successfully",
+          nextStatus: response?.status || "-",
+        });
+        removeHandledOrder(vars.order.id);
+        setShowAcceptSuccess(true);
+      } else {
+        alert("Order Rejected");
+        removeHandledOrder(vars.order.id);
+      }
+      closeReview();
+      window.dispatchEvent(new Event("refresh-notifications"));
+    },
+    onError: (error) => {
+      alert("Error: " + messageFrom(error, "Unknown error"));
+    },
+  });
+
+  const isProcessing = reviewMutation.isPending;
+
+  const submitReview = () => {
     if (!reviewOrder || !reviewAction) return;
-    const order = reviewOrder;
     const reason = reviewReason.trim();
     if (reviewAction === "reject" && !reason) {
       alert("Reason required");
       return;
     }
-    setIsProcessing(true);
-    try {
-      if (reviewAction === "approve") {
-        const response = await ordersService.UpdateStatus(order.id, 10, reason || undefined);
-        setAcceptSuccessInfo({
-          orderId: order.order_number,
-          message: response.message || "Order accepted successfully",
-          nextStatus: response.status || "-",
-        });
-        removeHandledOrder(order.id);
-        setShowAcceptSuccess(true);
-      } else {
-        await ordersService.UpdateStatus(order.id, 8, reason);
-        alert("Order Rejected");
-        removeHandledOrder(order.id);
-      }
-      closeReview();
-      fetchOrders();
-      window.dispatchEvent(new Event('refresh-notifications'));
-    } catch (error: any) {
-      alert("Error: " + (error?.response?.data?.message || "Unknown error"));
-    } finally {
-      setIsProcessing(false);
-    }
+    reviewMutation.mutate({ order: reviewOrder, action: reviewAction, reason });
   };
 
   // const pendingApproval = async (orderId: number) => {
@@ -190,8 +231,8 @@ export default function Billing_orders() {
   //     alert("Status Updated");
   //     setActiveOrderId(null);
   //     fetchOrders();
-  //   } catch (error: any) {
-  //     alert("Error: " + (error?.response?.data?.message || "Unknown error"));
+  //   } catch (error) {
+  //     alert("Error: " + (messageFrom(error, "Unknown error")));
   //   }
   // };
 
@@ -201,8 +242,8 @@ export default function Billing_orders() {
   //     alert("Status Updated");
   //     setActiveOrderId(null);
   //     fetchOrders();
-  //   } catch (error: any) {
-  //     alert("Error: " + (error?.response?.data?.message || "Unknown error"));
+  //   } catch (error) {
+  //     alert("Error: " + (messageFrom(error, "Unknown error")));
   //   }
   // };
 
@@ -213,7 +254,6 @@ export default function Billing_orders() {
       const orderDate = new Date(order.created_at);
       const from = new Date(`${fromDate}T00:00:00.000`);
       const to = new Date(`${toDate}T23:59:59.999`);
-
 
       matchDate = orderDate >= from && orderDate <= to;
     }
@@ -242,17 +282,17 @@ export default function Billing_orders() {
         "Card Code": full.card_code,
         "Card Name": full.card_name,
         "Delivery Date": full.delivery_date,
-        "Status": full.status_display,
+        Status: full.status_display,
         "Bill To": full.bill_to_address,
         "Ship To": full.ship_to_address,
         "Item Code": item.item_code,
         "Item Name": item.item_name,
-        "Scheme": getOrderItemSchemeNames(item),
+        Scheme: getOrderItemSchemeNames(item),
         "Scheme Qty": getOrderItemSchemeQtyText(item),
         // "Scheme Ltrs": (item as any).scheme_ltrs || "",
-        "Qty": item.qty,
-        "Boxes": item.boxes,
-        "Liters": item.ltrs,
+        Qty: item.qty,
+        Boxes: item.boxes,
+        Liters: item.ltrs,
         "Total Ltrs": getOrderItemTotalLtrs(item),
         "Price List (Basic)": item.price_list_basic,
         "Basic Price": item.basic_price,
@@ -264,7 +304,7 @@ export default function Billing_orders() {
         "Card Code": full.card_code,
         "Card Name": full.card_name,
         "Delivery Date": full.delivery_date,
-        "Status": full.status_display,
+        Status: full.status_display,
         "Bill To": full.bill_to_address,
         "Ship To": full.ship_to_address,
         "Price List (Basic)": "",
@@ -291,7 +331,6 @@ export default function Billing_orders() {
 
   return (
     <div className="bo-page">
-
       {/* â”€â”€ LIST VIEW â”€â”€ */}
       {!showDetails && (
         <>
@@ -305,118 +344,152 @@ export default function Billing_orders() {
           <div className="bo-toolbar">
             <div className="bo-filter-head">
               <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                <path d="M3 5h14M6 10h8M9 15h2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                <path
+                  d="M3 5h14M6 10h8M9 15h2"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                />
               </svg>
               <span>Filters</span>
             </div>
             <div className="bo-search-wrap">
               <div className="bo-date-wrap">
                 <label className="bo-date-label">From</label>
-                <input type="date" value={fromDate} onChange={(e) => { setFromDate(e.target.value); setCurrentPage(1); }} className="bo-date-input" />
+                <input aria-label="From"
+                  type="date"
+                  value={fromDate}
+                  onChange={(e) => {
+                    setFromDate(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="bo-date-input"
+                />
               </div>
               <div className="bo-date-wrap">
                 <label className="bo-date-label">To</label>
-                <input type="date" value={toDate} onChange={(e) => { setToDate(e.target.value); setCurrentPage(1); }} className="bo-date-input" />
+                <input aria-label="To"
+                  type="date"
+                  value={toDate}
+                  onChange={(e) => {
+                    setToDate(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="bo-date-input"
+                />
               </div>
               {(fromDate || toDate) && (
-                <button type="button" className="bo-filter-clear" onClick={() => { setFromDate(""); setToDate(""); setCurrentPage(1); }}>Clear</button>
+                <button
+                  type="button"
+                  className="bo-filter-clear"
+                  onClick={() => {
+                    setFromDate("");
+                    setToDate("");
+                    setCurrentPage(1);
+                  }}
+                >
+                  Clear
+                </button>
               )}
             </div>
             <span className="bo-count">Total: {filteredOrders.length}</span>
           </div>
 
           <div className="bo-table-wrap">
-            <table className="bo-table">
-              <thead>
-                <tr>
-                  <th>Order ID</th>
-                  <th>Card Name</th>
-                  <th>Items</th>
-                  <th>FOC</th>
-                  <th>Created At</th>
-                  <th>Delivery Date</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table density="compact">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Order ID</TableHead>
+                  <TableHead>Card Name</TableHead>
+                  <TableHead>Items</TableHead>
+                  <TableHead>FOC</TableHead>
+                  <TableHead>Created At</TableHead>
+                  <TableHead>Delivery Date</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {isOrdersLoading ? (
-                  <tr>
-                    <td colSpan={7}>
-                      <div className="order-loading-state">
-                        <span className="order-loading-spinner" />
-                        <span>Loading orders...</span>
-                      </div>
-                    </td>
-                  </tr>
+                  <TableRow>
+                    <TableCell colSpan={7}>
+                      <TableSkeleton columns={8} label="Loading orders" />
+                    </TableCell>
+                  </TableRow>
                 ) : filteredOrders.length > 0 ? (
-                  filteredOrders.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((order) => (
-                    <tr key={order.id} className={order.is_foc ? "bo-foc-row" : ""}>
-                      <td className="ao-cell-id">{order.order_number}</td>
-                      <td className="ao-cell-name">{order.card_name}</td>
-                      <td>{order.items_count ?? order.items?.length ?? 0}</td>
-                      <td>
-                        {order.is_foc ? (
-                          <span className="bo-foc-badge">FOC</span>
-                        ) : (
-                          <span className="bo-foc-empty">-</span>
-                        )}
-                      </td>
-                      <td>{formatCreatedDateTime(order.created_at)}</td>
-                      <td>{order.delivery_date}</td>
-                      <td>
-                        <div className="ao-row-actions">
-                          <button
-                            className="ao-btn-icon view"
-                            onClick={() => fetchOrderDetails(order.id)}
-                            title="View Order"
-                          >
-                            <HiEye size={20} />
-                          </button>
-                          <button
-                            className="ao-row-btn ao-row-approve"
-                            onClick={() => openReview(order, "approve")}
-                          >
-                            <HiCheckCircle size={18} /> Approve
-                          </button>
-                          <button
-                            className="ao-row-btn ao-row-reject"
-                            onClick={() => openReview(order, "reject")}
-                          >
-                            <HiXCircle size={18} /> Reject
-                          </button>
-                          <button
-                            className="ao-btn-icon edit"
-                            onClick={() => handleEditOrder(order)}
-                            title="Edit Order"
-                          >
-                            <HiPencilSquare size={20} />
-                          </button>
-                          <button
-                            className="ao-btn-icon download"
-                            onClick={() => downloadExcel(order)}
-                            title="Download Order"
-                          >
-                            <HiArrowDownTray size={20} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
+                  filteredOrders
+                    .slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
+                    .map((order) => (
+                      <TableRow key={order.id} className={order.is_foc ? "bo-foc-row" : ""}>
+                        <TableCell className="ao-cell-id">{order.order_number}</TableCell>
+                        <TableCell className="ao-cell-name">{order.card_name}</TableCell>
+                        <TableCell>{order.items_count ?? order.items?.length ?? 0}</TableCell>
+                        <TableCell>
+                          {order.is_foc ? (
+                            <span className="bo-foc-badge">FOC</span>
+                          ) : (
+                            <span className="bo-foc-empty">-</span>
+                          )}
+                        </TableCell>
+                        <TableCell>{formatCreatedDateTime(order.created_at)}</TableCell>
+                        <TableCell>{order.delivery_date}</TableCell>
+                        <TableCell>
+                          <div className="ao-row-actions">
+                            <button
+                              className="ao-btn-icon view"
+                              onClick={() => fetchOrderDetails(order.id)}
+                              title="View Order"
+                            >
+                              <HiEye size={20} />
+                            </button>
+                            <button
+                              className="ao-row-btn ao-row-approve"
+                              onClick={() => openReview(order, "approve")}
+                            >
+                              <HiCheckCircle size={18} /> Approve
+                            </button>
+                            <button
+                              className="ao-row-btn ao-row-reject"
+                              onClick={() => openReview(order, "reject")}
+                            >
+                              <HiXCircle size={18} /> Reject
+                            </button>
+                            <button
+                              className="ao-btn-icon edit"
+                              onClick={() => handleEditOrder(order)}
+                              title="Edit Order"
+                            >
+                              <HiPencilSquare size={20} />
+                            </button>
+                            <button
+                              className="ao-btn-icon download"
+                              onClick={() => downloadExcel(order)}
+                              title="Download Order"
+                            >
+                              <HiArrowDownTray size={20} />
+                            </button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))
                 ) : (
-                  <tr>
-                    <td colSpan={7} className="bo-empty">No orders found</td>
-                  </tr>
+                  <TableRow>
+                    <TableCell colSpan={7} className="bo-empty">
+                      {ordersFailed
+                        ? "Could not load orders. Refresh to try again."
+                        : "No orders found"}
+                    </TableCell>
+                  </TableRow>
                 )}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
 
           {filteredOrders.length > itemsPerPage && (
-            <div className="bo-pagination">
-              <button className="bo-pg-btn" disabled={currentPage === 1} onClick={() => setCurrentPage((p) => p - 1)}>Prev</button>
-              <span className="bo-pg-info">{currentPage} / {Math.ceil(filteredOrders.length / itemsPerPage)}</span>
-              <button className="bo-pg-btn" disabled={currentPage === Math.ceil(filteredOrders.length / itemsPerPage)} onClick={() => setCurrentPage((p) => p + 1)}>Next</button>
-            </div>
+            <Pagination
+              page={currentPage}
+              totalPages={Math.ceil(filteredOrders.length / itemsPerPage)}
+              onPageChange={setCurrentPage}
+            />
           )}
         </>
       )}
@@ -426,12 +499,28 @@ export default function Billing_orders() {
         <div className="bo-detail">
           <div className="bo-d-nav">
             <button className="bo-d-back" onClick={() => setShowDetails(false)}>
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M10 13L5 8l5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path
+                  d="M10 13L5 8l5-5"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
               Back to Orders
             </button>
             <div className="bo-d-actions">
               <button className="bo-d-export" onClick={() => downloadExcel(orderDetails)}>
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1v8m0 0L4 6.5M7 9l3-2.5M2.5 12h9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <path
+                    d="M7 1v8m0 0L4 6.5M7 9l3-2.5M2.5 12h9"
+                    stroke="currentColor"
+                    strokeWidth="1.4"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
                 Export Excel
               </button>
               <button
@@ -458,62 +547,170 @@ export default function Billing_orders() {
             </div>
             <div className="bo-d-items-scroll">
               <ItemSection items={selectedItems} />
-              <table className="bo-d-tbl">
-                <thead><tr><th>#</th><th>Item Code</th>
-                  <th style={{ minWidth: '250px' }}>Item Name</th>
-                  <th>Category</th><th>Scheme</th><th>Scheme Qty</th>
-                  <th>Qty</th><th>Pcs</th><th>Boxes</th><th>Ltrs</th>
-                  {/* <th>Scheme Ltrs</th> */}
-                  <th>Total Ltrs</th><th>{t("price_list", "Price List (Basic)")}</th><th>Basic Price</th><th>Tax %</th><th style={{ textAlign: 'right' }}>Amount</th></tr></thead>
-                <tbody>
-                  {selectedItems.length > 0 ? selectedItems.map((item, i) => (
-                    <tr key={i}>
-                      <td style={{ textAlign: 'center', color: '#94a3b8' }}>{i + 1}</td>
-                      <td><span className="bo-d-item-code">{item.item_code}</span></td>
-                      <td style={{ fontWeight: 500, color: '#0f172a', minWidth: '250px' }}>{item.item_name}</td>
-                      <td>{item.category}</td>
-                      <td colSpan={2}>{getOrderItemSchemes(item).length > 0 ? <div className="order-scheme-stack" aria-label="Applied schemes">{getOrderItemSchemes(item).map((scheme, schemeIndex) => <div className="order-scheme-chip" key={`${item.item_code}-scheme-${schemeIndex}`}><span className="order-scheme-name">{scheme.name || "-"}</span><span className="order-scheme-qty">Qty {scheme.qty || 0}</span></div>)}</div> : <span className="order-scheme-empty">No scheme</span>}</td>
-                      <td style={{ textAlign: 'center' }}>{item.qty}</td>
-                      <td style={{ textAlign: 'center' }}>{item.pcs}</td>
-                      <td style={{ textAlign: 'center' }}>{Number(item.boxes).toFixed(2)}</td>
-                      <td style={{ textAlign: 'center' }}>{item.ltrs}</td>
-                      {/* <td style={{textAlign:'center'}}>{item.scheme_name ? ((item as any).scheme_ltrs || 0) : "-"}</td> */}
-                      <td style={{ textAlign: 'center' }}>{getOrderItemTotalLtrs(item).toFixed(2)}</td>
-                      <td style={{ textAlign: 'right' }}>{Number(item.price_list_basic).toFixed(2)}</td>
-                      <td style={{ textAlign: 'right' }}>{Number(item.basic_price).toFixed(2)}</td>
-                      <td style={{ textAlign: 'center' }}>{Number(item.tax_rate).toFixed(2)}</td>
-                      <td style={{ textAlign: 'right', fontWeight: 600, color: '#0f172a' }}>{Number(item.total).toFixed(2)}</td>
-                    </tr>
-                  )) : (<tr><td colSpan={14} className="bo-empty">No items found</td></tr>)}
-                </tbody>
-              </table>
+              <Table density="compact">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>#</TableHead>
+                    <TableHead>Item Code</TableHead>
+                    <TableHead className="app-col-item">Item Name</TableHead>
+                    <TableHead>Category</TableHead>
+                    <TableHead>Scheme</TableHead>
+                    <TableHead>Scheme Qty</TableHead>
+                    <TableHead>Qty</TableHead>
+                    <TableHead>Pcs</TableHead>
+                    <TableHead>Boxes</TableHead>
+                    <TableHead>Ltrs</TableHead>
+                    {/* <TableHead>Scheme Ltrs</TableHead> */}
+                    <TableHead>Total Ltrs</TableHead>
+                    <TableHead>{t("price_list", "Price List (Basic)")}</TableHead>
+                    <TableHead>Basic Price</TableHead>
+                    <TableHead>Tax %</TableHead>
+                    <TableHead className="text-right">Amount</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {selectedItems.length > 0 ? (
+                    selectedItems.map((item, i) => (
+                      <TableRow key={i}>
+                        <TableCell className="text-center app-cell-index">
+                          {i + 1}
+                        </TableCell>
+                        <TableCell>
+                          <span className="bo-d-item-code">{item.item_code}</span>
+                        </TableCell>
+                        <TableCell className="app-col-item app-cell-name">
+                          {item.item_name}
+                        </TableCell>
+                        <TableCell>{item.category}</TableCell>
+                        <TableCell colSpan={2}>
+                          {getOrderItemSchemes(item).length > 0 ? (
+                            <div className="order-scheme-stack" aria-label="Applied schemes">
+                              {getOrderItemSchemes(item).map((scheme, schemeIndex) => (
+                                <div
+                                  className="order-scheme-chip"
+                                  key={`${item.item_code}-scheme-${schemeIndex}`}
+                                >
+                                  <span className="order-scheme-name">{scheme.name || "-"}</span>
+                                  <span className="order-scheme-qty">Qty {scheme.qty || 0}</span>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="order-scheme-empty">No scheme</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-center">{item.qty}</TableCell>
+                        <TableCell className="text-center">{item.pcs}</TableCell>
+                        <TableCell className="text-center">
+                          {Number(item.boxes).toFixed(2)}
+                        </TableCell>
+                        <TableCell className="text-center">{item.ltrs}</TableCell>
+                        {/* <TableCell style={{textAlign:'center'}}>{item.scheme_name ? ((item as any).scheme_ltrs || 0) : "-"}</TableCell> */}
+                        <TableCell className="text-center">
+                          {getOrderItemTotalLtrs(item).toFixed(2)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {Number(item.price_list_basic).toFixed(2)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {Number(item.basic_price).toFixed(2)}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          {Number(item.tax_rate).toFixed(2)}
+                        </TableCell>
+                        <TableCell
+                          className="text-right app-cell-total"
+                        >
+                          {Number(item.total).toFixed(2)}
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  ) : (
+                    <TableRow>
+                      <TableCell colSpan={14} className="bo-empty">
+                        No items found
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
             </div>
           </div>
 
           <div className="bo-d-bottombar">
-          <div className="bo-d-summary">
-            <div className="bo-d-sum-row"><span className="bo-d-sum-label">Total Ltrs</span><span className="bo-d-sum-val">{selectedItems.reduce((s, i) => s + getOrderItemTotalLtrs(i), 0).toFixed(2)}</span></div>
-            <div className="bo-d-sum-row"><span className="bo-d-sum-label">Subtotal</span><span className="bo-d-sum-val">{selectedItems.reduce((s, i) => s + Number(i.total || 0), 0).toFixed(2)}</span></div>
-            <div className="bo-d-sum-row"><span className="bo-d-sum-label">Tax</span><span className="bo-d-sum-val">{selectedItems.reduce((s, i) => s + (Number(i.total || 0) * Number(i.tax_rate || 0) / 100), 0).toFixed(2)}</span></div>
-            {[
-              { label: "Commodity", value: orderDetails.vareity_cost?.commodity_price, cls: "vc-commodity" },
-              { label: "Other", value: orderDetails.vareity_cost?.other_total, cls: "vc-other" },
-              { label: "Premium", value: orderDetails.vareity_cost?.premium_total, cls: "vc-premium" },
-            ]
-              .filter((entry) => Number(entry.value) > 0)
-              .map((entry) => (
-                <div className="bo-d-sum-row" key={entry.label}><span className={`bo-d-sum-label vc-pill ${entry.cls}`}>{entry.label}</span><span className="bo-d-sum-val">{Number(entry.value).toFixed(2)}</span></div>
-              ))}
-            <div className="bo-d-sum-row bo-d-sum-grand"><span className="bo-d-sum-label">Grand Total</span><span className="bo-d-sum-val">{(selectedItems.reduce((s, i) => s + Number(i.total || 0), 0) + selectedItems.reduce((s, i) => s + (Number(i.total || 0) * Number(i.tax_rate || 0) / 100), 0)).toFixed(2)}</span></div>
-          </div>
+            <div className="bo-d-summary">
+              <div className="bo-d-sum-row">
+                <span className="bo-d-sum-label">Total Ltrs</span>
+                <span className="bo-d-sum-val">
+                  {selectedItems.reduce((s, i) => s + getOrderItemTotalLtrs(i), 0).toFixed(2)}
+                </span>
+              </div>
+              <div className="bo-d-sum-row">
+                <span className="bo-d-sum-label">Subtotal</span>
+                <span className="bo-d-sum-val">
+                  {selectedItems.reduce((s, i) => s + Number(i.total || 0), 0).toFixed(2)}
+                </span>
+              </div>
+              <div className="bo-d-sum-row">
+                <span className="bo-d-sum-label">Tax</span>
+                <span className="bo-d-sum-val">
+                  {selectedItems
+                    .reduce((s, i) => s + (Number(i.total || 0) * Number(i.tax_rate || 0)) / 100, 0)
+                    .toFixed(2)}
+                </span>
+              </div>
+              {[
+                {
+                  label: "Commodity",
+                  value: orderDetails.vareity_cost?.commodity_price,
+                  cls: "vc-commodity",
+                },
+                { label: "Other", value: orderDetails.vareity_cost?.other_total, cls: "vc-other" },
+                {
+                  label: "Premium",
+                  value: orderDetails.vareity_cost?.premium_total,
+                  cls: "vc-premium",
+                },
+              ]
+                .filter((entry) => Number(entry.value) > 0)
+                .map((entry) => (
+                  <div className="bo-d-sum-row" key={entry.label}>
+                    <span className={`bo-d-sum-label vc-pill ${entry.cls}`}>{entry.label}</span>
+                    <span className="bo-d-sum-val">{Number(entry.value).toFixed(2)}</span>
+                  </div>
+                ))}
+              <div className="bo-d-sum-row bo-d-sum-grand">
+                <span className="bo-d-sum-label">Grand Total</span>
+                <span className="bo-d-sum-val">
+                  {(
+                    selectedItems.reduce((s, i) => s + Number(i.total || 0), 0) +
+                    selectedItems.reduce(
+                      (s, i) => s + (Number(i.total || 0) * Number(i.tax_rate || 0)) / 100,
+                      0,
+                    )
+                  ).toFixed(2)}
+                </span>
+              </div>
+            </div>
           </div>
         </div>
       )}
 
       {/* â”€â”€ STEP 1: REVIEW MODAL â”€â”€ */}
-      {reviewOrder && reviewAction && reviewStep === "review" && (
-        <div className="bo-modal-overlay">
-          <div className="bo-modal">
+      <Dialog
+        open={Boolean(reviewOrder && reviewAction && reviewStep === "review")}
+        onOpenChange={(next) => {
+          if (!next) closeReview();
+        }}
+      >
+        {reviewOrder && reviewAction && reviewStep === "review" && (
+          <DialogContent
+            title="Review order"
+            variant="bare"
+            size="auto"
+            showClose={false}
+            className="bo-modal"
+          >
             <div className="bo-modal-title">
               {reviewAction === "approve" ? "Review & Approve" : "Review & Reject"}
             </div>
@@ -534,7 +731,8 @@ export default function Billing_orders() {
               <div className="bo-review-row">
                 <span>Amount</span>
                 <strong>
-                  ₹{Number(reviewOrder.total_amount || 0).toLocaleString("en-IN", {
+                  ₹
+                  {Number(reviewOrder.total_amount || 0).toLocaleString("en-IN", {
                     minimumFractionDigits: 2,
                     maximumFractionDigits: 2,
                   })}
@@ -549,21 +747,38 @@ export default function Billing_orders() {
               className="bo-modal-textarea"
               value={reviewReason}
               onChange={(e) => setReviewReason(e.target.value)}
-              placeholder={reviewAction === "approve" ? "Add a reason (optional)..." : "Type reason..."}
+              placeholder={
+                reviewAction === "approve" ? "Add a reason (optional)..." : "Type reason..."
+              }
               rows={3}
             />
             <div className="bo-modal-actions">
-              <button className="bo-btn-approve" onClick={proceedToConfirm}>Continue</button>
-              <button className="bo-btn-cancel" onClick={closeReview}>Cancel</button>
+              <button className="bo-btn-approve" onClick={proceedToConfirm}>
+                Continue
+              </button>
+              <button className="bo-btn-cancel" onClick={closeReview}>
+                Cancel
+              </button>
             </div>
-          </div>
-        </div>
-      )}
+          </DialogContent>
+        )}
+      </Dialog>
 
       {/* â”€â”€ STEP 2: CONFIRM MODAL â”€â”€ */}
-      {reviewOrder && reviewAction && reviewStep === "confirm" && (
-        <div className="bo-modal-overlay">
-          <div className="bo-modal">
+      <Dialog
+        open={Boolean(reviewOrder && reviewAction && reviewStep === "confirm")}
+        onOpenChange={(next) => {
+          if (!next) closeReview();
+        }}
+      >
+        {reviewOrder && reviewAction && reviewStep === "confirm" && (
+          <DialogContent
+            title="Confirm decision"
+            variant="bare"
+            size="auto"
+            showClose={false}
+            className="bo-modal"
+          >
             <div className="bo-modal-title">
               {reviewAction === "approve" ? "Confirm Approval" : "Confirm Rejection"}
             </div>
@@ -582,26 +797,55 @@ export default function Billing_orders() {
                 Back
               </button>
             </div>
-          </div>
-        </div>
-      )}
+          </DialogContent>
+        )}
+      </Dialog>
 
       {/* â”€â”€ LOADING OVERLAY â”€â”€ */}
-      {isProcessing && (
-        <div className="bo-modal-overlay">
-          <div className="bo-modal bo-modal-loading">
-            <div className="bo-spinner" />
-            <p className="bo-loading-text">Processing order...</p>
-          </div>
-        </div>
-      )}
+      {/* See Auditor_Order for why a busy overlay belongs on the primitive:
+          it must not close, and it must stop the page behind being reached. */}
+      <Dialog open={isProcessing}>
+        {isProcessing && (
+          <DialogContent
+            title="Processing order"
+            variant="bare"
+            size="auto"
+            showClose={false}
+            overlayClassName="bo-modal-overlay"
+            className="bo-modal bo-modal-loading"
+            onEscapeKeyDown={(event) => event.preventDefault()}
+            onPointerDownOutside={(event) => event.preventDefault()}
+            onInteractOutside={(event) => event.preventDefault()}
+          >
+            <div role="status" aria-live="polite" aria-busy="true">
+              {/* The spinner was a bare animated div: invisible to assistive
+                  tech, which is why the status wrapper is new here. */}
+              <div className="bo-spinner" aria-hidden="true" />
+              <p className="bo-loading-text">Processing order...</p>
+            </div>
+          </DialogContent>
+        )}
+      </Dialog>
 
-      {showAcceptSuccess && acceptSuccessInfo && (
-        <div className="bo-modal-overlay">
-          <div className="bo-modal bo-modal-success">
+      <Dialog
+        open={Boolean(showAcceptSuccess && acceptSuccessInfo)}
+        onOpenChange={(next) => {
+          if (!next) setShowAcceptSuccess(false);
+        }}
+      >
+        {showAcceptSuccess && acceptSuccessInfo && (
+          <DialogContent
+            title="Accepted"
+            variant="bare"
+            size="auto"
+            showClose={false}
+            className="bo-modal bo-modal-success"
+          >
             <div className="bo-success-icon" aria-hidden="true" />
             <div className="bo-modal-title">
-              {acceptSuccessInfo.nextStatus.toLowerCase().includes("completed") ? "Order Completed" : "Order Accepted"}
+              {acceptSuccessInfo.nextStatus.toLowerCase().includes("completed")
+                ? "Order Completed"
+                : "Order Accepted"}
             </div>
             <div className="bo-success-info">
               <div className="bo-success-row">
@@ -628,12 +872,9 @@ export default function Billing_orders() {
                 OK
               </button>
             </div>
-          </div>
-        </div>
-      )}
-
+          </DialogContent>
+        )}
+      </Dialog>
     </div>
   );
 }
-
-

@@ -1,7 +1,39 @@
+/**
+ * DEAD FILE — nothing imports this, and the route it belonged to is gone.
+ *
+ * The quotation flow was closed on 2026-08-27. `App.tsx` has both the import
+ * (L67) and the `/Sales_Quotation` <Route> (L457-465) commented out, the
+ * sidebar entry is commented out (Sidebar.tsx:400-410), the `routeAccess`
+ * entry is commented out (routeAccess.ts:109), and the backend's own routes
+ * and views are commented out in `orders/urls.py` and `sap_sync/urls.py`. The
+ * `SalesQuotationLog` table is kept so history stays queryable, but nothing
+ * serves `/orders/quotation-overview/` any more.
+ *
+ * WHY IT WAS NOT CONVERTED WITH THE REST
+ * -------------------------------------
+ * It came up as a Phase 3.1 target — a page still fetching by hand — and it is
+ * genuinely one. It is deliberately being left alone: converting it would mean
+ * fixing a real `react-hooks/set-state-in-effect` violation at L107-109 (the
+ * `setCurrentPage(1)` effect, which today is only legal because the mount
+ * fetch effect above it makes the component unanalysable) on code that cannot
+ * run. If lint ever does reach this file, comment the component out; do not
+ * convert it.
+ *
+ * Kept rather than deleted, per the repo's standing rule on removals.
+ */
 import { useEffect, useMemo, useState } from "react";
 import { startExcelExport, exportDateStamp } from "../utils/excelExport";
 import { ordersService } from "../services/ordersService";
 import type { QuotationOverviewItem, QuotationStatusLabel } from "../services/ordersService";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Pagination } from "@/components/ui/pagination";
 
 const STATUS_STYLES: Record<QuotationStatusLabel, { label: string; bg: string; color: string }> = {
   CANCELLED: { label: "Cancelled", bg: "#fee2e2", color: "#dc2626" },
@@ -158,7 +190,7 @@ export default function Sales_Quotation() {
           </select>
           <input
             type="text"
-            placeholder="Search order / party / SAP no..."
+            placeholder="Search order / party / SAP no..." aria-label="Search order / party / SAP no"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             style={{ height: 38, padding: "0 12px", borderRadius: 8, border: "1px solid #cbd5e1", minWidth: 240 }}
@@ -192,52 +224,52 @@ export default function Sales_Quotation() {
         </div>
       ) : (
         <div style={{ overflowX: "auto" }}>
-          <table className="vo-table" style={{ width: "100%" }}>
-            <thead>
-              <tr>
-                <th>Order ID</th>
-                <th>Card Code</th>
-                <th>Card Name</th>
-                <th>Category</th>
-                <th>Created</th>
-                <th>SAP Doc No.</th>
-                <th>Quotation Status</th>
-                <th>Cancelled By</th>
-                <th>Cancelled At</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table density="compact" style={{ width: "100%" }}>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Order ID</TableHead>
+                <TableHead>Card Code</TableHead>
+                <TableHead>Card Name</TableHead>
+                <TableHead>Category</TableHead>
+                <TableHead>Created</TableHead>
+                <TableHead>SAP Doc No.</TableHead>
+                <TableHead>Quotation Status</TableHead>
+                <TableHead>Cancelled By</TableHead>
+                <TableHead>Cancelled At</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {paginated.map((row) => {
                 const style = STATUS_STYLES[row.quotation_status] || STATUS_STYLES.UNKNOWN;
                 return (
-                  <tr key={row.id}>
-                    <td>{row.order_number}</td>
-                    <td>{row.card_code}</td>
-                    <td>{row.card_name}</td>
-                    <td>{row.category || "-"}</td>
-                    <td>{formatDateTime(row.created_at)}</td>
-                    <td>{row.doc_num ?? "-"}</td>
-                    <td>
+                  <TableRow key={row.id}>
+                    <TableCell>{row.order_number}</TableCell>
+                    <TableCell>{row.card_code}</TableCell>
+                    <TableCell>{row.card_name}</TableCell>
+                    <TableCell>{row.category || "-"}</TableCell>
+                    <TableCell>{formatDateTime(row.created_at)}</TableCell>
+                    <TableCell>{row.doc_num ?? "-"}</TableCell>
+                    <TableCell>
                       <span style={{ background: style.bg, color: style.color, fontWeight: 700, fontSize: "0.72rem", padding: "3px 10px", borderRadius: 20, whiteSpace: "nowrap" }}>
                         {style.label}
                       </span>
-                    </td>
-                    <td>{row.quotation_cancelled_by ?? "-"}</td>
-                    <td>{row.quotation_cancelled ? formatDateTime(row.quotation_cancelled_at) : "-"}</td>
-                  </tr>
+                    </TableCell>
+                    <TableCell>{row.quotation_cancelled_by ?? "-"}</TableCell>
+                    <TableCell>{row.quotation_cancelled ? formatDateTime(row.quotation_cancelled_at) : "-"}</TableCell>
+                  </TableRow>
                 );
               })}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       )}
 
       {!loading && filtered.length > itemsPerPage && (
-        <div className="vo-pagination">
-          <button className="vo-pg-btn" disabled={currentPage === 1} onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}>← Prev</button>
-          <span className="vo-pg-info">{currentPage} / {totalPages}</span>
-          <button className="vo-pg-btn" disabled={currentPage === totalPages} onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}>Next →</button>
-        </div>
+        <Pagination
+          page={currentPage}
+          totalPages={totalPages}
+          onPageChange={setCurrentPage}
+        />
       )}
     </div>
   );

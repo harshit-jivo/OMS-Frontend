@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { HiHeart, HiKey, HiServerStack, HiIdentification } from "react-icons/hi2";
 import { einvoiceService } from "../../services/einvoiceService";
-import { NicField, JsonView, StatusBadge, ErrorAlert, apiErrorMessage } from "../../components/NicUI";
+import { NicField, JsonView, StatusBadge, ErrorAlert } from "../../components/NicUI";
+import { messageFrom } from "@/lib/apiError";
 
 export default function EinvTools() {
   const [gstin, setGstin] = useState("");
@@ -14,7 +15,7 @@ export default function EinvTools() {
     try {
       setOut({ title, data: await fn() });
     } catch (err) {
-      setError(apiErrorMessage(err));
+      setError(messageFrom(err, "Request failed"));
     } finally {
       setBusy("");
     }
@@ -31,17 +32,17 @@ export default function EinvTools() {
         <div className="nic-actions-row">
           <button className="ofs-secondary" disabled={!!busy}
             onClick={() => void call("health", "Health", einvoiceService.health)}>
-            <HiServerStack style={{ verticalAlign: "-3px", marginRight: 6 }} />
+            <HiServerStack className="nic-icon-lead" />
             {busy === "health" ? "…" : "Health"}
           </button>
           <button className="ofs-secondary" disabled={!!busy}
             onClick={() => void call("token", "Auth Token", einvoiceService.token)}>
-            <HiKey style={{ verticalAlign: "-3px", marginRight: 6 }} />
+            <HiKey className="nic-icon-lead" />
             {busy === "token" ? "…" : "Get Token"}
           </button>
           <button className="ofs-secondary" disabled={!!busy}
             onClick={() => void call("hb", "Heartbeat", einvoiceService.heartbeat)}>
-            <HiHeart style={{ verticalAlign: "-3px", marginRight: 6 }} />
+            <HiHeart className="nic-icon-lead" />
             {busy === "hb" ? "…" : "Heartbeat"}
           </button>
         </div>
@@ -61,7 +62,7 @@ export default function EinvTools() {
         <div className="nic-actions-row">
           <button className="ofs-secondary" disabled={!!busy || !gstin.trim()}
             onClick={() => void call("gstin", "GSTIN Details", () => einvoiceService.getGstin(gstin.trim()))}>
-            <HiIdentification style={{ verticalAlign: "-3px", marginRight: 6 }} />
+            <HiIdentification className="nic-icon-lead" />
             {busy === "gstin" ? "…" : "Get Details"}
           </button>
           <button className="ofs-secondary" disabled={!!busy || !gstin.trim()}

@@ -1,63 +1,69 @@
-import { useEffect, useState, useCallback } from "react";
+import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { HiMagnifyingGlass, HiBolt } from "react-icons/hi2";
 import { einvoiceService } from "../../services/einvoiceService";
 import type { InvoiceListItem } from "../../services/einvoiceService";
-import { NicField, StatusBadge, ErrorAlert, SuccessAlert, apiErrorMessage, CompanyDbSelect } from "../../components/NicUI";
+import { NicField, StatusBadge, ErrorAlert, SuccessAlert, CompanyDbSelect } from "../../components/NicUI";
+import { messageFrom } from "@/lib/apiError";
 import QrViewer from "../../components/QrViewer";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
-// Session-level cache so the list + filters survive tab switches / revisits.
-// Only a manual "Load Invoices" (or Generate) refetches. Cleared on full reload.
-const cache: {
-  loaded: boolean;
-  companyDb: string;
-  search: string;
-  limit: string;
-  rows: InvoiceListItem[];
-} = { loaded: false, companyDb: "JIVO_OIL_HANADB", search: "", limit: "25", rows: [] };
+/*
+ * The module-level `cache` object that used to live here is gone — it held the
+ * rows AND the filters, was written from an effect, and `cache.loaded` was only
+ * set on SUCCESS, so a failed first load re-fired `load()` on every keystroke
+ * in the Search box until one succeeded.
+ *
+ * The rows are now the query cache, keyed on the APPLIED filters. Behaviour
+ * change to know about: the filter VALUES no longer survive a tab switch
+ * (Einvoice.tsx mounts each tab conditionally). The data still does — returning
+ * with the default filters is a cache hit and paints instantly, which is what
+ * the module cache actually bought.
+ */
+const DEFAULTS = { companyDb: "JIVO_OIL_HANADB", search: "", limit: "25" };
+const NO_ROWS: InvoiceListItem[] = [];
 
 export default function InvoiceBrowser() {
-  const [companyDb, setCompanyDb] = useState(cache.companyDb);
-  const [search, setSearch] = useState(cache.search);
-  const [limit, setLimit] = useState(cache.limit);
-  const [rows, setRows] = useState<InvoiceListItem[]>(cache.rows);
-  const [loading, setLoading] = useState(false);
+  const [companyDb, setCompanyDb] = useState(DEFAULTS.companyDb);
+  const [search, setSearch] = useState(DEFAULTS.search);
+  const [limit, setLimit] = useState(DEFAULTS.limit);
+  /* The COMMITTED filters — "Load Invoices" applies them. Keying on the raw
+     inputs would fire a request per keystroke. */
+  const [applied, setApplied] = useState(DEFAULTS);
   const [error, setError] = useState("");
+  const queryClient = useQueryClient();
   const [notice, setNotice] = useState("");
   const [warning, setWarning] = useState("");
   const [busyDoc, setBusyDoc] = useState<number | null>(null);
   const [qrIrn, setQrIrn] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const data = await einvoiceService.listInvoices({
-        companyDb: companyDb.trim() || undefined,
-        search: search.trim() || undefined,
-        limit: Number(limit) || 25,
-      });
-      setRows(data.results);
-      cache.rows = data.results;
-      cache.loaded = true;
-    } catch (err) {
-      setError(apiErrorMessage(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [companyDb, search, limit]);
+  const {
+    data: rows = NO_ROWS,
+    isFetching: loading,
+    error: loadError,
+  } = useQuery({
+    queryKey: ["einvoice", "invoices", applied],
+    queryFn: async () =>
+      (
+        await einvoiceService.listInvoices({
+          companyDb: applied.companyDb.trim() || undefined,
+          search: applied.search.trim() || undefined,
+          limit: Number(applied.limit) || 25,
+        })
+      ).results,
+  });
 
-  // Persist filters so they're restored on revisit.
-  useEffect(() => {
-    cache.companyDb = companyDb;
-    cache.search = search;
-    cache.limit = limit;
-  }, [companyDb, search, limit]);
-
-  // Load only the first time ever; afterwards the cached list is reused until
-  // the user clicks "Load Invoices" (or generates an IRN).
-  useEffect(() => {
-    if (!cache.loaded) void load();
-  }, [load]);
+  const load = async () => {
+    setApplied({ companyDb, search, limit });
+    await queryClient.invalidateQueries({ queryKey: ["einvoice", "invoices"] });
+  };
 
   const generate = async (docentry: number) => {
     setBusyDoc(docentry);
@@ -72,7 +78,7 @@ export default function InvoiceBrowser() {
       await load();
     } catch (err) {
       const e = err as { response?: { data?: { error?: string } } };
-      setError(`DocEntry ${docentry}: ${e.response?.data?.error || apiErrorMessage(err)}`);
+      setError(`DocEntry ${docentry}: ${e.response?.data?.error || messageFrom(err, "Request failed")}`);
     } finally {
       setBusyDoc(null);
     }
@@ -107,7 +113,7 @@ export default function InvoiceBrowser() {
         already have an IRN are hidden.
       </p>
 
-      <div className="nic-form-grid" style={{ marginTop: 12 }}>
+      <div className="nic-form-grid nic-form-grid--spaced">
         <NicField label="Company DB">
           <CompanyDbSelect value={companyDb} onChange={setCompanyDb} />
         </NicField>
@@ -123,15 +129,18 @@ export default function InvoiceBrowser() {
       </div>
       <div className="nic-actions-row">
         <button className="ofs-primary" onClick={() => void load()} disabled={loading}>
-          <HiMagnifyingGlass style={{ verticalAlign: "-3px", marginRight: 6 }} />
+          <HiMagnifyingGlass className="nic-icon-lead" />
           {loading ? "Loading…" : "Load Invoices"}
         </button>
       </div>
 
-      <ErrorAlert>{error}</ErrorAlert>
+      {/* The load failure is rendered BEFORE the empty state below. It used to
+          fall through to "No pending invoices — every recent invoice already
+          has an IRN", which is the worst possible wrong message here. */}
+      <ErrorAlert>{error || (loadError ? messageFrom(loadError, "Request failed") : "")}</ErrorAlert>
       <SuccessAlert>{notice}</SuccessAlert>
       {warning ? (
-        <div className="nic-alert nic-alert--err" style={{ marginTop: 10, fontWeight: 600 }}>
+        <div className="nic-alert nic-alert--err nic-alert--strong">
           <span>{warning}</span>
         </div>
       ) : null}
@@ -148,29 +157,29 @@ export default function InvoiceBrowser() {
 
       {rows.length ? (
         <div className="nic-table-wrap">
-          <table className="nic-table">
-            <thead>
-              <tr>
-                <th>DocEntry</th><th>Doc No</th><th>Customer</th><th>Date</th>
-                <th>Total</th><th>Status</th><th>Action</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table density="compact">
+            <TableHeader>
+              <TableRow>
+                <TableHead>DocEntry</TableHead><TableHead>Doc No</TableHead><TableHead>Customer</TableHead><TableHead>Date</TableHead>
+                <TableHead>Total</TableHead><TableHead>Status</TableHead><TableHead>Action</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {rows.map((r) => (
-                <tr key={r.docentry}>
-                  <td>{r.docentry}</td>
-                  <td className="nic-mono">{r.docnum}</td>
-                  <td>{r.cardname}</td>
-                  <td style={{ whiteSpace: "nowrap" }}>{(r.docdate || "").slice(0, 10)}</td>
-                  <td style={{ textAlign: "right" }}>{Number(r.doctotal).toLocaleString("en-IN")}</td>
-                  <td>
+                <TableRow key={r.docentry}>
+                  <TableCell>{r.docentry}</TableCell>
+                  <TableCell className="nic-mono">{r.docnum}</TableCell>
+                  <TableCell>{r.cardname}</TableCell>
+                  <TableCell className="nic-nowrap">{(r.docdate || "").slice(0, 10)}</TableCell>
+                  <TableCell className="nic-num">{Number(r.doctotal).toLocaleString("en-IN")}</TableCell>
+                  <TableCell>
                     {statusBadge(r)}
-                    {r.last_error ? <div className="nic-note" style={{ marginTop: 4 }}>{r.last_error}</div> : null}
-                  </td>
-                  <td style={{ whiteSpace: "nowrap" }}>
+                    {r.last_error ? <div className="nic-note nic-note--stacked">{r.last_error}</div> : null}
+                  </TableCell>
+                  <TableCell className="nic-nowrap">
                     {r.irn && r.irn_source === "OMS" ? (
                       // QR is renderable only for OMS-generated IRNs (signed QR stored in OMS DB)
-                      <button className="ofs-secondary" style={{ minHeight: 30, padding: "0 10px", fontSize: 11 }}
+                      <button className="ofs-secondary nic-btn-xs"
                         onClick={() => setQrIrn(r.irn!)}>
                         View QR
                       </button>
@@ -178,20 +187,24 @@ export default function InvoiceBrowser() {
                       // Already has an IRN in SAP (@UTL_MDEXTH) / OMS_IRN_LOG — nothing to generate.
                       <span className="nic-note" title={r.irn}>Generated in {sourceLabel(r.irn_source)}</span>
                     ) : (
-                      <button className="ofs-primary" style={{ minHeight: 30, padding: "0 12px", fontSize: 11 }}
+                      <button className="ofs-primary nic-btn-xs nic-btn-xs--wide"
                         onClick={() => void generate(r.docentry)} disabled={busyDoc === r.docentry}>
-                        <HiBolt style={{ verticalAlign: "-2px", marginRight: 4 }} />
+                        <HiBolt className="nic-icon-inline" />
                         {busyDoc === r.docentry ? "Generating…" : "Generate IRN"}
                       </button>
                     )}
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       ) : !loading ? (
-        <p className="nic-note">No pending invoices — every recent invoice already has an IRN. Use Search to find a specific one.</p>
+        <p className="nic-note">
+          {loadError
+            ? "Could not load invoices."
+            : "No pending invoices — every recent invoice already has an IRN. Use Search to find a specific one."}
+        </p>
       ) : null}
     </section>
   );

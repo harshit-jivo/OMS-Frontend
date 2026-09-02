@@ -103,7 +103,7 @@
 }
 
 /* modal */
-.mart-modal-overlay {
+/* .mart-modal-overlay {
   position: fixed;
   inset: 0;
   background: rgba(15, 23, 42, 0.45);
@@ -113,7 +113,7 @@
   z-index: 1000;
   padding: 20px;
 }
-
+ */
 .mart-modal {
   background: #fff;
   border-radius: 12px;
@@ -244,30 +244,30 @@
   padding: 20px;
 }
 
-.mart-table {
+/* .mart-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 14px;
 }
-
-.mart-table th,
+ */
+/* .mart-table th,
 .mart-table td {
   text-align: left;
   padding: 10px 12px;
   border-bottom: 1px solid #e2e8f0;
 }
-
-.mart-table thead th {
+ */
+/* .mart-table thead th {
   background: #f8fafc;
   font-weight: 600;
   color: #475569;
 }
-
-.mart-table tfoot td {
+ */
+/* .mart-table tfoot td {
   border-top: 2px solid #cbd5e1;
   border-bottom: none;
 }
-
+ */
 .mart-num {
   text-align: right;
   white-space: nowrap;
@@ -318,14 +318,14 @@
   color: #0f172a;
 }
 
-.mart-badge {
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: #e0e7ff;
-  color: #3730a3;
-  font-size: 12px;
-  font-weight: 600;
-}
+/* .mart-badge {
+   padding: 4px 10px;
+   border-radius: 999px;
+   background: #e0e7ff;
+   color: #3730a3;
+   font-size: 12px;
+   font-weight: 600;
+   } */
 
 .mart-detail-meta {
   margin: 0 0 12px;
@@ -381,4 +381,49 @@
 .mart-reject {
   background: #dc2626;
   color: #fff;
+}
+
+/* Detail-view notice box: rejection reason + SAP push failure message.
+   Distinct from the pre-existing (currently unused) `.mart-reject-reason`
+   above — that rule's margin/padding/border-radius/color don't match this
+   inline style's values, so it is a dedicated class rather than a reuse. */
+.mart-notice-box {
+  margin: 12px 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  color: #7f1d1d;
+}
+
+.mart-notice-label {
+  color: #b91c1c;
+}
+
+.mart-notice-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* List-row SAP status pills. Base holds every property shared by both
+   states; modifiers only differ by background (and the failed state's
+   help cursor). */
+.mart-sap-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #fff;
+  vertical-align: middle;
+}
+
+.mart-sap-badge.mart-sap-badge--failed {
+  background: #dc2626;
+  cursor: help;
+}
+
+.mart-sap-badge.mart-sap-badge--success {
+  background: #16a34a;
 }

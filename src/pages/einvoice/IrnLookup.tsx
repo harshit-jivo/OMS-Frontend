@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { HiMagnifyingGlass } from "react-icons/hi2";
 import { einvoiceService } from "../../services/einvoiceService";
-import { NicField, JsonView, DetailsView, ErrorAlert, apiErrorMessage } from "../../components/NicUI";
+import { NicField, JsonView, DetailsView, ErrorAlert } from "../../components/NicUI";
+import { messageFrom } from "@/lib/apiError";
 import DateInput from "../../components/DateInput";
 
 type Mode = "irn" | "doc" | "rejected";
@@ -33,7 +34,7 @@ export default function IrnLookup() {
         setData(await einvoiceService.getRejected(rejDate.trim()));
       }
     } catch (err) {
-      setError(apiErrorMessage(err));
+      setError(messageFrom(err, "Request failed"));
     } finally {
       setBusy(false);
     }
@@ -91,7 +92,7 @@ export default function IrnLookup() {
 
       <div className="nic-actions-row">
         <button className="ofs-primary" onClick={() => void run()} disabled={busy}>
-          <HiMagnifyingGlass style={{ verticalAlign: "-3px", marginRight: 6 }} />
+          <HiMagnifyingGlass className="nic-icon-lead" />
           {busy ? "Searching…" : "Search"}
         </button>
       </div>

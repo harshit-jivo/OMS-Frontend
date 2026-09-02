@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bar,
   BarChart,
@@ -13,12 +14,10 @@ import {
 } from "recharts";
 import {
   deviceAdminService,
-  type Analytics,
   type CountRow,
   type DeviceFilters,
   type DeviceRow,
   type MobilePlatform,
-  type Pagination,
   type PlatformAdoption,
   type VersionPolicy,
   type VersionPolicyStat,
@@ -27,6 +26,17 @@ import { HiXMark } from "react-icons/hi2";
 import StatusBadge from "../components/StatusBadge";
 import relativeTime from "../utils/relativeTime";
 import "../styles/Device_Management.css";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+// The devices service exports a `Pagination` TYPE, so the component is
+// aliased rather than renaming a shared API type for one call site.
+import { Pagination as Pager } from "@/components/ui/pagination";
 
 /**
  * Device Management — the single System screen: live device activity and fleet
@@ -473,103 +483,77 @@ function AdoptionChart({
   );
 }
 
+/** Stable empty, so the table does not see a new array each poll. */
+const NO_DEVICES: DeviceRow[] = [];
+
 export default function Device_Management() {
   const [filters, setFilters] = useState<DeviceFilters>(EMPTY_FILTERS);
   const [searchInput, setSearchInput] = useState("");
   const [ordering, setOrdering] = useState(DEFAULT_ORDERING);
   const [page, setPage] = useState(1);
-  const [rows, setRows] = useState<DeviceRow[]>([]);
-  const [pagination, setPagination] = useState<Pagination | null>(null);
-  const [analytics, setAnalytics] = useState<Analytics | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState("");
-  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
+  const queryClient = useQueryClient();
   const [selected, setSelected] = useState<DeviceRow | null>(null);
-  // Mobile version policies, loaded once (and reloaded after a save). Separate
-  // from the analytics poll: they change only when an admin edits them.
-  const [policies, setPolicies] =
-    useState<Record<MobilePlatform, VersionPolicy | null> | null>(null);
-
-  const loadPolicies = useCallback(() => {
-    deviceAdminService
-      .getVersionPolicies()
-      .then(setPolicies)
-      .catch((err) => console.error("Failed to load version policies", err));
-  }, []);
-
-  useEffect(() => {
-    loadPolicies();
-  }, [loadPolicies]);
+  // Mobile version policies. Separate key from the device poll: they change
+  // only when an admin edits them.
+  const { data: policies = null } = useQuery({
+    queryKey: ["devices", "version-policy"],
+    queryFn: () => deviceAdminService.getVersionPolicies(),
+  });
 
   /**
    * Devices and analytics load together: the status tiles count the same rows
    * the table lists, so fetching them apart would let the tiles and the badges
    * drift for a moment after a refresh.
    *
-   * `silent` distinguishes an auto-refresh from a user-driven load — a silent
-   * pass leaves the current rows on screen (no "Loading…" flash) and swaps them
-   * only once the new data lands.
+   * The key is the SPREAD filter fields, not the `filters` object — it is
+   * rebuilt by updater functions on every change, so keying on its identity
+   * would refetch on every render.
+   *
+   * `refetchInterval` replaces a hand-rolled 60s `setInterval` plus a `loadRef`
+   * that existed only to keep it from closing over stale filters.
+   *
+   * BEHAVIOUR CHANGE, knowingly: the old guard was `document.hidden`, so a
+   * visible-but-unfocused tab kept refreshing. `refetchIntervalInBackground:
+   * false` keys off window FOCUS, so that tab now stops until it is focused.
    */
-  const load = useCallback(
-    async (silent = false) => {
-      if (silent) setRefreshing(true);
-      else setLoading(true);
-      try {
-        const [list, stats] = await Promise.all([
-          deviceAdminService.listDevices({
-            ...filters,
-            ordering,
-            page,
-            page_size: PAGE_SIZE,
-          }),
-          deviceAdminService.getAnalytics(),
-        ]);
-        setRows(list.results);
-        setPagination(list.pagination);
-        setAnalytics(stats);
-        setLastRefreshed(new Date());
-        setError("");
-      } catch (err) {
-        console.error("Failed to load device data", err);
-        // A failed background refresh must not blank a table someone is
-        // reading — keep the last good rows and surface a quiet message.
-        setError("Could not refresh devices. Showing the last known data.");
-      } finally {
-        setLoading(false);
-        setRefreshing(false);
-      }
+  const deviceQuery = useQuery({
+    queryKey: [
+      "devices",
+      filters.search,
+      filters.build_number,
+      filters.status,
+      ordering,
+      page,
+    ],
+    queryFn: async () => {
+      const [list, stats] = await Promise.all([
+        deviceAdminService.listDevices({ ...filters, ordering, page, page_size: PAGE_SIZE }),
+        deviceAdminService.getAnalytics(),
+      ]);
+      return { rows: list.results, pagination: list.pagination, analytics: stats };
     },
-    [filters, ordering, page],
-  );
+    // Keeps the current page on screen while the next one loads, which is what
+    // the old `silent` flag did by hand.
+    placeholderData: keepPreviousData,
+    refetchInterval: REFRESH_MS,
+    refetchIntervalInBackground: false,
+  });
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  const rows = deviceQuery.data?.rows ?? NO_DEVICES;
+  const pagination = deviceQuery.data?.pagination ?? null;
+  const analytics = deviceQuery.data?.analytics ?? null;
+  const loading = deviceQuery.isPending;
+  const refreshing = deviceQuery.isFetching && !deviceQuery.isPending;
+  const lastRefreshed = deviceQuery.dataUpdatedAt ? new Date(deviceQuery.dataUpdatedAt) : null;
+  // A failed background refresh must not blank a table someone is reading —
+  // TanStack keeps the last good data, so this is only a message.
+  const error = deviceQuery.isError ? "Could not refresh devices. Showing the last known data." : "";
 
-  // A ref holds the latest `load` so the interval never closes over stale
-  // filters/page/ordering, and the interval is created ONCE — so an auto
-  // refresh never resets what the admin has selected.
-  const loadRef = useRef(load);
-  useEffect(() => {
-    loadRef.current = load;
-  }, [load]);
+  const load = () => queryClient.invalidateQueries({ queryKey: ["devices"] });
 
   // After saving a policy, refresh the policy forms AND the analytics/table so
   // the new latest/old counts and Update Status column reflect it at once.
-  const onPolicySaved = useCallback(() => {
-    loadPolicies();
-    loadRef.current(true);
-  }, [loadPolicies]);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      // Don't burn requests refreshing a tab nobody is looking at.
-      if (document.hidden) return;
-      loadRef.current(true);
-    }, REFRESH_MS);
-    return () => window.clearInterval(timer);
-  }, []);
+  const onPolicySaved = () => void queryClient.invalidateQueries({ queryKey: ["devices"] });
 
   // Escape closes the detail drawer — the expected way out of a panel, and the
   // only one available without moving the mouse to the corner.
@@ -668,7 +652,7 @@ export default function Device_Management() {
                   ? `Updated ${relativeTime(lastRefreshed.toISOString())}`
                   : ""}
             </span>
-            <button type="button" className="dm-btn" onClick={() => load(true)} disabled={refreshing}>
+            <button type="button" className="dm-btn" onClick={() => load()} disabled={refreshing}>
               Refresh
             </button>
           </div>
@@ -810,64 +794,58 @@ export default function Device_Management() {
       {error && <p className="dm-error">{error}</p>}
 
       <div className="dm-table-wrap">
-        <table className="dm-table">
-          <thead>
-            <tr>
+        <Table density="compact">
+          <TableHeader>
+            <TableRow>
               {/* Sortable columns are exactly the API's allow-listed ordering
                   fields. Status is derived from last_active rather than stored,
                   so it is not one of them — it stays a plain header rather than
                   offering a sort that would silently do nothing. Relative sorts
                   by last_active, the timestamp it renders. */}
-              <th>Status</th>
+              <TableHead>Status</TableHead>
               <SortHeader label="Name" field="user__name" ordering={ordering} onSort={toggleSort} />
               <SortHeader label="App Type" field="app_type" ordering={ordering} onSort={toggleSort} />
               <SortHeader label="Version" field="app_version" ordering={ordering} onSort={toggleSort} />
               <SortHeader label="Build" field="build_number" ordering={ordering} onSort={toggleSort} />
               {/* Derived from the version policy, server-side. Not sortable: it's
                   computed, not a stored column the API can order by. */}
-              <th>Update</th>
+              <TableHead>Update</TableHead>
               <SortHeader label="Relative" field="last_active" ordering={ordering} onSort={toggleSort} />
-            </tr>
-          </thead>
-          <tbody>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {loading ? (
-              <tr><td colSpan={7} className="dm-empty">Loading devices…</td></tr>
+              <TableRow><TableCell colSpan={7} className="dm-empty">Loading devices…</TableCell></TableRow>
             ) : rows.length === 0 ? (
-              <tr><td colSpan={7} className="dm-empty">No devices match this search</td></tr>
+              <TableRow><TableCell colSpan={7} className="dm-empty">No devices match this search</TableCell></TableRow>
             ) : (
               rows.map((row) => (
-                <tr key={row.id} onClick={() => setSelected(row)} className="dm-row" title="View device details">
+                <TableRow key={row.id} onClick={() => setSelected(row)} className="dm-row" title="View device details">
                   {/* The server-derived four-state status, matching what the
                       Online/Idle/Offline tiles count — not the binary
                       is_active registration flag, which would contradict them. */}
-                  <td><StatusBadge status={row.status} /></td>
-                  <td>{row.user_name || "-"}</td>
-                  <td>{row.app_type}</td>
-                  <td>{row.app_version}</td>
-                  <td className="dm-num">{row.build_number}</td>
-                  <td><UpdateBadge status={row.update_status} /></td>
-                  <td className="dm-rel" title={formatDateTime(row.last_active)}>
+                  <TableCell><StatusBadge status={row.status} /></TableCell>
+                  <TableCell>{row.user_name || "-"}</TableCell>
+                  <TableCell>{row.app_type}</TableCell>
+                  <TableCell>{row.app_version}</TableCell>
+                  <TableCell className="dm-num">{row.build_number}</TableCell>
+                  <TableCell><UpdateBadge status={row.update_status} /></TableCell>
+                  <TableCell className="dm-rel" title={formatDateTime(row.last_active)}>
                     {relativeTime(row.last_active)}
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))
             )}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
 
       {pagination && pagination.total_pages > 1 && (
-        <div className="dm-pagination">
-          <button className="dm-pg-btn" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>← Prev</button>
-          <span className="dm-pg-info">Page {pagination.page} / {pagination.total_pages}</span>
-          <button
-            className="dm-pg-btn"
-            disabled={page >= pagination.total_pages}
-            onClick={() => setPage((p) => p + 1)}
-          >
-            Next →
-          </button>
-        </div>
+        <Pager
+          page={pagination.page}
+          totalPages={pagination.total_pages}
+          onPageChange={setPage}
+        />
       )}
 
       {/* ---- device detail (right-side drawer) ---- */}

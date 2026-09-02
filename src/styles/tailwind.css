@@ -1,0 +1,327 @@
+/*
+ * Tailwind, added ALONGSIDE the existing 35,000 lines of CSS — Phase 1.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * PREFLIGHT IS DELIBERATELY NOT IMPORTED. Read this before changing it.
+ * ─────────────────────────────────────────────────────────────────────────
+ *
+ * `@import "tailwindcss"` pulls in three things: the theme, PREFLIGHT, and the
+ * utilities. Preflight is a reset — it strips margins from headings, removes
+ * list markers from `ul`, unstyles `button`, and sets `border-collapse` on
+ * tables. Fifty-four stylesheets written over several years assume browser
+ * defaults for every one of those.
+ *
+ * Importing it would restyle all 108 pages at once, in one commit, with no way
+ * to tell an intended change from a regression. So the layers are imported
+ * individually and preflight is left out. Phase 1's stated exit condition is
+ * "nothing looks different", and this is the line that delivers it.
+ *
+ * When a page is migrated off its stylesheet, preflight can be enabled for that
+ * page's subtree with a scoped copy — not switched on globally.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * A CASCADE NOTE THAT WILL SURPRISE SOMEONE
+ * ─────────────────────────────────────────────────────────────────────────
+ *
+ * Every existing stylesheet is UNLAYERED. In the CSS cascade, unlayered styles
+ * beat layered ones regardless of specificity — so a page's own CSS wins over a
+ * Tailwind utility, not the other way round. That is the safe direction for
+ * this phase (nothing can be accidentally restyled), but it means adding
+ * `class="p-4"` to an element whose stylesheet already sets padding will appear
+ * to do nothing. The fix is to remove the competing rule, not to reach for
+ * `!important`.
+ */
+@layer theme, base, components, utilities;
+
+@import "tailwindcss/theme.css" layer(theme);
+/* @import "tailwindcss/preflight.css" layer(base);  <- see above */
+@import "tailwindcss/utilities.css" layer(utilities);
+
+/*
+ * ─────────────────────────────────────────────────────────────────────────
+ * The app's own reset — moved here from styles/Login.css
+ * ─────────────────────────────────────────────────────────────────────────
+ *
+ * This is NOT Tailwind's preflight (still deliberately not imported, see
+ * above). It is the one universal rule this codebase has always had. It was
+ * written at the top of Login.css, which is imported eagerly because Login is
+ * the only non-lazy route — so a rule named after one page has been resetting
+ * all 108 for years. Every stylesheet since was written expecting it.
+ *
+ * WHY IT IS IN A LAYER NOW
+ * ------------------------
+ * Unlayered CSS beats every cascade layer regardless of specificity. Left
+ * unlayered, `* { padding: 0 }` outranks `.py-4` — so a Tailwind padding or
+ * margin utility resolved to zero ANYWHERE in the app. The class was in the
+ * DOM, it matched a real rule in a loaded stylesheet, and it did nothing.
+ * That cost most of a day on the first table conversion, and it would have
+ * cost it again on every page in Phase 2.
+ *
+ * Nothing else changes. Against the 50 unlayered stylesheets the reset is
+ * still the weakest thing in the cascade: it was already losing to every one
+ * of them on specificity (`*` is 0,0,0 — any class selector beats it), and a
+ * layered rule loses to unlayered CSS outright. The only rules it now yields
+ * to are Tailwind's utilities, which is the entire point.
+ */
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+}
+
+/*
+ * The design that already exists, written down.
+ *
+ * Every value here was read out of the current stylesheets — `src/index.css`
+ * for the global set, and the 88 byte-identical declaration blocks catalogued
+ * in docs/codebase/DUPLICATION.md for the rest. Nothing is a Tailwind default
+ * and nothing is new: `bg-surface` must produce the same `#f8fafc` that
+ * eight stylesheets already hardcode, or the tokens are a second design rather
+ * than a description of the first.
+ *
+ * This is the step that makes later phases safe. A shadcn component themed
+ * from these renders in the app's own colours instead of shadcn's.
+ */
+@theme {
+  /* ---- Type ------------------------------------------------------------ */
+  --font-sans: "Inter", "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Consolas, monospace;
+
+  /* ---- Neutrals -------------------------------------------------------- */
+  /* --text-h in index.css: the strongest heading colour. */
+  --color-ink: #0f172a;
+  /* Recurs in 8 duplicated blocks as the strong body colour. */
+  --color-ink-soft: #1e293b;
+  /* --text in index.css. */
+  --color-body: #475569;
+  /* 5 blocks: the muted label colour. See the note under Brand for the name. */
+  --color-subtle: #64748b;
+  /* --border in index.css. */
+  --color-line: #dbe4ee;
+  /* 8 blocks pair this border with the surface below. */
+  --color-line-strong: #cbd5e1;
+  /* --code-bg, and the subtle panel fill in 13 blocks. */
+  --color-surface: #f8fafc;
+  /* --bg in index.css: the page behind the panels. */
+  --color-canvas: #f4f7fb;
+
+  /* ---- Brand ----------------------------------------------------------- */
+  /*
+   * Named `brand`, not `accent`, on purpose. shadcn's semantic set uses
+   * `--color-accent` for a SUBTLE surface, not the primary colour — and both
+   * live in Tailwind's one colour namespace, so calling this `accent` would
+   * silently overwrite shadcn's and turn every `bg-accent` blue. Same reason
+   * the muted colour below is `subtle`.
+   */
+  /* --accent in index.css; also the focus ring in 6 duplicated blocks. */
+  --color-brand: #2563eb;
+  --color-brand-soft: rgba(37, 99, 235, 0.1);
+  --color-brand-line: rgba(37, 99, 235, 0.28);
+
+  /* ---- Semantic -------------------------------------------------------- */
+  /* The danger trio, byte-identical across 6 stylesheets. */
+  --color-danger: #dc2626;
+  --color-danger-soft: #fef2f2;
+  --color-danger-line: #fecaca;
+  /* The warning/attention set, from 5 blocks. */
+  --color-warning: #f97316;
+  --color-warning-strong: #fb923c;
+  --color-warning-soft: #fff7ed;
+
+  /* ---- Status palette -------------------------------------------------- */
+  /*
+   * The badge colours, counted out of the existing stylesheets: #f1f5f9 (99
+   * uses), #dcfce7 (30), #166534 (25), #991b1b (22), #fee2e2 (21), #fef3c7
+   * (13), #92400e (10), #ede9fe (5).
+   *
+   * Deliberately SEPARATE from the `--color-danger` / `--color-warning` sets
+   * above, and not folded into them: those are the 50-weight tints the app
+   * uses for panels and alert strips (#fef2f2, #fff7ed), and badges use the
+   * 100-weight ones (#fee2e2, #fef3c7). Merging them would change every alert
+   * strip in the app in order to fix a badge.
+   *
+   * `note` is violet. It is not decoration: View_Orders already distinguishes
+   * "pending approval" (amber — waiting on someone) from "needs approval"
+   * (violet — waiting on YOU) on the same screen. Collapsing them would throw
+   * away a distinction the design makes on purpose.
+   */
+  --color-ok: #166534;
+  --color-ok-soft: #dcfce7;
+  --color-hold: #92400e;
+  --color-hold-soft: #fef3c7;
+  --color-bad: #991b1b;
+  --color-bad-soft: #fee2e2;
+  --color-note: #5b21b6;
+  --color-note-soft: #ede9fe;
+  /* The neutral chip fill, and the most-used colour in the whole codebase. */
+  --color-surface-strong: #f1f5f9;
+
+  /* ---- Shape ----------------------------------------------------------- */
+  /* --radius-sm / md / lg in index.css. */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+
+  /* ---- Spacing --------------------------------------------------------- */
+  /*
+   * Tailwind's default is `0.25rem`, and in this app a rem is NOT 16px:
+   * `index.css` sets `:root { font: 18px/145% var(--sans) }`, so the root is
+   * 18px and `p-4` came out as 18px rather than 16px. Every one of the 50
+   * existing stylesheets is written in px on a 4px grid, so the rem-based
+   * scale silently disagreed with the design it is meant to reproduce by
+   * 12.5% — enough to shift a table row 6px and not enough to look like a bug.
+   *
+   * Pinned to px so `p-4` is 16px here, the same 16px the CSS it replaces
+   * means. Font sizes are deliberately left in rem: those SHOULD track the
+   * root, because a reader who enlarges text expects text to enlarge.
+   */
+  --spacing: 4px;
+
+  /* ---- Sizing ---------------------------------------------------------- */
+  /* --input-h and --btn-h are both 40px; kept as one token because they are
+     one decision, and 5 blocks set a 36px compact variant beside them. */
+  --spacing-control: 40px;
+  --spacing-control-sm: 36px;
+
+  /* ---- Elevation ------------------------------------------------------- */
+  /* --shadow in index.css, verbatim. */
+  --shadow-panel: 0 16px 36px rgba(15, 23, 42, 0.06), 0 4px 12px rgba(15, 23, 42, 0.03);
+  /* The focus ring 6 stylesheets draw around a focused control. */
+  --shadow-focus: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+/*
+ * ─────────────────────────────────────────────────────────────────────────
+ * shadcn/ui theme — plan item 1.4
+ * ─────────────────────────────────────────────────────────────────────────
+ *
+ * shadcn components are written against a fixed set of semantic utilities
+ * (`bg-background`, `text-muted-foreground`, `border-border`, `ring-ring`).
+ * Those have to resolve to SOMETHING, and left at shadcn's defaults every
+ * component landing in Phase 2 arrives in shadcn's palette — a second design
+ * beside the app's, which is what "visual parity first" exists to prevent. So
+ * they are pointed at the tokens above, read out of the app's own stylesheets.
+ *
+ * WHY THE `--sh-` PREFIX
+ * ---------------------
+ * shadcn's convention is to declare these as `--background`, `--accent`,
+ * `--muted`, `--border` on `:root`. Following that convention here would be a
+ * bug: this codebase ALREADY defines and uses several of those names.
+ *
+ *     --accent   defined in index.css + 2 stylesheets, referenced 40 times
+ *     --muted    defined in 2 stylesheets, referenced 17 times
+ *     --border   defined in index.css
+ *
+ * Both sets would sit unlayered on `:root`, so the later import simply wins —
+ * and since `index.css` is imported after this file, `--accent` would resolve
+ * to the app's blue rather than the subtle surface shadcn means by it. Every
+ * `bg-accent` in Phase 2 would come out blue-on-blue, and the cause would be
+ * three files away from the symptom.
+ *
+ * Prefixing sidesteps the collision entirely. Nothing is lost: shadcn
+ * components reference the UTILITY (`bg-accent`), not the raw property, and
+ * `@theme inline` below is what connects the two. A component pasted from the
+ * shadcn registry works unmodified.
+ */
+:root {
+  --sh-background: #ffffff;
+  --sh-foreground: var(--color-ink);
+
+  --sh-card: #ffffff;
+  --sh-card-foreground: var(--color-ink);
+  --sh-popover: #ffffff;
+  --sh-popover-foreground: var(--color-ink);
+
+  --sh-primary: var(--color-brand);
+  --sh-primary-foreground: #ffffff;
+
+  --sh-secondary: var(--color-surface);
+  --sh-secondary-foreground: var(--color-ink-soft);
+
+  --sh-muted: var(--color-surface);
+  --sh-muted-foreground: var(--color-subtle);
+
+  --sh-accent: var(--color-surface);
+  --sh-accent-foreground: var(--color-ink-soft);
+
+  --sh-destructive: var(--color-danger);
+  --sh-destructive-foreground: #ffffff;
+
+  --sh-border: var(--color-line);
+  --sh-input: var(--color-line-strong);
+  --sh-ring: var(--color-brand);
+}
+
+/*
+ * `@theme inline` maps those onto Tailwind's colour namespace WITHOUT freezing
+ * their values — `inline` makes the generated utility emit `var(--sh-...)`
+ * rather than the colour it resolves to today. That is what lets a subtree
+ * override one property and have every utility follow it, which is how shadcn
+ * expects theming to work.
+ */
+@theme inline {
+  --color-background: var(--sh-background);
+  --color-foreground: var(--sh-foreground);
+  --color-card: var(--sh-card);
+  --color-card-foreground: var(--sh-card-foreground);
+  --color-popover: var(--sh-popover);
+  --color-popover-foreground: var(--sh-popover-foreground);
+  --color-primary: var(--sh-primary);
+  --color-primary-foreground: var(--sh-primary-foreground);
+  --color-secondary: var(--sh-secondary);
+  --color-secondary-foreground: var(--sh-secondary-foreground);
+  --color-muted: var(--sh-muted);
+  --color-muted-foreground: var(--sh-muted-foreground);
+  --color-accent: var(--sh-accent);
+  --color-accent-foreground: var(--sh-accent-foreground);
+  --color-destructive: var(--sh-destructive);
+  --color-destructive-foreground: var(--sh-destructive-foreground);
+  --color-border: var(--sh-border);
+  --color-input: var(--sh-input);
+  --color-ring: var(--sh-ring);
+}
+
+/*
+ * Keyframes for the Phase 1 proving ground (components/PageLoading.tsx).
+ *
+ * Tailwind can express the animation shorthand but not the keyframes
+ * themselves, so they live here rather than in an injected `<style>` tag — the
+ * previous approach, which re-inserted the same rule into the document on
+ * every render of the component.
+ *
+ * The hold at 40% is what makes a fast route load show nothing at all.
+ */
+@keyframes oms-page-loading-fade {
+  0%, 40% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+/*
+ * The dialog's open animation. Written as a keyframe here rather than reached
+ * for via `animate-in` / `zoom-in-95`, because those utilities come from the
+ * `tailwindcss-animate` plugin and this project does not have it — they would
+ * compile to nothing and read, in the source, as if they worked.
+ *
+ * It reproduces `trk-pop` from Tracker.css, which is the pop the 13 tracker
+ * modals already used.
+ */
+@keyframes dialog-pop {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.96); }
+  to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+/*
+ * The skeleton shimmer. A keyframe rather than `animate-pulse`, because
+ * Tailwind's own pulse goes to opacity 0.5 and back — on `--color-surface-strong`
+ * over a white card that is nearly invisible. This moves the background
+ * lightness instead, so the bar reads as loading on the surfaces these tables
+ * actually sit on.
+ */
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.55; }
+}

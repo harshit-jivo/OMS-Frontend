@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   HiCheck,
   HiEllipsisVertical,
@@ -11,6 +12,7 @@ import {
 } from "react-icons/hi2";
 import api from "../services/api";
 import "../styles/Nutrition_Manager.css";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Nutrition Manager — single-page master/detail (vanilla CSS).
@@ -55,6 +57,16 @@ const UOM_URL = "/legal/uom/";
 const NUTRITION_URL = "/legal/nutrition/";
 const ITEM_NUTRITION_URL = "/legal/item-nutrition/";
 
+/** Items + units load together (`Promise.all`): either both arrive or, on a
+ *  failure, neither does — matching the original mount effect exactly. */
+type Catalog = { items: Item[]; uoms: Uom[] };
+
+/** Stable empties, so a query with no data yet does not hand out a new `[]`
+ *  (and retrigger memos/effects) on every render. */
+const EMPTY_ITEMS: Item[] = [];
+const EMPTY_UOMS: Uom[] = [];
+const EMPTY_NUTRITION: Nutrition[] = [];
+
 const asArray = <T,>(payload: unknown): T[] => {
   if (Array.isArray(payload)) return payload as T[];
   if (payload && typeof payload === "object") {
@@ -73,7 +85,9 @@ const formatNum = (value: string | number | null | undefined): string => {
 const formatDate = (value?: string): string => {
   if (!value) return "";
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  return Number.isNaN(date.getTime())
+    ? ""
+    : date.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 };
 
 const errMessage = (error: unknown, fallback: string): string => {
@@ -183,7 +197,12 @@ function UomToggle({
       ))}
 
       <div className="nm-uom-add-wrap" ref={ref}>
-        <button type="button" aria-label="Manage units" onClick={() => setOpen((o) => !o)} className="nm-pill-add">
+        <button
+          type="button"
+          aria-label="Manage units"
+          onClick={() => setOpen((o) => !o)}
+          className="nm-pill-add"
+        >
           <HiPlus />
         </button>
 
@@ -196,12 +215,32 @@ function UomToggle({
               {uoms.map((uom) =>
                 editId === uom.id ? (
                   <div className="nm-unit-edit" key={uom.id}>
-                    <input value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Name" className="nm-input nm-input-sm" />
-                    <input value={editUnit} onChange={(e) => setEditUnit(e.target.value)} placeholder="Unit" className="nm-input nm-input-sm" />
-                    <button type="button" aria-label="Save" className="nm-icon-btn" onClick={saveEdit}>
+                    <input
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      placeholder="Name"
+                      className="nm-input nm-input-sm"
+                    />
+                    <input
+                      value={editUnit}
+                      onChange={(e) => setEditUnit(e.target.value)}
+                      placeholder="Unit"
+                      className="nm-input nm-input-sm"
+                    />
+                    <button
+                      type="button"
+                      aria-label="Save"
+                      className="nm-icon-btn"
+                      onClick={saveEdit}
+                    >
                       <HiCheck />
                     </button>
-                    <button type="button" aria-label="Cancel" className="nm-icon-btn" onClick={() => setEditId(null)}>
+                    <button
+                      type="button"
+                      aria-label="Cancel"
+                      className="nm-icon-btn"
+                      onClick={() => setEditId(null)}
+                    >
                       <HiXMark />
                     </button>
                   </div>
@@ -209,10 +248,20 @@ function UomToggle({
                   <div className="nm-unit-row" key={uom.id}>
                     <span className="nm-unit-tag">{uom.uom_unit}</span>
                     <span className="nm-unit-name">{uom.uom_name}</span>
-                    <button type="button" aria-label="Edit unit" className="nm-icon-btn" onClick={() => startEdit(uom)}>
+                    <button
+                      type="button"
+                      aria-label="Edit unit"
+                      className="nm-icon-btn"
+                      onClick={() => startEdit(uom)}
+                    >
                       <HiPencilSquare />
                     </button>
-                    <button type="button" aria-label="Delete unit" className="nm-icon-btn is-danger" onClick={() => remove(uom.id)}>
+                    <button
+                      type="button"
+                      aria-label="Delete unit"
+                      className="nm-icon-btn is-danger"
+                      onClick={() => remove(uom.id)}
+                    >
                       <HiTrash />
                     </button>
                   </div>
@@ -235,7 +284,12 @@ function UomToggle({
                 className="nm-input nm-input-sm nm-input-unit"
                 onKeyDown={(e) => e.key === "Enter" && submitNew()}
               />
-              <button type="button" onClick={submitNew} disabled={!name.trim() || !unit.trim() || busy} className="nm-btn nm-btn-primary nm-btn-sm">
+              <button
+                type="button"
+                onClick={submitNew}
+                disabled={!name.trim() || !unit.trim() || busy}
+                className="nm-btn nm-btn-primary nm-btn-sm"
+              >
                 Add
               </button>
             </div>
@@ -253,7 +307,12 @@ function RowMenu({ onEdit, onDelete }: { onEdit: () => void; onDelete: () => voi
   const ref = useClickOutside<HTMLDivElement>(() => setOpen(false));
   return (
     <div className="nm-menu" ref={ref}>
-      <button type="button" aria-label="Actions" onClick={() => setOpen((o) => !o)} className="nm-menu-btn">
+      <button
+        type="button"
+        aria-label="Actions"
+        onClick={() => setOpen((o) => !o)}
+        className="nm-menu-btn"
+      >
         <HiEllipsisVertical />
       </button>
       {open && (
@@ -348,14 +407,24 @@ function NutritionForm({
 
       <div className="nm-form-unit">
         <span className="nm-field-label">Unit</span>
-        <UomToggle uoms={uoms} value={draft.uom} onChange={(id) => setDraft({ ...draft, uom: id })} api={uomApi} />
+        <UomToggle
+          uoms={uoms}
+          value={draft.uom}
+          onChange={(id) => setDraft({ ...draft, uom: id })}
+          api={uomApi}
+        />
       </div>
 
       <div className="nm-form-actions">
         <button type="button" onClick={onCancel} className="nm-btn nm-btn-text">
           Cancel
         </button>
-        <button type="button" onClick={save} disabled={!valid || busy} className="nm-btn nm-btn-primary">
+        <button
+          type="button"
+          onClick={save}
+          disabled={!valid || busy}
+          className="nm-btn nm-btn-primary"
+        >
           {busy ? "Saving…" : "Save"}
         </button>
       </div>
@@ -393,7 +462,12 @@ function NutritionTable({
     per_100gm: parseFloat(draft.per_100gm) || 0,
   });
 
-  const blankDraft: Draft = { nutrition_name: "", per_serving: "", per_100gm: "", uom: uoms[0]?.id ?? null };
+  const blankDraft: Draft = {
+    nutrition_name: "",
+    per_serving: "",
+    per_100gm: "",
+    uom: uoms[0]?.id ?? null,
+  };
   const draftFor = (row: Nutrition): Draft => ({
     nutrition_name: row.nutrition_name,
     per_serving: String(row.per_serving ?? ""),
@@ -504,7 +578,8 @@ function ItemSelector({
   const submit = async () => {
     if (!name.trim() || busy || !modal) return;
     setBusy(true);
-    const ok = modal.mode === "add" ? await onAdd(name.trim()) : await onUpdate(modal.id, name.trim());
+    const ok =
+      modal.mode === "add" ? await onAdd(name.trim()) : await onUpdate(modal.id, name.trim());
     setBusy(false);
     if (ok) setModal(null);
   };
@@ -520,7 +595,12 @@ function ItemSelector({
 
       <div className="nm-search">
         <HiMagnifyingGlass className="nm-search-icon" />
-        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search items" className="nm-search-input" />
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search items"
+          className="nm-search-input"
+        />
       </div>
 
       <div className="nm-item-list">
@@ -528,20 +608,42 @@ function ItemSelector({
           <div key={item.id} className={`nm-item${item.id === selectedId ? " is-active" : ""}`}>
             <button type="button" onClick={() => onSelect(item.id)} className="nm-item-btn">
               <span className="nm-item-name">{item.item_name}</span>
-              {item.created_at && <span className="nm-item-date">{formatDate(item.created_at)}</span>}
+              {item.created_at && (
+                <span className="nm-item-date">{formatDate(item.created_at)}</span>
+              )}
             </button>
             <RowMenu onEdit={() => openEdit(item)} onDelete={() => onDelete(item.id)} />
           </div>
         ))}
-        {filtered.length === 0 && <div className="nm-item-empty">{search ? "No matches." : "No items yet."}</div>}
+        {filtered.length === 0 && (
+          <div className="nm-item-empty">{search ? "No matches." : "No items yet."}</div>
+        )}
       </div>
 
-      {modal && (
-        <div className="nm-modal-overlay" onClick={() => !busy && setModal(null)}>
-          <div className="nm-modal" onClick={(e) => e.stopPropagation()}>
+      <Dialog
+        open={Boolean(modal)}
+        onOpenChange={(next) => {
+          if (!next) (() => !busy && setModal(null))();
+        }}
+      >
+        {modal && (
+          <DialogContent
+            title="Nutrition form"
+            variant="bare"
+            size="auto"
+            showClose={false}
+            className="nm-modal"
+          >
             <div className="nm-modal-head">
-              <span className="nm-modal-title">{modal.mode === "add" ? "New item" : "Rename item"}</span>
-              <button type="button" aria-label="Close" onClick={() => setModal(null)} className="nm-modal-close">
+              <span className="nm-modal-title">
+                {modal.mode === "add" ? "New item" : "Rename item"}
+              </span>
+              <button
+                type="button"
+                aria-label="Close"
+                onClick={() => setModal(null)}
+                className="nm-modal-close"
+              >
                 <HiXMark />
               </button>
             </div>
@@ -557,13 +659,18 @@ function ItemSelector({
               <button type="button" onClick={() => setModal(null)} className="nm-btn nm-btn-text">
                 Cancel
               </button>
-              <button type="button" onClick={submit} disabled={!name.trim() || busy} className="nm-btn nm-btn-primary">
+              <button
+                type="button"
+                onClick={submit}
+                disabled={!name.trim() || busy}
+                className="nm-btn nm-btn-primary"
+              >
                 {busy ? "Saving…" : modal.mode === "add" ? "Add item" : "Save changes"}
               </button>
             </div>
-          </div>
-        </div>
-      )}
+          </DialogContent>
+        )}
+      </Dialog>
     </aside>
   );
 }
@@ -571,67 +678,74 @@ function ItemSelector({
 /* ── Dashboard ────────────────────────────────────────────────────────────── */
 
 export default function NutritionManager() {
-  const [items, setItems] = useState<Item[]>([]);
-  const [uoms, setUoms] = useState<Uom[]>([]);
-  const [rows, setRows] = useState<Nutrition[]>([]);
-  const [rowsLoading, setRowsLoading] = useState(false);
+  const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [error, setError] = useState("");
 
-  // Items + units load once.
-  useEffect(() => {
-    (async () => {
-      try {
-        const [itemsRes, uomsRes] = await Promise.all([api.get(ITEM_URL), api.get(UOM_URL)]);
-        const loadedItems = asArray<Item>(itemsRes.data);
-        setItems(loadedItems);
-        setUoms(asArray<Uom>(uomsRes.data));
-        if (loadedItems.length) setSelectedId(loadedItems[0].id);
-      } catch (err) {
-        setError(errMessage(err, "Unable to load nutrition data."));
-      }
-    })();
-  }, []);
+  // Items + units — one query, mirroring the original `Promise.all`: either
+  // both arrive or, on a failure, neither does.
+  const {
+    data: catalog,
+    isError: catalogFailed,
+  } = useQuery<Catalog>({
+    queryKey: ["legal", "items-uoms"],
+    queryFn: async () => {
+      const [itemsRes, uomsRes] = await Promise.all([api.get(ITEM_URL), api.get(UOM_URL)]);
+      return { items: asArray<Item>(itemsRes.data), uoms: asArray<Uom>(uomsRes.data) };
+    },
+  });
+  const items = catalog?.items ?? EMPTY_ITEMS;
+  const uoms = catalog?.uoms ?? EMPTY_UOMS;
+
+  /* Re-seed during render, never in an effect: the `seededFrom` identity guard
+   * (same shape as Order_Flow_Settings' `config` adoption) fires once per new
+   * catalog snapshot, and only picks a default when nothing is selected yet —
+   * so it reproduces the old mount-effect's one-time auto-select without an
+   * effect, and still recovers a default if the first load came back empty. */
+  const [seededFrom, setSeededFrom] = useState<Catalog | undefined>(undefined);
+  if (catalog && catalog !== seededFrom) {
+    setSeededFrom(catalog);
+    if (selectedId === null && catalog.items.length) setSelectedId(catalog.items[0].id);
+  }
 
   // Nutrition facts for the selected item — fetched from the dedicated endpoint
   // (/legal/item-nutrition/?item_id=…) whenever the selection changes.
-  useEffect(() => {
-    if (selectedId == null) {
-      setRows([]);
-      return;
-    }
-    let ignore = false;
-    setRowsLoading(true);
-    (async () => {
-      try {
-        const { data } = await api.get(ITEM_NUTRITION_URL, { params: { item_id: selectedId } });
-        if (ignore) return;
-        const facts =
-          data && Array.isArray((data as { nutritional_facts?: unknown }).nutritional_facts)
-            ? (data as { nutritional_facts: Nutrition[] }).nutritional_facts
-            : asArray<Nutrition>(data);
-        setRows(facts);
-      } catch (err) {
-        if (!ignore) {
-          setRows([]);
-          setError(errMessage(err, "Unable to load nutrition facts."));
-        }
-      } finally {
-        if (!ignore) setRowsLoading(false);
-      }
-    })();
-    return () => {
-      ignore = true;
-    };
-  }, [selectedId]);
+  const {
+    data: rowsData,
+    isFetching: rowsLoading,
+    isError: rowsFailed,
+  } = useQuery<Nutrition[]>({
+    queryKey: ["legal", "nutrition", selectedId],
+    queryFn: async () => {
+      const { data } = await api.get(ITEM_NUTRITION_URL, { params: { item_id: selectedId } });
+      return data && Array.isArray((data as { nutritional_facts?: unknown }).nutritional_facts)
+        ? (data as { nutritional_facts: Nutrition[] }).nutritional_facts
+        : asArray<Nutrition>(data);
+    },
+    enabled: selectedId != null,
+  });
+  const rows = rowsData ?? EMPTY_NUTRITION;
+
+  const loadError = catalogFailed
+    ? "Unable to load nutrition data."
+    : rowsFailed
+      ? "Unable to load nutrition facts."
+      : "";
 
   const selectedItem = items.find((it) => it.id === selectedId) ?? null;
 
-  /* Items — POST / PATCH /:id/ / DELETE /:id/ */
+  /* Items — POST / PATCH /:id/ / DELETE /:id/. Each patches the shared
+     ["legal","items-uoms"] cache directly — the local patch IS the
+     persistence, same as it was against `setItems`/`setUoms`. */
+  const patchCatalog = (updater: (base: Catalog) => Catalog) =>
+    queryClient.setQueryData<Catalog>(["legal", "items-uoms"], (prev) =>
+      updater(prev ?? { items: EMPTY_ITEMS, uoms: EMPTY_UOMS }),
+    );
+
   const addItem = async (item_name: string): Promise<boolean> => {
     try {
       const { data } = await api.post<Item>(ITEM_URL, { item_name });
-      setItems((prev) => [data, ...prev]);
+      patchCatalog((base) => ({ ...base, items: [data, ...base.items] }));
       setSelectedId(data.id);
       return true;
     } catch (err) {
@@ -643,7 +757,7 @@ export default function NutritionManager() {
   const updateItem = async (id: number, item_name: string): Promise<boolean> => {
     try {
       const { data } = await api.patch<Item>(`${ITEM_URL}${id}/`, { item_name });
-      setItems((prev) => prev.map((it) => (it.id === id ? data : it)));
+      patchCatalog((base) => ({ ...base, items: base.items.map((it) => (it.id === id ? data : it)) }));
       return true;
     } catch (err) {
       setError(errMessage(err, "Could not rename the item."));
@@ -654,8 +768,10 @@ export default function NutritionManager() {
   const deleteItem = async (id: number) => {
     try {
       await api.delete(`${ITEM_URL}${id}/`);
-      setItems((prev) => prev.filter((it) => it.id !== id));
-      setSelectedId((curr) => (curr === id ? items.find((it) => it.id !== id)?.id ?? null : curr));
+      patchCatalog((base) => ({ ...base, items: base.items.filter((it) => it.id !== id) }));
+      setSelectedId((curr) =>
+        curr === id ? (items.find((it) => it.id !== id)?.id ?? null) : curr,
+      );
     } catch (err) {
       setError(errMessage(err, "Could not delete the item."));
     }
@@ -665,7 +781,7 @@ export default function NutritionManager() {
   const createUom = async (uom_name: string, uom_unit: string): Promise<Uom | null> => {
     try {
       const { data } = await api.post<Uom>(UOM_URL, { uom_name, uom_unit });
-      setUoms((prev) => [...prev, data]);
+      patchCatalog((base) => ({ ...base, uoms: [...base.uoms, data] }));
       return data;
     } catch (err) {
       setError(errMessage(err, "Could not add the unit."));
@@ -676,7 +792,7 @@ export default function NutritionManager() {
   const updateUom = async (id: number, uom_name: string, uom_unit: string): Promise<boolean> => {
     try {
       const { data } = await api.patch<Uom>(`${UOM_URL}${id}/`, { uom_name, uom_unit });
-      setUoms((prev) => prev.map((u) => (u.id === id ? data : u)));
+      patchCatalog((base) => ({ ...base, uoms: base.uoms.map((u) => (u.id === id ? data : u)) }));
       return true;
     } catch (err) {
       setError(errMessage(err, "Could not update the unit."));
@@ -687,7 +803,7 @@ export default function NutritionManager() {
   const deleteUom = async (id: number): Promise<boolean> => {
     try {
       await api.delete(`${UOM_URL}${id}/`);
-      setUoms((prev) => prev.filter((u) => u.id !== id));
+      patchCatalog((base) => ({ ...base, uoms: base.uoms.filter((u) => u.id !== id) }));
       return true;
     } catch (err) {
       setError(errMessage(err, "Could not delete the unit."));
@@ -697,11 +813,18 @@ export default function NutritionManager() {
 
   const uomApi: UomApi = { create: createUom, update: updateUom, remove: deleteUom };
 
-  /* Nutrition — POST / PATCH /:id/ / DELETE /:id/ */
+  /* Nutrition — POST / PATCH /:id/ / DELETE /:id/. Patches the
+     ["legal","nutrition",selectedId] cache the same way the catalogue
+     mutations patch ["legal","items-uoms"] above. */
+  const patchRows = (updater: (base: Nutrition[]) => Nutrition[]) =>
+    queryClient.setQueryData<Nutrition[]>(["legal", "nutrition", selectedId], (prev) =>
+      updater(prev ?? EMPTY_NUTRITION),
+    );
+
   const addNutrition = async (payload: NutritionPayload): Promise<boolean> => {
     try {
       const { data } = await api.post<Nutrition>(NUTRITION_URL, payload);
-      setRows((prev) => [...prev, data]);
+      patchRows((base) => [...base, data]);
       return true;
     } catch (err) {
       setError(errMessage(err, "Could not add the nutrition row."));
@@ -712,7 +835,7 @@ export default function NutritionManager() {
   const updateNutrition = async (id: number, payload: NutritionPayload): Promise<boolean> => {
     try {
       const { data } = await api.patch<Nutrition>(`${NUTRITION_URL}${id}/`, payload);
-      setRows((prev) => prev.map((n) => (n.id === id ? data : n)));
+      patchRows((base) => base.map((n) => (n.id === id ? data : n)));
       return true;
     } catch (err) {
       setError(errMessage(err, "Could not update the nutrition row."));
@@ -721,7 +844,9 @@ export default function NutritionManager() {
   };
 
   const deleteNutrition = async (id: number) => {
-    setRows((prev) => prev.filter((n) => n.id !== id));
+    // Optimistic, matching the original: the row is gone from the cache
+    // immediately, with no rollback if the request then fails.
+    patchRows((base) => base.filter((n) => n.id !== id));
     try {
       await api.delete(`${NUTRITION_URL}${id}/`);
     } catch (err) {
@@ -742,12 +867,14 @@ export default function NutritionManager() {
         />
 
         <section className="nm-detail">
-          {error && (
+          {(error || loadError) && (
             <div className="nm-error" role="alert">
-              <span>{error}</span>
-              <button type="button" onClick={() => setError("")} aria-label="Dismiss">
-                <HiXMark />
-              </button>
+              <span>{error || loadError}</span>
+              {error && (
+                <button type="button" onClick={() => setError("")} aria-label="Dismiss">
+                  <HiXMark />
+                </button>
+              )}
             </div>
           )}
 
@@ -757,7 +884,9 @@ export default function NutritionManager() {
                 <span className="nm-eyebrow">Nutrition facts</span>
                 <h2 className="nm-detail-title">{selectedItem.item_name}</h2>
                 <span className="nm-detail-count">
-                  {rowsLoading ? "Loading…" : `${rows.length} ${rows.length === 1 ? "nutrient" : "nutrients"}`}
+                  {rowsLoading
+                    ? "Loading…"
+                    : `${rows.length} ${rows.length === 1 ? "nutrient" : "nutrients"}`}
                 </span>
               </header>
               <div className="nm-detail-body">

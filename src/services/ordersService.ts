@@ -525,7 +525,12 @@ const normalizeOrderItem = (item: OrderItem): OrderItem => {
   //   ((item as any).total_ltrs !== undefined
   //     ? Math.max(toNumber((item as any).total_ltrs) - toNumber(item.ltrs), 0)
   //     : schemeQty);
-  const totalLtrs = (item as any).total_ltrs ?? toNumber(item.ltrs) + toNumber(schemeQty);
+  // `total_ltrs` is sent by the API but is not on `OrderItem` — it is a
+  // computed field the backend adds, so the cast names it rather than opening
+  // the whole row to `any`.
+  const totalLtrs =
+    (item as OrderItem & { total_ltrs?: number | string | null }).total_ltrs ??
+    toNumber(item.ltrs) + toNumber(schemeQty);
 
   return {
     ...item,
@@ -539,6 +544,60 @@ const normalizeOrderItem = (item: OrderItem): OrderItem => {
 const normalizeOrder = (order: Order): Order => ({
   ...order,
   items: Array.isArray(order.items) ? order.items.map(normalizeOrderItem) : [],
+});
+
+/**
+ * One outgoing order line, with every number actually a number.
+ *
+ * The wizard's inputs are text inputs, so `qty`, `boxes`, `tax_rate` and the
+ * rest all arrive as strings; the backend's `to_float` would cope, but the
+ * payload is also logged, diffed and replayed, and a payload of strings is a
+ * payload nobody can compare.
+ *
+ * `createOrder` and `saveDraft` had a character-identical copy of this each.
+ * They are one function now because they were never allowed to differ: both
+ * post to `/orders/create/` and are parsed by the same code.
+ */
+const outgoingOrderItem = (item: OrderItem) => ({
+  ...item,
+  sub_group: item.sub_group ?? item.variety,
+  qty: Number(item.qty),
+  pcs: Number(item.pcs),
+  boxes: Number(item.boxes),
+  ltrs: Number(item.ltrs),
+  price_list_basic: Number(item.price_list_basic),
+  basic_price: Number(item.basic_price),
+  tax_rate: Number(item.tax_rate),
+  total: Number(item.total),
+  scheme_id: item.scheme_id ? Number(item.scheme_id) : undefined,
+  scheme_qty: item.scheme_qty ? Number(item.scheme_qty) : 0,
+  schemes: Array.isArray(item.schemes) ? item.schemes.map(outgoingScheme) : undefined,
+  total_ltrs: item.total_ltrs,
+});
+
+/**
+ * One scheme on an outgoing line — SPREAD, not rebuilt.
+ *
+ * This used to return a fresh `{scheme_id, scheme_qty}`, which silently
+ * discarded every other key. That was fine for a legacy hand-picked scheme,
+ * which has nothing else, and wrong for one the v2 engine resolved: the
+ * backend qualifies a v2 entry on `scheme_v2_id` alone
+ * (orders/services/order_items.py, `_extract_order_item_schemes`), so an entry
+ * stripped of it has neither a scheme nor a scheme_v2_id and is skipped —
+ * every engine-resolved giveaway placed through Add Sales was dropped on the
+ * wire. The Mart flow never hit this because `createMartOrder` posts its
+ * payload unmapped.
+ *
+ * `scheme_id` is only emitted when the source actually has one: `Number(
+ * undefined)` is NaN, which serialises to `null` and reaches the backend as a
+ * scheme lookup for nothing.
+ */
+const outgoingScheme = (scheme: OrderItemScheme) => ({
+  ...scheme,
+  ...(scheme.scheme_id === undefined || scheme.scheme_id === null
+    ? {}
+    : { scheme_id: Number(scheme.scheme_id) }),
+  scheme_qty: Number(scheme.scheme_qty ?? scheme.qty_scheme ?? 0),
 });
 
 
@@ -635,27 +694,7 @@ export const ordersService = {
   createOrder: async (formData: CreateOrder) => {
     const payload = {
       ...formData,
-      items: formData.items.map((item) => ({
-        ...item,
-        sub_group: item.sub_group ?? item.variety,
-        qty: Number(item.qty),
-        pcs: Number(item.pcs),
-        boxes: Number(item.boxes),
-        ltrs: Number(item.ltrs),
-        price_list_basic: Number(item.price_list_basic),
-        basic_price: Number(item.basic_price),
-        tax_rate: Number(item.tax_rate),
-        total: Number(item.total),
-        scheme_id: item.scheme_id ? Number(item.scheme_id) : undefined,
-        scheme_qty: item.scheme_qty ? Number(item.scheme_qty) : 0,
-        schemes: Array.isArray(item.schemes)
-          ? item.schemes.map((scheme) => ({
-              scheme_id: Number(scheme.scheme_id),
-              scheme_qty: Number(scheme.scheme_qty ?? scheme.qty_scheme ?? 0),
-            }))
-          : undefined,
-        total_ltrs: item.total_ltrs,
-      })),
+      items: formData.items.map(outgoingOrderItem),
     };
     const response = await api.post("/orders/create/", payload);
     return response.data;
@@ -724,27 +763,7 @@ export const ordersService = {
       ...formData,
       ...(orderId ? { order_id: orderId } : {}),
       is_draft: true,
-      items: items.map((item) => ({
-        ...item,
-        sub_group: item.sub_group ?? item.variety,
-        qty: Number(item.qty),
-        pcs: Number(item.pcs),
-        boxes: Number(item.boxes),
-        ltrs: Number(item.ltrs),
-        price_list_basic: Number(item.price_list_basic),
-        basic_price: Number(item.basic_price),
-        tax_rate: Number(item.tax_rate),
-        total: Number(item.total),
-        scheme_id: item.scheme_id ? Number(item.scheme_id) : undefined,
-        scheme_qty: item.scheme_qty ? Number(item.scheme_qty) : 0,
-        schemes: Array.isArray(item.schemes)
-          ? item.schemes.map((scheme) => ({
-              scheme_id: Number(scheme.scheme_id),
-              scheme_qty: Number(scheme.scheme_qty ?? scheme.qty_scheme ?? 0),
-            }))
-          : undefined,
-        total_ltrs: item.total_ltrs,
-      })),
+      items: items.map(outgoingOrderItem),
     };
     const response = await api.post("/orders/create/", payload);
     return response.data;

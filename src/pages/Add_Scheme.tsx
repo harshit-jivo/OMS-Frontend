@@ -1,17 +1,23 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ordersService } from "../services/ordersService";
 import type { SchemeRow } from "../services/ordersService";
-import { userService } from "../services/userService";
+import { useStates } from "../lib/authQueries";
 import "../styles/Add_Scheme.css";
-
-type StateOption = {
-  id: number;
-  name: string;
-  code: string;
-};
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 const EMPTY_FORM = { scheme_name: "", item_code: "", state_code: "" };
+
+/** One identity for "no schemes", so `visibleSchemes` does not recompute forever. */
+const NO_SCHEMES: SchemeRow[] = [];
 
 // The API reports duplicate/validation problems per field; surface the first one
 // rather than a generic "failed" alert.
@@ -29,16 +35,16 @@ const readApiError = (error: unknown, fallback: string): string => {
 
 export default function Add_Scheme() {
   const stateDropdownRef = useRef<HTMLDivElement>(null);
+  const queryClient = useQueryClient();
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [states, setStates] = useState<StateOption[]>([]);
-  const [isLoadingStates, setIsLoadingStates] = useState(false);
+  // Shared with Scheme_Manager and App_User under ["auth","states"], so the
+  // list of states is fetched once per session rather than once per page.
+  const { states, isLoading: isLoadingStates } = useStates();
   const [stateDropdownOpen, setStateDropdownOpen] = useState(false);
   const [formData, setFormData] = useState(EMPTY_FORM);
 
   // null = creating a new scheme; a number = editing that scheme_id.
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [schemes, setSchemes] = useState<SchemeRow[]>([]);
-  const [isLoadingSchemes, setIsLoadingSchemes] = useState(false);
   const [search, setSearch] = useState("");
   const [includeInactive, setIncludeInactive] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
@@ -50,25 +56,25 @@ export default function Add_Scheme() {
     state_code: formData.state_code,
   };
 
-  const loadSchemes = useCallback(async () => {
-    setIsLoadingSchemes(true);
-    try {
-      const rows = await ordersService.getSchemesForManage({
-        include_inactive: includeInactive,
-      });
-      setSchemes(rows);
-    } catch (error) {
-      console.error("Error fetching schemes:", error);
-      setSchemes([]);
-      setFeedback({ kind: "error", text: readApiError(error, "Could not load schemes") });
-    } finally {
-      setIsLoadingSchemes(false);
-    }
-  }, [includeInactive]);
+  /*
+   * `includeInactive` is part of the key, not a dependency of a refetch. The
+   * old `useCallback`/`useEffect` pair re-created the fetcher whenever the
+   * checkbox moved and re-ran it — and, having thrown the previous result
+   * away, showed a spinner every time you toggled back to a list it had
+   * already downloaded. Two keys means both are cached.
+   */
+  const {
+    data: schemeData,
+    isPending: isLoadingSchemes,
+    error: schemeError,
+  } = useQuery({
+    queryKey: ["schemes", "manage", { includeInactive }],
+    queryFn: () => ordersService.getSchemesForManage({ include_inactive: includeInactive }),
+  });
+  const schemes = schemeData ?? NO_SCHEMES;
 
-  useEffect(() => {
-    void loadSchemes();
-  }, [loadSchemes]);
+  /** Re-read after any create/update/deactivate/delete, both keys at once. */
+  const reloadSchemes = () => queryClient.invalidateQueries({ queryKey: ["schemes", "manage"] });
 
   // Client-side filter: the list is small (tens of rows) so there is no need to
   // round-trip the server on every keystroke.
@@ -83,23 +89,6 @@ export default function Add_Scheme() {
         row.state_code?.toLowerCase().includes(term),
     );
   }, [schemes, search]);
-
-  useEffect(() => {
-    const fetchStates = async () => {
-      setIsLoadingStates(true);
-      try {
-        const data = await userService.getState();
-        setStates(Array.isArray(data) ? data : []);
-      } catch (error) {
-        console.error("Error fetching states:", error);
-        setStates([]);
-      } finally {
-        setIsLoadingStates(false);
-      }
-    };
-
-    void fetchStates();
-  }, []);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -131,7 +120,7 @@ export default function Add_Scheme() {
 
       setFormData(EMPTY_FORM);
       setEditingId(null);
-      await loadSchemes();
+      await reloadSchemes();
     } catch (error) {
       console.error("Error:", error);
       setFeedback({
@@ -180,7 +169,7 @@ export default function Add_Scheme() {
         text: result?.message || `Scheme #${row.scheme_id} deactivated`,
       });
       if (editingId === row.scheme_id) cancelEdit();
-      await loadSchemes();
+      await reloadSchemes();
     } catch (error) {
       console.error("Error:", error);
       setFeedback({ kind: "error", text: readApiError(error, "Failed to deactivate scheme") });
@@ -195,7 +184,7 @@ export default function Add_Scheme() {
     try {
       await ordersService.updateScheme(row.scheme_id, { is_active: true });
       setFeedback({ kind: "ok", text: `Scheme #${row.scheme_id} re-activated` });
-      await loadSchemes();
+      await reloadSchemes();
     } catch (error) {
       console.error("Error:", error);
       setFeedback({ kind: "error", text: readApiError(error, "Failed to re-activate scheme") });
@@ -371,7 +360,7 @@ export default function Add_Scheme() {
             <input
               className="asg-search"
               type="search"
-              placeholder="Search name, item code or state"
+              placeholder="Search name, item code or state" aria-label="Search name, item code or state"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -387,35 +376,43 @@ export default function Add_Scheme() {
         </div>
 
         <div className="asg-table-wrap">
-          <table className="asg-table">
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Scheme Name</th>
-                <th>State</th>
-                <th>Free Item</th>
-                <th>Status</th>
-                <th aria-label="Actions" />
-              </tr>
-            </thead>
-            <tbody>
+          <Table density="compact">
+            <TableHeader>
+              <TableRow>
+                <TableHead>ID</TableHead>
+                <TableHead>Scheme Name</TableHead>
+                <TableHead>State</TableHead>
+                <TableHead>Free Item</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead aria-label="Actions" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {isLoadingSchemes ? (
-                <tr>
-                  <td colSpan={6} className="asg-empty">
+                <TableRow>
+                  <TableCell colSpan={6} className="asg-empty">
                     Loading schemes...
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
+              ) : schemeError ? (
+                /* The old code caught this into `setFeedback` and ALSO emptied
+                   the list, so a failed load read as "No schemes found." */
+                <TableRow>
+                  <TableCell colSpan={6} className="asg-empty">
+                    {readApiError(schemeError, "Could not load schemes")}
+                  </TableCell>
+                </TableRow>
               ) : visibleSchemes.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="asg-empty">
+                <TableRow>
+                  <TableCell colSpan={6} className="asg-empty">
                     No schemes found.
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ) : (
                 visibleSchemes.map((row) => {
                   const isBusy = busyId === row.scheme_id;
                   return (
-                    <tr
+                    <TableRow
                       key={row.scheme_id}
                       className={[
                         row.is_active ? "" : "is-inactive",
@@ -424,23 +421,23 @@ export default function Add_Scheme() {
                         .filter(Boolean)
                         .join(" ")}
                     >
-                      <td>{row.scheme_id}</td>
-                      <td>{row.scheme_name}</td>
-                      <td>{row.state_code || "—"}</td>
-                      <td>
+                      <TableCell>{row.scheme_id}</TableCell>
+                      <TableCell>{row.scheme_name}</TableCell>
+                      <TableCell>{row.state_code || "—"}</TableCell>
+                      <TableCell>
                         {row.item_code || "—"}
                         {row.item_name ? (
                           <span className="asg-item-name">{row.item_name}</span>
                         ) : null}
-                      </td>
-                      <td>
+                      </TableCell>
+                      <TableCell>
                         <span
                           className={`asg-badge ${row.is_active ? "is-active" : "is-off"}`}
                         >
                           {row.is_active ? "Active" : "Deactivated"}
                         </span>
-                      </td>
-                      <td className="asg-row-actions">
+                      </TableCell>
+                      <TableCell className="asg-row-actions">
                         <button
                           type="button"
                           className="asg-link"
@@ -468,13 +465,13 @@ export default function Add_Scheme() {
                             {isBusy ? "..." : "Re-activate"}
                           </button>
                         )}
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   );
                 })
               )}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       </div>
     </div>

@@ -58,7 +58,7 @@ export default function HAIS() {
       </div>
 
       {/* Tab bar */}
-      <div className="nic-tabs" style={{ margin: "0 0 14px" }}>
+      <div className="nic-tabs nic-tabs--tight">
         {TABS.map((t) => (
           <button
             key={t.key}
@@ -83,9 +83,9 @@ export default function HAIS() {
 
         {view === "edit" && (
           <>
-            <div className="nic-actions-row" style={{ marginBottom: 12 }}>
+            <div className="nic-actions-row nic-actions-row--offset">
               <button className="nic-tab" onClick={backToList}>
-                <HiArrowLeft style={{ verticalAlign: "-3px", marginRight: 6 }} />
+                <HiArrowLeft className="nic-icon-lead" />
                 Back to Assets
               </button>
             </div>

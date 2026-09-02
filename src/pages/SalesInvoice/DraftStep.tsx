@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { HiCheckCircle, HiXMark } from "react-icons/hi2";
 import ContentsTab from "./ContentsTab";
 import InteractiveLoader from "./InteractiveLoader";
 import { formatDateDisplay, formatMoney, toNumber } from "./salesInvoice.utils";
 import type { SalesInvoiceState } from "./useSalesInvoice";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 
 type Props = {
   state: SalesInvoiceState;
@@ -88,15 +89,35 @@ function DraftDocumentStrip({ state }: { state: SalesInvoiceState }) {
 
   return (
     <div className="si-draft-summary-dates">
-      <EditableDate label="Posting Date" value={state.form.postingDate} onChange={updatePostingDate} />
+      <EditableDate
+        label="Posting Date"
+        value={state.form.postingDate}
+        onChange={updatePostingDate}
+      />
     </div>
   );
 }
 
-export default function DraftStep({ state, onReset, onCreateNew, onAddItems, onChangeBranch }: Props) {
+export default function DraftStep({
+  state,
+  onReset,
+  onCreateNew,
+  onAddItems,
+  onChangeBranch,
+}: Props) {
   const [totalsModalOpen, setTotalsModalOpen] = useState(false);
-  const [postErrorNotificationOpen, setPostErrorNotificationOpen] = useState(false);
-  const [successModalOpen, setSuccessModalOpen] = useState(false);
+  // The error and success banners are not independent state — they are open
+  // whenever the hook is reporting an error or a success the user has not
+  // dismissed yet. Storing what was DISMISSED instead of what is OPEN keeps
+  // that a render-time derivation. `submitForReview` below clears both markers
+  // as it starts a post, which is what makes a repeat of the identical error
+  // message show again rather than stay dismissed.
+  const [dismissedPostError, setDismissedPostError] = useState<string | null>(null);
+  const [dismissedPostSuccess, setDismissedPostSuccess] = useState<string | null>(null);
+  const postErrorNotificationOpen =
+    Boolean(state.postError) && state.postError !== dismissedPostError;
+  const successModalOpen =
+    Boolean(state.postSuccess) && state.postSuccess !== dismissedPostSuccess;
   const customerName = state.customerDetails?.CardName || state.selectedParty?.CardName || "-";
   const postDisabledReason = state.selectedLineBatchError;
   // What this customer still owes, straight off their SAP account balance.
@@ -110,6 +131,23 @@ export default function DraftStep({ state, onReset, onCreateNew, onAddItems, onC
     setTotalsModalOpen(true);
   };
 
+  const closeSuccessModal = () => {
+    setDismissedPostSuccess(state.postSuccess);
+    onCreateNew();
+  };
+
+  /* `postInvoice` has exactly one caller — the Submit button in the totals
+     modal — so closing that modal here is the same thing the third effect did
+     when `state.posting` went true, minus the extra render. */
+  const submitForReview = () => {
+    setTotalsModalOpen(false);
+    setDismissedPostError(null);
+    setDismissedPostSuccess(null);
+    state.postInvoice();
+  };
+
+  /* Replaced by the derivations above.
+
   useEffect(() => {
     if (state.postError) setPostErrorNotificationOpen(true);
   }, [state.postError]);
@@ -120,14 +158,10 @@ export default function DraftStep({ state, onReset, onCreateNew, onAddItems, onC
     }
   }, [state.postSuccess]);
 
-  const closeSuccessModal = () => {
-    setSuccessModalOpen(false);
-    onCreateNew();
-  };
-
   useEffect(() => {
     if (state.posting) setTotalsModalOpen(false);
   }, [state.posting]);
+  */
 
   return (
     <div className="si-draft-stage">
@@ -140,7 +174,9 @@ export default function DraftStep({ state, onReset, onCreateNew, onAddItems, onC
           estimatedTime: "~30 seconds",
         }}
       />
-      {state.loadingDraftDetails && <div className="si-loader">Loading customer and salesperson details...</div>}
+      {state.loadingDraftDetails && (
+        <div className="si-loader">Loading customer and salesperson details...</div>
+      )}
       {state.draftError && <div className="si-inline-error">{state.draftError}</div>}
 
       <section className="si-card si-draft-party-card si-draft-summary-card">
@@ -167,12 +203,18 @@ export default function DraftStep({ state, onReset, onCreateNew, onAddItems, onC
       </section>
 
       <details className="si-payload-box si-step3-payload">
-        <summary>Draft payload - dates display as {formatDateDisplay(state.form.postingDate)}</summary>
+        <summary>
+          Draft payload - dates display as {formatDateDisplay(state.form.postingDate)}
+        </summary>
         <pre>{JSON.stringify(state.payload, null, 2)}</pre>
       </details>
 
       {state.postError && postErrorNotificationOpen && (
-        <aside className="si-floating-notification si-floating-notification-error" role="alert" aria-live="assertive">
+        <aside
+          className="si-floating-notification si-floating-notification-error"
+          role="alert"
+          aria-live="assertive"
+        >
           <header>
             <div>
               <strong>Unable to submit invoice for review</strong>
@@ -181,7 +223,7 @@ export default function DraftStep({ state, onReset, onCreateNew, onAddItems, onC
             <button
               type="button"
               aria-label="Close SAP error notification"
-              onClick={() => setPostErrorNotificationOpen(false)}
+              onClick={() => setDismissedPostError(state.postError)}
             >
               <HiXMark aria-hidden="true" />
             </button>
@@ -189,7 +231,6 @@ export default function DraftStep({ state, onReset, onCreateNew, onAddItems, onC
           <pre>{state.postError}</pre>
         </aside>
       )}
-
 
       {successModalOpen && (
         <div className="si-modal-backdrop si-success-backdrop" role="presentation">
@@ -212,9 +253,7 @@ export default function DraftStep({ state, onReset, onCreateNew, onAddItems, onC
             </span>
             <span className="si-eyebrow">Sales Invoice</span>
             <h2>Invoice Submitted for Review</h2>
-            {state.postedDocNum && (
-              <p className="si-success-docnum">Draft #{state.postedDocNum}</p>
-            )}
+            {state.postedDocNum && <p className="si-success-docnum">Draft #{state.postedDocNum}</p>}
             <p className="si-success-message">{state.postSuccess}</p>
             <div className="si-success-actions">
               <button className="si-btn si-btn-primary" type="button" onClick={closeSuccessModal}>
@@ -225,133 +264,154 @@ export default function DraftStep({ state, onReset, onCreateNew, onAddItems, onC
         </div>
       )}
 
-      {totalsModalOpen && (
-        <div className="si-modal-backdrop" role="presentation">
-          <section className="si-totals-modal" role="dialog" aria-modal="true" aria-label="Invoice totals and freight">
+      <Dialog
+        open={Boolean(totalsModalOpen)}
+        onOpenChange={(next) => {
+          if (!next) setTotalsModalOpen(false);
+        }}
+      >
+        {totalsModalOpen && (
+          <DialogContent
+            title="Totals"
+            variant="bare"
+            size="auto"
+            showClose={false}
+            className="si-totals-modal"
+          >
             <header className="si-so-modal-head">
               <div>
                 <span className="si-eyebrow">Invoice Total</span>
                 <h2>{formatMoney(state.totals.grandTotal)}</h2>
                 <p>Review totals and freight charges before posting.</p>
               </div>
-              <button className="si-btn si-btn-outline" type="button" onClick={() => setTotalsModalOpen(false)}>
+              <button
+                className="si-btn si-btn-outline"
+                type="button"
+                onClick={() => setTotalsModalOpen(false)}
+              >
                 Close
               </button>
             </header>
 
             <div className="si-action-total-panel si-action-total-panel-modal">
-            <section className="si-footer-drawer-section">
-              <header className="si-footer-drawer-head">
-                <strong>Totals</strong>
-              </header>
-              <div className="si-totals-breakdown">
-                <div className="si-totals-line">
-                  <span>Taxable Amount</span>
-                  <strong>{formatMoney(state.totals.taxable)}</strong>
-                </div>
-                {state.totals.discountAmount > 0 && (
-                  <div className="si-totals-line si-totals-line-muted">
-                    <span>Discount</span>
-                    <strong>- {formatMoney(state.totals.discountAmount)}</strong>
-                  </div>
-                )}
-                {state.totals.freight > 0 && (
+              <section className="si-footer-drawer-section">
+                <header className="si-footer-drawer-head">
+                  <strong>Totals</strong>
+                </header>
+                <div className="si-totals-breakdown">
                   <div className="si-totals-line">
-                    <span>Freight</span>
-                    <strong>{formatMoney(state.totals.freight)}</strong>
+                    <span>Taxable Amount</span>
+                    <strong>{formatMoney(state.totals.taxable)}</strong>
                   </div>
-                )}
-                <div className="si-totals-line">
-                  <span>Tax Amount</span>
-                  <strong>{formatMoney(state.totals.tax)}</strong>
-                </div>
-                {Math.abs(state.totals.roundOff) >= 0.005 && (
-                  <div className="si-totals-line si-totals-line-muted">
-                    <span>Round Off</span>
-                    <strong>{formatMoney(state.totals.roundOff)}</strong>
-                  </div>
-                )}
-                <div className="si-totals-line si-totals-grand">
-                  <span>Grand Total</span>
-                  <strong>{formatMoney(state.totals.grandTotal)}</strong>
-                </div>
-              </div>
-            </section>
-
-            <section className="si-footer-drawer-section">
-              <header className="si-footer-drawer-head">
-                <strong>Freight</strong>
-                <button className="si-footer-add-freight" type="button" onClick={addFreightRow}>
-                  + Add
-                </button>
-              </header>
-              {state.freightRows.length === 0 ? (
-                <div className="si-footer-freight-empty">No freight expenses added.</div>
-              ) : (
-                <div className="si-freight-rows">
-                  {state.freightRows.map((row, index) => (
-                    <div className="si-freight-row" key={`${row.expenseCode}-${index}`}>
-                      <span className="si-freight-row-index">{index + 1}</span>
-                      <label className="si-freight-field si-freight-field-expense">
-                        <span>Expense</span>
-                        <select
-                          value={row.expenseCode}
-                          aria-label={`Freight expense ${index + 1}`}
-                          onChange={(event) => {
-                            const selected = state.freightOptions.find(
-                              (option) => String(option.ExpnsCode) === event.target.value,
-                            );
-                            state.updateFreightRow(index, {
-                              expenseCode: event.target.value,
-                              expenseName: selected?.ExpnsName || "",
-                            });
-                          }}
-                        >
-                          <option value="">Select freight</option>
-                          {state.freightOptions.map((option) => (
-                            <option key={option.ExpnsCode} value={option.ExpnsCode}>
-                              {option.ExpnsName}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="si-freight-field si-freight-field-amount">
-                        <span>Amount</span>
-                        <div className="si-freight-amount-input">
-                          <em>₹</em>
-                          <input
-                            type="number"
-                            min="0"
-                            value={row.lineTotal}
-                            aria-label={`Freight amount ${index + 1}`}
-                            onChange={(event) => state.updateFreightRow(index, { lineTotal: toNumber(event.target.value) })}
-                          />
-                        </div>
-                      </label>
-                      <label className="si-freight-field si-freight-field-tax">
-                        <span>Tax Code</span>
-                        <input
-                          type="text"
-                          value={row.taxCode}
-                          aria-label={`Freight tax code ${index + 1}`}
-                          placeholder="GST exempt code"
-                          onChange={(event) => state.updateFreightRow(index, { taxCode: event.target.value })}
-                        />
-                      </label>
-                      <button
-                        className="si-freight-remove"
-                        type="button"
-                        onClick={() => state.removeFreightRow(index)}
-                        aria-label={`Remove freight row ${index + 1}`}
-                      >
-                        x
-                      </button>
+                  {state.totals.discountAmount > 0 && (
+                    <div className="si-totals-line si-totals-line-muted">
+                      <span>Discount</span>
+                      <strong>- {formatMoney(state.totals.discountAmount)}</strong>
                     </div>
-                  ))}
+                  )}
+                  {state.totals.freight > 0 && (
+                    <div className="si-totals-line">
+                      <span>Freight</span>
+                      <strong>{formatMoney(state.totals.freight)}</strong>
+                    </div>
+                  )}
+                  <div className="si-totals-line">
+                    <span>Tax Amount</span>
+                    <strong>{formatMoney(state.totals.tax)}</strong>
+                  </div>
+                  {Math.abs(state.totals.roundOff) >= 0.005 && (
+                    <div className="si-totals-line si-totals-line-muted">
+                      <span>Round Off</span>
+                      <strong>{formatMoney(state.totals.roundOff)}</strong>
+                    </div>
+                  )}
+                  <div className="si-totals-line si-totals-grand">
+                    <span>Grand Total</span>
+                    <strong>{formatMoney(state.totals.grandTotal)}</strong>
+                  </div>
                 </div>
-              )}
-            </section>
-          </div>
+              </section>
+
+              <section className="si-footer-drawer-section">
+                <header className="si-footer-drawer-head">
+                  <strong>Freight</strong>
+                  <button className="si-footer-add-freight" type="button" onClick={addFreightRow}>
+                    + Add
+                  </button>
+                </header>
+                {state.freightRows.length === 0 ? (
+                  <div className="si-footer-freight-empty">No freight expenses added.</div>
+                ) : (
+                  <div className="si-freight-rows">
+                    {state.freightRows.map((row, index) => (
+                      <div className="si-freight-row" key={`${row.expenseCode}-${index}`}>
+                        <span className="si-freight-row-index">{index + 1}</span>
+                        <label className="si-freight-field si-freight-field-expense">
+                          <span>Expense</span>
+                          <select
+                            value={row.expenseCode}
+                            aria-label={`Freight expense ${index + 1}`}
+                            onChange={(event) => {
+                              const selected = state.freightOptions.find(
+                                (option) => String(option.ExpnsCode) === event.target.value,
+                              );
+                              state.updateFreightRow(index, {
+                                expenseCode: event.target.value,
+                                expenseName: selected?.ExpnsName || "",
+                              });
+                            }}
+                          >
+                            <option value="">Select freight</option>
+                            {state.freightOptions.map((option) => (
+                              <option key={option.ExpnsCode} value={option.ExpnsCode}>
+                                {option.ExpnsName}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="si-freight-field si-freight-field-amount">
+                          <span>Amount</span>
+                          <div className="si-freight-amount-input">
+                            <em>₹</em>
+                            <input
+                              type="number"
+                              min="0"
+                              value={row.lineTotal}
+                              aria-label={`Freight amount ${index + 1}`}
+                              onChange={(event) =>
+                                state.updateFreightRow(index, {
+                                  lineTotal: toNumber(event.target.value),
+                                })
+                              }
+                            />
+                          </div>
+                        </label>
+                        <label className="si-freight-field si-freight-field-tax">
+                          <span>Tax Code</span>
+                          <input
+                            type="text"
+                            value={row.taxCode}
+                            aria-label={`Freight tax code ${index + 1}`}
+                            placeholder="GST exempt code"
+                            onChange={(event) =>
+                              state.updateFreightRow(index, { taxCode: event.target.value })
+                            }
+                          />
+                        </label>
+                        <button
+                          className="si-freight-remove"
+                          type="button"
+                          onClick={() => state.removeFreightRow(index)}
+                          aria-label={`Remove freight row ${index + 1}`}
+                        >
+                          x
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            </div>
 
             <footer className="si-totals-modal-foot">
               <div className="si-totals-modal-foot-summary">
@@ -366,13 +426,14 @@ export default function DraftStep({ state, onReset, onCreateNew, onAddItems, onC
                 type="button"
                 disabled={state.posting || Boolean(postDisabledReason)}
                 title={postDisabledReason || undefined}
-                onClick={state.postInvoice}>
+                onClick={submitForReview}
+              >
                 {state.posting ? "Submitting..." : "Submit for Review"}
               </button>
             </footer>
-          </section>
-        </div>
-      )}
+          </DialogContent>
+        )}
+      </Dialog>
 
       <div className="si-action-bar">
         <div className="si-action-bar-row">

@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   HiEye,
   HiPencilSquare,
@@ -17,10 +18,24 @@ import {
   type SalesOrderSapStatus,
 } from "../../services/ordersService";
 import { startExcelExport, exportDateStamp } from "../../utils/excelExport";
+
+/** Stable empties, so the render does not see a new identity every pass. */
+const NO_MART_ORDERS: MartOrderSummary[] = [];
+const NO_SAP_STATUSES: Record<string, SalesOrderSapStatus> = {};
 import ItemSection from "../../components/order-items/ItemSection";
 import PartyHeader from "../../components/order-items/PartyHeader";
 import "../../styles/Auditor_Order.css";
 import "../../styles/MartApproval/MartApproval.css";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { messageFrom } from "@/lib/apiError";
 
 /**
  * Mart Approval — the "Pending Orders" queue for the mart_approval role.
@@ -49,12 +64,36 @@ function MartApproval() {
   const navigate = useNavigate();
 
   const [tab, setTab] = useState<TabKey>("pending");
-  const [orders, setOrders] = useState<MartOrderSummary[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(
-    null,
-  );
+  const queryClient = useQueryClient();
+  /*
+   * The list and the SAP statuses stay in ONE queryFn on purpose: the statuses
+   * are looked up FROM the list's ids, and the old code force-cleared them to
+   * {} on every non-Approved tab so a stale map could never paint "Created in
+   * SAP" onto a Pending row. Two queries would reintroduce exactly that gap.
+   */
+  const {
+    data: listData,
+    isPending: loading,
+    error: loadError,
+  } = useQuery({
+    queryKey: ["orders", "mart", tab],
+    queryFn: async () => {
+      const data = await ordersService.getMartOrders(tab);
+      const list = Array.isArray(data) ? data : [];
+      // Only the Approved tab can hold orders whose SAP push failed.
+      if (tab === "approved" && list.length) {
+        try {
+          return { list, statuses: await ordersService.getSalesOrderSapStatus(list.map((o) => o.id)) };
+        } catch {
+          return { list, statuses: {} as Record<string, SalesOrderSapStatus> };
+        }
+      }
+      return { list, statuses: {} as Record<string, SalesOrderSapStatus> };
+    },
+  });
+  const orders = listData?.list ?? NO_MART_ORDERS;
+  const error = loadError ? messageFrom(loadError, "Failed to load orders. Please try again.") : "";
+  const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
   // Detail view (See): the full order + its items, plus whether it's pending.
   const [detailOrder, setDetailOrder] = useState<Order | null>(null);
@@ -69,47 +108,27 @@ function MartApproval() {
 
   // Latest SAP push result per order (only fetched for the Approved tab, where a
   // failed SAP push leaves the order "Mart Approved" instead of "Completed").
-  const [sapStatuses, setSapStatuses] = useState<Record<string, SalesOrderSapStatus>>({});
+  /* Server-derived, but ALSO patched by a failed resend below, so it is state
+     seeded from the query rather than the query data itself. */
+  const [resendStatuses, setResendStatuses] = useState<Record<string, SalesOrderSapStatus> | null>(
+    null,
+  );
+  const sapStatuses = resendStatuses ?? listData?.statuses ?? NO_SAP_STATUSES;
   const [resendingId, setResendingId] = useState<number | null>(null);
 
   const sapFor = (orderId: number) => sapStatuses[String(orderId)] ?? null;
   const isSapFailed = (orderId: number) => sapFor(orderId)?.status === "FAILED";
   const isCompletedStatus = (statusDisplay?: string) =>
-    String(statusDisplay || "").toLowerCase().includes("complete");
+    String(statusDisplay || "")
+      .toLowerCase()
+      .includes("complete");
   // In the Approved tab an order that reached 'Completed' pushed to SAP
   // successfully — it stays visible but only gets a View action.
   const isApprovedSuccess = (o: { status_display?: string }) =>
     tab === "approved" && isCompletedStatus(o.status_display);
 
-  const loadList = async (tabKey: TabKey) => {
-    setLoading(true);
-    setError("");
-    try {
-      const data = await ordersService.getMartOrders(tabKey);
-      const list = Array.isArray(data) ? data : [];
-      setOrders(list);
-      // Only the Approved tab can hold orders whose SAP push failed; fetch their
-      // SAP status so we can flag failures and offer a resend.
-      if (tabKey === "approved" && list.length) {
-        try {
-          const statuses = await ordersService.getSalesOrderSapStatus(
-            list.map((o) => o.id),
-          );
-          setSapStatuses(statuses);
-        } catch {
-          setSapStatuses({});
-        }
-      } else {
-        setSapStatuses({});
-      }
-    } catch (e: any) {
-      setError(
-        e?.response?.data?.error || "Failed to load orders. Please try again.",
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
+  /** Re-read the current tab. Was `loadList(tab)`. */
+  const loadList = async () => queryClient.invalidateQueries({ queryKey: ["orders", "mart"] });
 
   const onResend = async (target: ActionTarget) => {
     setResendingId(target.id);
@@ -121,20 +140,13 @@ function MartApproval() {
         text: res?.message || `Order ${target.order_number} sent to SAP.`,
       });
       setDetailOrder(null);
-      await loadList(tab);
-    } catch (e: any) {
-      const detail =
-        e?.response?.data?.sap_error ||
-        e?.response?.data?.error ||
-        e?.response?.data?.message ||
-        "Failed to resend the order to SAP. Please try again.";
+      await loadList();
+    } catch (e) {
+      const detail = messageFrom(e, "Failed to resend the order to SAP. Please try again.");
       setMsg({ kind: "err", text: detail });
       // Refresh SAP statuses so the (possibly new) error message shows.
       try {
-        const statuses = await ordersService.getSalesOrderSapStatus(
-          orders.map((o) => o.id),
-        );
-        setSapStatuses(statuses);
+        setResendStatuses(await ordersService.getSalesOrderSapStatus(orders.map((o) => o.id)));
       } catch {
         /* keep the previous statuses */
       }
@@ -143,11 +155,6 @@ function MartApproval() {
     }
   };
 
-  useEffect(() => {
-    loadList(tab);
-    setDetailOrder(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab]);
 
   const isPendingTab = tab === "pending";
 
@@ -160,10 +167,10 @@ function MartApproval() {
       setDetailOrder(detail);
       setDetailItems((detail.items as OrderItem[]) || []);
       setDetailPending(order.is_pending);
-    } catch (e: any) {
+    } catch (e) {
       setMsg({
         kind: "err",
-        text: e?.response?.data?.error || "Failed to open the order.",
+        text: messageFrom(e, "Failed to open the order."),
       });
     } finally {
       setBusy(false);
@@ -185,11 +192,11 @@ function MartApproval() {
       setMsg({ kind: "ok", text: `Order ${approveTarget.order_number} approved.` });
       setApproveTarget(null);
       setDetailOrder(null);
-      await loadList(tab);
-    } catch (e: any) {
+      await loadList();
+    } catch (e) {
       setMsg({
         kind: "err",
-        text: e?.response?.data?.error || "Failed to approve the order.",
+        text: messageFrom(e, "Failed to approve the order."),
       });
     } finally {
       setBusy(false);
@@ -210,11 +217,11 @@ function MartApproval() {
       setRejectTarget(null);
       setRejectReason("");
       setDetailOrder(null);
-      await loadList(tab);
-    } catch (e: any) {
+      await loadList();
+    } catch (e) {
       setMsg({
         kind: "err",
-        text: e?.response?.data?.error || "Failed to reject the order.",
+        text: messageFrom(e, "Failed to reject the order."),
       });
     } finally {
       setBusy(false);
@@ -242,10 +249,10 @@ function MartApproval() {
         fileName: `MartOrder_${orderNumber}_${exportDateStamp()}`,
         sheetName: "Order",
       });
-    } catch (e: any) {
+    } catch (e) {
       setMsg({
         kind: "err",
-        text: e?.response?.data?.error || "Failed to download the order.",
+        text: messageFrom(e, "Failed to download the order."),
       });
     }
   };
@@ -291,8 +298,7 @@ function MartApproval() {
                   }
                   disabled={resendingId === detailOrder.id}
                 >
-                  <HiArrowPath />{" "}
-                  {resendingId === detailOrder.id ? "Sending…" : "Resend to SAP"}
+                  <HiArrowPath /> {resendingId === detailOrder.id ? "Sending…" : "Resend to SAP"}
                 </button>
               </>
             )}
@@ -340,38 +346,19 @@ function MartApproval() {
           .toLowerCase()
           .includes("reject") &&
           detailOrder.rejection_reason && (
-            <div
-              style={{
-                margin: "12px 0",
-                padding: "12px 14px",
-                borderRadius: 10,
-                border: "1px solid #FECACA",
-                background: "#FEF2F2",
-                color: "#7F1D1D",
-              }}
-            >
-              <strong style={{ color: "#B91C1C" }}>Rejection reason:</strong>{" "}
-              <span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+            <div className="mart-notice-box">
+              <strong className="mart-notice-label">Rejection reason:</strong>{" "}
+              <span className="mart-notice-text">
                 {detailOrder.rejection_reason}
               </span>
             </div>
           )}
 
         {isSapFailed(detailOrder.id) && (
-          <div
-            style={{
-              margin: "12px 0",
-              padding: "12px 14px",
-              borderRadius: 10,
-              border: "1px solid #FECACA",
-              background: "#FEF2F2",
-              color: "#7F1D1D",
-            }}
-          >
-            <strong style={{ color: "#B91C1C" }}>SAP push failed.</strong>{" "}
-            <span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-              {sapFor(detailOrder.id)?.error_message ||
-                "SAP did not return an error message."}
+          <div className="mart-notice-box">
+            <strong className="mart-notice-label">SAP push failed.</strong>{" "}
+            <span className="mart-notice-text">
+              {sapFor(detailOrder.id)?.error_message || "SAP did not return an error message."}
             </span>
           </div>
         )}
@@ -402,9 +389,7 @@ function MartApproval() {
             </div>
             <div className="ao-d-sum-row ao-d-sum-grand">
               <span className="ao-d-sum-label">Grand Total</span>
-              <span className="ao-d-sum-val">
-                {(subtotal + taxTotal).toFixed(2)}
-              </span>
+              <span className="ao-d-sum-val">{(subtotal + taxTotal).toFixed(2)}</span>
             </div>
           </div>
         </div>
@@ -418,14 +403,24 @@ function MartApproval() {
   function renderModals() {
     return (
       <>
-        {approveTarget && (
-          <div className="mart-modal-overlay" onClick={() => setApproveTarget(null)}>
-            <div className="mart-modal mart-modal-sm" onClick={(e) => e.stopPropagation()}>
+        <Dialog
+          open={Boolean(approveTarget)}
+          onOpenChange={(next) => {
+            if (!next) (() => setApproveTarget(null))();
+          }}
+        >
+          {approveTarget && (
+            <DialogContent
+              title="Approve order"
+              variant="bare"
+              size="auto"
+              showClose={false}
+              className="mart-modal mart-modal-sm"
+            >
               <h3>Approve order {approveTarget.order_number}?</h3>
               <p className="mart-confirm-text">
-                Please check all the details of the order carefully before
-                approving. Once approved, the order will move ahead in the Mart
-                flow.
+                Please check all the details of the order carefully before approving. Once approved,
+                the order will move ahead in the Mart flow.
               </p>
               <div className="mart-modal-actions">
                 <button
@@ -435,21 +430,28 @@ function MartApproval() {
                 >
                   Cancel
                 </button>
-                <button
-                  className="mart-btn mart-approve"
-                  onClick={confirmApprove}
-                  disabled={busy}
-                >
+                <button className="mart-btn mart-approve" onClick={confirmApprove} disabled={busy}>
                   {busy ? "Approving…" : "Yes, Approve"}
                 </button>
               </div>
-            </div>
-          </div>
-        )}
+            </DialogContent>
+          )}
+        </Dialog>
 
-        {rejectTarget && (
-          <div className="mart-modal-overlay" onClick={() => setRejectTarget(null)}>
-            <div className="mart-modal mart-modal-sm" onClick={(e) => e.stopPropagation()}>
+        <Dialog
+          open={Boolean(rejectTarget)}
+          onOpenChange={(next) => {
+            if (!next) (() => setRejectTarget(null))();
+          }}
+        >
+          {rejectTarget && (
+            <DialogContent
+              title="Reject order"
+              variant="bare"
+              size="auto"
+              showClose={false}
+              className="mart-modal mart-modal-sm"
+            >
               <h3>Reject order {rejectTarget.order_number}?</h3>
               <p className="mart-confirm-text">Please enter a reason for rejection.</p>
               <textarea
@@ -467,17 +469,13 @@ function MartApproval() {
                 >
                   Cancel
                 </button>
-                <button
-                  className="mart-btn mart-reject"
-                  onClick={confirmReject}
-                  disabled={busy}
-                >
+                <button className="mart-btn mart-reject" onClick={confirmReject} disabled={busy}>
                   {busy ? "Rejecting…" : "Reject Order"}
                 </button>
               </div>
-            </div>
-          </div>
-        )}
+            </DialogContent>
+          )}
+        </Dialog>
       </>
     );
   }
@@ -486,9 +484,7 @@ function MartApproval() {
     <div className="mart-page">
       <div className="mart-header">
         <h2 className="mart-title">Pending Orders</h2>
-        <p className="mart-subtitle">
-          Review and action distributor (Mart) orders.
-        </p>
+        <p className="mart-subtitle">Review and action distributor (Mart) orders.</p>
       </div>
 
       <div className="mart-tabs">
@@ -496,7 +492,14 @@ function MartApproval() {
           <button
             key={t.key}
             className={`mart-tab ${t.key === tab ? "is-active" : ""}`}
-            onClick={() => setTab(t.key)}
+            onClick={() => {
+              setTab(t.key);
+              // Was a bare `setDetailOrder(null)` sitting beside `loadList(tab)`
+              // in a `[tab]` effect — setState derived from state, and the
+              // existing disable there only covered exhaustive-deps.
+              setDetailOrder(null);
+              setResendStatuses(null);
+            }}
           >
             {t.label}
           </button>
@@ -505,58 +508,43 @@ function MartApproval() {
       </div>
 
       {error && <div className="mart-error">{error}</div>}
-      {msg && (
-        <div className={msg.kind === "ok" ? "mart-success" : "mart-error"}>
-          {msg.text}
-        </div>
-      )}
+      {msg && <div className={msg.kind === "ok" ? "mart-success" : "mart-error"}>{msg.text}</div>}
 
       <div className="mart-list">
-        <table className="mart-table">
-          <thead>
-            <tr>
-              <th>Order ID</th>
-              <th>Card Name</th>
-              <th className="mart-num">Items</th>
-              <th>Created At</th>
-              <th>Delivery Date</th>
-              <th className="mart-actions-col">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table density="compact">
+          <TableHeader>
+            <TableRow>
+              <TableHead>Order ID</TableHead>
+              <TableHead>Card Name</TableHead>
+              <TableHead className="mart-num">Items</TableHead>
+              <TableHead>Created At</TableHead>
+              <TableHead>Delivery Date</TableHead>
+              <TableHead className="mart-actions-col">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {loading ? (
-              <tr>
-                <td colSpan={6} className="mart-empty">
+              <TableRow>
+                <TableCell colSpan={6} className="mart-empty">
                   Loading…
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             ) : orders.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="mart-empty">
+              <TableRow>
+                <TableCell colSpan={6} className="mart-empty">
                   No {tab} orders.
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             ) : (
               orders.map((o) => (
-                <tr key={o.id}>
-                  <td className="mart-cell-id">{o.order_number}</td>
-                  <td>
+                <TableRow key={o.id}>
+                  <TableCell className="mart-cell-id">{o.order_number}</TableCell>
+                  <TableCell>
                     {o.card_name}
                     {isSapFailed(o.id) && (
                       <span
                         title={sapFor(o.id)?.error_message || "SAP push failed"}
-                        style={{
-                          display: "inline-block",
-                          marginLeft: 8,
-                          padding: "2px 8px",
-                          borderRadius: 20,
-                          fontSize: "0.68rem",
-                          fontWeight: 700,
-                          color: "#fff",
-                          background: "#DC2626",
-                          verticalAlign: "middle",
-                          cursor: "help",
-                        }}
+                        className="mart-sap-badge mart-sap-badge--failed"
                       >
                         SAP Failed
                       </span>
@@ -568,27 +556,17 @@ function MartApproval() {
                             ? `SAP Doc Num ${sapFor(o.id)?.doc_num}`
                             : "Created in SAP"
                         }
-                        style={{
-                          display: "inline-block",
-                          marginLeft: 8,
-                          padding: "2px 8px",
-                          borderRadius: 20,
-                          fontSize: "0.68rem",
-                          fontWeight: 700,
-                          color: "#fff",
-                          background: "#16A34A",
-                          verticalAlign: "middle",
-                        }}
+                        className="mart-sap-badge mart-sap-badge--success"
                       >
                         Created in SAP
                         {sapFor(o.id)?.doc_num != null ? ` #${sapFor(o.id)?.doc_num}` : ""}
                       </span>
                     )}
-                  </td>
-                  <td className="mart-num">{o.items_count}</td>
-                  <td>{fmtDateTime(o.created_at)}</td>
-                  <td>{o.delivery_date || "—"}</td>
-                  <td>
+                  </TableCell>
+                  <TableCell className="mart-num">{o.items_count}</TableCell>
+                  <TableCell>{fmtDateTime(o.created_at)}</TableCell>
+                  <TableCell>{o.delivery_date || "—"}</TableCell>
+                  <TableCell>
                     <div className="mart-row-actions">
                       <button
                         className="mart-icon-btn view"
@@ -602,82 +580,76 @@ function MartApproval() {
                           gets a View action — no edit/resend/download. */}
                       {!isApprovedSuccess(o) && (
                         <>
-                      {/* SAP push failed → let the approver edit and retry the push. */}
-                      {isSapFailed(o.id) && (
-                        <>
+                          {/* SAP push failed → let the approver edit and retry the push. */}
+                          {isSapFailed(o.id) && (
+                            <>
+                              <button
+                                className="mart-icon-btn edit"
+                                title="Edit"
+                                onClick={() => onEdit({ id: o.id, order_number: o.order_number })}
+                              >
+                                <HiPencilSquare size={18} />
+                              </button>
+                              <button
+                                className="mart-row-btn mart-approve"
+                                onClick={() => onResend({ id: o.id, order_number: o.order_number })}
+                                disabled={resendingId === o.id}
+                              >
+                                <HiArrowPath size={16} />{" "}
+                                {resendingId === o.id ? "Sending…" : "Resend to SAP"}
+                              </button>
+                            </>
+                          )}
+                          {isPendingTab && (
+                            <>
+                              <button
+                                className="mart-icon-btn edit"
+                                title="Edit"
+                                onClick={() => onEdit({ id: o.id, order_number: o.order_number })}
+                              >
+                                <HiPencilSquare size={18} />
+                              </button>
+                              <button
+                                className="mart-row-btn mart-approve"
+                                onClick={() =>
+                                  setApproveTarget({
+                                    id: o.id,
+                                    order_number: o.order_number,
+                                  })
+                                }
+                              >
+                                <HiCheckCircle size={16} /> Approve
+                              </button>
+                              <button
+                                className="mart-row-btn mart-reject"
+                                onClick={() => {
+                                  setRejectReason("");
+                                  setRejectTarget({
+                                    id: o.id,
+                                    order_number: o.order_number,
+                                  });
+                                }}
+                              >
+                                <HiXCircle size={16} /> Reject
+                              </button>
+                            </>
+                          )}
                           <button
-                            className="mart-icon-btn edit"
-                            title="Edit"
-                            onClick={() =>
-                              onEdit({ id: o.id, order_number: o.order_number })
-                            }
+                            className="mart-icon-btn download"
+                            title="Download"
+                            onClick={() => onDownload(o.id, o.order_number)}
                           >
-                            <HiPencilSquare size={18} />
+                            <HiArrowDownTray size={18} />
                           </button>
-                          <button
-                            className="mart-row-btn mart-approve"
-                            onClick={() =>
-                              onResend({ id: o.id, order_number: o.order_number })
-                            }
-                            disabled={resendingId === o.id}
-                          >
-                            <HiArrowPath size={16} />{" "}
-                            {resendingId === o.id ? "Sending…" : "Resend to SAP"}
-                          </button>
-                        </>
-                      )}
-                      {isPendingTab && (
-                        <>
-                          <button
-                            className="mart-icon-btn edit"
-                            title="Edit"
-                            onClick={() =>
-                              onEdit({ id: o.id, order_number: o.order_number })
-                            }
-                          >
-                            <HiPencilSquare size={18} />
-                          </button>
-                          <button
-                            className="mart-row-btn mart-approve"
-                            onClick={() =>
-                              setApproveTarget({
-                                id: o.id,
-                                order_number: o.order_number,
-                              })
-                            }
-                          >
-                            <HiCheckCircle size={16} /> Approve
-                          </button>
-                          <button
-                            className="mart-row-btn mart-reject"
-                            onClick={() => {
-                              setRejectReason("");
-                              setRejectTarget({
-                                id: o.id,
-                                order_number: o.order_number,
-                              });
-                            }}
-                          >
-                            <HiXCircle size={16} /> Reject
-                          </button>
-                        </>
-                      )}
-                      <button
-                        className="mart-icon-btn download"
-                        title="Download"
-                        onClick={() => onDownload(o.id, o.order_number)}
-                      >
-                        <HiArrowDownTray size={18} />
-                      </button>
                         </>
                       )}
                     </div>
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))
             )}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
 
       {renderModals()}

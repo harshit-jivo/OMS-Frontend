@@ -116,21 +116,21 @@
   overflow-x: auto;
 }
 
-.ir-table {
+/* .ir-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.9rem;
 }
-
-.ir-table th,
+ */
+/* .ir-table th,
 .ir-table td {
   text-align: left;
   padding: 14px 16px;
   border-bottom: 1px solid #f1f5f9;
   white-space: nowrap;
 }
-
-.ir-table thead th {
+ */
+/* .ir-table thead th {
   background: #f8fafc;
   font-size: 0.72rem;
   text-transform: uppercase;
@@ -138,17 +138,17 @@
   color: #64748b;
   font-weight: 700;
 }
-
-.ir-table tbody tr:hover {
+ */
+/* .ir-table tbody tr:hover {
   background: #f8fafc;
 }
-
-.ir-table-compact th,
+ */
+/* .ir-table-compact th,
 .ir-table-compact td {
   padding: 10px 12px;
   white-space: normal;
 }
-
+ */
 .ir-num {
   text-align: right;
   font-variant-numeric: tabular-nums;
@@ -165,49 +165,67 @@
 }
 
 /* Badges */
-.ir-badge {
-  display: inline-block;
-  padding: 4px 10px;
-  border-radius: 999px;
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-}
+/*
+ * Replaced by components/ui/badge.tsx — Phase 2.2. Commented out rather than
+ * deleted, per the standing instruction. `.ir-badge-lg` below is KEPT and still
+ * applied: it is a size override on the detail modal's pill, and size is this
+ * page's call, not the shared component's.
+ *
+ * Seven bespoke hues here — amber, green, red, orange, blue, violet, teal — for
+ * seven statuses. Four of them now share two tones: `rejected` and `error` are
+ * both red, `approved` and `posted_to_sap` are the outcome and the system state
+ * that follows it. That is deliberate, and the reasoning is written down in
+ * statusTone.ts: the colour answers "fine, waiting, or wrong?", the label
+ * answers "why". The teal on `cl_raised` is the one thing genuinely lost.
+ *
+ * These render only inside modals, which is why e2e/interactions.visual.spec.ts
+ * had to exist before this change could be made at all.
+ */
+/*
+   .ir-badge {
+   display: inline-block;
+   padding: 4px 10px;
+   border-radius: 999px;
+   font-size: 0.72rem;
+   font-weight: 700;
+   letter-spacing: 0.03em;
+   }
 
-.ir-badge-pending {
-  background: #fef9c3;
-  color: #a16207;
-}
+   .ir-badge-pending {
+   background: #fef9c3;
+   color: #a16207;
+   }
 
-.ir-badge-approved {
-  background: #dcfce7;
-  color: #15803d;
-}
+   .ir-badge-approved {
+   background: #dcfce7;
+   color: #15803d;
+   }
 
-.ir-badge-rejected {
-  background: #fee2e2;
-  color: #b91c1c;
-}
+   .ir-badge-rejected {
+   background: #fee2e2;
+   color: #b91c1c;
+   }
 
-.ir-badge-error {
-  background: #ffedd5;
-  color: #c2410c;
-}
+   .ir-badge-error {
+   background: #ffedd5;
+   color: #c2410c;
+   }
 
-.ir-badge-posted_to_sap {
-  background: #dbeafe;
-  color: #1d4ed8;
-}
+   .ir-badge-posted_to_sap {
+   background: #dbeafe;
+   color: #1d4ed8;
+   }
 
-.ir-badge-edited {
-  background: #ede9fe;
-  color: #6d28d9;
-}
+   .ir-badge-edited {
+   background: #ede9fe;
+   color: #6d28d9;
+   }
 
-.ir-badge-cl_raised {
-  background: #ccfbf1;
-  color: #0f766e;
-}
+   .ir-badge-cl_raised {
+   background: #ccfbf1;
+   color: #0f766e;
+   }
+ */
 
 /* Full error / rejection message inside the detail modal */
 .ir-error-box,
@@ -649,7 +667,7 @@ a.ir-btn {
 }
 
 /* Modal */
-.ir-modal-backdrop {
+/* .ir-modal-backdrop {
   position: fixed;
   inset: 0;
   background: rgba(15, 23, 42, 0.45);
@@ -659,7 +677,7 @@ a.ir-btn {
   padding: 16px;
   z-index: 1000;
 }
-
+ */
 .ir-modal {
   background: #fff;
   border-radius: 16px;
@@ -798,10 +816,10 @@ a.ir-btn {
   overflow: hidden;
 }
 
-.ir-modal-body .ir-table tbody tr:last-child td {
+/* .ir-modal-body .ir-table tbody tr:last-child td {
   border-bottom: none;
 }
-
+ */
 .ir-cell-code {
   font-weight: 700;
   color: #0f172a;

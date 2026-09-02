@@ -1,0 +1,196 @@
+/*
+ * Staff_Rate_Assignment — Phase 6.3.
+ *
+ * 24 inline objects, no stylesheet. A move, verified by
+ * `staff-rate-assignment.png` staying pixel-identical.
+ *
+ * Its product card and rate field are the same treatment as
+ * Party_Product_Assignment's add-products modal, down to the hex values —
+ * the two pages were written from each other. They are NOT shared here: a
+ * shared class across two pages with no common component is the kind of
+ * coupling that makes the next visual change land somewhere unintended.
+ * Deduplicating them belongs with the shadcn primitive work in Phase 2,
+ * not with a mechanical style move.
+ */
+
+.sra-card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  margin-bottom: 24px;
+}
+
+.sra-head {
+  margin-bottom: 20px;
+}
+
+.sra-title {
+  margin: 0 0 4px;
+  font-size: 24px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.sra-toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.sra-input {
+  height: var(--input-h, 40px);
+  padding: 0 12px;
+  background: rgba(248, 250, 252, 0.9);
+  border: 1px solid #cbd5e1;
+  border-radius: var(--radius-sm, 8px);
+  font-size: var(--font-ui, 13px);
+  color: #0f172a;
+  outline: none;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.sra-search {
+  max-width: 520px;
+}
+
+.sra-save {
+  height: var(--input-h, 40px);
+  padding: 0 16px;
+  border: 1px solid #0f766e;
+  border-radius: var(--radius-sm, 8px);
+  background: #0f766e;
+  color: #fff;
+  font-size: var(--font-ui, 13px);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* Was two copies of the same three-way condition — one for `background`, one
+   for `cursor` — beside the `disabled` attribute already carrying it. */
+.sra-save:disabled {
+  background: #94a3b8;
+  cursor: not-allowed;
+}
+
+.sra-panel {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.sra-state {
+  padding: 24px;
+  color: #64748b;
+}
+
+.sra-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+}
+
+.sra-product {
+  display: flex;
+  align-items: flex-start;
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  cursor: pointer;
+  background: #fff;
+}
+
+.sra-product.is-selected {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+
+.sra-check {
+  margin-top: 4px;
+  margin-right: 12px;
+  width: 16px;
+  height: 16px;
+  accent-color: #2563eb;
+  pointer-events: none;
+}
+
+.sra-product-body {
+  flex: 1;
+}
+
+.sra-product-name {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.sra-product-meta {
+  font-size: 0.75rem;
+  color: #64748b;
+  margin-top: 4px;
+}
+
+.sra-rate {
+  margin-top: 12px;
+}
+
+.sra-rate-label {
+  font-size: 0.75rem;
+  color: #475569;
+  display: block;
+  margin-bottom: 4px;
+  font-weight: 500;
+}
+
+/* ---- pagination ------------------------------------------------------ */
+
+.sra-pager {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-top: 8px;
+}
+
+.sra-pager-count {
+  color: #64748b;
+  font-size: 0.8rem;
+}
+
+.sra-pager-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sra-pager-btn {
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  color: #0f172a;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+/* Prev at page 1 and Next at the last page were greyed by three separate
+   ternaries each; both buttons already carried the matching `disabled`. */
+.sra-pager-btn:disabled {
+  background: #f1f5f9;
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
+.sra-pager-page {
+  color: #475569;
+  font-size: 0.8rem;
+  min-width: 56px;
+  text-align: center;
+}

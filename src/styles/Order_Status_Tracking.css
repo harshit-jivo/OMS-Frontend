@@ -165,22 +165,22 @@
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
 }
 
-.ot-table,
+/* .ot-table,
 .ot-items-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
 }
-
-.ot-table thead,
+ */
+/* .ot-table thead,
 .ot-items-table thead {
   background: #1e293b;
   position: sticky;
   top: 0;
   z-index: 1;
 }
-
-.ot-table th,
+ */
+/* .ot-table th,
 .ot-items-table th {
   color: #e2e8f0;
   padding: 11px 14px;
@@ -191,20 +191,20 @@
   white-space: nowrap;
   text-align: center;
 }
-
-.ot-table td,
+ */
+/* .ot-table td,
 .ot-items-table td {
   padding: 10px 14px;
   border-bottom: 1px solid #e5e7eb;
   color: #334155;
   text-align: center;
 }
-
-.ot-table tbody tr:nth-child(even),
+ */
+/* .ot-table tbody tr:nth-child(even),
 .ot-items-table tbody tr:nth-child(even) {
   background: #f8fafc;
 }
-
+ */
 .ot-card-search {
   position: relative;
   display: flex;
@@ -257,28 +257,28 @@
 .ot-card-search-clear:focus-visible { outline: 2px solid #2563eb; outline-offset: 1px; }
 .ot-card-search-clear svg { width: 18px; height: 18px; }
 
-.ot-table tbody tr.ot-foc-row,
+/* .ot-table tbody tr.ot-foc-row,
 .ot-table tbody tr.ot-foc-row:nth-child(even) {
   background: #fff7ed;
   box-shadow: inset 4px 0 0 #f97316;
 }
-
-.ot-table tbody tr.ot-foc-row:hover,
+ */
+/* .ot-table tbody tr.ot-foc-row:hover,
 .ot-table tbody tr.ot-foc-row:nth-child(even):hover {
   background: #ffedd5;
 }
-
-.ot-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 4px 10px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 700;
-  background: #dbeafe;
-  color: #1d4ed8;
-}
+ */
+/* .ot-badge {
+   display: inline-flex;
+   align-items: center;
+   justify-content: center;
+   padding: 4px 10px;
+   border-radius: 999px;
+   font-size: 11px;
+   font-weight: 700;
+   background: #dbeafe;
+   color: #1d4ed8;
+   } */
 
 .ot-foc-badge {
   display: inline-flex;
@@ -296,11 +296,11 @@
   white-space: nowrap;
 }
 
-.ot-foc-badge-detail {
-  background: #fb923c;
-  border-color: rgba(255,255,255,.32);
-  box-shadow: 0 0 0 3px rgba(251,146,60,.18);
-}
+/* .ot-foc-badge-detail {
+   background: #fb923c;
+   border-color: rgba(255,255,255,.32);
+   box-shadow: 0 0 0 3px rgba(251,146,60,.18);
+   } */
 
 .ot-foc-empty {
   color: #94a3b8;
@@ -315,13 +315,13 @@
   color: #166534;
 }
 
-.ot-badge-rejected,
-.ot-badge-declined,
-.ot-badge-cancelled,
-.ot-badge-canceled {
-  background: #fee2e2;
-  color: #991b1b;
-}
+/* .ot-badge-rejected,
+   .ot-badge-declined,
+   .ot-badge-cancelled,
+   .ot-badge-canceled {
+   background: #fee2e2;
+   color: #991b1b;
+   } */
 
 .ot-icon-btn,
 .ot-back-btn,
@@ -355,32 +355,32 @@
   text-align: center;
 }
 
-.ot-pagination {
+/* .ot-pagination {
   display: flex;
   justify-content: flex-end;
   align-items: center;
   gap: 8px;
   margin-top: 14px;
 }
-
-.ot-pg-btn {
+ */
+/* .ot-pg-btn {
   height: 36px; padding: 0 14px;
   background: #ffffff;
   color: #475569;
   border: 1px solid #e2e8f0;
 }
-
-.ot-pg-btn:disabled {
+ */
+/* .ot-pg-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
-
-.ot-pg-info {
+ */
+/* .ot-pg-info {
   font-size: 12px;
   font-weight: 700;
   color: #1e293b;
 }
-
+ */
 .ot-detail {
   display: flex;
   flex-direction: column;
@@ -469,11 +469,11 @@
   font-weight: 800;
 }
 
-.ot-detail-card .ot-badge {
-  background: rgba(255, 255, 255, 0.12);
-  color: #f8fafc;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-}
+/* .ot-detail-card .ot-badge {
+   background: rgba(255, 255, 255, 0.12);
+   color: #f8fafc;
+   border: 1px solid rgba(255, 255, 255, 0.14);
+   } */
 
 .ot-items-head {
   display: flex;
@@ -595,4 +595,115 @@
   .ot-detail-span2 {
     grid-column: span 1;
   }
+}
+
+/* ==========================================================================
+   LIVE — Phase 6.3: the billing-only "Order Log Timeline" block.
+   Verified by e2e/interactions.visual.spec.ts's "the billing order log
+   timeline" test (order-log-timeline.png). Two objects stay inline — the
+   "Pending with: <name>" branch needs a log whose tone is "pending" AND is
+   the last entry, on an order carrying `rate_approvals`; no fixture has one,
+   so it cannot be verified. See the comment beside it in the TSX.
+   ========================================================================== */
+
+.ot-log-total-ltrs {
+  margin-left: auto;
+  margin-right: 16px;
+}
+
+.ot-log-section {
+  margin-top: 16px;
+}
+
+.ot-log-list {
+  padding: 20px 24px;
+}
+
+.ot-log-row {
+  display: flex;
+  gap: 16px;
+  position: relative;
+  padding-bottom: 24px;
+}
+
+.ot-log-row.is-last {
+  padding-bottom: 0;
+}
+
+.ot-log-connector {
+  position: absolute;
+  left: 11px;
+  top: 24px;
+  bottom: 0;
+  width: 2px;
+  background: #e2e8f0;
+}
+
+.ot-log-dot {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+}
+
+.ot-log-dot--approved { background: #10b981; }
+.ot-log-dot--rejected { background: #ef4444; }
+.ot-log-dot--pending { background: #f59e0b; }
+.ot-log-dot--progress { background: #2563eb; }
+
+.ot-log-dot-inner {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #fff;
+}
+
+.ot-log-card {
+  flex: 1;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 14px 18px;
+}
+
+.ot-log-card.ot-log-card--pending {
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+
+.ot-log-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.ot-log-title {
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: #0f172a;
+}
+
+.ot-log-time {
+  font-size: 0.75rem;
+  color: #64748b;
+}
+
+.ot-log-performed {
+  font-size: 0.82rem;
+  color: #475569;
+}
+
+.ot-log-remark {
+  margin-top: 8px;
+  font-size: 0.8rem;
+  color: #64748b;
+  background: #fff;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
 }

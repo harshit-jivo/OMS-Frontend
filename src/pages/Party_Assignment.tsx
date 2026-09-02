@@ -1,11 +1,17 @@
-import { useEffect, useRef, useState } from "react";
-import * as XLSX from "xlsx"; // reading uploaded workbooks only; writing goes through excelExport
+import { useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+// SheetJS (422 kB) is fetched at import time, not page-load time — see
+// utils/xlsxLoader.ts. Reading uploaded workbooks only; writing goes
+// through excelExport.
+import { loadXlsx, type WorkBook, type XlsxModule } from "../utils/xlsxLoader";
 import { startSheetsExport } from "../utils/excelExport";
 import { userService } from "../services/userService";
 import type { User } from "../services/userService";
-import { sapService } from "../services/sapService";
+import { useUserList } from "../lib/authQueries";
+import { useSapParties } from "../lib/sapQueries";
 import type { Party } from "../services/sapService";
 import "../styles/Party_Assignment.css";
+import { errorBody } from "@/lib/apiError";
 
 type SearchableParty = Party & {
   CardCode?: string | number | null;
@@ -36,11 +42,10 @@ const getUserCategory = (user?: User) => {
 // All categories assigned to a user (OIL / BEVERAGES / MART), falling back to
 // the single primary category for users created before multi-category support.
 const getUserCategories = (user?: User): string[] => {
-  const list = (user as { categories?: Array<{ category?: string } | string> } | undefined)?.categories;
+  const list = (user as { categories?: Array<{ category?: string } | string> } | undefined)
+    ?.categories;
   const names = Array.isArray(list)
-    ? list
-        .map((c) => asText(typeof c === "string" ? c : c?.category))
-        .filter(Boolean)
+    ? list.map((c) => asText(typeof c === "string" ? c : c?.category)).filter(Boolean)
     : [];
   if (names.length) return Array.from(new Set(names));
   const single = getUserCategory(user);
@@ -61,6 +66,9 @@ const mergeParties = (partyList: Party[]) => {
   });
 };
 
+/* Superseded by `asList` in src/lib/sapQueries.ts, which now accepts the same
+   three shapes for every consumer of ["sap","parties"] rather than only this
+   page. Kept rather than deleted, per the repo's standing rule on removals.
 const getPartyList = (data: unknown): Party[] => {
   if (Array.isArray(data)) return data as Party[];
   if (data && typeof data === "object") {
@@ -70,12 +78,12 @@ const getPartyList = (data: unknown): Party[] => {
   }
   return [];
 };
+*/
 
 const getImportValue = (row: Record<string, unknown>, keys: string[]) => {
-  const normalizedEntries = Object.entries(row).map(([key, value]) => [
-    normalizeSearch(key),
-    value,
-  ] as const);
+  const normalizedEntries = Object.entries(row).map(
+    ([key, value]) => [normalizeSearch(key), value] as const,
+  );
   for (const key of keys) {
     const normalizedKey = normalizeSearch(key);
     const match = normalizedEntries.find(([entryKey]) => entryKey === normalizedKey);
@@ -84,12 +92,16 @@ const getImportValue = (row: Record<string, unknown>, keys: string[]) => {
   return "";
 };
 
-const getWorksheetRows = (workbook: XLSX.WorkBook, sheetNames: string[]) => {
+const getWorksheetRows = (XLSX: XlsxModule, workbook: WorkBook, sheetNames: string[]) => {
   const normalizedNames = sheetNames.map(normalizeSearch);
-  const sheetName = workbook.SheetNames.find((name) => normalizedNames.includes(normalizeSearch(name)));
+  const sheetName = workbook.SheetNames.find((name) =>
+    normalizedNames.includes(normalizeSearch(name)),
+  );
   if (!sheetName) return [];
 
-  return XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets[sheetName], { defval: "" });
+  return XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets[sheetName], {
+    defval: "",
+  });
 };
 
 const splitImportList = (value: unknown) =>
@@ -99,9 +111,34 @@ const splitImportList = (value: unknown) =>
     .filter(Boolean);
 
 export default function Party_Assignment() {
-  const [users, setUsers] = useState<User[]>([]);
-  const [parties, setParties] = useState<Party[]>([]);
-  const [isPartiesLoading, setIsPartiesLoading] = useState(false);
+  const queryClient = useQueryClient();
+
+  /*
+   * The user list is the shared ["users"] key; the role filter is this page's
+   * own business and stays here. It used to read `data.data.filter(...)` with
+   * no guard at all, so any response that was not `{data: [...]}` threw
+   * "filter is not a function" — the tolerant unwrap now lives in the hook.
+   */
+  const { users: allUsers } = useUserList();
+  const users = useMemo(
+    () =>
+      allUsers.filter(
+        (u) =>
+          (u as { role_id?: number }).role_id === 2 ||
+          (u as { role_id?: number }).role_id === 4 ||
+          Number(u.role) === 2 ||
+          Number(u.role) === 4 ||
+          u.role?.toLowerCase() === "manager" ||
+          u.role?.toLowerCase() === "billing" ||
+          u.role?.toLowerCase() === "distributor",
+      ),
+    [allUsers],
+  );
+
+  /* Shared with the five Sap Sync tabs under ["sap","parties"]. The dedupe is
+     this page's, so it runs over the cached list rather than inside the fetch. */
+  const { items: rawParties, isFetching: isPartiesLoading } = useSapParties();
+  const parties = useMemo(() => mergeParties(rawParties), [rawParties]);
   const [selectedUser, setSelectedUser] = useState<number | "">("");
   const [selectedCategory, setSelectedCategory] = useState("");
   const [showParties, setShowParties] = useState(false);
@@ -113,53 +150,34 @@ export default function Party_Assignment() {
   const [isImporting, setIsImporting] = useState(false);
   const importInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    fetchUsers();
-    fetchParties();
-  }, []);
+  const fetchParties = () => queryClient.invalidateQueries({ queryKey: ["sap", "parties"] });
 
-  const fetchUsers = async () => {
-    try {
-      const data = await userService.getUsers();
-      const data2 = data.data.filter(
-        (u: any) =>
-          u.role_id === 2 ||
-          u.role_id === 4 ||
-          Number(u.role) === 2 ||
-          Number(u.role) === 4 ||
-          u.role?.toLowerCase() === "manager" ||
-          u.role?.toLowerCase() === "billing" ||
-          u.role?.toLowerCase() === "distributor",
-      );
-      setUsers(data2);
-    } catch (error) {
-      console.error("Error fetching users:", error);
-    }
-  };
-
-  const fetchParties = async () => {
-    setIsPartiesLoading(true);
-    try {
-      const data = await sapService.getParties();
-      setParties(mergeParties(getPartyList(data)));
-    } catch (error) {
-      console.error("Error fetching parties:", error);
-      setParties([]);
-    } finally {
-      setIsPartiesLoading(false);
-    }
-  };
-
+  /*
+   * DELIBERATELY IMPERATIVE, and it must stay that way.
+   *
+   * `selectedParties` is server-seeded and then user-editable: this seeds it,
+   * and the checkboxes below (and Import) edit it freely before Save. It
+   * therefore cannot BE query data — and it must not be re-seeded from an
+   * effect on the query either, because a background refetch would then throw
+   * away edits the user has not saved yet.
+   *
+   * What the cache does buy is the fetch itself: `fetchQuery` on a per-user,
+   * per-category key means re-selecting a user you already looked at does not
+   * re-request their assignment list.
+   */
   const fetchUserParties = async (userId: number, category?: string) => {
+    const userRecord = users.find((user) => user.id === userId);
+    // Scope to the chosen category; default to the user's first category.
+    const userCategory = category ?? (getUserCategories(userRecord)[0] || "");
     try {
-      const userRecord = users.find((user) => user.id === userId);
-      // Scope to the chosen category; default to the user's first category.
-      const userCategory = category ?? (getUserCategories(userRecord)[0] || "");
-      const res = await userService.getUserParties(userId, userCategory || undefined);
+      const res = await queryClient.fetchQuery({
+        queryKey: ["party", "assigned", userId, userCategory],
+        queryFn: () => userService.getUserParties(userId, userCategory || undefined),
+      });
 
       const assigned = (res.data?.parties || [])
-        .filter((p: any) => isPartyInUserCategory(p, userCategory))
-        .map((p: any) => asText(p.card_code));
+        .filter((p: Party) => isPartyInUserCategory(p, userCategory))
+        .map((p: Party) => asText(p.card_code));
 
       setSelectedParties(assigned);
     } catch (err) {
@@ -177,7 +195,9 @@ export default function Party_Assignment() {
   const selectedUserCategories = getUserCategories(selectedUserRecord);
   // The category currently being assigned for (defaults to the user's first).
   const selectedUserCategoryLabel = selectedCategory || selectedUserCategories[0] || "";
-  const partyOptions = parties.filter((party) => isPartyInUserCategory(party, selectedUserCategoryLabel));
+  const partyOptions = parties.filter((party) =>
+    isPartyInUserCategory(party, selectedUserCategoryLabel),
+  );
   const partySearchTerm = normalizeSearch(search);
   const visibleParties = partyOptions.filter((party) => {
     if (!partySearchTerm) return true;
@@ -188,11 +208,11 @@ export default function Party_Assignment() {
       party.state,
       party.main_group,
       getPartyCategory(party),
-    ].map(normalizeSearch).join(" ");
+    ]
+      .map(normalizeSearch)
+      .join(" ");
 
-    return partySearchTerm
-      .split(" ")
-      .every((term) => searchableText.includes(term));
+    return partySearchTerm.split(" ").every((term) => searchableText.includes(term));
   });
   const visiblePartyKeys = visibleParties.map(getPartyCode);
 
@@ -200,232 +220,254 @@ export default function Party_Assignment() {
     normalizeSearch(user.name).includes(normalizeSearch(userSearch)),
   );
 
- const handleSave = async () => {
-  try {
-    if (!selectedUser) {
-      alert("Please select user");
-      return;
-    }
+  const handleSave = async () => {
+    try {
+      if (!selectedUser) {
+        alert("Please select user");
+        return;
+      }
 
-   
-    const selectedPartyCodes = [...new Set(selectedParties)];
+      const selectedPartyCodes = [...new Set(selectedParties)];
 
-    const res = await userService.assignPartiesToUser(
-      Number(selectedUser),
-      selectedPartyCodes,
-      selectedUserCategoryLabel || undefined,
-    );
-
-    console.log("API Response:", res);
-
-    alert("Parties saved successfully ✅");
-
-    // close dropdown
-    setShowParties(false);
-
-    // reload assigned parties
-    fetchUserParties(Number(selectedUser), selectedUserCategoryLabel);
-
-  } catch (error) {
-    console.error("Error saving parties:", error);
-    alert("Failed to save ❌");
-  }
-};
-
-const handleDel =  async (partyCode: string) => {
-  try {
-    if (!selectedUser) return;
-
-    console.log("Removing party", partyCode, "from user", selectedUser);
-
-    const selectedPartyCodes = [...new Set(selectedParties.filter((p) => p !== partyCode))];
-    await userService.assignPartiesToUser(
-      Number(selectedUser),
-      selectedPartyCodes,
-      selectedUserCategoryLabel || undefined,
-    );
-
-    alert("Party removed ✅");
-
-     fetchUserParties(Number(selectedUser), selectedUserCategoryLabel);
-
-  } catch (error) {
-    console.error(error);
-    alert("Failed ❌");
-  }
-};
-
-const downloadBulkTemplate = () => {
-  const userRows = [
-    { Username: "manager.username" },
-    { Username: "billing.username" },
-  ];
-  const partyRows = [
-    { "Party Code": "CUST000001" },
-    { "Party Code": "CUST000002" },
-    { "Party Code": "CUST000003" },
-  ];
-  startSheetsExport(
-    [
-      { sheetName: "Users", rows: userRows },
-      { sheetName: "Parties", rows: partyRows },
-    ],
-    "party-user-assignment-template.xlsx",
-  );
-};
-
-const handleBulkImport = async (file: File) => {
-  setIsImporting(true);
-  try {
-    const buffer = await file.arrayBuffer();
-    const workbook = XLSX.read(buffer, { type: "array" });
-    const userRows = getWorksheetRows(workbook, ["Users", "User"]);
-    const partyRows = getWorksheetRows(workbook, ["Parties", "Party", "Party Codes", "Party Mapping"]);
-
-    let parsedRows: { user_name: string; name: string; username: string; card_code: string }[] = [];
-
-    if (userRows.length && partyRows.length) {
-      const userIdentifiers = Array.from(new Set(
-        userRows
-          .map((row) =>
-            asText(getImportValue(row, ["Username", "username", "User", "User Name", "User ID", "User Id", "user_id", "Name", "name"])),
-          )
-          .filter(Boolean),
-      ));
-      const partyCodes = Array.from(new Set(
-        partyRows
-          .map((row) =>
-            asText(getImportValue(row, ["Party Code", "Party Codes", "Card Code", "Card Codes", "card_code", "CardCode", "party_code"])),
-          )
-          .filter(Boolean),
-      ));
-
-      parsedRows = userIdentifiers.flatMap((userIdentifier) =>
-        partyCodes.map((cardCode) => ({
-          user_name: userIdentifier,
-          name: userIdentifier,
-          username: userIdentifier,
-          card_code: cardCode,
-        })),
+      const res = await userService.assignPartiesToUser(
+        Number(selectedUser),
+        selectedPartyCodes,
+        selectedUserCategoryLabel || undefined,
       );
-    } else {
-      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet, { defval: "" });
-      parsedRows = rows
-        .flatMap((row) => {
-          const userIdentifiers = [
-            ...splitImportList(getImportValue(row, ["Users", "User", "User Name", "Name", "user_name", "name"])),
-            ...splitImportList(getImportValue(row, ["Usernames", "Username", "User ID", "User Id", "user_id", "username"])),
-          ];
-          const uniqueUsers = Array.from(new Set(userIdentifiers));
-          const partyCodes = splitImportList(
-            getImportValue(row, ["Party Codes", "Party Code", "Card Codes", "Card Code", "card_code", "CardCode", "party_code"])
-          );
 
-          return uniqueUsers.flatMap((userIdentifier) =>
-            partyCodes.map((cardCode) => ({
-              user_name: userIdentifier,
-              name: userIdentifier,
-              username: userIdentifier,
-              card_code: cardCode,
-            }))
-          );
-        })
-        .filter((row) => (row.username || row.user_name) && row.card_code);
+      console.log("API Response:", res);
+
+      alert("Parties saved successfully ✅");
+
+      // close dropdown
+      setShowParties(false);
+
+      // reload assigned parties
+      fetchUserParties(Number(selectedUser), selectedUserCategoryLabel);
+    } catch (error) {
+      console.error("Error saving parties:", error);
+      alert("Failed to save ❌");
     }
+  };
 
-    if (!parsedRows.length) {
-      alert("No valid rows found. Use Users and Parties sheets from the template.");
-      return;
+  const handleDel = async (partyCode: string) => {
+    try {
+      if (!selectedUser) return;
+
+      console.log("Removing party", partyCode, "from user", selectedUser);
+
+      const selectedPartyCodes = [...new Set(selectedParties.filter((p) => p !== partyCode))];
+      await userService.assignPartiesToUser(
+        Number(selectedUser),
+        selectedPartyCodes,
+        selectedUserCategoryLabel || undefined,
+      );
+
+      alert("Party removed ✅");
+
+      fetchUserParties(Number(selectedUser), selectedUserCategoryLabel);
+    } catch (error) {
+      console.error(error);
+      alert("Failed ❌");
     }
+  };
 
-    const response = await userService.bulkAssignPartiesToUsers(parsedRows);
-    const data = response.data || {};
-    const errors = Array.isArray(data.errors) ? data.errors : [];
-    const errorPreview = errors.slice(0, 5).join("\n");
-    alert(
+  const downloadBulkTemplate = () => {
+    const userRows = [{ Username: "manager.username" }, { Username: "billing.username" }];
+    const partyRows = [
+      { "Party Code": "CUST000001" },
+      { "Party Code": "CUST000002" },
+      { "Party Code": "CUST000003" },
+    ];
+    startSheetsExport(
       [
-        errors.length ? `Import completed with errors.` : `Import complete.`,
-        `Added: ${data.added || 0}`,
-        `Existing/updated: ${data.existing || 0}`,
-        errors.length ? `Errors: ${errors.length}` : "",
-        errorPreview,
-        errors.length > 5 ? `${errors.length - 5} more errors...` : "",
-      ].filter(Boolean).join("\n"),
+        { sheetName: "Users", rows: userRows },
+        { sheetName: "Parties", rows: partyRows },
+      ],
+      "party-user-assignment-template.xlsx",
     );
-    if (errors.length) {
-      console.warn("Party assignment import errors:", errors);
+  };
+
+  const handleBulkImport = async (file: File) => {
+    setIsImporting(true);
+    try {
+      const buffer = await file.arrayBuffer();
+      const XLSX = await loadXlsx();
+      const workbook = XLSX.read(buffer, { type: "array" });
+      const userRows = getWorksheetRows(XLSX, workbook, ["Users", "User"]);
+      const partyRows = getWorksheetRows(XLSX, workbook, [
+        "Parties",
+        "Party",
+        "Party Codes",
+        "Party Mapping",
+      ]);
+
+      let parsedRows: { user_name: string; name: string; username: string; card_code: string }[] =
+        [];
+
+      if (userRows.length && partyRows.length) {
+        const userIdentifiers = Array.from(
+          new Set(
+            userRows
+              .map((row) =>
+                asText(
+                  getImportValue(row, [
+                    "Username",
+                    "username",
+                    "User",
+                    "User Name",
+                    "User ID",
+                    "User Id",
+                    "user_id",
+                    "Name",
+                    "name",
+                  ]),
+                ),
+              )
+              .filter(Boolean),
+          ),
+        );
+        const partyCodes = Array.from(
+          new Set(
+            partyRows
+              .map((row) =>
+                asText(
+                  getImportValue(row, [
+                    "Party Code",
+                    "Party Codes",
+                    "Card Code",
+                    "Card Codes",
+                    "card_code",
+                    "CardCode",
+                    "party_code",
+                  ]),
+                ),
+              )
+              .filter(Boolean),
+          ),
+        );
+
+        parsedRows = userIdentifiers.flatMap((userIdentifier) =>
+          partyCodes.map((cardCode) => ({
+            user_name: userIdentifier,
+            name: userIdentifier,
+            username: userIdentifier,
+            card_code: cardCode,
+          })),
+        );
+      } else {
+        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet, { defval: "" });
+        parsedRows = rows
+          .flatMap((row) => {
+            const userIdentifiers = [
+              ...splitImportList(
+                getImportValue(row, ["Users", "User", "User Name", "Name", "user_name", "name"]),
+              ),
+              ...splitImportList(
+                getImportValue(row, [
+                  "Usernames",
+                  "Username",
+                  "User ID",
+                  "User Id",
+                  "user_id",
+                  "username",
+                ]),
+              ),
+            ];
+            const uniqueUsers = Array.from(new Set(userIdentifiers));
+            const partyCodes = splitImportList(
+              getImportValue(row, [
+                "Party Codes",
+                "Party Code",
+                "Card Codes",
+                "Card Code",
+                "card_code",
+                "CardCode",
+                "party_code",
+              ]),
+            );
+
+            return uniqueUsers.flatMap((userIdentifier) =>
+              partyCodes.map((cardCode) => ({
+                user_name: userIdentifier,
+                name: userIdentifier,
+                username: userIdentifier,
+                card_code: cardCode,
+              })),
+            );
+          })
+          .filter((row) => (row.username || row.user_name) && row.card_code);
+      }
+
+      if (!parsedRows.length) {
+        alert("No valid rows found. Use Users and Parties sheets from the template.");
+        return;
+      }
+
+      const response = await userService.bulkAssignPartiesToUsers(parsedRows);
+      const data = response.data || {};
+      const errors = Array.isArray(data.errors) ? data.errors : [];
+      const errorPreview = errors.slice(0, 5).join("\n");
+      alert(
+        [
+          errors.length ? `Import completed with errors.` : `Import complete.`,
+          `Added: ${data.added || 0}`,
+          `Existing/updated: ${data.existing || 0}`,
+          errors.length ? `Errors: ${errors.length}` : "",
+          errorPreview,
+          errors.length > 5 ? `${errors.length - 5} more errors...` : "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      );
+      if (errors.length) {
+        console.warn("Party assignment import errors:", errors);
+      }
+      if (selectedUser) {
+        fetchUserParties(Number(selectedUser));
+      }
+    } catch (error) {
+      console.error("Error importing party assignments:", error);
+      // The import endpoint answers `{ data: { errors: [...] } }` — a LIST of
+      // per-row failures, not one message, so it reads the body directly.
+      const data = errorBody(error)?.data as { errors?: unknown } | undefined;
+      const errors: string[] = Array.isArray(data?.errors) ? (data.errors as string[]) : [];
+      alert(
+        errors.length
+          ? `Import completed with errors: ${errors.slice(0, 3).join("; ")}`
+          : "Failed to import Excel file.",
+      );
+    } finally {
+      setIsImporting(false);
+      if (importInputRef.current) {
+        importInputRef.current.value = "";
+      }
     }
-    if (selectedUser) {
-      fetchUserParties(Number(selectedUser));
-    }
-  } catch (error: any) {
-    console.error("Error importing party assignments:", error);
-    const data = error?.response?.data?.data;
-    const errors = Array.isArray(data?.errors) ? data.errors : [];
-    alert(errors.length ? `Import completed with errors: ${errors.slice(0, 3).join("; ")}` : "Failed to import Excel file.");
-  } finally {
-    setIsImporting(false);
-    if (importInputRef.current) {
-      importInputRef.current.value = "";
-    }
-  }
-};
+  };
 
   return (
     <div className="pa-page app-page">
-
       {!showParties && (
-        <div 
-          className="pa-card" 
-          style={{ 
-            background: '#fff', 
-            borderRadius: '12px', 
-            padding: '24px', 
-            boxShadow: '0 1px 3px rgba(0,0,0,0.1)', 
-            marginBottom: '24px' 
-          }}
-        >
-          <div style={{ marginBottom: '24px' }}>
-            <h1 style={{ margin: '0 0 4px', fontSize: '24px', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em' }}>Party Assignment</h1>
+        <div className="pa-card">
+          <div className="pa-card-head">
+            <h1 className="pa-title">Party Assignment</h1>
             {/* <p style={{ margin: 0, fontSize: '13px', color: '#64748b' }}>Search and select a user to manage their assigned parties.</p> */}
           </div>
 
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              gap: '16px',
-              flexWrap: 'wrap',
-              padding: '16px',
-              marginBottom: '24px',
-              background: '#f8fafc',
-              border: '1px solid #e2e8f0',
-              borderRadius: '8px',
-            }}
-          >
+          <div className="pa-upload">
             <div>
-              <h2 style={{ margin: '0 0 4px', fontSize: '16px', fontWeight: 700, color: '#0f172a' }}>
-                Excel Upload
-              </h2>
-              <p style={{ margin: 0, fontSize: '13px', color: '#64748b' }}>
-                Add usernames in the Users sheet and one party code per row in the Parties sheet; every listed party is assigned to every listed user.
+              <h2 className="pa-upload-title">Excel Upload</h2>
+              <p className="pa-upload-note">
+                Add usernames in the Users sheet and one party code per row in the Parties sheet;
+                every listed party is assigned to every listed user.
               </p>
             </div>
-            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+            <div className="pa-upload-actions">
               <button
                 type="button"
                 onClick={downloadBulkTemplate}
-                style={{
-                  padding: '9px 14px',
-                  border: '1px solid #cbd5e1',
-                  background: '#fff',
-                  color: '#334155',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  fontWeight: 600,
-                }}
+                className="pa-btn pa-btn-outline"
               >
                 Download Template
               </button>
@@ -433,24 +475,16 @@ const handleBulkImport = async (file: File) => {
                 type="button"
                 disabled={isImporting}
                 onClick={() => importInputRef.current?.click()}
-                style={{
-                  padding: '9px 14px',
-                  border: 'none',
-                  background: '#16a34a',
-                  color: '#fff',
-                  borderRadius: '8px',
-                  fontWeight: 600,
-                  cursor: isImporting ? 'not-allowed' : 'pointer',
-                  opacity: isImporting ? 0.75 : 1,
-                }}
+                className="pa-btn pa-btn-go"
               >
-                {isImporting ? 'Uploading...' : 'Upload Excel'}
+                {isImporting ? "Uploading..." : "Upload Excel"}
               </button>
               <input
                 ref={importInputRef}
                 type="file"
                 accept=".xlsx,.xls,.csv"
-                style={{ display: 'none' }}
+                aria-label="Upload Excel file"
+                className="pa-file-input"
                 onChange={(event) => {
                   const file = event.target.files?.[0];
                   if (file) {
@@ -461,26 +495,13 @@ const handleBulkImport = async (file: File) => {
             </div>
           </div>
 
-          <div style={{ position: 'relative', maxWidth: '400px', zIndex: 10 }}>
-            <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#334155', marginBottom: '8px' }}>
-              User Search
-            </label>
-            <div style={{ position: 'relative' }}>
+          <div className="pa-search">
+            <label className="pa-label">User Search</label>
+            <div className="pa-search-wrap">
               <input
                 type="text"
-                placeholder="Type name to search..."
-                style={{ 
-                  width: '100%', 
-                  height: 'var(--input-h, 40px)',
-                  padding: '0 12px',
-                  background: 'rgba(248, 250, 252, 0.9)',
-                  border: '1px solid #cbd5e1', 
-                  borderRadius: 'var(--radius-sm, 8px)', 
-                  fontSize: 'var(--font-ui, 13px)', 
-                  color: '#0f172a',
-                  outline: 'none',
-                  boxSizing: 'border-box'
-                }}
+                placeholder="Type name to search..." aria-label="Type name to search"
+                className="pa-search-input"
                 value={userSearch}
                 onChange={(e) => {
                   setUserSearch(e.target.value);
@@ -491,26 +512,14 @@ const handleBulkImport = async (file: File) => {
             </div>
 
             {showDropdown && (
-              <div style={{ 
-                position: 'absolute', 
-                top: '100%', 
-                left: 0, 
-                right: 0, 
-                marginTop: '4px', 
-                background: '#fff', 
-                border: '1px solid #e2e8f0', 
-                borderRadius: '8px', 
-                boxShadow: '0 4px 12px rgba(0,0,0,0.1)', 
-                maxHeight: '250px', 
-                overflowY: 'auto' 
-              }}>
+              <div className="pa-dropdown">
                 {filteredUsers.length > 0 ? (
                   filteredUsers.map((user) => (
                     <div
                       key={user.id}
-                      style={{ padding: '10px 14px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9' }}
-                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f8fafc'}
-                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                      className="pa-dropdown-item"
+                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f8fafc")}
+                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
                       onClick={() => {
                         const firstCategory = getUserCategories(user)[0] || "";
                         setSelectedUser(user.id);
@@ -520,38 +529,39 @@ const handleBulkImport = async (file: File) => {
                         fetchUserParties(user.id, firstCategory);
                       }}
                     >
-                      <div style={{ fontWeight: 500, color: '#0f172a' }}>{user.name}</div>
-                      <div style={{ fontSize: '0.75rem', color: '#64748b' }}>{user.role || 'Unknown Role'}</div>
+                      <div className="pa-dropdown-name">{user.name}</div>
+                      <div className="pa-dropdown-role">
+                        {user.role || "Unknown Role"}
+                      </div>
                     </div>
                   ))
                 ) : (
-                  <div style={{ padding: '10px 14px', color: '#64748b' }}>No users found</div>
+                  <div className="pa-dropdown-empty">No users found</div>
                 )}
               </div>
             )}
           </div>
 
           {selectedUser && (
-            <div style={{ marginTop: '32px', paddingTop: '24px', borderTop: '1px solid #e2e8f0' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
+            <div className="pa-assigned">
+              <div className="pa-assigned-head">
                 <div>
-                  <h3 style={{ fontSize: '1.1rem', fontWeight: 600, color: '#0f172a', margin: 0 }}>Assigned Parties</h3>
-                  <p style={{ fontSize: '0.875rem', color: '#64748b', margin: '4px 0 0' }}>
-                    <strong>{[...new Set(selectedParties)].length}</strong> parties assigned to <strong>{selectedUserRecord?.name}</strong>
-                    {selectedUserCategoryLabel && <> in <strong>{selectedUserCategoryLabel}</strong></>}
+                  <h3 className="pa-assigned-title">
+                    Assigned Parties
+                  </h3>
+                  <p className="pa-assigned-sub">
+                    <strong>{[...new Set(selectedParties)].length}</strong> parties assigned to{" "}
+                    <strong>{selectedUserRecord?.name}</strong>
+                    {selectedUserCategoryLabel && (
+                      <>
+                        {" "}
+                        in <strong>{selectedUserCategoryLabel}</strong>
+                      </>
+                    )}
                   </p>
                 </div>
                 <button
-                  style={{ 
-                    background: '#2563eb', 
-                    color: '#fff', 
-                    padding: '8px 16px', 
-                    borderRadius: '8px', 
-                    border: 'none', 
-                    fontWeight: 500, 
-                    cursor: 'pointer',
-                    boxShadow: '0 1px 2px rgba(37, 99, 235, 0.2)'
-                  }}
+                  className="pa-btn-assign"
                   onClick={() => {
                     setSearch("");
                     setShowParties(true);
@@ -563,8 +573,10 @@ const handleBulkImport = async (file: File) => {
               </div>
 
               {selectedUserCategories.length > 1 && (
-                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '20px' }}>
-                  <span style={{ fontSize: '0.8rem', color: '#64748b', alignSelf: 'center', marginRight: '4px' }}>Category:</span>
+                <div className="pa-category-row">
+                  <span className="pa-category-label">
+                    Category:
+                  </span>
                   {selectedUserCategories.map((cat) => {
                     const active = selectedUserCategoryLabel === cat;
                     return (
@@ -572,16 +584,7 @@ const handleBulkImport = async (file: File) => {
                         key={cat}
                         type="button"
                         onClick={() => handleCategoryChange(cat)}
-                        style={{
-                          padding: '6px 14px',
-                          borderRadius: '999px',
-                          border: active ? '1px solid #2563eb' : '1px solid #cbd5e1',
-                          background: active ? '#eff6ff' : '#fff',
-                          color: active ? '#1d4ed8' : '#475569',
-                          fontWeight: active ? 700 : 500,
-                          fontSize: '0.85rem',
-                          cursor: 'pointer',
-                        }}
+                        className={`pa-category-chip${active ? " pa-category-chip--active" : ""}`}
                       >
                         {cat}
                       </button>
@@ -590,39 +593,29 @@ const handleBulkImport = async (file: File) => {
                 </div>
               )}
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '16px' }}>
+              <div className="pa-assigned-grid">
                 {(selectedParties || []).length > 0 ? (
                   [...new Set(selectedParties)].map((partyCode) => {
                     const party = partyOptions.find((p) => getPartyCode(p) === partyCode);
                     return party ? (
-                      <div key={getPartyKey(party)} style={{ 
-                        display: 'flex', 
-                        justifyContent: 'space-between', 
-                        alignItems: 'flex-start', 
-                        background: '#f8fafc', 
-                        padding: '14px 16px', 
-                        borderRadius: '8px', 
-                        border: '1px solid #e2e8f0' 
-                      }}>
+                      <div
+                        key={getPartyKey(party)}
+                        className="pa-assigned-card"
+                      >
                         <div>
-                          <div style={{ fontWeight: 600, color: '#1e293b', fontSize: '0.95rem' }}>{getPartyName(party)}</div>
-                          <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '4px', fontFamily: 'monospace' }}>
-                            {[getPartyCode(party), party.state, getPartyCategory(party)].filter(Boolean).join(" • ")}
+                          <div className="pa-assigned-name">
+                            {getPartyName(party)}
+                          </div>
+                          <div className="pa-assigned-meta">
+                            {[getPartyCode(party), party.state, getPartyCategory(party)]
+                              .filter(Boolean)
+                              .join(" • ")}
                           </div>
                         </div>
                         <button
-                          style={{ 
-                            background: 'none', 
-                            border: 'none', 
-                            color: '#ef4444', 
-                            fontSize: '1.25rem', 
-                            cursor: 'pointer', 
-                            padding: '0 4px', 
-                            lineHeight: 1,
-                            opacity: 0.7 
-                          }}
-                          onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
-                          onMouseLeave={(e) => e.currentTarget.style.opacity = '0.7'}
+                          className="pa-assigned-remove"
+                          onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
+                          onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.7")}
                           onClick={() => handleDel(getPartyCode(party))}
                           title="Remove Party"
                         >
@@ -632,7 +625,7 @@ const handleBulkImport = async (file: File) => {
                     ) : null;
                   })
                 ) : (
-                  <div style={{ gridColumn: '1 / -1', padding: '40px 20px', textAlign: 'center', background: '#f8fafc', borderRadius: '8px', color: '#64748b', border: '1px dashed #cbd5e1' }}>
+                  <div className="pa-assigned-empty">
                     No parties assigned to this user yet. Click "Assign New Parties" to get started.
                   </div>
                 )}
@@ -643,43 +636,31 @@ const handleBulkImport = async (file: File) => {
       )}
 
       {showParties && (
-        <div style={{ background: '#fff', borderRadius: '12px', padding: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
+        <div className="pa-card">
+          <div className="pa-panel-head">
             <div>
-              <h2 style={{ margin: '0 0 4px', fontSize: '24px', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em' }}>Assign Parties</h2>
-              <p style={{ fontSize: '0.875rem', color: '#64748b', margin: '4px 0 0' }}>
-                Select multiple {selectedUserCategoryLabel && <strong>{selectedUserCategoryLabel} </strong>}parties to map to <strong>{selectedUserRecord?.name}</strong>
+              <h2 className="pa-title">
+                Assign Parties
+              </h2>
+              <p className="pa-panel-sub">
+                Select multiple{" "}
+                {selectedUserCategoryLabel && <strong>{selectedUserCategoryLabel} </strong>}parties
+                to map to <strong>{selectedUserRecord?.name}</strong>
               </p>
             </div>
             <button
-              style={{ 
-                background: '#fff', 
-                border: '1px solid #cbd5e1', 
-                padding: '8px 16px', 
-                borderRadius: '8px', 
-                cursor: 'pointer', 
-                fontWeight: 500,
-                color: '#334155'
-              }}
+              className="pa-btn-back"
               onClick={() => setShowParties(false)}
             >
               ← Back
             </button>
           </div>
 
-          <div style={{ marginBottom: '16px', maxWidth: '500px' }}>
+          <div className="pa-panel-search">
             <input
               type="text"
-              placeholder="Search party by name or code..."
-              style={{ 
-                width: '100%', 
-                padding: '10px 14px', 
-                border: '1px solid #cbd5e1', 
-                borderRadius: '8px', 
-                fontSize: '0.95rem', 
-                outline: 'none',
-                boxSizing: 'border-box'
-              }}
+              placeholder="Search party by name or code..." aria-label="Search party by name or code"
+              className="pa-panel-search-input"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -687,49 +668,41 @@ const handleBulkImport = async (file: File) => {
 
           <div
             key={`party-list-${partySearchTerm}-${visibleParties.length}`}
-            style={{ 
-            maxHeight: '400px', 
-            overflowY: 'auto', 
-            border: '1px solid #e2e8f0', 
-            borderRadius: '8px', 
-            background: '#f8fafc' 
-          }}
+            className="pa-party-list"
           >
             {!isPartiesLoading && visibleParties.length > 0 && (
-              <label 
-                style={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  padding: '14px 16px', 
-                  borderBottom: '2px solid #cbd5e1', 
-                  cursor: 'pointer', 
-                  background: '#f1f5f9', 
-                  margin: 0,
-                  position: 'sticky',
-                  top: 0,
-                  zIndex: 10
-                }}
-              >
+              <label className="pa-select-all">
                 <input
                   type="checkbox"
-                  style={{ marginRight: '16px', width: '18px', height: '18px', cursor: 'pointer', accentColor: '#2563eb' }}
-                  checked={visibleParties.length > 0 && visiblePartyKeys.every((key) => selectedParties.includes(key))}
+                  className="pa-checkbox"
+                  checked={
+                    visibleParties.length > 0 &&
+                    visiblePartyKeys.every((key) => selectedParties.includes(key))
+                  }
                   onChange={(e) => {
                     if (e.target.checked) {
-                      const newKeys = visiblePartyKeys.filter(key => !selectedParties.includes(key));
+                      const newKeys = visiblePartyKeys.filter(
+                        (key) => !selectedParties.includes(key),
+                      );
                       setSelectedParties([...selectedParties, ...newKeys]);
                     } else {
-                      setSelectedParties(selectedParties.filter(key => !visiblePartyKeys.includes(key)));
+                      setSelectedParties(
+                        selectedParties.filter((key) => !visiblePartyKeys.includes(key)),
+                      );
                     }
                   }}
                 />
-            <div style={{ fontWeight: 600, color: '#0f172a', fontSize: '0.95rem' }}>
-              Select All ({visiblePartyKeys.filter((key) => selectedParties.includes(key)).length}/{visibleParties.length})
-            </div>
+                <div className="pa-select-all-label">
+                  Select All (
+                  {visiblePartyKeys.filter((key) => selectedParties.includes(key)).length}/
+                  {visibleParties.length})
+                </div>
               </label>
             )}
             {isPartiesLoading ? (
-              <div style={{ padding: '32px', textAlign: 'center', color: '#64748b' }}>Loading parties...</div>
+              <div className="pa-party-list-status">
+                Loading parties...
+              </div>
             ) : visibleParties.length > 0 ? (
               visibleParties.map((party) => {
                 const partyCode = getPartyCode(party);
@@ -737,76 +710,54 @@ const handleBulkImport = async (file: File) => {
                 const partyKey = getPartyCode(party);
 
                 return (
-                <label 
-                  key={getPartyKey(party)} 
-                  style={{ 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    padding: '14px 16px', 
-                    borderBottom: '1px solid #e2e8f0', 
-                    cursor: 'pointer', 
-                    background: selectedParties.includes(partyKey) ? '#eff6ff' : '#fff', 
-                    transition: 'background 0.2s',
-                    margin: 0
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    style={{ marginRight: '16px', width: '18px', height: '18px', cursor: 'pointer', accentColor: '#2563eb' }}
-                    checked={selectedParties.includes(partyKey)}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setSelectedParties([...selectedParties, partyKey]);
-                      } else {
-                        setSelectedParties(selectedParties.filter((key) => key !== partyKey));
-                      }
-                    }}
-                  />
-                  <div>
-                    <div style={{ fontWeight: 500, color: '#0f172a', fontSize: '0.95rem' }}>
-                      {partyName || "Unnamed party"}
+                  <label
+                    key={getPartyKey(party)}
+                    className={`pa-party-row${selectedParties.includes(partyKey) ? " pa-party-row--selected" : ""}`}
+                  >
+                    <input
+                      type="checkbox"
+                      className="pa-checkbox"
+                      checked={selectedParties.includes(partyKey)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedParties([...selectedParties, partyKey]);
+                        } else {
+                          setSelectedParties(selectedParties.filter((key) => key !== partyKey));
+                        }
+                      }}
+                    />
+                    <div>
+                      <div className="pa-party-name">
+                        {partyName || "Unnamed party"}
+                      </div>
+                      <div className="pa-party-meta">
+                        {[partyCode, party.state, getPartyCategory(party)]
+                          .filter(Boolean)
+                          .join(" • ")}
+                      </div>
                     </div>
-                    <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '2px', fontFamily: 'monospace' }}>
-                      {[partyCode, party.state, getPartyCategory(party)].filter(Boolean).join(" • ")}
-                    </div>
-                  </div>
-                </label>
-              );
-            })
+                  </label>
+                );
+              })
             ) : (
-              <div style={{ padding: '32px', textAlign: 'center', color: '#64748b' }}>No matching parties found</div>
+              <div className="pa-party-list-status">
+                No matching parties found
+              </div>
             )}
           </div>
 
-          <div style={{ marginTop: '24px', display: 'flex', gap: '12px', justifyContent: 'flex-end', borderTop: '1px solid #e2e8f0', paddingTop: '20px' }}>
+          <div className="pa-panel-actions">
             <button
-              style={{ 
-                background: '#fff', 
-                border: '1px solid #cbd5e1', 
-                padding: '10px 20px', 
-                borderRadius: '8px', 
-                cursor: 'pointer', 
-                fontWeight: 500, 
-                color: '#475569' 
-              }}
+              className="pa-btn-cancel"
               onClick={() => setShowParties(false)}
             >
               Cancel
             </button>
             <button
-              style={{ 
-                background: '#2563eb', 
-                color: '#fff', 
-                padding: '10px 20px', 
-                borderRadius: '8px', 
-                border: 'none', 
-                fontWeight: 500, 
-                cursor: 'pointer',
-                boxShadow: '0 1px 2px rgba(37, 99, 235, 0.2)'
-              }}
+              className="pa-btn-save"
               onClick={handleSave}
             >
-          Save Assignments ({[...new Set(selectedParties)].length})
+              Save Assignments ({[...new Set(selectedParties)].length})
             </button>
           </div>
         </div>

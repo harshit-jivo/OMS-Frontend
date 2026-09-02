@@ -57,7 +57,7 @@ export default function AssetDetails({ asset, onClose, onEdit, onHandover, onHis
               {(asset.working_status as string) || "—"}
             </StatusBadge>
           </h3>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div className="hais-detail-sub-row">
             <span className="hais-detail-sub">{asset.asset_type || "Asset"}</span>
             <button className="hais-detail-close" onClick={onClose} aria-label="Close">
               &times;
@@ -130,15 +130,15 @@ export default function AssetDetails({ asset, onClose, onEdit, onHandover, onHis
 
         <div className="hais-detail-foot">
           <button className="ofs-primary" onClick={() => onHandover?.(asset)}>
-            <HiUserPlus style={{ verticalAlign: "-3px", marginRight: 6 }} />
+            <HiUserPlus className="nic-icon-lead" />
             Handover
           </button>
           <button className="nic-tab" onClick={() => onHistory?.(asset)}>
-            <HiClipboardDocumentList style={{ verticalAlign: "-3px", marginRight: 6 }} />
+            <HiClipboardDocumentList className="nic-icon-lead" />
             History
           </button>
           <button className="nic-tab" onClick={() => onEdit?.(asset.asset_id)}>
-            <HiPencil style={{ verticalAlign: "-3px", marginRight: 6 }} />
+            <HiPencil className="nic-icon-lead" />
             Edit / Update Config
           </button>
         </div>

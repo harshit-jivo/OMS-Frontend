@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { HiMagnifyingGlass } from "react-icons/hi2";
 import { ewaybillService } from "../../services/ewaybillService";
-import { NicField, JsonView, DetailsView, ErrorAlert, apiErrorMessage } from "../../components/NicUI";
+import { NicField, JsonView, DetailsView, ErrorAlert } from "../../components/NicUI";
+import { messageFrom } from "@/lib/apiError";
 
 type Mode = "ewb" | "irn" | "gstin" | "transporter";
 const MODES: [Mode, string][] = [
@@ -25,7 +26,7 @@ export default function EwbLookup() {
       else if (mode === "gstin") setData(await ewaybillService.gstinDetails(v));
       else setData(await ewaybillService.transporterDetails(v));
     } catch (err) {
-      setError(apiErrorMessage(err));
+      setError(messageFrom(err, "Request failed"));
     } finally {
       setBusy(false);
     }
@@ -58,7 +59,7 @@ export default function EwbLookup() {
 
       <div className="nic-actions-row">
         <button className="ofs-primary" onClick={() => void run()} disabled={busy}>
-          <HiMagnifyingGlass style={{ verticalAlign: "-3px", marginRight: 6 }} />
+          <HiMagnifyingGlass className="nic-icon-lead" />
           {busy ? "Searching…" : "Search"}
         </button>
       </div>

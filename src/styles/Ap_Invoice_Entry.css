@@ -133,14 +133,14 @@
 .ap-lines-head h3 { margin: 0; font-size: 16px; font-weight: 700; }
 .ap-lines-head .ap-dim { font-size: 12px; display: inline-flex; align-items: center; gap: 5px; }
 .ap-table-wrap { overflow-x: auto; }
-.ap-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.ap-table th {
+/* .ap-table { width: 100%; border-collapse: collapse; font-size: 13px; } */
+/* .ap-table th {
   text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
   color: var(--ap-muted); font-weight: 700; padding: 8px 10px; border-bottom: 1px solid var(--ap-line);
   white-space: nowrap;
-}
-.ap-table td { padding: 9px 10px; border-bottom: 1px solid #f1f2f4; vertical-align: middle; }
-.ap-table tfoot td { border-bottom: 0; padding-top: 12px; }
+} */
+/* .ap-table td { padding: 9px 10px; border-bottom: 1px solid #f1f2f4; vertical-align: middle; } */
+/* .ap-table tfoot td { border-bottom: 0; padding-top: 12px; } */
 .ap-r { text-align: right; }
 /* copied cells sit visually behind the editable inputs */
 .ap-ro-cell { color: var(--ap-ink-2); background: #fbfbfc; }
@@ -163,10 +163,10 @@
 }
 
 /* ---- Modal ---- */
-.ap-modal-overlay {
+/* .ap-modal-overlay {
   position: fixed; inset: 0; background: rgba(15, 23, 42, 0.45);
   display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 60;
-}
+} */
 .ap-modal {
   background: #fff; border-radius: var(--ap-radius); box-shadow: var(--ap-shadow-lg);
   width: min(560px, 100%); max-height: 88vh; display: flex; flex-direction: column;
@@ -183,12 +183,12 @@
 .ap-note { color: var(--ap-muted); font-size: 12px; margin: 14px 0 0; }
 
 /* ---- Toast ---- */
-.ap-toast {
+/* .ap-toast {
   position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
   background: var(--ap-ink); color: #fff; border-radius: 999px;
   padding: 10px 18px; font-size: 13px; font-weight: 600;
   box-shadow: var(--ap-shadow-lg); z-index: 80;
-}
+} */
 
 @media (max-width: 720px) {
   .ap-page { padding: 16px 14px; }

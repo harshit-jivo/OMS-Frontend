@@ -197,14 +197,14 @@
   max-height: 72vh;
 }
 
-.sovi-table {
+/* .sovi-table {
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
   font-size: 0.82rem;
 }
-
-.sovi-table th,
+ */
+/* .sovi-table th,
 .sovi-table td {
   padding: 7px 10px;
   border-bottom: 1px solid #eef2f7;
@@ -212,8 +212,8 @@
   white-space: nowrap;
   text-align: left;
 }
-
-.sovi-table thead th {
+ */
+/* .sovi-table thead th {
   position: sticky;
   top: 0;
   z-index: 2;
@@ -225,17 +225,17 @@
   letter-spacing: 0.03em;
   border-right-color: #2b4d78;
 }
-
-.sovi-table thead th.sovi-num {
+ */
+/* .sovi-table thead th.sovi-num {
   text-align: right;
 }
-
+ */
 /* ── Sortable headings ────────────────────────────────────── */
 
-.sovi-table thead th.sovi-th-sort {
+/* .sovi-table thead th.sovi-th-sort {
   padding: 0;
 }
-
+ */
 .sovi-sort-btn {
   display: flex;
   align-items: center;
@@ -284,11 +284,11 @@
   color: #93c5fd;
 }
 
-.sovi-table td.sovi-num {
+/* .sovi-table td.sovi-num {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
-
+ */
 .sovi-strong {
   font-weight: 700;
   color: #0f172a;
@@ -299,10 +299,10 @@
   min-width: 220px;
 }
 
-.sovi-table tbody tr:hover td {
+/* .sovi-table tbody tr:hover td {
   background: #f8fafc;
 }
-
+ */
 /* ── Order rows ───────────────────────────────────────────── */
 
 .sovi-order-row {
@@ -388,32 +388,32 @@
 
 /* ── Badges ───────────────────────────────────────────────── */
 
-.sovi-badge {
-  display: inline-block;
-  border-radius: 999px;
-  padding: 2px 9px;
-  font-size: 0.7rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  white-space: nowrap;
-}
+/* .sovi-badge {
+                                                                   display: inline-block;
+                                                                   border-radius: 999px;
+                                                                   padding: 2px 9px;
+                                                                   font-size: 0.7rem;
+                                                                   font-weight: 700;
+                                                                   letter-spacing: 0.02em;
+                                                                   white-space: nowrap;
+                                                                   } */
 
-.sovi-badge-none,
-.sovi-badge-pending {
-  background: #f1f5f9;
-  color: #64748b;
-}
+/* .sovi-badge-none,
+                                                                   .sovi-badge-pending {
+                                                                   background: #f1f5f9;
+                                                                   color: #64748b;
+                                                                   } */
 
-.sovi-badge-some,
-.sovi-badge-partly-invoiced {
-  background: #fef3c7;
-  color: #92400e;
-}
+/* .sovi-badge-some,
+   .sovi-badge-partly-invoiced {
+   background: #fef3c7;
+   color: #92400e;
+   } */
 
-.sovi-badge-invoiced {
-  background: #dcfce7;
-  color: #166534;
-}
+/* .sovi-badge-invoiced {
+   background: #dcfce7;
+   color: #166534;
+   } */
 
 /* ── Order modal ──────────────────────────────────────────── */
 
@@ -669,7 +669,7 @@
 
 /* ── Line table inside the expanded order ─────────────────── */
 
-.sovi-lines-table {
+/* .sovi-lines-table {
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
@@ -679,16 +679,16 @@
   border-radius: 10px;
   overflow: hidden;
 }
-
-.sovi-lines-table th,
+ */
+/* .sovi-lines-table th,
 .sovi-lines-table td {
   padding: 6px 10px;
   border-bottom: 1px solid #f1f5f9;
   text-align: left;
   white-space: nowrap;
 }
-
-.sovi-lines-table thead th {
+ */
+/* .sovi-lines-table thead th {
   background: #f1f5f9;
   color: #475569;
   font-size: 0.68rem;
@@ -696,17 +696,17 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
-
-.sovi-lines-table th.sovi-num,
+ */
+/* .sovi-lines-table th.sovi-num,
 .sovi-lines-table td.sovi-num {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
-
-.sovi-lines-table tbody tr:last-child td {
+ */
+/* .sovi-lines-table tbody tr:last-child td {
   border-bottom: none;
 }
-
+ */
 /* A line with nothing left to send — kept for the arithmetic, muted. */
 .sovi-line-done td {
   color: #94a3b8;

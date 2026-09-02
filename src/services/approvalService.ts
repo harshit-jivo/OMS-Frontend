@@ -1,4 +1,5 @@
 import api from "./api";
+import type { Schemas } from "../types/api";
 
 /**
  * Approval workflow admin API.
@@ -301,15 +302,17 @@ export type CompanyMappingPayload = Partial<
   >
 >;
 
-/** Mirrors payments/serializers.py CollectionPersonSerializer. */
-export interface CollectionPerson {
-  id: number;
-  code: string;
-  name: string;
-  company: Company | "";
-  phone: string;
-  is_active: boolean;
-}
+/**
+ * Mirrors payments/serializers.py CollectionPersonSerializer — and, unlike the
+ * rest of this file's types, is DERIVED from the generated schema rather than
+ * hand-duplicated. The server marks every field but `name` optional (a partial
+ * PATCH); `Required` re-tightens that back to what every call site already
+ * assumes, so the shape callers see is unchanged, but a field the backend
+ * renames or drops now fails this line instead of drifting silently.
+ */
+export type CollectionPerson = Required<
+  Pick<Schemas["CollectionPerson"], "id" | "name" | "code" | "company" | "phone" | "is_active">
+>;
 
 export type CollectionPersonPayload = Partial<
   Pick<

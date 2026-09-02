@@ -106,7 +106,16 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   "/App_User": { permissions: ["App_User"] },
   "/Page_Permissions": { adminOnly: true },
   "/UI_Labels": { adminOnly: true },
-  "/Sales_Quotation": { adminOnly: true },
+  // "/Sales_Quotation": { adminOnly: true },
+  //
+  // Commented out with the route itself (App.tsx, DISABLED 2026-08-27 — the
+  // quotation flow is closed and its backend routes are commented out too).
+  //
+  // It survived here because the coverage test scanned App.tsx for `path="…"`
+  // WITHOUT stripping comments, so a route inside a `{/* … */}` block counted
+  // as live and the table was required to carry a rule for it. A rule for a
+  // page nobody can reach is worse than a missing one — it reads as protection.
+  // The test strips comments now, which is what surfaced this.
   "/Device_Management": { permissions: ["Device_Management"] },
   "/Sap_Sync": { permissions: ["Sap_Sync"] },
   "/Party_Assignment": { permissions: ["Party_Assignment"] },

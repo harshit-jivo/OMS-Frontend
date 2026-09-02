@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { HiQrCode } from "react-icons/hi2";
 import { einvoiceService } from "../../services/einvoiceService";
-import { NicField, ErrorAlert, apiErrorMessage } from "../../components/NicUI";
+import { NicField, ErrorAlert } from "../../components/NicUI";
+import { messageFrom } from "@/lib/apiError";
 import QrViewer from "../../components/QrViewer";
 
 export default function IrnQr() {
@@ -19,7 +20,7 @@ export default function IrnQr() {
       const r = await einvoiceService.renderQr(qrData.trim());
       setUri(r.data_uri);
     } catch (err) {
-      setError(apiErrorMessage(err));
+      setError(messageFrom(err, "Request failed"));
     } finally {
       setBusy(false);
     }
@@ -42,17 +43,17 @@ export default function IrnQr() {
         <code> SignedQRCode</code> string.
       </p>
 
-      <div className="nic-form-grid" style={{ marginTop: 14 }}>
+      <div className="nic-form-grid nic-form-grid--spaced-wide">
         <NicField label="View stored QR by IRN">
           <input className="nic-input nic-mono" value={irn} onChange={(e) => setIrn(e.target.value)}
             placeholder="64-character IRN hash" />
         </NicField>
-        <div style={{ display: "flex", alignItems: "flex-end" }}>
+        <div className="nic-field-bottom">
           <button className="ofs-secondary" onClick={showStored}>Show stored QR</button>
         </div>
       </div>
 
-      <div className="nic-form-grid" style={{ marginTop: 14 }}>
+      <div className="nic-form-grid nic-form-grid--spaced-wide">
         <NicField label="…or render from SignedQRCode string" full>
           <textarea className="nic-textarea" value={qrData} onChange={(e) => setQrData(e.target.value)}
             placeholder="Paste the SignedQRCode (JWS) string here" />
@@ -60,7 +61,7 @@ export default function IrnQr() {
       </div>
       <div className="nic-actions-row">
         <button className="ofs-primary" onClick={() => void renderFromData()} disabled={busy}>
-          <HiQrCode style={{ verticalAlign: "-3px", marginRight: 6 }} />
+          <HiQrCode className="nic-icon-lead" />
           {busy ? "Rendering…" : "Render QR"}
         </button>
       </div>

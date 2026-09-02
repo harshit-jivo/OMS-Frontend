@@ -12,6 +12,27 @@
   margin-bottom: 20px;
 }
 
+/*
+ * Two classes, deliberately — `0,2,0`.
+ *
+ * The element carries BOTH `.au-header` (above) and `.app-page-head`
+ * (AppShell.css:26), and those two declare the same `align-items: flex-start`
+ * and `margin-bottom: 20px`. A single-class modifier would be `0,1,0`: a tie
+ * with both, decided by whichever stylesheet the bundler happened to emit
+ * last. The inline style this replaces beat both outright, so the modifier has
+ * to as well.
+ *
+ * It also has to outrank `@media (max-width: 768px) .au-header` further down,
+ * which sets `align-items: flex-start` again. It does (0,2,0 beats 0,1,0 at
+ * any width), so the header keeps centring below 768px exactly as the inline
+ * style made it. The `flex-direction: column` and `gap` in that media block are
+ * untouched and still apply.
+ */
+.au-header.au-header--center {
+  align-items: center;
+  margin-bottom: 24px;
+}
+
 .au-header-actions {
   display: flex;
   align-items: center;
@@ -250,35 +271,47 @@
 }
 
 /* ── In-table badges (role / status) ─────────────────────────────────────── */
+/*
+ * Replaced by components/ui/badge.tsx — Phase 2.2. Commented out rather than
+ * deleted, per the standing instruction on this refactor.
+ *
+ * `-ok` and `-bad` are the reason the primitive exists: this file decided that
+ * "Active" is #047857 and "Inactive" is #b91c1c, and eleven other stylesheets
+ * decided the same two things differently. The colour for a status is now
+ * chosen once, in components/ui/statusTone.ts, so App_User's green is the same
+ * green as everywhere else.
+ *
+ * `-role` was blue for every role, so routing it through the shared `info`
+ * tone loses nothing.
+ */
+/* .au-cell-badge {
+     display: inline-flex;
+     align-items: center;
+     padding: 3px 10px;
+     border-radius: 999px;
+     background: #f1f5f9;
+     font-size: 10.5px;
+     font-weight: 700;
+     letter-spacing: 0.05em;
+     text-transform: uppercase;
+     color: #64748b;
+     white-space: nowrap;
+   }
 
-.au-cell-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 3px 10px;
-  border-radius: 999px;
-  background: #f1f5f9;
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: #64748b;
-  white-space: nowrap;
-}
+   .au-cell-badge-role {
+     background: rgba(37, 99, 235, 0.12);
+     color: #1d4ed8;
+   }
 
-.au-cell-badge-role {
-  background: rgba(37, 99, 235, 0.12);
-  color: #1d4ed8;
-}
+   .au-cell-badge-ok {
+     background: rgba(16, 185, 129, 0.16);
+     color: #047857;
+   }
 
-.au-cell-badge-ok {
-  background: rgba(16, 185, 129, 0.16);
-  color: #047857;
-}
-
-.au-cell-badge-bad {
-  background: rgba(239, 68, 68, 0.16);
-  color: #b91c1c;
-}
+   .au-cell-badge-bad {
+     background: rgba(239, 68, 68, 0.16);
+     color: #b91c1c;
+   } */
 
 @media (max-width: 1200px) {
   .au-kpis {
@@ -301,7 +334,7 @@
 }
 
 /* ── Add / Edit user modal ── */
-.au-modal-overlay {
+/* .au-modal-overlay {
   position: fixed;
   inset: 0;
   z-index: 1000;
@@ -314,7 +347,7 @@
   overflow-y: auto;
   animation: au-overlay-in 0.16s ease;
 }
-
+ */
 .au-modal {
   position: relative;
   width: 100%;
@@ -439,28 +472,48 @@
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-.au-table-wrap {
-  width: 100%;
-  overflow-x: auto;
-}
+/* ─────────────────────────────────────────────────────────────────────────
+ * Replaced by components/ui/table.tsx — Phase 2.1
+ * ─────────────────────────────────────────────────────────────────────────
+ *
+ * The users table now uses the shared Table primitive, so everything below is
+ * dead: nothing in App_User.tsx carries these class names any more.
+ *
+ * Commented out rather than deleted, per the standing instruction on this
+ * refactor. Deleting is a one-pass `sed` away once the primitive has been in
+ * front of users for a release; until then this is the record of what the
+ * table used to be, in the file where someone would look for it.
+ *
+ * Verified dead rather than assumed: with these rules still live the page
+ * screenshot is byte-identical to the one taken after commenting them out.
+ * If any of it still applied, that comparison would have moved.
+ */
+/*
+   .au-table-wrap {
+     width: 100%;
+     overflow-x: auto;
+   }
+ */
 
-.au-table-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 20px 22px 14px;
-  border-bottom: 1px solid #e9eef5;
-}
+/*
+   .au-table-head {
+     display: flex;
+     align-items: center;
+     justify-content: space-between;
+     gap: 12px;
+     padding: 20px 22px 14px;
+     border-bottom: 1px solid #e9eef5;
+   }
+ */
 
-.au-table-title,
+/* .au-table-title — see the Phase 2.1 note above. */
 .au-form-title {
   font-size: 16px;
   font-weight: 800;
   color: #0f172a;
 }
 
-.au-table-subtitle,
+/* .au-table-subtitle — see the Phase 2.1 note above. */
 .au-form-subtitle {
   /* Styles moved to inline in JSX for consistency with other pages */
 }
@@ -477,45 +530,47 @@
   font-weight: 700;
 }
 
-.au-table {
-  width: 100%;
-  min-width: 940px;
-  border-collapse: collapse;
-}
+/*
+   .au-table {
+     width: 100%;
+     min-width: 940px;
+     border-collapse: collapse;
+   }
 
-.au-table thead {
-  background: #ffffff;
-}
+   .au-table thead {
+     background: #ffffff;
+   }
 
-.au-table th {
-  padding: 14px 20px;
-  text-align: left;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: #94a3b8;
-  border-bottom: 1px solid #eef2f7;
-}
+   .au-table th {
+     padding: 14px 20px;
+     text-align: left;
+     font-size: 11px;
+     font-weight: 600;
+     letter-spacing: 0.06em;
+     text-transform: uppercase;
+     color: #94a3b8;
+     border-bottom: 1px solid #eef2f7;
+   }
 
-.au-table td {
-  padding: 15px 20px;
-  font-size: 13px;
-  border-bottom: 1px solid #f4f6fa;
-  color: #475569;
-}
+   .au-table td {
+     padding: 15px 20px;
+     font-size: 13px;
+     border-bottom: 1px solid #f4f6fa;
+     color: #475569;
+   }
 
-.au-table tbody tr:last-child td {
-  border-bottom: none;
-}
+   .au-table tbody tr:last-child td {
+     border-bottom: none;
+   }
 
-.au-table tbody tr {
-  transition: background 0.14s ease;
-}
+   .au-table tbody tr {
+     transition: background 0.14s ease;
+   }
 
-.au-table tbody tr:hover {
-  background: #f8fafc;
-}
+   .au-table tbody tr:hover {
+     background: #f8fafc;
+   }
+ */
 
 .au-name {
   font-weight: 600;
@@ -582,15 +637,15 @@
   background: #f1f5f9;
 }
 
-.au-pagination {
+/* .au-pagination {
   display: flex;
   justify-content: flex-end;
   align-items: center;
   gap: 8px;
   padding: 18px 22px 22px;
 }
-
-.au-pg-btn {
+ */
+/* .au-pg-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -606,24 +661,24 @@
   cursor: pointer;
   transition: all 0.15s ease;
 }
-
-.au-pg-btn:hover:not(:disabled) {
+ */
+/* .au-pg-btn:hover:not(:disabled) {
   background: #f8fafc;
   border-color: #cbd5e1;
   color: #0f172a;
 }
-
-.au-pg-btn:disabled {
+ */
+/* .au-pg-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
-
-.au-pg-info {
+ */
+/* .au-pg-info {
   font-size: 12px;
   font-weight: 700;
   color: #0f172a;
 }
-
+ */
 .au-form-card {
   padding: 24px;
   width: 100%;
@@ -955,6 +1010,22 @@
   top: 0;
 }
 
+/* This row is not clickable itself, unlike every other `.au-mg-option`
+   (which sets `cursor: pointer`) — two classes so it wins regardless of
+   which of the two rules the bundler emits later. */
+.au-mg-option.au-variety-search {
+  cursor: default;
+}
+
+.au-variety-search-input {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+  outline: none;
+}
+
 .au-variety-selectall {
   top: 54px;
 }
@@ -1042,6 +1113,17 @@
   filter: brightness(0.98);
 }
 
+/* The arrow icon on `.au-submit` when not saving — same 13px box and
+   stacking context as `.au-submit-spinner`, but kept as its own class:
+   that class also carries a border and spin animation this icon must not
+   get (rule 8 — a near-match reuse would be a silent regression). */
+.au-submit-icon {
+  width: 13px;
+  height: 13px;
+  position: relative;
+  z-index: 1;
+}
+
 @media (max-width: 1024px) {
   .au-form-card {
     max-width: 100%;
@@ -1083,11 +1165,11 @@
     max-height: none;
   }
 
-  .au-table th,
+  /* .au-table th,
   .au-table td {
     padding: 10px;
   }
-
+ */
   .au-form-card {
     padding: 18px;
     margin: 0;
@@ -1118,16 +1200,16 @@
 }
 
 @media (max-width: 480px) {
-  .au-table {
+  /* .au-table {
     min-width: 560px;
   }
-
-  .au-table th,
+ */
+  /* .au-table th,
   .au-table td {
     padding: 8px;
     font-size: 12px;
   }
-
+ */
   .au-form-card {
     padding: 14px;
   }
@@ -1139,3 +1221,120 @@
   }
 }
     
+
+/* ==========================================================================
+   UI_Labels' dialogs
+   ==========================================================================
+   This page imports this stylesheet (UI_Labels.tsx:16) and shares its header
+   markup with App_User, so the header classes above are reused as-is. What
+   follows is only what is specific to its add/edit form and delete confirm.
+   ========================================================================== */
+
+/* The `*` beside a required field's label. */
+.au-req {
+  color: #dc2626;
+}
+
+/* Helper text under a field. */
+.au-hint {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+/* The same helper text where it sits ABOVE the controls it describes. */
+.au-hint--lead {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.au-label--tight {
+  margin-bottom: 8px;
+  color: #334155;
+}
+
+/*
+ * A checkbox and its wording on one line — LAYOUT ONLY.
+ *
+ * It carried `font-size: 14px; color: #0f172a` in its first version, which was
+ * wrong and the baseline said so: the "Active" label is also an `.au-label`,
+ * this rule is defined later in the file, and at equal specificity the later
+ * one wins — so it overrode that class's uppercase, tracking and size. Those
+ * two declarations belong only to the two toggle rows below, which are not
+ * `.au-label`s.
+ */
+.au-check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The two "Field behaviour" toggles, which are bare labels rather than
+   `.au-label`s and so carry their own type. */
+.au-toggle-row {
+  font-size: 14px;
+  color: #0f172a;
+}
+
+.au-toggle-row--spaced {
+  margin-bottom: 8px;
+}
+
+/* "Field required" greys out while "Field enabled" is unchecked — a hidden
+   field cannot be mandatory, and the label says so before the checkbox is even
+   reached. Two classes so it beats `.au-toggle-row`'s colour regardless of the
+   order the two rules end up in. */
+.au-toggle-row.au-toggle-row--muted {
+  color: #94a3b8;
+}
+
+/* Checkboxes must not stretch the way the text inputs in this form do. */
+.au-check {
+  width: auto;
+}
+
+.au-form-error {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: #dc2626;
+}
+
+/* `.au-form-actions` already sets display and justify-content and is shared
+   with App_User's form — only the gap is specific to the two-button row here,
+   so only the gap gets a class. */
+.au-form-actions--gap {
+  gap: 10px;
+}
+
+.au-btn-cancel {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.au-btn-danger {
+  background: #dc2626;
+}
+
+.au-cell-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.au-cell-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.au-btn-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.au-delete-text {
+  font-size: 14px;
+  line-height: 1.5;
+  color: #475569;
+}

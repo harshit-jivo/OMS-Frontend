@@ -10,16 +10,24 @@ import type { Order, OrderItem } from "../services/ordersService";
 import { exportToExcel } from "../utils/excelExport";
 import "../styles/Auditor_Order.css";
 import { useLocation, useNavigate } from "react-router-dom";
-import { sortOrders } from "../utils/orderHistory";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useOrderQueue, useOrderDetailsFetcher } from "../lib/approvalQueries";
 import { useUILabels } from "../services/uiConfig";
 import ItemSection from "../components/order-items/ItemSection";
 import PartyHeader from "../components/order-items/PartyHeader";
+import { HiArrowDownTray, HiCheckCircle, HiEye, HiXCircle } from "react-icons/hi2";
 import {
-  HiArrowDownTray,
-  HiCheckCircle,
-  HiEye,
-  HiXCircle,
-} from "react-icons/hi2";
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Pagination } from "@/components/ui/pagination";
+import { TableSkeleton } from "@/components/ui/skeleton";
+import { messageFrom } from "@/lib/apiError";
 
 const RATE_APPROVAL_STATUS = "RATE_APPROVAL";
 const RATE_APPROVER_APPROVED_STATUS = 6;
@@ -42,7 +50,6 @@ export default function RateApproverOrders() {
   const { t } = useUILabels();
   const location = useLocation();
   const navigate = useNavigate();
-  const [orders, setOrders] = useState<Order[]>([]);
   const [showDetails, setShowDetails] = useState(false);
   const [orderDetails, setOrderDetails] = useState<Order | null>(null);
   const [selectedItems, setSelectedItems] = useState<OrderItem[]>([]);
@@ -55,8 +62,15 @@ export default function RateApproverOrders() {
   const [reviewStep, setReviewStep] = useState<"review" | "confirm">("review");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
-  const [isOrdersLoading, setIsOrdersLoading] = useState(true);
-  const [isProcessing, setIsProcessing] = useState(false);
+  const queryClient = useQueryClient();
+  const fetchOrderDetails_ = useOrderDetailsFetcher();
+  // No `refetchOrders`: its only caller was the redundant refetch that followed
+  // `removeHandledOrder`'s invalidation, and the failure state here is a
+  // message rather than a retry button.
+  const { orders, isOrdersLoading, ordersFailed } = useOrderQueue(
+    ["orders", "queue", "rate-approver"],
+    () => ordersService.getOrders(RATE_APPROVAL_STATUS, false, true) as Promise<Order[]>,
+  );
   const [showAcceptSuccess, setShowAcceptSuccess] = useState(false);
   const [acceptSuccessInfo, setAcceptSuccessInfo] = useState<{
     orderId: string;
@@ -66,37 +80,17 @@ export default function RateApproverOrders() {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
 
-  useEffect(() => {
-    fetchOrders();
-  }, []);
-
   const refreshNotifications = () => {
     window.dispatchEvent(new Event("refreshNotifications"));
     window.dispatchEvent(new Event("refresh-notifications"));
   };
 
-  const fetchOrders = async () => {
-    setIsOrdersLoading(true);
-    try {
-      const data = await ordersService.getOrders(RATE_APPROVAL_STATUS, false, true);
-      setOrders(sortOrders(data || []));
-    } catch (error) {
-      console.log("Error fetching rate approval orders:", error);
-    } finally {
-      setIsOrdersLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (location.state?.openOrderId) {
-      fetchOrderDetails(location.state.openOrderId);
-      navigate(location.pathname, { replace: true, state: {} });
-    }
-  }, [location.state?.openOrderId, location.pathname, navigate]);
 
   const fetchOrderDetails = async (orderId: number) => {
     try {
-      const data = await ordersService.getOrderDetails(orderId);
+      // Shared ["order-details", id] cache: this page fetches the same order
+      // twice — once to open the panel, again inside the Excel export.
+      const data = await fetchOrderDetails_(orderId);
       setOrderDetails(data);
       setSelectedItems(data.items || []);
       setShowDetails(true);
@@ -105,8 +99,26 @@ export default function RateApproverOrders() {
     }
   };
 
+  // Declared ABOVE the effect that calls it, not below. It read the other way
+  // round for as long as the file has existed, which works at runtime — the
+  // const is assigned during render, the effect runs after — but it is a
+  // use-before-declare to any static analysis.
+  useEffect(() => {
+    if (location.state?.openOrderId) {
+      fetchOrderDetails(location.state.openOrderId);
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+    // `fetchOrderDetails` is re-created every render and opens the detail
+    // panel; listing it would re-open the panel on every render. This effect is
+    // a one-shot handoff from a navigation, keyed on the incoming id.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state?.openOrderId, location.pathname, navigate]);
+
+
   const removeHandledOrder = (orderId: number) => {
-    setOrders((current) => current.filter((order) => order.id !== orderId));
+    // Was a local `setOrders` filter. The `fetchOrders()` that follows every
+    // caller made it a double removal; one invalidation does both.
+    void queryClient.invalidateQueries({ queryKey: ["orders", "queue", "rate-approver"] });
     setSelectedItems([]);
     if (orderDetails?.id === orderId) {
       setOrderDetails(null);
@@ -140,43 +152,60 @@ export default function RateApproverOrders() {
     setReviewStep("confirm");
   };
 
-  // Step 3 — user confirmed: call the API for the chosen action.
-  const submitReview = async () => {
+  /*
+   * Step 3 — the write.
+   *
+   * The hand-rolled version owned an `isProcessing` flag reset in a `finally`;
+   * `useMutation` owns it as `isPending`, which cannot be left stuck on by a
+   * path that returns before the reset. That flag also drives a blocking
+   * Dialog on this page, so a stuck one is not merely a disabled button.
+   *
+   * The old body also called `refetchOrders()` right after
+   * `removeHandledOrder`, which already invalidates this queue.
+   */
+  const reviewMutation = useMutation({
+    mutationFn: async (vars: { order: Order; action: "approve" | "reject"; reason: string }) => {
+      if (vars.action === "approve") {
+        return await ordersService.UpdateStatus(
+          vars.order.id,
+          RATE_APPROVER_APPROVED_STATUS,
+          vars.reason || "Approved",
+        );
+      }
+      await ordersService.UpdateStatus(vars.order.id, RATE_APPROVER_REJECTED_STATUS, vars.reason);
+      return null;
+    },
+    onSuccess: (response, vars) => {
+      if (vars.action === "approve") {
+        setAcceptSuccessInfo({
+          orderId: vars.order.order_number,
+          message: response?.message || "Order approved successfully",
+          nextStatus: response?.status || "-",
+        });
+        removeHandledOrder(vars.order.id);
+        setShowAcceptSuccess(true);
+      } else {
+        alert("Order Rejected");
+        removeHandledOrder(vars.order.id);
+      }
+      closeReview();
+      refreshNotifications();
+    },
+    onError: (error) => {
+      alert("Error: " + messageFrom(error, "Something went wrong"));
+    },
+  });
+
+  const isProcessing = reviewMutation.isPending;
+
+  const submitReview = () => {
     if (!reviewOrder || !reviewAction) return;
-    const order = reviewOrder;
     const reason = reviewReason.trim();
     if (reviewAction === "reject" && !reason) {
       alert("Reason required");
       return;
     }
-    setIsProcessing(true);
-    try {
-      if (reviewAction === "approve") {
-        const response = await ordersService.UpdateStatus(
-          order.id,
-          RATE_APPROVER_APPROVED_STATUS,
-          reason || "Approved",
-        );
-        setAcceptSuccessInfo({
-          orderId: order.order_number,
-          message: response.message || "Order approved successfully",
-          nextStatus: response.status || "-",
-        });
-        removeHandledOrder(order.id);
-        setShowAcceptSuccess(true);
-      } else {
-        await ordersService.UpdateStatus(order.id, RATE_APPROVER_REJECTED_STATUS, reason);
-        alert("Order Rejected");
-        removeHandledOrder(order.id);
-      }
-      closeReview();
-      fetchOrders();
-      refreshNotifications();
-    } catch (error: any) {
-      alert("Error: " + (error?.response?.data?.message || "Something went wrong"));
-    } finally {
-      setIsProcessing(false);
-    }
+    reviewMutation.mutate({ order: reviewOrder, action: reviewAction, reason });
   };
 
   const filteredOrders = orders.filter((order) => {
@@ -257,14 +286,19 @@ export default function RateApproverOrders() {
           <div className="ao-toolbar">
             <div className="ao-filter-head">
               <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                <path d="M3 5h14M6 10h8M9 15h2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                <path
+                  d="M3 5h14M6 10h8M9 15h2"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                />
               </svg>
               <span>Filters</span>
             </div>
             <div className="ao-search-wrap">
               <div className="ao-date-wrap">
                 <label className="ao-date-label">From</label>
-                <input
+                <input aria-label="From"
                   type="date"
                   value={fromDate}
                   onChange={(e) => {
@@ -276,7 +310,7 @@ export default function RateApproverOrders() {
               </div>
               <div className="ao-date-wrap">
                 <label className="ao-date-label">To</label>
-                <input
+                <input aria-label="To"
                   type="date"
                   value={toDate}
                   onChange={(e) => {
@@ -304,42 +338,39 @@ export default function RateApproverOrders() {
           </div>
 
           {isOrdersLoading ? (
-            <div className="order-loading-state">
-              <span className="order-loading-spinner" />
-              <span>Loading orders...</span>
-            </div>
+            <TableSkeleton columns={8} label="Loading orders" />
           ) : filteredOrders.length > 0 ? (
             <div className="ao-table-wrap">
-              <table className="ao-table">
-                <thead>
-                  <tr>
-                    <th>Order ID</th>
-                    <th>Card Name</th>
-                    <th>Items</th>
-                    <th>FOC</th>
-                    <th>Created At</th>
-                    <th>Delivery Date</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
+              <Table density="compact">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Order ID</TableHead>
+                    <TableHead>Card Name</TableHead>
+                    <TableHead>Items</TableHead>
+                    <TableHead>FOC</TableHead>
+                    <TableHead>Created At</TableHead>
+                    <TableHead>Delivery Date</TableHead>
+                    <TableHead>Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {filteredOrders
                     .slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
                     .map((order) => (
-                      <tr key={order.id} className={order.is_foc ? "ao-foc-row" : ""}>
-                        <td className="ao-cell-id">{order.order_number}</td>
-                        <td className="ao-cell-name">{order.card_name}</td>
-                        <td>{order.items_count ?? order.items?.length ?? 0}</td>
-                        <td>
+                      <TableRow key={order.id} className={order.is_foc ? "ao-foc-row" : ""}>
+                        <TableCell className="ao-cell-id">{order.order_number}</TableCell>
+                        <TableCell className="ao-cell-name">{order.card_name}</TableCell>
+                        <TableCell>{order.items_count ?? order.items?.length ?? 0}</TableCell>
+                        <TableCell>
                           {order.is_foc ? (
                             <span className="ao-foc-badge">FOC</span>
                           ) : (
                             <span className="ao-foc-empty">-</span>
                           )}
-                        </td>
-                        <td>{formatCreatedDateTime(order.created_at)}</td>
-                        <td>{order.delivery_date}</td>
-                        <td>
+                        </TableCell>
+                        <TableCell>{formatCreatedDateTime(order.created_at)}</TableCell>
+                        <TableCell>{order.delivery_date}</TableCell>
+                        <TableCell>
                           <div className="ao-row-actions">
                             <button
                               className="ao-btn-icon view"
@@ -368,11 +399,11 @@ export default function RateApproverOrders() {
                               <HiArrowDownTray size={20} />
                             </button>
                           </div>
-                        </td>
-                      </tr>
+                        </TableCell>
+                      </TableRow>
                     ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
           ) : (
             <div
@@ -387,30 +418,18 @@ export default function RateApproverOrders() {
                 margin: "20px 0",
               }}
             >
-              No rate approval orders found
+              {ordersFailed
+                        ? "Could not load orders. Refresh to try again."
+                        : "No rate approval orders found"}
             </div>
           )}
 
           {filteredOrders.length > itemsPerPage && (
-            <div className="ao-pagination">
-              <button
-                className="ao-pg-btn"
-                disabled={currentPage === 1}
-                onClick={() => setCurrentPage((p) => p - 1)}
-              >
-                Prev
-              </button>
-              <span className="ao-pg-info">
-                {currentPage} / {Math.ceil(filteredOrders.length / itemsPerPage)}
-              </span>
-              <button
-                className="ao-pg-btn"
-                disabled={currentPage === Math.ceil(filteredOrders.length / itemsPerPage)}
-                onClick={() => setCurrentPage((p) => p + 1)}
-              >
-                Next
-              </button>
-            </div>
+            <Pagination
+              page={currentPage}
+              totalPages={Math.ceil(filteredOrders.length / itemsPerPage)}
+              onPageChange={setCurrentPage}
+            />
           )}
         </>
       )}
@@ -469,39 +488,41 @@ export default function RateApproverOrders() {
             </div>
             <div className="ao-d-items-scroll">
               <ItemSection items={selectedItems} />
-              <table className="ao-d-tbl">
-                <thead>
-                  <tr>
-                    <th>#</th>
-                    <th>Item Code</th>
-                    <th style={{ minWidth: "250px" }}>Item Name</th>
-                    <th>Category</th>
-                    <th>Scheme</th>
-                    <th>Scheme Qty</th>
-                    <th>Qty</th>
-                    <th>Pcs</th>
-                    <th>Boxes</th>
-                    <th>Ltrs</th>
-                    <th>Total Ltrs</th>
-                    <th>{t("price_list", "Price List (Basic)")}</th>
-                    <th>Basic Price</th>
-                    <th>Tax %</th>
-                    <th style={{ textAlign: "right" }}>Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
+              <Table density="compact">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>#</TableHead>
+                    <TableHead>Item Code</TableHead>
+                    <TableHead className="app-col-item">Item Name</TableHead>
+                    <TableHead>Category</TableHead>
+                    <TableHead>Scheme</TableHead>
+                    <TableHead>Scheme Qty</TableHead>
+                    <TableHead>Qty</TableHead>
+                    <TableHead>Pcs</TableHead>
+                    <TableHead>Boxes</TableHead>
+                    <TableHead>Ltrs</TableHead>
+                    <TableHead>Total Ltrs</TableHead>
+                    <TableHead>{t("price_list", "Price List (Basic)")}</TableHead>
+                    <TableHead>Basic Price</TableHead>
+                    <TableHead>Tax %</TableHead>
+                    <TableHead className="text-right">Amount</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {selectedItems.length > 0 ? (
                     selectedItems.map((item, i) => (
-                      <tr key={`${item.item_code}-${i}`}>
-                        <td style={{ textAlign: "center", color: "#94a3b8" }}>{i + 1}</td>
-                        <td>
+                      <TableRow key={`${item.item_code}-${i}`}>
+                        <TableCell className="text-center app-cell-index">
+                          {i + 1}
+                        </TableCell>
+                        <TableCell>
                           <span className="ao-d-item-code">{item.item_code}</span>
-                        </td>
-                        <td style={{ fontWeight: 500, color: "#0f172a", minWidth: "250px" }}>
+                        </TableCell>
+                        <TableCell className="app-col-item app-cell-name">
                           {item.item_name}
-                        </td>
-                        <td>{item.category}</td>
-                        <td colSpan={2}>
+                        </TableCell>
+                        <TableCell>{item.category}</TableCell>
+                        <TableCell colSpan={2}>
                           {getOrderItemSchemes(item).length > 0 ? (
                             <div className="order-scheme-stack" aria-label="Applied schemes">
                               {getOrderItemSchemes(item).map((scheme, schemeIndex) => (
@@ -517,95 +538,118 @@ export default function RateApproverOrders() {
                           ) : (
                             <span className="order-scheme-empty">No scheme</span>
                           )}
-                        </td>
-                        <td style={{ textAlign: "center" }}>{item.qty}</td>
-                        <td style={{ textAlign: "center" }}>{item.pcs}</td>
-                        <td style={{ textAlign: "center" }}>{Number(item.boxes).toFixed(2)}</td>
-                        <td style={{ textAlign: "center" }}>{item.ltrs}</td>
-                        <td style={{ textAlign: "center" }}>
+                        </TableCell>
+                        <TableCell className="text-center">{item.qty}</TableCell>
+                        <TableCell className="text-center">{item.pcs}</TableCell>
+                        <TableCell className="text-center">
+                          {Number(item.boxes).toFixed(2)}
+                        </TableCell>
+                        <TableCell className="text-center">{item.ltrs}</TableCell>
+                        <TableCell className="text-center">
                           {getOrderItemTotalLtrs(item).toFixed(2)}
-                        </td>
-                        <td style={{ textAlign: "right" }}>
+                        </TableCell>
+                        <TableCell className="text-right">
                           {Number(item.price_list_basic).toFixed(2)}
-                        </td>
-                        <td style={{ textAlign: "right" }}>
+                        </TableCell>
+                        <TableCell className="text-right">
                           {Number(item.basic_price).toFixed(2)}
-                        </td>
-                        <td style={{ textAlign: "center" }}>
+                        </TableCell>
+                        <TableCell className="text-center">
                           {Number(item.tax_rate).toFixed(2)}
-                        </td>
-                        <td style={{ textAlign: "right", fontWeight: 600, color: "#0f172a" }}>
+                        </TableCell>
+                        <TableCell
+                          className="text-right app-cell-total"
+                        >
                           {Number(item.total).toFixed(2)}
-                        </td>
-                      </tr>
+                        </TableCell>
+                      </TableRow>
                     ))
                   ) : (
-                    <tr>
-                      <td colSpan={14} className="ao-empty">
+                    <TableRow>
+                      <TableCell colSpan={14} className="ao-empty">
                         No items found
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   )}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
           </div>
 
           <div className="ao-d-bottombar">
-          <div className="ao-d-summary">
-            <div className="ao-d-sum-row">
-              <span className="ao-d-sum-label">Total Ltrs</span>
-              <span className="ao-d-sum-val">
-                {selectedItems.reduce((s, i) => s + getOrderItemTotalLtrs(i), 0).toFixed(2)}
-              </span>
+            <div className="ao-d-summary">
+              <div className="ao-d-sum-row">
+                <span className="ao-d-sum-label">Total Ltrs</span>
+                <span className="ao-d-sum-val">
+                  {selectedItems.reduce((s, i) => s + getOrderItemTotalLtrs(i), 0).toFixed(2)}
+                </span>
+              </div>
+              <div className="ao-d-sum-row">
+                <span className="ao-d-sum-label">Subtotal</span>
+                <span className="ao-d-sum-val">
+                  {selectedItems.reduce((s, i) => s + Number(i.total || 0), 0).toFixed(2)}
+                </span>
+              </div>
+              <div className="ao-d-sum-row">
+                <span className="ao-d-sum-label">Tax</span>
+                <span className="ao-d-sum-val">
+                  {selectedItems
+                    .reduce((s, i) => s + (Number(i.total || 0) * Number(i.tax_rate || 0)) / 100, 0)
+                    .toFixed(2)}
+                </span>
+              </div>
+              {[
+                {
+                  label: "Commodity",
+                  value: orderDetails.vareity_cost?.commodity_price,
+                  cls: "vc-commodity",
+                },
+                { label: "Other", value: orderDetails.vareity_cost?.other_total, cls: "vc-other" },
+                {
+                  label: "Premium",
+                  value: orderDetails.vareity_cost?.premium_total,
+                  cls: "vc-premium",
+                },
+              ]
+                .filter((entry) => Number(entry.value) > 0)
+                .map((entry) => (
+                  <div className="ao-d-sum-row" key={entry.label}>
+                    <span className={`ao-d-sum-label vc-pill ${entry.cls}`}>{entry.label}</span>
+                    <span className="ao-d-sum-val">{Number(entry.value).toFixed(2)}</span>
+                  </div>
+                ))}
+              <div className="ao-d-sum-row ao-d-sum-grand">
+                <span className="ao-d-sum-label">Grand Total</span>
+                <span className="ao-d-sum-val">
+                  {(
+                    selectedItems.reduce((s, i) => s + Number(i.total || 0), 0) +
+                    selectedItems.reduce(
+                      (s, i) => s + (Number(i.total || 0) * Number(i.tax_rate || 0)) / 100,
+                      0,
+                    )
+                  ).toFixed(2)}
+                </span>
+              </div>
             </div>
-            <div className="ao-d-sum-row">
-              <span className="ao-d-sum-label">Subtotal</span>
-              <span className="ao-d-sum-val">
-                {selectedItems.reduce((s, i) => s + Number(i.total || 0), 0).toFixed(2)}
-              </span>
-            </div>
-            <div className="ao-d-sum-row">
-              <span className="ao-d-sum-label">Tax</span>
-              <span className="ao-d-sum-val">
-                {selectedItems
-                  .reduce((s, i) => s + (Number(i.total || 0) * Number(i.tax_rate || 0)) / 100, 0)
-                  .toFixed(2)}
-              </span>
-            </div>
-            {[
-              { label: "Commodity", value: orderDetails.vareity_cost?.commodity_price, cls: "vc-commodity" },
-              { label: "Other", value: orderDetails.vareity_cost?.other_total, cls: "vc-other" },
-              { label: "Premium", value: orderDetails.vareity_cost?.premium_total, cls: "vc-premium" },
-            ]
-              .filter((entry) => Number(entry.value) > 0)
-              .map((entry) => (
-                <div className="ao-d-sum-row" key={entry.label}>
-                  <span className={`ao-d-sum-label vc-pill ${entry.cls}`}>{entry.label}</span>
-                  <span className="ao-d-sum-val">{Number(entry.value).toFixed(2)}</span>
-                </div>
-              ))}
-            <div className="ao-d-sum-row ao-d-sum-grand">
-              <span className="ao-d-sum-label">Grand Total</span>
-              <span className="ao-d-sum-val">
-                {(
-                  selectedItems.reduce((s, i) => s + Number(i.total || 0), 0) +
-                  selectedItems.reduce(
-                    (s, i) => s + (Number(i.total || 0) * Number(i.tax_rate || 0)) / 100,
-                    0,
-                  )
-                ).toFixed(2)}
-              </span>
-            </div>
-          </div>
           </div>
         </div>
       )}
 
       {/* â”€â”€ STEP 1: REVIEW MODAL â”€â”€ */}
-      {reviewOrder && reviewAction && reviewStep === "review" && (
-        <div className="ao-modal-overlay">
-          <div className="ao-modal">
+      <Dialog
+        open={Boolean(reviewOrder && reviewAction && reviewStep === "review")}
+        onOpenChange={(next) => {
+          if (!next) closeReview();
+        }}
+      >
+        {reviewOrder && reviewAction && reviewStep === "review" && (
+          <DialogContent
+            title="Review order"
+            variant="bare"
+            size="auto"
+            showClose={false}
+            className="ao-modal"
+          >
             <div className="ao-modal-title">
               {reviewAction === "approve" ? "Review & Approve" : "Review & Reject"}
             </div>
@@ -626,7 +670,8 @@ export default function RateApproverOrders() {
               <div className="ao-review-row">
                 <span>Amount</span>
                 <strong>
-                  ₹{Number(reviewOrder.total_amount || 0).toLocaleString("en-IN", {
+                  ₹
+                  {Number(reviewOrder.total_amount || 0).toLocaleString("en-IN", {
                     minimumFractionDigits: 2,
                     maximumFractionDigits: 2,
                   })}
@@ -641,21 +686,38 @@ export default function RateApproverOrders() {
               className="ao-modal-textarea"
               value={reviewReason}
               onChange={(e) => setReviewReason(e.target.value)}
-              placeholder={reviewAction === "approve" ? "Add a reason (optional)..." : "Type reason..."}
+              placeholder={
+                reviewAction === "approve" ? "Add a reason (optional)..." : "Type reason..."
+              }
               rows={3}
             />
             <div className="ao-modal-actions">
-              <button className="ao-btn-approve" onClick={proceedToConfirm}>Continue</button>
-              <button className="ao-btn-cancel" onClick={closeReview}>Cancel</button>
+              <button className="ao-btn-approve" onClick={proceedToConfirm}>
+                Continue
+              </button>
+              <button className="ao-btn-cancel" onClick={closeReview}>
+                Cancel
+              </button>
             </div>
-          </div>
-        </div>
-      )}
+          </DialogContent>
+        )}
+      </Dialog>
 
       {/* â”€â”€ STEP 2: CONFIRM MODAL â”€â”€ */}
-      {reviewOrder && reviewAction && reviewStep === "confirm" && (
-        <div className="ao-modal-overlay">
-          <div className="ao-modal">
+      <Dialog
+        open={Boolean(reviewOrder && reviewAction && reviewStep === "confirm")}
+        onOpenChange={(next) => {
+          if (!next) closeReview();
+        }}
+      >
+        {reviewOrder && reviewAction && reviewStep === "confirm" && (
+          <DialogContent
+            title="Confirm decision"
+            variant="bare"
+            size="auto"
+            showClose={false}
+            className="ao-modal"
+          >
             <div className="ao-modal-title">
               {reviewAction === "approve" ? "Confirm Approval" : "Confirm Rejection"}
             </div>
@@ -676,25 +738,52 @@ export default function RateApproverOrders() {
                 Back
               </button>
             </div>
-          </div>
-        </div>
-      )}
+          </DialogContent>
+        )}
+      </Dialog>
 
-      {isProcessing && (
-        <div className="ao-modal-overlay">
-          <div className="ao-modal ao-modal-loading">
-            <div className="ao-spinner" />
-            <p className="ao-loading-text">Processing order...</p>
-          </div>
-        </div>
-      )}
+      {/* See Auditor_Order for why a busy overlay belongs on the primitive:
+          it must not close, and it must stop the page behind being reached. */}
+      <Dialog open={isProcessing}>
+        {isProcessing && (
+          <DialogContent
+            title="Processing order"
+            variant="bare"
+            size="auto"
+            showClose={false}
+            overlayClassName="ao-modal-overlay"
+            className="ao-modal ao-modal-loading"
+            onEscapeKeyDown={(event) => event.preventDefault()}
+            onPointerDownOutside={(event) => event.preventDefault()}
+            onInteractOutside={(event) => event.preventDefault()}
+          >
+            <div role="status" aria-live="polite" aria-busy="true">
+              <div className="ao-spinner" aria-hidden="true" />
+              <p className="ao-loading-text">Processing order...</p>
+            </div>
+          </DialogContent>
+        )}
+      </Dialog>
 
-      {showAcceptSuccess && acceptSuccessInfo && (
-        <div className="ao-modal-overlay">
-          <div className="ao-modal ao-modal-success">
+      <Dialog
+        open={Boolean(showAcceptSuccess && acceptSuccessInfo)}
+        onOpenChange={(next) => {
+          if (!next) setShowAcceptSuccess(false);
+        }}
+      >
+        {showAcceptSuccess && acceptSuccessInfo && (
+          <DialogContent
+            title="Accepted"
+            variant="bare"
+            size="auto"
+            showClose={false}
+            className="ao-modal ao-modal-success"
+          >
             <div className="ao-success-icon" aria-hidden="true" />
             <div className="ao-modal-title">
-              {acceptSuccessInfo.nextStatus.toLowerCase().includes("completed") ? "Order Completed" : "Order Approved"}
+              {acceptSuccessInfo.nextStatus.toLowerCase().includes("completed")
+                ? "Order Completed"
+                : "Order Approved"}
             </div>
             <div className="ao-success-info">
               <div className="ao-success-row">
@@ -721,10 +810,9 @@ export default function RateApproverOrders() {
                 OK
               </button>
             </div>
-          </div>
-        </div>
-      )}
-
+          </DialogContent>
+        )}
+      </Dialog>
     </div>
   );
 }

@@ -67,13 +67,13 @@ export default function QrViewer({ src, caption, irn, ackNo, ackDt, docNo, downl
       {caption ? <span className="nic-note">{caption}</span> : null}
       <div className="nic-qr-actions">
         <button type="button" className="ofs-primary" onClick={printQr}>
-          <HiPrinter style={{ verticalAlign: "-3px", marginRight: 6 }} />Print
+          <HiPrinter className="nic-icon-lead" />Print
         </button>
         <button type="button" className="ofs-secondary" onClick={download}>
-          <HiArrowDownTray style={{ verticalAlign: "-3px", marginRight: 6 }} />Download
+          <HiArrowDownTray className="nic-icon-lead" />Download
         </button>
         <button type="button" className="ofs-secondary" onClick={() => window.open(src, "_blank")}>
-          <HiArrowsPointingOut style={{ verticalAlign: "-3px", marginRight: 6 }} />Open
+          <HiArrowsPointingOut className="nic-icon-lead" />Open
         </button>
       </div>
     </div>

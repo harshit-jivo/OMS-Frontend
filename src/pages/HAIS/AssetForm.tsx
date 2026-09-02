@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { HiCheckCircle } from "react-icons/hi2";
 import DateInput from "../../components/DateInput";
-import { NicField, SuccessAlert, apiErrorMessage } from "../../components/NicUI";
+import { NicField, SuccessAlert } from "../../components/NicUI";
+import { messageFrom } from "@/lib/apiError";
 import {
   haisService,
   WORKING_STATUSES,
@@ -65,18 +67,49 @@ type Props = {
 };
 
 export default function AssetForm({ editId, onSaved }: Props) {
+  const queryClient = useQueryClient();
   const [form, setForm] = useState<Asset>(EMPTY);
   const [busy, setBusy] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  /** Save failures. The LOAD failure is the query's. */
+  const [saveError, setSaveError] = useState("");
   const [success, setSuccess] = useState("");
-  // The record as loaded — lets us detect what changed (user / config) and ask why.
-  const [original, setOriginal] = useState<Asset | null>(null);
   const [changeReason, setChangeReason] = useState("");
   // Device is in stock / not issued to anyone yet — no current holder.
   const [unassigned, setUnassigned] = useState(false);
   // Dropdown values, loaded from the DB masters.
   const { assetTypes, departments, storageTypes } = useHaisOptions();
+
+  /*
+   * Load the record when editing.
+   *
+   * The old version of this was one effect that mixed synchronous setState
+   * (`setChangeReason("")`, and the whole `if (!editId)` branch) with an
+   * unanalysable promise chain — four `set-state-in-effect` violations kept
+   * quiet by the promise chain sitting alongside them.
+   *
+   * `original` IS the query data now; it existed only to diff `form` against.
+   * `form` is seeded from it during render, which is legal where an effect is
+   * not, and the seed is guarded on the data's identity so a refetch that
+   * returns the same record does not stamp over what the user has typed.
+   */
+  const { data: original = null, isPending, error: loadError } = useQuery({
+    queryKey: ["hais", "asset", editId],
+    enabled: Boolean(editId),
+    queryFn: () => haisService.get(editId!),
+  });
+  const loading = Boolean(editId) && isPending;
+  const error = saveError || (loadError ? messageFrom(loadError, "Request failed") : "");
+
+  const [seededFrom, setSeededFrom] = useState<Asset | null>(null);
+  if (original && original !== seededFrom) {
+    setSeededFrom(original);
+    setForm({ ...EMPTY, ...original });
+    setChangeReason("");
+    // No holder recorded → treat the loaded device as unassigned.
+    setUnassigned(
+      !(original.current_user_id ?? "").trim() && !(original.current_user_name ?? "").trim(),
+    );
+  }
 
   const isEdit = !!editId;
   const userChanged =
@@ -86,38 +119,6 @@ export default function AssetForm({ editId, onSaved }: Props) {
     isEdit && !!original &&
     (CONFIG_KEYS.some((k) => (form[k] ?? "") !== (original[k] ?? "")) ||
       (form.storage_types ?? []).join("|") !== (original.storage_types ?? []).join("|"));
-
-  /* Load the record when editing. */
-  useEffect(() => {
-    setChangeReason("");
-    if (!editId) {
-      setForm(EMPTY);
-      setOriginal(null);
-      setUnassigned(false);
-      return;
-    }
-    let alive = true;
-    setLoading(true);
-    setError("");
-    haisService
-      .get(editId)
-      .then((data) => {
-        if (!alive) return;
-        setForm({ ...EMPTY, ...data });
-        setOriginal(data);
-        // No holder recorded → treat the loaded device as unassigned.
-        setUnassigned(!(data.current_user_id ?? "").trim() && !(data.current_user_name ?? "").trim());
-      })
-      .catch((err) => {
-        if (alive) setError(apiErrorMessage(err));
-      })
-      .finally(() => {
-        if (alive) setLoading(false);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [editId]);
 
   const set = (key: keyof Asset) => (value: string) =>
     setForm((f) => ({ ...f, [key]: value }));
@@ -182,11 +183,11 @@ export default function AssetForm({ editId, onSaved }: Props) {
   };
 
   const save = async () => {
-    setError("");
+    setSaveError("");
     setSuccess("");
     const problem = validate();
     if (problem) {
-      setError(problem);
+      setSaveError(problem);
       return;
     }
     setBusy(true);
@@ -205,9 +206,12 @@ export default function AssetForm({ editId, onSaved }: Props) {
           : `Asset created successfully. System-generated Asset ID: ${saved?.asset_id ?? ""}.`,
       );
       if (!isEdit) setForm(EMPTY);
+      // The register is cached now, so a save that does not invalidate it means
+      // a new asset never appears and an edited one keeps its old row.
+      await queryClient.invalidateQueries({ queryKey: ["hais"] });
       onSaved?.(saved ?? payload);
     } catch (err) {
-      setError(apiErrorMessage(err));
+      setSaveError(messageFrom(err, "Request failed"));
     } finally {
       setBusy(false);
     }
@@ -225,7 +229,7 @@ export default function AssetForm({ editId, onSaved }: Props) {
       ) : (
         <>
           {isEdit && (
-            <p className="nic-note" style={{ marginTop: -4 }}>
+            <p className="nic-note nic-note--tuck-4">
               Editing a device changes only its <strong>Configuration</strong> and{" "}
               <strong>Maintenance</strong>. To change the holder, use <strong>Handover</strong>.
             </p>
@@ -275,7 +279,7 @@ export default function AssetForm({ editId, onSaved }: Props) {
 
           {/* ── Configuration ── */}
           <h4 className="nic-subsection-title">Configuration</h4>
-          <p className="nic-note" style={{ marginTop: -6 }}>
+          <p className="nic-note nic-note--tuck-6">
             For computing devices only — leave blank for peripherals like a keyboard or mouse.
           </p>
           <div className="nic-form-grid">
@@ -459,7 +463,7 @@ export default function AssetForm({ editId, onSaved }: Props) {
 
           <div className="nic-actions-row">
             <button className="ofs-primary" onClick={() => void save()} disabled={busy}>
-              <HiCheckCircle style={{ verticalAlign: "-3px", marginRight: 6 }} />
+              <HiCheckCircle className="nic-icon-lead" />
               {busy ? "Saving…" : isEdit ? "Update Asset" : "Save Asset"}
             </button>
           </div>
@@ -469,7 +473,7 @@ export default function AssetForm({ editId, onSaved }: Props) {
       )}
 
       {/* Any problem is surfaced in a popup. */}
-      <ErrorPopup message={error} onClose={() => setError("")} />
+      <ErrorPopup message={error} onClose={() => setSaveError("")} />
     </section>
   );
 }

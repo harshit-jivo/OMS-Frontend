@@ -1,11 +1,29 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { HiArchiveBox, HiArrowPath, HiArrowRight, HiChevronLeft, HiDocumentText, HiPhoto, HiTrash, HiXMark } from "react-icons/hi2";
+import {
+  HiArchiveBox,
+  HiArrowPath,
+  HiArrowRight,
+  HiChevronLeft,
+  HiDocumentText,
+  HiPhoto,
+  HiTrash,
+  HiXMark,
+} from "react-icons/hi2";
 import DraftStep, { BranchBadge } from "./DraftStep";
 import OrdersStep from "./OrdersStep";
 import { apiFetch, hanaUrl, useSalesInvoice, type SalesInvoiceState } from "./useSalesInvoice";
 import { formatMoney, type SelectedLine } from "./salesInvoice.utils";
 import "../../styles/Sales_Invoice.css";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 
 type PartyPickerModalProps = {
   state: SalesInvoiceState;
@@ -162,30 +180,89 @@ const getChainValue = (chain?: string | null) => {
   return text || nullChainValue;
 };
 
-const formatChainName = (chainValue: string) => chainValue === nullChainValue ? "No Chain" : chainValue;
+const formatChainName = (chainValue: string) =>
+  chainValue === nullChainValue ? "No Chain" : chainValue;
 
 const getPartyOpenOrders = (party: { OpenOrders?: number; Num_of_Open_SalesOrder?: number }) =>
   Number(party.OpenOrders ?? party.Num_of_Open_SalesOrder ?? 0);
 
 const getItemTotalQty = (item: FinishedGoodItem) => {
-  const qty = Number(item.TotalQty ?? item.AvailableQty ?? item.AvailableQuantity ?? item.Quantity ?? item.OnHand ?? item.InStock ?? 0);
+  const qty = Number(
+    item.TotalQty ??
+      item.AvailableQty ??
+      item.AvailableQuantity ??
+      item.Quantity ??
+      item.OnHand ??
+      item.InStock ??
+      0,
+  );
   return Number.isFinite(qty) ? qty : 0;
 };
 
 const stateFilterOrder = [
-  "PB", "HR", "DL", "UP", "AP", "GJ", "MH", "WB", "JK", "TE", "KT", "RJ", "GO", "AS", "HP", "UK",
-  "BH", "MP", "TN", "CT", "DB", "MN",
+  "PB",
+  "HR",
+  "DL",
+  "UP",
+  "AP",
+  "GJ",
+  "MH",
+  "WB",
+  "JK",
+  "TE",
+  "KT",
+  "RJ",
+  "GO",
+  "AS",
+  "HP",
+  "UK",
+  "BH",
+  "MP",
+  "TN",
+  "CT",
+  "DB",
+  "MN",
 ];
 
 const chainFilterOrder = [
-  "DISTRIBUTOR", "D MART", "SUPER STOCKIST", "RETAILER", nullChainValue, "WALMART", "INDIVIDUALS",
-  "BIG BASKET", "GT", "SINGLE SHOPS", "RELIANCE FRESH", "ARY SHOPS", "GURUDWARA", "METRO CASH & CARRY",
-  "ABRL", "RAJ MANDIR", "AMAZON", "BULK", "STAFF",
+  "DISTRIBUTOR",
+  "D MART",
+  "SUPER STOCKIST",
+  "RETAILER",
+  nullChainValue,
+  "WALMART",
+  "INDIVIDUALS",
+  "BIG BASKET",
+  "GT",
+  "SINGLE SHOPS",
+  "RELIANCE FRESH",
+  "ARY SHOPS",
+  "GURUDWARA",
+  "METRO CASH & CARRY",
+  "ABRL",
+  "RAJ MANDIR",
+  "AMAZON",
+  "BULK",
+  "STAFF",
 ];
 
 const mainGroupFilterOrder = [
-  "GT", "MT", "ROI", "E-COMMERCE", "BRANCH", "CSD", "CORPORATE", "HORECA", "STAFF", "REFERENCE",
-  "SANGAT", "CALL CENTER", "BULK OIL", "EXPORT", "EVENTS & EXHIBITIONS", "PURCHASE OIL",
+  "GT",
+  "MT",
+  "ROI",
+  "E-COMMERCE",
+  "BRANCH",
+  "CSD",
+  "CORPORATE",
+  "HORECA",
+  "STAFF",
+  "REFERENCE",
+  "SANGAT",
+  "CALL CENTER",
+  "BULK OIL",
+  "EXPORT",
+  "EVENTS & EXHIBITIONS",
+  "PURCHASE OIL",
 ];
 
 const sortByFilterOrder = (order: string[]) => (optionA: string, optionB: string) => {
@@ -201,13 +278,18 @@ const sortByFilterOrder = (order: string[]) => (optionA: string, optionB: string
 
 function PartyPickerModal({ state, onClose, onSelect }: PartyPickerModalProps) {
   const [selectedState, setSelectedState] = useState("");
-  const [selectedMainGroup, setSelectedMainGroup] = useState("");
-  const [selectedChain, setSelectedChain] = useState("");
+  // The raw chip choices. What the rest of the component reads is the DERIVED
+  // `selectedMainGroup` / `selectedChain` below, which drop a choice that is no
+  // longer among its options — the job the two clamp effects used to do a
+  // render late.
+  const [mainGroupChoice, setMainGroupChoice] = useState("");
+  const [chainChoice, setChainChoice] = useState("");
   const [partyQuery, setPartyQuery] = useState("");
   const [filterModal, setFilterModal] = useState<"state" | "mainGroup" | "chain" | null>(null);
   const stateOptions = useMemo(() => {
-    return [...new Set(state.parties.map((party) => String(party.State1 || "").trim()).filter(Boolean))]
-      .sort(sortByFilterOrder(stateFilterOrder));
+    return [
+      ...new Set(state.parties.map((party) => String(party.State1 || "").trim()).filter(Boolean)),
+    ].sort(sortByFilterOrder(stateFilterOrder));
   }, [state.parties]);
   const mainGroupOptions = useMemo(() => {
     const groups = state.parties
@@ -216,6 +298,7 @@ function PartyPickerModal({ state, onClose, onSelect }: PartyPickerModalProps) {
       .filter(Boolean);
     return [...new Set(groups)].sort(sortByFilterOrder(mainGroupFilterOrder));
   }, [selectedState, state.parties]);
+  const selectedMainGroup = mainGroupOptions.includes(mainGroupChoice) ? mainGroupChoice : "";
   const chainOptions = useMemo(() => {
     const chains = state.parties
       .filter((party) => !selectedState || party.State1 === selectedState)
@@ -226,27 +309,42 @@ function PartyPickerModal({ state, onClose, onSelect }: PartyPickerModalProps) {
     );
     return uniqueChains.sort(sortByFilterOrder(chainFilterOrder));
   }, [selectedMainGroup, selectedState, state.parties]);
+  const selectedChain = chainOptions.includes(chainChoice) ? chainChoice : "";
   const filteredParties = useMemo(() => {
     const normalizedQuery = partyQuery.trim().toLowerCase();
     return state.parties.filter((party) => {
       const stateMatches = !selectedState || party.State1 === selectedState;
       const mainGroupMatches = !selectedMainGroup || party.U_Main_Group === selectedMainGroup;
       const chainMatches = !selectedChain || getChainValue(party.U_Chain) === selectedChain;
-      const queryMatches = !normalizedQuery
-        || [party.CardName, party.CardCode, formatStateName(party.State1), party.U_Main_Group, party.U_Chain]
+      const queryMatches =
+        !normalizedQuery ||
+        [
+          party.CardName,
+          party.CardCode,
+          formatStateName(party.State1),
+          party.U_Main_Group,
+          party.U_Chain,
+        ]
           .filter(Boolean)
           .some((value) => String(value).toLowerCase().includes(normalizedQuery));
       return stateMatches && mainGroupMatches && chainMatches && queryMatches;
     });
   }, [partyQuery, selectedChain, selectedMainGroup, selectedState, state.parties]);
 
+  /* Replaced by the two derived consts above. These cleared a filter one render
+     AFTER its option list stopped containing it, so the list below rendered once
+     against a filter that no longer applied.
+
   useEffect(() => {
-    setSelectedMainGroup((current) => (current && !mainGroupOptions.includes(current) ? "" : current));
+    setMainGroupChoice((current) =>
+      current && !mainGroupOptions.includes(current) ? "" : current,
+    );
   }, [mainGroupOptions]);
 
   useEffect(() => {
-    setSelectedChain((current) => (current && !chainOptions.includes(current) ? "" : current));
+    setChainChoice((current) => (current && !chainOptions.includes(current) ? "" : current));
   }, [chainOptions]);
+  */
 
   const visibleStates = useMemo(() => {
     const selectedFirstStates = selectedState
@@ -271,31 +369,57 @@ function PartyPickerModal({ state, onClose, onSelect }: PartyPickerModalProps) {
   const hiddenChainCount = Math.max(chainOptions.length - visibleChains.length, 0);
   const clearPartyFilters = () => {
     setSelectedState("");
-    setSelectedMainGroup("");
-    setSelectedChain("");
+    setMainGroupChoice("");
+    setChainChoice("");
   };
-  const modalOptions = filterModal === "state" ? stateOptions : filterModal === "mainGroup" ? mainGroupOptions : chainOptions;
-  const modalTitle = filterModal === "state" ? "Select State" : filterModal === "mainGroup" ? "Select Main Group" : "Select Chain";
-  const modalAllLabel = filterModal === "state" ? "All states" : filterModal === "mainGroup" ? "All main groups" : "All chains";
-  const isModalAllActive = filterModal === "state" ? !selectedState : filterModal === "mainGroup" ? !selectedMainGroup : !selectedChain;
-  const isModalOptionActive = (option: string) => (
-    filterModal === "state" ? selectedState === option : filterModal === "mainGroup" ? selectedMainGroup === option : selectedChain === option
-  );
+  const modalOptions =
+    filterModal === "state"
+      ? stateOptions
+      : filterModal === "mainGroup"
+        ? mainGroupOptions
+        : chainOptions;
+  const modalTitle =
+    filterModal === "state"
+      ? "Select State"
+      : filterModal === "mainGroup"
+        ? "Select Main Group"
+        : "Select Chain";
+  const modalAllLabel =
+    filterModal === "state"
+      ? "All states"
+      : filterModal === "mainGroup"
+        ? "All main groups"
+        : "All chains";
+  const isModalAllActive =
+    filterModal === "state"
+      ? !selectedState
+      : filterModal === "mainGroup"
+        ? !selectedMainGroup
+        : !selectedChain;
+  const isModalOptionActive = (option: string) =>
+    filterModal === "state"
+      ? selectedState === option
+      : filterModal === "mainGroup"
+        ? selectedMainGroup === option
+        : selectedChain === option;
   const selectModalOption = (option: string) => {
     if (filterModal === "state") setSelectedState(option);
-    else if (filterModal === "mainGroup") setSelectedMainGroup(option);
-    else setSelectedChain(option);
+    else if (filterModal === "mainGroup") setMainGroupChoice(option);
+    else setChainChoice(option);
     setFilterModal(null);
   };
   const clearModalOption = () => {
     if (filterModal === "state") setSelectedState("");
-    else if (filterModal === "mainGroup") setSelectedMainGroup("");
-    else setSelectedChain("");
+    else if (filterModal === "mainGroup") setMainGroupChoice("");
+    else setChainChoice("");
     setFilterModal(null);
   };
-  const formatModalOption = (option: string) => (
-    filterModal === "state" ? formatStateName(option) : filterModal === "mainGroup" ? option : formatChainName(option)
-  );
+  const formatModalOption = (option: string) =>
+    filterModal === "state"
+      ? formatStateName(option)
+      : filterModal === "mainGroup"
+        ? option
+        : formatChainName(option);
 
   return (
     <div className="si-modal-backdrop" role="presentation" onClick={onClose}>
@@ -343,7 +467,11 @@ function PartyPickerModal({ state, onClose, onSelect }: PartyPickerModalProps) {
                 </button>
               ))}
               {hiddenStateCount > 0 && (
-                <button className="si-state-chip si-state-chip-more" type="button" onClick={() => setFilterModal("state")}>
+                <button
+                  className="si-state-chip si-state-chip-more"
+                  type="button"
+                  onClick={() => setFilterModal("state")}
+                >
                   More +{hiddenStateCount}
                 </button>
               )}
@@ -354,7 +482,7 @@ function PartyPickerModal({ state, onClose, onSelect }: PartyPickerModalProps) {
               <button
                 className={`si-state-chip${!selectedMainGroup ? " is-active" : ""}`}
                 type="button"
-                onClick={() => setSelectedMainGroup("")}
+                onClick={() => setMainGroupChoice("")}
               >
                 All main groups
               </button>
@@ -363,13 +491,17 @@ function PartyPickerModal({ state, onClose, onSelect }: PartyPickerModalProps) {
                   className={`si-state-chip${selectedMainGroup === mainGroup ? " is-active" : ""}`}
                   type="button"
                   key={mainGroup}
-                  onClick={() => setSelectedMainGroup(mainGroup)}
+                  onClick={() => setMainGroupChoice(mainGroup)}
                 >
                   {mainGroup}
                 </button>
               ))}
               {hiddenMainGroupCount > 0 && (
-                <button className="si-state-chip si-state-chip-more" type="button" onClick={() => setFilterModal("mainGroup")}>
+                <button
+                  className="si-state-chip si-state-chip-more"
+                  type="button"
+                  onClick={() => setFilterModal("mainGroup")}
+                >
                   More +{hiddenMainGroupCount}
                 </button>
               )}
@@ -380,7 +512,7 @@ function PartyPickerModal({ state, onClose, onSelect }: PartyPickerModalProps) {
               <button
                 className={`si-state-chip${!selectedChain ? " is-active" : ""}`}
                 type="button"
-                onClick={() => setSelectedChain("")}
+                onClick={() => setChainChoice("")}
               >
                 All chains
               </button>
@@ -389,20 +521,28 @@ function PartyPickerModal({ state, onClose, onSelect }: PartyPickerModalProps) {
                   className={`si-state-chip${selectedChain === chain ? " is-active" : ""}`}
                   type="button"
                   key={chain}
-                  onClick={() => setSelectedChain(chain)}
+                  onClick={() => setChainChoice(chain)}
                 >
                   {formatChainName(chain)}
                 </button>
               ))}
               {hiddenChainCount > 0 && (
-                <button className="si-state-chip si-state-chip-more" type="button" onClick={() => setFilterModal("chain")}>
+                <button
+                  className="si-state-chip si-state-chip-more"
+                  type="button"
+                  onClick={() => setFilterModal("chain")}
+                >
                   More +{hiddenChainCount}
                 </button>
               )}
             </div>
 
             {(selectedState || selectedMainGroup || selectedChain) && (
-              <button className="si-btn si-btn-outline si-party-clear-filters" type="button" onClick={clearPartyFilters}>
+              <button
+                className="si-btn si-btn-outline si-party-clear-filters"
+                type="button"
+                onClick={clearPartyFilters}
+              >
                 Clear filters
               </button>
             )}
@@ -419,30 +559,30 @@ function PartyPickerModal({ state, onClose, onSelect }: PartyPickerModalProps) {
             {state.partyError && <div className="si-inline-error">{state.partyError}</div>}
 
             <div className="si-party-modal-results">
-            {state.loadingParties ? (
-              <div className="si-loader">Loading customers...</div>
-            ) : filteredParties.length === 0 ? (
-              <div className="si-empty">No customers found.</div>
-            ) : (
-              filteredParties.map((party) => (
-                <button
-                  className="si-party-row"
-                  key={`${party.CardCode}-${party.State1 || ""}-${party.U_Main_Group || ""}-${party.U_Chain || ""}`}
-                  type="button"
-                  onClick={() => {
-                    state.selectParty(party);
-                    onSelect();
-                  }}
-                >
-                  <span>
-                    <strong>{party.CardName}</strong>
-                  </span>
-                  <small className="si-party-so-count">
-                    {getPartyOpenOrders(party).toLocaleString("en-IN")} open SO
-                  </small>
-                </button>
-              ))
-            )}
+              {state.loadingParties ? (
+                <div className="si-loader">Loading customers...</div>
+              ) : filteredParties.length === 0 ? (
+                <div className="si-empty">No customers found.</div>
+              ) : (
+                filteredParties.map((party) => (
+                  <button
+                    className="si-party-row"
+                    key={`${party.CardCode}-${party.State1 || ""}-${party.U_Main_Group || ""}-${party.U_Chain || ""}`}
+                    type="button"
+                    onClick={() => {
+                      state.selectParty(party);
+                      onSelect();
+                    }}
+                  >
+                    <span>
+                      <strong>{party.CardName}</strong>
+                    </span>
+                    <small className="si-party-so-count">
+                      {getPartyOpenOrders(party).toLocaleString("en-IN")} open SO
+                    </small>
+                  </button>
+                ))
+              )}
             </div>
           </section>
         </div>
@@ -533,12 +673,17 @@ function InvoiceSourceChoice({
 }) {
   const salesOrderMeta = loadingOrders
     ? "Loading open sales orders..."
-    : ordersError || `${openSalesOrderCount} open sales ${openSalesOrderCount === 1 ? "order" : "orders"}`;
+    : ordersError ||
+      `${openSalesOrderCount} open sales ${openSalesOrderCount === 1 ? "order" : "orders"}`;
 
   return (
     <section className="si-source-choice" aria-label="Invoice source">
       <div className="si-source-choice-grid">
-        <button className="si-source-card si-source-card-items" type="button" onClick={onChooseItems}>
+        <button
+          className="si-source-card si-source-card-items"
+          type="button"
+          onClick={onChooseItems}
+        >
           <HiArchiveBox className="si-source-card-watermark" aria-hidden="true" />
           <span className="si-source-card-icon" aria-hidden="true">
             <HiArchiveBox />
@@ -550,7 +695,11 @@ function InvoiceSourceChoice({
             <HiArrowRight aria-hidden="true" />
           </em>
         </button>
-        <button className="si-source-card si-source-card-orders" type="button" onClick={onChooseSalesOrder}>
+        <button
+          className="si-source-card si-source-card-orders"
+          type="button"
+          onClick={onChooseSalesOrder}
+        >
           <HiDocumentText className="si-source-card-watermark" aria-hidden="true" />
           <span className="si-source-card-icon" aria-hidden="true">
             <HiDocumentText />
@@ -559,7 +708,9 @@ function InvoiceSourceChoice({
             Sales Order
             <small>{salesOrderMeta}</small>
           </strong>
-          <span className="si-source-card-copy">Pick open sales orders and continue the existing invoice flow.</span>
+          <span className="si-source-card-copy">
+            Pick open sales orders and continue the existing invoice flow.
+          </span>
           <em>
             Continue
             <HiArrowRight aria-hidden="true" />
@@ -605,7 +756,11 @@ function ItemInvoiceLines({
           const batchQty = row.batch?.batches.reduce((sum, batch) => sum + batch.quantity, 0) || 0;
           const invoiceQty = toFiniteQuantity(row.invoiceQty);
           const batchWarehouse = row.batch?.warehouseCode || "-";
-          const availableQty = row.batch ? row.batch.warehouseQuantity : row.item ? getItemTotalQty(row.item) : 0;
+          const availableQty = row.batch
+            ? row.batch.warehouseQuantity
+            : row.item
+              ? getItemTotalQty(row.item)
+              : 0;
           const batchQtyMismatch = Boolean(row.item) && Math.abs(batchQty - invoiceQty) >= 0.0001;
 
           return (
@@ -623,19 +778,34 @@ function ItemInvoiceLines({
               </div>
               <div className="si-invoice-item-copy">
                 <strong>{row.item?.ItemName || "Select an item"}</strong>
-                <button className="si-item-card-select-btn" type="button" onClick={() => onOpenItemPicker(row.id)}>
+                <button
+                  className="si-item-card-select-btn"
+                  type="button"
+                  onClick={() => onOpenItemPicker(row.id)}
+                >
                   {row.item?.ItemCode || "Click to Select Item"}
                 </button>
                 <dl>
                   <div>
                     <dt>Quantity</dt>
                     <dd>
-                      <input value={row.item ? row.invoiceQty : ""} placeholder="Qty" readOnly />
+                      <input
+                        value={row.item ? row.invoiceQty : ""}
+                        placeholder="Qty"
+                        aria-label="Quantity"
+                        readOnly
+                      />
                     </dd>
                   </div>
                   <div>
                     <dt>Unit Price</dt>
-                    <dd>{row.item ? formatMoney(pickItemNumber(row.item, ["Price", "UnitPrice", "PriceBefDi"], 0)) : "-"}</dd>
+                    <dd>
+                      {row.item
+                        ? formatMoney(
+                            pickItemNumber(row.item, ["Price", "UnitPrice", "PriceBefDi"], 0),
+                          )
+                        : "-"}
+                    </dd>
                   </div>
                 </dl>
                 <button
@@ -646,7 +816,8 @@ function ItemInvoiceLines({
                 >
                   {row.batch ? (
                     <span>
-                      Warehouse: {batchWarehouse} | Available Qty: {availableQty.toLocaleString("en-IN")}
+                      Warehouse: {batchWarehouse} | Available Qty:{" "}
+                      {availableQty.toLocaleString("en-IN")}
                     </span>
                   ) : (
                     <span>
@@ -670,7 +841,13 @@ function ItemInvoiceLines({
   );
 }
 
-function InvoicePageHeader({ onOpenSkuGallery, onReload }: { onOpenSkuGallery: () => void; onReload: () => void }) {
+function InvoicePageHeader({
+  onOpenSkuGallery,
+  onReload,
+}: {
+  onOpenSkuGallery: () => void;
+  onReload: () => void;
+}) {
   return (
     <header className="si-page-head">
       <div>
@@ -678,7 +855,13 @@ function InvoicePageHeader({ onOpenSkuGallery, onReload }: { onOpenSkuGallery: (
         <h1>Sales Invoice</h1>
       </div>
       <div className="si-page-head-actions">
-        <button className="si-header-action-btn si-header-action-btn-secondary" type="button" onClick={onReload}>
+        <button
+          className="si-header-action-btn si-header-action-btn-secondary"
+          type="button"
+          aria-label="Reload"
+          title="Reload"
+          onClick={onReload}
+        >
           <HiArrowPath aria-hidden="true" />
         </button>
         <button className="si-header-action-btn" type="button" onClick={onOpenSkuGallery}>
@@ -750,9 +933,9 @@ function ItemPickerModal({
       setLoading(true);
       setError("");
       try {
-        const data = await apiFetch<FinishedGoodItem[] | { data?: FinishedGoodItem[]; results?: FinishedGoodItem[] }>(
-          hanaUrl("/api/hana/fg-items/"),
-        );
+        const data = await apiFetch<
+          FinishedGoodItem[] | { data?: FinishedGoodItem[]; results?: FinishedGoodItem[] }
+        >(hanaUrl("/api/hana/fg-items/"));
         const nextItems = Array.isArray(data) ? data : data.data || data.results || [];
         if (active) setItems(nextItems);
       } catch (err) {
@@ -769,11 +952,16 @@ function ItemPickerModal({
     };
   }, []);
 
-  const getFilterOptions = (field: keyof FinishedGoodItem, filters: Partial<Record<keyof FinishedGoodItem, string>>) =>
+  const getFilterOptions = (
+    field: keyof FinishedGoodItem,
+    filters: Partial<Record<keyof FinishedGoodItem, string>>,
+  ) =>
     Object.entries(
       items
         .filter((item) =>
-          Object.entries(filters).every(([key, value]) => !value || String(item[key as keyof FinishedGoodItem] || "") === value),
+          Object.entries(filters).every(
+            ([key, value]) => !value || String(item[key as keyof FinishedGoodItem] || "") === value,
+          ),
         )
         .reduce<Record<string, number>>((counts, item) => {
           const value = String(item[field] || "").trim();
@@ -782,7 +970,9 @@ function ItemPickerModal({
           return counts;
         }, {}),
     )
-      .sort(([optionA, countA], [optionB, countB]) => countB - countA || optionA.localeCompare(optionB))
+      .sort(
+        ([optionA, countA], [optionB, countB]) => countB - countA || optionA.localeCompare(optionB),
+      )
       .map(([option]) => option);
 
   const brandOptions = getFilterOptions("U_Brand", {
@@ -825,12 +1015,13 @@ function ItemPickerModal({
   const normalizedQuery = query.trim().toLowerCase();
   const filteredItems = items.filter((item) => {
     const filterMatches =
-      (!selectedBrand || item.U_Brand === selectedBrand)
-      && (!selectedSubGroup || item.U_Sub_Group === selectedSubGroup)
-      && (!selectedVariety || item.U_Variety === selectedVariety)
-      && (!selectedPackSize || item.U_SKU === selectedPackSize);
-    const queryMatches = !normalizedQuery
-      || [item.ItemCode, item.ItemName, item.U_Brand, item.U_Variety, item.U_Sub_Group, item.U_SKU]
+      (!selectedBrand || item.U_Brand === selectedBrand) &&
+      (!selectedSubGroup || item.U_Sub_Group === selectedSubGroup) &&
+      (!selectedVariety || item.U_Variety === selectedVariety) &&
+      (!selectedPackSize || item.U_SKU === selectedPackSize);
+    const queryMatches =
+      !normalizedQuery ||
+      [item.ItemCode, item.ItemName, item.U_Brand, item.U_Variety, item.U_Sub_Group, item.U_SKU]
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(normalizedQuery));
     return filterMatches && queryMatches;
@@ -843,13 +1034,16 @@ function ItemPickerModal({
     setSelectedPackSize("");
   };
 
-  const itemFilterConfig: Record<ItemFilterModal, {
-    allLabel: string;
-    options: string[];
-    selectedValue: string;
-    setSelectedValue: (value: string) => void;
-    title: string;
-  }> = {
+  const itemFilterConfig: Record<
+    ItemFilterModal,
+    {
+      allLabel: string;
+      options: string[];
+      selectedValue: string;
+      setSelectedValue: (value: string) => void;
+      title: string;
+    }
+  > = {
     brand: {
       allLabel: "All brands",
       options: brandOptions,
@@ -921,7 +1115,11 @@ function ItemPickerModal({
           </button>
         ))}
         {hiddenCount > 0 && (
-          <button className="si-state-chip si-state-chip-more" type="button" onClick={() => setFilterModal(filterKey)}>
+          <button
+            className="si-state-chip si-state-chip-more"
+            type="button"
+            onClick={() => setFilterModal(filterKey)}
+          >
             More +{hiddenCount}
           </button>
         )}
@@ -967,7 +1165,14 @@ function ItemPickerModal({
         </header>
         <div className="si-item-picker-body">
           <aside className="si-item-filter-panel">
-            {renderFilterChips("brand", "Brand", "All brands", brandOptions, selectedBrand, setSelectedBrand)}
+            {renderFilterChips(
+              "brand",
+              "Brand",
+              "All brands",
+              brandOptions,
+              selectedBrand,
+              setSelectedBrand,
+            )}
             {renderFilterChips(
               "subGroup",
               "Sub Group",
@@ -1138,7 +1343,11 @@ const pickItemNumber = (item: FinishedGoodItem, keys: string[], fallback = 0) =>
   return fallback;
 };
 
-const pickRecordNumber = (source: Record<string, unknown>, keys: string[], fallback: number | null = null) => {
+const pickRecordNumber = (
+  source: Record<string, unknown>,
+  keys: string[],
+  fallback: number | null = null,
+) => {
   for (const key of keys) {
     const parsed = Number(source[key]);
     if (Number.isFinite(parsed)) return parsed;
@@ -1161,7 +1370,8 @@ const unwrapItemPriceRecord = (data: ItemPriceApiResponse): ItemPriceRecord | nu
   if (wrappedData && typeof wrappedData === "object") return wrappedData as ItemPriceRecord;
   const wrappedResults = data.results;
   if (Array.isArray(wrappedResults)) return wrappedResults[0] || null;
-  if (wrappedResults && typeof wrappedResults === "object") return wrappedResults as ItemPriceRecord;
+  if (wrappedResults && typeof wrappedResults === "object")
+    return wrappedResults as ItemPriceRecord;
   return data as ItemPriceRecord;
 };
 
@@ -1176,7 +1386,11 @@ const mergeItemPrice = (item: FinishedGoodItem, priceRecord: ItemPriceRecord | n
   );
   const taxCode = pickRecordText(source, ["TaxCode", "VatGroup", "Tax_Code"]);
   const taxPercent = pickRecordNumber(source, ["VatPrcnt", "TaxPercent", "Tax_Percent"]);
-  const discountPercent = pickRecordNumber(source, ["DiscPrcnt", "DiscountPercent", "Discount_Percent"]);
+  const discountPercent = pickRecordNumber(source, [
+    "DiscPrcnt",
+    "DiscountPercent",
+    "Discount_Percent",
+  ]);
 
   return {
     ...item,
@@ -1203,7 +1417,10 @@ const getBatchDateTokens = (value?: string | null) => {
 
   const tokens = new Set([text.toLowerCase().replace(/[^a-z0-9]/g, "")]);
   const dateOnly = text.split("T")[0]?.split(" ")[0] || text;
-  const parts = dateOnly.split(/[/-]/).map((part) => part.trim()).filter(Boolean);
+  const parts = dateOnly
+    .split(/[/-]/)
+    .map((part) => part.trim())
+    .filter(Boolean);
 
   if (parts.length === 3) {
     const [first, second, third] = parts;
@@ -1222,10 +1439,13 @@ const getBatchDateTokens = (value?: string | null) => {
 
 const isBatchDateValue = (value: string, batch: BatchDetail) => {
   const candidateTokens = getBatchDateTokens(value);
-  const dateTokens = [batch.ExpDate, batch.PrdDate, batch.InDate].reduce<Set<string>>((tokens, dateValue) => {
-    getBatchDateTokens(dateValue).forEach((token) => tokens.add(token));
-    return tokens;
-  }, new Set());
+  const dateTokens = [batch.ExpDate, batch.PrdDate, batch.InDate].reduce<Set<string>>(
+    (tokens, dateValue) => {
+      getBatchDateTokens(dateValue).forEach((token) => tokens.add(token));
+      return tokens;
+    },
+    new Set(),
+  );
 
   return [...candidateTokens].some((token) => token && dateTokens.has(token));
 };
@@ -1269,16 +1489,21 @@ const getItemRowsValidationError = (rows: ItemInvoiceRow[]) => {
   const selectedRows = rows.filter((row) => row.item);
   if (selectedRows.length === 0) return "Select at least one item.";
 
-  const rowWithoutBatch = selectedRows.find((row) => !row.batch?.warehouseCode || row.batch.batches.length === 0);
-  if (rowWithoutBatch) return `Choose batches for ${rowWithoutBatch.item?.ItemName || "every selected item"}.`;
+  const rowWithoutBatch = selectedRows.find(
+    (row) => !row.batch?.warehouseCode || row.batch.batches.length === 0,
+  );
+  if (rowWithoutBatch)
+    return `Choose batches for ${rowWithoutBatch.item?.ItemName || "every selected item"}.`;
 
   const mismatchedRow = selectedRows.find((row) => {
     const invoiceQty = toFiniteQuantity(row.invoiceQty);
-    const batchQty = row.batch?.batches.reduce((sum, allocation) => sum + allocation.quantity, 0) || 0;
+    const batchQty =
+      row.batch?.batches.reduce((sum, allocation) => sum + allocation.quantity, 0) || 0;
     const displayedBatchQty = row.batch?.warehouseQuantity || batchQty;
     return displayedBatchQty + 0.0001 < invoiceQty || batchQty + 0.0001 < invoiceQty;
   });
-  if (mismatchedRow) return `Batch quantity must be at least invoice quantity for ${mismatchedRow.item?.ItemName || "each item"}.`;
+  if (mismatchedRow)
+    return `Batch quantity must be at least invoice quantity for ${mismatchedRow.item?.ItemName || "each item"}.`;
 
   return "";
 };
@@ -1291,7 +1516,11 @@ const itemRowsToSelectedLines = (rows: ItemInvoiceRow[]): SelectedLine[] =>
     .map((row) => {
       const invoiceQty = toFiniteQuantity(row.invoiceQty);
       const price = pickItemNumber(row.item, ["Price", "UnitPrice", "U_Price", "PriceBefDi"], 0);
-      const priceBeforeDiscount = pickItemNumber(row.item, ["PriceBefDi", "PriceBeforeDiscount", "Price"], price);
+      const priceBeforeDiscount = pickItemNumber(
+        row.item,
+        ["PriceBefDi", "PriceBeforeDiscount", "Price"],
+        price,
+      );
       const taxCode = pickItemText(row.item, ["TaxCode", "VatGroup", "Tax_Code"]);
       const openQty = Math.max(row.batch.warehouseQuantity || invoiceQty, invoiceQty);
 
@@ -1316,11 +1545,16 @@ const itemRowsToSelectedLines = (rows: ItemInvoiceRow[]): SelectedLine[] =>
             const batchNumber = getBatchNumber(batch);
             return {
               ...(batchNumber ? { BatchNumber: batchNumber } : {}),
-              ...(systemSerialNumber !== undefined ? { SystemSerialNumber: systemSerialNumber } : {}),
+              ...(systemSerialNumber !== undefined
+                ? { SystemSerialNumber: systemSerialNumber }
+                : {}),
               Quantity: quantity,
             };
           })
-          .filter((batch) => (batch.BatchNumber || batch.SystemSerialNumber !== undefined) && batch.Quantity > 0),
+          .filter(
+            (batch) =>
+              (batch.BatchNumber || batch.SystemSerialNumber !== undefined) && batch.Quantity > 0,
+          ),
       };
     });
 
@@ -1371,7 +1605,9 @@ function BatchPickerModal({
         if (!active) return;
         setWarehouses(nextWarehouses);
         setSelectedWhsCode((current) =>
-          current && nextWarehouses.some((warehouse) => warehouse.WhsCode === current) ? current : "",
+          current && nextWarehouses.some((warehouse) => warehouse.WhsCode === current)
+            ? current
+            : "",
         );
       } catch (err) {
         console.error(err);
@@ -1403,7 +1639,9 @@ function BatchPickerModal({
       setError("");
       try {
         const data = await apiFetch<BatchDetail[]>(
-          hanaUrl(`/api/hana/batch-details/?item_code=${encodeURIComponent(item.ItemCode)}&whs_code=${encodeURIComponent(selectedWhsCode)}`),
+          hanaUrl(
+            `/api/hana/batch-details/?item_code=${encodeURIComponent(item.ItemCode)}&whs_code=${encodeURIComponent(selectedWhsCode)}`,
+          ),
         );
         if (active) setBatches(Array.isArray(data) ? data : []);
       } catch (err) {
@@ -1423,17 +1661,20 @@ function BatchPickerModal({
     };
   }, [item.ItemCode, selectedWhsCode]);
 
-  const selectedWarehouse = warehouses.find((warehouse) => warehouse.WhsCode === selectedWhsCode) || null;
+  const selectedWarehouse =
+    warehouses.find((warehouse) => warehouse.WhsCode === selectedWhsCode) || null;
   const selectedWarehouseQuantity = Number(selectedWarehouse?.["SUM(Quantity)"] || 0);
   const unitPrice = pickItemNumber(item, ["Price", "UnitPrice", "PriceBefDi"], 0);
   const allocations = allocateFefoBatches(batches, invoiceQty);
   const allocatedQty = allocations.reduce((sum, allocation) => sum + allocation.quantity, 0);
   const displayedBatchQty = selectedWarehouseQuantity || allocatedQty;
   const batchAllocationMatches = allocatedQty + 0.0001 >= invoiceQty;
-  const quantityMatches = selectedWarehouseQuantity > 0
-    && selectedWarehouseQuantity + 0.0001 >= invoiceQty
-    && batchAllocationMatches;
-  const cannotCreateDraft = !quantityMatches || !canCreateDraft || creatingDraft || loadingBatches || loadingWarehouses;
+  const quantityMatches =
+    selectedWarehouseQuantity > 0 &&
+    selectedWarehouseQuantity + 0.0001 >= invoiceQty &&
+    batchAllocationMatches;
+  const cannotCreateDraft =
+    !quantityMatches || !canCreateDraft || creatingDraft || loadingBatches || loadingWarehouses;
   const batchSignature = `${selectedWhsCode}|${invoiceQty}|${allocations
     .map((allocation) => `${allocation.batch.BatchNum}:${allocation.quantity}`)
     .join("|")}`;
@@ -1490,7 +1731,9 @@ function BatchPickerModal({
           <aside className="si-batch-warehouse-panel">
             <div className="si-batch-panel-title">
               <span>Warehouse Stock</span>
-              <strong>{loadingWarehouses ? "Loading..." : `${warehouses.length} warehouses`}</strong>
+              <strong>
+                {loadingWarehouses ? "Loading..." : `${warehouses.length} warehouses`}
+              </strong>
             </div>
             {loadingWarehouses ? (
               <div className="si-loader">Loading warehouse quantities...</div>
@@ -1536,7 +1779,8 @@ function BatchPickerModal({
             </div>
             <div className={`si-batch-match-status${quantityMatches ? " is-match" : " has-error"}`}>
               <span>
-                Invoice Qty: {invoiceQty.toLocaleString("en-IN")} | Batch Qty: {displayedBatchQty.toLocaleString("en-IN")}
+                Invoice Qty: {invoiceQty.toLocaleString("en-IN")} | Batch Qty:{" "}
+                {displayedBatchQty.toLocaleString("en-IN")}
               </span>
             </div>
             {error && <div className="si-inline-error">{error}</div>}
@@ -1549,35 +1793,40 @@ function BatchPickerModal({
               <div className="si-empty">No batches found for this warehouse.</div>
             ) : (
               <div className="si-table-wrap">
-                <table className="si-lines-table si-batch-table">
-                  <thead>
-                    <tr>
-                      <th>Expiration Date</th>
-                      <th>Batch Qty</th>
-                    </tr>
-                  </thead>
-                  <tbody>
+                <Table density="compact">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Expiration Date</TableHead>
+                      <TableHead>Batch Qty</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
                     {batches.map((batch) => {
                       return (
-                        <tr
+                        <TableRow
                           key={`${batch.BatchNum}-${batch.BaseEntry || ""}-${batch.InDate || ""}`}
                         >
-                          <td>{formatBatchDate(batch.ExpDate)}</td>
-                          <td>{Number(batch.Quantity || 0).toLocaleString("en-IN")}</td>
-                        </tr>
+                          <TableCell>{formatBatchDate(batch.ExpDate)}</TableCell>
+                          <TableCell>
+                            {Number(batch.Quantity || 0).toLocaleString("en-IN")}
+                          </TableCell>
+                        </TableRow>
                       );
                     })}
-                  </tbody>
-                </table>
+                  </TableBody>
+                </Table>
               </div>
             )}
           </section>
         </div>
-        <footer className={`si-order-selection-bar si-batch-draft-bar${draftError ? " has-error" : ""}`}>
+        <footer
+          className={`si-order-selection-bar si-batch-draft-bar${draftError ? " has-error" : ""}`}
+        >
           <div>
             <strong>{item.ItemName}</strong>
             <span>
-              Warehouse: {selectedWhsCode || "-"} - Invoice Qty: {invoiceQty.toLocaleString("en-IN")} - Batch Qty:{" "}
+              Warehouse: {selectedWhsCode || "-"} - Invoice Qty:{" "}
+              {invoiceQty.toLocaleString("en-IN")} - Batch Qty:{" "}
               {displayedBatchQty.toLocaleString("en-IN")}
             </span>
             {draftError && <span className="si-order-selection-error">{draftError}</span>}
@@ -1612,9 +1861,7 @@ function SkeletonInvoice({
   onReset,
   onChangeBranch,
 }: SkeletonInvoiceProps) {
-  const partyLabel = state.selectedParty
-    ? state.selectedParty.CardName
-    : "Select Party";
+  const partyLabel = state.selectedParty ? state.selectedParty.CardName : "Select Party";
 
   return (
     <div className="si-draft-stage">
@@ -1653,22 +1900,24 @@ function SkeletonInvoice({
       <section className="si-card si-tabs-card si-skeleton-lines">
         {sourceMode !== "items" && (
           <div className="si-table-wrap">
-            <table className="si-lines-table">
-              <thead>
-                <tr>
-                  <th>Item Code</th>
-                  <th>Description</th>
-                  <th>Quantity</th>
-                  <th>Unit Price</th>
-                  <th>Tax Code</th>
-                  <th>Line Total</th>
-                </tr>
-              </thead>
-            </table>
+            <Table density="compact">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Item Code</TableHead>
+                  <TableHead>Description</TableHead>
+                  <TableHead>Quantity</TableHead>
+                  <TableHead>Unit Price</TableHead>
+                  <TableHead>Tax Code</TableHead>
+                  <TableHead>Line Total</TableHead>
+                </TableRow>
+              </TableHeader>
+            </Table>
           </div>
         )}
         {!state.selectedParty && <div className="si-empty">Select a party to begin.</div>}
-        {state.selectedParty && !sourceMode && <div className="si-empty">Choose invoice source from the modal window.</div>}
+        {state.selectedParty && !sourceMode && (
+          <div className="si-empty">Choose invoice source from the modal window.</div>
+        )}
         {state.selectedParty && sourceMode === "sales-order" && (
           <div className="si-empty">Select open sales orders to fill invoice lines.</div>
         )}
@@ -1696,13 +1945,20 @@ export default function SalesInvoiceWizard() {
   const [itemPickerRowId, setItemPickerRowId] = useState<number | null>(null);
   const [batchPickerRowId, setBatchPickerRowId] = useState<number | null>(null);
   const [sourceMode, setSourceMode] = useState<InvoiceSourceMode | null>(null);
-  const [itemRows, setItemRows] = useState<ItemInvoiceRow[]>([{ id: 1, type: "Item", item: null, invoiceQty: 1, batch: null }]);
+  const [itemRows, setItemRows] = useState<ItemInvoiceRow[]>([
+    { id: 1, type: "Item", item: null, invoiceQty: 1, batch: null },
+  ]);
   const [itemDraftError, setItemDraftError] = useState("");
   const [creatingItemDraft, setCreatingItemDraft] = useState(false);
   const [pricingItemCode, setPricingItemCode] = useState("");
 
   useEffect(() => {
-    if (sourceMode === "sales-order" && state.selectedParty && state.step === 2 && !state.customerDetails) {
+    if (
+      sourceMode === "sales-order" &&
+      state.selectedParty &&
+      state.step === 2 &&
+      !state.customerDetails
+    ) {
       setOrdersModalOpen(true);
     }
   }, [sourceMode, state.customerDetails, state.selectedParty, state.step]);
@@ -1809,7 +2065,9 @@ export default function SalesInvoiceWizard() {
     setItemDraftError("");
     setItemRows((current) => {
       const nextRows = current.filter((row) => row.id !== rowId);
-      return nextRows.length > 0 ? nextRows : [{ id: 1, type: "Item", item: null, invoiceQty: 1, batch: null }];
+      return nextRows.length > 0
+        ? nextRows
+        : [{ id: 1, type: "Item", item: null, invoiceQty: 1, batch: null }];
     });
     setItemPickerRowId((current) => (current === rowId ? null : current));
     setBatchPickerRowId((current) => (current === rowId ? null : current));
@@ -1824,7 +2082,9 @@ export default function SalesInvoiceWizard() {
   const fetchItemWithCustomerPrice = async (item: FinishedGoodItem) => {
     const priceList = toFiniteQuantity(state.selectedParty?.ListNum, 1);
     const data = await apiFetch<ItemPriceApiResponse>(
-      hanaUrl(`/api/hana/item-price/?item_code=${encodeURIComponent(item.ItemCode)}&price_list=${encodeURIComponent(String(priceList))}`),
+      hanaUrl(
+        `/api/hana/item-price/?item_code=${encodeURIComponent(item.ItemCode)}&price_list=${encodeURIComponent(String(priceList))}`,
+      ),
     );
     return mergeItemPrice(item, unwrapItemPriceRecord(data));
   };
@@ -1847,9 +2107,15 @@ export default function SalesInvoiceWizard() {
 
     setItemRows((current) => {
       const existingRow = current.find((row) => row.id === rowId);
-      if (!existingRow) return [...current, { id: rowId, type: "Item", item: pricedItem, invoiceQty: 1, batch: null }];
+      if (!existingRow)
+        return [
+          ...current,
+          { id: rowId, type: "Item", item: pricedItem, invoiceQty: 1, batch: null },
+        ];
       return current.map((row) =>
-        row.id === rowId ? { ...row, item: pricedItem, invoiceQty: row.invoiceQty || 1, batch: null } : row,
+        row.id === rowId
+          ? { ...row, item: pricedItem, invoiceQty: row.invoiceQty || 1, batch: null }
+          : row,
       );
     });
     setPricingItemCode("");
@@ -1860,7 +2126,9 @@ export default function SalesInvoiceWizard() {
   const selectBatchForRow = (batch: SelectedBatch) => {
     if (batchPickerRowId === null) return;
     setItemDraftError("");
-    setItemRows((current) => current.map((row) => (row.id === batchPickerRowId ? { ...row, batch } : row)));
+    setItemRows((current) =>
+      current.map((row) => (row.id === batchPickerRowId ? { ...row, batch } : row)),
+    );
   };
 
   const itemRowsValidationError = getItemRowsValidationError(itemRows);
@@ -1905,17 +2173,34 @@ export default function SalesInvoiceWizard() {
           stock) is branch-specific, so nothing loads until one is chosen. */}
       {!state.branch && (
         <div className="si-modal-backdrop si-branch-backdrop" role="presentation">
-          <section className="si-branch-modal" role="dialog" aria-modal="true" aria-label="Select branch">
+          <section
+            className="si-branch-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Select branch"
+          >
             <span className="si-eyebrow">Sales Invoice</span>
             <h2>Select a branch</h2>
             <p>Customers, orders, prices and stock load for the branch you pick.</p>
             <div className="si-branch-options">
-              <button type="button" className="si-branch-option" onClick={() => state.selectBranch("OIL")}>
-                <span className="si-branch-emoji" aria-hidden="true">🛢️</span>
+              <button
+                type="button"
+                className="si-branch-option"
+                onClick={() => state.selectBranch("OIL")}
+              >
+                <span className="si-branch-emoji" aria-hidden="true">
+                  🛢️
+                </span>
                 <strong>Oil</strong>
               </button>
-              <button type="button" className="si-branch-option" onClick={() => state.selectBranch("BEVERAGE")}>
-                <span className="si-branch-emoji" aria-hidden="true">🥤</span>
+              <button
+                type="button"
+                className="si-branch-option"
+                onClick={() => state.selectBranch("BEVERAGE")}
+              >
+                <span className="si-branch-emoji" aria-hidden="true">
+                  🥤
+                </span>
                 <strong>Beverage</strong>
               </button>
             </div>
@@ -1963,14 +2248,19 @@ export default function SalesInvoiceWizard() {
         />
       )}
 
-      {showSourceModal && (
-        <div className="si-modal-backdrop" role="presentation" onClick={closeSourceModal}>
-          <section
+      <Dialog
+        open={Boolean(showSourceModal)}
+        onOpenChange={(next) => {
+          if (!next) setSourceModalOpen(false);
+        }}
+      >
+        {showSourceModal && (
+          <DialogContent
+            title="Choose a source"
+            variant="bare"
+            size="auto"
+            showClose={false}
             className="si-source-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Choose invoice source"
-            onClick={(event) => event.stopPropagation()}
           >
             <header className="si-so-modal-head">
               <div>
@@ -2006,18 +2296,23 @@ export default function SalesInvoiceWizard() {
               onChooseSalesOrder={openOrdersModal}
               onChooseItems={chooseItems}
             />
-          </section>
-        </div>
-      )}
+          </DialogContent>
+        )}
+      </Dialog>
 
-      {showOrdersModal && (
-        <div className="si-modal-backdrop" role="presentation" onClick={closeOrdersModal}>
-          <section
+      <Dialog
+        open={Boolean(showOrdersModal)}
+        onOpenChange={(next) => {
+          if (!next) setOrdersModalOpen(false);
+        }}
+      >
+        {showOrdersModal && (
+          <DialogContent
+            title="Pick orders"
+            variant="bare"
+            size="auto"
+            showClose={false}
             className="si-so-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Select open sales orders"
-            onClick={(event) => event.stopPropagation()}
           >
             <header className="si-so-modal-head">
               <div>
@@ -2055,9 +2350,9 @@ export default function SalesInvoiceWizard() {
               continueLoadingLabel="Creating draft..."
               onContinue={createDraftFromSelectedOrders}
             />
-          </section>
-        </div>
-      )}
+          </DialogContent>
+        )}
+      </Dialog>
 
       {showItemPickerModal && (
         <ItemPickerModal
@@ -2084,7 +2379,9 @@ export default function SalesInvoiceWizard() {
             setItemDraftError("");
             setItemRows((current) =>
               current.map((row) =>
-                row.id === batchPickerRow.id ? { ...row, invoiceQty: nextQuantity, batch: null } : row,
+                row.id === batchPickerRow.id
+                  ? { ...row, invoiceQty: nextQuantity, batch: null }
+                  : row,
               ),
             );
           }}

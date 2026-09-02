@@ -13,6 +13,8 @@ type Props = {
   onChange: (value: string) => void;
   placeholder?: string;
   disabled?: boolean;
+  /** Accessible name for the search box; defaults to the placeholder. */
+  ariaLabel?: string;
 };
 
 function SearchableSelect({
@@ -21,6 +23,7 @@ function SearchableSelect({
   onChange,
   placeholder = "Search…",
   disabled = false,
+  ariaLabel,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -91,6 +94,10 @@ function SearchableSelect({
         className="distributor-combo-input"
         value={open ? query : selectedLabel}
         placeholder={selectedLabel || placeholder}
+        aria-label={ariaLabel || selectedLabel || placeholder}
+        role="combobox"
+        aria-expanded={open}
+        aria-autocomplete="list"
         disabled={disabled}
         onFocus={openList}
         onClick={openList}

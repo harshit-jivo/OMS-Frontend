@@ -213,13 +213,13 @@
   scrollbar-width: thin;
 }
 
-.sd-table {
+/* .sd-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 12.5px;
-}
+} */
 
-.sd-table thead th {
+/* .sd-table thead th {
   position: sticky;
   top: 0;
   z-index: 1;
@@ -233,22 +233,22 @@
   color: var(--app-muted);
   text-align: left;
   white-space: nowrap;
-}
+} */
 
-.sd-table tbody td {
+/* .sd-table tbody td {
   padding: 11px 14px;
   border-bottom: 1px solid rgba(226, 232, 240, 0.8);
   color: var(--app-text);
   vertical-align: middle;
-}
+} */
 
-.sd-table tbody tr:last-child td {
+/* .sd-table tbody tr:last-child td {
   border-bottom: none;
-}
+} */
 
-.sd-table tbody tr:hover td {
+/* .sd-table tbody tr:hover td {
   background: rgba(37, 99, 235, 0.04);
-}
+} */
 
 .sd-num {
   text-align: right;
@@ -313,6 +313,12 @@
 
 /* ── Badges ──────────────────────────────────────────────────────────────── */
 
+/* Phase 2.2: every `sd-badge` call site now renders <Badge> instead — the
+   five Sap_Sync sub-pages (Status, Products, Parties & Addresses, Branches,
+   Logs). Commented out rather than deleted, per the standing instruction.
+   Colour now comes from components/ui/badge.tsx: accent → info, ok → ok,
+   fail → bad, and the bare `.sd-badge` → the neutral default. */
+/*
 .sd-badge {
   display: inline-flex;
   align-items: center;
@@ -347,6 +353,7 @@
   background: rgba(239, 68, 68, 0.16);
   color: #b91c1c;
 }
+*/
 
 /* ── States and pagination ───────────────────────────────────────────────── */
 
@@ -370,7 +377,7 @@
   color: #b91c1c;
 }
 
-.sd-pagination {
+/* .sd-pagination {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -378,9 +385,9 @@
   padding: 13px 18px;
   border-top: 1px solid var(--app-border);
   background: #fafcfe;
-}
+} */
 
-.sd-pg-btn {
+/* .sd-pg-btn {
   padding: 7px 14px;
   border: 1px solid var(--app-border);
   border-radius: var(--radius-md, 12px);
@@ -391,24 +398,24 @@
   color: var(--app-text);
   cursor: pointer;
   transition: border-color 0.18s ease, color 0.18s ease;
-}
+} */
 
-.sd-pg-btn:hover:not(:disabled) {
+/* .sd-pg-btn:hover:not(:disabled) {
   border-color: var(--app-accent);
   color: var(--app-accent-dark);
-}
+} */
 
-.sd-pg-btn:disabled {
+/* .sd-pg-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
-}
+} */
 
-.sd-pg-info {
+/* .sd-pg-info {
   font-size: 12px;
   font-weight: 700;
   color: var(--app-muted);
   font-variant-numeric: tabular-nums;
-}
+} */
 
 /* ── Responsive ──────────────────────────────────────────────────────────── */
 

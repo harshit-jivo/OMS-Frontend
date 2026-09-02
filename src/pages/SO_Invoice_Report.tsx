@@ -1,4 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+
+/** Stable empty, so the filter/sort memos settle. */
+const NO_ORDERS: PendingOrder[] = [];
 import {
   HiArrowDownTray,
   HiArrowPath,
@@ -19,6 +23,22 @@ import type {
 } from "../services/sapService";
 import { startExcelExport, exportDateStamp } from "../utils/excelExport";
 import "../styles/SO_Invoice_Report.css";
+import { Badge, type BadgeTone } from "@/components/ui/badge";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+
+/** Dispatch progress -> tone, read off the progress rules in SO_Invoice_Report.css. */
+const LINE_TONE: Record<string, BadgeTone> = {
+  "NOT INVOICED": "neutral",
+  "PARTLY INVOICED": "hold",
+  INVOICED: "ok",
+};
 
 const BRANCHES = [
   { value: "OIL", label: "Oil" },
@@ -192,45 +212,39 @@ export default function SO_Invoice_Report() {
   // every open order, however old.
   const [fromDate, setFromDate] = useState(oneMonthAgo);
   const [toDate, setToDate] = useState(() => isoDate(new Date()));
-  const [orders, setOrders] = useState<PendingOrder[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
   /** The order whose detail modal is open, or null when none is. */
   const [selected, setSelected] = useState<PendingOrder | null>(null);
   const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
 
-  const loadOrders = useCallback(
-    async (target: Branch, range: { from: string; to: string }) => {
-      setLoading(true);
-      setError("");
-      try {
-        const data = await sapService.getPendingDispatch(target, {
-          from: range.from,
-          to: range.to,
-        });
-        setOrders(data.orders ?? []);
-        // The open modal's order may be gone (or stale) after a reload.
-        setSelected(null);
-      } catch (err) {
-        console.error("SO vs invoice report failed:", err);
-        setOrders([]);
-        setError(
-          "Could not load sales orders from SAP. Please try again in a moment.",
-        );
-      } finally {
-        setLoading(false);
-      }
-    },
-    [],
-  );
+  /*
+   * The COMMITTED range, which is what the query is keyed on. `fromDate` and
+   * `toDate` are draft inputs — the old effect carried an `exhaustive-deps`
+   * disable precisely because listing them would fire a request per keystroke.
+   * Applying is an explicit act, so it gets its own state.
+   */
+  const [applied, setApplied] = useState({ from: fromDate, to: toDate });
 
-  useEffect(() => {
-    void loadOrders(branch, { from: fromDate, to: toDate });
-    // The date range is applied by the Apply button, not on every keystroke.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [branch, loadOrders]);
+  const applyRange = () => {
+    setApplied({ from: fromDate, to: toDate });
+    // The open modal's order may be gone (or stale) after a reload. Was done
+    // inside the fetch; re-expressing it as an effect on `orders` is the trap.
+    setSelected(null);
+  };
+
+  const {
+    data: orders = NO_ORDERS,
+    isFetching: loading,
+    isError,
+  } = useQuery({
+    queryKey: ["sap", "pending-dispatch", branch, applied.from, applied.to],
+    queryFn: async () => (await sapService.getPendingDispatch(branch, applied)).orders ?? [],
+  });
+
+  const error = isError
+    ? "Could not load sales orders from SAP. Please try again in a moment."
+    : "";
 
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -410,7 +424,10 @@ export default function SO_Invoice_Report() {
                 className={`sovi-segment${
                   branch === option.value ? " sovi-segment-active" : ""
                 }`}
-                onClick={() => setBranch(option.value)}
+                onClick={() => {
+                  setBranch(option.value);
+                  setSelected(null);
+                }}
               >
                 {option.label}
               </button>
@@ -479,7 +496,7 @@ export default function SO_Invoice_Report() {
           <button
             type="button"
             className="sovi-btn sovi-btn-ghost"
-            onClick={() => void loadOrders(branch, { from: fromDate, to: toDate })}
+            onClick={applyRange}
             disabled={loading}
           >
             <HiArrowPath aria-hidden="true" />
@@ -540,9 +557,9 @@ export default function SO_Invoice_Report() {
         </div>
       ) : (
         <div className="sovi-table-card">
-          <table className="sovi-table">
-            <thead>
-              <tr>
+          <Table density="compact">
+            <TableHeader>
+              <TableRow>
                 {ORDER_COLUMNS.map((column) => (
                   <SortHeader
                     key={column.key}
@@ -551,14 +568,14 @@ export default function SO_Invoice_Report() {
                     onSort={toggleSort}
                   />
                 ))}
-                <th className="sovi-col-toggle" />
-              </tr>
-            </thead>
-            <tbody>
+                <TableHead className="sovi-col-toggle" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {visible.map((order) => {
                 const age = daysOpen(order.order_date);
                 return (
-                    <tr
+                    <TableRow
                       key={order.so_doc_entry}
                       className="sovi-order-row"
                       tabIndex={0}
@@ -572,8 +589,8 @@ export default function SO_Invoice_Report() {
                         }
                       }}
                     >
-                      <td>{formatDate(order.order_date)}</td>
-                      <td>
+                      <TableCell>{formatDate(order.order_date)}</TableCell>
+                      <TableCell>
                         {age === null ? (
                           ""
                         ) : (
@@ -583,59 +600,57 @@ export default function SO_Invoice_Report() {
                             {age}d
                           </span>
                         )}
-                      </td>
-                      <td className="sovi-doc">{order.sales_order}</td>
-                      <td>
+                      </TableCell>
+                      <TableCell className="sovi-doc">{order.sales_order}</TableCell>
+                      <TableCell>
                         {order.invoice_count === 0 ? (
-                          <span className="sovi-badge sovi-badge-none">
-                            None
-                          </span>
+                          <Badge outlined>None</Badge>
                         ) : (
-                          <span className="sovi-badge sovi-badge-some">
+                          <Badge tone="hold" outlined>
                             {order.invoice_count}{" "}
                             {order.invoice_count === 1 ? "invoice" : "invoices"}
-                          </span>
+                          </Badge>
                         )}
-                      </td>
-                      <td className="sovi-col-progress">
+                      </TableCell>
+                      <TableCell className="sovi-col-progress">
                         <ProgressBar pct={order.invoiced_pct} />
-                      </td>
-                      <td className="sovi-col-wide">{order.party_name}</td>
-                      <td>{order.location}</td>
-                      <td>{order.chain}</td>
-                      <td>{order.so_name}</td>
-                      <td>{order.dispatch_from}</td>
-                      <td className="sovi-num">
+                      </TableCell>
+                      <TableCell className="sovi-col-wide">{order.party_name}</TableCell>
+                      <TableCell>{order.location}</TableCell>
+                      <TableCell>{order.chain}</TableCell>
+                      <TableCell>{order.so_name}</TableCell>
+                      <TableCell>{order.dispatch_from}</TableCell>
+                      <TableCell className="sovi-num">
                         {order.pending_line_count}/{order.line_count}
-                      </td>
-                      <td className="sovi-num">
+                      </TableCell>
+                      <TableCell className="sovi-num">
                         {formatNum(order.qty_ordered, 0)}
-                      </td>
-                      <td className="sovi-num">
+                      </TableCell>
+                      <TableCell className="sovi-num">
                         {order.qty_invoiced
                           ? formatNum(order.qty_invoiced, 0)
                           : "—"}
-                      </td>
-                      <td className="sovi-num sovi-strong">
+                      </TableCell>
+                      <TableCell className="sovi-num sovi-strong">
                         {formatNum(order.qty_pending, 0)}
-                      </td>
-                      <td className="sovi-num">
+                      </TableCell>
+                      <TableCell className="sovi-num">
                         {formatNum(order.ltr_pending, 0)}
-                      </td>
-                      <td className="sovi-num">
+                      </TableCell>
+                      <TableCell className="sovi-num">
                         {formatNum(order.boxes_pending, 0)}
-                      </td>
-                      <td className="sovi-col-toggle">
+                      </TableCell>
+                      <TableCell className="sovi-col-toggle">
                         <HiChevronRight
                           className="sovi-chevron"
                           aria-hidden="true"
                         />
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                 );
               })}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       )}
 
@@ -753,13 +768,9 @@ function OrderModal({
             <div className="sovi-modal-eyebrow">Sales Order</div>
             <h2 className="sovi-modal-title">
               {order.sales_order}
-              <span
-                className={`sovi-badge sovi-badge-${
-                  order.invoice_count ? "some" : "none"
-                }`}
-              >
+              <Badge tone={order.invoice_count ? "hold" : "neutral"} outlined>
                 {order.status}
-              </span>
+              </Badge>
             </h2>
             <div className="sovi-modal-sub">
               {order.party_name}
@@ -803,30 +814,30 @@ function OrderModal({
               Lines ({order.pending_line_count} pending of {order.line_count})
             </div>
             <div className="sovi-lines-scroll">
-              <table className="sovi-lines-table">
-                <thead>
-                  <tr>
-                    <th>SKU NO</th>
-                    <th className="sovi-col-wide">SKU NAME</th>
-                    <th>SKU</th>
-                    <th className="sovi-num">ORDERED</th>
-                    <th className="sovi-num">INVOICED</th>
-                    <th className="sovi-num">PENDING</th>
-                    <th className="sovi-num">LTR</th>
-                    <th className="sovi-num">BOXES</th>
-                    <th>INVOICE</th>
-                    <th>STATUS</th>
-                  </tr>
-                </thead>
-                <tbody>
+              <Table density="compact">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>SKU NO</TableHead>
+                    <TableHead className="sovi-col-wide">SKU NAME</TableHead>
+                    <TableHead>SKU</TableHead>
+                    <TableHead className="sovi-num">ORDERED</TableHead>
+                    <TableHead className="sovi-num">INVOICED</TableHead>
+                    <TableHead className="sovi-num">PENDING</TableHead>
+                    <TableHead className="sovi-num">LTR</TableHead>
+                    <TableHead className="sovi-num">BOXES</TableHead>
+                    <TableHead>INVOICE</TableHead>
+                    <TableHead>STATUS</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {order.lines.map((line) => (
                     <LineRow
                       key={`${line.so_doc_entry}-${line.line_num}`}
                       line={line}
                     />
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
           </div>
 
@@ -963,13 +974,13 @@ function LineRow({ line }: { line: PendingDispatchRow }) {
         )}
       </td>
       <td>
-        <span
-          className={`sovi-badge sovi-badge-${line.status
-            .toLowerCase()
-            .replace(/\s+/g, "-")}`}
-        >
+        {/*
+          `line.status` is "NOT INVOICED" / "PARTLY INVOICED" / "INVOICED" —
+          dispatch progress, not a workflow status, so the mapping stays local.
+        */}
+        <Badge outlined tone={LINE_TONE[line.status] ?? "neutral"}>
           {line.status}
-        </span>
+        </Badge>
       </td>
     </tr>
   );

@@ -1,5 +1,13 @@
 import { formatDateDisplay, formatMoney, lineKey, toNumber } from "./salesInvoice.utils";
 import type { SalesInvoiceState, SalesOrder } from "./useSalesInvoice";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 type Props = {
   state: SalesInvoiceState;
@@ -78,20 +86,20 @@ export default function LinesStep({ state }: Props) {
                 </header>
 
                 <div className="si-review-table-wrap">
-                  <table className="si-review-table">
-                    <thead>
-                      <tr>
-                        <th>#</th>
-                        <th>Item</th>
-                        <th>Description</th>
-                        <th>Whse / Tax</th>
-                        <th>Open</th>
-                        <th>Price</th>
-                        <th>Invoice Qty</th>
-                        <th>Line Total</th>
-                      </tr>
-                    </thead>
-                    <tbody>
+                  <Table density="compact">
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>#</TableHead>
+                        <TableHead>Item</TableHead>
+                        <TableHead>Description</TableHead>
+                        <TableHead>Whse / Tax</TableHead>
+                        <TableHead>Open</TableHead>
+                        <TableHead>Price</TableHead>
+                        <TableHead>Invoice Qty</TableHead>
+                        <TableHead>Line Total</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
                       {lines.map((line) => {
                         const key = lineKey(order.DocEntry, line.LineNum);
                         const selected = state.selectedLines[key];
@@ -100,21 +108,26 @@ export default function LinesStep({ state }: Props) {
                         const price = toNumber(selected?.Price ?? line.Price);
 
                         return (
-                          <tr className={checked ? "is-selected" : ""} key={key}>
-                            <td>
-                              <input type="checkbox" checked={checked} onChange={() => state.toggleLine(order, line)} />
-                            </td>
-                            <td><code>{line.ItemCode || "-"}</code></td>
-                            <td>
+                          <TableRow className={checked ? "is-selected" : ""} key={key}>
+                            <TableCell>
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                aria-label={`Include ${line.Dscription || line.ItemCode || "line"}`}
+                                onChange={() => state.toggleLine(order, line)}
+                              />
+                            </TableCell>
+                            <TableCell><code>{line.ItemCode || "-"}</code></TableCell>
+                            <TableCell>
                               <strong>{line.Dscription || "Unnamed SAP line"}</strong>
-                            </td>
-                            <td>
+                            </TableCell>
+                            <TableCell>
                               <span className="si-review-tag">{line.WhsCode || "-"}</span>
                               <span className="si-review-tag">{line.TaxCode || line.VatGroup || "-"}</span>
-                            </td>
-                            <td>{line.OpenQty}</td>
-                            <td>{formatMoney(toNumber(line.Price))}</td>
-                            <td>
+                            </TableCell>
+                            <TableCell>{line.OpenQty}</TableCell>
+                            <TableCell>{formatMoney(toNumber(line.Price))}</TableCell>
+                            <TableCell>
                               <input
                                 type="number"
                                 min="1"
@@ -122,15 +135,16 @@ export default function LinesStep({ state }: Props) {
                                 disabled={!checked}
                                 value={checked ? qty : ""}
                                 placeholder="—"
+                                aria-label={`Invoice qty for ${line.Dscription || line.ItemCode || "line"}`}
                                 onChange={(event) => state.updateLine(key, { invoiceQty: toNumber(event.target.value) })}
                               />
-                            </td>
-                            <td>{checked ? formatMoney(qty * price) : "—"}</td>
-                          </tr>
+                            </TableCell>
+                            <TableCell>{checked ? formatMoney(qty * price) : "—"}</TableCell>
+                          </TableRow>
                         );
                       })}
-                    </tbody>
-                  </table>
+                    </TableBody>
+                  </Table>
                 </div>
 
                 <footer className="si-review-card-foot">

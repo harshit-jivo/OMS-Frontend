@@ -1,6 +1,16 @@
 @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=Inter:wght@300;400;500;600&display=swap');
 
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+/*
+ * The universal reset that used to live here has moved to styles/tailwind.css,
+ * inside `@layer base`. It was never a Login rule: this stylesheet is imported
+ * eagerly (Login is the one route that is not lazy), so `* { padding: 0 }`
+ * applied to all 108 pages from a file named after one of them.
+ *
+ * It had to move because unlayered CSS beats every cascade layer, so that one
+ * line silently zeroed every Tailwind padding and margin utility in the app —
+ * the class landed in the DOM, matched a real rule, and did nothing. Same
+ * precedence as before against every stylesheet here; utilities now win.
+ */
 
 @keyframes toastIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
 @keyframes fadeUp   { from{opacity:0;transform:translateY(16px)} to{opacity:1;transform:translateY(0)} }
@@ -166,6 +176,73 @@ html, body { height: 100%; }
   border-radius: 50%;
   animation: spin .8s linear infinite;
   flex-shrink: 0;
+}
+
+/* ── Toast ── */
+.lp-toast {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  z-index: 9999;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 18px;
+  border-radius: 10px;
+  min-width: 280px;
+  max-width: 360px;
+  box-shadow: 0 8px 40px rgba(0,0,0,.35);
+  font-family: 'Inter', sans-serif;
+  animation: toastIn .35s cubic-bezier(.22,1,.36,1);
+}
+
+/* Two classes so the type colours win regardless of stylesheet order. */
+.lp-toast.lp-toast--error {
+  background: #7f1d1d;
+  border: 1px solid #b91c1c;
+}
+
+.lp-toast.lp-toast--success {
+  background: #14532d;
+  border: 1px solid #15803d;
+}
+
+.lp-toast-body {
+  flex: 1;
+}
+
+.lp-toast-title {
+  font-size: .8rem;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.lp-toast-title.lp-toast-title--error {
+  color: #fca5a5;
+}
+
+.lp-toast-title.lp-toast-title--success {
+  color: #86efac;
+}
+
+.lp-toast-message {
+  font-size: .85rem;
+  color: rgba(255,255,255,.8);
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+.lp-toast-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: rgba(255,255,255,.4);
+  font-size: 14px;
+  padding: 0;
+  line-height: 1;
+  margin-top: 1px;
 }
 
 @media (max-width: 900px) {

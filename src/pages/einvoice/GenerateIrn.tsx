@@ -4,8 +4,9 @@ import { einvoiceService } from "../../services/einvoiceService";
 import type { FromInvoicePreview, GenerateResponse, IrnResult } from "../../services/einvoiceService";
 import {
   NicField, KeyValues, JsonView, ValidationList, ErrorAlert, SuccessAlert,
-  StatusBadge, apiErrorMessage, CompanyDbSelect,
+  StatusBadge, CompanyDbSelect,
 } from "../../components/NicUI";
+import { messageFrom } from "@/lib/apiError";
 import QrViewer from "../../components/QrViewer";
 
 export default function GenerateIrn() {
@@ -34,7 +35,7 @@ export default function GenerateIrn() {
     try {
       setPreview(await einvoiceService.previewFromInvoice(docentry.trim(), companyDb.trim() || undefined, idType));
     } catch (err) {
-      setError(apiErrorMessage(err));
+      setError(messageFrom(err, "Request failed"));
     } finally {
       setBusy("");
     }
@@ -57,9 +58,9 @@ export default function GenerateIrn() {
       const e = err as { response?: { data?: GenerateResponse } };
       if (e.response?.data) {
         setGenResp(e.response.data);
-        setError(e.response.data.error || apiErrorMessage(err));
+        setError(e.response.data.error || messageFrom(err, "Request failed"));
       } else {
-        setError(apiErrorMessage(err));
+        setError(messageFrom(err, "Request failed"));
       }
     } finally {
       setBusy("");
@@ -78,7 +79,7 @@ export default function GenerateIrn() {
         the IRN and stores the signed invoice + QR.
       </p>
 
-      <div className="nic-form-grid" style={{ marginTop: 14 }}>
+      <div className="nic-form-grid nic-form-grid--spaced-wide">
         <NicField label="Look up by">
           <select className="nic-select" value={idType}
             onChange={(e) => setIdType(e.target.value as "docentry" | "docnum")}>
@@ -100,11 +101,11 @@ export default function GenerateIrn() {
 
       <div className="nic-actions-row">
         <button className="ofs-secondary" onClick={() => void doPreview()} disabled={!!busy}>
-          <HiDocumentMagnifyingGlass style={{ verticalAlign: "-3px", marginRight: 6 }} />
+          <HiDocumentMagnifyingGlass className="nic-icon-lead" />
           {busy === "preview" ? "Loading…" : "Preview & Validate"}
         </button>
         <button className="ofs-primary" onClick={() => void doGenerate()} disabled={!!busy}>
-          <HiBolt style={{ verticalAlign: "-3px", marginRight: 6 }} />
+          <HiBolt className="nic-icon-lead" />
           {busy === "generate" ? "Generating…" : "Generate IRN"}
         </button>
       </div>
@@ -115,7 +116,7 @@ export default function GenerateIrn() {
       {/* preview block */}
       {preview ? (
         <div className="nic-result">
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+          <div className="nic-row-inline">
             <StatusBadge tone={preview.valid ? "ok" : "err"}>
               {preview.valid ? "Valid — ready to generate" : `${preview.error_count} issue(s)`}
             </StatusBadge>
@@ -134,7 +135,7 @@ export default function GenerateIrn() {
             IRN generated successfully{genResp?.company_db ? ` (from ${genResp.company_db})` : ""}.
           </SuccessAlert>
           {genResp?.test_warning ? (
-            <div className="nic-alert nic-alert--err" style={{ marginTop: 10, fontWeight: 600 }}>
+            <div className="nic-alert nic-alert--err nic-alert--strong">
               <span>{genResp.test_warning}</span>
             </div>
           ) : null}
@@ -150,7 +151,7 @@ export default function GenerateIrn() {
             ]}
           />
           {result.SignedQRCode ? (
-            <div style={{ marginTop: 16 }}>
+            <div className="nic-block-offset">
               <QrFromData
                 data={result.SignedQRCode}
                 irn={result.Irn}
@@ -161,7 +162,7 @@ export default function GenerateIrn() {
             </div>
           ) : null}
           {genResp?.persistence_warning ? (
-            <div className="nic-alert nic-alert--err" style={{ marginTop: 12 }}>
+            <div className="nic-alert nic-alert--err nic-alert--offset">
               <span>{genResp.persistence_warning}</span>
             </div>
           ) : null}
@@ -179,7 +180,7 @@ function QrFromData({ data, irn, ackNo, ackDt, docNo }: {
   const [uri, setUri] = useState("");
   const [err, setErr] = useState("");
   useEffect(() => {
-    einvoiceService.renderQr(data).then((r) => setUri(r.data_uri)).catch((e) => setErr(apiErrorMessage(e)));
+    einvoiceService.renderQr(data).then((r) => setUri(r.data_uri)).catch((e) => setErr(messageFrom(e, "Request failed")));
   }, [data]);
   if (err) return <span className="nic-note">QR render failed: {err}</span>;
   if (!uri) return <span className="nic-note">Rendering QR…</span>;

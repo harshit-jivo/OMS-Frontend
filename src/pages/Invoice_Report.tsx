@@ -6,7 +6,7 @@ import {
   HiMagnifyingGlass,
   HiXMark,
 } from "react-icons/hi2";
-import { API_BASE_URL } from "../services/api";
+import { useBillPrint, openBillPrint } from "../hooks/useBillPrint";
 import "../styles/Invoice_Report.css";
 
 // Oil, beverage and mart are separate SAP company databases with separate
@@ -26,11 +26,17 @@ const branchLabel = (value: Branch) =>
   BRANCHES.find((b) => b.value === value)?.label ?? value;
 
 // Bill prints are proxied through our own backend (it resolves DocNum ->
-// DocEntry against the branch's OINV, then streams the Crystal PDF back). The
-// response is application/pdf, so the PDF is embedded via an <iframe> instead
-// of fetched.
-const billPdfUrl = (docNum: string, branch: Branch) =>
-  `${API_BASE_URL}/invoice/crystal/?docNum=${encodeURIComponent(docNum)}&branch=${branch}`;
+// DocEntry against the branch's OINV, then streams the Crystal PDF back).
+//
+// The URL used to be put straight into the <iframe> and the "open in new tab"
+// link. That could not work: those are browser navigations, so no
+// Authorization header is attached, and this project authenticates with JWT
+// alone — no session cookie to fall back on. The request arrived anonymous at
+// a view inheriting IsAuthenticated.
+//
+// It now goes through axios (services/invoicePrint.ts), which attaches the
+// token, refreshes and retries on a 401, and turns a failure into a message
+// instead of a blank rectangle.
 
 export default function Invoice_Report() {
 
@@ -40,8 +46,12 @@ export default function Invoice_Report() {
   // selector must not silently repoint the open preview.
   const [activeBranch, setActiveBranch] = useState<Branch>("OIL");
   const [activeDocNum, setActiveDocNum] = useState("");
-  const [pdfLoading, setPdfLoading] = useState(false);
   const [error, setError] = useState("");
+
+  // Holds the PDF as an object URL and revokes the previous one on every
+  // replacement — a preview per invoice, over a long session, otherwise pins
+  // every PDF in memory for the life of the tab.
+  const preview = useBillPrint();
 
   // ── Route access: now decided once, in components/ProtectedPage.tsx ───────
   // The guard that used to sit here is commented out below rather than removed.
@@ -66,22 +76,19 @@ export default function Invoice_Report() {
       return;
     }
     setError("");
-    setPdfLoading(true);
     setActiveBranch(branch);
-    // Re-setting the same value must still reload the iframe, so clear first.
-    if (trimmed === activeDocNum) {
-      setActiveDocNum("");
-      window.setTimeout(() => setActiveDocNum(trimmed), 0);
-    } else {
-      setActiveDocNum(trimmed);
-    }
+    setActiveDocNum(trimmed);
+    // No clear-then-reset dance any more. That existed because the iframe only
+    // reloaded when its `src` changed, so re-submitting the same Doc Number
+    // did nothing; fetching explicitly re-runs whether or not anything changed.
+    preview.load({ docNum: trimmed, branch });
   };
 
   const handleClear = () => {
     setDocNum("");
     setActiveDocNum("");
     setError("");
-    setPdfLoading(false);
+    preview.load(null);
   };
 
   return (
@@ -164,24 +171,35 @@ export default function Invoice_Report() {
               Bill_{activeDocNum}.pdf
               <span className="invr-viewer-branch">{branchLabel(activeBranch)}</span>
             </span>
-            <a
+            {/* A button, not a link: the PDF has to be FETCHED with the access
+                token before there is anything to open, and an <a href> to the
+                endpoint sends no token at all. `openBillPrint` opens the tab
+                synchronously and points it at the blob afterwards, so the
+                popup blocker still attributes it to this click. */}
+            <button
+              type="button"
               className="invr-btn invr-btn-ghost"
-              href={billPdfUrl(activeDocNum, activeBranch)}
-              target="_blank"
-              rel="noopener noreferrer"
+              disabled={preview.loading}
+              onClick={() => {
+                void openBillPrint({ docNum: activeDocNum, branch: activeBranch })
+                  .then((message) => setError(message));
+              }}
             >
               <HiArrowTopRightOnSquare aria-hidden="true" />
               Open in new tab
-            </a>
+            </button>
           </div>
-          {pdfLoading && <div className="invr-loading">Loading invoice…</div>}
-          <iframe
-            key={`${activeBranch}-${activeDocNum}`}
-            className="invr-pdf-frame"
-            title={`Invoice ${activeDocNum}`}
-            src={billPdfUrl(activeDocNum, activeBranch)}
-            onLoad={() => setPdfLoading(false)}
-          />
+          {preview.loading && <div className="invr-loading">Loading invoice…</div>}
+          {preview.error && <p className="invr-error">{preview.error}</p>}
+          {/* An <iframe> handed an error response renders a blank rectangle or
+              raw JSON, so it is only mounted once there is a real PDF. */}
+          {preview.url && (
+            <iframe
+              className="invr-pdf-frame"
+              title={`Invoice ${activeDocNum}`}
+              src={preview.url}
+            />
+          )}
         </div>
       ) : (
         <div className="invr-empty">

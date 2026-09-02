@@ -1,0 +1,223 @@
+/*
+ * Notifications.css
+ *
+ * Styles for two globally-mounted notification UI pieces (mounted from
+ * src/components/Sidebar.tsx, present on every page):
+ *   - NotificationPermissionModal (src/components/NotificationPermissionModal.tsx)
+ *   - NotificationToaster         (src/components/NotificationToaster.tsx)
+ *
+ * Prefix: "notif-" (modal pieces use notif-modal-*, toaster pieces use
+ * notif-toast-*). Chosen deliberately to avoid colliding with:
+ *   - the pre-existing "sb-notif-*" classes in src/components/Sidebar.css,
+ *     which style a DIFFERENT notification bell/dropdown built earlier in
+ *     this phase;
+ *   - the "trk-toast-in" keyframe / "trk-toast" class used by the Tracker
+ *     app's own hand-rolled toast (src/styles/Tracker.css, src/components/ui/toast.tsx).
+ */
+
+/* ---- NotificationPermissionModal ---- */
+
+.notif-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: rgba(15, 23, 42, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.notif-modal-card {
+  width: 100%;
+  max-width: 420px;
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
+  padding: 28px 24px 22px;
+  text-align: center;
+}
+
+.notif-modal-icon {
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  background: #EFF6FF;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 16px;
+}
+
+.notif-modal-icon-svg {
+  width: 34px;
+  height: 34px;
+}
+
+.notif-modal-title {
+  margin: 0;
+  font-size: 1.4rem;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.notif-modal-subtitle {
+  margin: 6px 0 18px;
+  font-size: 0.9rem;
+  color: #64748b;
+  line-height: 1.5;
+}
+
+.notif-modal-benefits {
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 22px;
+}
+
+.notif-modal-benefit {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.notif-modal-benefit-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.notif-modal-benefit-text {
+  font-size: 0.88rem;
+  color: #334155;
+}
+
+.notif-modal-btn-allow {
+  width: 100%;
+  background: #2563eb;
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: 12px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  cursor: pointer;
+  opacity: 1;
+}
+
+/* Submitting modifier: two-state (submitting boolean) conditional style.
+   Compound selector keeps specificity 0,2,0 so it reliably beats the base
+   rule above regardless of source order. */
+.notif-modal-btn-allow.notif-modal-btn-allow--submitting {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.notif-modal-btn-dismiss {
+  width: 100%;
+  background: none;
+  color: #64748b;
+  border: none;
+  padding: 12px;
+  margin-top: 4px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* ---- NotificationToaster ---- */
+
+.notif-toast-container {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.notif-toast-card {
+  pointer-events: auto;
+  width: 340px;
+  background: #ffffff;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.12);
+  padding: 14px 16px;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.notif-toast-icon {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #eff6ff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.notif-toast-icon-svg {
+  width: 20px;
+  height: 20px;
+}
+
+.notif-toast-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.notif-toast-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.notif-toast-title {
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: #0f172a;
+}
+
+.notif-toast-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  color: #94a3b8;
+  padding: 0;
+}
+
+.notif-toast-message {
+  margin: 4px 0 0;
+  font-size: 0.85rem;
+  color: #475569;
+  line-height: 1.4;
+}
+
+.notif-toast-order {
+  margin: 6px 0 0;
+  font-size: 0.75rem;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.notif-toast-action {
+  margin-top: 10px;
+  background: #2563eb;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}

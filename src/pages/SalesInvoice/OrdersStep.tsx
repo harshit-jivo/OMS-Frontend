@@ -2,6 +2,14 @@ import { useEffect, useMemo, useState } from "react";
 import { HiArrowRight } from "react-icons/hi2";
 import { formatDateDisplay, formatMoney, lineKey, toNumber } from "./salesInvoice.utils";
 import { apiFetch, hanaUrl, type SalesInvoiceState } from "./useSalesInvoice";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 /** What an in-flight invoice log's status means for someone about to invoice
  *  this SO. SAP keeps reporting the order open until that invoice posts, so
@@ -129,6 +137,12 @@ export default function OrdersStep({
 
   const getDocKey = (order: typeof state.salesOrders[number], index: number) => `${order.DocEntry || order.DocNum || index}-${index}`;
 
+  /* `activeOrderKey` is what the user last clicked; it goes stale as soon as the
+     search box narrows the list out from under it. The render below already
+     falls back to the first order in that case, so `activeKey` is just that same
+     fallback expressed as a key — which is all the effect that used to live here
+     wrote back into state, one render later.
+
   useEffect(() => {
     if (filteredOrders.length === 0) {
       setActiveOrderKey(null);
@@ -138,12 +152,15 @@ export default function OrdersStep({
     const activeExists = filteredOrders.some((order, index) => getDocKey(order, index) === activeOrderKey);
     if (!activeExists) setActiveOrderKey(getDocKey(filteredOrders[0], 0));
   }, [activeOrderKey, filteredOrders]);
+  */
 
   const activeOrderEntry = filteredOrders
     .map((order, index) => ({ order, index, key: getDocKey(order, index) }))
     .find((entry) => entry.key === activeOrderKey);
   const activeOrder = activeOrderEntry?.order || filteredOrders[0] || null;
   const activeOrderIndex = activeOrderEntry?.index || 0;
+  const activeKey =
+    activeOrderEntry?.key ?? (filteredOrders.length > 0 ? getDocKey(filteredOrders[0], 0) : null);
   const activeUsedBy = activeOrder
     ? state.usedSalesOrders?.[String(activeOrder.DocNum || activeOrder.DocEntry || activeOrderIndex + 1)]
     : undefined;
@@ -153,7 +170,11 @@ export default function OrdersStep({
     ? activeOpenLines.filter((line) => state.selectedLines[lineKey(activeOrder.DocEntry, line.LineNum)]).length
     : 0;
   const allActiveOpenLinesSelected = activeOpenLines.length > 0 && selectedActiveOpenLineCount === activeOpenLines.length;
-  const activeItemCodes = useMemo(() => {
+  /* No `useMemo`: its only dependency was `activeOrderLines`, a fresh array on
+     every render, so the memo never hit and the React Compiler reported
+     `Compilation Skipped: Existing memoization could not be preserved` for the
+     whole component. The compiler memoises this correctly on its own. */
+  const activeItemCodes = (() => {
     const itemCodeByKey = activeOrderLines.reduce<Record<string, string>>((items, line) => {
       const key = getItemCodeKey(line.ItemCode);
       if (key && !items[key]) items[key] = line.ItemCode;
@@ -162,7 +183,7 @@ export default function OrdersStep({
     return Object.entries(itemCodeByKey)
       .sort(([codeA], [codeB]) => codeA.localeCompare(codeB))
       .map(([key, itemCode]) => ({ key, itemCode }));
-  }, [activeOrderLines]);
+  })();
   const activeItemCodesKey = activeItemCodes.map(({ key }) => key).join("|");
 
   useEffect(() => {
@@ -240,7 +261,7 @@ export default function OrdersStep({
                   const openLines = lines.filter((line) => toNumber(line.OpenQty) > 0);
                   const selectedCount = openLines.filter((line) => state.selectedLines[lineKey(order.DocEntry, line.LineNum)]).length;
                   const docKey = getDocKey(order, index);
-                  const isActive = activeOrderKey === docKey;
+                  const isActive = activeKey === docKey;
                   const isSelected = selectedCount > 0;
                   const docNum = order.DocNum || order.DocEntry || index + 1;
                   const usedBy = state.usedSalesOrders?.[String(docNum)];
@@ -334,10 +355,10 @@ export default function OrdersStep({
                       {activeOrderLines.length === 0 ? (
                         <div className="si-visible-empty-line">No lines found on this sales order.</div>
                       ) : (
-                        <table className="si-so-lines-table">
-                          <thead>
-                            <tr>
-                              <th className="si-so-select-cell">
+                        <Table density="compact">
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead className="si-so-select-cell">
                                 <label className="si-so-select-all">
                                   <input
                                     type="checkbox"
@@ -348,13 +369,13 @@ export default function OrdersStep({
                                   />
                                   <span>Select</span>
                                 </label>
-                              </th>
-                              <th>Item Description</th>
-                              <th className="si-so-open-qty-head">Open Qty</th>
-                              <th>Warehouse Stock / Batches</th>
-                            </tr>
-                          </thead>
-                          <tbody>
+                              </TableHead>
+                              <TableHead>Item Description</TableHead>
+                              <TableHead className="si-so-open-qty-head">Open Qty</TableHead>
+                              <TableHead>Warehouse Stock / Batches</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
                             {activeOrderLines.map((line, lineIndex) => {
                               const key = lineKey(activeOrder.DocEntry || activeOrderIndex, line.LineNum ?? lineIndex);
                               const selected = state.selectedLines[key];
@@ -363,8 +384,8 @@ export default function OrdersStep({
                               const warehouseStock = warehouseStockByItemCode[getItemCodeKey(line.ItemCode)] || [];
 
                               return (
-                                <tr className={cn("si-so-line-row", selected && "is-selected", disabled && "is-disabled")} key={key}>
-                                  <td className="si-so-select-cell">
+                                <TableRow className={cn("si-so-line-row", selected && "is-selected", disabled && "is-disabled")} key={key}>
+                                  <TableCell className="si-so-select-cell">
                                     <input
                                       type="checkbox"
                                       checked={Boolean(selected)}
@@ -372,14 +393,14 @@ export default function OrdersStep({
                                       onChange={() => state.toggleLine(activeOrder, line)}
                                       aria-label={`Select ${line.Dscription || line.ItemCode || "sales order line"}`}
                                     />
-                                  </td>
-                                  <td>
+                                  </TableCell>
+                                  <TableCell>
                                     <span className="si-so-item-description">{line.Dscription || "Unnamed SAP line"}</span>
-                                  </td>
-                                  <td>
+                                  </TableCell>
+                                  <TableCell>
                                     <strong className="si-so-open-qty">{openQty.toLocaleString("en-IN")}</strong>
-                                  </td>
-                                  <td>
+                                  </TableCell>
+                                  <TableCell>
                                     <div className="si-warehouse-stock-row" aria-label={`Warehouse stock for ${line.Dscription || line.ItemCode}`}>
                                       {warehouseStock.length === 0 ? (
                                         <em className="si-warehouse-stock-empty">No warehouse stock</em>
@@ -398,12 +419,12 @@ export default function OrdersStep({
                                         ))
                                       )}
                                     </div>
-                                  </td>
-                                </tr>
+                                  </TableCell>
+                                </TableRow>
                               );
                             })}
-                          </tbody>
-                        </table>
+                          </TableBody>
+                        </Table>
                       )}
                     </div>
                   </>

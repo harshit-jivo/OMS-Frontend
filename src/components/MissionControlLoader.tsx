@@ -58,10 +58,14 @@ type Props = {
    */
   onRaiseCl?: () => void;
   /**
-   * Link to the invoice's bill print. Shown on the success panel only when the
+   * Opens the invoice's bill print. Shown on the success panel only when the
    * parent supplies it (i.e. SAP gave back a document to print).
+   *
+   * A handler rather than a URL: the PDF endpoint needs the access token, so
+   * it has to be FETCHED rather than navigated to. This component stays
+   * presentational and the parent owns the request.
    */
-  reportUrl?: string;
+  onOpenReport?: () => void;
 };
 
 export default function MissionControlLoader({
@@ -69,7 +73,7 @@ export default function MissionControlLoader({
   onClose,
   onRetry,
   onRaiseCl,
-  reportUrl,
+  onOpenReport,
 }: Props) {
   const { status, logs, doc, invoiceNumber, errorMessage, rawError } = state;
   const isRunning = status === "running";
@@ -150,15 +154,10 @@ export default function MissionControlLoader({
             <SummaryPanel doc={doc} />
 
             <div className="mcl-actions">
-              {reportUrl && (
-                <a
-                  className="mcl-btn mcl-btn-ghost"
-                  href={reportUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
+              {onOpenReport && (
+                <button type="button" className="mcl-btn mcl-btn-ghost" onClick={onOpenReport}>
                   <HiDocumentText aria-hidden="true" /> Generate Invoice Report
-                </a>
+                </button>
               )}
               <button ref={primaryRef} type="button" className="mcl-btn mcl-btn-ok" onClick={onClose}>
                 Done

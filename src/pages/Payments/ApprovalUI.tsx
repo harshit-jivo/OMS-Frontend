@@ -8,6 +8,8 @@ import {
 } from "react-icons/hi2";
 
 import type { RequestStatus } from "../../services/approvalService";
+import { Badge, type BadgeTone } from "@/components/ui/badge";
+import { Dialog, DialogClose, DialogContent } from "@/components/ui/dialog";
 
 /**
  * Reusable presentational primitives for the Approval console.
@@ -21,28 +23,27 @@ import type { RequestStatus } from "../../services/approvalService";
 // Status badge
 // ---------------------------------------------------------------------------
 
-const STATUS_TONE: Record<RequestStatus, string> = {
-  DRAFT: "apv-badge-muted",
-  PENDING: "apv-badge-warn",
-  APPROVED: "apv-badge-ok",
-  REJECTED: "apv-badge-err",
-  CANCELLED: "apv-badge-muted",
+/**
+ * Payment-request status -> shared badge tone (Phase 2.2).
+ *
+ * Kept as an explicit map rather than routed through `toneForStatus`: these are
+ * a closed `RequestStatus` union, so the compiler checks every case is covered
+ * here, which it cannot do for the string-keyed lookup.
+ */
+const STATUS_TONE: Record<RequestStatus, BadgeTone> = {
+  DRAFT: "neutral",
+  PENDING: "hold",
+  APPROVED: "ok",
+  REJECTED: "bad",
+  CANCELLED: "neutral",
 };
 
 export function StatusPill({ status, label }: { status: RequestStatus; label?: string }) {
-  return (
-    <span className={`apv-badge ${STATUS_TONE[status] ?? "apv-badge-muted"}`}>
-      {label || status}
-    </span>
-  );
+  return <Badge tone={STATUS_TONE[status] ?? "neutral"}>{label || status}</Badge>;
 }
 
 export function ActivePill({ active }: { active: boolean }) {
-  return (
-    <span className={`apv-badge ${active ? "apv-badge-ok" : "apv-badge-muted"}`}>
-      {active ? "Active" : "Inactive"}
-    </span>
-  );
+  return <Badge tone={active ? "ok" : "neutral"}>{active ? "Active" : "Inactive"}</Badge>;
 }
 
 // ---------------------------------------------------------------------------
@@ -56,7 +57,9 @@ export function TableSkeleton({ rows = 5, cols = 5 }: { rows?: number; cols?: nu
         <tr key={r}>
           {Array.from({ length: cols }).map((__, c) => (
             <td key={c}>
-              <div className="apv-skeleton" style={{ width: c === 0 ? "40%" : "70%" }} />
+              <div
+                className={`apv-skeleton${c === 0 ? " apv-skeleton-first" : ""}`}
+              />
             </td>
           ))}
         </tr>
@@ -76,10 +79,10 @@ export function EmptyState({
 }) {
   return (
     <div className="apv-empty">
-      <HiInbox size={30} style={{ opacity: 0.35, marginBottom: 8 }} />
+      <HiInbox size={30} className="apv-empty-icon" />
       <div className="apv-empty-title">{title}</div>
       {hint && <div>{hint}</div>}
-      {action && <div style={{ marginTop: 12 }}>{action}</div>}
+      {action && <div className="apv-empty-action">{action}</div>}
     </div>
   );
 }
@@ -87,7 +90,7 @@ export function EmptyState({
 export function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
     <div className="apv-error">
-      <HiExclamationTriangle size={26} style={{ marginBottom: 8 }} />
+      <HiExclamationTriangle size={26} className="apv-error-icon" />
       <div>{message}</div>
       {onRetry && (
         <button type="button" className="apv-btn" onClick={onRetry}>
@@ -151,8 +154,7 @@ export function SearchSelect({
     if (!q) return options;
     return options.filter(
       (o) =>
-        o.label.toLowerCase().includes(q) ||
-        (o.hint ? o.hint.toLowerCase().includes(q) : false),
+        o.label.toLowerCase().includes(q) || (o.hint ? o.hint.toLowerCase().includes(q) : false),
     );
   }, [options, query]);
 
@@ -285,6 +287,29 @@ export function SearchSelect({
 // Modal
 // ---------------------------------------------------------------------------
 
+/**
+ * The Approval console's modal — nine call sites behind one component, which is
+ * why this one is worth converting over the pages' one-off overlays.
+ *
+ * It had more of the behaviour than most hand-rolled modals in this codebase:
+ * Escape, a body-scroll lock, `aria-modal` and a real accessible name. What it
+ * still could not do is the part that is genuinely hard to hand-write:
+ *
+ *   * **Trap focus.** Tab walked straight out of the modal into the page
+ *     behind, which stayed reachable and clickable.
+ *   * **Hide the background from assistive tech.** `aria-modal` is advisory;
+ *     the rest of the page stayed in the accessibility tree.
+ *   * **Put focus back.** On close, focus fell to `<body>`, so the next Tab
+ *     restarted from the top of the sidebar.
+ *
+ * The props are unchanged, so all nine call sites are untouched — `Modal` is
+ * mounted only when it is open, so `open` is a constant here and closing is
+ * still reported through `onClose`.
+ *
+ * `variant="bare"` because `.apv-modal` already sets the width, radius, shadow
+ * and the head/body/foot flex column. The close button stays in the head where
+ * that stylesheet positions it, so the primitive's own is switched off.
+ */
 export function Modal({
   title,
   onClose,
@@ -298,44 +323,56 @@ export function Modal({
   wide?: boolean;
   children: ReactNode;
 }) {
-  // Escape closes; body scroll is locked while open.
+  /*
+   * Restore focus by hand, because this component is UNMOUNTED rather than
+   * closed.
+   *
+   * All nine call sites render `{condition && <Modal … />}`, so `onClose`
+   * makes the parent drop the whole subtree — Dialog included — in the same
+   * commit. Radix restores focus while tearing down a dialog that transitions
+   * open -> closed; an abrupt unmount never gives it that transition, and
+   * focus lands on <body>. Which is exactly the defect this conversion was
+   * supposed to fix, so it is worth six lines rather than nine call-site
+   * rewrites.
+   *
+   * A ref, not state: reading document.activeElement during the mount effect
+   * is the last moment it still holds the element that opened the modal.
+   */
+  const openerRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    openerRef.current = document.activeElement as HTMLElement | null;
     return () => {
-      document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = previous;
+      const opener = openerRef.current;
+      // Only if it is still on the page and still focusable — a modal that
+      // deletes the row its own button lived in must not throw here.
+      if (opener?.isConnected) opener.focus();
     };
-  }, [onClose]);
+  }, []);
 
   return (
-    <div className="apv-modal-overlay" onMouseDown={onClose}>
-      <div
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+    >
+      <DialogContent
+        title={title}
+        variant="bare"
+        size="auto"
+        showClose={false}
         className={`apv-modal${wide ? " is-wide" : ""}`}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="apv-modal-head">
           <h3>{title}</h3>
-          <button
-            type="button"
-            className="apv-btn apv-btn-icon"
-            onClick={onClose}
-            aria-label="Close"
-          >
+          <DialogClose type="button" className="apv-btn apv-btn-icon" aria-label="Close">
             <HiXMark />
-          </button>
+          </DialogClose>
         </div>
         <div className="apv-modal-body">{children}</div>
         {footer && <div className="apv-modal-foot">{footer}</div>}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -377,7 +414,7 @@ export function ConfirmDialog({
         </>
       }
     >
-      <p style={{ margin: 0, fontSize: 13, lineHeight: 1.6 }}>{message}</p>
+      <p className="apv-confirm-message">{message}</p>
     </Modal>
   );
 }

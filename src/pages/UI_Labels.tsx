@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { HiPencilSquare, HiTrash, HiPlus } from "react-icons/hi2";
 
-import { showToast } from "../components/NotificationToaster";
+import { showToast } from "@/lib/toastStore";
 import {
   applyLabelUpdate,
   applyFieldUpdate,
@@ -13,11 +14,26 @@ import {
   type UILabelRow,
 } from "../services/uiConfig";
 import "../styles/App_User.css";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { TableSkeleton } from "@/components/ui/skeleton";
+import { errorBody, fieldError, messageFrom } from "@/lib/apiError";
 
 const DISPLAY_NAME_MAX = 100;
 const FIELD_KEY_MAX = 100;
 // Keys are stable machine identifiers clients depend on: lowercase, digits, _.
 const FIELD_KEY_PATTERN = /^[a-z][a-z0-9_]*$/;
+
+const LABELS_KEY = ["ui-labels"] as const;
+/** One identity for "no rows yet", so the filter memo below settles. */
+const NO_LABELS: UILabelRow[] = [];
 
 /**
  * UI Label Management (admin only).
@@ -29,8 +45,22 @@ const FIELD_KEY_PATTERN = /^[a-z][a-z0-9_]*$/;
  * afterwards: clients depend on it as the stable key.
  */
 export default function UILabels() {
-  const [labels, setLabelRows] = useState<UILabelRow[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const { data: labels = NO_LABELS, isPending: isLoading } = useQuery({
+    queryKey: LABELS_KEY,
+    queryFn: uiLabelAdminService.listLabels,
+  });
+
+  /**
+   * Write the list in the cache.
+   *
+   * The three CRUD handlers below each patched a local `labels` array so the
+   * table updated without a refetch. They still do — the array just lives in
+   * the query cache now, which is what makes the patch survive a remount and
+   * lets any other reader of this key see it.
+   */
+  const setLabelRows = (update: (rows: UILabelRow[]) => UILabelRow[]) =>
+    queryClient.setQueryData<UILabelRow[]>(LABELS_KEY, (rows) => update(rows ?? []));
   const [search, setSearch] = useState("");
 
   // Form modal — shared by create ("add") and edit modes.
@@ -50,26 +80,6 @@ export default function UILabels() {
   // Delete confirmation.
   const [deleteRow, setDeleteRow] = useState<UILabelRow | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
-
-  const fetchLabels = async () => {
-    setIsLoading(true);
-    try {
-      const rows = await uiLabelAdminService.listLabels();
-      setLabelRows(rows);
-    } catch (error) {
-      console.error("Failed to load UI labels:", error);
-      showToast({
-        title: "Load failed",
-        message: "Could not load UI labels. Please try again.",
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    void fetchLabels();
-  }, []);
 
   const normalizedSearch = search.trim().toLowerCase();
   const filtered = useMemo(
@@ -187,9 +197,7 @@ export default function UILabels() {
           is_enabled: isEnabled,
           is_required: isRequired,
         });
-        setLabelRows((rows) =>
-          rows.map((row) => (row.id === updated.id ? updated : row)),
-        );
+        setLabelRows((rows) => rows.map((row) => (row.id === updated.id ? updated : row)));
         syncCache(updated);
         showToast({
           title: "Label updated",
@@ -212,13 +220,12 @@ export default function UILabels() {
         });
       }
       closeForm();
-    } catch (error: any) {
-      const data = error?.response?.data;
-      const serverMsg =
-        data?.errors?.field_key?.[0] ||
-        data?.errors?.display_name?.[0] ||
-        data?.message;
-      setFormError(serverMsg || "Could not save the label. Please try again.");
+    } catch (error) {
+      // Two NAMED fields, in a deliberate order — `messageFrom`'s "first field
+      // wins" cannot express that, which is why this one keeps its own read.
+      const errors = errorBody(error)?.errors as Record<string, unknown> | undefined;
+      const serverMsg = fieldError(errors, "field_key") ?? fieldError(errors, "display_name");
+      setFormError(serverMsg || messageFrom(error, "Could not save the label. Please try again."));
     } finally {
       setIsSaving(false);
     }
@@ -254,21 +261,15 @@ export default function UILabels() {
   return (
     <div className="au-page app-page">
       {/* ── PAGE HEADER ── */}
-      <div
-        className="au-header app-page-head"
-        style={{ marginBottom: "24px", alignItems: "center" }}
-      >
+      <div className="au-header app-page-head au-header--center">
         <div>
           <h1 className="au-title app-page-title">UI Label Management</h1>
-          <p
-            className="au-subtitle app-page-subtitle"
-            style={{ margin: "4px 0 0", fontSize: "13px", color: "#64748b" }}
-          >
-            Rename field labels shown across web and mobile. Changes apply on
-            each client&apos;s next login — no deployment or app rebuild needed.
+          <p className="au-subtitle app-page-subtitle">
+            Rename field labels shown across web and mobile. Changes apply on each client&apos;s
+            next login — no deployment or app rebuild needed.
           </p>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+        <div className="au-header-actions">
           <div className="au-search">
             <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
               <circle cx="9" cy="9" r="6" stroke="currentColor" strokeWidth="1.6" />
@@ -297,17 +298,11 @@ export default function UILabels() {
               </button>
             )}
           </div>
-          <span className="au-table-count" style={{ margin: 0 }}>
+          <span className="au-table-count">
             Total: {filtered.length}
           </span>
-          <button
-            className="au-toggle-btn"
-            onClick={openAdd}
-            title="Add label"
-          >
-            <span
-              style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
-            >
+          <button className="au-toggle-btn" onClick={openAdd} title="Add label">
+            <span className="au-btn-label">
               <HiPlus size={16} /> Add Label
             </span>
           </button>
@@ -317,62 +312,49 @@ export default function UILabels() {
       {/* ── LABELS TABLE ── */}
       <div className="au-table-card">
         {isLoading ? (
-          <div className="order-loading-state">
-            <span className="order-loading-spinner" />
-            <span>Loading labels...</span>
-          </div>
+          <TableSkeleton columns={5} label="Loading labels" />
         ) : filtered.length > 0 ? (
           <div className="au-table-wrap">
-            <table className="au-table">
-              <thead>
-                <tr>
-                  <th>Field Key</th>
-                  <th>Display Name</th>
-                  <th>Description</th>
-                  <th>Status</th>
-                  <th>Behaviour</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Field Key</TableHead>
+                  <TableHead>Display Name</TableHead>
+                  <TableHead>Description</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Behaviour</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {filtered.map((row) => (
-                  <tr key={row.id}>
-                    <td className="au-muted">
+                  <TableRow key={row.id}>
+                    <TableCell className="au-muted">
                       <code>{row.field_key}</code>
-                    </td>
-                    <td className="au-name">{row.display_name}</td>
-                    <td>{row.description || <span className="au-muted">—</span>}</td>
-                    <td>
-                      <span
-                        className={`au-chip ${
-                          row.is_active ? "au-active" : "au-inactive"
-                        }`}
-                      >
+                    </TableCell>
+                    <TableCell className="au-name">{row.display_name}</TableCell>
+                    <TableCell>{row.description || <span className="au-muted">—</span>}</TableCell>
+                    <TableCell>
+                      <span className={`au-chip ${row.is_active ? "au-active" : "au-inactive"}`}>
                         {row.is_active ? "Active" : "Inactive"}
                       </span>
-                    </td>
-                    <td>
-                      <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-                        <span
-                          className={`au-chip ${
-                            row.is_enabled ? "au-active" : "au-inactive"
-                          }`}
-                        >
+                    </TableCell>
+                    <TableCell>
+                      <div className="au-cell-chips">
+                        <span className={`au-chip ${row.is_enabled ? "au-active" : "au-inactive"}`}>
                           {row.is_enabled ? "Enabled" : "Disabled"}
                         </span>
                         {row.is_enabled && (
                           <span
-                            className={`au-chip ${
-                              row.is_required ? "au-active" : "au-inactive"
-                            }`}
+                            className={`au-chip ${row.is_required ? "au-active" : "au-inactive"}`}
                           >
                             {row.is_required ? "Required" : "Optional"}
                           </span>
                         )}
                       </div>
-                    </td>
-                    <td>
-                      <div style={{ display: "flex", gap: "8px" }}>
+                    </TableCell>
+                    <TableCell>
+                      <div className="au-cell-actions">
                         <button
                           className="au-edit-btn"
                           onClick={() => openEdit(row)}
@@ -390,11 +372,11 @@ export default function UILabels() {
                           <HiTrash size={16} />
                         </button>
                       </div>
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         ) : (
           <div
@@ -414,13 +396,22 @@ export default function UILabels() {
       </div>
 
       {/* ── ADD / EDIT LABEL MODAL ── */}
-      {showForm && (
-        <div className="au-modal-overlay" role="dialog" aria-modal="true">
-          <div className="au-modal">
+      <Dialog
+        open={Boolean(showForm)}
+        onOpenChange={(next) => {
+          if (!next) setShowForm(false);
+        }}
+      >
+        {showForm && (
+          <DialogContent
+            title="Label form"
+            variant="bare"
+            size="auto"
+            showClose={false}
+            className="au-modal"
+          >
             <div className="au-form-toolbar">
-              <h2 className="au-form-heading">
-                {isEditMode ? "Edit UI Label" : "Add UI Label"}
-              </h2>
+              <h2 className="au-form-heading">{isEditMode ? "Edit UI Label" : "Add UI Label"}</h2>
               <button
                 type="button"
                 className="au-modal-close"
@@ -436,14 +427,11 @@ export default function UILabels() {
                 {/* Field key — editable on create, read-only on edit. */}
                 <div className="au-field au-full">
                   <label className="au-label">
-                    Field Key{" "}
-                    {!isEditMode && <span style={{ color: "#dc2626" }}>*</span>}
+                    Field Key {!isEditMode && <span className="au-req">*</span>}
                   </label>
                   <input
                     value={fieldKey}
-                    onChange={(e) =>
-                      setFieldKey(e.target.value.toLowerCase().replace(/\s+/g, "_"))
-                    }
+                    onChange={(e) => setFieldKey(e.target.value.toLowerCase().replace(/\s+/g, "_"))}
                     maxLength={FIELD_KEY_MAX}
                     placeholder="e.g. price_list"
                     readOnly={isEditMode}
@@ -451,22 +439,16 @@ export default function UILabels() {
                     autoFocus={!isEditMode}
                   />
                   {!isEditMode && (
-                    <span
-                      style={{
-                        fontSize: "12px",
-                        color: "#94a3b8",
-                        marginTop: "4px",
-                      }}
-                    >
-                      Lowercase letters, digits and underscores. Cannot be changed
-                      later — clients use this as the stable key.
+                    <span className="au-hint">
+                      Lowercase letters, digits and underscores. Cannot be changed later — clients
+                      use this as the stable key.
                     </span>
                   )}
                 </div>
 
                 <div className="au-field au-full">
                   <label className="au-label">
-                    Display Name <span style={{ color: "#dc2626" }}>*</span>
+                    Display Name <span className="au-req">*</span>
                   </label>
                   <input
                     value={displayName}
@@ -476,13 +458,7 @@ export default function UILabels() {
                     required
                     autoFocus={isEditMode}
                   />
-                  <span
-                    style={{
-                      fontSize: "12px",
-                      color: "#94a3b8",
-                      marginTop: "4px",
-                    }}
-                  >
+                  <span className="au-hint">
                     {displayName.trim().length}/{DISPLAY_NAME_MAX}
                   </span>
                 </div>
@@ -497,15 +473,12 @@ export default function UILabels() {
                 </div>
 
                 <div className="au-field au-full">
-                  <label
-                    className="au-label"
-                    style={{ display: "flex", alignItems: "center", gap: "8px" }}
-                  >
+                  <label className="au-label au-check-row">
                     <input
                       type="checkbox"
                       checked={isActive}
                       onChange={(e) => setIsActive(e.target.checked)}
-                      style={{ width: "auto" }}
+                      className="au-check"
                     />
                     Active (uncheck to fall back to the built-in default)
                   </label>
@@ -514,34 +487,13 @@ export default function UILabels() {
                 {/* Field behaviour — only meaningful for input-field keys such
                     as po_number. Ignored by pure text labels like price_list. */}
                 <div className="au-field au-full">
-                  <label
-                    className="au-label"
-                    style={{ marginBottom: "8px", color: "#334155" }}
-                  >
-                    Field behaviour
-                  </label>
-                  <span
-                    style={{
-                      fontSize: "12px",
-                      color: "#94a3b8",
-                      margin: "0 0 10px",
-                    }}
-                  >
-                    For input fields (e.g. <code>po_number</code>): control
-                    whether the field shows and whether it is mandatory. Text-only
-                    labels can ignore these.
+                  <label className="au-label au-label--tight">Field behaviour</label>
+                  <span className="au-hint--lead">
+                    For input fields (e.g. <code>po_number</code>): control whether the field shows
+                    and whether it is mandatory. Text-only labels can ignore these.
                   </span>
 
-                  <label
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "8px",
-                      fontSize: "14px",
-                      color: "#0f172a",
-                      marginBottom: "8px",
-                    }}
-                  >
+                  <label className="au-check-row au-toggle-row au-toggle-row--spaced">
                     <input
                       type="checkbox"
                       checked={isEnabled}
@@ -551,26 +503,20 @@ export default function UILabels() {
                         // A hidden field cannot be required.
                         if (!next) setIsRequired(false);
                       }}
-                      style={{ width: "auto" }}
+                      className="au-check"
                     />
                     Field enabled (show this field on the form)
                   </label>
 
                   <label
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "8px",
-                      fontSize: "14px",
-                      color: isEnabled ? "#0f172a" : "#94a3b8",
-                    }}
+                    className={`au-check-row au-toggle-row${isEnabled ? "" : " au-toggle-row--muted"}`}
                   >
                     <input
                       type="checkbox"
                       checked={isRequired}
                       disabled={!isEnabled}
                       onChange={(e) => setIsRequired(e.target.checked)}
-                      style={{ width: "auto" }}
+                      className="au-check"
                     />
                     Field required (mandatory when shown)
                   </label>
@@ -580,11 +526,7 @@ export default function UILabels() {
               {formError && (
                 <p
                   role="alert"
-                  style={{
-                    color: "#dc2626",
-                    fontSize: "13px",
-                    margin: "8px 0 0",
-                  }}
+                  className="au-form-error"
                 >
                   {formError}
                 </p>
@@ -592,22 +534,29 @@ export default function UILabels() {
 
               <div className="au-form-actions">
                 <button type="submit" className="au-submit" disabled={isSaving}>
-                  {isSaving
-                    ? "Saving..."
-                    : isEditMode
-                      ? "Save"
-                      : "Create Label"}
+                  {isSaving ? "Saving..." : isEditMode ? "Save" : "Create Label"}
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
+          </DialogContent>
+        )}
+      </Dialog>
 
       {/* ── DELETE CONFIRMATION ── */}
-      {deleteRow && (
-        <div className="au-modal-overlay" role="dialog" aria-modal="true">
-          <div className="au-modal" style={{ maxWidth: "440px" }}>
+      <Dialog
+        open={Boolean(deleteRow)}
+        onOpenChange={(next) => {
+          if (!next) setDeleteRow(null);
+        }}
+      >
+        {deleteRow && (
+          <DialogContent
+            title="Delete label"
+            variant="bare"
+            size="auto"
+            showClose={false}
+            className="au-modal"
+          >
             <div className="au-form-toolbar">
               <h2 className="au-form-heading">Delete UI Label</h2>
               <button
@@ -619,37 +568,33 @@ export default function UILabels() {
                 &times;
               </button>
             </div>
-            <p style={{ fontSize: "14px", color: "#475569", lineHeight: 1.5 }}>
-              Delete <code>{deleteRow.field_key}</code> (
-              <strong>{deleteRow.display_name}</strong>)? Clients will fall back to
-              the built-in default text. This cannot be undone.
+            <p className="au-delete-text">
+              Delete <code>{deleteRow.field_key}</code> (<strong>{deleteRow.display_name}</strong>)?
+              Clients will fall back to the built-in default text. This cannot be undone.
             </p>
             <div
-              className="au-form-actions"
-              style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}
+              className="au-form-actions au-form-actions--gap"
             >
               <button
                 type="button"
-                className="au-submit"
+                className="au-submit au-btn-cancel"
                 onClick={() => setDeleteRow(null)}
                 disabled={isDeleting}
-                style={{ background: "#e2e8f0", color: "#0f172a" }}
               >
                 Cancel
               </button>
               <button
                 type="button"
-                className="au-submit"
+                className="au-submit au-btn-danger"
                 onClick={handleDelete}
                 disabled={isDeleting}
-                style={{ background: "#dc2626" }}
               >
                 {isDeleting ? "Deleting..." : "Delete"}
               </button>
             </div>
-          </div>
-        </div>
-      )}
+          </DialogContent>
+        )}
+      </Dialog>
     </div>
   );
 }

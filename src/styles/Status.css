@@ -270,6 +270,9 @@
   gap: 8px;
 }
 
+/* Phase 2.2: the last-sync pill is a <Badge> now (Status.tsx:205).
+   Commented out rather than deleted, per the standing instruction. */
+/*
 .st-status-badge {
   display: inline-flex;
   align-items: center;
@@ -291,6 +294,7 @@
   background: rgba(239, 68, 68, 0.16);
   color: #b91c1c;
 }
+*/
 
 /* ── Responsive ──────────────────────────────────────────────────────────── */
 
@@ -326,4 +330,20 @@
     flex-direction: column;
     align-items: flex-start;
   }
+}
+
+/* Shown when one of the four SAP lists fails to load. Until now those errors
+   went to `console.log` and the KPI simply read 0, which is indistinguishable
+   from an empty table — on a page whose only job is reporting whether the data
+   arrived. */
+.st-load-error {
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border: 1px solid #fecaca;
+  border-left: 3px solid #dc2626;
+  border-radius: 6px;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 0.85rem;
+  font-weight: 600;
 }

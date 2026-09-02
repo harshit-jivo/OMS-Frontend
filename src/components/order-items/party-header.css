@@ -95,7 +95,7 @@
 }
 
 /* ── Details modal ── */
-.ph-modal-overlay {
+/* .ph-modal-overlay {
   position: fixed;
   inset: 0;
   z-index: 1300;
@@ -107,7 +107,7 @@
   backdrop-filter: blur(3px);
   overflow-y: auto;
   animation: ph-fade 0.15s ease;
-}
+} */
 
 .ph-modal {
   width: 100%;

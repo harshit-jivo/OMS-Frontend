@@ -1,6 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import api from "../services/api";
 import "../styles/Report.css";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Pagination } from "@/components/ui/pagination";
 
 const toDateInputValue = (date: Date) => {
   const year = date.getFullYear();
@@ -32,7 +42,9 @@ type DashboardStateItemSale = {
 };
 
 const normalize = (value?: string | number | null) =>
-  String(value || "").trim().toLowerCase();
+  String(value || "")
+    .trim()
+    .toLowerCase();
 
 const displayNumber = (value: number) =>
   Number.isInteger(value) ? String(value) : value.toFixed(2);
@@ -43,8 +55,7 @@ const getItemKey = (item: Pick<DashboardStateItemProduct, "item_code" | "item_na
 const getDashboardPeriod = (fromDate: string, toDate: string) => {
   const from = fromDate ? new Date(`${fromDate}T00:00:00`) : now;
   const to = toDate ? new Date(`${toDate}T00:00:00`) : from;
-  const sameMonth =
-    from.getFullYear() === to.getFullYear() && from.getMonth() === to.getMonth();
+  const sameMonth = from.getFullYear() === to.getFullYear() && from.getMonth() === to.getMonth();
 
   return {
     year: from.getFullYear(),
@@ -52,37 +63,61 @@ const getDashboardPeriod = (fromDate: string, toDate: string) => {
   };
 };
 
+/*
+ * A module-level constant, not `[]` inline in the destructure: a fresh array
+ * each render is a new identity, which would invalidate every useMemo below it
+ * on every render — the exact thing those useMemos exist to avoid.
+ */
+const EMPTY_SALES: DashboardStateItemSale[] = [];
+
 export default function StateWise_Report() {
-  const [stateItemSales, setStateItemSales] = useState<DashboardStateItemSale[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [selectedProductType, setSelectedProductType] = useState("");
   const [selectedItemKey, setSelectedItemKey] = useState("");
   const [selectedState, setSelectedState] = useState("");
   const [orderStatus, setOrderStatus] = useState("completed");
   const [fromDate, setFromDate] = useState(firstDay);
   const [toDate, setToDate] = useState(lastDay);
-  const [currentPage, setCurrentPage] = useState(1);
+  /*
+   * The page number, stamped with the filters it was chosen under.
+   *
+   * It used to be a bare number kept in step by two effects — one resetting to
+   * 1 whenever a filter changed, one clamping it when the row count shrank.
+   * Both wrote state from inside an effect, which costs a second render pass
+   * every time and is what `react-hooks/set-state-in-effect` objects to. The
+   * stamp lets the correct page be DERIVED during render instead: if the
+   * filters have moved on since the user picked page 4, page 4 is simply not
+   * what this signature asks for.
+   *
+   * These two effects were always here; converting the fetch to useQuery is
+   * what made the linter able to see them, because the unanalysable fetch
+   * effect above them is gone.
+   */
+  const [pageRequest, setPageRequest] = useState({ signature: "", page: 1 });
 
-  useEffect(() => {
-    const fetchDashboardStateData = async () => {
-      const period = getDashboardPeriod(fromDate, toDate);
-      setIsLoading(true);
+  /*
+   * The key is the DERIVED period, not the two dates.
+   *
+   * `getDashboardPeriod` collapses a date range to a year and a month (0 when
+   * the range spans months), and that pair is all the request carries. Keying
+   * on fromDate/toDate would refetch identical data every time the user nudged
+   * a day inside the same month; keying on what the URL actually contains
+   * means those are cache hits.
+   */
+  const period = getDashboardPeriod(fromDate, toDate);
 
-      try {
-        const response = await api.get(
-          `/orders/dashboardW/charts/?line_year=${period.year}&year=${period.year}&month=${period.month}&status=${orderStatus}`,
-        );
-        setStateItemSales(Array.isArray(response.data?.state_item_sales) ? response.data.state_item_sales : []);
-      } catch (error) {
-        console.error("Failed to fetch dashboard state-wise data:", error);
-        setStateItemSales([]);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchDashboardStateData();
-  }, [fromDate, toDate, orderStatus]);
+  const { data: stateItemSales = EMPTY_SALES, isPending: isLoading } = useQuery({
+    queryKey: ["dashboard-charts", period.year, period.month, orderStatus],
+    queryFn: async () => {
+      const response = await api.get(
+        `/orders/dashboardW/charts/?line_year=${period.year}&year=${period.year}&month=${period.month}&status=${orderStatus}`,
+      );
+      // Same defensive read as before: this endpoint has been seen to answer
+      // with an object when it has nothing to report.
+      return Array.isArray(response.data?.state_item_sales)
+        ? (response.data.state_item_sales as DashboardStateItemSale[])
+        : [];
+    },
+  });
 
   const allRows = useMemo(() => {
     return stateItemSales.flatMap((stateItem) =>
@@ -101,8 +136,8 @@ export default function StateWise_Report() {
 
   const productTypes = useMemo(
     () =>
-      Array.from(new Set(allRows.map((row) => row.productType).filter(Boolean))).sort(
-        (a, b) => a.localeCompare(b),
+      Array.from(new Set(allRows.map((row) => row.productType).filter(Boolean))).sort((a, b) =>
+        a.localeCompare(b),
       ),
     [allRows],
   );
@@ -133,22 +168,26 @@ export default function StateWise_Report() {
     [stateItemSales],
   );
 
-  useEffect(() => {
-    if (selectedItemKey && !itemOptions.some((item) => item.itemKey === selectedItemKey)) {
-      setSelectedItemKey("");
-    }
-  }, [itemOptions, selectedItemKey]);
+  /*
+   * Choosing a product type narrows the item list, which can strip out the item
+   * already chosen. That used to be corrected by an effect writing "" back into
+   * state; deriving it does the same job in one render pass, and leaves the
+   * user's original choice intact should the type filter be cleared again.
+   */
+  const activeItemKey = itemOptions.some((item) => item.itemKey === selectedItemKey)
+    ? selectedItemKey
+    : "";
 
   const reportRows = useMemo(() => {
     return allRows
       .filter((row) => !selectedProductType || row.productType === selectedProductType)
-      .filter((row) => !selectedItemKey || row.itemKey === selectedItemKey)
+      .filter((row) => !activeItemKey || row.itemKey === activeItemKey)
       .filter((row) => !selectedState || row.state === selectedState)
       .sort((a, b) => {
         const stateSort = a.state.localeCompare(b.state);
         return stateSort || b.sales - a.sales || a.product.localeCompare(b.product);
       });
-  }, [allRows, selectedItemKey, selectedProductType, selectedState]);
+  }, [allRows, activeItemKey, selectedProductType, selectedState]);
 
   const totals = reportRows.reduce(
     (sum, row) => ({
@@ -162,36 +201,35 @@ export default function StateWise_Report() {
   const stateCount = new Set(reportRows.map((row) => row.state)).size;
   const productCount = new Set(reportRows.map((row) => row.itemKey)).size;
   const totalPages = Math.max(1, Math.ceil(reportRows.length / itemsPerPage));
+
+  // Everything the request depends on. A change to any of it means the page the
+  // user last picked belongs to a different result set.
+  const filterSignature = [
+    fromDate,
+    toDate,
+    orderStatus,
+    selectedProductType,
+    activeItemKey,
+    selectedState,
+  ].join("|");
+
+  // Clamped as well as stamped: the row count can shrink without the filters
+  // changing at all, when a refetch returns fewer rows.
+  const currentPage =
+    pageRequest.signature === filterSignature ? Math.min(pageRequest.page, totalPages) : 1;
+  const setCurrentPage = (page: number) => setPageRequest({ signature: filterSignature, page });
+
   const paginatedRows = reportRows.slice(
     (currentPage - 1) * itemsPerPage,
     currentPage * itemsPerPage,
   );
   const selectedItemName =
-    itemOptions.find((item) => item.itemKey === selectedItemKey)?.product || "";
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [fromDate, selectedItemKey, selectedProductType, selectedState, toDate, orderStatus]);
-
-  useEffect(() => {
-    if (currentPage > totalPages) {
-      setCurrentPage(totalPages);
-    }
-  }, [currentPage, totalPages]);
+    itemOptions.find((item) => item.itemKey === activeItemKey)?.product || "";
 
   return (
     <div className="dr-page">
       <div className="dr-header">
-        <h1
-          className="dr-title"
-          style={{
-            margin: "0 0 4px",
-            fontSize: "24px",
-            fontWeight: 800,
-            color: "#0f172a",
-            letterSpacing: "-0.02em",
-          }}
-        >
+        <h1 className="dr-title">
           State Wise Report
         </h1>
       </div>
@@ -200,7 +238,7 @@ export default function StateWise_Report() {
         <div className="dr-filter-row">
           <div className="dr-field">
             <label className="dr-label">Product Type</label>
-            <select
+            <select aria-label="Product Type"
               className="dr-date-input"
               value={selectedProductType}
               onChange={(event) => setSelectedProductType(event.target.value)}
@@ -216,9 +254,9 @@ export default function StateWise_Report() {
 
           <div className="dr-field">
             <label className="dr-label">Item</label>
-            <select
+            <select aria-label="Item"
               className="dr-date-input"
-              value={selectedItemKey}
+              value={activeItemKey}
               onChange={(event) => setSelectedItemKey(event.target.value)}
             >
               <option value="">All Items</option>
@@ -232,7 +270,7 @@ export default function StateWise_Report() {
 
           <div className="dr-field">
             <label className="dr-label">State</label>
-            <select
+            <select aria-label="State"
               className="dr-date-input"
               value={selectedState}
               onChange={(event) => setSelectedState(event.target.value)}
@@ -248,7 +286,7 @@ export default function StateWise_Report() {
 
           <div className="dr-field">
             <label className="dr-label">Status</label>
-            <select
+            <select aria-label="Status"
               className="dr-date-input"
               value={orderStatus}
               onChange={(event) => setOrderStatus(event.target.value)}
@@ -262,7 +300,7 @@ export default function StateWise_Report() {
 
           <div className="dr-field">
             <label className="dr-label">From</label>
-            <input
+            <input aria-label="From"
               type="date"
               className="dr-date-input"
               value={fromDate}
@@ -272,7 +310,7 @@ export default function StateWise_Report() {
 
           <div className="dr-field">
             <label className="dr-label">To</label>
-            <input
+            <input aria-label="To"
               type="date"
               className="dr-date-input"
               value={toDate}
@@ -313,65 +351,47 @@ export default function StateWise_Report() {
           <div className="dr-empty">Loading dashboard state-wise data...</div>
         ) : reportRows.length > 0 ? (
           <div className="dr-table-wrap">
-            <table className="dr-table">
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>State</th>
-                  <th>Product</th>
-                  <th>Product Type</th>
-                  <th>Qty</th>
-                  <th>Boxes</th>
-                  <th>Ltrs</th>
-                  <th>Sales</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table density="compact">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>#</TableHead>
+                  <TableHead>State</TableHead>
+                  <TableHead>Product</TableHead>
+                  <TableHead>Product Type</TableHead>
+                  <TableHead>Qty</TableHead>
+                  <TableHead>Boxes</TableHead>
+                  <TableHead>Ltrs</TableHead>
+                  <TableHead>Sales</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {paginatedRows.map((row, index) => (
-                  <tr key={`${row.state}-${row.itemKey}`}>
-                    <td className="dr-muted">
+                  <TableRow key={`${row.state}-${row.itemKey}`}>
+                    <TableCell className="dr-muted">
                       {(currentPage - 1) * itemsPerPage + index + 1}
-                    </td>
-                    <td className="dr-bold">{row.state}</td>
-                    <td>{row.product}</td>
-                    <td>{row.productType}</td>
-                    <td style={{ textAlign: "center" }}>{displayNumber(row.qty)}</td>
-                    <td style={{ textAlign: "center" }}>
+                    </TableCell>
+                    <TableCell className="dr-bold">{row.state}</TableCell>
+                    <TableCell>{row.product}</TableCell>
+                    <TableCell>{row.productType}</TableCell>
+                    <TableCell className="text-center">{displayNumber(row.qty)}</TableCell>
+                    <TableCell className="text-center">
                       {displayNumber(row.boxes)}
-                    </td>
-                    <td style={{ textAlign: "center" }}>
-                      {displayNumber(row.ltrs)}
-                    </td>
-                    <td style={{ textAlign: "center" }}>{displayNumber(row.sales)}</td>
-                  </tr>
+                    </TableCell>
+                    <TableCell className="text-center">{displayNumber(row.ltrs)}</TableCell>
+                    <TableCell className="text-center">
+                      {displayNumber(row.sales)}
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         ) : (
           <div className="dr-empty">No dashboard state-wise data found</div>
         )}
 
         {reportRows.length > itemsPerPage && (
-          <div className="dr-pagination">
-            <button
-              className="dr-pg-btn"
-              disabled={currentPage === 1}
-              onClick={() => setCurrentPage((page) => page - 1)}
-            >
-              Prev
-            </button>
-            <span className="dr-pg-info">
-              {currentPage} / {totalPages}
-            </span>
-            <button
-              className="dr-pg-btn"
-              disabled={currentPage === totalPages}
-              onClick={() => setCurrentPage((page) => page + 1)}
-            >
-              Next
-            </button>
-          </div>
+          <Pagination page={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
         )}
       </div>
     </div>

@@ -22,8 +22,18 @@
   display: none; /* Hidden as per previous instruction */
 }
 
+/*
+ * The comment that used to sit here read "Styles moved to inline in JSX for
+ * consistency with other pages". That move is what this phase is undoing, so
+ * the declarations are back — identical values, taken off the four <h1>s that
+ * carried them.
+ */
 .dr-title {
-  /* Styles moved to inline in JSX for consistency with other pages */
+  margin: 0 0 4px;
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: #0f172a;
 }
 
 .dr-filter-card,
@@ -431,7 +441,7 @@
   overflow: hidden;
 }
 
-.dr-pagination {
+/* .dr-pagination {
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -440,8 +450,8 @@
   border-top: 1px solid rgba(226, 232, 240, 0.9);
   background: rgba(248, 250, 252, 0.78);
 }
-
-.dr-pg-btn {
+ */
+/* .dr-pg-btn {
   display: inline-flex; align-items: center; justify-content: center;
   height: 36px;
   padding: 0 14px;
@@ -454,23 +464,23 @@
   cursor: pointer;
   transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
 }
-
-.dr-pg-btn:hover:not(:disabled) {
+ */
+/* .dr-pg-btn:hover:not(:disabled) {
   border-color: #93c5fd;
   background: #f8fbff;
 }
-
-.dr-pg-btn:disabled {
+ */
+/* .dr-pg-btn:disabled {
   cursor: not-allowed;
   opacity: 0.5;
 }
-
-.dr-pg-info {
+ */
+/* .dr-pg-info {
   font-size: 13px;
   font-weight: 600;
   color: #475569;
 }
-
+ */
 .dr-report-header {
   display: flex;
   align-items: center;
@@ -519,20 +529,20 @@
   max-height: 54vh;
 }
 
-.dr-table {
+/* .dr-table {
   width: 100%;
   min-width: 780px;
   border-collapse: collapse;
 }
-
-.dr-table thead {
+ */
+/* .dr-table thead {
   position: sticky;
   top: 0;
   z-index: 2;
   background: linear-gradient(160deg, #18253f 0%, #223455 100%);
 }
-
-.dr-table th {
+ */
+/* .dr-table th {
   padding: 13px 14px;
   text-align: center;
   font-size: 11px;
@@ -541,8 +551,8 @@
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.78);
 }
-
-.dr-table td {
+ */
+/* .dr-table td {
   padding: 13px 14px;
   font-size: 13px;
   color: #334155;
@@ -550,23 +560,23 @@
   background: rgba(255, 255, 255, 0.78);
   text-align: center;
 }
-
-.dr-table tbody tr:hover td {
+ */
+/* .dr-table tbody tr:hover td {
   background: #f8fbff;
 }
-
-.dr-table tbody tr.dr-foc-row td {
+ */
+/* .dr-table tbody tr.dr-foc-row td {
   background: #fff7ed;
 }
-
-.dr-table tbody tr.dr-foc-row td:first-child {
+ */
+/* .dr-table tbody tr.dr-foc-row td:first-child {
   box-shadow: inset 4px 0 0 #f97316;
 }
-
-.dr-table tbody tr.dr-foc-row:hover td {
+ */
+/* .dr-table tbody tr.dr-foc-row:hover td {
   background: #ffedd5;
 }
-
+ */
 .dr-muted {
   font-size: 12px;
   color: #94a3b8;
@@ -579,36 +589,49 @@
 
 .dr-empty {
   text-align: center;
-  padding: 2.6rem;
-  color: #94a3b8;
+  /*
+   * `2.6rem` and `#94a3b8` were the declared values and neither has ever
+   * rendered: the inline style on this div set `40px` and `#64748b` and beat
+   * them both. These are the values that were on screen. The four below never
+   * existed here at all.
+   */
+  padding: 40px;
+  color: #64748b;
+  margin: 20px 0;
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
 }
 
-.dr-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 5px 10px;
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
+/* The order-item table's cell classes moved to UIConsistency.css — the four
+   order pages render the same table and do not import this file. */
 
-.dr-badge-approved {
-  background: rgba(22, 163, 74, 0.12);
-  color: #15803d;
-}
+/* .dr-badge {
+   display: inline-flex;
+   align-items: center;
+   justify-content: center;
+   padding: 5px 10px;
+   border-radius: 999px;
+   font-size: 10px;
+   font-weight: 700;
+   text-transform: uppercase;
+   letter-spacing: 0.06em;
+   } */
 
-.dr-badge-pending {
-  background: rgba(245, 158, 11, 0.12);
-  color: #d97706;
-}
+/* .dr-badge-approved {
+   background: rgba(22, 163, 74, 0.12);
+   color: #15803d;
+   } */
 
-.dr-badge-rejected {
-  background: rgba(220, 38, 38, 0.12);
-  color: #dc2626;
-}
+/* .dr-badge-pending {
+   background: rgba(245, 158, 11, 0.12);
+   color: #d97706;
+   } */
+
+/* .dr-badge-rejected {
+   background: rgba(220, 38, 38, 0.12);
+   color: #dc2626;
+   } */
 
 .dr-badge-billed {
   background: rgba(37, 99, 235, 0.12);
@@ -764,11 +787,11 @@
   line-height: 1.2;
 }
 
-.dr-d-header-card .dr-badge {
-  background: rgba(255, 255, 255, 0.12);
-  color: rgba(255, 255, 255, 0.92);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-}
+/* .dr-d-header-card .dr-badge {
+   background: rgba(255, 255, 255, 0.12);
+   color: rgba(255, 255, 255, 0.92);
+   border: 1px solid rgba(255, 255, 255, 0.16);
+   } */
 
 .dr-d-hf-label {
   font-size: 10px;
@@ -836,20 +859,20 @@
   border-radius: 999px;
 }
 
-.dr-d-tbl {
+/* .dr-d-tbl {
   width: 100%;
   min-width: 820px;
   border-collapse: collapse;
   font-size: 13px;
 }
-
-.dr-d-tbl thead {
+ */
+/* .dr-d-tbl thead {
   position: sticky;
   top: 0;
   z-index: 1;
 }
-
-.dr-d-tbl th {
+ */
+/* .dr-d-tbl th {
   padding: 11px 14px;
   background: linear-gradient(160deg, #18253f 0%, #223455 100%);
   color: rgba(255, 255, 255, 0.84);
@@ -860,8 +883,8 @@
   letter-spacing: 0.06em;
   white-space: nowrap;
 }
-
-.dr-d-tbl td {
+ */
+/* .dr-d-tbl td {
   padding: 11px 14px;
   color: #475569;
   border-bottom: 1px solid #e8eef5;
@@ -869,15 +892,15 @@
   transition: background 0.12s ease;
   white-space: nowrap;
 }
-
-.dr-d-tbl tbody tr:nth-child(even) {
+ */
+/* .dr-d-tbl tbody tr:nth-child(even) {
   background: #fafcff;
 }
-
-.dr-d-tbl tbody tr:hover {
+ */
+/* .dr-d-tbl tbody tr:hover {
   background: #eff6ff;
 }
-
+ */
 .dr-d-item-code {
   display: inline-block;
   padding: 3px 8px;
@@ -970,9 +993,20 @@
     padding: 18px;
   }
 
+  /*
+   * Dead before this conversion, and kept dead deliberately.
+   *
+   * The inline `font-size: 24px` on the <h1> beat this at every width, so the
+   * title has never been 26px on a tablet. Now that 24px lives in the base
+   * class, uncommenting this would enlarge it there for the first time — a
+   * visual change at a breakpoint the 1440x900 suite does not watch. The
+   * ≤480px rule further down sets 24px, the same value the base class now
+   * has, so that one is redundant rather than dead and is left alone.
+   *
   .dr-title {
     font-size: 26px;
   }
+  */
 
   .dr-filter-row > .dr-field {
     flex: 1 1 calc(50% - 12px);
@@ -998,11 +1032,11 @@
     max-height: none;
   }
 
-  .dr-table,
+  /* .dr-table,
   .dr-d-tbl {
     min-width: 680px;
   }
-
+ */
   .dr-d-info-grid {
     grid-template-columns: repeat(2, 1fr);
   }
@@ -1037,13 +1071,13 @@
     font-size: 24px;
   }
 
-  .dr-table th,
+  /* .dr-table th,
   .dr-table td,
   .dr-d-tbl th,
   .dr-d-tbl td {
     padding: 9px 10px;
   }
-
+ */
   .dr-d-info-grid {
     grid-template-columns: 1fr;
   }
@@ -1052,8 +1086,8 @@
     grid-column: span 1;
   }
 
-  .dr-table,
+  /* .dr-table,
   .dr-d-tbl {
     min-width: 620px;
   }
-}
+ */}

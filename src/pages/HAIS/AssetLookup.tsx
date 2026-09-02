@@ -1,10 +1,20 @@
-import { useState } from "react";
+import { useState, Suspense, lazy } from "react";
 import { HiMagnifyingGlass, HiQrCode, HiPencil, HiUserPlus } from "react-icons/hi2";
-import { KeyValues, StatusBadge, ErrorAlert, apiErrorMessage } from "../../components/NicUI";
+import { KeyValues, StatusBadge, ErrorAlert } from "../../components/NicUI";
+import { messageFrom } from "@/lib/apiError";
 import { haisService, configSummary, holderLabel, type Asset } from "../../services/haisService";
 import AssetHistory from "./AssetHistory";
 import AssetActionModal from "./AssetActionModal";
-import QrScanner from "./QrScanner";
+/*
+ * The camera scanner is loaded when the user asks to scan — Phase 5.3.
+ *
+ * `html5-qrcode` is ~350 kB and was pulled in by the HAIS page chunk, so
+ * looking up an asset by typing its code downloaded a camera library that
+ * would never be used. It only ever renders behind `scanning &&`, which makes
+ * it the cleanest possible split: the component's own mount condition IS the
+ * moment the code is needed.
+ */
+const QrScanner = lazy(() => import("./QrScanner"));
 
 type Props = {
   onEdit?: (assetId: string) => void;
@@ -54,7 +64,7 @@ export default function AssetLookup({ onEdit }: Props) {
     try {
       setAsset(await haisService.get(id));
     } catch (err) {
-      setError(apiErrorMessage(err));
+      setError(messageFrom(err, "Request failed"));
     } finally {
       setBusy(false);
     }
@@ -72,7 +82,7 @@ export default function AssetLookup({ onEdit }: Props) {
     try {
       setAsset(await haisService.getBySerial(code));
     } catch (err) {
-      setError(apiErrorMessage(err));
+      setError(messageFrom(err, "Request failed"));
     } finally {
       setBusy(false);
     }
@@ -101,21 +111,28 @@ export default function AssetLookup({ onEdit }: Props) {
 
       <div className="nic-actions-row">
         <button className="ofs-primary" onClick={() => void run()} disabled={busy}>
-          <HiMagnifyingGlass style={{ verticalAlign: "-3px", marginRight: 6 }} />
+          <HiMagnifyingGlass className="nic-icon-lead" />
           {busy ? "Searching…" : "Look up"}
         </button>
         <button className="nic-tab" onClick={() => setScanning(true)} disabled={busy}>
-          <HiQrCode style={{ verticalAlign: "-3px", marginRight: 6 }} />
+          <HiQrCode className="nic-icon-lead" />
           Scan QR
         </button>
       </div>
 
-      {scanning && <QrScanner onDecode={(t) => void onScan(t)} onClose={() => setScanning(false)} />}
+      {scanning && (
+        // No fallback: the scanner is a full-screen overlay, and flashing a
+        // placeholder overlay before the real one is worse than a brief pause
+        // on the button the user just pressed.
+        <Suspense fallback={null}>
+          <QrScanner onDecode={(t) => void onScan(t)} onClose={() => setScanning(false)} />
+        </Suspense>
+      )}
 
       <ErrorAlert>{error}</ErrorAlert>
 
       {asset && (
-        <div className="nic-result" style={{ marginTop: 16 }}>
+        <div className="nic-result nic-result--offset">
           <div className="nic-subsection">
             <h4 className="nic-subsection-title">
               {asset.asset_id}{" "}
@@ -148,11 +165,11 @@ export default function AssetLookup({ onEdit }: Props) {
 
           <div className="nic-actions-row">
             <button className="ofs-primary" onClick={() => setAction("handover")}>
-              <HiUserPlus style={{ verticalAlign: "-3px", marginRight: 6 }} />
+              <HiUserPlus className="nic-icon-lead" />
               Handover
             </button>
             <button className="nic-tab" onClick={() => onEdit?.(asset.asset_id)}>
-              <HiPencil style={{ verticalAlign: "-3px", marginRight: 6 }} />
+              <HiPencil className="nic-icon-lead" />
               Edit / Update Config
             </button>
           </div>

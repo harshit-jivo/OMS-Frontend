@@ -1,7 +1,16 @@
 import { useEffect, useState } from "react";
 import { HiPlusCircle } from "react-icons/hi2";
-import { NicField, ErrorAlert, SuccessAlert, apiErrorMessage } from "../../components/NicUI";
+import { NicField, ErrorAlert, SuccessAlert } from "../../components/NicUI";
+import { messageFrom } from "@/lib/apiError";
 import { type HaisOption } from "../../services/haisService";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 type Props = {
   /** Plural title, e.g. "Departments". */
@@ -57,7 +66,7 @@ export default function OptionManager({ title, singular, load, create }: Props) 
       setSuccess(`${singular} "${value}" added.`);
       setRows(await load());
     } catch (err) {
-      setError(apiErrorMessage(err));
+      setError(messageFrom(err, "Request failed"));
     } finally {
       setBusy(false);
     }
@@ -86,7 +95,7 @@ export default function OptionManager({ title, singular, load, create }: Props) 
 
       <div className="nic-actions-row">
         <button className="ofs-primary" onClick={() => void add()} disabled={busy}>
-          <HiPlusCircle style={{ verticalAlign: "-3px", marginRight: 6 }} />
+          <HiPlusCircle className="nic-icon-lead" />
           {busy ? "Adding…" : `Add ${singular}`}
         </button>
       </div>
@@ -95,33 +104,33 @@ export default function OptionManager({ title, singular, load, create }: Props) 
       <SuccessAlert>{success}</SuccessAlert>
 
       {/* List */}
-      <div className="nic-table-wrap" style={{ marginTop: 16 }}>
-        <table className="nic-table">
-          <thead>
-            <tr>
-              <th style={{ width: 64 }}>#</th>
-              <th>{singular}</th>
-            </tr>
-          </thead>
-          <tbody>
+      <div className="nic-table-wrap nic-table-wrap--offset">
+        <Table density="compact">
+          <TableHeader>
+            <TableRow>
+              <TableHead className="nic-col-tiny">#</TableHead>
+              <TableHead>{singular}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {loading ? (
-              <tr>
-                <td colSpan={2} className="nic-note">Loading…</td>
-              </tr>
+              <TableRow>
+                <TableCell colSpan={2} className="nic-note">Loading…</TableCell>
+              </TableRow>
             ) : rows.length === 0 ? (
-              <tr>
-                <td colSpan={2} className="nic-note">No {title.toLowerCase()} yet — add one above.</td>
-              </tr>
+              <TableRow>
+                <TableCell colSpan={2} className="nic-note">No {title.toLowerCase()} yet — add one above.</TableCell>
+              </TableRow>
             ) : (
               rows.map((r, i) => (
-                <tr key={r.id}>
-                  <td>{i + 1}</td>
-                  <td>{r.name}</td>
-                </tr>
+                <TableRow key={r.id}>
+                  <TableCell>{i + 1}</TableCell>
+                  <TableCell>{r.name}</TableCell>
+                </TableRow>
               ))
             )}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
     </section>
   );

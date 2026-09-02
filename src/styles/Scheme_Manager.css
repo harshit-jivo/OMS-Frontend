@@ -460,6 +460,9 @@
 
 .sch-state.error { color: #b91c1c; }
 
+/* Wraps the three loading placeholders shown while the list is fetching. */
+.sch-skeleton-wrap { padding: 8px 0; }
+
 .sch-skeleton {
   height: 58px;
   border-radius: 10px;
@@ -686,6 +689,28 @@
 .sch-result-line { margin-top: 6px; font-size: 13px; color: #334155; }
 .sch-result-line.give { color: #047857; font-weight: 600; }
 .sch-result-meta { margin-top: 5px; font-size: 12px; color: #94a3b8; }
+
+/* Vendor-check panel: the "What do they get?" / "Run the test" action rows,
+   and the result blocks that appear underneath each. */
+.sch-check-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+
+.sch-run-row { margin-top: 14px; }
+
+.sch-check-results { margin-top: 18px; }
+
+/* Modifiers layered onto the shared .sch-notice / .sch-hint base rules —
+   compound selectors so they win regardless of source order. Both base
+   classes are used only in this file (verified via grep), but they carry
+   other spacing elsewhere in it, so the extra margin is scoped here rather
+   than added to the base rule. */
+.sch-notice.sch-notice--tight { margin-top: 14px; margin-bottom: 0; }
+.sch-hint.sch-hint--mb10 { margin-bottom: 10px; }
+.sch-hint.sch-hint--ml10 { margin-left: 10px; }
 
 /* ── the editor, written as a sentence ──────────────────────────────── */
 

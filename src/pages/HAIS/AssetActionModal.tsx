@@ -1,6 +1,7 @@
 import { useState } from "react";
 import DateInput from "../../components/DateInput";
-import { NicField, ErrorAlert, apiErrorMessage } from "../../components/NicUI";
+import { NicField, ErrorAlert } from "../../components/NicUI";
+import { messageFrom } from "@/lib/apiError";
 import {
   haisService,
   configSummary,
@@ -83,7 +84,7 @@ export default function AssetActionModal({ asset, mode, onClose, onDone }: Props
           });
       onDone(updated);
     } catch (err) {
-      setError(apiErrorMessage(err));
+      setError(messageFrom(err, "Request failed"));
     } finally {
       setBusy(false);
     }
@@ -116,25 +117,23 @@ export default function AssetActionModal({ asset, mode, onClose, onDone }: Props
 
   return (
     <div
-      className="sb-modal-overlay"
+      className="sb-modal-overlay hais-action-overlay"
       onClick={onClose}
-      style={{ zIndex: 1000, position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
     >
       <div
-        className="sb-modal"
+        className="sb-modal hais-action-modal"
         onClick={(e) => e.stopPropagation()}
-        style={{ width: "100%", maxWidth: 720, maxHeight: "88vh", overflowY: "auto", background: "#fff", borderRadius: 12, padding: 24, boxShadow: "0 10px 25px rgba(0,0,0,0.1)" }}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-          <h3 style={{ margin: 0 }}>
+        <div className="nic-modal-head nic-modal-head--tight-6">
+          <h3 className="nic-modal-title">
             {isHandover ? "Handover" : "Update Configuration"} — <span className="nic-mono">{asset.asset_id}</span>
           </h3>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 24, color: "#64748b", lineHeight: 1 }}>
+          <button onClick={onClose} className="nic-modal-close">
             &times;
           </button>
         </div>
 
-        <p className="nic-note" style={{ marginTop: 0 }}>
+        <p className="nic-note nic-note--flush">
           Currently with: <strong>{asset.current_user_name || asset.current_user_id || "—"}</strong>
           {" · "}Config: {configSummary(asset) || "—"}
         </p>
@@ -168,7 +167,7 @@ export default function AssetActionModal({ asset, mode, onClose, onDone }: Props
               </NicField>
             </div>
 
-            <label style={{ display: "flex", alignItems: "center", gap: 8, margin: "6px 0 4px" }}>
+            <label className="hais-upgrade-check">
               <input type="checkbox" checked={alsoUpgrade} onChange={(e) => setAlsoUpgrade(e.target.checked)} />
               <span>Also change configuration for the new user (e.g. hardware team increases RAM)</span>
             </label>
@@ -181,7 +180,7 @@ export default function AssetActionModal({ asset, mode, onClose, onDone }: Props
           </>
         ) : (
           <>
-            <p className="nic-note" style={{ marginTop: 0 }}>
+            <p className="nic-note nic-note--flush">
               Use this when only the hardware changed (no new user). The before → after change is saved in the device history.
             </p>
             <h4 className="nic-subsection-title">New Configuration</h4>
@@ -199,7 +198,7 @@ export default function AssetActionModal({ asset, mode, onClose, onDone }: Props
 
         <ErrorAlert>{error}</ErrorAlert>
 
-        <div className="nic-actions-row" style={{ marginTop: 12 }}>
+        <div className="nic-actions-row nic-actions-row--top12">
           <button className="ofs-primary" onClick={() => void submit()} disabled={busy}>
             {busy ? "Saving…" : isHandover ? "Confirm Handover" : "Save Change"}
           </button>

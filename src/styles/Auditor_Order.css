@@ -28,12 +28,12 @@
         }
         .ao-date-input:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,.1); }
 
-        .ao-pagination { display:flex; align-items:center; justify-content:flex-end; gap:4px; margin-top:16px; }
-        .ao-pg-btn { height: 36px; padding: 0 14px; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; font-family: 'Inter', sans-serif; border: 1px solid #e2e8f0; border-radius: var(--radius-sm, 8px); background: #fff; color: #64748b; cursor: pointer; transition: all .15s; }
-        .ao-pg-btn:hover:not(:disabled) { background:#f8fafc; border-color:#cbd5e1; color:#1e293b; }
-        .ao-pg-btn:disabled { opacity:.4; cursor:not-allowed; }
-        .ao-pg-info { font-size:12px; font-weight:600; color:#1e293b; font-family:'Inter',sans-serif; padding:0 4px; }
-
+        /* .ao-pagination { display:flex; align-items:center; justify-content:flex-end; gap:4px; margin-top:16px; }
+ */        /* .ao-pg-btn { height: 36px; padding: 0 14px; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; font-family: 'Inter', sans-serif; border: 1px solid #e2e8f0; border-radius: var(--radius-sm, 8px); background: #fff; color: #64748b; cursor: pointer; transition: all .15s; }
+ */        /* .ao-pg-btn:hover:not(:disabled) { background:#f8fafc; border-color:#cbd5e1; color:#1e293b; }
+ */        /* .ao-pg-btn:disabled { opacity:.4; cursor:not-allowed; }
+ */        /* .ao-pg-info { font-size:12px; font-weight:600; color:#1e293b; font-family:'Inter',sans-serif; padding:0 4px; }
+ */
         /* Table */
         .ao-table-wrap {
           border-radius: var(--radius-md, 12px); border: 1px solid #e2e8f0; background: #fff;
@@ -44,35 +44,57 @@
         .ao-table-wrap::-webkit-scrollbar { width: 5px; height: 5px; }
         .ao-table-wrap::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
 
-        .ao-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-        .ao-table thead { background: #1e293b; position: sticky; top: 0; z-index: 2; }
-        .ao-table th {
+        /* .ao-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+ */        /* .ao-table thead { background: #1e293b; position: sticky; top: 0; z-index: 2; }
+ */        /* .ao-table th {
           color: #e2e8f0; padding: 11px 14px; font-size: 11px; font-weight: 600;
           text-align: left; text-transform: uppercase; letter-spacing: .04em;
           white-space: nowrap; border-bottom: 2px solid #334155;
           text-align: center;
         }
-        .ao-table td { padding: 10px 14px; border-bottom: 1px solid #e5e7eb; color: #334155; transition: background .1s; }
-        .ao-table tbody tr:hover { background: #eff6ff; }
-        .ao-table tbody tr:nth-child(even) { background: #f8fafc; }
-        .ao-table tbody tr:nth-child(even):hover { background: #eff6ff; }
-        .ao-table tbody tr.ao-foc-row,
+ */        /* .ao-table td { padding: 10px 14px; border-bottom: 1px solid #e5e7eb; color: #334155; transition: background .1s; }
+ */        /* .ao-table tbody tr:hover { background: #eff6ff; }
+ */        /* .ao-table tbody tr:nth-child(even) { background: #f8fafc; }
+ */        /* .ao-table tbody tr:nth-child(even):hover { background: #eff6ff; }
+ */        /* .ao-table tbody tr.ao-foc-row,
         .ao-table tbody tr.ao-foc-row:nth-child(even) {
           background: #fff7ed;
           box-shadow: inset 4px 0 0 #f97316;
         }
-        .ao-table tbody tr.ao-foc-row:hover,
+ */        /* .ao-table tbody tr.ao-foc-row:hover,
         .ao-table tbody tr.ao-foc-row:nth-child(even):hover {
           background: #ffedd5;
         }
-        .ao-action-cell { white-space: nowrap; }
+ */        .ao-action-cell { white-space: nowrap; }
         .ao-empty { text-align: center; color: #94a3b8; padding: 32px !important; font-style: italic; }
 
+        /* Auditor_Order.tsx "no orders found" panel only. Compound selector
+           (0,2,0) so `color` reliably beats the shared `.ao-empty` rule above
+           regardless of stylesheet order; `.ao-empty`'s own `padding: 32px
+           !important` and `font-style: italic` still win through untouched —
+           matches the pre-conversion inline style's actual computed result
+           (its `padding: 40px` was already being overridden by that
+           `!important`). Do not extend the base `.ao-empty` rule itself: it is
+           also used by Rate_Approver_Order.tsx, outside this group. */
+        .ao-empty.ao-empty-panel {
+          color: #64748b;
+          background: #f8fafc;
+          border-radius: 8px;
+          border: 1px dashed #cbd5e1;
+          margin: 20px 0;
+        }
+
         /* Badge */
-        .ao-badge { display: inline-flex; padding: 3px 10px; border-radius: 4px; font-size: 11px; font-weight: 600; background: #dbeafe; color: #1e40af; }
-        .ao-badge-approved { background: #dcfce7; color: #166534; }
-        .ao-badge-rejected { background: #fee2e2; color: #991b1b; }
-        .ao-badge-pending, .ao-badge-pending-approval { background: #fef3c7; color: #92400e; }
+        /*
+         * DEAD, not converted — Phase 2.2. Auditor_Order.tsx never referenced
+         * any of these: the page renders only `.ao-foc-badge`, so these status
+         * colours have been styling nothing. Commented out rather than deleted,
+         * per the standing instruction on this refactor.
+         */
+        /* .ao-badge { display: inline-flex; padding: 3px 10px; border-radius: 4px; font-size: 11px; font-weight: 600; background: #dbeafe; color: #1e40af; } */
+        /* .ao-badge-approved { background: #dcfce7; color: #166534; } */
+        /* .ao-badge-rejected { background: #fee2e2; color: #991b1b; } */
+        /* .ao-badge-pending, .ao-badge-pending-approval { background: #fef3c7; color: #92400e; } */
         .ao-foc-badge {
           display: inline-flex;
           align-items: center;
@@ -88,11 +110,11 @@
           letter-spacing: .04em;
           white-space: nowrap;
         }
-        .ao-foc-badge-detail {
-          background: #fb923c;
-          border-color: rgba(255,255,255,.32);
-          box-shadow: 0 0 0 3px rgba(251,146,60,.18);
-        }
+        /* .ao-foc-badge-detail {
+           background: #fb923c;
+           border-color: rgba(255,255,255,.32);
+           box-shadow: 0 0 0 3px rgba(251,146,60,.18);
+           } */
         .ao-foc-empty { color: #94a3b8; font-weight: 600; }
 
         /* Buttons */
@@ -229,14 +251,14 @@
         .ao-d-items-scroll::-webkit-scrollbar { width: 4px; height: 4px; }
         .ao-d-items-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
 
-        .ao-d-tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
-        .ao-d-tbl thead { position: sticky; top: 0; z-index: 1; }
-        .ao-d-tbl th { background: #1e293b; color: #e2e8f0; padding: 10px 14px; font-size: 10px; font-weight: 600; text-align: left; text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; border-bottom: 2px solid #334155; }
-        .ao-d-tbl td { padding: 10px 14px; color: #475569; border-bottom: 1px solid #e5e7eb; font-variant-numeric: tabular-nums; transition: background .1s; }
-        .ao-d-tbl tbody tr:hover { background: #eff6ff; }
-        .ao-d-tbl tbody tr:nth-child(even) { background: #f8fafc; }
-        .ao-d-tbl tbody tr:nth-child(even):hover { background: #eff6ff; }
-        .ao-d-item-code { display: inline-block; background: #f1f5f9; padding: 2px 7px; border-radius: 4px; font-size: 11px; font-weight: 600; color: #475569; font-family: 'SF Mono','Cascadia Code','Consolas',monospace; border: 1px solid #e2e8f0; }
+        /* .ao-d-tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+ */        /* .ao-d-tbl thead { position: sticky; top: 0; z-index: 1; }
+ */        /* .ao-d-tbl th { background: #1e293b; color: #e2e8f0; padding: 10px 14px; font-size: 10px; font-weight: 600; text-align: left; text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; border-bottom: 2px solid #334155; }
+ */        /* .ao-d-tbl td { padding: 10px 14px; color: #475569; border-bottom: 1px solid #e5e7eb; font-variant-numeric: tabular-nums; transition: background .1s; }
+ */        /* .ao-d-tbl tbody tr:hover { background: #eff6ff; }
+ */        /* .ao-d-tbl tbody tr:nth-child(even) { background: #f8fafc; }
+ */        /* .ao-d-tbl tbody tr:nth-child(even):hover { background: #eff6ff; }
+ */        .ao-d-item-code { display: inline-block; background: #f1f5f9; padding: 2px 7px; border-radius: 4px; font-size: 11px; font-weight: 600; color: #475569; font-family: 'SF Mono','Cascadia Code','Consolas',monospace; border: 1px solid #e2e8f0; }
 
         /* Item cards inside the modal — 2 per row, 4 metrics per row */
         .ao-d-item-grid.order-detail-card-list { grid-template-columns: repeat(4  , minmax(0, 1fr)); gap: 10px; padding: 12px; }
@@ -317,11 +339,11 @@
         }
 
         @media (max-width: 480px) {
-          .ao-table th,
+          /* .ao-table th,
           .ao-table td,
           .ao-d-tbl th,
           .ao-d-tbl td { padding: 8px 10px; }
-          .ao-d-info-grid { grid-template-columns: 1fr; }
+ */          .ao-d-info-grid { grid-template-columns: 1fr; }
           .ao-d-info-span2 { grid-column: span 1; }
           .ao-d-header-card { padding: 18px; }
           .ao-d-ordnum { font-size: 17px; }

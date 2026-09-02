@@ -7,35 +7,48 @@ import {
   getOrderItemTotalLtrs,
   ordersService,
 } from "../services/ordersService";
-import type { OrderItem, Order, OrderLog, OrderStatus, PartyProduct, QuotationStatus } from "../services/ordersService";
-import { loadCurrentUserOrderSummaries } from "../utils/orderHistory";
+import type {
+  OrderItem,
+  Order,
+  OrderLog,
+  PartyProduct,
+  QuotationStatus,
+} from "../services/ordersService";
+import { useQueryClient } from "@tanstack/react-query";
+
+import { useAssignedParties, useCurrentUserOrders, useOrderStatuses } from "../lib/orderQueries";
 import "../styles/View_Orders.css";
 import "../styles/Auditor_Order.css";
 import { useUILabels } from "../services/uiConfig";
 import ItemSection from "../components/order-items/ItemSection";
 import PartyHeader from "../components/order-items/PartyHeader";
 import { useLocation, useNavigate } from "react-router-dom";
-import { 
-  HiEye,           // View
-  HiArrowDownTray    // Download
+import {
+  HiEye, // View
+  HiArrowDownTray, // Download
 } from "react-icons/hi2";
+import { Badge } from "@/components/ui/badge";
+import { toneForStatus } from "@/components/ui/statusTone";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Pagination } from "@/components/ui/pagination";
+import { TableSkeleton } from "@/components/ui/skeleton";
+import { messageFrom } from "@/lib/apiError";
 
 const now = new Date();
 
 // First day of current month
-const firstDay = new Date(now.getFullYear(), now.getMonth(), 1)
-  .toISOString()
-  .split("T")[0];
+const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0];
 
 // Last day of current month
-const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 1)
-  .toISOString()
-  .split("T")[0];
-
-type PartyFilterOption = {
-  cardCode: string;
-  cardName: string;
-};
+const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString().split("T")[0];
 
 type ItemFilterOption = {
   itemCode: string;
@@ -56,108 +69,64 @@ const formatCreatedDateTime = (value?: string | null) => {
 };
 
 const isRejectedOrder = (order: Pick<Order, "status_display">) =>
-  String(order.status_display || "").toLowerCase().includes("reject");
+  String(order.status_display || "")
+    .toLowerCase()
+    .includes("reject");
 
 const isCompletedOrder = (order: Pick<Order, "status_display">) =>
-  String(order.status_display || "").trim().toLowerCase() === "completed";
+  String(order.status_display || "")
+    .trim()
+    .toLowerCase() === "completed";
 
 const getRejectedByFromLogs = (logs: OrderLog[]) => {
   const isRealPerformer = (value: string | null) => {
-    const normalized = String(value || "").trim().toLowerCase();
+    const normalized = String(value || "")
+      .trim()
+      .toLowerCase();
     return normalized && normalized !== "pending" && normalized !== "system";
   };
 
-  return [...logs]
-    .reverse()
-    .find((log) => {
+  return (
+    [...logs].reverse().find((log) => {
       const statusName = String(log.status_name || "").toLowerCase();
       const remarks = String(log.remarks || "").toLowerCase();
       return (
         isRealPerformer(log.performed_by_name) &&
         (statusName.includes("reject") || remarks.includes("reject"))
       );
-    })?.performed_by_name || null;
+    })?.performed_by_name || null
+  );
 };
 
 export default function View_Orders() {
   const { t } = useUILabels();
   const location = useLocation();
   const navigate = useNavigate();
-  const [orders, setOrders] = useState<Order[]>([]);
+  // Shared with both Order_Tracking pages — one key, so moving between them
+  // renders from cache instead of refetching the whole history.
+  const { orders, isOrdersLoading } = useCurrentUserOrders();
+  const status = useOrderStatuses();
+  const partyOptions = useAssignedParties();
+  const queryClient = useQueryClient();
   const [showDetails, setShowDetails] = useState(false);
   const [orderDetails, setOrderDetails] = useState<Order | null>(null);
   const [selectedItems, setSelectedItems] = useState<OrderItem[]>([]);
   const [statusFilter, setStatusFilter] = useState("");
   const [partyFilter, setPartyFilter] = useState("");
   const [itemFilter, setItemFilter] = useState("");
-  const [status, setStatus] = useState<OrderStatus[]>([]);
-  const [partyOptions, setPartyOptions] = useState<PartyFilterOption[]>([]);
   const [partyItems, setPartyItems] = useState<PartyProduct[]>([]);
-  const [isOrdersLoading, setIsOrdersLoading] = useState(true);
   const [isLoadingItems, setIsLoadingItems] = useState(false);
   const [fromDate, setFromDate] = useState(firstDay);
   const [toDate, setToDate] = useState(lastDay);
   const [currentPage, setCurrentPage] = useState(1);
   const [rejectedByByOrderId, setRejectedByByOrderId] = useState<Record<number, string>>({});
-  const [quotationStatusByOrderId, setQuotationStatusByOrderId] = useState<Record<number, QuotationStatus>>({});
+  const [quotationStatusByOrderId, setQuotationStatusByOrderId] = useState<
+    Record<number, QuotationStatus>
+  >({});
   const [cancelTarget, setCancelTarget] = useState<Order | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
   const [cancelError, setCancelError] = useState("");
   const itemsPerPage = 10;
-
-  useEffect(() => {
-    const fetchOrders = async () => {
-      setIsOrdersLoading(true);
-      try {
-        const data = await loadCurrentUserOrderSummaries();
-        setOrders(data);
-      } catch (error) {
-        console.log("Error fetching orders:", error);
-      } finally {
-        setIsOrdersLoading(false);
-      }
-    };
-
-    const fetchOrderStatus = async () => {
-      try {
-        const data = await ordersService.getOrdersStatus();
-        setStatus(data);
-      } catch (error) {
-        console.log("Error fetching order Status:", error);
-      }
-    };
-
-    const fetchAssignedParties = async () => {
-      try {
-        const data = await ordersService.getPartyName();
-        const parties = Array.isArray(data) ? data : [];
-        const uniqueParties = new Map<string, PartyFilterOption>();
-
-        parties.forEach((party) => {
-          const cardCode = String(party.value || party.card_code || "").trim();
-          const rawLabel = String(party.label || party.card_name || "").trim();
-          const cardName = rawLabel.replace(/\s*\([^)]*\)\s*$/, "") || cardCode;
-          const key = cardCode || cardName;
-
-          if (!key) return;
-
-          uniqueParties.set(key, { cardCode, cardName });
-        });
-
-        setPartyOptions(
-          Array.from(uniqueParties.values()).sort((a, b) =>
-            a.cardName.localeCompare(b.cardName),
-          ),
-        );
-      } catch (error) {
-        console.log("Error fetching assigned parties:", error);
-      }
-    };
-
-    fetchOrders();
-    fetchOrderStatus();
-    fetchAssignedParties();
-  }, []);
 
   useEffect(() => {
     if (location.state?.openOrderId) {
@@ -169,17 +138,17 @@ export default function View_Orders() {
   // console.log("Selected Items:", JSON.stringify(selectedItems));
   // console.log("Order Details:", JSON.stringify(orderDetails));
 
-       const fetchOrderDetails = async (orderId: number) => {
-  try {
-    const data = await ordersService.getOrderDetails(orderId);
+  const fetchOrderDetails = async (orderId: number) => {
+    try {
+      const data = await ordersService.getOrderDetails(orderId);
 
-    setOrderDetails(data);
-    setSelectedItems(data.items || []);
-    setShowDetails(true);
-  } catch (error) {
-    console.log("Error fetching order details:", error);
-  }
-};
+      setOrderDetails(data);
+      setSelectedItems(data.items || []);
+      setShowDetails(true);
+    } catch (error) {
+      console.log("Error fetching order details:", error);
+    }
+  };
 
   useEffect(() => {
     let isCancelled = false;
@@ -243,7 +212,11 @@ export default function View_Orders() {
       );
 
       if (!isCancelled) {
-        setRejectedByByOrderId(Object.fromEntries(entries.filter((entry): entry is readonly [number, string] => entry !== null)));
+        setRejectedByByOrderId(
+          Object.fromEntries(
+            entries.filter((entry): entry is readonly [number, string] => entry !== null),
+          ),
+        );
       }
     };
 
@@ -333,8 +306,10 @@ export default function View_Orders() {
       }
       // Mirror the cancellation locally so the button disappears immediately.
       const cancelledId = cancelTarget.id;
-      setOrders((prev) =>
-        prev.map((order) =>
+      // Mirrored into the query cache rather than into local state, so the
+      // two Order_Tracking pages reading the same key see it too.
+      queryClient.setQueryData<Order[]>(["orders", "current-user"], (prev) =>
+        (prev ?? []).map((order) =>
           order.id === cancelledId ? { ...order, quotation_cancelled: true } : order,
         ),
       );
@@ -347,11 +322,8 @@ export default function View_Orders() {
         return next;
       });
       setCancelTarget(null);
-    } catch (error: any) {
-      const detail =
-        error?.response?.data?.message ||
-        error?.response?.data?.details ||
-        "Failed to cancel sales quotation";
+    } catch (error) {
+      const detail = messageFrom(error, "Failed to cancel sales quotation");
       setCancelError(typeof detail === "string" ? detail : JSON.stringify(detail));
     } finally {
       setIsCancelling(false);
@@ -374,9 +346,7 @@ export default function View_Orders() {
       });
     });
 
-    return Array.from(uniqueItems.values()).sort((a, b) =>
-      a.itemName.localeCompare(b.itemName),
-    );
+    return Array.from(uniqueItems.values()).sort((a, b) => a.itemName.localeCompare(b.itemName));
   }, [partyItems]);
 
   const filteredOrders = orders.filter((order) => {
@@ -462,7 +432,6 @@ export default function View_Orders() {
   };
   return (
     <div className="vo-page">
-
       {/* ── LIST VIEW ── */}
       {!showDetails && (
         <>
@@ -476,7 +445,12 @@ export default function View_Orders() {
           <div className="vo-toolbar">
             <div className="vo-filter-head">
               <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                <path d="M3 5h14M6 10h8M9 15h2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                <path
+                  d="M3 5h14M6 10h8M9 15h2"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                />
               </svg>
               <span>Filters</span>
             </div>
@@ -484,11 +458,16 @@ export default function View_Orders() {
               <select
                 className="vo-status-select"
                 value={statusFilter}
-                onChange={(e) => { setStatusFilter(e.target.value); setCurrentPage(1); }}
+                onChange={(e) => {
+                  setStatusFilter(e.target.value);
+                  setCurrentPage(1);
+                }}
               >
                 <option value="">All Statuses</option>
                 {status.map((s) => (
-                  <option key={s.id} value={s.name}>{s.name}</option>
+                  <option key={s.id} value={s.name}>
+                    {s.name}
+                  </option>
                 ))}
               </select>
 
@@ -503,8 +482,12 @@ export default function View_Orders() {
               >
                 <option value="">All Parties</option>
                 {partyOptions.map((party) => (
-                  <option key={party.cardCode || party.cardName} value={party.cardCode || party.cardName}>
-                    {party.cardName}{party.cardCode ? ` (${party.cardCode})` : ""}
+                  <option
+                    key={party.cardCode || party.cardName}
+                    value={party.cardCode || party.cardName}
+                  >
+                    {party.cardName}
+                    {party.cardCode ? ` (${party.cardCode})` : ""}
                   </option>
                 ))}
               </select>
@@ -513,7 +496,10 @@ export default function View_Orders() {
                 className="vo-status-select"
                 value={itemFilter}
                 disabled={!partyFilter || isLoadingItems}
-                onChange={(e) => { setItemFilter(e.target.value); setCurrentPage(1); }}
+                onChange={(e) => {
+                  setItemFilter(e.target.value);
+                  setCurrentPage(1);
+                }}
               >
                 <option value="">
                   {partyFilter
@@ -523,20 +509,40 @@ export default function View_Orders() {
                     : "Select Party First"}
                 </option>
                 {itemOptions.map((item) => (
-                  <option key={item.itemCode || item.itemName} value={item.itemCode || item.itemName}>
-                    {item.itemName}{item.itemCode ? ` (${item.itemCode})` : ""}
+                  <option
+                    key={item.itemCode || item.itemName}
+                    value={item.itemCode || item.itemName}
+                  >
+                    {item.itemName}
+                    {item.itemCode ? ` (${item.itemCode})` : ""}
                   </option>
                 ))}
               </select>
 
               <div className="vo-date-wrap">
                 <label className="vo-date-label">From</label>
-                <input type="date" value={fromDate} onChange={(e) => { setFromDate(e.target.value); setCurrentPage(1); }} className="vo-date-input" />
+                <input aria-label="From"
+                  type="date"
+                  value={fromDate}
+                  onChange={(e) => {
+                    setFromDate(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="vo-date-input"
+                />
               </div>
 
               <div className="vo-date-wrap">
                 <label className="vo-date-label">To</label>
-                <input type="date" value={toDate} onChange={(e) => { setToDate(e.target.value); setCurrentPage(1); }} className="vo-date-input" />
+                <input aria-label="To"
+                  type="date"
+                  value={toDate}
+                  onChange={(e) => {
+                    setToDate(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="vo-date-input"
+                />
               </div>
 
               {(statusFilter || partyFilter || itemFilter) && (
@@ -558,97 +564,95 @@ export default function View_Orders() {
           </div>
 
           {isOrdersLoading ? (
-            <div className="order-loading-state">
-              <span className="order-loading-spinner" />
-              <span>Loading orders...</span>
-            </div>
+            <TableSkeleton columns={8} label="Loading orders" />
           ) : filteredOrders.length > 0 ? (
             <div className="vo-table-wrap">
-              <table className="vo-table">
-                <thead>
-                  <tr>
-                    <th>Order ID</th>
-                    <th>Card Name</th>
-                    <th>Items</th>
-                    <th>FOC</th>
-                    <th>Created At</th>
-                    <th>Delivery Date</th>
-                    <th>Status</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
+              <Table density="compact">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Order ID</TableHead>
+                    <TableHead>Card Name</TableHead>
+                    <TableHead>Items</TableHead>
+                    <TableHead>FOC</TableHead>
+                    <TableHead>Created At</TableHead>
+                    <TableHead>Delivery Date</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {paginatedOrders.map((order) => (
-                      <tr key={order.id} className={order.is_foc ? "vo-foc-row" : ""}>
-                        <td className="ao-cell-id">{order.order_number}</td>
-                        <td className="ao-cell-name">{order.card_name}</td>
-                        <td>{order.items_count ?? order.items?.length ?? 0}</td>
-                        <td>
-                          {order.is_foc ? (
-                            <span className="vo-foc-badge">FOC</span>
-                          ) : (
-                            <span className="vo-foc-empty">-</span>
-                          )}
-                        </td>
-                        <td>{formatCreatedDateTime(order.created_at)}</td>
-                        <td>{order.delivery_date}</td>
-                        <td>
-                          <div className="vo-status-stack">
-                            <span className={`vo-badge vo-badge-${(order.status_display || "").toLowerCase().replace(/\s+/g, "-")}`}>
-                              {order.status_display}
+                    <TableRow key={order.id} className={order.is_foc ? "vo-foc-row" : ""}>
+                      <TableCell className="ao-cell-id">{order.order_number}</TableCell>
+                      <TableCell className="ao-cell-name">{order.card_name}</TableCell>
+                      <TableCell>{order.items_count ?? order.items?.length ?? 0}</TableCell>
+                      <TableCell>
+                        {order.is_foc ? (
+                          <span className="vo-foc-badge">FOC</span>
+                        ) : (
+                          <span className="vo-foc-empty">-</span>
+                        )}
+                      </TableCell>
+                      <TableCell>{formatCreatedDateTime(order.created_at)}</TableCell>
+                      <TableCell>{order.delivery_date}</TableCell>
+                      <TableCell>
+                        <div className="vo-status-stack">
+                          <Badge tone={toneForStatus(order.status_display)}>
+                            {order.status_display}
+                          </Badge>
+                          {isRejectedOrder(order) && rejectedByByOrderId[order.id] ? (
+                            <span className="vo-rejected-by">
+                              By: {rejectedByByOrderId[order.id]}
                             </span>
-                            {isRejectedOrder(order) && rejectedByByOrderId[order.id] ? (
-                              <span className="vo-rejected-by">
-                                By: {rejectedByByOrderId[order.id]}
-                              </span>
-                            ) : null}
-                            {order.quotation_cancelled ? (
-                              <span className="vo-sq-cancelled">SQ Cancelled</span>
-                            ) : canCancelQuotation(order) ? (
-                              <button
-                                type="button"
-                                className="vo-sq-cancel-btn"
-                                title="Cancel Sales Quotation"
-                                onClick={() => { setCancelError(""); setCancelTarget(order); }}
-                              >
-                                Cancel SQ
-                              </button>
-                            ) : null}
-                          </div>
-                        </td>
-                        <td>
-                          <div className="ao-row-actions">
+                          ) : null}
+                          {order.quotation_cancelled ? (
+                            <span className="vo-sq-cancelled">SQ Cancelled</span>
+                          ) : canCancelQuotation(order) ? (
                             <button
-                              className="ao-btn-icon view"
-                              onClick={() => fetchOrderDetails(order.id)}
-                              title="View Order"
+                              type="button"
+                              className="vo-sq-cancel-btn"
+                              title="Cancel Sales Quotation"
+                              onClick={() => {
+                                setCancelError("");
+                                setCancelTarget(order);
+                              }}
                             >
-                              <HiEye size={20} />
+                              Cancel SQ
                             </button>
-                            <button
-                              className="ao-btn-icon download"
-                              onClick={() => downloadExcel(order)}
-                              title="Download Order"
-                            >
-                              <HiArrowDownTray size={20} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                </tbody>
-              </table>
+                          ) : null}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="ao-row-actions">
+                          <button
+                            className="ao-btn-icon view"
+                            onClick={() => fetchOrderDetails(order.id)}
+                            title="View Order"
+                          >
+                            <HiEye size={20} />
+                          </button>
+                          <button
+                            className="ao-btn-icon download"
+                            onClick={() => downloadExcel(order)}
+                            title="Download Order"
+                          >
+                            <HiArrowDownTray size={20} />
+                          </button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </div>
           ) : (
-            <div className="vo-empty" style={{ padding: "40px", textAlign: "center", color: "#64748b", background: "#f8fafc", borderRadius: "8px", border: "1px dashed #cbd5e1", margin: "20px 0" }}>No orders found</div>
+            <div className="vo-empty vo-empty-panel">
+              No orders found
+            </div>
           )}
 
           {filteredOrders.length > itemsPerPage && (
-            <div className="vo-pagination">
-              <button className="vo-pg-btn" disabled={pageNumber === 1} onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}>← Prev</button>
-              <span className="vo-pg-info">{pageNumber} / {totalPages}</span>
-              <button className="vo-pg-btn" disabled={pageNumber === totalPages} onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}>Next →</button>
-            </div>
+            <Pagination page={pageNumber} totalPages={totalPages} onPageChange={setCurrentPage} />
           )}
         </>
       )}
@@ -659,7 +663,15 @@ export default function View_Orders() {
           {/* Navigation */}
           <div className="ao-d-nav">
             <button className="ao-d-back" onClick={() => setShowDetails(false)}>
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M10 13L5 8l5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path
+                  d="M10 13L5 8l5-5"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
               Back to Orders
             </button>
             <div className="ao-d-actions">
@@ -669,14 +681,32 @@ export default function View_Orders() {
                 <button
                   type="button"
                   className="vo-d-cancel-sq"
-                  onClick={() => { setCancelError(""); setCancelTarget(orderDetails); }}
+                  onClick={() => {
+                    setCancelError("");
+                    setCancelTarget(orderDetails);
+                  }}
                 >
-                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                    <path
+                      d="M3 3l8 8M11 3l-8 8"
+                      stroke="currentColor"
+                      strokeWidth="1.6"
+                      strokeLinecap="round"
+                    />
+                  </svg>
                   Cancel Sales Quotation
                 </button>
               ) : null}
               <button className="ao-d-export" onClick={() => downloadExcel(orderDetails)}>
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1v8m0 0L4 6.5M7 9l3-2.5M2.5 12h9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <path
+                    d="M7 1v8m0 0L4 6.5M7 9l3-2.5M2.5 12h9"
+                    stroke="currentColor"
+                    strokeWidth="1.4"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
                 Export Excel
               </button>
             </div>
@@ -702,53 +732,99 @@ export default function View_Orders() {
             </div>
             <div className="ao-d-items-scroll">
               <ItemSection items={selectedItems} />
-              <table className="vo-d-tbl">
-                <thead>
-                  <tr>
-                    <th>#</th><th>Item Code</th><th style={{ minWidth: '250px' }}>Item Name</th><th>Category</th><th>Scheme</th><th>Scheme Qty</th><th>Qty</th><th>Pcs</th><th>Boxes</th><th>Ltrs</th>
-                    {/* <th>Scheme Ltrs</th> */}
-                    <th>Total Ltrs</th><th>{t("price_list", "Price List (Basic)")}</th><th>Basic Price</th><th>Tax %</th><th style={{textAlign:'right'}}>Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {selectedItems.length > 0 ? selectedItems.map((item, i) => {
-                    const schemes = getOrderItemSchemes(item);
+              <Table density="compact">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>#</TableHead>
+                    <TableHead>Item Code</TableHead>
+                    <TableHead className="app-col-item">Item Name</TableHead>
+                    <TableHead>Category</TableHead>
+                    <TableHead>Scheme</TableHead>
+                    <TableHead>Scheme Qty</TableHead>
+                    <TableHead>Qty</TableHead>
+                    <TableHead>Pcs</TableHead>
+                    <TableHead>Boxes</TableHead>
+                    <TableHead>Ltrs</TableHead>
+                    {/* <TableHead>Scheme Ltrs</TableHead> */}
+                    <TableHead>Total Ltrs</TableHead>
+                    <TableHead>{t("price_list", "Price List (Basic)")}</TableHead>
+                    <TableHead>Basic Price</TableHead>
+                    <TableHead>Tax %</TableHead>
+                    <TableHead className="text-right">Amount</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {selectedItems.length > 0 ? (
+                    selectedItems.map((item, i) => {
+                      const schemes = getOrderItemSchemes(item);
 
-                    return (
-                    <tr key={i}>
-                      <td style={{textAlign:'center',color:'#94a3b8'}}>{i + 1}</td>
-                      <td><span className="vo-d-item-code">{item.item_code}</span></td>
-                      <td style={{fontWeight:500,color:'#0f172a', minWidth: '250px'}}>{item.item_name}</td>
-                      <td>{item.category}</td>
-                      <td colSpan={2}>
-                        {schemes.length > 0 ? (
-                          <div className="order-scheme-stack" aria-label="Applied schemes">
-                            {schemes.map((scheme, schemeIndex) => (
-                              <div className="order-scheme-chip" key={`${item.item_code}-scheme-${schemeIndex}`}>
-                                <span className="order-scheme-name">{scheme.name || "-"}</span>
-                                <span className="order-scheme-qty">Qty {scheme.qty || 0}</span>
+                      return (
+                        <TableRow key={i}>
+                          <TableCell className="text-center app-cell-index">
+                            {i + 1}
+                          </TableCell>
+                          <TableCell>
+                            <span className="vo-d-item-code">{item.item_code}</span>
+                          </TableCell>
+                          <TableCell
+                            className="app-col-item app-cell-name"
+                          >
+                            {item.item_name}
+                          </TableCell>
+                          <TableCell>{item.category}</TableCell>
+                          <TableCell colSpan={2}>
+                            {schemes.length > 0 ? (
+                              <div className="order-scheme-stack" aria-label="Applied schemes">
+                                {schemes.map((scheme, schemeIndex) => (
+                                  <div
+                                    className="order-scheme-chip"
+                                    key={`${item.item_code}-scheme-${schemeIndex}`}
+                                  >
+                                    <span className="order-scheme-name">{scheme.name || "-"}</span>
+                                    <span className="order-scheme-qty">Qty {scheme.qty || 0}</span>
+                                  </div>
+                                ))}
                               </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <span className="order-scheme-empty">No scheme</span>
-                        )}
-                      </td>
-                      <td style={{textAlign:'center'}}>{item.qty}</td>
-                      <td style={{textAlign:'center'}}>{item.pcs}</td>
-                      <td style={{textAlign:'center'}}>{Number(item.boxes).toFixed(2)}</td>
-                      <td style={{textAlign:'center'}}>{item.ltrs}</td>
-                      {/* <td style={{textAlign:'center'}}>{item.scheme_name ? ((item as any).scheme_ltrs || 0) : "—"}</td> */}
-                      <td style={{textAlign:'center'}}>{getOrderItemTotalLtrs(item).toFixed(2)}</td>
-                      <td style={{textAlign:'right'}}>{Number(item.price_list_basic).toFixed(2)}</td>
-                      <td style={{textAlign:'right'}}>{Number(item.basic_price).toFixed(2)}</td>
-                      <td style={{textAlign:'center'}}>{Number(item.tax_rate).toFixed(2)}</td>
-                      <td style={{textAlign:'right',fontWeight:600,color:'#0f172a'}}>{Number(item.total).toFixed(2)}</td>
-                    </tr>
-                    );
-                  }) : (<tr><td colSpan={14} className="vo-empty">No items found</td></tr>)}
-                </tbody>
-              </table>
+                            ) : (
+                              <span className="order-scheme-empty">No scheme</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-center">{item.qty}</TableCell>
+                          <TableCell className="text-center">{item.pcs}</TableCell>
+                          <TableCell className="text-center">
+                            {Number(item.boxes).toFixed(2)}
+                          </TableCell>
+                          <TableCell className="text-center">{item.ltrs}</TableCell>
+                          {/* <TableCell style={{textAlign:'center'}}>{item.scheme_name ? ((item as any).scheme_ltrs || 0) : "—"}</TableCell> */}
+                          <TableCell className="text-center">
+                            {getOrderItemTotalLtrs(item).toFixed(2)}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {Number(item.price_list_basic).toFixed(2)}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {Number(item.basic_price).toFixed(2)}
+                          </TableCell>
+                          <TableCell className="text-center">
+                            {Number(item.tax_rate).toFixed(2)}
+                          </TableCell>
+                          <TableCell
+                            className="text-right app-cell-total"
+                          >
+                            {Number(item.total).toFixed(2)}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
+                  ) : (
+                    <TableRow>
+                      <TableCell colSpan={14} className="vo-empty">
+                        No items found
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
             </div>
           </div>
 
@@ -756,20 +832,36 @@ export default function View_Orders() {
           <div className="ao-d-summary">
             <div className="ao-d-sum-row">
               <span className="ao-d-sum-label">Total Ltrs</span>
-              <span className="ao-d-sum-val">{selectedItems.reduce((s, i) => s + getOrderItemTotalLtrs(i), 0).toFixed(2)}</span>
+              <span className="ao-d-sum-val">
+                {selectedItems.reduce((s, i) => s + getOrderItemTotalLtrs(i), 0).toFixed(2)}
+              </span>
             </div>
             <div className="ao-d-sum-row">
               <span className="ao-d-sum-label">Subtotal</span>
-              <span className="ao-d-sum-val">{selectedItems.reduce((s, i) => s + Number(i.total || 0), 0).toFixed(2)}</span>
+              <span className="ao-d-sum-val">
+                {selectedItems.reduce((s, i) => s + Number(i.total || 0), 0).toFixed(2)}
+              </span>
             </div>
             <div className="ao-d-sum-row">
               <span className="ao-d-sum-label">Tax</span>
-              <span className="ao-d-sum-val">{selectedItems.reduce((s, i) => s + (Number(i.total || 0) * Number(i.tax_rate || 0) / 100), 0).toFixed(2)}</span>
+              <span className="ao-d-sum-val">
+                {selectedItems
+                  .reduce((s, i) => s + (Number(i.total || 0) * Number(i.tax_rate || 0)) / 100, 0)
+                  .toFixed(2)}
+              </span>
             </div>
             {[
-              { label: "Commodity", value: orderDetails.vareity_cost?.commodity_price, cls: "vc-commodity" },
+              {
+                label: "Commodity",
+                value: orderDetails.vareity_cost?.commodity_price,
+                cls: "vc-commodity",
+              },
               { label: "Other", value: orderDetails.vareity_cost?.other_total, cls: "vc-other" },
-              { label: "Premium", value: orderDetails.vareity_cost?.premium_total, cls: "vc-premium" },
+              {
+                label: "Premium",
+                value: orderDetails.vareity_cost?.premium_total,
+                cls: "vc-premium",
+              },
             ]
               .filter((entry) => Number(entry.value) > 0)
               .map((entry) => (
@@ -780,24 +872,43 @@ export default function View_Orders() {
               ))}
             <div className="ao-d-sum-row ao-d-sum-grand">
               <span className="ao-d-sum-label">Grand Total</span>
-              <span className="ao-d-sum-val">{(selectedItems.reduce((s, i) => s + Number(i.total || 0), 0) + selectedItems.reduce((s, i) => s + (Number(i.total || 0) * Number(i.tax_rate || 0) / 100), 0)).toFixed(2)}</span>
+              <span className="ao-d-sum-val">
+                {(
+                  selectedItems.reduce((s, i) => s + Number(i.total || 0), 0) +
+                  selectedItems.reduce(
+                    (s, i) => s + (Number(i.total || 0) * Number(i.tax_rate || 0)) / 100,
+                    0,
+                  )
+                ).toFixed(2)}
+              </span>
             </div>
           </div>
         </div>
-
       )}
 
       {/* ── CANCEL SALES QUOTATION CONFIRM MODAL ── */}
-      {cancelTarget && (
-        <div className="vo-modal-overlay" onClick={() => { if (!isCancelling) setCancelTarget(null); }}>
-          <div className="vo-modal" onClick={(e) => e.stopPropagation()}>
+      <Dialog
+        open={Boolean(cancelTarget)}
+        onOpenChange={(next) => {
+          if (!next && !isCancelling) setCancelTarget(null);
+        }}
+      >
+        {cancelTarget && (
+          <DialogContent
+            title="Cancel sales quotation"
+            variant="bare"
+            size="auto"
+            showClose={false}
+            className="vo-modal"
+          >
             <div className="vo-modal-title">Cancel Sales Quotation</div>
             <p className="vo-modal-msg">
               Cancel the SAP Sales Quotation
               {quotationStatusByOrderId[cancelTarget.id]?.doc_num
                 ? ` (No. ${quotationStatusByOrderId[cancelTarget.id]?.doc_num})`
                 : ""}{" "}
-              for order <strong>{cancelTarget.order_number}</strong>? This cancels the quotation in SAP and cannot be undone.
+              for order <strong>{cancelTarget.order_number}</strong>? This cancels the quotation in
+              SAP and cannot be undone.
             </p>
             {cancelError ? <p className="vo-modal-error">{cancelError}</p> : null}
             <div className="vo-modal-actions">
@@ -818,9 +929,9 @@ export default function View_Orders() {
                 {isCancelling ? "Cancelling..." : "Cancel Quotation"}
               </button>
             </div>
-          </div>
-        </div>
-      )}
+          </DialogContent>
+        )}
+      </Dialog>
     </div>
   );
 }

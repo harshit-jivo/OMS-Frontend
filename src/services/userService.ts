@@ -173,7 +173,10 @@ removePartyProduct: async (card_code: string, itemCode: string, category: string
 
         return response.data; },
 
-  bulkAssignPartiesToUser: async (card_code: string, payload: any[]) => {
+  bulkAssignPartiesToUser: async (
+    card_code: string,
+    payload: Array<{ item_code: string; category?: string; basic_rate?: number | string }>,
+  ) => {
     const response = await api.post(`/auth/party-product/bulk-add/`, {
       card_codes: card_code,   
       products : payload

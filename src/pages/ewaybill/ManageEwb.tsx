@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { HiBolt } from "react-icons/hi2";
 import { ewaybillService } from "../../services/ewaybillService";
-import { NicField, JsonView, ErrorAlert, SuccessAlert, apiErrorMessage } from "../../components/NicUI";
+import { NicField, JsonView, ErrorAlert, SuccessAlert } from "../../components/NicUI";
+import { messageFrom } from "@/lib/apiError";
 import DateInput from "../../components/DateInput";
 
 type Mode = "cancel" | "close" | "reject" | "transporter" | "partb" | "extend";
@@ -43,7 +44,7 @@ export default function ManageEwb() {
         }
       }
     } catch (err) {
-      setError(apiErrorMessage(err));
+      setError(messageFrom(err, "Request failed"));
     } finally {
       setBusy(false);
     }
@@ -56,7 +57,7 @@ export default function ManageEwb() {
         <h2>Manage e-Way Bill</h2>
       </div>
 
-      <div className="nic-tabs" style={{ margin: "0 0 16px" }}>
+      <div className="nic-tabs nic-tabs--mb16">
         {MODES.map(([m, label]) => (
           <button key={m} className={`nic-tab ${mode === m ? "nic-tab-active" : ""}`}
             onClick={() => { setMode(m); setResult(null); setError(""); }}>
@@ -72,7 +73,7 @@ export default function ManageEwb() {
               ? "VEHEWB — update Part B (vehicle/place/mode). Provide the NIC payload."
               : "EXTENDVALIDITY — extend an EWB nearing expiry. Provide the NIC payload."}
           </p>
-          <div className="nic-form-grid" style={{ marginTop: 12 }}>
+          <div className="nic-form-grid nic-form-grid--spaced">
             <NicField label="Payload (JSON)" full>
               <textarea className="nic-textarea" value={json} onChange={(e) => setJson(e.target.value)} />
             </NicField>
@@ -113,7 +114,7 @@ export default function ManageEwb() {
 
       <div className="nic-actions-row">
         <button className="ofs-primary" onClick={() => void run()} disabled={busy}>
-          <HiBolt style={{ verticalAlign: "-3px", marginRight: 6 }} />
+          <HiBolt className="nic-icon-lead" />
           {busy ? "Working…" : "Submit"}
         </button>
       </div>

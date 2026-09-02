@@ -1,8 +1,17 @@
 import { useEffect, useState } from "react";
 import { HiArrowPath, HiArrowDownTray, HiMagnifyingGlass } from "react-icons/hi2";
-import { ErrorAlert, apiErrorMessage } from "../../components/NicUI";
+import { ErrorAlert } from "../../components/NicUI";
+import { messageFrom } from "@/lib/apiError";
 import { haisService, holderLabel, type Asset } from "../../services/haisService";
 import { startExcelExport, exportDateStamp, type ExcelRow } from "../../utils/excelExport";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 type ReportKey =
   | "unassigned"
@@ -97,7 +106,7 @@ export default function HaisReports() {
     haisService
       .list({})
       .then((d) => alive && setRows(d.results ?? []))
-      .catch((e) => alive && setError(apiErrorMessage(e)))
+      .catch((e) => alive && setError(messageFrom(e, "Request failed")))
       .finally(() => alive && setBusy(false));
     return () => {
       alive = false;
@@ -110,7 +119,7 @@ export default function HaisReports() {
     haisService
       .list({})
       .then((d) => setRows(d.results ?? []))
-      .catch((e) => setError(apiErrorMessage(e)))
+      .catch((e) => setError(messageFrom(e, "Request failed")))
       .finally(() => setBusy(false));
   };
 
@@ -184,32 +193,31 @@ export default function HaisReports() {
 
   return (
     <section className="ofs-card ofs-card--wide">
-      <div className="ofs-card-head" style={{ justifyContent: "space-between" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div className="ofs-card-head nic-head--split">
+        <div className="nic-head-title">
           <span className="ofs-card-mark" />
           <h2>Reports</h2>
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
+        <div className="nic-actions-inline">
           <button className="ofs-primary" onClick={exportExcel}>
-            <HiArrowDownTray style={{ verticalAlign: "-3px", marginRight: 6 }} />
+            <HiArrowDownTray className="nic-icon-lead" />
             Export Excel
           </button>
           <button className="nic-tab" onClick={reload} disabled={busy}>
-            <HiArrowPath style={{ verticalAlign: "-3px", marginRight: 6 }} />
+            <HiArrowPath className="nic-icon-lead" />
             {busy ? "Loading…" : "Refresh"}
           </button>
         </div>
       </div>
 
       {/* Search — mostly by serial number */}
-      <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
-        <label className="nic-field" style={{ flex: "1 1 320px", marginBottom: 0 }}>
+      <div className="nic-filter-row">
+        <label className="nic-field nic-field--grow">
           <span className="nic-label">Search by Serial No. (or Asset ID / user)</span>
-          <div style={{ position: "relative" }}>
-            <HiMagnifyingGlass style={{ position: "absolute", left: 10, top: 11, color: "#94a3b8" }} />
+          <div className="nic-search-wrap">
+            <HiMagnifyingGlass className="nic-search-icon" />
             <input
-              className="nic-input nic-mono"
-              style={{ paddingLeft: 32 }}
+              className="nic-input nic-input--search nic-mono"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="e.g. DL5440X92KK"
@@ -234,7 +242,7 @@ export default function HaisReports() {
       </div>
 
       {/* Report picker */}
-      <div className="nic-tabs" style={{ margin: "14px 0" }}>
+      <div className="nic-tabs nic-tabs--spaced">
         {REPORTS.map((r) => (
           <button
             key={r.key}
@@ -259,36 +267,36 @@ export default function HaisReports() {
         )}
 
         {report === "warranty" && (
-          <table className="nic-table">
-            <thead>
-              <tr>
-                <th>Asset ID</th>
-                <th>Serial No.</th>
-                <th>Category</th>
-                <th>Warranty Ends</th>
-                <th>Days Left</th>
-                <th>Current User</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table density="compact">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Asset ID</TableHead>
+                <TableHead>Serial No.</TableHead>
+                <TableHead>Category</TableHead>
+                <TableHead>Warranty Ends</TableHead>
+                <TableHead>Days Left</TableHead>
+                <TableHead>Current User</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {warranty.length === 0 ? (
-                <tr><td colSpan={6} className="nic-note">No warranties expiring in {WARRANTY_SOON_DAYS} days.</td></tr>
+                <TableRow><TableCell colSpan={6} className="nic-note">No warranties expiring in {WARRANTY_SOON_DAYS} days.</TableCell></TableRow>
               ) : (
                 warranty.map(({ a, days }) => (
-                  <tr key={a.asset_id}>
-                    <td className="nic-mono">{a.asset_id}</td>
-                    <td className="nic-mono">{a.serial_num}</td>
-                    <td>{a.asset_type as string}</td>
-                    <td>{a.warranty_ends}</td>
-                    <td style={{ color: days < 0 ? "#ef4444" : days <= 30 ? "#f59e0b" : "inherit", fontWeight: 600 }}>
+                  <TableRow key={a.asset_id}>
+                    <TableCell className="nic-mono">{a.asset_id}</TableCell>
+                    <TableCell className="nic-mono">{a.serial_num}</TableCell>
+                    <TableCell>{a.asset_type as string}</TableCell>
+                    <TableCell>{a.warranty_ends}</TableCell>
+                    <TableCell className={`nic-due${days < 0 ? " nic-due--overdue" : days <= 30 ? " nic-due--soon" : ""}`}>
                       {warrantyDaysLabel(days)}
-                    </td>
-                    <td>{holderLabel(a)}</td>
-                  </tr>
+                    </TableCell>
+                    <TableCell>{holderLabel(a)}</TableCell>
+                  </TableRow>
                 ))
               )}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         )}
 
         {report === "byDept" && <CountTable title="Department" data={byDept} />}
@@ -301,46 +309,46 @@ export default function HaisReports() {
 
 function DeviceTable({ rows, columns, empty }: { rows: Asset[]; columns: Column[]; empty: string }) {
   return (
-    <table className="nic-table">
-      <thead>
-        <tr>{columns.map(([h]) => <th key={h}>{h}</th>)}</tr>
-      </thead>
-      <tbody>
+    <Table density="compact">
+      <TableHeader>
+        <TableRow>{columns.map(([h]) => <TableHead key={h}>{h}</TableHead>)}</TableRow>
+      </TableHeader>
+      <TableBody>
         {rows.length === 0 ? (
-          <tr><td colSpan={columns.length} className="nic-note">{empty}</td></tr>
+          <TableRow><TableCell colSpan={columns.length} className="nic-note">{empty}</TableCell></TableRow>
         ) : (
           rows.map((a) => (
-            <tr key={a.asset_id}>
+            <TableRow key={a.asset_id}>
               {columns.map(([h, get], i) => (
-                <td key={h} className={i <= 1 ? "nic-mono" : undefined}>{String(get(a) ?? "") || "—"}</td>
+                <TableCell key={h} className={i <= 1 ? "nic-mono" : undefined}>{String(get(a) ?? "") || "—"}</TableCell>
               ))}
-            </tr>
+            </TableRow>
           ))
         )}
-      </tbody>
-    </table>
+      </TableBody>
+    </Table>
   );
 }
 
 function CountTable({ title, data }: { title: string; data: [string, number][] }) {
   const total = data.reduce((s, [, n]) => s + n, 0);
   return (
-    <table className="nic-table">
-      <thead>
-        <tr><th>{title}</th><th style={{ width: 120 }}>Devices</th></tr>
-      </thead>
-      <tbody>
+    <Table density="compact">
+      <TableHeader>
+        <TableRow><TableHead>{title}</TableHead><TableHead className="nic-col-narrow">Devices</TableHead></TableRow>
+      </TableHeader>
+      <TableBody>
         {data.length === 0 ? (
-          <tr><td colSpan={2} className="nic-note">No data.</td></tr>
+          <TableRow><TableCell colSpan={2} className="nic-note">No data.</TableCell></TableRow>
         ) : (
           <>
             {data.map(([name, count]) => (
-              <tr key={name}><td>{name}</td><td>{count}</td></tr>
+              <TableRow key={name}><TableCell>{name}</TableCell><TableCell>{count}</TableCell></TableRow>
             ))}
-            <tr style={{ fontWeight: 700 }}><td>Total</td><td>{total}</td></tr>
+            <TableRow className="nic-row-total"><TableCell>Total</TableCell><TableCell>{total}</TableCell></TableRow>
           </>
         )}
-      </tbody>
-    </table>
+      </TableBody>
+    </Table>
   );
 }

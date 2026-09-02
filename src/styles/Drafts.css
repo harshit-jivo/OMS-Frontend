@@ -1,0 +1,93 @@
+/*
+ * Drafts — Phase 6.3. Thirteen inline objects, no stylesheet.
+ * Verified by `drafts.png` staying pixel-identical.
+ */
+
+.drf-page {
+  padding: 20px;
+}
+
+.drf-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.drf-title {
+  margin: 0;
+  color: #0f172a;
+}
+
+.drf-total {
+  font-size: 0.85rem;
+  color: #64748b;
+}
+
+.drf-loading {
+  color: #64748b;
+}
+
+.drf-state {
+  padding: 40px;
+  text-align: center;
+  border-radius: 8px;
+}
+
+.drf-state--error {
+  color: #b91c1c;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+}
+
+.drf-state--empty {
+  color: #64748b;
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+}
+
+.drf-scroll {
+  overflow-x: auto;
+}
+
+.drf-table {
+  width: 100%;
+}
+
+.drf-actions-head,
+.drf-actions {
+  text-align: right;
+}
+
+.drf-actions {
+  white-space: nowrap;
+}
+
+.drf-btn {
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.drf-btn--continue {
+  margin-right: 8px;
+  border: none;
+  background: #2563eb;
+  color: #fff;
+}
+
+.drf-btn--delete {
+  border: 1px solid #ca1111;
+  background: #fff;
+  color: #ca1111;
+}
+
+/* Was `cursor: deletingId === order.id ? "not-allowed" : "pointer"` beside the
+   `disabled` attribute already carrying that same comparison. */
+.drf-btn:disabled {
+  cursor: not-allowed;
+}

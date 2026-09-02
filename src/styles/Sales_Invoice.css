@@ -674,11 +674,18 @@
 .si-so-card.is-already-logged {
   border-style: dashed;
   border-color: #fcd34d;
+  opacity: 0.62;
   transition: opacity 0.15s ease;
 }
 
 .si-so-card.is-already-logged:hover {
   opacity: 1 !important;
+}
+
+/* A deliberate choice — some lines selected despite the SO being flagged as
+   already logged — brings it back to full strength outside hover too. */
+.si-so-card.is-already-logged.has-selected-lines {
+  opacity: 1;
 }
 
 /* Lightened, not disabled: SAP still reports the order open, so this is a
@@ -716,9 +723,17 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  min-height: 66px;
   border-bottom: 1px solid #e2e8f0;
   background: #f8fbff;
+  color: #0f172a;
   padding: 13px 14px;
+  cursor: pointer;
+}
+
+/* Lets the h3/p column shrink and wrap instead of overflowing the flex row. */
+.si-so-head-info {
+  min-width: 0;
 }
 
 .si-so-head h3,
@@ -751,6 +766,7 @@
 }
 
 .si-so-actions span {
+  display: inline-flex;
   color: #475569;
   font-size: 12px;
   font-weight: 800;
@@ -810,6 +826,7 @@
   grid-template-columns: 28px minmax(0, 1fr) 220px;
   gap: 12px;
   align-items: center;
+  min-height: 74px;
   border-bottom: 1px solid #edf2f7;
   background: #fff;
   color: #0f172a;
@@ -836,8 +853,10 @@
   color: #64748b;
 }
 
+/* Was 0.5 here but an inline override always rendered 0.55 — corrected to
+   match what the app has actually shown. */
 .si-line-row.is-disabled {
-  opacity: 0.5;
+  opacity: 0.55;
 }
 
 .si-line-row input[type="checkbox"] {
@@ -857,17 +876,20 @@
   display: flex;
   align-items: center;
   gap: 7px;
+  margin: 0;
   flex-wrap: wrap;
 }
 
 .si-line-copy strong {
   color: #0f172a;
   font-size: 13px;
+  font-weight: 850;
   line-height: 1.35;
 }
 
 .si-item-badge,
 .si-line-copy p span {
+  display: inline-flex;
   border-radius: 999px;
   background: #f1f5f9;
   color: #475569;
@@ -888,6 +910,10 @@
   color: #64748b;
   font-size: 11px;
   font-weight: 800;
+}
+
+.si-line-side span {
+  display: inline-flex;
 }
 
 .si-line-side label {
@@ -2051,21 +2077,21 @@
   background: #ffffff;
 }
 
-.si-so-lines-table {
+/* .si-so-lines-table {
   width: 100%;
   min-width: 760px;
   border-collapse: collapse;
   color: #0f172a;
-}
+} */
 
-.si-so-lines-table th,
+/* .si-so-lines-table th,
 .si-so-lines-table td {
   border-bottom: 1px solid #f1f5f9;
   text-align: left;
   vertical-align: middle;
-}
+} */
 
-.si-so-lines-table th {
+/* .si-so-lines-table th {
   position: sticky;
   top: 0;
   z-index: 1;
@@ -2075,12 +2101,12 @@
   font-weight: 850;
   letter-spacing: 0;
   padding: 10px 12px;
-}
+} */
 
-.si-so-lines-table td {
+/* .si-so-lines-table td {
   background: #ffffff;
   padding: 13px 12px;
-}
+} */
 
 .si-so-line-row:hover td {
   background: #f8fafc;
@@ -3571,14 +3597,14 @@
   color: #ef4444;
 }
 
-.si-lines-table {
+/* .si-lines-table {
   width: 100%;
   min-width: 980px;
   border-collapse: collapse;
   font-size: 12px;
-}
+} */
 
-.si-lines-table th {
+/* .si-lines-table th {
   background: #f8fafc;
   color: #64748b;
   font-size: 11px;
@@ -3586,13 +3612,13 @@
   text-align: left;
   text-transform: uppercase;
   white-space: nowrap;
-}
+} */
 
-.si-lines-table td {
+/* .si-lines-table td {
   border-top: 1px solid #e2e8f0;
   padding: 7px;
   vertical-align: middle;
-}
+} */
 
 .si-lines-table input,
 .si-form-grid input,
@@ -3608,9 +3634,9 @@
   padding: 0 9px;
 }
 
-.si-lines-table input {
+/* .si-lines-table input {
   min-width: 86px;
-}
+} */
 
 .si-line-readonly {
   display: block;
@@ -4478,14 +4504,14 @@
   overflow: auto;
 }
 
-.si-review-table {
+/* .si-review-table {
   width: 100%;
   min-width: 980px;
   border-collapse: collapse;
   font-size: 12px;
-}
+} */
 
-.si-review-table th {
+/* .si-review-table th {
   background: #172033;
   color: #e2e8f0;
   font-size: 11px;
@@ -4493,26 +4519,26 @@
   padding: 10px;
   text-align: left;
   text-transform: uppercase;
-}
+} */
 
-.si-review-table td {
+/* .si-review-table td {
   border-top: 1px solid #e2e8f0;
   color: #334155;
   padding: 9px 10px;
   vertical-align: middle;
-}
+} */
 
-.si-review-table tr.is-selected {
+/* .si-review-table tr.is-selected {
   background: #f0f9ff;
-}
+} */
 
-.si-review-table input[type="checkbox"] {
+/* .si-review-table input[type="checkbox"] {
   width: 18px;
   height: 18px;
   accent-color: #2563eb;
-}
+} */
 
-.si-review-table input[type="number"] {
+/* .si-review-table input[type="number"] {
   width: 96px;
   height: 34px;
   border: 1px solid #cbd5e1;
@@ -4520,21 +4546,21 @@
   color: #0f172a;
   outline: none;
   padding: 0 9px;
-}
+} */
 
-.si-review-table input[type="number"]:disabled {
+/* .si-review-table input[type="number"]:disabled {
   background: #f8fafc;
   color: #94a3b8;
-}
+} */
 
-.si-review-table code {
+/* .si-review-table code {
   background: #eff6ff;
   border: 1px solid #bfdbfe;
   color: #1d4ed8;
   font-size: 11px;
   font-weight: 850;
   padding: 4px 7px;
-}
+} */
 
 .si-review-tag {
   display: inline-flex;
@@ -5473,28 +5499,28 @@
   font-size: 13px;
 }
 
-.si-batch-table {
+/* .si-batch-table {
   width: 100%;
   min-width: 0;
   table-layout: fixed;
-}
+} */
 
-.si-batch-table th,
+/* .si-batch-table th,
 .si-batch-table td {
   white-space: normal;
-}
+} */
 
-.si-batch-table th:first-child,
+/* .si-batch-table th:first-child,
 .si-batch-table td:first-child,
 .si-batch-table th:nth-child(2),
 .si-batch-table td:nth-child(2) {
   width: 50%;
-}
+} */
 
-.si-batch-table th:nth-child(2),
+/* .si-batch-table th:nth-child(2),
 .si-batch-table td:nth-child(2) {
   text-align: right;
-}
+} */
 
 @media (max-width: 1180px) {
   .si-form-summary-row {
@@ -5755,9 +5781,9 @@
     grid-template-columns: minmax(220px, 34%) minmax(0, 1fr);
   }
 
-  .si-so-lines-table {
+  /* .si-so-lines-table {
     min-width: 700px;
-  }
+  } */
 
   .si-page-head-actions {
     justify-content: flex-start;
@@ -5832,9 +5858,9 @@
     flex: 1;
   }
 
-  .si-so-lines-table {
+  /* .si-so-lines-table {
     min-width: 640px;
-  }
+  } */
 
   .si-party-modal-body,
   .si-item-picker-body,
@@ -6003,14 +6029,14 @@
     padding: 12px;
   }
 
-  .si-so-lines-table {
+  /* .si-so-lines-table {
     min-width: 560px;
-  }
+  } */
 
-  .si-so-lines-table th,
+  /* .si-so-lines-table th,
   .si-so-lines-table td {
     padding: 10px;
-  }
+  } */
 
   .si-order-selection-bar {
     gap: 10px;
@@ -6139,13 +6165,13 @@
     text-align: right;
   }
 
-  .si-so-lines-table {
+  /* .si-so-lines-table {
     min-width: 520px;
-  }
+  } */
 
-  .si-batch-table {
+  /* .si-batch-table {
     min-width: 0;
-  }
+  } */
 
   .si-posting-orbit svg {
     width: 34px;

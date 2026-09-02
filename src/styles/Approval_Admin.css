@@ -342,8 +342,8 @@
   border-radius: var(--apv-radius);
   background: #fff;
 }
-.apv-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.apv-table th {
+/* .apv-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+ *//* .apv-table th {
   position: sticky;
   top: 0;
   z-index: 1;
@@ -356,37 +356,37 @@
   border-bottom: 1px solid var(--apv-line);
   white-space: nowrap;
 }
-.apv-table td {
+ *//* .apv-table td {
   padding: 11px 14px;
   border-bottom: 1px solid #f1f3f5;
   vertical-align: middle;
 }
-.apv-table tbody tr:last-child td { border-bottom: none; }
-.apv-table tbody tr:hover { background: #fafbff; }
-.apv-table code {
+ *//* .apv-table tbody tr:last-child td { border-bottom: none; }
+ *//* .apv-table tbody tr:hover { background: #fafbff; }
+ *//* .apv-table code {
   font-size: 12px;
   background: #f3f4f6;
   padding: 2px 6px;
   border-radius: 4px;
 }
-.apv-row-actions { display: flex; gap: 6px; justify-content: flex-end; }
+ */.apv-row-actions { display: flex; gap: 6px; justify-content: flex-end; }
 .apv-num { text-align: right; font-variant-numeric: tabular-nums; }
 
 /* ---- Badges ---- */
-.apv-badge {
-  display: inline-block;
-  padding: 3px 9px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  white-space: nowrap;
-}
-.apv-badge-ok { background: var(--apv-ok-bg); color: var(--apv-ok); }
-.apv-badge-warn { background: var(--apv-warn-bg); color: var(--apv-warn); }
-.apv-badge-err { background: var(--apv-err-bg); color: var(--apv-err); }
-.apv-badge-info { background: var(--apv-primary-50); color: var(--apv-primary-600); }
-.apv-badge-muted { background: #f3f4f6; color: var(--apv-muted); }
+/* .apv-badge {
+                        display: inline-block;
+                        padding: 3px 9px;
+                        border-radius: 999px;
+                        font-size: 11px;
+                        font-weight: 700;
+                        letter-spacing: 0.02em;
+                        white-space: nowrap;
+                        } */
+/* .apv-badge-ok { background: var(--apv-ok-bg); color: var(--apv-ok); } */
+/* .apv-badge-warn { background: var(--apv-warn-bg); color: var(--apv-warn); } */
+/* .apv-badge-err { background: var(--apv-err-bg); color: var(--apv-err); } */
+/* .apv-badge-info { background: var(--apv-primary-50); color: var(--apv-primary-600); } */
+/* .apv-badge-muted { background: #f3f4f6; color: var(--apv-muted); } */
 
 /* ---- States ---- */
 .apv-empty,
@@ -412,6 +412,12 @@
   background: linear-gradient(90deg, #eef0f3 25%, #f7f8fa 37%, #eef0f3 63%);
   background-size: 400% 100%;
   animation: apv-shimmer 1.4s ease infinite;
+  /* Default (non-first) column width — was inline `c === 0 ? "40%" : "70%"`. */
+  width: 70%;
+}
+/* First skeleton column reads narrower (was the code/id column). */
+.apv-skeleton.apv-skeleton-first {
+  width: 40%;
 }
 @keyframes apv-shimmer {
   0% { background-position: 100% 50%; }
@@ -422,6 +428,12 @@
 }
 
 /* ---- Modal ---- */
+/* Replaced by the Dialog primitive's own overlay (Phase 2.3). Radix renders the
+   backdrop and the panel as SIBLINGS in a portal, so this flex centring could
+   never have positioned the panel again — the panel centres itself. The 20px
+   padding here was the only thing this rule contributed that the primitive does
+   not, and it has moved onto .apv-modal's width below. Same colour either way:
+   the primitive's bg-ink/50 is #0f172a at .50 where this was .45.
 .apv-modal-overlay {
   position: fixed;
   inset: 0;
@@ -432,11 +444,17 @@
   padding: 20px;
   z-index: 1000;
 }
+*/
 .apv-modal {
   background: #fff;
   border-radius: var(--apv-radius);
   box-shadow: var(--apv-shadow-lg);
-  width: 100%;
+  /* Was `width: 100%` inside an overlay padded by 20px, so it resolved to
+     viewport-40px. The panel is now fixed-positioned and centred by the Dialog
+     primitive, where 100% resolves against the viewport itself — hence the
+     subtraction. Identical at every width; without it the panel goes
+     edge-to-edge on a narrow screen. */
+  width: calc(100% - 40px);
   max-width: 620px;
   max-height: 90vh;
   display: flex;
@@ -640,4 +658,77 @@
   background: #fef2f2;
   border-color: #fecaca;
   color: #b91c1c;
+}
+
+/* ==========================================================================
+   Phase 6.3 inline-style conversions (ApprovalManagement, ApprovalUI,
+   ConfigTab). Grouped here rather than woven into the sections above so the
+   original hand-authored rules stay easy to diff against.
+   ========================================================================== */
+
+/* Small flex wrapper used to line up a select/button pair inside a card head
+   or toolbar row. Split into a base + modifier because the inline objects it
+   replaces did not all specify align-items — .apv-actions-row alone matches
+   the ones that left it unset (default stretch), and the -center modifier
+   matches the ones that set "center" explicitly. */
+.apv-actions-row {
+  display: flex;
+  gap: 8px;
+}
+.apv-actions-row.apv-actions-row-center {
+  align-items: center;
+}
+
+/* Workflow-picker field in the Levels/Approvers toolbars — wider than the
+   default .apv-field so the workflow name is not clipped. .apv-field itself
+   is used by many other fields at its default width, so this is a modifier
+   rather than a change to the base rule. */
+.apv-field.apv-field-wf {
+  min-width: 280px;
+}
+
+/* Wraps each level's block in the Approvers tab list. */
+.apv-level-group {
+  margin-bottom: 18px;
+}
+
+/* The "no named approvers" notice sits at the bottom of a .apv-level-group,
+   which already carries its own bottom margin — this modifier zeroes the
+   notice's own margin so the two don't stack. .apv-notice / .apv-notice-warn
+   are also used outside this group (AnalyticsTab), so their base rules are
+   left untouched. */
+.apv-notice.apv-notice-tight {
+  margin-bottom: 0;
+}
+
+/* Right-aligned actions cell in the bank-mapping table (ConfigTab). Not
+   reused from .apv-num, which also sets font-variant-numeric for a numeric
+   column — a different declared set even though it would render the same
+   here. */
+.apv-cell-right {
+  text-align: right;
+}
+
+/* .apv-muted line (ConfigTab "Last sync…" meta) that needs separation from
+   the table above it. .apv-muted has other call sites at its default
+   spacing, so this is a modifier rather than a base-rule change. */
+.apv-muted.apv-muted-spaced {
+  margin-top: 8px;
+}
+
+/* ---- ApprovalUI primitives ---- */
+.apv-empty-icon {
+  opacity: 0.35;
+  margin-bottom: 8px;
+}
+.apv-empty-action {
+  margin-top: 12px;
+}
+.apv-error-icon {
+  margin-bottom: 8px;
+}
+.apv-confirm-message {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
 }

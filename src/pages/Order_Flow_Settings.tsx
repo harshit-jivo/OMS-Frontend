@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import {
   HiCheck,
@@ -22,6 +23,8 @@ import { sapService } from "../services/sapService";
 import type { Party } from "../services/sapService";
 import "../styles/Order_Flow_Settings.css";
 import "../styles/Order_Flow_Settings_Parties.css";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { messageFrom } from "@/lib/apiError";
 
 const DEFAULT_CONDITIONS: OrderFlowConditionOption[] = [
   { code: "BASIC_GT_MARKET", label: "Price List (Basic) > Basic Price and Basic Price != 0" },
@@ -35,6 +38,10 @@ const DEFAULT_FLOW_OPTIONS: OrderFlowTypeOption[] = [
   { code: "ASM", label: "ASM Order Flow" },
   { code: "BILLING", label: "Billing Orders Flow" },
 ];
+
+/** Stable empties, so the party filter memos settle. */
+const NO_PARTIES: Party[] = [];
+const NO_PARTY_CONFIGS: PartyFlowConfig[] = [];
 
 const DEFAULT_CONFIG: OrderFlowConfig = {
   flow_type: "ASM",
@@ -59,7 +66,10 @@ type ApplyMode = "global" | "parties";
 
 const getPartyCode = (party: Party) => String(party.card_code || "").trim();
 const getPartyName = (party: Party) => String(party.card_name || "").trim();
-const getPartyCat = (party: Party) => String(party.category || "").trim().toUpperCase();
+const getPartyCat = (party: Party) =>
+  String(party.category || "")
+    .trim()
+    .toUpperCase();
 
 const normalizeParties = (data: unknown): Party[] => {
   if (Array.isArray(data)) return data as Party[];
@@ -84,6 +94,8 @@ function ToggleRow({ title, subtitle, checked, disabled, onChange }: ToggleRowPr
   return (
     <button
       type="button"
+      role="checkbox"
+      aria-checked={checked}
       className={`ofs-toggle-row${checked ? " is-checked" : ""}${disabled ? " is-disabled" : ""}`}
       onClick={onChange}
       disabled={disabled}
@@ -101,23 +113,22 @@ function ToggleRow({ title, subtitle, checked, disabled, onChange }: ToggleRowPr
 
 export default function Order_Flow_Settings() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  /** Save/delete failures. The LOAD failure is the query's, below. */
+  const [saveError, setSaveError] = useState("");
   const [config, setConfig] = useState<OrderFlowConfig>(DEFAULT_CONFIG);
   const [selectedFlowType, setSelectedFlowType] = useState("ASM");
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [flowMenuOpen, setFlowMenuOpen] = useState(false);
   const [successVisible, setSuccessVisible] = useState(false);
-  const [error, setError] = useState("");
 
   // Party-specific flow state
   const [applyMode, setApplyMode] = useState<ApplyMode>("global");
-  const [parties, setParties] = useState<Party[]>([]);
   const [selectedTargets, setSelectedTargets] = useState<
     { card_code: string; category: string; card_name: string }[]
   >([]);
   const [partyMenuOpen, setPartyMenuOpen] = useState(false);
   const [partySearch, setPartySearch] = useState("");
-  const [partyConfigs, setPartyConfigs] = useState<PartyFlowConfig[]>([]);
   const partyDropdownRef = useRef<HTMLDivElement>(null);
 
   const conditionOptions = config.condition_options?.length
@@ -130,15 +141,20 @@ export default function Order_Flow_Settings() {
     "ASM Order Flow";
   const isPartyMode = applyMode === "parties";
 
-  const loadConfig = useCallback(async (flowType = selectedFlowType) => {
-    setLoading(true);
-    setError("");
-    try {
-      const data = await ordersService.getOrderFlowConfig(flowType);
-      setConfig({
+  /*
+   * `selectedFlowType` is the key. The old `loadConfig` was a `useCallback`
+   * depending on `selectedFlowType` that ALSO called
+   * `setSelectedFlowType(data.flow_type || flowType)` — so a successful load
+   * changed the callback's identity and re-fired the effect that had just run.
+   */
+  const { data: configData, isPending: loading, isError: configFailed } = useQuery({
+    queryKey: ["order-flow", "config", selectedFlowType],
+    queryFn: async () => {
+      const data = await ordersService.getOrderFlowConfig(selectedFlowType);
+      return {
         ...DEFAULT_CONFIG,
         ...data,
-        flow_type: data.flow_type || flowType,
+        flow_type: data.flow_type || selectedFlowType,
         flow_options: data.flow_options?.length ? data.flow_options : DEFAULT_FLOW_OPTIONS,
         condition_options: data.condition_options?.length
           ? data.condition_options
@@ -146,31 +162,47 @@ export default function Order_Flow_Settings() {
         rate_conditions: Array.isArray(data.rate_conditions)
           ? data.rate_conditions
           : DEFAULT_CONFIG.rate_conditions,
-      });
-      setSelectedFlowType(data.flow_type || flowType);
-    } catch (err) {
-      console.error("Failed to load order flow settings:", err);
-      setError("Failed to load order flow settings.");
-    } finally {
-      setLoading(false);
+      };
+    },
+  });
+
+  /*
+   * `config` is server-seeded and then user-edited (every toggle below writes
+   * to it), so it stays state. Re-seeding during render rather than in an
+   * effect: an effect would be a `set-state-in-effect` violation and would also
+   * land a render late. The `seededFrom` identity guard is what stops the
+   * `flow_type` adoption from looping.
+   */
+  const [seededFrom, setSeededFrom] = useState<typeof configData>(undefined);
+  if (configData && configData !== seededFrom) {
+    setSeededFrom(configData);
+    setConfig(configData);
+    if (configData.flow_type && configData.flow_type !== selectedFlowType) {
+      setSelectedFlowType(configData.flow_type);
     }
-  }, [selectedFlowType]);
+  }
 
-  useEffect(() => {
-    void loadConfig();
-  }, [loadConfig]);
+  const error = saveError || (configFailed ? "Failed to load order flow settings." : "");
 
-  const loadParties = useCallback(async () => {
-    try {
-      const [partyData, configData] = await Promise.all([
+  const loadConfig = (flowType?: string) => {
+    if (flowType && flowType !== selectedFlowType) setSelectedFlowType(flowType);
+    return queryClient.invalidateQueries({ queryKey: ["order-flow", "config"] });
+  };
+
+  /* Parties and their per-party flow overrides, read together so the list and
+     the overrides describe the same moment. */
+  const { data: partyData } = useQuery({
+    queryKey: ["order-flow", "parties"],
+    queryFn: async () => {
+      const [rawParties, configs] = await Promise.all([
         sapService.getParties(),
         ordersService.getPartyFlowConfigs(),
       ]);
-      // The parties endpoint repeats rows; keep one entry per party + category so the
-      // category variants stay visible, but drop exact duplicates (which would create
-      // duplicate React keys and break list filtering).
+      // The parties endpoint repeats rows; keep one entry per party + category
+      // so the category variants stay visible, but drop exact duplicates (which
+      // would create duplicate React keys and break list filtering).
       const seen = new Set<string>();
-      const uniqueParties = normalizeParties(partyData).filter((party) => {
+      const uniqueParties = normalizeParties(rawParties).filter((party) => {
         const code = getPartyCode(party);
         if (!code) return false;
         const key = `${code}||${String(party.category || "").trim()}`;
@@ -178,16 +210,16 @@ export default function Order_Flow_Settings() {
         seen.add(key);
         return true;
       });
-      setParties(uniqueParties);
-      setPartyConfigs(Array.isArray(configData?.data) ? configData.data : []);
-    } catch (err) {
-      console.error("Failed to load parties:", err);
-    }
-  }, []);
+      return {
+        parties: uniqueParties,
+        partyConfigs: Array.isArray(configs?.data) ? configs.data : NO_PARTY_CONFIGS,
+      };
+    },
+  });
+  const parties = partyData?.parties ?? NO_PARTIES;
+  const partyConfigs = partyData?.partyConfigs ?? NO_PARTY_CONFIGS;
 
-  useEffect(() => {
-    void loadParties();
-  }, [loadParties]);
+  const loadParties = () => queryClient.invalidateQueries({ queryKey: ["order-flow", "parties"] });
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -214,8 +246,10 @@ export default function Order_Flow_Settings() {
     const base = term
       ? parties.filter((party) =>
           [getPartyName(party), getPartyCode(party), party.category, party.state].some((value) =>
-            String(value || "").toLowerCase().includes(term)
-          )
+            String(value || "")
+              .toLowerCase()
+              .includes(term),
+          ),
         )
       : parties;
     return [...base].sort((a, b) => {
@@ -237,7 +271,11 @@ export default function Order_Flow_Settings() {
   }, [parties]);
 
   const lookupPartyName = (code: string, category?: string | null) =>
-    partyNameByKey[`${String(code || "").trim()}||${String(category || "").trim().toUpperCase()}`] || "";
+    partyNameByKey[
+      `${String(code || "").trim()}||${String(category || "")
+        .trim()
+        .toUpperCase()}`
+    ] || "";
 
   const flowPreview = useMemo(() => {
     const stages = ["Order Created"];
@@ -293,7 +331,7 @@ export default function Order_Flow_Settings() {
 
   const switchMode = (mode: ApplyMode) => {
     setApplyMode(mode);
-    setError("");
+    setSaveError("");
     if (mode === "parties") {
       loadSelectionSettings(selectedTargets, selectedFlowType);
     } else {
@@ -317,7 +355,7 @@ export default function Order_Flow_Settings() {
 
   const removeSelectedTarget = (code: string, category: string) => {
     setSelectedTargets((current) =>
-      current.filter((t) => !(t.card_code === code && t.category === category))
+      current.filter((t) => !(t.card_code === code && t.category === category)),
     );
   };
 
@@ -338,34 +376,39 @@ export default function Order_Flow_Settings() {
     try {
       await ordersService.deletePartyFlowConfig(
         [{ card_code: cfg.card_code, category: cfg.category || "" }],
-        cfg.flow_type
+        cfg.flow_type,
       );
-      setPartyConfigs((current) =>
-        current.filter(
-          (item) =>
-            !(
-              item.card_code === cfg.card_code &&
-              item.category === cfg.category &&
-              item.flow_type === cfg.flow_type
-            )
-        )
+      queryClient.setQueryData<{ parties: Party[]; partyConfigs: PartyFlowConfig[] }>(
+        ["order-flow", "parties"],
+        (cached) =>
+          cached && {
+            ...cached,
+            partyConfigs: cached.partyConfigs.filter(
+              (item) =>
+                !(
+                  item.card_code === cfg.card_code &&
+                  item.category === cfg.category &&
+                  item.flow_type === cfg.flow_type
+                ),
+            ),
+          },
       );
     } catch (err) {
       console.error("Failed to remove party flow:", err);
-      setError("Failed to remove custom flow for this party.");
+      setSaveError("Failed to remove custom flow for this party.");
     }
   };
 
   const handleSave = async () => {
-    setError("");
+    setSaveError("");
     if (config.rate_approval_enabled && !config.rate_conditions.length) {
-      setError("Select at least one Rate Approval condition or turn Rate Approval off.");
+      setSaveError("Select at least one Rate Approval condition or turn Rate Approval off.");
       return;
     }
 
     if (isPartyMode) {
       if (selectedTargets.length === 0) {
-        setError("Select at least one party to apply this flow to.");
+        setSaveError("Select at least one party to apply this flow to.");
         return;
       }
       setSaving(true);
@@ -378,13 +421,13 @@ export default function Order_Flow_Settings() {
             billing_enabled: config.billing_enabled,
             auditor_enabled: config.auditor_enabled,
             rate_conditions: config.rate_conditions || [],
-          }
+          },
         );
         await loadParties();
         setSuccessVisible(true);
-      } catch (err: any) {
+      } catch (err) {
         console.error("Failed to save party flow settings:", err);
-        setError(err?.response?.data?.message || "Failed to save party flow settings.");
+        setSaveError(messageFrom(err, "Failed to save party flow settings."));
       } finally {
         setSaving(false);
       }
@@ -400,11 +443,12 @@ export default function Order_Flow_Settings() {
       });
 
       if ("success" in response && response.success === false) {
-        setError(response.message || "Failed to save order flow.");
+        setSaveError(response.message || "Failed to save order flow.");
         return;
       }
 
-      const savedConfig = "data" in response && response.data ? response.data : response as OrderFlowConfig;
+      const savedConfig =
+        "data" in response && response.data ? response.data : (response as OrderFlowConfig);
       setConfig({
         ...DEFAULT_CONFIG,
         ...savedConfig,
@@ -415,9 +459,9 @@ export default function Order_Flow_Settings() {
           : conditionOptions,
       });
       setSuccessVisible(true);
-    } catch (err: any) {
+    } catch (err) {
       console.error("Failed to save order flow settings:", err);
-      setError(err?.response?.data?.message || "Failed to save order flow settings.");
+      setSaveError(messageFrom(err, "Failed to save order flow settings."));
     } finally {
       setSaving(false);
     }
@@ -486,7 +530,13 @@ export default function Order_Flow_Settings() {
           </div>
 
           <div className="ofs-flow-select">
-            <button type="button" className="ofs-flow-trigger" onClick={() => setFlowMenuOpen((open) => !open)}>
+            <button
+              type="button"
+              className="ofs-flow-trigger"
+              aria-haspopup="listbox"
+              aria-expanded={flowMenuOpen}
+              onClick={() => setFlowMenuOpen((open) => !open)}
+            >
               <span>
                 <small>{isPartyMode ? "Flow Role" : "Selected Flow"}</small>
                 <strong>{selectedFlowLabel}</strong>
@@ -494,11 +544,13 @@ export default function Order_Flow_Settings() {
               <HiChevronDown className={flowMenuOpen ? "is-open" : ""} />
             </button>
             {flowMenuOpen ? (
-              <div className="ofs-flow-menu">
+              <div className="ofs-flow-menu" role="listbox">
                 {flowOptions.map((option) => (
                   <button
                     key={option.code}
                     type="button"
+                    role="option"
+                    aria-selected={option.code === selectedFlowType}
                     className={`ofs-flow-option${option.code === selectedFlowType ? " is-selected" : ""}`}
                     onClick={() => handleFlowSelect(option.code)}
                   >
@@ -512,7 +564,13 @@ export default function Order_Flow_Settings() {
 
           {isPartyMode ? (
             <div className="ofs-flow-select ofp-party-select" ref={partyDropdownRef}>
-              <button type="button" className="ofs-flow-trigger" onClick={() => setPartyMenuOpen((open) => !open)}>
+              <button
+                type="button"
+                className="ofs-flow-trigger"
+                aria-haspopup="listbox"
+                aria-expanded={partyMenuOpen}
+                onClick={() => setPartyMenuOpen((open) => !open)}
+              >
                 <span>
                   <small>Selected Parties</small>
                   <strong>{partyFilterLabel}</strong>
@@ -522,16 +580,17 @@ export default function Order_Flow_Settings() {
               {partyMenuOpen ? (
                 <div className="ofs-flow-menu ofp-party-menu">
                   <label className="ofp-party-search">
-                    <HiMagnifyingGlass />
+                    <HiMagnifyingGlass aria-hidden="true" />
                     <input
                       type="text"
                       value={partySearch}
                       onChange={(event) => setPartySearch(event.target.value)}
                       placeholder="Search party by name or code"
+                      aria-label="Search party by name or code"
                       autoFocus
                     />
                   </label>
-                  <div className="ofp-party-options">
+                  <div className="ofp-party-options" role="listbox" aria-multiselectable="true">
                     {filteredParties.length === 0 ? (
                       <div className="ofp-party-empty">No party found</div>
                     ) : (
@@ -539,11 +598,15 @@ export default function Order_Flow_Settings() {
                         const code = getPartyCode(party);
                         const category = getPartyCat(party);
                         const selected = isTargetSelected(code, category);
-                        const hasConfig = Boolean(partyConfigByKey[`${code}||${category}||${selectedFlowType}`]);
+                        const hasConfig = Boolean(
+                          partyConfigByKey[`${code}||${category}||${selectedFlowType}`],
+                        );
                         return (
                           <button
                             key={`${code}||${category}`}
                             type="button"
+                            role="option"
+                            aria-selected={selected}
                             className={`ofp-party-option${selected ? " is-selected" : ""}`}
                             onClick={() => togglePartySelect(party)}
                           >
@@ -552,8 +615,12 @@ export default function Order_Flow_Settings() {
                             </span>
                             <span className="ofp-party-text">
                               <span>
-                                <span className="ofp-party-name">{getPartyName(party) || code}</span>
-                                {category ? <span className="ofp-party-cat">{category}</span> : null}
+                                <span className="ofp-party-name">
+                                  {getPartyName(party) || code}
+                                </span>
+                                {category ? (
+                                  <span className="ofp-party-cat">{category}</span>
+                                ) : null}
                               </span>
                               <small>
                                 {code}
@@ -571,9 +638,14 @@ export default function Order_Flow_Settings() {
               {selectedTargets.length > 0 ? (
                 <div className="ofp-party-chips">
                   {selectedTargets.map((target) => (
-                    <span className="ofp-party-chip" key={`${target.card_code}||${target.category}`}>
+                    <span
+                      className="ofp-party-chip"
+                      key={`${target.card_code}||${target.category}`}
+                    >
                       {target.card_name}
-                      {target.category ? <span className="ofp-chip-cat">{target.category}</span> : null}
+                      {target.category ? (
+                        <span className="ofp-chip-cat">{target.category}</span>
+                      ) : null}
                       <button
                         type="button"
                         onClick={() => removeSelectedTarget(target.card_code, target.category)}
@@ -586,8 +658,9 @@ export default function Order_Flow_Settings() {
                 </div>
               ) : null}
               <p className="ofp-hint">
-                The <strong>{selectedFlowLabel}</strong> stages below replace the global flow for every selected
-                party's {selectedFlowType === "BILLING" ? "billing-created" : "ASM"} orders.
+                The <strong>{selectedFlowLabel}</strong> stages below replace the global flow for
+                every selected party's {selectedFlowType === "BILLING" ? "billing-created" : "ASM"}{" "}
+                orders.
               </p>
             </div>
           ) : null}
@@ -648,9 +721,16 @@ export default function Order_Flow_Settings() {
             </div>
             <div className="ofp-configured-list">
               {partyConfigs.map((cfg) => (
-                <div className="ofp-configured-row" key={`${cfg.card_code}||${cfg.category}||${cfg.flow_type}`}>
+                <div
+                  className="ofp-configured-row"
+                  key={`${cfg.card_code}||${cfg.category}||${cfg.flow_type}`}
+                >
                   <div className="ofp-configured-main">
-                    <strong>{lookupPartyName(cfg.card_code, cfg.category) || cfg.card_name || cfg.card_code}</strong>
+                    <strong>
+                      {lookupPartyName(cfg.card_code, cfg.category) ||
+                        cfg.card_name ||
+                        cfg.card_code}
+                    </strong>
                     <small>
                       {cfg.card_code}
                       {cfg.category ? ` · ${cfg.category}` : ""} · {cfg.flow_label || cfg.flow_type}
@@ -662,7 +742,11 @@ export default function Order_Flow_Settings() {
                     {cfg.auditor_enabled ? <span>Auditor</span> : null}
                   </div>
                   <div className="ofp-configured-actions">
-                    <button type="button" className="ofs-secondary" onClick={() => editConfiguredParty(cfg)}>
+                    <button
+                      type="button"
+                      className="ofs-secondary"
+                      onClick={() => editConfiguredParty(cfg)}
+                    >
                       Edit
                     </button>
                     <button
@@ -712,9 +796,20 @@ export default function Order_Flow_Settings() {
         </button>
       </div>
 
-      {successVisible ? (
-        <div className="ofs-modal-backdrop" onClick={() => setSuccessVisible(false)}>
-          <div className="ofs-modal" onClick={(event) => event.stopPropagation()}>
+      <Dialog
+        open={Boolean(successVisible)}
+        onOpenChange={(next) => {
+          if (!next) (() => setSuccessVisible(false))();
+        }}
+      >
+        {successVisible && (
+          <DialogContent
+            title="Flow settings"
+            variant="bare"
+            size="auto"
+            showClose={false}
+            className="ofs-modal"
+          >
             <div className="ofs-success-icon">
               <HiCheck />
             </div>
@@ -725,7 +820,11 @@ export default function Order_Flow_Settings() {
                 : "Order flow settings saved successfully."}
             </p>
             <div className="ofs-modal-actions">
-              <button type="button" className="ofs-secondary" onClick={() => setSuccessVisible(false)}>
+              <button
+                type="button"
+                className="ofs-secondary"
+                onClick={() => setSuccessVisible(false)}
+              >
                 Keep Editing
               </button>
               <button type="button" className="ofs-primary" onClick={() => navigate("/Dashboard")}>
@@ -733,9 +832,9 @@ export default function Order_Flow_Settings() {
                 Go to Dashboard
               </button>
             </div>
-          </div>
-        </div>
-      ) : null}
+          </DialogContent>
+        )}
+      </Dialog>
     </div>
   );
 }

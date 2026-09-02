@@ -12,6 +12,7 @@ import PartyDirectory from "./PartyDirectory";
 import Branches from "./Branches";
 import Logs from "./Logs";
 import "../styles/Sap_Sync.css";
+import { Tab, TabList } from "@/components/ui/tabs";
 
 /* Parties and Addresses are one subject — a party and the places it bills/ships
  * to — so they share a single "Parties & Addresses" tab (see PartyDirectory).
@@ -60,25 +61,23 @@ export default function Sap_sync() {
       </div>
 
       {/* ── TABS ── */}
-      <div className="sap-tabs" role="tablist" aria-label="SAP sync sections">
+      <TabList className="sap-tabs" label="SAP sync sections">
         {TABS.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.key;
           return (
-            <button
+            <Tab
               key={tab.key}
-              type="button"
-              role="tab"
-              aria-selected={isActive}
+              selected={isActive}
               className={`sap-tab ${isActive ? "sap-tab-active" : ""}`}
               onClick={() => setActiveTab(tab.key)}
             >
               <Icon className="sap-tab-icon" aria-hidden="true" />
               {tab.label}
-            </button>
+            </Tab>
           );
         })}
-      </div>
+      </TabList>
 
       {/* ── CONTENT ── */}
       <div className="sap-content">{renderContent()}</div>

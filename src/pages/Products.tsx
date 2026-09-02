@@ -1,8 +1,19 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { HiArrowPath, HiCube, HiMagnifyingGlass, HiSwatch, HiTag } from "react-icons/hi2";
-import { sapService } from "../services/sapService";
 import type { Product } from "../services/sapService";
+
+import { useSapProducts } from "../lib/sapQueries";
 import "../styles/SapData.css";
+import { Badge } from "@/components/ui/badge";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Pagination } from "@/components/ui/pagination";
 
 const ITEMS_PER_PAGE = 15;
 
@@ -13,33 +24,28 @@ const uniqueCount = (products: Product[], key: keyof Product) =>
   new Set(products.map((product) => String(product[key] || "").trim()).filter(Boolean)).size;
 
 export default function Products() {
-  const [products, setProducts] = useState<Product[]>([]);
+  // `isLoading` is the FIRST load; `isFetching` also covers a Refresh. They
+  // were one `loading` flag, so pressing Refresh replaced the table with the
+  // word "Loading…" instead of leaving the data up while it reloaded.
+  const {
+    items: products,
+    isLoading: loading,
+    isFetching,
+    refetch: fetchProducts,
+  } = useSapProducts();
   const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-
-  useEffect(() => {
-    fetchProducts();
-  }, []);
-
-  const fetchProducts = async () => {
-    setLoading(true);
-    try {
-      const data = await sapService.getProducts();
-      setProducts(Array.isArray(data) ? data : []);
-    } catch (error) {
-      console.log("Error fetching products:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const filteredProducts = useMemo(() => {
     const needle = search.trim().toLowerCase();
     if (!needle) return products;
     return products.filter((product) =>
-      [product.item_code, product.item_name, product.brand, product.category, product.variety]
-        .some((field) => String(field || "").toLowerCase().includes(needle)),
+      [product.item_code, product.item_name, product.brand, product.category, product.variety].some(
+        (field) =>
+          String(field || "")
+            .toLowerCase()
+            .includes(needle),
+      ),
     );
   }, [products, search]);
 
@@ -79,7 +85,7 @@ export default function Products() {
           <input
             type="text"
             className="sd-search"
-            placeholder="Search by code, name, brand, category or variety…"
+            placeholder="Search by code, name, brand, category or variety…" aria-label="Search by code, name, brand, category or variety"
             value={search}
             onChange={(event) => {
               setSearch(event.target.value);
@@ -87,9 +93,9 @@ export default function Products() {
             }}
           />
         </div>
-        <button type="button" className="sd-btn" onClick={fetchProducts} disabled={loading}>
+        <button type="button" className="sd-btn" onClick={fetchProducts} disabled={isFetching}>
           <HiArrowPath className={loading ? "sd-spin" : ""} aria-hidden="true" />
-          {loading ? "Loading…" : "Refresh"}
+          {isFetching ? "Loading…" : "Refresh"}
         </button>
       </div>
 
@@ -110,62 +116,48 @@ export default function Products() {
         ) : (
           <>
             <div className="sd-table-scroll">
-              <table className="sd-table">
-                <thead>
-                  <tr>
-                    <th>Item Code</th>
-                    <th>Item Name</th>
-                    <th>Brand</th>
-                    <th>Category</th>
-                    <th>Variety</th>
-                    <th>Type</th>
-                    <th>Pack Unit</th>
-                  </tr>
-                </thead>
-                <tbody>
+              <Table density="compact">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Item Code</TableHead>
+                    <TableHead>Item Name</TableHead>
+                    <TableHead>Brand</TableHead>
+                    <TableHead>Category</TableHead>
+                    <TableHead>Variety</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Pack Unit</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {visible.map((product) => (
-                    <tr key={product.id}>
-                      <td className="sd-code">{dash(product.item_code)}</td>
-                      <td className="sd-wrap-cell sd-strong">{dash(product.item_name)}</td>
-                      <td>{dash(product.brand)}</td>
-                      <td>
+                    <TableRow key={product.id}>
+                      <TableCell className="sd-code">{dash(product.item_code)}</TableCell>
+                      <TableCell className="sd-wrap-cell sd-strong">
+                        {dash(product.item_name)}
+                      </TableCell>
+                      <TableCell>{dash(product.brand)}</TableCell>
+                      <TableCell>
                         {product.category ? (
-                          <span className="sd-badge sd-badge-info">{product.category}</span>
+                          <Badge tone="info">{product.category}</Badge>
                         ) : (
                           <span className="sd-dim">—</span>
                         )}
-                      </td>
-                      <td>{dash(product.variety)}</td>
-                      <td className="sd-dim">{dash(product.type)}</td>
-                      <td className="sd-nowrap">{dash(product.sal_pack_unit)}</td>
-                    </tr>
+                      </TableCell>
+                      <TableCell>{dash(product.variety)}</TableCell>
+                      <TableCell className="sd-dim">{dash(product.type)}</TableCell>
+                      <TableCell className="sd-nowrap">{dash(product.sal_pack_unit)}</TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
 
             {filteredProducts.length > ITEMS_PER_PAGE && (
-              <div className="sd-pagination">
-                <button
-                  type="button"
-                  className="sd-pg-btn"
-                  disabled={page === 1}
-                  onClick={() => setCurrentPage(page - 1)}
-                >
-                  ← Prev
-                </button>
-                <span className="sd-pg-info">
-                  {page} / {totalPages}
-                </span>
-                <button
-                  type="button"
-                  className="sd-pg-btn"
-                  disabled={page === totalPages}
-                  onClick={() => setCurrentPage(page + 1)}
-                >
-                  Next →
-                </button>
-              </div>
+              <Pagination
+                page={currentPage}
+                totalPages={totalPages}
+                onPageChange={setCurrentPage}
+              />
             )}
           </>
         )}

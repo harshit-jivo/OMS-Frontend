@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   HiArrowPath,
   HiBuildingOffice2,
@@ -6,9 +6,18 @@ import {
   HiMagnifyingGlass,
   HiXCircle,
 } from "react-icons/hi2";
-import { sapService } from "../services/sapService";
-import type { Branch } from "../services/sapService";
+import { useSapBranches } from "../lib/sapQueries";
 import "../styles/SapData.css";
+import { Badge } from "@/components/ui/badge";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Pagination } from "@/components/ui/pagination";
 
 const ITEMS_PER_PAGE = 15;
 
@@ -22,33 +31,26 @@ const formatStamp = (value?: string) => {
 };
 
 export default function Branches() {
-  const [branches, setBranches] = useState<Branch[]>([]);
+  // `isLoading` is the FIRST load; `isFetching` also covers a Refresh. They
+  // were one `loading` flag, so pressing Refresh replaced the table with the
+  // word "Loading…" instead of leaving the data up while it reloaded.
+  const {
+    items: branches,
+    isLoading: loading,
+    isFetching,
+    refetch: fetchBranches,
+  } = useSapBranches();
   const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-
-  useEffect(() => {
-    fetchBranches();
-  }, []);
-
-  const fetchBranches = async () => {
-    setLoading(true);
-    try {
-      const data = await sapService.getBranches();
-      setBranches(Array.isArray(data) ? data : []);
-    } catch (error) {
-      console.log("Error fetching Branches:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const filteredBranches = useMemo(() => {
     const needle = search.trim().toLowerCase();
     if (!needle) return branches;
     return branches.filter((branch) =>
       [branch.bpl_id, branch.bpl_name].some((field) =>
-        String(field ?? "").toLowerCase().includes(needle),
+        String(field ?? "")
+          .toLowerCase()
+          .includes(needle),
       ),
     );
   }, [branches, search]);
@@ -61,7 +63,12 @@ export default function Branches() {
   const kpis = [
     { label: "Branches", value: branches.length, icon: HiBuildingOffice2, tone: "" },
     { label: "Active", value: activeCount, icon: HiCheckCircle, tone: "sd-kpi-ok" },
-    { label: "Inactive", value: branches.length - activeCount, icon: HiXCircle, tone: "sd-kpi-bad" },
+    {
+      label: "Inactive",
+      value: branches.length - activeCount,
+      icon: HiXCircle,
+      tone: "sd-kpi-bad",
+    },
   ];
 
   return (
@@ -89,7 +96,7 @@ export default function Branches() {
           <input
             type="text"
             className="sd-search"
-            placeholder="Search by BPL id or branch name…"
+            placeholder="Search by BPL id or branch name…" aria-label="Search by BPL id or branch name"
             value={search}
             onChange={(event) => {
               setSearch(event.target.value);
@@ -97,9 +104,9 @@ export default function Branches() {
             }}
           />
         </div>
-        <button type="button" className="sd-btn" onClick={fetchBranches} disabled={loading}>
+        <button type="button" className="sd-btn" onClick={fetchBranches} disabled={isFetching}>
           <HiArrowPath className={loading ? "sd-spin" : ""} aria-hidden="true" />
-          {loading ? "Loading…" : "Refresh"}
+          {isFetching ? "Loading…" : "Refresh"}
         </button>
       </div>
 
@@ -119,54 +126,40 @@ export default function Branches() {
         ) : (
           <>
             <div className="sd-table-scroll">
-              <table className="sd-table">
-                <thead>
-                  <tr>
-                    <th>BPL ID</th>
-                    <th>Branch Name</th>
-                    <th>Status</th>
-                    <th>Last Updated</th>
-                  </tr>
-                </thead>
-                <tbody>
+              <Table density="compact">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>BPL ID</TableHead>
+                    <TableHead>Branch Name</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Last Updated</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {visible.map((branch) => (
-                    <tr key={branch.id}>
-                      <td className="sd-code">BPL-{branch.bpl_id}</td>
-                      <td className="sd-strong">{dash(branch.bpl_name)}</td>
-                      <td>
-                        <span className={`sd-badge ${branch.is_active ? "sd-badge-ok" : "sd-badge-fail"}`}>
+                    <TableRow key={branch.id}>
+                      <TableCell className="sd-code">BPL-{branch.bpl_id}</TableCell>
+                      <TableCell className="sd-strong">{dash(branch.bpl_name)}</TableCell>
+                      <TableCell>
+                        <Badge tone={branch.is_active ? "ok" : "bad"}>
                           {branch.is_active ? "Active" : "Inactive"}
-                        </span>
-                      </td>
-                      <td className="sd-dim sd-nowrap">{formatStamp(branch.updated_at)}</td>
-                    </tr>
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="sd-dim sd-nowrap">
+                        {formatStamp(branch.updated_at)}
+                      </TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
 
             {filteredBranches.length > ITEMS_PER_PAGE && (
-              <div className="sd-pagination">
-                <button
-                  type="button"
-                  className="sd-pg-btn"
-                  disabled={page === 1}
-                  onClick={() => setCurrentPage(page - 1)}
-                >
-                  ← Prev
-                </button>
-                <span className="sd-pg-info">
-                  {page} / {totalPages}
-                </span>
-                <button
-                  type="button"
-                  className="sd-pg-btn"
-                  disabled={page === totalPages}
-                  onClick={() => setCurrentPage(page + 1)}
-                >
-                  Next →
-                </button>
-              </div>
+              <Pagination
+                page={currentPage}
+                totalPages={totalPages}
+                onPageChange={setCurrentPage}
+              />
             )}
           </>
         )}

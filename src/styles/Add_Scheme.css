@@ -430,14 +430,14 @@
    horizontally on small screens. */
 .asg-table-wrap { width: 100%; overflow-x: auto; }
 
-.asg-table {
+/* .asg-table {
   width: 100%;
   min-width: 720px;
   border-collapse: collapse;
   font-family: 'Inter', sans-serif;
   font-size: var(--font-ui, 13px);
-}
-.asg-table th {
+} */
+/* .asg-table th {
   padding: 10px 12px;
   text-align: left;
   color: #64748b;
@@ -447,15 +447,15 @@
   text-transform: uppercase;
   border-bottom: 1px solid #e2e8f0;
   white-space: nowrap;
-}
-.asg-table td {
+} */
+/* .asg-table td {
   padding: 11px 12px;
   color: #0f172a;
   border-bottom: 1px solid #f1f5f9;
   vertical-align: top;
-}
-.asg-table tr.is-inactive td { color: #94a3b8; }
-.asg-table tr.is-editing { background: #eff6ff; }
+} */
+/* .asg-table tr.is-inactive td { color: #94a3b8; } */
+/* .asg-table tr.is-editing { background: #eff6ff; } */
 
 .asg-item-name {
   display: block;

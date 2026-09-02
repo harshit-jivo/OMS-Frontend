@@ -38,7 +38,7 @@ export default function AssetQr({ asset, size = 128 }: Props) {
       <html>
         <head><title>${asset.asset_id} — QR</title></head>
         <body style="font-family:system-ui,Arial,sans-serif;text-align:center;padding:16px;margin:0">
-          <img src="${dataUrl}" style="width:220px;height:220px" />
+          <img src="${dataUrl}" alt="${asset.asset_id} QR code" style="width:220px;height:220px" />
           <div style="font-family:monospace;font-size:14px;margin-top:8px">${asset.asset_id}</div>
           <div style="font-size:12px;color:#444">S/N: ${serial}</div>
           <div style="font-size:12px;color:#444">${asset.company ?? ""} ${asset.model_num ?? ""}</div>

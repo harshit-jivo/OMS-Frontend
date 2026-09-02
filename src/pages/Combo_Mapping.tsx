@@ -1,7 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { sapService } from "../services/sapService";
+import { useMemo, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSapProducts } from "../lib/sapQueries";
 import { userService } from "../services/userService";
 import type { ComboMapping } from "../services/userService";
+import { messageFrom } from "@/lib/apiError";
+import "../styles/Combo_Mapping.css";
 
 type CatalogueProduct = {
   item_code: string;
@@ -23,11 +26,33 @@ const parentHalfOf = (itemName: string) => asText(itemName.split("+")[0] || "");
 /** Which half of the combo the product list is currently choosing for. */
 type PickerTarget = "parent" | "free";
 
+/** Stable empty, so `visibleCombos` settles. */
+const NO_COMBOS: ComboMapping[] = [];
+
 export default function Combo_Mapping() {
-  const [combos, setCombos] = useState<ComboMapping[]>([]);
-  const [products, setProducts] = useState<CatalogueProduct[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [loadError, setLoadError] = useState("");
+  const queryClient = useQueryClient();
+  const {
+    data: combos = NO_COMBOS,
+    isPending: isLoading,
+    isError: combosFailed,
+  } = useQuery({
+    queryKey: ["combo-mappings"],
+    queryFn: () => userService.getComboMappings(),
+  });
+  const loadError = combosFailed
+    ? "Could not load combo packs. Check that you are signed in and try again."
+    : "";
+
+  /* Shared ["sap","products"] key. The filter is this page's own business: a
+     combo can never be its own free half, so combos stay out of the picker. */
+  const { items: allProducts } = useSapProducts();
+  const products = useMemo(
+    () =>
+      (allProducts as unknown as CatalogueProduct[]).filter(
+        (p) => !asText(p.item_name).includes("+"),
+      ),
+    [allProducts],
+  );
   const [search, setSearch] = useState("");
   const [showUnmappedOnly, setShowUnmappedOnly] = useState(false);
   const [notice, setNotice] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
@@ -43,43 +68,12 @@ export default function Combo_Mapping() {
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const pickerInputRef = useRef<HTMLInputElement>(null);
 
-  const loadCombos = async () => {
-    setIsLoading(true);
-    setLoadError("");
-    try {
-      setCombos(await userService.getComboMappings());
-    } catch (error) {
-      console.error("Error loading combo mappings:", error);
-      setLoadError("Could not load combo packs. Check that you are signed in and try again.");
-      setCombos([]);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    void loadCombos();
-
-    const loadProducts = async () => {
-      try {
-        const data = await sapService.getProducts();
-        const list = Array.isArray(data) ? data : data?.results || [];
-        // A combo can never be its own free half, so keep them out of the picker.
-        setProducts(list.filter((p: CatalogueProduct) => !asText(p.item_name).includes("+")));
-      } catch (error) {
-        console.error("Error loading products:", error);
-        setProducts([]);
-      }
-    };
-
-    void loadProducts();
-  }, []);
+  const loadCombos = () => queryClient.invalidateQueries({ queryKey: ["combo-mappings"] });
 
   const visibleCombos = useMemo(() => {
     const term = search.trim().toLowerCase();
     return combos.filter((combo) => {
-      if (showUnmappedOnly && combo.parent_item_code && combo.free_item_code)
-        return false;
+      if (showUnmappedOnly && combo.parent_item_code && combo.free_item_code) return false;
       if (!term) return true;
       return (
         combo.item_name?.toLowerCase().includes(term) ||
@@ -106,8 +100,7 @@ export default function Combo_Mapping() {
     const matches = term
       ? products.filter(
           (p) =>
-            p.item_name?.toLowerCase().includes(term) ||
-            p.item_code?.toLowerCase().includes(term),
+            p.item_name?.toLowerCase().includes(term) || p.item_code?.toLowerCase().includes(term),
         )
       : products;
 
@@ -155,11 +148,7 @@ export default function Combo_Mapping() {
     setPickerSearch("");
   };
 
-  const save = async (
-    combo: ComboMapping,
-    parentItemCode: string,
-    freeItemCode: string,
-  ) => {
+  const save = async (combo: ComboMapping, parentItemCode: string, freeItemCode: string) => {
     const key = comboKey(combo);
     setSavingKey(key);
     setNotice(null);
@@ -174,11 +163,11 @@ export default function Combo_Mapping() {
       setNotice({ tone: "ok", text: response?.message || "Mapping saved" });
       closeEditor();
       await loadCombos();
-    } catch (error: any) {
+    } catch (error) {
       console.error("Error saving combo mapping:", error);
       setNotice({
         tone: "error",
-        text: error?.response?.data?.message || "Could not save the mapping",
+        text: messageFrom(error, "Could not save the mapping"),
       });
     } finally {
       setSavingKey(null);
@@ -186,8 +175,7 @@ export default function Combo_Mapping() {
   };
 
   const clearMapping = async (combo: ComboMapping) => {
-    if (!window.confirm(`Remove the parent and free item from ${combo.item_name}?`))
-      return;
+    if (!window.confirm(`Remove the parent and free item from ${combo.item_name}?`)) return;
     const key = comboKey(combo);
     setSavingKey(key);
     setNotice(null);
@@ -202,90 +190,38 @@ export default function Combo_Mapping() {
       setNotice({ tone: "ok", text: response?.message || "Mapping cleared" });
       closeEditor();
       await loadCombos();
-    } catch (error: any) {
+    } catch (error) {
       console.error("Error clearing combo mapping:", error);
       setNotice({
         tone: "error",
-        text: error?.response?.data?.message || "Could not clear the mapping",
+        text: messageFrom(error, "Could not clear the mapping"),
       });
     } finally {
       setSavingKey(null);
     }
   };
 
-  const cardStyle: React.CSSProperties = {
-    background: "#fff",
-    borderRadius: "12px",
-    padding: "24px",
-    boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
-    marginBottom: "24px",
-  };
-
-  const labelStyle: React.CSSProperties = {
-    fontSize: "11px",
-    fontWeight: 700,
-    letterSpacing: "0.06em",
-    textTransform: "uppercase",
-    color: "#94a3b8",
-  };
-
   return (
     <div className="app-page">
-      <div style={cardStyle}>
-        <div style={{ marginBottom: "20px" }}>
-          <h1
-            style={{
-              margin: "0 0 4px",
-              fontSize: "24px",
-              fontWeight: 800,
-              color: "#0f172a",
-              letterSpacing: "-0.02em",
-            }}
-          >
-            Combo Mapping
-          </h1>
-          <p style={{ margin: 0, fontSize: "13px", color: "#64748b" }}>
-            A combo pack is named "A + B" and carries B free of cost. Map each combo to
-            the product it gives away — adding the combo to a sales order then adds a
-            zero-priced line for that product with the same number of pieces.
+      <div className="cmb-card">
+        <div className="cmb-head">
+          <h1 className="cmb-title">Combo Mapping</h1>
+          <p className="cmb-intro">
+            A combo pack is named "A + B" and carries B free of cost. Map each combo to the product
+            it gives away — adding the combo to a sales order then adds a zero-priced line for that
+            product with the same number of pieces.
           </p>
         </div>
 
-        <div
-          style={{
-            display: "flex",
-            gap: "12px",
-            alignItems: "center",
-            flexWrap: "wrap",
-            padding: "14px 16px",
-            background: "#f8fafc",
-            border: "1px solid #e2e8f0",
-            borderRadius: "8px",
-          }}
-        >
+        <div className="cmb-filters">
           <input
             type="text"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Search combo or free item..."
-            style={{
-              flex: "1 1 260px",
-              padding: "9px 12px",
-              border: "1px solid #cbd5e1",
-              borderRadius: "8px",
-              fontSize: "14px",
-            }}
+            className="cmb-search"
           />
-          <label
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-              fontSize: "13px",
-              color: "#334155",
-              cursor: "pointer",
-            }}
-          >
+          <label className="cmb-toggle">
             <input
               type="checkbox"
               checked={showUnmappedOnly}
@@ -293,42 +229,29 @@ export default function Combo_Mapping() {
             />
             Unmapped only
           </label>
-          <span style={{ fontSize: "13px", color: "#64748b" }}>
+          <span className="cmb-count">
             {mappedCount} of {combos.length} mapped
           </span>
         </div>
 
         {notice && (
-          <div
-            style={{
-              marginTop: "16px",
-              padding: "10px 14px",
-              borderRadius: "8px",
-              fontSize: "13px",
-              background: notice.tone === "ok" ? "#dcfce7" : "#fee2e2",
-              color: notice.tone === "ok" ? "#15803d" : "#b91c1c",
-            }}
-          >
-            {notice.text}
-          </div>
+          <div className={`cmb-notice cmb-notice--${notice.tone}`}>{notice.text}</div>
         )}
       </div>
 
-      <div style={cardStyle}>
+      <div className="cmb-card">
         {isLoading ? (
-          <div style={{ padding: "32px", textAlign: "center", color: "#64748b" }}>
-            Loading combo packs...
-          </div>
+          <div className="cmb-state">Loading combo packs...</div>
         ) : loadError ? (
-          <div style={{ padding: "32px", textAlign: "center", color: "#b91c1c" }}>{loadError}</div>
+          <div className="cmb-state cmb-state--error">{loadError}</div>
         ) : visibleCombos.length === 0 ? (
-          <div style={{ padding: "32px", textAlign: "center", color: "#64748b" }}>
+          <div className="cmb-state">
             {combos.length === 0
               ? "No combo packs are assigned to any party yet."
               : "No combo packs match this filter."}
           </div>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+          <div className="cmb-rows">
             {visibleCombos.map((combo) => {
               const key = comboKey(combo);
               const isEditing = editingKey === key;
@@ -338,61 +261,40 @@ export default function Combo_Mapping() {
               const bothHalvesChosen = Boolean(draftParentItem && draftFreeItem);
 
               return (
-                <div
-                  key={key}
-                  style={{
-                    border: `1px solid ${isEditing ? "#3b82f6" : "#e2e8f0"}`,
-                    borderRadius: "10px",
-                    padding: "16px",
-                    background: isEditing ? "#f8fbff" : "#fff",
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: "16px",
-                      alignItems: "flex-start",
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    <div style={{ flex: "1 1 320px", minWidth: 0 }}>
-                      <div style={labelStyle}>Combo</div>
-                      <div style={{ fontSize: "14px", fontWeight: 600, color: "#0f172a" }}>
-                        {combo.item_name}
-                      </div>
-                      <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>
+                <div key={key} className={`cmb-row${isEditing ? " is-editing" : ""}`}>
+                  <div className="cmb-row-main">
+                    <div className="cmb-col cmb-col--combo">
+                      <div className="cmb-label">Combo</div>
+                      <div className="cmb-name">{combo.item_name}</div>
+                      <div className="cmb-sub">
                         {combo.item_code} · {combo.category} · {combo.party_count}{" "}
                         {combo.party_count === 1 ? "party" : "parties"}
                       </div>
                     </div>
 
-                    <div style={{ flex: "1 1 220px", minWidth: 0 }}>
-                      <div style={labelStyle}>Parent (paid) item</div>
+                    <div className="cmb-col">
+                      <div className="cmb-label">Parent (paid) item</div>
                       {combo.parent_item_code ? (
                         <>
-                          <div style={{ fontSize: "14px", fontWeight: 600, color: "#1d4ed8" }}>
+                          <div className="cmb-name cmb-name--parent">
                             {combo.parent_item?.item_name ||
                               `${combo.parent_item_code} (not in SAP)`}
                           </div>
-                          <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>
-                            {combo.parent_item_code} · priced line
-                          </div>
+                          <div className="cmb-sub">{combo.parent_item_code} · priced line</div>
                         </>
                       ) : (
-                        <div style={{ fontSize: "14px", color: "#b45309", fontWeight: 600 }}>
-                          Not mapped
-                        </div>
+                        <div className="cmb-unmapped">Not mapped</div>
                       )}
                     </div>
 
-                    <div style={{ flex: "1 1 220px", minWidth: 0 }}>
-                      <div style={labelStyle}>Free item</div>
+                    <div className="cmb-col">
+                      <div className="cmb-label">Free item</div>
                       {combo.free_item_code ? (
                         <>
-                          <div style={{ fontSize: "14px", fontWeight: 600, color: "#15803d" }}>
+                          <div className="cmb-name cmb-name--free">
                             {combo.free_item?.item_name || `${combo.free_item_code} (not in SAP)`}
                           </div>
-                          <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>
+                          <div className="cmb-sub">
                             {combo.free_item_code} ·{" "}
                             {combo.free_qty_per_unit
                               ? `${combo.free_qty_per_unit} free per piece`
@@ -400,33 +302,22 @@ export default function Combo_Mapping() {
                           </div>
                         </>
                       ) : (
-                        <div style={{ fontSize: "14px", color: "#b45309", fontWeight: 600 }}>
-                          Not mapped
-                        </div>
+                        <div className="cmb-unmapped">Not mapped</div>
                       )}
                       {combo.is_partially_mapped && (
-                        <div style={{ fontSize: "12px", color: "#b45309", marginTop: "4px" }}>
+                        <div className="cmb-partial">
                           Only {combo.mapped_party_count} of {combo.party_count} parties carry this
                           mapping. Saving applies it to all of them.
                         </div>
                       )}
                     </div>
 
-                    <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                    <div className="cmb-actions">
                       <button
                         type="button"
                         onClick={() => (isEditing ? closeEditor() : openEditor(combo))}
                         disabled={isSaving}
-                        style={{
-                          padding: "8px 14px",
-                          border: "1px solid #cbd5e1",
-                          background: "#fff",
-                          color: "#334155",
-                          borderRadius: "8px",
-                          cursor: isSaving ? "not-allowed" : "pointer",
-                          fontWeight: 600,
-                          fontSize: "13px",
-                        }}
+                        className="cmb-btn"
                       >
                         {isEditing ? "Cancel" : combo.free_item_code ? "Change" : "Map"}
                       </button>
@@ -435,16 +326,7 @@ export default function Combo_Mapping() {
                           type="button"
                           onClick={() => clearMapping(combo)}
                           disabled={isSaving}
-                          style={{
-                            padding: "8px 14px",
-                            border: "1px solid #fecaca",
-                            background: "#fff",
-                            color: "#b91c1c",
-                            borderRadius: "8px",
-                            cursor: isSaving ? "not-allowed" : "pointer",
-                            fontWeight: 600,
-                            fontSize: "13px",
-                          }}
+                          className="cmb-btn cmb-btn--clear"
                         >
                           Clear
                         </button>
@@ -453,24 +335,11 @@ export default function Combo_Mapping() {
                   </div>
 
                   {isEditing && (
-                    <div
-                      style={{
-                        marginTop: "16px",
-                        paddingTop: "16px",
-                        borderTop: "1px solid #e2e8f0",
-                      }}
-                    >
+                    <div className="cmb-editor">
                       {/* Two halves, picked one at a time from the list below.
                           Nothing is pre-selected: the names are inconsistent
                           enough that a guess is wrong often enough to matter. */}
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: "8px",
-                          flexWrap: "wrap",
-                          marginBottom: "12px",
-                        }}
-                      >
+                      <div className="cmb-targets">
                         {(
                           [
                             ["parent", "Parent (paid)", draftParentItem],
@@ -485,41 +354,17 @@ export default function Combo_Mapping() {
                               onClick={() => {
                                 setPickerTarget(target);
                                 setPickerSearch("");
-                                window.setTimeout(
-                                  () => pickerInputRef.current?.focus(),
-                                  0,
-                                );
+                                window.setTimeout(() => pickerInputRef.current?.focus(), 0);
                               }}
-                              style={{
-                                padding: "8px 14px",
-                                borderRadius: "8px",
-                                border: active
-                                  ? "1px solid #2563eb"
-                                  : "1px solid #cbd5e1",
-                                background: active ? "#eff6ff" : "#fff",
-                                color: active ? "#1d4ed8" : "#334155",
-                                fontWeight: 600,
-                                fontSize: "13px",
-                                cursor: "pointer",
-                              }}
+                              className={`cmb-target${active ? " is-active" : ""}`}
                             >
-                              {label}:{" "}
-                              <span style={{ fontWeight: 500 }}>
-                                {value || "not selected"}
-                              </span>
+                              {label}: <span className="cmb-target-value">{value || "not selected"}</span>
                             </button>
                           );
                         })}
                       </div>
 
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: "12px",
-                          flexWrap: "wrap",
-                          marginBottom: "12px",
-                        }}
-                      >
+                      <div className="cmb-editor-fields">
                         <input
                           ref={pickerInputRef}
                           type="text"
@@ -532,15 +377,9 @@ export default function Combo_Mapping() {
                               ? parentHalfOf(combo.item_name || "")
                               : freeHalfOf(combo.item_name || "")) || combo.item_name
                           }"`}
-                          style={{
-                            flex: "1 1 320px",
-                            padding: "9px 12px",
-                            border: "1px solid #cbd5e1",
-                            borderRadius: "8px",
-                            fontSize: "14px",
-                          }}
+                          className="cmb-picker-search"
                         />
-                        <div style={{ flex: "0 1 220px" }}>
+                        <div className="cmb-qty-wrap">
                           <input
                             type="number"
                             min="0"
@@ -548,27 +387,14 @@ export default function Combo_Mapping() {
                             value={draftQty}
                             onChange={(event) => setDraftQty(event.target.value)}
                             placeholder="Free per piece (blank = 1)"
-                            style={{
-                              width: "100%",
-                              padding: "9px 12px",
-                              border: "1px solid #cbd5e1",
-                              borderRadius: "8px",
-                              fontSize: "14px",
-                            }}
+                            className="cmb-qty"
                           />
                         </div>
                       </div>
 
-                      <div
-                        style={{
-                          maxHeight: "260px",
-                          overflowY: "auto",
-                          border: "1px solid #e2e8f0",
-                          borderRadius: "8px",
-                        }}
-                      >
+                      <div className="cmb-picker">
                         {pickerResults.length === 0 ? (
-                          <div style={{ padding: "16px", fontSize: "13px", color: "#64748b" }}>
+                          <div className="cmb-picker-empty">
                             No suggestions. Type a product name or item code to search.
                           </div>
                         ) : (
@@ -585,26 +411,15 @@ export default function Combo_Mapping() {
                                     ? setDraftParentItem(product.item_code)
                                     : setDraftFreeItem(product.item_code)
                                 }
-                                style={{
-                                  display: "block",
-                                  width: "100%",
-                                  textAlign: "left",
-                                  padding: "9px 12px",
-                                  border: "none",
-                                  borderBottom: "1px solid #f1f5f9",
-                                  background: isChosen ? "#eff6ff" : "#fff",
-                                  cursor: "pointer",
-                                  fontSize: "13px",
-                                  color: "#0f172a",
-                                }}
+                                className={`cmb-picker-row${isChosen ? " is-chosen" : ""}`}
                               >
-                                <span style={{ fontWeight: isChosen ? 700 : 500 }}>
-                                  {product.item_name}
-                                </span>
-                                <span style={{ color: "#64748b" }}>
+                                <span className="cmb-picker-name">{product.item_name}</span>
+                                <span className="cmb-picker-meta">
                                   {"  "}
                                   {product.item_code} · {product.category}
-                                  {product.sal_factor2 ? ` · ${Number(product.sal_factor2)} per box` : ""}
+                                  {product.sal_factor2
+                                    ? ` · ${Number(product.sal_factor2)} per box`
+                                    : ""}
                                 </span>
                               </button>
                             );
@@ -612,34 +427,16 @@ export default function Combo_Mapping() {
                         )}
                       </div>
 
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: "10px",
-                          alignItems: "center",
-                          marginTop: "12px",
-                          flexWrap: "wrap",
-                        }}
-                      >
+                      <div className="cmb-save-bar">
                         <button
                           type="button"
                           onClick={() => save(combo, draftParentItem, draftFreeItem)}
                           disabled={!bothHalvesChosen || isSaving}
-                          style={{
-                            padding: "9px 16px",
-                            border: "none",
-                            background: bothHalvesChosen ? "#2563eb" : "#cbd5e1",
-                            color: "#fff",
-                            borderRadius: "8px",
-                            cursor:
-                              !bothHalvesChosen || isSaving ? "not-allowed" : "pointer",
-                            fontWeight: 600,
-                            fontSize: "13px",
-                          }}
+                          className={`cmb-btn-save${bothHalvesChosen ? " is-ready" : ""}`}
                         >
                           {isSaving ? "Saving..." : "Save mapping"}
                         </button>
-                        <span style={{ fontSize: "13px", color: "#64748b" }}>
+                        <span className="cmb-save-hint">
                           {bothHalvesChosen
                             ? `Splits into ${draftParentItem} + ${draftFreeItem} for all ${
                                 combo.party_count

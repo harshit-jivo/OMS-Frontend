@@ -3,12 +3,18 @@ import api from "./api";
 export interface Product  {
   id: number;
   item_code: string;
-  item_name: string;
-  brand?: string;
-  category?: string;
-  sal_pack_unit?: string;
-  variety?: string;
-  type?: string;
+  /*
+   * Nullable and required-on-the-server respectively, per the OpenAPI schema —
+   * see types/conformance.ts, which fails the build if this drifts again.
+   * SAP rows imported without a description arrive with `item_name: null`, and
+   * every screen that shows it already runs it through `dash()`.
+   */
+  item_name?: string | null;
+  brand?: string | null;
+  category: string;
+  sal_pack_unit?: string | null;
+  variety?: string | null;
+  type?: string | null;
   staff_rate?: string | number;
   on_hand?: string | number | null;
   total_on_hand?: string | number | null;
@@ -161,14 +167,14 @@ export interface Address {
   card_code: string;
   address_name: string;
   address_type: string;
-  full_address?: string;
-  city?: string;
-  state?: string;
-  zip_code?: string;
-  gst_number?: string;
-  country?: string;
+  full_address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip_code?: string | null;
+  gst_number?: string | null;
+  country?: string | null;
   /** SAP address category (e.g. plant / depot); groups a party's addresses. */
-  category?: string;
+  category?: string | null;
   synced_at?: string;
 }
 
@@ -177,12 +183,12 @@ export interface Party  {
   card_code: string;
   card_name: string;
   open_sales_order_count?: number;
-  address?: string;
-  category?: string;
-  state?: string;
-  main_group?: string;
-  chain?: string;
-  country?: string;
+  address?: string | null;
+  category?: string | null;
+  state?: string | null;
+  main_group?: string | null;
+  chain?: string | null;
+  country?: string | null;
   card_type?: string;
   synced_at?: string;
 };
@@ -235,18 +241,18 @@ export interface Branch {
   id: number;
   bpl_id: number;
   bpl_name: string;
-  is_active: boolean;
+  is_active?: boolean;
   updated_at?: string;
 }
 
 export interface Log {
   id: number;
   sync_type: string;
-  status: string;
-  records_processed: number;
-  records_created: number;
-  records_updated: number;
-  triggered_by: string;
+  status?: string;
+  records_processed?: number;
+  records_created?: number;
+  records_updated?: number;
+  triggered_by?: string;
 }
 
 export interface QuotationLog {

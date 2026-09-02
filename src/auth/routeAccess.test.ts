@@ -51,9 +51,24 @@ const admin = session({ role: "admin", roles: ["admin"] });
  * test below pass while checking an empty list; hence the sanity check on the
  * count.
  */
+/**
+ * Read a source file with its comments stripped.
+ *
+ * Without this, anything inside a `{/* ... *\/}` block counts as live code.
+ * Both scanners below were affected: a commented-out route counted as a real
+ * route, so the access table was required to carry a rule for a page nobody
+ * can reach — and a rule for an unreachable page is worse than a missing one,
+ * because it reads as protection. `/Sales_Quotation` was exactly that.
+ */
+function codeOf(path: string): string {
+  return readFileSync(resolve(process.cwd(), path), "utf-8")
+    .replace(/\{\s*\/\*[\s\S]*?\*\/\s*\}/g, "")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+}
+
 function routesInApp(): string[] {
-  const source = readFileSync(resolve(process.cwd(), "src/App.tsx"), "utf-8");
-  return [...source.matchAll(/path="([^"]+)"/g)].map((m) => m[1]);
+  return [...codeOf("src/App.tsx").matchAll(/path="([^"]+)"/g)].map((m) => m[1]);
 }
 
 describe("coverage", () => {
@@ -83,11 +98,11 @@ describe("coverage", () => {
 
 describe("the sidebar and the router agree", () => {
   function sidebarLinks(): string[] {
-    const source = readFileSync(
-      resolve(process.cwd(), "src/components/Sidebar.tsx"),
-      "utf-8",
-    );
-    return [...source.matchAll(/to="(\/[^"]*)"/g)].map((m) => m[1]);
+    // Comment-stripped for the same reason as the router scan: a link inside a
+    // `{/* ... *\/}` block is not a link, and requiring a rule for where it
+    // points keeps a dead entry alive in the table.
+    return [...codeOf("src/components/Sidebar.tsx").matchAll(/to="(\/[^"]*)"/g)]
+      .map((m) => m[1]);
   }
 
   it("every sidebar link points at a route with an access rule", () => {

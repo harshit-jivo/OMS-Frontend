@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { KeyValues, StatusBadge, ErrorAlert, apiErrorMessage } from "../../components/NicUI";
+import { KeyValues, StatusBadge, ErrorAlert } from "../../components/NicUI";
+import { messageFrom } from "@/lib/apiError";
 import { haisService, configSummary, holderLabel, type Asset } from "../../services/haisService";
 import AssetHistory from "./AssetHistory";
 import "../../styles/Einvoice.css";
@@ -37,7 +38,7 @@ export default function AssetPublicView() {
     haisService
       .getBySerial(code)
       .then((a) => alive && setAsset(a))
-      .catch((err) => alive && setError(apiErrorMessage(err)))
+      .catch((err) => alive && setError(messageFrom(err, "Request failed")))
       .finally(() => alive && setLoading(false));
     return () => {
       alive = false;
@@ -63,7 +64,7 @@ export default function AssetPublicView() {
           </>
         ) : asset ? (
           <>
-            <h2 style={{ margin: "4px 0 12px" }}>
+            <h2 className="hais-public-title">
               <span className="nic-mono">{asset.asset_id}</span>{" "}
               <StatusBadge tone={statusTone(asset.working_status as string)}>
                 {(asset.working_status as string) || "—"}

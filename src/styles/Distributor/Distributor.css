@@ -145,29 +145,29 @@
   margin: 0 0 12px;
 }
 
-.distributor-table {
+/* .distributor-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 14px;
-}
+} */
 
-.distributor-table th,
+/* .distributor-table th,
 .distributor-table td {
   text-align: left;
   padding: 10px 12px;
   border-bottom: 1px solid #e2e8f0;
-}
+} */
 
-.distributor-table thead th {
+/* .distributor-table thead th {
   background: #f8fafc;
   font-weight: 600;
   color: #475569;
-}
+} */
 
-.distributor-table tfoot td {
+/* .distributor-table tfoot td {
   border-top: 2px solid #cbd5e1;
   border-bottom: none;
-}
+} */
 
 .distributor-qty-col {
   width: 120px;
@@ -249,9 +249,9 @@
   overflow: visible;
 }
 
-.distributor-table thead th {
+/* .distributor-table thead th {
   background: #f8fafc;
-}
+} */
 
 /* Per-row dropdowns fill their cell. */
 .distributor-cat-col,

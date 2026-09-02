@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   Bar,
   BarChart,
@@ -11,35 +12,48 @@ import {
   YAxis,
 } from "recharts";
 import { HiArrowDownTray, HiClock, HiExclamationTriangle, HiCheckCircle, HiInboxStack } from "react-icons/hi2";
-import * as XLSX from "xlsx";
+// SheetJS (422 kB) is fetched when the user asks for the export, not when
+// the report page opens — see utils/xlsxLoader.ts.
+import { loadXlsx } from "../utils/xlsxLoader";
 import trackerService from "../services/trackerService";
-import type { Lookups, ReportData, ReportFilters } from "../services/trackerService";
+import type { ReportFilters } from "../services/trackerService";
 import "../styles/Tracker.css";
+import { Badge } from "@/components/ui/badge";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 const AGE_COLORS = ["#10b981", "#f59e0b", "#f97316", "#ef4444"];
 
 export default function Tracker_Reports() {
-  const [lookups, setLookups] = useState<Lookups | null>(null);
-  const [data, setData] = useState<ReportData | null>(null);
+  // Draft vs applied, as on Tracker_Invoices: `applied` IS the query key, so
+  // going back to a filter set already seen is a cache hit rather than a
+  // round trip, and the report on screen can never disagree with the filters
+  // that produced it.
   const [filters, setFilters] = useState<ReportFilters>({});
-  const [loading, setLoading] = useState(false);
+  const [applied, setApplied] = useState<ReportFilters>({});
 
-  useEffect(() => {
-    trackerService.getLookups().then(setLookups).catch(() => {});
-    load();
-  }, []);
+  const { data: lookups = null } = useQuery({
+    queryKey: ["tracker", "lookups"],
+    queryFn: () => trackerService.getLookups(),
+    staleTime: 5 * 60_000,
+  });
 
-  const load = async (f: ReportFilters = filters) => {
-    setLoading(true);
-    try {
-      setData(await trackerService.getReports(f));
-    } finally {
-      setLoading(false);
-    }
-  };
+  const { data = null, isFetching: loading } = useQuery({
+    queryKey: ["tracker", "reports", applied],
+    queryFn: () => trackerService.getReports(applied),
+  });
 
-  const exportExcel = () => {
+  const load = (next: ReportFilters = filters) => setApplied(next);
+
+  const exportExcel = async () => {
     if (!data) return;
+    const XLSX = await loadXlsx();
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb,
       XLSX.utils.json_to_sheet([data.summary]), "Summary");
@@ -62,11 +76,11 @@ export default function Tracker_Reports() {
     setFilters((f) => ({ ...f, [k]: v || undefined }));
 
   const kpi = (icon: React.ReactNode, label: string, value: React.ReactNode, tone: string) => (
-    <div className="trk-card" style={{ margin: 0, flex: 1, minWidth: 150 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <div style={{ fontSize: 26, color: tone }}>{icon}</div>
+    <div className="trk-card trk-kpi">
+      <div className="trk-kpi-body">
+        <div className="trk-kpi-icon" style={{ color: tone }}>{icon}</div>
         <div>
-          <div style={{ fontSize: 26, fontWeight: 800, lineHeight: 1 }}>{value}</div>
+          <div className="trk-kpi-value">{value}</div>
           <div className="trk-sub">{label}</div>
         </div>
       </div>
@@ -86,32 +100,32 @@ export default function Tracker_Reports() {
       </div>
 
       {/* Filters */}
-      <div className="trk-actionbar" style={{ alignItems: "flex-end", gap: 14 }}>
-        <div className="trk-field" style={{ gap: 4 }}>
-          <label style={{ fontSize: 11 }}>From</label>
-          <input type="date" value={filters.from || ""} onChange={(e) => setF("from", e.target.value)} />
+      <div className="trk-actionbar trk-actionbar--filters">
+        <div className="trk-field trk-field--tight">
+          <label className="trk-label-xs">From</label>
+          <input aria-label="From" type="date" value={filters.from || ""} onChange={(e) => setF("from", e.target.value)} />
         </div>
-        <div className="trk-field" style={{ gap: 4 }}>
-          <label style={{ fontSize: 11 }}>To</label>
-          <input type="date" value={filters.to || ""} onChange={(e) => setF("to", e.target.value)} />
+        <div className="trk-field trk-field--tight">
+          <label className="trk-label-xs">To</label>
+          <input aria-label="To" type="date" value={filters.to || ""} onChange={(e) => setF("to", e.target.value)} />
         </div>
-        <div className="trk-field" style={{ gap: 4 }}>
-          <label style={{ fontSize: 11 }}>Branch</label>
-          <select value={filters.branch || ""} onChange={(e) => setF("branch", Number(e.target.value))}>
+        <div className="trk-field trk-field--tight">
+          <label className="trk-label-xs">Branch</label>
+          <select aria-label="Branch" value={filters.branch || ""} onChange={(e) => setF("branch", Number(e.target.value))}>
             <option value="">All branches</option>
             {lookups?.branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
         </div>
-        <div className="trk-field" style={{ gap: 4 }}>
-          <label style={{ fontSize: 11 }}>Unit</label>
-          <select value={filters.unit || ""} onChange={(e) => setF("unit", Number(e.target.value))}>
+        <div className="trk-field trk-field--tight">
+          <label className="trk-label-xs">Unit</label>
+          <select aria-label="Unit" value={filters.unit || ""} onChange={(e) => setF("unit", Number(e.target.value))}>
             <option value="">All units</option>
             {lookups?.units.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
           </select>
         </div>
-        <div className="trk-field" style={{ gap: 4 }}>
-          <label style={{ fontSize: 11 }}>Category</label>
-          <select value={filters.category || ""} onChange={(e) => setF("category", Number(e.target.value))}>
+        <div className="trk-field trk-field--tight">
+          <label className="trk-label-xs">Category</label>
+          <select aria-label="Category" value={filters.category || ""} onChange={(e) => setF("category", Number(e.target.value))}>
             <option value="">All categories</option>
             {lookups?.categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
@@ -125,7 +139,7 @@ export default function Tracker_Reports() {
       ) : (
         <>
           {/* KPIs */}
-          <div style={{ display: "flex", gap: 14, marginBottom: 18, flexWrap: "wrap" }}>
+          <div className="trk-kpi-row">
             {kpi(<HiInboxStack />, "In progress", data.summary.in_progress, "#4f46e5")}
             {kpi(<HiCheckCircle />, "Completed", data.summary.completed, "#059669")}
             {kpi(<HiExclamationTriangle />, "Overdue", data.summary.overdue, "#dc2626")}
@@ -134,7 +148,7 @@ export default function Tracker_Reports() {
 
           {/* Avg days per stage */}
           <div className="trk-card">
-            <h3 style={{ marginTop: 0 }}>Average days per stage</h3>
+            <h3 className="trk-heading-top">Average days per stage</h3>
             <ResponsiveContainer width="100%" height={280}>
               <BarChart data={data.avg_days_per_stage} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#eef0f3" />
@@ -148,7 +162,7 @@ export default function Tracker_Reports() {
 
           {/* Pending per stage */}
           <div className="trk-card">
-            <h3 style={{ marginTop: 0 }}>Pending invoices per stage</h3>
+            <h3 className="trk-heading-top">Pending invoices per stage</h3>
             <ResponsiveContainer width="100%" height={280}>
               <BarChart data={data.pending_by_stage} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#eef0f3" />
@@ -164,7 +178,7 @@ export default function Tracker_Reports() {
 
           {/* Ageing */}
           <div className="trk-card">
-            <h3 style={{ marginTop: 0 }}>Ageing of open invoices</h3>
+            <h3 className="trk-heading-top">Ageing of open invoices</h3>
             <ResponsiveContainer width="100%" height={240}>
               <BarChart data={data.ageing} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#eef0f3" />
@@ -179,7 +193,7 @@ export default function Tracker_Reports() {
           </div>
 
           {/* Bottleneck tables */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16 }}>
+          <div className="trk-report-grid">
             <BottleneckTable title="Slowest people" rows={data.bottleneck_by_person} keyLabel="Person" />
             <BottleneckTable title="Slowest vendors" rows={data.bottleneck_by_vendor} keyLabel="Vendor" />
             <BottleneckTable title="By category" rows={data.bottleneck_by_category} keyLabel="Category" />
@@ -195,29 +209,29 @@ function BottleneckTable({
 }: { title: string; rows: { key: string; avg_days: number; visits: number }[]; keyLabel: string }) {
   return (
     <div className="trk-card">
-      <h3 style={{ marginTop: 0 }}>{title}</h3>
+      <h3 className="trk-heading-top">{title}</h3>
       <div className="trk-table-wrap">
-        <table className="trk-table">
-          <thead>
-            <tr><th>{keyLabel}</th><th>Avg days</th><th>Visits</th></tr>
-          </thead>
-          <tbody>
+        <Table density="compact">
+          <TableHeader>
+            <TableRow><TableHead>{keyLabel}</TableHead><TableHead>Avg days</TableHead><TableHead>Visits</TableHead></TableRow>
+          </TableHeader>
+          <TableBody>
             {rows.slice(0, 10).map((r, i) => (
-              <tr key={i}>
-                <td>{r.key}</td>
-                <td>
-                  <span className={"trk-badge " + (r.avg_days > 5 ? "trk-badge-danger" : r.avg_days > 3 ? "trk-badge-warn" : "trk-badge-ok")}>
+              <TableRow key={i}>
+                <TableCell>{r.key}</TableCell>
+                <TableCell>
+                  <Badge tone={r.avg_days > 5 ? "bad" : r.avg_days > 3 ? "hold" : "ok"} outlined>
                     {r.avg_days}
-                  </span>
-                </td>
-                <td>{r.visits}</td>
-              </tr>
+                  </Badge>
+                </TableCell>
+                <TableCell>{r.visits}</TableCell>
+              </TableRow>
             ))}
             {rows.length === 0 && (
-              <tr><td colSpan={3}><div className="trk-empty">No data.</div></td></tr>
+              <TableRow><TableCell colSpan={3}><div className="trk-empty">No data.</div></TableCell></TableRow>
             )}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
     </div>
   );

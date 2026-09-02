@@ -136,13 +136,14 @@
   gap: 10px;
 }
 
+/*
+ * `.pr-badge`, `.br-badge-*` and `.lg-badge-*` were dropped from this selector
+ * list: they belong to the Products, Branches and Logs stylesheets that Phase
+ * 0.5 deleted as orphans. The rules for those pages went; this shared rule
+ * kept naming them, which is why they survived that sweep.
+ */
 .ad-badge,
-.pr-badge,
-.pt-badge,
-.br-badge-active,
-.br-badge-inactive,
-.lg-badge-ok,
-.lg-badge-fail {
+.pt-badge {
   border-radius: 999px;
   padding: 4px 10px;
 }
@@ -165,7 +166,7 @@
   color: #94a3b8;
 }
 
-.order-loading-state {
+/* .order-loading-state {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -178,7 +179,7 @@
   border-radius: 8px;
   font-weight: 600;
 }
-
+ */
 .order-loading-spinner {
   width: 22px;
   height: 22px;
@@ -273,7 +274,7 @@
   box-shadow: 0 14px 32px rgba(15, 23, 42, 0.05), 0 4px 12px rgba(15, 23, 42, 0.03);
 }
 
-.vo-table thead,
+/* .vo-table thead,
 .ao-table thead,
 .bo-table thead,
 .vo-d-tbl thead,
@@ -281,8 +282,8 @@
 .bo-d-tbl thead {
   background: #172033;
 }
-
-.vo-table th,
+ */
+/* .vo-table th,
 .ao-table th,
 .bo-table th,
 .vo-d-tbl th,
@@ -290,15 +291,15 @@
 .bo-d-tbl th {
   border-bottom-color: #243553;
 }
-
-.vo-table td,
+ */
+/* .vo-table td,
 .ao-table td,
 .bo-table td {
   text-align: center;
   vertical-align: middle;
 }
-
-.vo-table tbody tr:hover,
+ */
+/* .vo-table tbody tr:hover,
 .ao-table tbody tr:hover,
 .bo-table tbody tr:hover,
 .vo-d-tbl tbody tr:hover,
@@ -306,8 +307,8 @@
 .bo-d-tbl tbody tr:hover {
   background: #eef6ff;
 }
-
-.vo-table tbody tr:nth-child(even),
+ */
+/* .vo-table tbody tr:nth-child(even),
 .ao-table tbody tr:nth-child(even),
 .bo-table tbody tr:nth-child(even),
 .vo-d-tbl tbody tr:nth-child(even),
@@ -315,8 +316,8 @@
 .bo-d-tbl tbody tr:nth-child(even) {
   background: #f8fbff;
 }
-
-.vo-table tbody tr:nth-child(even):hover,
+ */
+/* .vo-table tbody tr:nth-child(even):hover,
 .ao-table tbody tr:nth-child(even):hover,
 .bo-table tbody tr:nth-child(even):hover,
 .vo-d-tbl tbody tr:nth-child(even):hover,
@@ -324,31 +325,31 @@
 .bo-d-tbl tbody tr:nth-child(even):hover {
   background: #eef6ff;
 }
-
+ */
 /* ── Minimal list tables (Rate Approver / Auditor / Billing / Status Tracking) ── */
-.ao-table thead,
+/* .ao-table thead,
 .bo-table thead,
 .ot-table thead {
   background: #f8fafc;
 }
-.ao-table th,
+ *//* .ao-table th,
 .bo-table th,
 .ot-table th {
   color: #64748b;
   font-weight: 600;
   border-bottom: 1px solid #e5e7eb;
 }
-.ao-table td,
+ *//* .ao-table td,
 .bo-table td,
 .ot-table td {
   border-bottom: 1px solid #f1f5f9;
 }
-.ao-table tbody tr:nth-child(even),
+ *//* .ao-table tbody tr:nth-child(even),
 .bo-table tbody tr:nth-child(even),
 .ot-table tbody tr:nth-child(even) {
   background: transparent;
 }
-.ao-table tbody tr:hover,
+ *//* .ao-table tbody tr:hover,
 .bo-table tbody tr:hover,
 .ot-table tbody tr:hover,
 .ao-table tbody tr:nth-child(even):hover,
@@ -356,7 +357,7 @@
 .ot-table tbody tr:nth-child(even):hover {
   background: #f8fafc;
 }
-.ao-table td.ao-cell-id,
+ *//* .ao-table td.ao-cell-id,
 .bo-table td.ao-cell-id,
 .ot-table td.ao-cell-id,
 .ao-table td.ao-cell-name,
@@ -364,7 +365,7 @@
 .ot-table td.ao-cell-name {
   text-align: left;
 }
-.ao-cell-id { font-weight: 600; color: #0f172a; white-space: nowrap; }
+ */.ao-cell-id { font-weight: 600; color: #0f172a; white-space: nowrap; }
 .ao-cell-name { font-weight: 500; color: #334155; }
 
 /* Row action cluster (view · Approve · Reject · Track/Edit · Download) */
@@ -837,33 +838,83 @@
   }
 }
 
+/*
+ * The `.vo-badge-*` halves of these selectors were removed in Phase 2.2 —
+ * View_Orders, Order_Tracking and PartyHeader now use components/ui/badge.tsx,
+ * and their colour comes from statusTone.ts. `.ot-badge-*` is left intact
+ * because Order_Status_Tracking.tsx still uses it; it is next.
+ *
+ * Worth knowing before touching these: several of these statuses were ALSO
+ * coloured in View_Orders.css, differently. `approved` was teal here and green
+ * there, both unlayered and equally specific, so the winner was decided by
+ * stylesheet import order.
+ */
 /* ── Distinct status-badge colours (Order Tracker / Status Tracking / View Orders) ──
    Each workflow status gets its own hue so they are easy to tell apart at a glance. */
-.vo-badge-rate-approval,
-.ot-badge-rate-approval { background: #e0e7ff; color: #3730a3; }        /* indigo */
-.vo-badge-need-approval,
-.ot-badge-need-approval { background: #f3e8ff; color: #7e22ce; }        /* purple */
-.vo-badge-auditor-approval,
-.ot-badge-auditor-approval { background: #ffedd5; color: #9a3412; }     /* orange */
-.vo-badge-billing,
-.ot-badge-billing { background: #dbeafe; color: #1e40af; }             /* blue */
-.vo-badge-billing-pending,
-.ot-badge-billing-pending { background: #cffafe; color: #155e75; }     /* cyan */
-.vo-badge-approved,
-.ot-badge-approved,
-.vo-badge-accepted,
-.ot-badge-accepted { background: #ccfbf1; color: #0f766e; }            /* teal */
-.vo-badge-completed,
+/* .ot-badge-rate-approval { background: #e0e7ff; color: #3730a3; } */        /* indigo */
+/* .ot-badge-need-approval { background: #f3e8ff; color: #7e22ce; } */        /* purple */
+/* .ot-badge-auditor-approval { background: #ffedd5; color: #9a3412; } */     /* orange */
+/* .ot-badge-billing { background: #dbeafe; color: #1e40af; } */             /* blue */
+/* .ot-badge-billing-pending { background: #cffafe; color: #155e75; } */     /* cyan */
+/* .ot-badge-approved,
+   .ot-badge-accepted { background: #ccfbf1; color: #0f766e; } */            /* teal */
 .ot-badge-completed,
-.vo-badge-billed,
 .ot-badge-billed { background: #dcfce7; color: #166534; }              /* green */
-.vo-badge-rejected,
-.ot-badge-rejected,
-.vo-badge-declined,
-.ot-badge-declined,
-.vo-badge-cancelled,
-.ot-badge-cancelled,
-.vo-badge-canceled,
-.ot-badge-canceled { background: #fee2e2; color: #991b1b; }            /* red */
-.vo-badge-billing-rejected,
-.ot-badge-billing-rejected { background: #ffe4e6; color: #9f1239; }    /* rose */
+/* .ot-badge-rejected,
+   .ot-badge-declined,
+   .ot-badge-cancelled,
+   .ot-badge-canceled { background: #fee2e2; color: #991b1b; } */            /* red */
+/* .ot-badge-billing-rejected { background: #ffe4e6; color: #9f1239; } */    /* rose */
+
+/* ==========================================================================
+   The order-item table
+   ==========================================================================
+
+   One table, rendered by twelve pages: the four manager reports
+   (Daily/PersonWise/Sales/StateWise), the four order queues (Auditor/Billing/
+   Rate_Approver/View_Orders), and the order-detail views behind
+   Order_Tracking, Order_Status_Tracking and Distributor/Order_Tracking. Every
+   one of them carried the same declarations inline — 94 of them.
+
+   ALIGNMENT IS DELIBERATELY NOT HERE. `TableHead` ships Tailwind's `text-left`
+   and `TableCell` ships `text-body` (components/ui/table.tsx), and `cn()` is
+   `twMerge` — so a `className="text-right"` on the call site REPLACES the
+   default. A `.app-cell-right` here would also win, because this file is
+   unlayered and Tailwind's utilities sit in `@layer utilities`, but it would
+   win by a cascade subtlety rather than by saying what it means.
+   ========================================================================== */
+
+/* The Item Name column, wide enough not to wrap a product name. */
+.app-col-item {
+  min-width: 250px;
+}
+
+/* The row-number column. */
+.app-cell-index {
+  color: #94a3b8;
+}
+
+.app-cell-name {
+  font-weight: 500;
+  color: #0f172a;
+}
+
+/* The money column at the end of the row. */
+.app-cell-total {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+/* The "pending with" chip on an order log entry. Five identical copies across
+   Order_Tracking, Distributor/Order_Tracking and Order_Status_Tracking — the
+   last declaration set in the codebase that three or more files shared. */
+.app-chip-amber {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 2px 10px;
+  border-radius: 20px;
+  background: #fef3c7;
+  color: #d97706;
+  font-size: 0.72rem;
+  font-weight: 700;
+}

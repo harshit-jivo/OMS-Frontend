@@ -30,3 +30,12 @@ dist-ssr
 *.njsproj
 *.sln
 .claude
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+
+*storybook.log
+storybook-static

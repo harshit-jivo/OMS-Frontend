@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   HiArrowPath,
   HiCheckCircle,
@@ -6,9 +6,20 @@ import {
   HiMagnifyingGlass,
   HiXCircle,
 } from "react-icons/hi2";
-import { sapService } from "../services/sapService";
 import type { Log } from "../services/sapService";
+
+import { useSapLogs } from "../lib/sapQueries";
 import "../styles/SapData.css";
+import { Badge } from "@/components/ui/badge";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Pagination } from "@/components/ui/pagination";
 
 const ITEMS_PER_PAGE = 15;
 
@@ -20,33 +31,21 @@ const isSuccess = (log: Log) => String(log.status || "").toLowerCase() === "succ
 const num = (value: unknown) => Number(value || 0).toLocaleString("en-IN");
 
 export default function Logs() {
-  const [logs, setLogs] = useState<Log[]>([]);
+  // `isLoading` is the FIRST load; `isFetching` also covers a Refresh. They
+  // were one `loading` flag, so pressing Refresh replaced the table with the
+  // word "Loading…" instead of leaving the data up while it reloaded.
+  const { items: logs, isLoading: loading, isFetching, refetch: fetchLogs } = useSapLogs();
   const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-
-  useEffect(() => {
-    fetchLogs();
-  }, []);
-
-  const fetchLogs = async () => {
-    setLoading(true);
-    try {
-      const data = await sapService.getLogs();
-      setLogs(Array.isArray(data) ? data : []);
-    } catch (error) {
-      console.log("Error fetching Logs:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const filteredLogs = useMemo(() => {
     const needle = search.trim().toLowerCase();
     if (!needle) return logs;
     return logs.filter((log) =>
       [log.sync_type, log.status, log.triggered_by].some((field) =>
-        String(field || "").toLowerCase().includes(needle),
+        String(field || "")
+          .toLowerCase()
+          .includes(needle),
       ),
     );
   }, [logs, search]);
@@ -89,7 +88,7 @@ export default function Logs() {
           <input
             type="text"
             className="sd-search"
-            placeholder="Search by sync type, status or who triggered it…"
+            placeholder="Search by sync type, status or who triggered it…" aria-label="Search by sync type, status or who triggered it"
             value={search}
             onChange={(event) => {
               setSearch(event.target.value);
@@ -97,9 +96,9 @@ export default function Logs() {
             }}
           />
         </div>
-        <button type="button" className="sd-btn" onClick={fetchLogs} disabled={loading}>
+        <button type="button" className="sd-btn" onClick={fetchLogs} disabled={isFetching}>
           <HiArrowPath className={loading ? "sd-spin" : ""} aria-hidden="true" />
-          {loading ? "Loading…" : "Refresh"}
+          {isFetching ? "Loading…" : "Refresh"}
         </button>
       </div>
 
@@ -118,60 +117,42 @@ export default function Logs() {
         ) : (
           <>
             <div className="sd-table-scroll">
-              <table className="sd-table">
-                <thead>
-                  <tr>
-                    <th>Sync Type</th>
-                    <th>Status</th>
-                    <th className="sd-num">Processed</th>
-                    <th className="sd-num">Created</th>
-                    <th className="sd-num">Updated</th>
-                    <th>Triggered By</th>
-                  </tr>
-                </thead>
-                <tbody>
+              <Table density="compact">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Sync Type</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="sd-num">Processed</TableHead>
+                    <TableHead className="sd-num">Created</TableHead>
+                    <TableHead className="sd-num">Updated</TableHead>
+                    <TableHead>Triggered By</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {visible.map((log) => (
-                    <tr key={log.id}>
-                      <td>
-                        <span className="sd-badge sd-badge-accent">{dash(log.sync_type)}</span>
-                      </td>
-                      <td>
-                        <span className={`sd-badge ${isSuccess(log) ? "sd-badge-ok" : "sd-badge-fail"}`}>
-                          {dash(log.status)}
-                        </span>
-                      </td>
-                      <td className="sd-num">{num(log.records_processed)}</td>
-                      <td className="sd-num">{num(log.records_created)}</td>
-                      <td className="sd-num">{num(log.records_updated)}</td>
-                      <td className="sd-dim">{dash(log.triggered_by)}</td>
-                    </tr>
+                    <TableRow key={log.id}>
+                      <TableCell>
+                        <Badge tone="info">{dash(log.sync_type)}</Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge tone={isSuccess(log) ? "ok" : "bad"}>{dash(log.status)}</Badge>
+                      </TableCell>
+                      <TableCell className="sd-num">{num(log.records_processed)}</TableCell>
+                      <TableCell className="sd-num">{num(log.records_created)}</TableCell>
+                      <TableCell className="sd-num">{num(log.records_updated)}</TableCell>
+                      <TableCell className="sd-dim">{dash(log.triggered_by)}</TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
 
             {filteredLogs.length > ITEMS_PER_PAGE && (
-              <div className="sd-pagination">
-                <button
-                  type="button"
-                  className="sd-pg-btn"
-                  disabled={page === 1}
-                  onClick={() => setCurrentPage(page - 1)}
-                >
-                  ← Prev
-                </button>
-                <span className="sd-pg-info">
-                  {page} / {totalPages}
-                </span>
-                <button
-                  type="button"
-                  className="sd-pg-btn"
-                  disabled={page === totalPages}
-                  onClick={() => setCurrentPage(page + 1)}
-                >
-                  Next →
-                </button>
-              </div>
+              <Pagination
+                page={currentPage}
+                totalPages={totalPages}
+                onPageChange={setCurrentPage}
+              />
             )}
           </>
         )}

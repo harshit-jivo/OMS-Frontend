@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { HiXCircle } from "react-icons/hi2";
 import { einvoiceService } from "../../services/einvoiceService";
-import { NicField, KeyValues, JsonView, ErrorAlert, SuccessAlert, apiErrorMessage } from "../../components/NicUI";
+import { NicField, KeyValues, JsonView, ErrorAlert, SuccessAlert } from "../../components/NicUI";
+import { messageFrom } from "@/lib/apiError";
 
 const REASONS = [
   { code: "1", label: "1 — Duplicate" },
@@ -36,7 +37,7 @@ export default function CancelIrn() {
     } catch (err) {
       const body = (err as { response?: { data?: Record<string, unknown> } })?.response?.data;
       const failMsg = body ? nicErrorMessage(body) : "";
-      setError(failMsg ? friendlyCancelError(failMsg) : apiErrorMessage(err));
+      setError(failMsg ? friendlyCancelError(failMsg) : messageFrom(err, "Request failed"));
     } finally {
       setBusy(false);
     }
@@ -71,7 +72,7 @@ export default function CancelIrn() {
 
       <div className="nic-actions-row">
         <button className="ofs-primary" onClick={() => void submit()} disabled={busy}>
-          <HiXCircle style={{ verticalAlign: "-3px", marginRight: 6 }} />
+          <HiXCircle className="nic-icon-lead" />
           {busy ? "Cancelling…" : "Cancel IRN"}
         </button>
       </div>

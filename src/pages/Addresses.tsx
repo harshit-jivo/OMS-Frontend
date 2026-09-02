@@ -1,31 +1,26 @@
-import { useEffect, useState } from "react";
-import { sapService } from "../services/sapService";
-import type { Address } from "../services/sapService";
+/**
+ * DEAD FILE — nothing imports this.
+ *
+ * Sap_Sync's "Parties & Addresses" tab renders `PartyDirectory`, which fetches
+ * and joins both lists itself; this standalone page was superseded when those
+ * two tabs were merged and no route or import survived the change. It is left
+ * in place rather than deleted (see the repo's standing rule on removals), and
+ * it was carried through the TanStack Query conversion so that adopting it
+ * again — if the split view is ever wanted back — does not mean converting it
+ * then.
+ *
+ * If you are looking for the live parties screen, it is `PartyDirectory.tsx`.
+ */
+import { useState } from "react";
+
+import { useSapAddresses } from "../lib/sapQueries";
 import "../styles/Addresses.css";
 
 export default function Addresses() {
-  
-  const [addresses, setAddresses] = useState<Address[]>([]);
+  const { items: addresses, isLoading: loading } = useSapAddresses();
   const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 12;
-
-  useEffect(() => {
-    fetchAddresses();
-  }, []);
-
-  const fetchAddresses = async () => {
-    setLoading(true);
-    try {
-      const data = await sapService.getAddresses();
-      setAddresses(data);
-    } catch (error) {
-      console.log("Error fetching addresses:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const filteredAddresses = addresses.filter(
     (address) =>
@@ -45,7 +40,7 @@ export default function Addresses() {
         <div className="ad-search-wrap">
           <input
             type="text"
-            placeholder="Search by code, name or city..."
+            placeholder="Search by code, name or city..." aria-label="Search by code, name or city"
             value={search}
             onChange={(e) => {
               setSearch(e.target.value);
@@ -66,7 +61,9 @@ export default function Addresses() {
               <div className="ad-card" key={address.id}>
                 <div className="ad-card-head">
                   <span className="ad-code">{address.card_code}</span>
-                  <span className="ad-badge">{address.address_type === "S" ? "Shipping" : "Billing"}</span>
+                  <span className="ad-badge">
+                    {address.address_type === "S" ? "Shipping" : "Billing"}
+                  </span>
                 </div>
                 <div className="ad-card-name">{address.address_name}</div>
                 {address.full_address && <div className="ad-card-addr">{address.full_address}</div>}

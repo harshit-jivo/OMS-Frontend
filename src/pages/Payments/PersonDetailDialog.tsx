@@ -77,11 +77,14 @@ function Timeline({ points }: { points: PersonDetail["timeline"] }) {
       {points.map((p) => (
         <div className="pdash-pd-day" key={p.date}>
           <div className="pdash-pd-bars">
+            {/* Height is a live ratio against the window's peak day, not a
+                fixed set of values — stays inline. */}
             <span
               className="pdash-pd-bar tone-blue"
               style={{ height: `${(p.received / peak) * 100}%` }}
               title={`${prettyDate(p.date)} — collected ${money(p.received)}`}
             />
+            {/* Same reason as above — computed from live data. */}
             <span
               className="pdash-pd-bar tone-green"
               style={{ height: `${(p.deposited / peak) * 100}%` }}

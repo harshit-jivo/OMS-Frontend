@@ -2,10 +2,24 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { ordersService } from "../../services/ordersService";
 import type { Order, OrderLog, SalesOrderSapStatus } from "../../services/ordersService";
-import { loadCurrentUserOrderSummaries } from "../../utils/orderHistory";
+import { useQueryClient } from "@tanstack/react-query";
+
+import { useCurrentUserOrders } from "../../lib/orderQueries";
 import { useAction } from "../../auth/actions";
 import "../../styles/Order_Tracking.css";
-
+import { Badge } from "@/components/ui/badge";
+import { toneForStatus } from "@/components/ui/statusTone";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Pagination } from "@/components/ui/pagination";
+import { TableSkeleton } from "@/components/ui/skeleton";
+import { messageFrom } from "@/lib/apiError";
 
 // Distributor-facing Order Tracking page.
 //
@@ -49,18 +63,19 @@ const compareLogsByDisplayOrder = (
 export default function Distributor_Order_Tracking() {
   const navigate = useNavigate();
   const location = useLocation();
-  const [orders, setOrders] = useState<Order[]>([]);
+  // Shared with View_Orders and the main Order_Tracking: one key, one fetch.
+  const { orders, isOrdersLoading: loading } = useCurrentUserOrders();
+  const queryClient = useQueryClient();
   const [logs, setLogs] = useState<OrderLog[]>([]);
-  const [loading, setLoading] = useState(true);
   const [logsLoading, setLogsLoading] = useState(false);
   const [tracker, setTracker] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [sapStatus, setSapStatus] = useState<SalesOrderSapStatus | null>(null);
   const [sapLoading, setSapLoading] = useState(false);
   const [resending, setResending] = useState(false);
-  const [sapActionMsg, setSapActionMsg] = useState<
-    { kind: "ok" | "err"; text: string } | null
-  >(null);
+  const [sapActionMsg, setSapActionMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(
+    null,
+  );
   const [statusFilter, setStatusFilter] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
@@ -73,22 +88,9 @@ export default function Distributor_Order_Tracking() {
   // matched neither.
   const isSapManager = useAction("mart.manageSap");
 
-  useEffect(() => {
-    void fetchOrders();
-  }, []);
-
-  const fetchOrders = async () => {
-    try {
-      setLoading(true);
-      const data = await loadCurrentUserOrderSummaries();
-      setOrders(data || []);
-    } catch (error) {
-      console.log("Error fetching orders:", error);
-      setOrders([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+  /** Pull the list again — the resend flow can move an order to Completed. */
+  const refreshOrders = () =>
+    queryClient.invalidateQueries({ queryKey: ["orders", "current-user"] });
 
   useEffect(() => {
     if (location.state?.openOrderId && orders.length > 0) {
@@ -118,9 +120,7 @@ export default function Distributor_Order_Tracking() {
         const second = new Date(a.created_at || "").getTime();
 
         if (Number.isNaN(first) || Number.isNaN(second)) {
-          return String(b.order_number || "").localeCompare(
-            String(a.order_number || "")
-          );
+          return String(b.order_number || "").localeCompare(String(a.order_number || ""));
         }
 
         return first - second;
@@ -148,16 +148,24 @@ export default function Distributor_Order_Tracking() {
   }, [logs]);
 
   const visibleLogs = useMemo(() => {
-    const currentStatus = String(selectedOrder?.status_display || "").trim().toLowerCase();
+    const currentStatus = String(selectedOrder?.status_display || "")
+      .trim()
+      .toLowerCase();
     const isCurrentRatePending = currentStatus.includes("rate");
     const getPerformerKey = (log: OrderLog) =>
-      String(log.performed_by_name || "").trim().toLowerCase();
+      String(log.performed_by_name || "")
+        .trim()
+        .toLowerCase();
     const isRealPerformer = (value: string | null | undefined) =>
       Boolean(value && value !== "pending" && value !== "system");
     const isRateLog = (log: OrderLog) =>
-      String(log.status_name || "").toLowerCase().includes("rate");
+      String(log.status_name || "")
+        .toLowerCase()
+        .includes("rate");
     const isRejectedLog = (log: OrderLog) =>
-      String(log.status_name || "").toLowerCase().includes("reject");
+      String(log.status_name || "")
+        .toLowerCase()
+        .includes("reject");
     const isApprovedLog = (log: OrderLog) => {
       const statusName = String(log.status_name || "").toLowerCase();
       const remarks = String(log.remarks || "").toLowerCase();
@@ -200,18 +208,26 @@ export default function Distributor_Order_Tracking() {
       });
     };
     const hasLaterDuplicateDecision = (log: OrderLog) => {
-      const statusName = String(log.status_name || "").trim().toLowerCase();
+      const statusName = String(log.status_name || "")
+        .trim()
+        .toLowerCase();
       const performer = getPerformerKey(log);
-      const remarks = String(log.remarks || "").trim().toLowerCase();
+      const remarks = String(log.remarks || "")
+        .trim()
+        .toLowerCase();
 
       if (!isRealPerformer(performer) || !isDecisionHistoryLog(log)) {
         return false;
       }
 
       return orderedLogs.some((otherLog) => {
-        const otherStatus = String(otherLog.status_name || "").trim().toLowerCase();
+        const otherStatus = String(otherLog.status_name || "")
+          .trim()
+          .toLowerCase();
         const otherPerformer = getPerformerKey(otherLog);
-        const otherRemarks = String(otherLog.remarks || "").trim().toLowerCase();
+        const otherRemarks = String(otherLog.remarks || "")
+          .trim()
+          .toLowerCase();
         const logTime = new Date(log.created_at || "").getTime();
         const otherTime = new Date(otherLog.created_at || "").getTime();
 
@@ -244,12 +260,11 @@ export default function Distributor_Order_Tracking() {
             betweenLog.id !== log.id &&
             betweenLog.id !== otherLog.id &&
             (betweenTime > logTime || (betweenTime === logTime && betweenLog.id > log.id)) &&
-            (betweenTime < otherTime || (betweenTime === otherTime && betweenLog.id < otherLog.id)) &&
-            (
-              betweenStatus.includes("billing") ||
+            (betweenTime < otherTime ||
+              (betweenTime === otherTime && betweenLog.id < otherLog.id)) &&
+            (betweenStatus.includes("billing") ||
               betweenStatus.includes("auditor") ||
-              betweenStatus.includes("rate")
-            )
+              betweenStatus.includes("rate"))
           );
         });
 
@@ -281,12 +296,11 @@ export default function Distributor_Order_Tracking() {
             betweenLog.id !== log.id &&
             betweenLog.id !== otherLog.id &&
             (betweenTime > logTime || (betweenTime === logTime && betweenLog.id > log.id)) &&
-            (betweenTime < otherTime || (betweenTime === otherTime && betweenLog.id < otherLog.id)) &&
-            (
-              betweenStatus.includes("billing") ||
+            (betweenTime < otherTime ||
+              (betweenTime === otherTime && betweenLog.id < otherLog.id)) &&
+            (betweenStatus.includes("billing") ||
               betweenStatus.includes("auditor") ||
-              betweenStatus.includes("rate")
-            )
+              betweenStatus.includes("rate"))
           );
         });
 
@@ -360,21 +374,21 @@ export default function Distributor_Order_Tracking() {
           return (
             betweenLog.id !== log.id &&
             betweenLog.id !== latestPendingRateLog.id &&
-            (betweenTime > pendingRateTime || (betweenTime === pendingRateTime && betweenLog.id > latestPendingRateLog.id)) &&
+            (betweenTime > pendingRateTime ||
+              (betweenTime === pendingRateTime && betweenLog.id > latestPendingRateLog.id)) &&
             (betweenTime < logTime || (betweenTime === logTime && betweenLog.id < log.id)) &&
-            (
-              betweenStatus.includes("billing") ||
+            (betweenStatus.includes("billing") ||
               betweenStatus.includes("auditor") ||
               betweenStatus.includes("rate") ||
               betweenStatus.includes("reject") ||
-              betweenStatus.includes("complete")
-            )
+              betweenStatus.includes("complete"))
           );
         });
 
         if (
           !hasStageBoundaryBetween &&
-          (logTime > pendingRateTime || (logTime === pendingRateTime && log.id > latestPendingRateLog.id))
+          (logTime > pendingRateTime ||
+            (logTime === pendingRateTime && log.id > latestPendingRateLog.id))
         ) {
           return false;
         }
@@ -413,16 +427,26 @@ export default function Distributor_Order_Tracking() {
 
   const displayLogs = useMemo(() => {
     const isRealPerformer = (value: string | null | undefined) => {
-      const normalized = String(value || "").trim().toLowerCase();
+      const normalized = String(value || "")
+        .trim()
+        .toLowerCase();
       return Boolean(normalized && normalized !== "pending" && normalized !== "system");
     };
     const isRateLog = (log: OrderLog) =>
-      String(log.status_name || "").toLowerCase().includes("rate");
+      String(log.status_name || "")
+        .toLowerCase()
+        .includes("rate");
     const isBillingLog = (log: OrderLog) =>
-      String(log.status_name || "").toLowerCase().includes("billing") ||
-      String(log.remarks || "").toLowerCase().includes("billing");
+      String(log.status_name || "")
+        .toLowerCase()
+        .includes("billing") ||
+      String(log.remarks || "")
+        .toLowerCase()
+        .includes("billing");
     const isRejectedLog = (log: OrderLog) =>
-      String(log.status_name || "").toLowerCase().includes("reject");
+      String(log.status_name || "")
+        .toLowerCase()
+        .includes("reject");
     const isApprovedLog = (log: OrderLog) => {
       const statusName = String(log.status_name || "").toLowerCase();
       const remarks = String(log.remarks || "").toLowerCase();
@@ -467,45 +491,47 @@ export default function Distributor_Order_Tracking() {
       return isApprovedLog(log) && getPreviousStageName(log).includes("rate");
     };
 
-    return [...visibleLogs].sort(compareLogsByDisplayOrder).reduce<OrderLog[]>((mergedLogs, log) => {
-      if (!isAcceptedRateApprovalLog(log)) {
-        mergedLogs.push(log);
-        return mergedLogs;
-      }
+    return [...visibleLogs]
+      .sort(compareLogsByDisplayOrder)
+      .reduce<OrderLog[]>((mergedLogs, log) => {
+        if (!isAcceptedRateApprovalLog(log)) {
+          mergedLogs.push(log);
+          return mergedLogs;
+        }
 
-      const previousLog = mergedLogs[mergedLogs.length - 1];
-      if (previousLog && isAcceptedRateApprovalLog(previousLog)) {
-        const names = [
-          ...String(previousLog.performed_by_name || "")
-            .split(",")
-            .map((name) => name.trim())
-            .filter(Boolean),
-          String(log.performed_by_name || "").trim(),
-        ].filter(Boolean);
-
-        const remarks = Array.from(
-          new Set(
-            [previousLog.remarks, log.remarks]
-              .map((remark) => String(remark || "").trim())
+        const previousLog = mergedLogs[mergedLogs.length - 1];
+        if (previousLog && isAcceptedRateApprovalLog(previousLog)) {
+          const names = [
+            ...String(previousLog.performed_by_name || "")
+              .split(",")
+              .map((name) => name.trim())
               .filter(Boolean),
-          ),
-        ).join(", ");
+            String(log.performed_by_name || "").trim(),
+          ].filter(Boolean);
 
-        mergedLogs[mergedLogs.length - 1] = {
-          ...previousLog,
-          performed_by_name: Array.from(new Set(names)).join(", "),
-          created_at: log.created_at || previousLog.created_at,
-          remarks,
-        };
+          const remarks = Array.from(
+            new Set(
+              [previousLog.remarks, log.remarks]
+                .map((remark) => String(remark || "").trim())
+                .filter(Boolean),
+            ),
+          ).join(", ");
+
+          mergedLogs[mergedLogs.length - 1] = {
+            ...previousLog,
+            performed_by_name: Array.from(new Set(names)).join(", "),
+            created_at: log.created_at || previousLog.created_at,
+            remarks,
+          };
+          return mergedLogs;
+        }
+
+        mergedLogs.push({
+          ...log,
+          status_name: "Rate Approval",
+        });
         return mergedLogs;
-      }
-
-      mergedLogs.push({
-        ...log,
-        status_name: "Rate Approval",
-      });
-      return mergedLogs;
-    }, []);
+      }, []);
   }, [orderedLogs, visibleLogs]);
 
   const timelineLogs = useMemo(() => {
@@ -517,7 +543,9 @@ export default function Distributor_Order_Tracking() {
     }
 
     const hasBillingStep = displayLogs.some((log) =>
-      String(log.status_name || "").toLowerCase().includes("billing")
+      String(log.status_name || "")
+        .toLowerCase()
+        .includes("billing"),
     );
 
     if (hasBillingStep) {
@@ -556,15 +584,11 @@ export default function Distributor_Order_Tracking() {
 
     return (
       isSentToAuditorLog(log) ||
-      (
-        statusName.includes("billing") &&
-        (
-          statusName.includes("accepted") ||
+      (statusName.includes("billing") &&
+        (statusName.includes("accepted") ||
           statusName.includes("approved") ||
           remarks.includes("accepted") ||
-          remarks.includes("approved")
-        )
-      ) ||
+          remarks.includes("approved"))) ||
       remarks.includes("accepted by billing") ||
       remarks.includes("approved by billing")
     );
@@ -573,9 +597,10 @@ export default function Distributor_Order_Tracking() {
   const getLogDisplayTitle = (log: OrderLog) => {
     const statusName = String(log.status_name || "").toLowerCase();
     const remarks = String(log.remarks || "").toLowerCase();
-    const performer = String(log.performed_by_name || "").trim().toLowerCase();
-    const hasRealPerformer =
-      performer && performer !== "pending" && performer !== "system";
+    const performer = String(log.performed_by_name || "")
+      .trim()
+      .toLowerCase();
+    const hasRealPerformer = performer && performer !== "pending" && performer !== "system";
     const isRejected = statusName.includes("reject");
     const isAccepted =
       statusName === "approved" ||
@@ -635,9 +660,7 @@ export default function Distributor_Order_Tracking() {
     }
 
     if (statusName.includes("rate") && hasRealPerformer) {
-      return isRejected
-        ? "Rate Approval Rejected"
-        : "Accepted by Rate Approver";
+      return isRejected ? "Rate Approval Rejected" : "Accepted by Rate Approver";
     }
 
     if (statusName.includes("billing") && statusName.includes("reject")) {
@@ -762,24 +785,16 @@ export default function Distributor_Order_Tracking() {
       await Promise.all([
         fetchSapStatus(selectedOrder.id),
         (async () => {
-          const details = await ordersService
-            .getOrderDetails(selectedOrder.id)
-            .catch(() => null);
+          const details = await ordersService.getOrderDetails(selectedOrder.id).catch(() => null);
           if (details) setSelectedOrder(details);
-          const response = await ordersService
-            .getOrderLogs(selectedOrder.id)
-            .catch(() => []);
+          const response = await ordersService.getOrderLogs(selectedOrder.id).catch(() => []);
           setLogs(Array.isArray(response) ? response : []);
         })(),
       ]);
       // Keep the list in sync (status may have moved to Completed).
-      void fetchOrders();
-    } catch (error: any) {
-      const detail =
-        error?.response?.data?.sap_error ||
-        error?.response?.data?.error ||
-        error?.response?.data?.message ||
-        "Failed to send the order to SAP. Please try again.";
+      void refreshOrders();
+    } catch (error) {
+      const detail = messageFrom(error, "Failed to send the order to SAP. Please try again.");
       setSapActionMsg({ kind: "err", text: detail });
       void fetchSapStatus(selectedOrder.id);
     } finally {
@@ -824,19 +839,8 @@ export default function Distributor_Order_Tracking() {
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              style={{
-                height: 'var(--input-h, 40px)',
-                padding: '0 12px',
-                borderRadius: 'var(--radius-sm, 8px)',
-                border: '1px solid #cbd5e1',
-                backgroundColor: '#fff',
-                color: '#0f172a',
-                cursor: 'pointer',
-                fontWeight: 500,
-                fontSize: 'var(--font-ui, 13px)',
-                outline: 'none',
-                minWidth: '180px'
-              }}
+              className="tracker-filter-select"
+              aria-label="Filter by order status"
             >
               <option value="">All Orders</option>
               {uniqueStatuses.map((status) => (
@@ -845,56 +849,45 @@ export default function Distributor_Order_Tracking() {
                 </option>
               ))}
             </select>
-            {!loading && (
-              <span className="tracker-count">Total: {filteredOrders.length}</span>
-            )}
+            {!loading && <span className="tracker-count">Total: {filteredOrders.length}</span>}
           </div>
 
           {loading ? (
-            <div className="order-loading-state">
-              <span className="order-loading-spinner" />
-              <span>Loading orders...</span>
-            </div>
+            <TableSkeleton columns={7} label="Loading orders" />
           ) : filteredOrders.length > 0 ? (
             <div className="tracker-table-wrap">
-              <table className="vo-table">
-                <thead>
-                  <tr>
-                    <th>Order ID</th>
-                    <th>Card Name</th>
-                    <th>FOC</th>
-                    <th>Created At</th>
-                    <th>Delivery Date</th>
-                    <th>Status</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
+              <Table density="compact">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Order ID</TableHead>
+                    <TableHead>Card Name</TableHead>
+                    <TableHead>FOC</TableHead>
+                    <TableHead>Created At</TableHead>
+                    <TableHead>Delivery Date</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {paginatedOrders.map((order) => (
-                    <tr key={order.id} className={order.is_foc ? "tracker-foc-row" : ""}>
-                      <td className="ao-cell-id">{order.order_number}</td>
-                      <td className="ao-cell-name">{order.card_name}</td>
-                      <td>
+                    <TableRow key={order.id} className={order.is_foc ? "tracker-foc-row" : ""}>
+                      <TableCell className="ao-cell-id">{order.order_number}</TableCell>
+                      <TableCell className="ao-cell-name">{order.card_name}</TableCell>
+                      <TableCell>
                         {order.is_foc ? (
                           <span className="tracker-foc-badge">FOC</span>
                         ) : (
                           <span className="tracker-foc-empty">-</span>
                         )}
-                      </td>
-                      <td>{formatCreatedDateTime(order.created_at)}</td>
-                      <td>{order.delivery_date}</td>
-                      <td>
-                        <span
-                          className={`vo-badge vo-badge-${(
-                            order.status_display || ""
-                          )
-                            .toLowerCase()
-                            .replace(/\s+/g, "-")}`}
-                        >
+                      </TableCell>
+                      <TableCell>{formatCreatedDateTime(order.created_at)}</TableCell>
+                      <TableCell>{order.delivery_date}</TableCell>
+                      <TableCell>
+                        <Badge tone={toneForStatus(order.status_display)}>
                           {order.status_display}
-                        </span>
-                      </td>
-                      <td>
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
                         <div className="ao-row-actions">
                           <button
                             type="button"
@@ -904,38 +897,18 @@ export default function Distributor_Order_Tracking() {
                             Track
                           </button>
                         </div>
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
           ) : (
-            <div className="vo-empty" style={{ padding: "40px", textAlign: "center", color: "#64748b", background: "#f8fafc", borderRadius: "8px", border: "1px dashed #cbd5e1", margin: "20px 0" }}>No orders found</div>
+            <div className="vo-empty tracker-empty-state">No orders found</div>
           )}
 
           {!loading && filteredOrders.length > itemsPerPage && (
-            <div className="tracker-pagination">
-              <button
-                type="button"
-                className="tracker-pg-btn"
-                disabled={currentPage === 1}
-                onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
-              >
-                Prev
-              </button>
-              <span className="tracker-pg-info">
-                {currentPage} / {totalPages}
-              </span>
-              <button
-                type="button"
-                className="tracker-pg-btn"
-                disabled={currentPage === totalPages}
-                onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
-              >
-                Next
-              </button>
-            </div>
+            <Pagination page={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
           )}
         </div>
       )}
@@ -943,24 +916,16 @@ export default function Distributor_Order_Tracking() {
       {tracker && selectedOrder && (
         <div className="tracker-detail-card">
           <div className="tracker-detail-top">
-            <button
-              type="button"
-              className="tracker-back-btn"
-              onClick={handleBack}
-            >
+            <button type="button" className="tracker-back-btn" onClick={handleBack}>
               Back
             </button>
-            <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-              <span
-                className={`vo-badge vo-badge-${(
-                  selectedOrder.status_display || ""
-                )
-                  .toLowerCase()
-                  .replace(/\s+/g, "-")}`}
-              >
+            <div className="tracker-status-row">
+              <Badge tone={toneForStatus(selectedOrder.status_display)}>
                 {selectedOrder.status_display}
-              </span>
-              {selectedOrder.is_foc ? <span className="tracker-foc-badge tracker-foc-badge-detail">FOC ORDER</span> : null}
+              </Badge>
+              {selectedOrder.is_foc ? (
+                <span className="tracker-foc-badge tracker-foc-badge-detail">FOC ORDER</span>
+              ) : null}
             </div>
           </div>
 
@@ -1000,114 +965,97 @@ export default function Distributor_Order_Tracking() {
           {/* SAP Sales Order result: DocEntry/DocNum on success, the SAP error on
               failure. Visible to the Mart approver / admin only (not distributors),
               who can also edit a failed order and retry the push. */}
-          {isSapManager && (() => {
-            const isFailed = sapStatus?.status === "FAILED";
-            const isSuccess = sapStatus?.status === "SUCCESS";
-            const accent = isFailed ? "#DC2626" : isSuccess ? "#16A34A" : "#64748B";
+          {isSapManager &&
+            (() => {
+              const isFailed = sapStatus?.status === "FAILED";
+              const isSuccess = sapStatus?.status === "SUCCESS";
 
-            return (
-              <div
-                className="tracker-sap-details"
-                style={{
-                  margin: "4px 0 20px",
-                  padding: "16px",
-                  borderRadius: 10,
-                  border: `1px solid ${isFailed ? "#FECACA" : isSuccess ? "#BBF7D0" : "#E2E8F0"}`,
-                  background: isFailed ? "#FEF2F2" : isSuccess ? "#F0FDF4" : "#F8FAFC",
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-                  <h5 style={{ margin: 0, fontSize: "0.95rem", color: "#0f172a" }}>SAP Details</h5>
-                  {sapStatus ? (
-                    <span
-                      style={{
-                        fontSize: "0.72rem",
-                        fontWeight: 700,
-                        padding: "2px 10px",
-                        borderRadius: 20,
-                        color: "#fff",
-                        background: accent,
-                      }}
-                    >
-                      {isSuccess ? "Created in SAP" : isFailed ? "SAP Failed" : sapStatus.status}
-                    </span>
-                  ) : null}
-                </div>
-
-                {sapLoading ? (
-                  <p className="vo-empty" style={{ margin: 0 }}>Loading SAP status…</p>
-                ) : !sapStatus ? (
-                  <p style={{ margin: 0, color: "#64748b" }}>
-                    This order has not been sent to SAP yet.
-                  </p>
-                ) : isSuccess ? (
-                  <div className="tracker-summary-grid" style={{ margin: 0 }}>
-                    <div>
-                      <p className="tracker-label">Doc Entry</p>
-                      <p>{sapStatus.doc_entry ?? "-"}</p>
-                    </div>
-                    <div>
-                      <p className="tracker-label">Doc Num</p>
-                      <p>{sapStatus.doc_num ?? "-"}</p>
-                    </div>
-                    {sapStatus.completed_at ? (
-                      <div>
-                        <p className="tracker-label">Created At</p>
-                        <p>{formatDateTime(sapStatus.completed_at)}</p>
-                      </div>
+              return (
+                <div
+                  className={`tracker-sap-details${
+                    isFailed
+                      ? " tracker-sap-details--failed"
+                      : isSuccess
+                        ? " tracker-sap-details--success"
+                        : ""
+                  }`}
+                >
+                  <div className="tracker-sap-head">
+                    <h5 className="tracker-sap-title">SAP Details</h5>
+                    {sapStatus ? (
+                      <span
+                        className={`tracker-sap-status-pill${
+                          isFailed
+                            ? " tracker-sap-status-pill--failed"
+                            : isSuccess
+                              ? " tracker-sap-status-pill--success"
+                              : ""
+                        }`}
+                      >
+                        {isSuccess ? "Created in SAP" : isFailed ? "SAP Failed" : sapStatus.status}
+                      </span>
                     ) : null}
                   </div>
-                ) : (
-                  <div>
-                    <p className="tracker-label" style={{ color: "#B91C1C" }}>
-                      Why SAP failed
-                    </p>
-                    <p style={{ color: "#7F1D1D", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                      {sapStatus.error_message || "SAP did not return an error message."}
-                    </p>
-                  </div>
-                )}
 
-                {isFailed && isSapManager ? (
-                  <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
-                    <button
-                      type="button"
-                      className="tracker-btn"
-                      onClick={handleEditOrder}
-                      disabled={resending}
-                    >
-                      Edit Order
-                    </button>
-                    <button
-                      type="button"
-                      className="tracker-btn"
-                      style={{ background: "#16A34A", borderColor: "#16A34A" }}
-                      onClick={() => void handleResendToSap()}
-                      disabled={resending}
-                    >
-                      {resending ? "Sending to SAP…" : "Resend to SAP"}
-                    </button>
-                  </div>
-                ) : null}
+                  {sapLoading ? (
+                    <p className="vo-empty tracker-vo-flush">Loading SAP status…</p>
+                  ) : !sapStatus ? (
+                    <p className="tracker-sap-note">This order has not been sent to SAP yet.</p>
+                  ) : isSuccess ? (
+                    <div className="tracker-summary-grid tracker-summary-grid--flush">
+                      <div>
+                        <p className="tracker-label">Doc Entry</p>
+                        <p>{sapStatus.doc_entry ?? "-"}</p>
+                      </div>
+                      <div>
+                        <p className="tracker-label">Doc Num</p>
+                        <p>{sapStatus.doc_num ?? "-"}</p>
+                      </div>
+                      {sapStatus.completed_at ? (
+                        <div>
+                          <p className="tracker-label">Created At</p>
+                          <p>{formatDateTime(sapStatus.completed_at)}</p>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <div>
+                      <p className="tracker-label tracker-label--danger">Why SAP failed</p>
+                      <p className="tracker-sap-error-text">
+                        {sapStatus.error_message || "SAP did not return an error message."}
+                      </p>
+                    </div>
+                  )}
 
-                {sapActionMsg ? (
-                  <div
-                    style={{
-                      marginTop: 12,
-                      padding: "8px 12px",
-                      borderRadius: 8,
-                      fontSize: "0.85rem",
-                      fontWeight: 600,
-                      color: sapActionMsg.kind === "ok" ? "#166534" : "#991B1B",
-                      background: sapActionMsg.kind === "ok" ? "#DCFCE7" : "#FEE2E2",
-                    }}
-                  >
-                    {sapActionMsg.text}
-                  </div>
-                ) : null}
-              </div>
-            );
-          })()}
+                  {isFailed && isSapManager ? (
+                    <div className="tracker-sap-actions">
+                      <button
+                        type="button"
+                        className="tracker-btn"
+                        onClick={handleEditOrder}
+                        disabled={resending}
+                      >
+                        Edit Order
+                      </button>
+                      <button
+                        type="button"
+                        className="tracker-btn tracker-btn-resend"
+                        onClick={() => void handleResendToSap()}
+                        disabled={resending}
+                      >
+                        {resending ? "Sending to SAP…" : "Resend to SAP"}
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {sapActionMsg ? (
+                    <div className={`tracker-sap-msg tracker-sap-msg--${sapActionMsg.kind}`}>
+                      {sapActionMsg.text}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })()}
 
           <div className="tracker-timeline">
             <h5>Order Log Timeline</h5>
@@ -1126,11 +1074,7 @@ export default function Distributor_Order_Tracking() {
                   <div key={log.id} className="tracker-timeline-row">
                     <div className="tracker-timeline-left">
                       <div className={`tracker-dot ${tone}`}>
-                        {tone === "approved"
-                          ? "✓"
-                          : tone === "rejected"
-                            ? "✕"
-                            : "•"}
+                        {tone === "approved" ? "✓" : tone === "rejected" ? "✕" : "•"}
                       </div>
                       {index !== timelineLogs.length - 1 ? (
                         <div className={`tracker-line ${tone}`} />
@@ -1146,31 +1090,40 @@ export default function Distributor_Order_Tracking() {
                       {(() => {
                         const isLastLog = index === timelineLogs.length - 1;
                         const statusLower = (log.status_name || "").toLowerCase();
-                        const isTerminal = statusLower.includes("completed") || statusLower.includes("rejected");
+                        const isTerminal =
+                          statusLower.includes("completed") || statusLower.includes("rejected");
                         const isPendingLog = isLastLog && !isTerminal;
 
                         if (isPendingLog) {
-                          const isRateApprovalStatus = statusLower.includes("rate") || statusLower.includes("need approval");
-                          const rateApprovalRows = isRateApprovalStatus ? getRateApprovalStatusRows() : [];
+                          const isRateApprovalStatus =
+                            statusLower.includes("rate") || statusLower.includes("need approval");
+                          const rateApprovalRows = isRateApprovalStatus
+                            ? getRateApprovalStatusRows()
+                            : [];
 
                           let holderName = "";
                           if (isRateApprovalStatus) {
                             const pendingApprovers = rateApprovalRows
                               .filter((ra) => ra.status === "PENDING")
                               .map((ra) => ra.name);
-                            holderName = pendingApprovers.length > 0 ? pendingApprovers.join(", ") : "";
+                            holderName =
+                              pendingApprovers.length > 0 ? pendingApprovers.join(", ") : "";
                           }
 
                           if (rateApprovalRows.length > 0) {
                             return (
-                              <div className="tracker-log-meta" style={{ color: "#475569", fontWeight: 600 }}>
+                              <div
+                                className="tracker-log-meta tracker-log-meta--approval"
+                              >
                                 {rateApprovalRows.map((approval) => (
                                   <div key={`${approval.name}-${approval.status}`}>
                                     {approval.name}: {formatApprovalStatus(approval.status)}
                                   </div>
                                 ))}
                                 {holderName ? (
-                                  <span style={{ display: "inline-block", marginTop: 4, background: "#FEF3C7", color: "#D97706", fontSize: "0.72rem", fontWeight: 700, padding: "2px 10px", borderRadius: 20 }}>
+                                  <span
+                                    className="app-chip-amber"
+                                  >
                                     Awaiting Action
                                   </span>
                                 ) : null}
@@ -1179,14 +1132,20 @@ export default function Distributor_Order_Tracking() {
                           }
 
                           return holderName ? (
-                            <div className="tracker-log-meta" style={{ color: "#92400E", fontWeight: 600 }}>
+                            <div
+                              className="tracker-log-meta tracker-log-meta--pending"
+                            >
                               <div>Pending with: {holderName}</div>
-                              <span style={{ display: "inline-block", marginTop: 4, background: "#FEF3C7", color: "#D97706", fontSize: "0.72rem", fontWeight: 700, padding: "2px 10px", borderRadius: 20 }}>
+                              <span
+                                className="app-chip-amber"
+                              >
                                 Awaiting Action
                               </span>
                             </div>
                           ) : (
-                            <p className="tracker-log-meta">Performed By: {log.performed_by_name || "Pending"}</p>
+                            <p className="tracker-log-meta">
+                              Performed By: {log.performed_by_name || "Pending"}
+                            </p>
                           );
                         }
 
