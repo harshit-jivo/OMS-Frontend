@@ -105,6 +105,7 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // --- Administration -----------------------------------------------------
   "/App_User": { permissions: ["App_User"] },
   "/Page_Permissions": { adminOnly: true },
+  "/Role_Permissions": { adminOnly: true },
   "/UI_Labels": { adminOnly: true },
   // "/Sales_Quotation": { adminOnly: true },
   //
@@ -165,21 +166,32 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   "/Nutrition_Manager": { roles: ["legal"] },
 
   // --- Sales --------------------------------------------------------------
-  "/Add_Sales": { roles: BILLING_OR_MANAGER },
-  "/FOC": { roles: BILLING_OR_MANAGER },
-  "/View_Orders": { roles: BILLING_OR_MANAGER },
+  // Phase 4: these carry BOTH a registry permission key and the legacy role
+  // list, mirroring the backend's transitional HasKeyOrRole gates on the
+  // order endpoints. A user granted `orders.sales.create` (via role bundle or
+  // the Permissions page) reaches Add_Sales without holding billing/manager;
+  // the role halves go when the backend's fallback goes — same cleanup
+  // contract, both sides together.
+  "/Add_Sales": { permissions: ["orders.sales.create"], roles: BILLING_OR_MANAGER },
+  "/FOC": { permissions: ["orders.sales.create"], roles: BILLING_OR_MANAGER },
+  "/View_Orders": { permissions: ["orders.sales.view"], roles: BILLING_OR_MANAGER },
   "/Drafts": {
+    permissions: ["orders.sales.create"],
     roles: BILLING_OR_MANAGER,
     note:
       "The sidebar link is commented out, but Add_Sales still navigates here " +
-      "after saving a draft, so it must stay reachable for the same roles.",
+      "after saving a draft, so it must stay reachable for the same people.",
   },
-  "/Sales_Invoice": { roles: ["billing"] },
+  "/Sales_Invoice": { permissions: ["invoices.sales.create"], roles: ["billing"] },
   "/Sales_Invoice/SKU_Images": {
+    permissions: ["invoices.sales.create"],
     roles: ["billing"],
-    note: "Opened from the Sales Invoice screen, which is billing-only.",
+    note: "Opened from the Sales Invoice screen, so it carries the same gate.",
   },
-  "/Invoice_Review": { roles: ["billing", "factory_approver"] },
+  "/Invoice_Review": {
+    permissions: ["invoices.review.decide"],
+    roles: ["billing", "factory_approver"],
+  },
 
   // --- Order workflow, by desk -------------------------------------------
   "/Auditor_orders": { roles: ["auditor"] },
@@ -189,7 +201,7 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   "/Rate_Approver_orders": { roles: RATE_APPROVER_ROLES },
   "/Rate_Approver_status_tracking": { roles: RATE_APPROVER_ROLES },
   "/Order_Tracking": { roles: BILLING_OR_MANAGER },
-  "/Invoice_Report": { roles: ["billing"] },
+  "/Invoice_Report": { permissions: ["invoices.report.view"], roles: ["billing"] },
 
   // --- Reports ------------------------------------------------------------
   "/Daily_Report": REPORTS,
@@ -241,7 +253,14 @@ export function canAccess(
   if (access.anyUser) return true;
 
   if (access.trackerPage) {
-    return trackerPagesFor(session.role, false).has(access.trackerPage);
+    // Registry fold: a tracker page can now also be granted as a permission
+    // key (role bundle or personal grant) — the server unions both sources in
+    // `tracker_pages_for`, and this mirrors it. The tracker page keys ARE
+    // registry keys, so `can()` checks the same string.
+    return (
+      trackerPagesFor(session.role, false).has(access.trackerPage) ||
+      can(session, access.trackerPage)
+    );
   }
 
   if ((access.permissions ?? []).some((key) => can(session, key))) return true;

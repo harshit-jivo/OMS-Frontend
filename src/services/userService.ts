@@ -251,6 +251,72 @@ updateUser: async (id: number, data: CreateUserData) => {
   return response.data;
 },
 
+  // --- Role Permissions matrix (Phase 4) ---------------------------------
+  // The registry is the server's catalogue of grantable keys; the roles call
+  // returns every role with its bundle. Both are admin-only server-side.
+  getPermissionRegistry: async () => {
+    const response = await api.get(`/auth/permission-registry/`);
+    return response.data as {
+      success: boolean;
+      data: { modules: { name: string; keys: { key: string; label: string }[] }[] };
+    };
+  },
+
+  getRolePermissions: async () => {
+    const response = await api.get(`/auth/roles/permissions/`);
+    return response.data as {
+      success: boolean;
+      data: {
+        migrated: boolean;
+        roles: {
+          id: number;
+          name: string;
+          display_name: string;
+          is_active: boolean;
+          keys: string[];
+          /** Distinct holders (primary or extra) — a held role cannot be deleted. */
+          users: number;
+        }[];
+      };
+    };
+  },
+
+  updateRolePermissions: async (roleId: number, keys: string[]) => {
+    const response = await api.put(`/auth/roles/${roleId}/permissions/`, { keys });
+    return response.data as { success: boolean; message: string };
+  },
+
+  // Role lifecycle. `name` is immutable server-side (parts of the system
+  // still match roles by name); display_name is the safe rename.
+  createRole: async (name: string, displayName: string) => {
+    const response = await api.post(`/auth/roles/create/`, {
+      name,
+      display_name: displayName,
+    });
+    return response.data as {
+      success: boolean;
+      message: string;
+      data: { id: number; name: string; display_name: string; is_active: boolean };
+    };
+  },
+
+  updateRole: async (
+    roleId: number,
+    patch: { display_name?: string; is_active?: boolean },
+  ) => {
+    const response = await api.put(`/auth/roles/${roleId}/update/`, patch);
+    return response.data as {
+      success: boolean;
+      message: string;
+      data: { id: number; name: string; display_name: string; is_active: boolean };
+    };
+  },
+
+  deleteRole: async (roleId: number) => {
+    const response = await api.delete(`/auth/roles/${roleId}/delete/`);
+    return response.data as { success: boolean; message: string };
+  },
+
   getPagePermissions: async (userId: number) => {
     const response = await api.get(`/auth/users/${userId}/page-permissions/`);
     return response.data;

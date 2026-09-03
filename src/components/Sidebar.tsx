@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
@@ -7,7 +7,6 @@ import {
   HiChartPie,
   HiCalendarDays,
   HiChartBar,
-  HiChevronDown,
   HiClock,
   HiCog6Tooth,
   HiClipboardDocumentList,
@@ -55,36 +54,142 @@ const SidebarIcon = ({ children }: { children: ReactNode }) => (
   </span>
 );
 
-/*
- * Which nav group owns a route. Module scope so the initial state below can be
- * read straight off the first pathname, rather than starting every group
- * closed and opening the right one a render later.
+/* -- Data-driven navigation (the EXIM pattern) ------------------------------
  *
- * `/Drafts` stays commented out here exactly as it was in the effect this
- * replaced — the route is still in the sidebar but not in the Sales group.
+ * One table, not six hundred lines of hand-written JSX. Each link names its
+ * route; visibility is `canOpen(session, path)` -- the same routeAccess table
+ * the router enforces -- so a link renders exactly when the route behind it
+ * would open. A section auto-hides when none of its links are visible, which
+ * is how a mart user ends up with a two-section sidebar without any
+ * role-specific markup.
+ *
+ * `gate` overrides the visibility path for the two SAP reports that are
+ * billing-only even though their routes sit under the Reports grant -- the
+ * pages themselves bounce anyone else, so the links follow /Sales_Invoice.
+ *
+ * To add a page: add a route + routeAccess entry, then one line here.
  */
-const isSalesPath = (path: string) =>
-  path === "/Add_Sales" ||
-  // path === "/Drafts" ||
-  path === "/View_Orders" ||
-  path === "/FOC" ||
-  path === "/Sales_Invoice";
+type IconComponent = React.ComponentType;
 
-const isReportsPath = (path: string) =>
-  path === "/Daily_Report" ||
-  path === "/PersonWise_Report" ||
-  path === "/Sales_Report" ||
-  path === "/StateWise_Report";
+interface SidebarLinkDef {
+  to: string;
+  label: string;
+  icon: IconComponent;
+  /** Visibility path when it differs from `to`. */
+  gate?: string;
+}
 
-const isDistributorPath = (path: string) =>
-  path === "/Distributor" || path === "/Distributor_Order_Tracking";
+interface SidebarSectionDef {
+  label: string;
+  links: SidebarLinkDef[];
+}
+
+const SIDEBAR_SECTIONS: SidebarSectionDef[] = [
+  {
+    label: "Orders",
+    links: [
+      { to: "/Add_Sales", label: "Add Sales", icon: HiPlusCircle },
+      { to: "/FOC", label: "FOC", icon: HiGift },
+      { to: "/View_Orders", label: "View Orders", icon: HiEye },
+      { to: "/Order_Tracking", label: "Order Tracker", icon: HiPresentationChartLine },
+      { to: "/Auditor_orders", label: "Auditor Queue", icon: HiClipboardDocumentList },
+      { to: "/Auditor_status_tracking", label: "Auditor Tracking", icon: HiClock },
+      { to: "/Billing_orders", label: "Billing Queue", icon: HiClipboardDocumentList },
+      { to: "/Billing_status_tracking", label: "Billing Tracking", icon: HiClock },
+      { to: "/Rate_Approver_orders", label: "Approver Queue", icon: HiClipboardDocumentList },
+      { to: "/Rate_Approver_status_tracking", label: "Approver Tracking", icon: HiClock },
+      { to: "/Mart_Approval", label: "Mart Approval", icon: HiShoppingCart },
+    ],
+  },
+  {
+    label: "Invoices",
+    links: [
+      { to: "/Sales_Invoice", label: "Sales Invoice", icon: HiDocumentText },
+      { to: "/Invoice_Review", label: "Invoice Review", icon: HiDocumentCheck },
+      { to: "/Invoice_Report", label: "Invoice Report", icon: HiDocumentText },
+      { to: "/Einvoice", label: "e-Invoice (IRN)", icon: HiReceiptPercent },
+      { to: "/Ewaybill", label: "e-Way Bill", icon: HiTruck },
+    ],
+  },
+  {
+    label: "Payments",
+    links: [
+      { to: "/Payments_Dashboard", label: "Payments Dashboard", icon: HiChartPie },
+    ],
+  },
+  {
+    label: "Reports",
+    links: [
+      { to: "/Daily_Report", label: "Daily Report", icon: HiCalendarDays },
+      { to: "/PersonWise_Report", label: "Person Wise", icon: HiUserCircle },
+      { to: "/Sales_Report", label: "Sales Report", icon: HiChartBar },
+      { to: "/StateWise_Report", label: "State Wise", icon: HiMap },
+      { to: "/Inventory_Report", label: "Inventory Report", icon: HiCube, gate: "/Sales_Invoice" },
+      { to: "/SO_Invoice_Report", label: "Open SO", icon: HiClipboardDocumentCheck, gate: "/Sales_Invoice" },
+    ],
+  },
+  {
+    label: "Stock",
+    links: [{ to: "/Product_Stock", label: "Stock", icon: HiCube }],
+  },
+  {
+    label: "Schemes",
+    links: [
+      { to: "/Add_Scheme", label: "Add Scheme", icon: HiGift },
+      { to: "/Scheme_Manager", label: "Schemes", icon: HiTag },
+      { to: "/Combo_Mapping", label: "Combo Mapping", icon: HiCube },
+    ],
+  },
+  {
+    label: "Distributor",
+    links: [
+      { to: "/Distributor", label: "Distributor", icon: HiTruck },
+      { to: "/Distributor_Order_Tracking", label: "Order Tracking", icon: HiClock },
+    ],
+  },
+  {
+    label: "Legal",
+    links: [
+      { to: "/Label_Checker", label: "Label Checker", icon: HiDocumentCheck },
+      { to: "/Nutrition_Manager", label: "Nutrition Manager", icon: HiClipboardDocumentList },
+    ],
+  },
+  {
+    label: "HAIS",
+    links: [{ to: "/HAIS", label: "Hardware Assets", icon: HiComputerDesktop }],
+  },
+  {
+    label: "Tracker",
+    links: [
+      { to: "/Tracker_Entry", label: "Invoice Entry", icon: HiPlusCircle },
+      { to: "/Ap_Invoice_Entry", label: "AP Invoice Entry", icon: HiDocumentText },
+      { to: "/Tracker_Queue", label: "My Stage Queue", icon: HiClipboardDocumentList },
+      { to: "/Tracker_Invoices", label: "All Invoices", icon: HiEye },
+      { to: "/Tracker_Alerts", label: "Stuck Alerts", icon: HiClock },
+      { to: "/Tracker_Reports", label: "Reports", icon: HiChartBar },
+      { to: "/Tracker_Admin", label: "Administration", icon: HiCog6Tooth },
+    ],
+  },
+  {
+    label: "Administration",
+    links: [
+      { to: "/App_User", label: "App User", icon: HiUsers },
+      { to: "/Page_Permissions", label: "Permissions", icon: HiShieldCheck },
+      { to: "/Role_Permissions", label: "Role Permissions", icon: HiShieldCheck },
+      { to: "/Party_Assignment", label: "Party Assignment", icon: HiUserGroup },
+      { to: "/Party_Product_Assignment", label: "Party Products", icon: HiTag },
+      { to: "/Order_Flow_Settings", label: "Order Flow Settings", icon: HiCog6Tooth },
+      { to: "/Sap_Sync", label: "SAP Sync", icon: HiArrowPath },
+      { to: "/Device_Management", label: "Device Management", icon: HiDevicePhoneMobile },
+      { to: "/UI_Labels", label: "UI Labels", icon: HiTag },
+    ],
+  },
+];
 
 export default function Sidebar({ children }: SidebarProps) {
-  // Hoisted above the state so the initial open-group can be read off the
-  // router's pathname. `window.location` would be the wrong source: it ignores
-  // the router's basename and its own history.
+  // The router's pathname, not `window.location` — that would ignore the
+  // router's basename and its own history. Drives the active-link highlight.
   const location = useLocation();
-  const [salesOpen, setSalesOpen] = useState(() => isSalesPath(location.pathname));
   const [menuOpen, setMenuOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     localStorage.getItem("sidebar_collapsed") === "true",
@@ -93,13 +198,9 @@ export default function Sidebar({ children }: SidebarProps) {
   // localStorage reads kept in local state. The Sidebar used to be the ONLY
   // thing that loaded the user's grants — which is why route guards, running
   // earlier, had nothing to read. It is now a consumer like everything else.
-  const { session, isAdmin } = useAuth();
+  const { session } = useAuth();
   const userRole = session?.role ?? "";
   const userName = session?.name || session?.username || "";
-  const [reportsOpen, setReportsOpen] = useState(() => isReportsPath(location.pathname));
-  const [distributorOpen, setDistributorOpen] = useState(() =>
-    isDistributorPath(location.pathname),
-  );
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const roleLabel = userRole ? userRole.toUpperCase() : "USER";
   const displayName = userName || "User";
@@ -158,6 +259,15 @@ export default function Sidebar({ children }: SidebarProps) {
    */
   const show = (path: string) => canOpen(session, path);
 
+  /**
+   * A link is active on its own path and on any route nested under it, so a
+   * detail page like /Sales_Invoice/SKU_Images keeps its parent highlighted.
+   * Exact-or-prefix is enough here because no sidebar path is a prefix of
+   * another sidebar path.
+   */
+  const isLinkActive = (to: string) =>
+    location.pathname === to || location.pathname.startsWith(`${to}/`);
+
   // Tracker access is centralized by role (see config/pageAccess.ts), and is
   // reached through `show()` like everything else — the table's `trackerPage`
   // rules resolve to the same `trackerPagesFor` call.
@@ -183,23 +293,6 @@ export default function Sidebar({ children }: SidebarProps) {
   // Removing it from here is what makes one source of truth possible; leaving
   // a second fetch would just recreate the drift more quietly.
 
-  /*
-   * Navigating opens the group that owns the new route and closes the other
-   * two. The groups are not purely derived — clicking a group header toggles
-   * one open on any route — so this is React's documented "adjust state when a
-   * prop changes" pattern rather than a plain derivation: compare against the
-   * path last synced, and only re-sync when it actually moves.
-   *
-   * As an effect this drew the sidebar once with the PREVIOUS route's group
-   * still open on every navigation.
-   */
-  const [syncedPath, setSyncedPath] = useState(location.pathname);
-  if (syncedPath !== location.pathname) {
-    setSyncedPath(location.pathname);
-    setSalesOpen(isSalesPath(location.pathname));
-    setReportsOpen(isReportsPath(location.pathname));
-    setDistributorOpen(isDistributorPath(location.pathname));
-  }
 
   // NOTE: `device_id` / `device_last_sync` are deliberately ABSENT from this
   // list and must stay that way — one browser keeps ONE device id across
@@ -319,7 +412,7 @@ export default function Sidebar({ children }: SidebarProps) {
       <aside className={`sidebar ${menuOpen ? "open" : ""} ${sidebarCollapsed ? "collapsed" : ""}`}>
         <ul>
           {!trackerOnly && (
-            <li className={location.pathname === "/Dashboard" ? "active" : ""}>
+            <li className={isLinkActive("/Dashboard") ? "active" : ""}>
               <Link to="/Dashboard" onClick={closeSidebar}>
                 <SidebarIcon>
                   <HiHome />
@@ -329,583 +422,28 @@ export default function Sidebar({ children }: SidebarProps) {
             </li>
           )}
 
-          {show("/Invoice_Review") && (
-            <li className={location.pathname === "/Invoice_Review" ? "active" : ""}>
-              <Link to="/Invoice_Review" onClick={closeSidebar}>
-                <SidebarIcon>
-                  <HiClipboardDocumentCheck />
-                </SidebarIcon>
-                Invoice Review
-              </Link>
-            </li>
-          )}
-
-          {show("/Label_Checker") && (
-            <>
-              <li className={location.pathname === "/Label_Checker" ? "active" : ""}>
-                <Link to="/Label_Checker" onClick={closeSidebar}>
-                  <SidebarIcon>
-                    <HiTag />
-                  </SidebarIcon>
-                  Label Checker
-                </Link>
-              </li>
-              <li className={location.pathname === "/Nutrition_Manager" ? "active" : ""}>
-                <Link to="/Nutrition_Manager" onClick={closeSidebar}>
-                  <SidebarIcon>
-                    <HiClipboardDocumentList />
-                  </SidebarIcon>
-                  Nutrition Manager
-                </Link>
-              </li>
-            </>
-          )}
-
-          {show("/App_User") && (
-            <li className={location.pathname === "/App_User" ? "active" : ""}>
-              <Link to="/App_User" onClick={closeSidebar}>
-                <SidebarIcon>
-                  <HiUsers />
-                </SidebarIcon>
-                App User
-              </Link>
-            </li>
-          )}
-
-          {isAdmin && (
-            <li className={location.pathname === "/Page_Permissions" ? "active" : ""}>
-              <Link to="/Page_Permissions" onClick={closeSidebar}>
-                <SidebarIcon>
-                  <HiShieldCheck />
-                </SidebarIcon>
-                Permissions
-              </Link>
-            </li>
-          )}
-
-          {/* Sales Quotation — DISABLED 2026-08-27, the flow is closed.
-          {isAdmin && (
-            <li className={location.pathname === "/Sales_Quotation" ? "active" : ""}>
-              <Link to="/Sales_Quotation" onClick={closeSidebar}>
-                <SidebarIcon><HiReceiptPercent /></SidebarIcon>
-                Sales Quotation
-              </Link>
-            </li>
-          )}
-          */}
-
-          {/* Payments — visible to admins and to anyone granted the
-              Payments_Dashboard permission. The server enforces the same key
-              on every analytics endpoint; this only decides the menu. */}
-          {show("/Payments_Dashboard") && <li className="sidebar-section">Payments</li>}
-
-          {show("/Payments_Dashboard") && (
-            <li className={location.pathname === "/Payments_Dashboard" ? "active" : ""}>
-              <Link to="/Payments_Dashboard" onClick={closeSidebar}>
-                <SidebarIcon>
-                  <HiChartPie />
-                </SidebarIcon>
-                Payments Dashboard
-              </Link>
-            </li>
-          )}
-
-          {/* Settings — admin-only configuration screens. */}
-          {isAdmin && <li className="sidebar-section">Settings</li>}
-
-          {isAdmin && (
-            <li className={location.pathname === "/UI_Labels" ? "active" : ""}>
-              <Link to="/UI_Labels" onClick={closeSidebar}>
-                <SidebarIcon>
-                  <HiTag />
-                </SidebarIcon>
-                UI Labels
-              </Link>
-            </li>
-          )}
-
-          {/* System — one screen: live device activity and version analytics.
-              Gated through the shared route table like every other link. */}
-          {show("/Device_Management") && <li className="sidebar-section">System</li>}
-
-          {show("/Device_Management") && (
-            <li className={location.pathname === "/Device_Management" ? "active" : ""}>
-              <Link to="/Device_Management" onClick={closeSidebar}>
-                <SidebarIcon>
-                  <HiDevicePhoneMobile />
-                </SidebarIcon>
-                Devices
-              </Link>
-            </li>
-          )}
-
-          {show("/Sap_Sync") && (
-            <li className={location.pathname === "/Sap_Sync" ? "active" : ""}>
-              <Link to="/Sap_Sync" onClick={closeSidebar}>
-                <SidebarIcon>
-                  <HiArrowPath />
-                </SidebarIcon>
-                SAP Sync
-              </Link>
-            </li>
-          )}
-
-          {show("/Party_Assignment") && (
-            <li className={location.pathname === "/Party_Assignment" ? "active" : ""}>
-              <Link to="/Party_Assignment" onClick={closeSidebar}>
-                <SidebarIcon>
-                  <HiUserGroup />
-                </SidebarIcon>
-                Party Assignment
-              </Link>
-            </li>
-          )}
-
-          {show("/Party_Product_Assignment") && (
-            <li className={location.pathname === "/Party_Product_Assignment" ? "active" : ""}>
-              <Link to="/Party_Product_Assignment" onClick={closeSidebar}>
-                <SidebarIcon>
-                  <HiCube />
-                </SidebarIcon>
-                Party Product Assignment
-              </Link>
-            </li>
-          )}
-
-          {show("/Add_Scheme") && (
-            <li className={location.pathname === "/Add_Scheme" ? "active" : ""}>
-              <Link to="/Add_Scheme" onClick={closeSidebar}>
-                <SidebarIcon>
-                  <HiReceiptPercent />
-                </SidebarIcon>
-                Add Scheme
-              </Link>
-            </li>
-          )}
-
-          {show("/Scheme_Manager") && (
-            <li className={location.pathname === "/Scheme_Manager" ? "active" : ""}>
-              <Link to="/Scheme_Manager" onClick={closeSidebar}>
-                <SidebarIcon>
-                  <HiReceiptPercent />
-                </SidebarIcon>
-                Schemes
-              </Link>
-            </li>
-          )}
-
-          {show("/Combo_Mapping") && (
-            <li className={location.pathname === "/Combo_Mapping" ? "active" : ""}>
-              <Link to="/Combo_Mapping" onClick={closeSidebar}>
-                <SidebarIcon>
-                  <HiGift />
-                </SidebarIcon>
-                Combo Mapping
-              </Link>
-            </li>
-          )}
-
-          {show("/Order_Flow_Settings") && (
-            <li className={location.pathname === "/Order_Flow_Settings" ? "active" : ""}>
-              <Link to="/Order_Flow_Settings" onClick={closeSidebar}>
-                <SidebarIcon>
-                  <HiCog6Tooth />
-                </SidebarIcon>
-                Order Flow Settings
-              </Link>
-            </li>
-          )}
-
-          {show("/Product_Stock") && (
-            <li className={location.pathname === "/Product_Stock" ? "active" : ""}>
-              <Link to="/Product_Stock" onClick={closeSidebar}>
-                <SidebarIcon>
-                  <HiClipboardDocumentList />
-                </SidebarIcon>
-                Stock
-              </Link>
-            </li>
-          )}
-
-          {show("/Einvoice") && (
-            <li className={location.pathname === "/Einvoice" ? "active" : ""}>
-              <Link to="/Einvoice" onClick={closeSidebar}>
-                <SidebarIcon>
-                  <HiDocumentCheck />
-                </SidebarIcon>
-                e-Invoice
-              </Link>
-            </li>
-          )}
-
-          {show("/Ewaybill") && (
-            <li className={location.pathname === "/Ewaybill" ? "active" : ""}>
-              <Link to="/Ewaybill" onClick={closeSidebar}>
-                <SidebarIcon>
-                  <HiTruck />
-                </SidebarIcon>
-                e-Way Bill
-              </Link>
-            </li>
-          )}
-
-          {/* Visible to admins, users granted the "HAIS" page, and the HAIS role. */}
-          {show("/HAIS") && (
-            <li className={location.pathname === "/HAIS" ? "active" : ""}>
-              <Link to="/HAIS" onClick={closeSidebar}>
-                <SidebarIcon>
-                  <HiComputerDesktop />
-                </SidebarIcon>
-                Hardware Assets
-              </Link>
-            </li>
-          )}
-
-          {/* Distributor — a collapsible group with two sub-pages: Create Order
-              (the line-item form) and Order Tracker (view + track own orders, no
-              staff edit flow). Visible to admins, users granted the "Distributor"
-              page, and the Distributor role. */}
-          {show("/Distributor") && (
-            <li>
-              <div className="dropdown-toggle" onClick={() => setDistributorOpen(!distributorOpen)}>
-                <SidebarIcon>
-                  <HiTruck />
-                </SidebarIcon>
-                Distributor
-                <HiChevronDown className={`sb-chevron ${distributorOpen ? "open" : ""}`} />
-              </div>
-              {distributorOpen && (
-                <ul className="dropdown-list">
-                  <li className={location.pathname === "/Distributor" ? "active" : ""}>
-                    <Link to="/Distributor" onClick={closeSidebar}>
-                      <SidebarIcon>
-                        <HiPlusCircle />
-                      </SidebarIcon>
-                      Create Order
-                    </Link>
-                  </li>
-                  <li
-                    className={location.pathname === "/Distributor_Order_Tracking" ? "active" : ""}
-                  >
-                    <Link to="/Distributor_Order_Tracking" onClick={closeSidebar}>
-                      <SidebarIcon>
-                        <HiPresentationChartLine />
-                      </SidebarIcon>
-                      Order Tracker
-                    </Link>
-                  </li>
-                </ul>
-              )}
-            </li>
-          )}
-
-          {/* Visible to admins, users granted the "Mart_Approval" page, and the Mart Approval role. */}
-          {show("/Mart_Approval") && (
-            <li className={location.pathname === "/Mart_Approval" ? "active" : ""}>
-              <Link to="/Mart_Approval" onClick={closeSidebar}>
-                <SidebarIcon>
-                  <HiClipboardDocumentCheck />
-                </SidebarIcon>
-                Mart Approval
-              </Link>
-            </li>
-          )}
-
-          {show("/Tracker_Entry") && (
-            <li className={location.pathname === "/Tracker_Entry" ? "active" : ""}>
-              <Link to="/Tracker_Entry" onClick={closeSidebar}>
-                <SidebarIcon>
-                  <HiDocumentText />
-                </SidebarIcon>
-                Invoice Entry
-              </Link>
-            </li>
-          )}
-
-          {show("/Ap_Invoice_Entry") && (
-            <li className={location.pathname === "/Ap_Invoice_Entry" ? "active" : ""}>
-              <Link to="/Ap_Invoice_Entry" onClick={closeSidebar}>
-                <SidebarIcon>
-                  <HiDocumentText />
-                </SidebarIcon>
-                AP Invoice Entry
-              </Link>
-            </li>
-          )}
-
-          {show("/Tracker_Queue") && (
-            <li className={location.pathname === "/Tracker_Queue" ? "active" : ""}>
-              <Link to="/Tracker_Queue" onClick={closeSidebar}>
-                <SidebarIcon>
-                  <HiClipboardDocumentCheck />
-                </SidebarIcon>
-                My Stage Queue
-              </Link>
-            </li>
-          )}
-
-          {show("/Tracker_Invoices") && (
-            <li className={location.pathname === "/Tracker_Invoices" ? "active" : ""}>
-              <Link to="/Tracker_Invoices" onClick={closeSidebar}>
-                <SidebarIcon>
-                  <HiClipboardDocumentList />
-                </SidebarIcon>
-                All Invoices
-              </Link>
-            </li>
-          )}
-
-          {show("/Tracker_Alerts") && (
-            <li className={location.pathname === "/Tracker_Alerts" ? "active" : ""}>
-              <Link to="/Tracker_Alerts" onClick={closeSidebar}>
-                <SidebarIcon>
-                  <HiClock />
-                </SidebarIcon>
-                Stuck Alerts
-              </Link>
-            </li>
-          )}
-
-          {show("/Tracker_Reports") && (
-            <li className={location.pathname === "/Tracker_Reports" ? "active" : ""}>
-              <Link to="/Tracker_Reports" onClick={closeSidebar}>
-                <SidebarIcon>
-                  <HiChartBar />
-                </SidebarIcon>
-                Tracker Reports
-              </Link>
-            </li>
-          )}
-
-          {show("/Tracker_Admin") && (
-            <li className={location.pathname === "/Tracker_Admin" ? "active" : ""}>
-              <Link to="/Tracker_Admin" onClick={closeSidebar}>
-                <SidebarIcon>
-                  <HiCog6Tooth />
-                </SidebarIcon>
-                Tracker Config
-              </Link>
-            </li>
-          )}
-
-          {show("/Add_Sales") && (
-            <li>
-              <div className="dropdown-toggle" onClick={() => setSalesOpen(!salesOpen)}>
-                <SidebarIcon>
-                  <HiShoppingCart />
-                </SidebarIcon>
-                Sales
-                <HiChevronDown className={`sb-chevron ${salesOpen ? "open" : ""}`} />
-              </div>
-              {salesOpen && (
-                <ul className="dropdown-list">
-                  <li>
-                    <Link to="/Add_Sales" onClick={closeSidebar}>
-                      <SidebarIcon>
-                        <HiPlusCircle />
-                      </SidebarIcon>
-                      Add Sales
-                    </Link>
-                  </li>
-                  {/* <li><Link to="/Drafts" onClick={closeSidebar}><SidebarIcon><HiDocumentText /></SidebarIcon>Drafts</Link></li> */}
-                  {show("/Add_Sales") && (
-                    <li>
-                      <Link to="/FOC" onClick={closeSidebar}>
+          {SIDEBAR_SECTIONS.map((section) => {
+            const visible = section.links.filter((link) => show(link.gate ?? link.to));
+            if (visible.length === 0) return null;
+            return (
+              <Fragment key={section.label}>
+                <li className="sidebar-section">{section.label}</li>
+                {visible.map((link) => {
+                  const Icon = link.icon;
+                  return (
+                    <li key={link.to} className={isLinkActive(link.to) ? "active" : ""}>
+                      <Link to={link.to} onClick={closeSidebar}>
                         <SidebarIcon>
-                          <HiGift />
+                          <Icon />
                         </SidebarIcon>
-                        FOC
+                        {link.label}
                       </Link>
                     </li>
-                  )}
-                  {show("/Sales_Invoice") && (
-                    <li>
-                      <Link to="/Sales_Invoice" onClick={closeSidebar}>
-                        <SidebarIcon>
-                          <HiDocumentText />
-                        </SidebarIcon>
-                        Sales Invoice
-                      </Link>
-                    </li>
-                  )}
-
-                  <li>
-                    <Link to="/View_Orders" onClick={closeSidebar}>
-                      <SidebarIcon>
-                        <HiEye />
-                      </SidebarIcon>
-                      View Orders
-                    </Link>
-                  </li>
-                </ul>
-              )}
-            </li>
-          )}
-
-          {show("/Auditor_orders") && (
-            <>
-              <li className={location.pathname === "/Auditor_orders" ? "active" : ""}>
-                <Link to="/Auditor_orders" onClick={closeSidebar}>
-                  <SidebarIcon>
-                    <HiClipboardDocumentList />
-                  </SidebarIcon>
-                  Pending Orders
-                </Link>
-              </li>
-              <li className={location.pathname === "/Auditor_status_tracking" ? "active" : ""}>
-                <Link to="/Auditor_status_tracking" onClick={closeSidebar}>
-                  <SidebarIcon>
-                    <HiClock />
-                  </SidebarIcon>
-                  Status Tracking
-                </Link>
-              </li>
-            </>
-          )}
-
-          {show("/Billing_orders") && (
-            <>
-              <li className={location.pathname === "/Billing_orders" ? "active" : ""}>
-                <Link to="/Billing_orders" onClick={closeSidebar}>
-                  <SidebarIcon>
-                    <HiClipboardDocumentList />
-                  </SidebarIcon>
-                  Pending Orders
-                </Link>
-              </li>
-              <li className={location.pathname === "/Billing_status_tracking" ? "active" : ""}>
-                <Link to="/Billing_status_tracking" onClick={closeSidebar}>
-                  <SidebarIcon>
-                    <HiClock />
-                  </SidebarIcon>
-                  Status Tracking
-                </Link>
-              </li>
-              <li className={location.pathname === "/Order_Tracking" ? "active" : ""}>
-                <Link to="/Order_Tracking" onClick={closeSidebar}>
-                  <SidebarIcon>
-                    <HiPresentationChartLine />
-                  </SidebarIcon>
-                  Order Tracker
-                </Link>
-              </li>
-              <li className={location.pathname === "/Invoice_Report" ? "active" : ""}>
-                <Link to="/Invoice_Report" onClick={closeSidebar}>
-                  <SidebarIcon>
-                    <HiDocumentText />
-                  </SidebarIcon>
-                  Invoice Report
-                </Link>
-              </li>
-            </>
-          )}
-
-          {show("/Rate_Approver_orders") && (
-            <>
-              <li className={location.pathname === "/Rate_Approver_orders" ? "active" : ""}>
-                <Link to="/Rate_Approver_orders" onClick={closeSidebar}>
-                  <SidebarIcon>
-                    <HiClipboardDocumentList />
-                  </SidebarIcon>
-                  Pending Orders
-                </Link>
-              </li>
-              <li
-                className={location.pathname === "/Rate_Approver_status_tracking" ? "active" : ""}
-              >
-                <Link to="/Rate_Approver_status_tracking" onClick={closeSidebar}>
-                  <SidebarIcon>
-                    <HiClock />
-                  </SidebarIcon>
-                  Status Tracking
-                </Link>
-              </li>
-            </>
-          )}
-
-          {show("/Order_Tracking") && (
-            <>
-              <li className={location.pathname === "/Order_Tracking" ? "active" : ""}>
-                <Link to="/Order_Tracking" onClick={closeSidebar}>
-                  <SidebarIcon>
-                    <HiPresentationChartLine />
-                  </SidebarIcon>
-                  Order Tracker
-                </Link>
-              </li>
-            </>
-          )}
-
-          {show("/Daily_Report") && (
-            <li>
-              <div className="dropdown-toggle" onClick={() => setReportsOpen(!reportsOpen)}>
-                <SidebarIcon>
-                  <HiChartBar />
-                </SidebarIcon>
-                Reports
-                <HiChevronDown className={`sb-chevron ${reportsOpen ? "open" : ""}`} />
-              </div>
-              {reportsOpen && (
-                <ul className="dropdown-list">
-                  <li>
-                    <Link to="/Daily_Report" onClick={closeSidebar}>
-                      <SidebarIcon>
-                        <HiCalendarDays />
-                      </SidebarIcon>
-                      Daily Report
-                    </Link>
-                  </li>
-                  <li>
-                    <Link to="/PersonWise_Report" onClick={closeSidebar}>
-                      <SidebarIcon>
-                        <HiUserCircle />
-                      </SidebarIcon>
-                      Person Wise Report
-                    </Link>
-                  </li>
-                  <li>
-                    <Link to="/Sales_Report" onClick={closeSidebar}>
-                      <SidebarIcon>
-                        <HiChartBar />
-                      </SidebarIcon>
-                      Sales Report
-                    </Link>
-                  </li>
-                  <li>
-                    <Link to="/StateWise_Report" onClick={closeSidebar}>
-                      <SidebarIcon>
-                        <HiMap />
-                      </SidebarIcon>
-                      State Wise Report
-                    </Link>
-                  </li>
-                  {/* Both SAP reports are billing-only (the pages themselves
-                      bounce anyone else), so they are not shown to a user who
-                      merely holds the "Reports" grant. */}
-                  {show("/Sales_Invoice") && (
-                    <>
-                      <li>
-                        <Link to="/Inventory_Report" onClick={closeSidebar}>
-                          <SidebarIcon>
-                            <HiCube />
-                          </SidebarIcon>
-                          Inventory Report
-                        </Link>
-                      </li>
-                      <li>
-                        <Link to="/SO_Invoice_Report" onClick={closeSidebar}>
-                          <SidebarIcon>
-                            <HiClipboardDocumentCheck />
-                          </SidebarIcon>
-                          Open SO
-                        </Link>
-                      </li>
-                    </>
-                  )}
-                </ul>
-              )}
-            </li>
-          )}
+                  );
+                })}
+              </Fragment>
+            );
+          })}
         </ul>
 
         <div className="sb-logout-wrap">

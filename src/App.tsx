@@ -62,6 +62,7 @@ const Order_Stock_Check = lazy(() => import("./pages/Order_Stock_Check"));
 const Product_Stock = lazy(() => import("./pages/Product_Stock"));
 const Order_Flow_Settings = lazy(() => import("./pages/Order_Flow_Settings"));
 const Page_Permissions = lazy(() => import("./pages/Page_Permissions"));
+const Role_Permissions = lazy(() => import("./pages/Role_Permissions"));
 const UI_Labels = lazy(() => import("./pages/UI_Labels"));
 const PaymentsDashboard = lazy(() => import("./pages/Payments/ApprovalManagement"));
 // import Sales_Quotation from "./pages/Sales_Quotation";  // DISABLED 2026-08-27 — quotation flow closed
@@ -446,6 +447,15 @@ function App() {
           element={
             <ProtectedPage>
               <Page_Permissions />
+            </ProtectedPage>
+          }
+        />
+
+        <Route
+          path="/Role_Permissions"
+          element={
+            <ProtectedPage>
+              <Role_Permissions />
             </ProtectedPage>
           }
         />

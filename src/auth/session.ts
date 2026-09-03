@@ -135,6 +135,10 @@ export interface ApiUser {
   roles?: unknown[];
   extra_roles?: unknown[];
   extra_pages?: unknown[];
+  /** Server-computed effective permission keys (Phase 4): union of role
+   *  bundles and extra_pages, admin already expanded. Preferred over
+   *  extra_pages when present. */
+  permissions?: unknown[];
   is_superuser?: boolean;
   is_staff?: boolean;
   company?: { id?: number | string; name?: string } | null;
@@ -167,7 +171,11 @@ export function sessionFromApi(user: ApiUser): Omit<Session, "userId"> & {
     role: primary,
     roleDisplay: user.role_display || primary,
     roles: Array.from(new Set([primary, ...extras].filter(Boolean))),
-    grants: (user.extra_pages ?? []).map(String),
+    // `permissions` (server-computed: role bundles ∪ extra_pages, admin
+    // pre-expanded) is preferred; `extra_pages` is the fallback for payloads
+    // that predate it. Same shape either way, so `can()` needs no change —
+    // roles just start counting once the server sends the richer field.
+    grants: (user.permissions ?? user.extra_pages ?? []).map(String),
     isSuperuser: Boolean(user.is_superuser),
     isStaff: Boolean(user.is_staff),
     companyId: String(user.company?.id ?? ""),

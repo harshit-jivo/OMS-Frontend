@@ -1,0 +1,158 @@
+/* Role Permissions matrix. Builds on the ofs-* base (Order_Flow_Settings.css)
+   and the pp-* accents (Page_Permissions.css); only the pieces unique to this
+   page live here. */
+
+.rp-role-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rp-role-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #ffffff;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  transition: border-color 0.16s ease, background 0.16s ease;
+}
+
+.rp-role-row:hover {
+  border-color: #bfdbfe;
+  background: #f8fbff;
+}
+
+.rp-role-row.is-selected {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+
+.rp-role-name {
+  font-weight: 600;
+  color: #0f172a;
+  font-size: 13px;
+}
+
+.rp-role-name small {
+  font-weight: 400;
+  color: #94a3b8;
+}
+
+.rp-role-meta {
+  font-size: 12px;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+.rp-module {
+  margin-bottom: 14px;
+}
+
+.rp-module-title {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #64748b;
+}
+
+.rp-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.rp-saved {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #16a34a;
+}
+
+.rp-new-btn {
+  margin-left: auto;
+}
+
+.rp-new-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  margin-bottom: 10px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.rp-new-form input {
+  flex: 1 1 180px;
+  padding: 7px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 13px;
+}
+
+.rp-new-form .pp-hint {
+  flex-basis: 100%;
+}
+
+.rp-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  margin-bottom: 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.rp-details-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.rp-details-row label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.rp-details-row input {
+  flex: 1 1 160px;
+  padding: 6px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 13px;
+}
+
+.rp-details-name {
+  font-size: 12px;
+  color: #64748b;
+  margin-right: auto;
+}
+
+.rp-details-name code {
+  background: #eef2f7;
+  padding: 1px 5px;
+  border-radius: 5px;
+}
+
+.rp-danger:not(:disabled) {
+  color: #dc2626;
+  border-color: #fecaca;
+}
