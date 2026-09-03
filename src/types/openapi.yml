@@ -721,26 +721,39 @@ paths:
   /api/v1/auth/login/:
     post:
       operationId: v1_auth_login_create
-      description: |-
-        Exchange credentials for a JWT pair.
-
-        Necessarily `AllowAny`, and therefore the one endpoint that most needs a
-        rate limit: nothing throttled it, so passwords could be guessed at whatever
-        speed the network allowed. `ScopedRateThrottle` applies the `login` rate
-        from settings (10/min per IP by default) rather than the looser `anon` one.
-
-        Keyed by IP, which is the only identifier available before authentication.
-        A shared office NAT therefore shares one bucket — the rate is set high
-        enough that ordinary humans never reach it and low enough that guessing is
-        hopeless.
+      description: 'Exchange credentials for a JWT pair. Returns two materially different
+        bodies: 200 carries `data.user` and `data.tokens`, while 401 carries `errors`
+        and no `data` at all.'
       tags:
       - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Login'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Login'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Login'
+        required: true
       security:
       - jwtAuth: []
       - {}
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginSuccess'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginFailure'
+          description: ''
   /api/v1/auth/logout/:
     post:
       operationId: v1_auth_logout_create
@@ -866,13 +879,20 @@ paths:
   /api/v1/auth/profile/:
     get:
       operationId: v1_auth_profile_retrieve
+      description: 'The authenticated session identity. `data` is the full `UserSerializer`
+        record for `request.user` — roles, assignments and `extra_pages` — which the
+        frontend route guards read. Single code path: no error branch of its own.'
       tags:
       - v1
       security:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Profile'
+          description: ''
   /api/v1/auth/refresh/:
     post:
       operationId: v1_auth_refresh_create
@@ -915,24 +935,22 @@ paths:
           description: No response body
   /api/v1/auth/roles/:
     get:
-      operationId: v1_auth_roles_retrieve
-      description: |-
-        The role vocabulary. Any authenticated user.
-
-        Deliberately NOT admin-only: `approvals` reads it to build the approver
-        picker, and that page is open to `Payments_Dashboard` holders who are not
-        administrators. It exposes role names, not who holds them.
-
-        Had no `permission_classes` at all, which under DRF's default meant
-        `AllowAny` — the silent-hole case that Phase 2.1's
-        `DEFAULT_PERMISSION_CLASSES` exists to eliminate.
+      operationId: v1_auth_roles_list
+      description: The active role vocabulary, as a bare array of `{id, name, display_name}`.
+        No envelope.
       tags:
       - v1
       security:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RoleListItem'
+          description: ''
   /api/v1/auth/states/:
     get:
       operationId: v1_auth_states_list
@@ -1059,14 +1077,18 @@ paths:
   /api/v1/auth/users/{user_id}/parties/:
     get:
       operationId: v1_auth_users_parties_retrieve
-      description: |-
-        The parties assigned to a user — own record, or any record for an admin.
-
-        Was `AllowAny`, which exposed the whole customer-to-salesperson map to
-        anonymous callers. Scoped rather than admin-gated because the dashboard
-        calls this for the logged-in user on every load; only the assignment-
-        management screen reads someone else's.
+      description: 'Parties assigned to `user_id`. 403 when a non-admin asks for someone
+        else''s record and 404 when the user does not exist; both carry `{success:
+        false, message}` and no `data`.'
       parameters:
+      - in: query
+        name: category
+        schema:
+          type: string
+        description: Scope the assignments to one category. The literal value `all`
+          bypasses scoping and returns every category. Any other value is honoured
+          only if it is one of the user's own categories, otherwise the user's primary
+          category is used.
       - in: path
         name: user_id
         schema:
@@ -1078,7 +1100,23 @@ paths:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserParties'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserPartiesError'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserPartiesError'
+          description: ''
   /api/v1/auth/users/create/:
     post:
       operationId: v1_auth_users_create_create
@@ -1101,24 +1139,20 @@ paths:
   /api/v1/auth/users/list/:
     get:
       operationId: v1_auth_users_list_retrieve
-      description: |-
-        The full user roster. Any authenticated user.
-
-        Was `AllowAny`, and `UserSerializer` listed `password` in its fields — so
-        this endpoint handed every account's password hash to anonymous callers.
-        Both halves are fixed: the hash is gone from the serializer and the roster
-        now needs a login.
-
-        Not admin-only, for the same reason as `RoleListView`: the approvals
-        configuration page builds its approver picker from this and is open to
-        `Payments_Dashboard` holders.
+      description: 'The active user roster, wrapped in `{success, data}`. The envelope
+        is the point: every other list under `/auth/` returns a bare array, so clients
+        must unwrap this one.'
       tags:
       - v1
       security:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserListForAssignment'
+          description: ''
   /api/v1/devices/me/:
     get:
       operationId: v1_devices_me_retrieve
@@ -3513,6 +3547,10 @@ paths:
   /api/v1/orders/{order_id}/orderdetails/:
     get:
       operationId: v1_orders_orderdetails_retrieve
+      description: 'One order with its items. Mounted twice — `/orderdetailsbyid/{order_id}/`
+        and `/{order_id}/orderdetails/` — and both routes answer with the same `OrderDetailSerializer`
+        body. Not scoped to the caller: any authenticated user may read any order
+        id.'
       parameters:
       - in: path
         name: order_id
@@ -3525,10 +3563,24 @@ paths:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderDetail'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrdersQueryError'
+          description: No order with this id (`get_object_or_404`).
   /api/v1/orders/{order_id}/orderlogs/:
     get:
-      operationId: v1_orders_orderlogs_retrieve
+      operationId: v1_orders_orderlogs_list
+      description: |-
+        The audit timeline for one order, oldest first, with the "Order Created" row (action_id 1) excluded.
+
+        Note `performed_by_name`: an order sitting at "Rate approval" has its latest rate-approval log blanked to `performed_by=None` (or a synthetic pending row created) before serialising, and DRF OMITS the `performed_by_name` key entirely for such a row rather than sending null. Treat it as possibly-absent, not merely nullable.
       parameters:
       - in: path
         name: order_id
@@ -3541,7 +3593,19 @@ paths:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OrdersLog'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrdersQueryError'
+          description: No order with this id (`get_object_or_404`).
   /api/v1/orders/{order_id}/reject/:
     post:
       operationId: v1_orders_reject_create
@@ -3578,52 +3642,9 @@ paths:
     post:
       operationId: v1_orders_update_status_create
       description: |-
-        Advance (or reject) an order through its configured status flow.
+        Advance or reject one order. The body is `{status: <status id>, reason?: <text>}`.
 
-        Every transition runs under `transaction.atomic()` with the order row held
-        by `select_for_update()`. It previously ran with neither, across ~380 lines
-        and several dependent writes — the defect `approvals/services.py` names in
-        its own opening docstring as the reason its design differs:
-
-            "UpdateOrderStatusView.post is neither, across ~380 lines and several
-             dependent writes — so two approvers acting at once can both pass the
-             pending check and double-advance a document."
-
-        That is exactly right, and the multi-approver rate-approval path is where
-        it bit hardest. Two approvers submitting together both read
-        `rate_approval.status == "PENDING"`, both record a decision, and both then
-        ask `_has_pending_rate_approvals` — which by then answers "none pending" for
-        both. The order advanced twice, with two status logs and two notification
-        fan-outs. The guards were all present and all correct; they were simply
-        reading uncommitted state.
-
-        The lock serialises them. The second approver now blocks, re-reads
-        committed state, and takes the branch that was always meant for them:
-        "You have already approved this order."
-
-        Two things had to be true before locking was safe:
-
-        * **No network calls inside the transaction.** `send_order_notifications`
-          is called from nine points in this method and ends in
-          `requests.post(..., timeout=15)` per recipient. Holding a row lock across
-          that would trade a rare silent corruption for a routine hang. It now
-          defers through `transaction.on_commit` — see that function.
-
-        * **The hand-rolled rollbacks still work.** Several paths save the new
-          status and then restore `previous_status` on failure. Inside
-          `atomic()`, `return Response(...)` does NOT roll back — only an exception
-          does — so those restores are still doing the work. Leave them, and
-          do not convert them to exceptions without reading each one first.
-
-        What atomic() DOES fix for free is the crash case: the method saved the new
-        status at the top and validated entitlement ~60 lines later, so a process
-        death in between left an order advanced with no approval recorded. That
-        window is now rolled back by the database.
-
-        Deliberately unchanged: the 71 sites keying business logic off mutable
-        status NAMES, and the hardcoded status ids. Both are real problems and both
-        are a separate change — locking a fragile flow is still strictly better
-        than leaving it racy.
+        The response body is built by `orders.services.order_status.apply_order_status_transition`, not by this view, and that function has nine return points. The posted `status` id is also NOT always the status the order ends up in: the flow configuration can override it, and the multi-approver branch rolls it back — so read the `status` NAME in the response rather than assuming the one you sent.
       parameters:
       - in: path
         name: order_id
@@ -3632,21 +3653,75 @@ paths:
         required: true
       tags:
       - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderStatusUpdate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/OrderStatusUpdate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/OrderStatusUpdate'
+        required: true
       security:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderStatusUpdateResult'
+          description: The transition was applied — or, in the "already rejected"
+            and "waiting for remaining approvers" branches, deliberately not applied.
+            Every 200 branch sends `message`, `order_id` and `status`; the rate-approval
+            ones add `approval_status`, and one of them adds `pending_approvers`.
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderStatusUpdateBadRequest'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderStatusUpdateForbidden'
+          description: 'Either the order is not assigned to this user for rate approval
+            (the view''s own `{"message": ...}`) or DRF refused the request (the `detail`/`message`/`error`/`success`
+            envelope). The two do not share a key, so both are optional here.'
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderLifecycleError'
+          description: No order with this id, or no order status with the posted `status`
+            id.
   /api/v1/orders/addresses/:
     get:
       operationId: v1_orders_addresses_retrieve
+      description: Bill-to and ship-to addresses for one party, split by `address_type`
+        and optionally narrowed by `category`. Either list can be empty; `is_fallback`
+        is always False.
       tags:
       - v1
       security:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartyAddresses'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartyAddressesError'
+          description: '`card_code` was missing from the query string. The view returns
+            this itself, so the body is `{"error": ...}` and nothing else.'
   /api/v1/orders/api/ai-order-summary/:
     post:
       operationId: v1_orders_api_ai_order_summary_create
@@ -3672,34 +3747,90 @@ paths:
           description: No response body
   /api/v1/orders/branch/:
     get:
-      operationId: v1_orders_branch_retrieve
-      description: |-
-        Factory dispatch locations, for the "dispatch from" selector.
-
-        Reads `sap_sync.Branch` — the model the SAP sync writes and the one that
-        matches the table. It used to read `orders.Branches`, a second unmanaged
-        model on the same table that declared every column wrongly.
-
-        `distinct('bpl_name')` is deliberate and Postgres-specific (DISTINCT ON):
-        the table is unique on (bpl_id, category), so one physical factory appears
-        once per company DB it exists in, and the selector wants it once.
+      operationId: v1_orders_branch_list
+      description: Factory dispatch locations for the "dispatch from" selector. A
+        bare array. Note `bpl_id` is a STRING here even though the column is an integer
+        — see `orders.serializers.BranchSerializer` for why that is deliberate.
       tags:
       - v1
       security:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OrdersBranch'
+          description: ''
   /api/v1/orders/create/:
     post:
       operationId: v1_orders_create_create
+      description: |-
+        The single order-write endpoint: create, save-as-draft and edit all post here, and an `order_id` in the BODY (not the URL) is what makes it an edit.
+
+        The response is not one shape. Six success branches exist — staff/standard/distributor, each for create and edit — and they agree on `id`, `order_number`, `total_amount`, `status`, `needs_approval` and `message` only. `order_type`, `employee_id`, `company`, `flagged_items` and `remarks` are each sent by some branches and not others, and the create and edit paths are separated by status code (201 vs 200).
       tags:
       - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrder'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/CreateOrder'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CreateOrder'
+        required: true
       security:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderEditResult'
+          description: An EDIT — the request carried an `order_id`. Three branches
+            land here (staff update, standard update, distributor edit) and their
+            key sets differ; see the per-field notes on the schema.
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderCreateResult'
+          description: A CREATE — no `order_id` in the request. Three branches land
+            here (staff, standard, distributor) and their key sets differ; see the
+            per-field notes on the schema.
+        '400':
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - type: object
+                  properties:
+                    error:
+                      type: string
+                  required:
+                  - error
+                  description: One of the four explicit guards in the view.
+                - type: object
+                  additionalProperties: true
+                  description: 'Raw DRF validation errors from CreateOrderSerializer,
+                    keyed by field name. Deliberately untyped: which keys appear depends
+                    on which fields failed, and `items` errors nest by index. No error
+                    envelope — this branch returns the errors dict directly rather
+                    than raising.'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderLifecycleError'
+          description: 'Edit mode only: the `order_id` in the body matches no order
+            (`get_object_or_404`).'
   /api/v1/orders/create-scheme/:
     post:
       operationId: v1_orders_create_scheme_create
@@ -3787,14 +3918,24 @@ paths:
           description: No response body
   /api/v1/orders/list/:
     get:
-      operationId: v1_orders_list_retrieve
+      operationId: v1_orders_list_list
+      description: The approval queues and the dashboard list. A bare array of hand-built
+        rows — no serializer describes it, and the shape is NOT `OrderListByUserIdSerializer`.
+        Filtered by the `status`, `user_id`, `billing`, `include_sap` and `approval_pending`
+        query parameters, but the row shape is the same on every branch.
       tags:
       - v1
       security:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OrderListRow'
+          description: ''
   /api/v1/orders/mart/{order_id}/:
     get:
       operationId: v1_orders_mart_retrieve
@@ -3918,35 +4059,72 @@ paths:
           description: No response body
   /api/v1/orders/notifications/:
     get:
-      operationId: v1_orders_notifications_retrieve
+      operationId: v1_orders_notifications_list
+      description: The caller's 50 most recent notifications, newest first. A bare
+        array, hard-capped at 50 with no pagination and no total.
       tags:
       - v1
       security:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OrdersNotification'
+          description: ''
     post:
       operationId: v1_orders_notifications_create
+      description: Mark every unread notification of the caller as read. Reads nothing
+        from the request body and always answers 200, even when nothing was unread.
       tags:
       - v1
       security:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationAck'
+          description: ''
     patch:
       operationId: v1_orders_notifications_partial_update
+      description: 'Mark one notification as read. Reads nothing from the request
+        body: the id comes from the URL.'
       tags:
       - v1
       security:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationAck'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationError'
+          description: No `pk` in the URL. Reachable because this same view is routed
+            both at `/notifications/` and at `/notifications/{pk}/`.
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationError'
+          description: No notification with that id BELONGING TO THE CALLER — the
+            lookup is scoped to `request.user`, so another user's id reads as not
+            found.
   /api/v1/orders/notifications/{id}/:
     get:
-      operationId: v1_orders_notifications_retrieve_2
+      operationId: v1_orders_notifications_list_2
+      description: The caller's 50 most recent notifications, newest first. A bare
+        array, hard-capped at 50 with no pagination and no total.
       parameters:
       - in: path
         name: id
@@ -3959,9 +4137,17 @@ paths:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OrdersNotification'
+          description: ''
     post:
       operationId: v1_orders_notifications_create_2
+      description: Mark every unread notification of the caller as read. Reads nothing
+        from the request body and always answers 200, even when nothing was unread.
       parameters:
       - in: path
         name: id
@@ -3974,9 +4160,15 @@ paths:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationAck'
+          description: ''
     patch:
       operationId: v1_orders_notifications_partial_update_2
+      description: 'Mark one notification as read. Reads nothing from the request
+        body: the id comes from the URL.'
       parameters:
       - in: path
         name: id
@@ -3989,7 +4181,26 @@ paths:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationAck'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationError'
+          description: No `pk` in the URL. Reachable because this same view is routed
+            both at `/notifications/` and at `/notifications/{pk}/`.
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationError'
+          description: No notification with that id BELONGING TO THE CALLER — the
+            lookup is scoped to `request.user`, so another user's id reads as not
+            found.
   /api/v1/orders/notifications/history/:
     get:
       operationId: v1_orders_notifications_history_retrieve
@@ -4011,6 +4222,10 @@ paths:
   /api/v1/orders/orderdetailsbyid/{order_id}/:
     get:
       operationId: v1_orders_orderdetailsbyid_retrieve
+      description: 'One order with its items. Mounted twice — `/orderdetailsbyid/{order_id}/`
+        and `/{order_id}/orderdetails/` — and both routes answer with the same `OrderDetailSerializer`
+        body. Not scoped to the caller: any authenticated user may read any order
+        id.'
       parameters:
       - in: path
         name: order_id
@@ -4023,7 +4238,17 @@ paths:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderDetail'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrdersQueryError'
+          description: No order with this id (`get_object_or_404`).
   /api/v1/orders/orders-by-item/:
     get:
       operationId: v1_orders_orders_by_item_retrieve
@@ -4036,7 +4261,9 @@ paths:
           description: No response body
   /api/v1/orders/ordersbyuser/{user_id}/:
     get:
-      operationId: v1_orders_ordersbyuser_retrieve
+      operationId: v1_orders_ordersbyuser_list
+      description: Every order created by `user_id`, newest first. Roles in `ORDERS_CROSS_USER_ROLES`
+        may read any user; everyone else only themselves, and gets 403 otherwise.
       parameters:
       - in: path
         name: user_id
@@ -4049,17 +4276,40 @@ paths:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OrderListByUserId'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrdersByUserForbidden'
+          description: 'A non-privileged caller (anyone outside `ORDERS_CROSS_USER_ROLES`,
+            and not staff/superuser) asked for another user''s orders. The view writes
+            this body itself, so it is `{"detail": ...}` alone.'
   /api/v1/orders/parties/:
     get:
-      operationId: v1_orders_parties_retrieve
+      operationId: v1_orders_parties_list
+      description: The parties assigned to the calling user, as picker options. A
+        bare array, ordered by card_name, and scoped to `request.user` — it takes
+        no user parameter.
       tags:
       - v1
       security:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PartyOption'
+          description: ''
   /api/v1/orders/party-flow-config/:
     get:
       operationId: v1_orders_party_flow_config_retrieve
@@ -4090,7 +4340,11 @@ paths:
           description: No response body
   /api/v1/orders/party-products/{card_code}/:
     get:
-      operationId: v1_orders_party_products_retrieve
+      operationId: v1_orders_party_products_list
+      description: The products one party may be sold, with that party's rate — the
+        product cascade on the Add Sales screen. A bare array. An assignment whose
+        item_code has no active SAP product is skipped, so this can be shorter than
+        the assignment list and can legitimately be empty.
       parameters:
       - in: path
         name: card_code
@@ -4103,7 +4357,13 @@ paths:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PartyProductRow'
+          description: ''
   /api/v1/orders/product-filters/:
     get:
       operationId: v1_orders_product_filters_retrieve
@@ -4116,14 +4376,24 @@ paths:
           description: No response body
   /api/v1/orders/products/:
     get:
-      operationId: v1_orders_products_retrieve
+      operationId: v1_orders_products_list
+      description: The product catalogue for the order form's picker, limited to item
+        codes still active in SAP and optionally narrowed by the `category`, `brand`,
+        `variety` and `type` query parameters. A bare array — the serializer was always
+        there, spectacular simply cannot see it through a bare APIView.
       tags:
       - v1
       security:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OrdersProduct'
+          description: ''
   /api/v1/orders/push-token/:
     post:
       operationId: v1_orders_push_token_create
@@ -4168,17 +4438,27 @@ paths:
           description: No response body
   /api/v1/orders/schemes/:
     get:
-      operationId: v1_orders_schemes_retrieve
+      operationId: v1_orders_schemes_list
+      description: Active scheme products, optionally filtered by the `state_code`
+        query parameter (matched against either the state code or its name). A bare
+        array; `item_name` is added in Python after the query, so it is present on
+        every row even though it is not a column.
       tags:
       - v1
       security:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SchemeListRow'
+          description: ''
   /api/v1/orders/schemes/{scheme_id}/:
     get:
-      operationId: v1_orders_schemes_retrieve_2
+      operationId: v1_orders_schemes_retrieve
       description: Read / update / delete a single scheme.
       parameters:
       - in: path
@@ -4286,14 +4566,23 @@ paths:
           description: No response body
   /api/v1/orders/status/:
     get:
-      operationId: v1_orders_status_retrieve
+      operationId: v1_orders_status_list
+      description: Every row of the order-status table as `{id, name}`. A bare array
+        — no envelope, no pagination, and no `code`, which is the column the rest
+        of the API keys off.
       tags:
       - v1
       security:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OrderStatusOption'
+          description: ''
   /api/v1/orders/status-tracking/:
     get:
       operationId: v1_orders_status_tracking_retrieve
@@ -5461,6 +5750,18 @@ paths:
       operationId: v1_sap_addresses_list
       description: List all party addresses with optional filter
       parameters:
+      - in: query
+        name: category
+        schema:
+          type: string
+      - in: query
+        name: city
+        schema:
+          type: string
+      - in: query
+        name: country
+        schema:
+          type: string
       - name: page
         required: false
         in: query
@@ -5473,6 +5774,10 @@ paths:
         description: Number of results to return per page.
         schema:
           type: integer
+      - in: query
+        name: state
+        schema:
+          type: string
       tags:
       - v1
       security:
@@ -5544,6 +5849,18 @@ paths:
     get:
       operationId: v1_sap_parties_list
       parameters:
+      - in: query
+        name: category
+        schema:
+          type: string
+      - in: query
+        name: chain
+        schema:
+          type: string
+      - in: query
+        name: country
+        schema:
+          type: string
       - name: page
         required: false
         in: query
@@ -5622,13 +5939,27 @@ paths:
   /api/v1/sap/product-varieties/:
     get:
       operationId: v1_sap_product_varieties_retrieve
+      description: Distinct product sub groups ("varieties"), sorted case-insensitively,
+        over active non-deleted products. Always 200; there is no error branch. `varieties`
+        and `sub_groups` are the same list — `varieties` is the legacy key.
+      parameters:
+      - in: query
+        name: category
+        schema:
+          type: string
+        description: Restrict to one product category (case-insensitive exact match).
+          Omitted or blank returns the sub groups of every category.
       tags:
       - v1
       security:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SapProductVarietyList'
+          description: ''
   /api/v1/sap/products/:
     get:
       operationId: v1_sap_products_list
@@ -5645,6 +5976,18 @@ paths:
         description: Number of results to return per page.
         schema:
           type: integer
+      - in: query
+        name: sub_group
+        schema:
+          type: string
+      - in: query
+        name: type
+        schema:
+          type: string
+      - in: query
+        name: variety
+        schema:
+          type: string
       tags:
       - v1
       security:
@@ -6354,26 +6697,114 @@ paths:
           description: No response body
   /api/v1/tracker/invoices/:
     get:
-      operationId: v1_tracker_invoices_retrieve
+      operationId: v1_tracker_invoices_list
+      description: 'Invoices visible to this user, as a BARE ARRAY — there is no envelope
+        and no pagination. Note the rows are the LIST shape: no `events`, no `payment`
+        object. POST to the same URL answers with the fuller DETAIL shape instead.'
+      parameters:
+      - in: query
+        name: branch
+        schema:
+          type: integer
+        description: Branch id.
+      - in: query
+        name: category
+        schema:
+          type: integer
+        description: Category id.
+      - in: query
+        name: effective_month
+        schema:
+          type: string
+        description: Accounting period as "YYYY-MM". An unparseable value is ignored,
+          not rejected.
+      - in: query
+        name: invoice_number
+        schema:
+          type: string
+        description: Case-insensitive substring of the invoice number.
+      - in: query
+        name: overdue
+        schema:
+          type: string
+        description: Only the literal `true` filters (keeps overdue rows, applied
+          in Python after serialisation). Any other value is ignored.
+      - in: query
+        name: party
+        schema:
+          type: string
+        description: Case-insensitive substring of the party name.
+      - in: query
+        name: stage
+        schema:
+          type: string
+        description: Current stage CODE (e.g. `entry`), exact match.
+      - in: query
+        name: status
+        schema:
+          type: string
+          enum:
+          - COMPLETED
+          - IN_PROGRESS
+        description: Invoice status, exact match.
+      - in: query
+        name: unit
+        schema:
+          type: integer
+        description: Unit id.
       tags:
       - v1
       security:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TrackerInvoiceList'
+          description: ''
     post:
       operationId: v1_tracker_invoices_create
+      description: Create an invoice at the entry stage. The 201 body is the DETAIL
+        serializer (`events` and `payment` included), NOT the list shape this endpoint
+        returns on GET.
       tags:
       - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvoiceWrite'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/InvoiceWrite'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/InvoiceWrite'
+        required: true
       security:
       - jwtAuth: []
       responses:
-        '200':
-          description: No response body
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrackerInvoiceDetail'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrackerValidationError'
+          description: ''
   /api/v1/tracker/invoices/{id}/:
     get:
-      operationId: v1_tracker_invoices_retrieve_2
+      operationId: v1_tracker_invoices_retrieve
+      description: One invoice in full. 404 (with an empty body) both when no such
+        invoice exists and when it lies outside the scope of this user — the two are
+        deliberately indistinguishable.
       parameters:
       - in: path
         name: id
@@ -6386,9 +6817,19 @@ paths:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrackerInvoiceDetail'
+          description: ''
+        '404':
+          description: Not found, or outside the scope of this user. EMPTY body —
+            the response carries no JSON at all, not even `detail`.
     patch:
       operationId: v1_tracker_invoices_partial_update
+      description: Partial update of an entry-stage invoice; the 200 body is the DETAIL
+        shape. 403 (a `detail` sentence) when the invoice is locked or has left the
+        entry desk, or when the caller is not on the entry desk.
       parameters:
       - in: path
         name: id
@@ -6397,11 +6838,41 @@ paths:
         required: true
       tags:
       - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedInvoiceWrite'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedInvoiceWrite'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedInvoiceWrite'
       security:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrackerInvoiceDetail'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrackerValidationError'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrackerError'
+          description: ''
+        '404':
+          description: Not found, or outside the scope of this user. EMPTY body —
+            the response carries no JSON at all, not even `detail`.
     delete:
       operationId: v1_tracker_invoices_destroy
       description: |-
@@ -6424,7 +6895,16 @@ paths:
       - jwtAuth: []
       responses:
         '204':
-          description: No response body
+          description: Soft-deleted. Empty body.
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrackerError'
+          description: ''
+        '404':
+          description: Not found, or outside the scope of this user. EMPTY body —
+            the response carries no JSON at all, not even `detail`.
   /api/v1/tracker/invoices/{id}/jsap/:
     get:
       operationId: v1_tracker_invoices_jsap_retrieve
@@ -6486,31 +6966,40 @@ paths:
   /api/v1/tracker/lookups/:
     get:
       operationId: v1_tracker_lookups_retrieve
-      description: Everything the entry form / filters need in one call.
+      description: Everything the entry form and the tracker filters need, in one
+        call. All seven keys are always present (possibly as empty arrays); every
+        list is restricted to `is_active` rows.
       tags:
       - v1
       security:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrackerLookups'
+          description: ''
   /api/v1/tracker/my-queue/:
     get:
       operationId: v1_tracker_my_queue_retrieve
-      description: |-
-        The actionable inbox: invoices parked at a stage this user handles.
-
-        The head-office / entry desk is shared: any entry-desk user sees every
-        invoice at the entry stage (freshly created or returned back), regardless of
-        creator. Returns every stage the user works (so all their desks show as tabs
-        even when empty) alongside the pending invoices.
+      description: The actionable inbox. `stages` lists EVERY stage this user works
+        (so empty desks still render as tabs) with a pending count; `invoices` holds
+        the in-progress invoices parked at those stages. Each invoice row is the list
+        shape plus `arrived_via_return`, and — only when that is true — `return_reason`,
+        `returned_from`, `returned_by` and `returned_at`, which drive the Current
+        / Returned split.
       tags:
       - v1
       security:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrackerMyQueue'
+          description: ''
   /api/v1/tracker/reports/:
     get:
       operationId: v1_tracker_reports_retrieve
@@ -6732,6 +7221,16 @@ components:
       required:
       - access
       - refresh
+    AdditionalChargeTypeEnum:
+      enum:
+      - DEMURRAGE
+      - LABOUR_COST
+      - POINT_VALUE
+      type: string
+      description: |-
+        * `DEMURRAGE` - Demurrage
+        * `LABOUR_COST` - Labour Cost
+        * `POINT_VALUE` - Point Value
     ApprovalLevel:
       type: object
       properties:
@@ -7137,6 +7636,71 @@ components:
         * `OIL` - Oil
         * `BEVERAGES` - Beverages
         * `MART` - Mart
+    CreateOrder:
+      type: object
+      properties:
+        card_code:
+          type: string
+          default: ''
+          maxLength: 100
+        card_name:
+          type: string
+          maxLength: 255
+        bill_to_id:
+          type: integer
+          default: 0
+        bill_to_address:
+          type: string
+          default: ''
+        ship_to_id:
+          type: integer
+          default: 0
+        ship_to_address:
+          type: string
+          default: ''
+        dispatch_from_id:
+          type: integer
+          default: 0
+        dispatch_from_name:
+          type: string
+          default: ''
+        company:
+          type: string
+          default: ''
+        po_number:
+          type: string
+          default: ''
+        warehouse_code:
+          type: string
+          default: ''
+        is_foc:
+          type: boolean
+          default: false
+        remarks:
+          type: string
+          default: ''
+        items:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+        price_list_basic:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,4})?$
+          default: '0.0000'
+        delivery_date:
+          type: string
+          format: date
+          nullable: true
+        order_type:
+          type: string
+          default: PARTY
+        employee_id:
+          type: string
+          default: ''
+      required:
+      - items
     CriticalityEnum:
       enum:
       - critical
@@ -7189,6 +7753,59 @@ components:
         * `PAYMENT` - Payment Receipt
         * `DEPOSIT` - Bank Deposit
         * `ORDER` - Sales Order
+    EventTypeEnum:
+      enum:
+      - RECEIVE
+      - ADVANCE
+      - RETURN
+      - NOTE
+      type: string
+      description: |-
+        * `RECEIVE` - Received
+        * `ADVANCE` - Advanced
+        * `RETURN` - Returned
+        * `NOTE` - Note
+    GstRate:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        label:
+          type: string
+          maxLength: 20
+        rate:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,2})?$
+        is_active:
+          type: boolean
+        sort_order:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+      required:
+      - id
+      - label
+      - rate
+    GstType:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 100
+        is_active:
+          type: boolean
+        sort_order:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+      required:
+      - id
+      - name
     HealthCheckResult:
       type: object
       properties:
@@ -7232,6 +7849,14 @@ components:
       required:
       - checks
       - status
+    HoldTypeEnum:
+      enum:
+      - FULL
+      - PARTIAL
+      type: string
+      description: |-
+        * `FULL` - Full hold (work on it later)
+        * `PARTIAL` - Partial hold (portion of value)
     InvoiceLog:
       type: object
       properties:
@@ -7362,6 +7987,24 @@ components:
         * `ERROR` - Error
         * `POSTED_TO_SAP` - Posted to SAP
         * `CL_RAISED` - CL Raised
+    InvoiceMode:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 100
+        is_active:
+          type: boolean
+        sort_order:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+      required:
+      - id
+      - name
     InvoiceRefLogs:
       type: object
       properties:
@@ -7401,6 +8044,67 @@ components:
       - ref_id
       - so_number
       - status
+    InvoiceWrite:
+      type: object
+      description: |-
+        Only the entry-stage fields are writable. Flow state is engine-managed.
+        `invoice_value` is NOT accepted — it is always derived on the server as
+        taxable + GST amount + additional charge.
+      properties:
+        invoice_date:
+          type: string
+          format: date
+        effective_month:
+          type: string
+          format: date
+        party_name:
+          type: string
+          maxLength: 255
+        party_code:
+          type: string
+          maxLength: 50
+        party_gstin:
+          type: string
+          maxLength: 20
+        invoice_number:
+          type: string
+          maxLength: 100
+        taxable_value:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,13}(?:\.\d{0,2})?$
+        gst_type:
+          type: integer
+        gst_rate:
+          type: integer
+        additional_charge_type:
+          oneOf:
+          - $ref: '#/components/schemas/AdditionalChargeTypeEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+        additional_charge_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,13}(?:\.\d{0,2})?$
+        category:
+          type: integer
+        unit:
+          type: integer
+        branch:
+          type: integer
+        mode:
+          type: integer
+      required:
+      - branch
+      - category
+      - effective_month
+      - gst_rate
+      - gst_type
+      - invoice_date
+      - invoice_number
+      - mode
+      - party_name
+      - taxable_value
+      - unit
     LabelItem:
       type: object
       properties:
@@ -7458,6 +8162,73 @@ components:
       - up
       type: string
       description: '* `up` - up'
+    Login:
+      type: object
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+          writeOnly: true
+      required:
+      - password
+      - username
+    LoginFailure:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        errors:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+      required:
+      - errors
+      - message
+      - success
+    LoginSuccess:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/LoginSuccessData'
+      required:
+      - data
+      - message
+      - success
+    LoginSuccessData:
+      type: object
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+        tokens:
+          $ref: '#/components/schemas/LoginTokens'
+      required:
+      - tokens
+      - user
+    LoginTokens:
+      type: object
+      properties:
+        access:
+          type: string
+        refresh:
+          type: string
+        token_type:
+          type: string
+        expires_in:
+          type: integer
+      required:
+      - access
+      - expires_in
+      - refresh
+      - token_type
     MainGroup:
       type: object
       properties:
@@ -7470,6 +8241,20 @@ components:
       required:
       - id
       - name
+    NotificationAck:
+      type: object
+      properties:
+        message:
+          type: string
+      required:
+      - message
+    NotificationError:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+      - error
     NutritionUOM:
       type: object
       properties:
@@ -7486,6 +8271,837 @@ components:
       - id
       - uom_name
       - uom_unit
+    OrderCreateResult:
+      type: object
+      properties:
+        id:
+          type: integer
+        order_number:
+          type: string
+        total_amount:
+          type: string
+        status:
+          type: string
+        needs_approval:
+          type: boolean
+        message:
+          type: string
+        order_type:
+          type: string
+        employee_id:
+          type: string
+          nullable: true
+        company:
+          type: string
+          nullable: true
+        flagged_items:
+          type: array
+          items:
+            type: string
+        remarks:
+          type: string
+      required:
+      - id
+      - message
+      - needs_approval
+      - order_number
+      - status
+      - total_amount
+    OrderDetail:
+      type: object
+      description: Schema alias for `OrderDetailSerializer`, with its method fields
+        typed.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        order_number:
+          type: string
+          maxLength: 50
+        card_code:
+          type: string
+          maxLength: 50
+        card_name:
+          type: string
+          maxLength: 255
+        bill_to_id:
+          type: integer
+          maximum: 2147483647
+          minimum: -2147483648
+        bill_to_address:
+          type: string
+          nullable: true
+        ship_to_id:
+          type: integer
+          maximum: 2147483647
+          minimum: -2147483648
+        ship_to_address:
+          type: string
+          nullable: true
+        dispatch_from_id:
+          type: integer
+          maximum: 2147483647
+          minimum: -2147483648
+        dispatch_from_name:
+          type: string
+          nullable: true
+          maxLength: 100
+        company:
+          type: string
+          nullable: true
+          maxLength: 100
+        po_number:
+          type: string
+          nullable: true
+          maxLength: 100
+        warehouse_code:
+          type: string
+          maxLength: 20
+        is_foc:
+          type: boolean
+        remarks:
+          type: string
+          nullable: true
+        total_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
+        status:
+          type: string
+        status_display:
+          type: string
+        created_by:
+          type: integer
+          nullable: true
+        created_by_name:
+          type: string
+          readOnly: true
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        delivery_date:
+          type: string
+          format: date
+          nullable: true
+        sap_created:
+          type: boolean
+        sap_doc_number:
+          type: string
+          nullable: true
+          maxLength: 100
+        quotation_cancelled:
+          type: boolean
+        approved_by:
+          type: integer
+          nullable: true
+        approved_at:
+          type: string
+          format: date-time
+          nullable: true
+        rejected_by:
+          type: integer
+          nullable: true
+        rejected_at:
+          type: string
+          format: date-time
+          nullable: true
+        rejection_reason:
+          type: string
+          nullable: true
+        reject_reason:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItemDetail'
+          readOnly: true
+        items_count:
+          type: integer
+          readOnly: true
+        party_state:
+          type: string
+          readOnly: true
+          nullable: true
+        rate_approvals:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderRateApproval'
+          readOnly: true
+        vareity_cost:
+          allOf:
+          - $ref: '#/components/schemas/OrderVarietyCost'
+          readOnly: true
+      required:
+      - card_code
+      - card_name
+      - created_at
+      - created_by_name
+      - id
+      - items
+      - items_count
+      - order_number
+      - party_state
+      - rate_approvals
+      - status
+      - status_display
+      - updated_at
+      - vareity_cost
+    OrderEditResult:
+      type: object
+      properties:
+        id:
+          type: integer
+        order_number:
+          type: string
+        total_amount:
+          type: string
+        status:
+          type: string
+        needs_approval:
+          type: boolean
+        message:
+          type: string
+        order_type:
+          type: string
+        employee_id:
+          type: string
+          nullable: true
+        company:
+          type: string
+          nullable: true
+      required:
+      - id
+      - message
+      - needs_approval
+      - order_number
+      - status
+      - total_amount
+    OrderItemApprover:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+      required:
+      - id
+      - name
+    OrderItemDetail:
+      type: object
+      description: Schema alias for `OrderItemSerializer`, with its method fields
+        typed.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        scheme_id:
+          type: integer
+          readOnly: true
+          nullable: true
+        scheme_name:
+          type: string
+          readOnly: true
+          nullable: true
+        scheme_item_code:
+          type: string
+          readOnly: true
+          nullable: true
+        is_scheme_visible:
+          type: boolean
+          readOnly: true
+        schemes:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItemScheme'
+          readOnly: true
+        approval_approvers:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItemApprover'
+          readOnly: true
+        variety:
+          type: string
+          readOnly: true
+        variety_type:
+          type: string
+          readOnly: true
+        last_purchase_price:
+          type: number
+          format: double
+          readOnly: true
+          nullable: true
+        item_code:
+          type: string
+          maxLength: 50
+        item_name:
+          type: string
+          nullable: true
+          maxLength: 255
+        category:
+          type: string
+          nullable: true
+          maxLength: 100
+        brand:
+          type: string
+          nullable: true
+          maxLength: 100
+        sub_group:
+          type: string
+          nullable: true
+          maxLength: 100
+        item_type:
+          type: string
+          nullable: true
+          maxLength: 100
+        qty:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        pcs:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        boxes:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        ltrs:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        price_list_basic:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,4})?$
+        basic_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,4})?$
+        total:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,4})?$
+        tax_rate:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,2})?$
+        qty_scheme:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+        is_auto_free:
+          type: boolean
+        combo_source_code:
+          type: string
+          nullable: true
+          maxLength: 50
+        order:
+          type: integer
+        scheme:
+          type: integer
+          nullable: true
+      required:
+      - approval_approvers
+      - id
+      - is_scheme_visible
+      - item_code
+      - last_purchase_price
+      - order
+      - scheme_id
+      - scheme_item_code
+      - scheme_name
+      - schemes
+      - variety
+      - variety_type
+    OrderItemScheme:
+      type: object
+      description: |-
+        Schema alias for `OrderItemSchemeSerializer`.
+
+        Both getters return None when the line carries no scheme id, which is the
+        common case.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        scheme_id:
+          type: integer
+          readOnly: true
+          nullable: true
+        scheme_name:
+          type: string
+          readOnly: true
+          nullable: true
+        scheme_item_code:
+          type: string
+          readOnly: true
+          nullable: true
+        scheme_qty:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+        qty_scheme:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+      required:
+      - id
+      - scheme_id
+      - scheme_item_code
+      - scheme_name
+      - scheme_qty
+    OrderLifecycleError:
+      type: object
+      properties:
+        detail:
+          type: string
+        message:
+          type: string
+        error:
+          type: string
+        success:
+          type: boolean
+      required:
+      - detail
+      - error
+      - message
+      - success
+    OrderListByUserId:
+      type: object
+      description: Schema alias for `OrderListByUserIdSerializer`.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        order_number:
+          type: string
+          maxLength: 50
+        order_type:
+          $ref: '#/components/schemas/OrderTypeEnum'
+        card_code:
+          type: string
+          maxLength: 50
+        card_name:
+          type: string
+          maxLength: 255
+        is_foc:
+          type: boolean
+        total_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
+        status:
+          type: integer
+        status_name:
+          type: string
+        status_display:
+          type: string
+          readOnly: true
+        created_by:
+          type: integer
+          readOnly: true
+        created_by_name:
+          type: string
+          readOnly: true
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        delivery_date:
+          type: string
+          format: date
+          nullable: true
+      required:
+      - card_code
+      - card_name
+      - created_at
+      - created_by
+      - created_by_name
+      - id
+      - order_number
+      - status
+      - status_display
+      - status_name
+    OrderListRow:
+      type: object
+      properties:
+        id:
+          type: integer
+        order_number:
+          type: string
+        order_type:
+          type: string
+        employee_id:
+          type: string
+          nullable: true
+        card_code:
+          type: string
+        card_name:
+          type: string
+        total_amount:
+          type: string
+        status:
+          type: string
+        status_display:
+          type: string
+        sap_doc_number:
+          type: string
+        items_count:
+          type: integer
+        created_by:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        delivery_date:
+          type: string
+          format: date
+          nullable: true
+        is_foc:
+          type: boolean
+      required:
+      - card_code
+      - card_name
+      - created_at
+      - created_by
+      - delivery_date
+      - employee_id
+      - id
+      - is_foc
+      - items_count
+      - order_number
+      - order_type
+      - sap_doc_number
+      - status
+      - status_display
+      - total_amount
+    OrderRateApproval:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        approver:
+          type: integer
+        approver_name:
+          type: string
+          readOnly: true
+        status:
+          $ref: '#/components/schemas/OrderRateApprovalStatusEnum'
+        remarks:
+          type: string
+          nullable: true
+        approved_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - approver
+      - approver_name
+      - created_at
+      - id
+    OrderRateApprovalStatusEnum:
+      enum:
+      - PENDING
+      - APPROVED
+      - REJECTED
+      type: string
+      description: |-
+        * `PENDING` - Pending
+        * `APPROVED` - Approved
+        * `REJECTED` - Rejected
+    OrderStatusAlreadyDecided:
+      type: object
+      properties:
+        message:
+          type: string
+        order_id:
+          type: integer
+        status:
+          type: string
+        approval_status:
+          type: string
+      required:
+      - approval_status
+      - message
+      - order_id
+      - status
+    OrderStatusOption:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+      required:
+      - id
+      - name
+    OrderStatusUpdate:
+      type: object
+      properties:
+        status:
+          type: integer
+        reason:
+          type: string
+      required:
+      - status
+    OrderStatusUpdateBadRequest:
+      oneOf:
+      - $ref: '#/components/schemas/OrderStatusAlreadyDecided'
+      - $ref: '#/components/schemas/OrderStatusUpdateInvalid'
+    OrderStatusUpdateForbidden:
+      type: object
+      properties:
+        message:
+          type: string
+        detail:
+          type: string
+        error:
+          type: string
+        success:
+          type: boolean
+    OrderStatusUpdateInvalid:
+      type: object
+      properties:
+        status:
+          type: array
+          items:
+            type: string
+        reason:
+          type: array
+          items:
+            type: string
+        detail:
+          type: string
+        message:
+          type: string
+        error:
+          type: string
+        success:
+          type: boolean
+      required:
+      - detail
+      - error
+      - message
+      - success
+    OrderStatusUpdateResult:
+      type: object
+      properties:
+        message:
+          type: string
+        order_id:
+          type: integer
+        status:
+          type: string
+        approval_status:
+          type: string
+        pending_approvers:
+          type: array
+          items:
+            type: string
+      required:
+      - message
+      - order_id
+      - status
+    OrderTypeEnum:
+      enum:
+      - PARTY
+      - STAFF
+      - DISTRIBUTOR
+      type: string
+      description: |-
+        * `PARTY` - Party
+        * `STAFF` - Staff
+        * `DISTRIBUTOR` - Distributor
+    OrderVarietyCost:
+      type: object
+      properties:
+        commodity_price:
+          type: number
+          format: double
+        other_total:
+          type: number
+          format: double
+        premium_total:
+          type: number
+          format: double
+      required:
+      - commodity_price
+      - other_total
+      - premium_total
+    OrdersBranch:
+      type: object
+      description: Schema alias for `orders.serializers.BranchSerializer`.
+      properties:
+        bpl_id:
+          type: string
+        bpl_name:
+          type: string
+          maxLength: 200
+        category:
+          $ref: '#/components/schemas/CategoryEnum'
+      required:
+      - bpl_id
+      - bpl_name
+      - category
+    OrdersByUserForbidden:
+      type: object
+      properties:
+        detail:
+          type: string
+      required:
+      - detail
+    OrdersLog:
+      type: object
+      description: Schema alias for `OrdersLogSerializer` — `performed_by_name` optional.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        status_id:
+          type: integer
+          readOnly: true
+        status_name:
+          type: string
+          readOnly: true
+        remarks:
+          type: string
+          readOnly: true
+        performed_by_name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - id
+      - remarks
+      - status_id
+      - status_name
+    OrdersNotification:
+      type: object
+      description: Schema alias for `orders.serializers.NotificationSerializer`.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        message:
+          type: string
+        is_read:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        order_id:
+          type: integer
+          readOnly: true
+      required:
+      - created_at
+      - id
+      - message
+      - order_id
+    OrdersPartyAddress:
+      type: object
+      description: Schema alias for `orders.serializers.PartyAddressSerializer`.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        full_address:
+          type: string
+          nullable: true
+        gst_number:
+          type: string
+          nullable: true
+          maxLength: 50
+        address_type:
+          type: string
+          maxLength: 1
+        address_name:
+          type: string
+          maxLength: 100
+        category:
+          type: string
+          nullable: true
+          maxLength: 20
+      required:
+      - address_name
+      - address_type
+      - id
+    OrdersProduct:
+      type: object
+      description: Schema alias for `orders.serializers.ProductSerializer`.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        item_code:
+          type: string
+          maxLength: 50
+        item_name:
+          type: string
+          maxLength: 255
+        category:
+          type: string
+          nullable: true
+          maxLength: 100
+        brand:
+          type: string
+          nullable: true
+          maxLength: 100
+        variety:
+          type: string
+          nullable: true
+          maxLength: 100
+        sal_factor2:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        tax_rate:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,2})?$
+        sal_pack_unit:
+          type: string
+          nullable: true
+          maxLength: 50
+      required:
+      - id
+      - item_code
+      - item_name
+    OrdersQueryError:
+      type: object
+      properties:
+        detail:
+          type: string
+        message:
+          type: string
+        error:
+          type: string
+        success:
+          type: boolean
+      required:
+      - detail
+      - error
+      - message
+      - success
     PaginatedApprovalWorkflowList:
       type: object
       required:
@@ -7584,11 +9200,6 @@ components:
         id:
           type: integer
           readOnly: true
-        addresses:
-          type: array
-          items:
-            $ref: '#/components/schemas/PartyAddress'
-          readOnly: true
         card_code:
           type: string
           maxLength: 50
@@ -7627,7 +9238,6 @@ components:
           format: date-time
           readOnly: true
       required:
-      - addresses
       - card_code
       - card_name
       - id
@@ -7684,6 +9294,30 @@ components:
       - card_code
       - id
       - synced_at
+    PartyAddresses:
+      type: object
+      properties:
+        bill_to:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrdersPartyAddress'
+        ship_to:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrdersPartyAddress'
+        is_fallback:
+          type: boolean
+      required:
+      - bill_to
+      - is_fallback
+      - ship_to
+    PartyAddressesError:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+      - error
     PartyList:
       type: object
       properties:
@@ -7720,6 +9354,148 @@ components:
       - card_name
       - id
       - synced_at
+    PartyOption:
+      type: object
+      properties:
+        value:
+          type: string
+        card_code:
+          type: string
+        card_name:
+          type: string
+        label:
+          type: string
+        category:
+          type: string
+          nullable: true
+        state:
+          type: string
+          nullable: true
+      required:
+      - card_code
+      - card_name
+      - category
+      - label
+      - state
+      - value
+    PartyProductFreeItem:
+      type: object
+      properties:
+        item_code:
+          type: string
+        item_name:
+          type: string
+          nullable: true
+        category:
+          type: string
+        brand:
+          type: string
+          nullable: true
+        variety:
+          type: string
+          nullable: true
+        sub_group:
+          type: string
+          nullable: true
+        sal_factor2:
+          type: number
+          format: double
+          nullable: true
+        sal_pack_unit:
+          type: string
+          nullable: true
+        tax_rate:
+          type: number
+          format: double
+          nullable: true
+        basic_rate:
+          type: number
+          format: double
+      required:
+      - basic_rate
+      - brand
+      - category
+      - item_code
+      - item_name
+      - sal_factor2
+      - sal_pack_unit
+      - sub_group
+      - tax_rate
+      - variety
+    PartyProductRow:
+      type: object
+      properties:
+        free_item:
+          allOf:
+          - $ref: '#/components/schemas/PartyProductFreeItem'
+          nullable: true
+        item_code:
+          type: string
+        category:
+          type: string
+        basic_rate:
+          type: number
+          format: double
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+        item_name:
+          type: string
+          nullable: true
+        sal_factor2:
+          type: number
+          format: double
+          nullable: true
+        tax_rate:
+          type: number
+          format: double
+          nullable: true
+        sal_pack_unit:
+          type: string
+          nullable: true
+        brand:
+          type: string
+          nullable: true
+        variety:
+          type: string
+          nullable: true
+        sub_group:
+          type: string
+          nullable: true
+        combo_scheme_id:
+          type: integer
+          nullable: true
+        combo_scheme_name:
+          type: string
+          nullable: true
+        is_combo:
+          type: boolean
+        free_item_code:
+          type: string
+          nullable: true
+        free_qty_per_unit:
+          type: number
+          format: double
+          nullable: true
+      required:
+      - basic_rate
+      - brand
+      - category
+      - combo_scheme_id
+      - combo_scheme_name
+      - free_item
+      - free_item_code
+      - free_qty_per_unit
+      - is_combo
+      - item_code
+      - item_name
+      - sal_factor2
+      - sal_pack_unit
+      - sub_group
+      - tax_rate
+      - updated_at
+      - variety
     PatchedApprovalLevel:
       type: object
       properties:
@@ -8065,6 +9841,55 @@ components:
           type: integer
           readOnly: true
           nullable: true
+    PatchedInvoiceWrite:
+      type: object
+      description: |-
+        Only the entry-stage fields are writable. Flow state is engine-managed.
+        `invoice_value` is NOT accepted — it is always derived on the server as
+        taxable + GST amount + additional charge.
+      properties:
+        invoice_date:
+          type: string
+          format: date
+        effective_month:
+          type: string
+          format: date
+        party_name:
+          type: string
+          maxLength: 255
+        party_code:
+          type: string
+          maxLength: 50
+        party_gstin:
+          type: string
+          maxLength: 20
+        invoice_number:
+          type: string
+          maxLength: 100
+        taxable_value:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,13}(?:\.\d{0,2})?$
+        gst_type:
+          type: integer
+        gst_rate:
+          type: integer
+        additional_charge_type:
+          oneOf:
+          - $ref: '#/components/schemas/AdditionalChargeTypeEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+        additional_charge_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,13}(?:\.\d{0,2})?$
+        category:
+          type: integer
+        unit:
+          type: integer
+        branch:
+          type: integer
+        mode:
+          type: integer
     PatchedLabelItem:
       type: object
       properties:
@@ -8239,6 +10064,60 @@ components:
           minimum: 0
         is_active:
           type: boolean
+    PaymentDetail:
+      type: object
+      properties:
+        discount_pct:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,4}(?:\.\d{0,2})?$
+        tds_pct:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,4}(?:\.\d{0,2})?$
+        hold_added_back:
+          type: boolean
+        discount_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,13}(?:\.\d{0,2})?$
+          readOnly: true
+        tds_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,13}(?:\.\d{0,2})?$
+          readOnly: true
+        paid_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,13}(?:\.\d{0,2})?$
+        open_balance:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,13}(?:\.\d{0,2})?$
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/PaymentDetailStatusEnum'
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - discount_amount
+      - open_balance
+      - status
+      - tds_amount
+      - updated_at
+    PaymentDetailStatusEnum:
+      enum:
+      - OPEN
+      - PAID
+      type: string
+      description: |-
+        * `OPEN` - Open
+        * `PAID` - Paid
     PaymentMethodMapping:
       type: object
       description: |-
@@ -8358,6 +10237,16 @@ components:
       - id
       - item_code
       - synced_at
+    Profile:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/User'
+      required:
+      - data
+      - success
     Readiness:
       type: object
       properties:
@@ -8370,6 +10259,43 @@ components:
       required:
       - checks
       - status
+    ReceivingNoteEnum:
+      enum:
+      - ON_TIME
+      - LATE
+      type: string
+      description: |-
+        * `ON_TIME` - On time
+        * `LATE` - Late received (After 6 PM)
+    Role:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 50
+        display_name:
+          type: string
+          maxLength: 100
+      required:
+      - display_name
+      - id
+      - name
+    RoleListItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        display_name:
+          type: string
+      required:
+      - display_name
+      - id
+      - name
     SKU:
       type: object
       properties:
@@ -8457,6 +10383,82 @@ components:
       - display_name
       - hana_schema
       - id
+    SapProductVarietyList:
+      type: object
+      properties:
+        category:
+          type: string
+        count:
+          type: integer
+        varieties:
+          type: array
+          items:
+            type: string
+        sub_groups:
+          type: array
+          items:
+            type: string
+      required:
+      - category
+      - count
+      - sub_groups
+      - varieties
+    SchemeListRow:
+      type: object
+      properties:
+        scheme_id:
+          type: integer
+        scheme_name:
+          type: string
+        state_code:
+          type: string
+          nullable: true
+        item_code:
+          type: string
+          nullable: true
+        item_name:
+          type: string
+      required:
+      - item_code
+      - item_name
+      - scheme_id
+      - scheme_name
+      - state_code
+    Stage:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        code:
+          type: string
+          maxLength: 50
+          pattern: ^[-a-zA-Z0-9_]+$
+        name:
+          type: string
+          maxLength: 100
+        order:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+        threshold_days:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+        status_choices: {}
+        requires_status:
+          type: boolean
+        can_return:
+          type: boolean
+        is_terminal:
+          type: boolean
+        is_active:
+          type: boolean
+      required:
+      - code
+      - id
+      - name
+      - order
     State:
       type: object
       properties:
@@ -8483,6 +10485,14 @@ components:
         * `up` - up
         * `down` - down
         * `degraded` - degraded
+    StatusCd2Enum:
+      enum:
+      - IN_PROGRESS
+      - COMPLETED
+      type: string
+      description: |-
+        * `IN_PROGRESS` - In Progress
+        * `COMPLETED` - Completed
     StorageType:
       type: object
       properties:
@@ -8567,6 +10577,1059 @@ components:
         * `PARTY` - Parties
         * `PARTY_ADDRESS` - Party Addresses
         * `ALL` - All
+    TrackerBranch:
+      type: object
+      description: |-
+        Schema-only alias — see `TrackerCategorySerializer`. `Branch` is already
+        taken by the orders/HANA branch serializer.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 100
+        is_active:
+          type: boolean
+        sort_order:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+      required:
+      - id
+      - name
+    TrackerCategory:
+      type: object
+      description: |-
+        Schema-only alias with the same fields.
+
+        `CategorySerializer` would be published under the component name
+        `Category`, which an unrelated serializer in another app already owns. Two
+        different classes claiming one component name makes the schema wrong for
+        one of them, silently. Renaming here keeps both honest.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 100
+        is_active:
+          type: boolean
+        sort_order:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+      required:
+      - id
+      - name
+    TrackerError:
+      type: object
+      properties:
+        detail:
+          type: string
+        message:
+          type: string
+        error:
+          type: string
+        success:
+          type: boolean
+      required:
+      - detail
+    TrackerInvoiceDetail:
+      type: object
+      description: |-
+        Schema-only counterpart of `InvoiceDetailSerializer` — the list shape
+        plus the full stage-event log and the payment row.
+
+        `payment` is a reverse one-to-one that does not exist until the invoice
+        reaches the payment desk, and DRF renders a missing one as null rather than
+        omitting the key; hence `allow_null`.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        invoice_date:
+          type: string
+          format: date
+        effective_month:
+          type: string
+          format: date
+        party_name:
+          type: string
+          maxLength: 255
+        party_code:
+          type: string
+          maxLength: 50
+        party_gstin:
+          type: string
+          maxLength: 20
+        invoice_number:
+          type: string
+          maxLength: 100
+        taxable_value:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,13}(?:\.\d{0,2})?$
+        gst_type:
+          type: integer
+        gst_type_name:
+          type: string
+          readOnly: true
+        gst_rate:
+          type: integer
+        gst_rate_label:
+          type: string
+          readOnly: true
+        gst_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,13}(?:\.\d{0,2})?$
+          readOnly: true
+        additional_charge_type:
+          oneOf:
+          - $ref: '#/components/schemas/AdditionalChargeTypeEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+        additional_charge_type_display:
+          type: string
+          readOnly: true
+        additional_charge_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,13}(?:\.\d{0,2})?$
+        invoice_value:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,13}(?:\.\d{0,2})?$
+        debit_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,13}(?:\.\d{0,2})?$
+        hold_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,13}(?:\.\d{0,2})?$
+        net_invoice_value:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,13}(?:\.\d{0,2})?$
+          readOnly: true
+        category:
+          type: integer
+        category_name:
+          type: string
+          readOnly: true
+        unit:
+          type: integer
+        unit_name:
+          type: string
+          readOnly: true
+        branch:
+          type: integer
+        branch_name:
+          type: string
+          readOnly: true
+        mode:
+          type: integer
+        mode_name:
+          type: string
+          readOnly: true
+        current_stage:
+          type: integer
+        current_stage_code:
+          type: string
+          readOnly: true
+        current_stage_name:
+          type: string
+          readOnly: true
+        status:
+          $ref: '#/components/schemas/StatusCd2Enum'
+        current_stage_entered_at:
+          type: string
+          format: date-time
+        is_locked:
+          type: boolean
+        rejection_pending:
+          type: boolean
+        days_at_stage:
+          type: number
+          format: double
+          readOnly: true
+        is_overdue:
+          type: boolean
+          readOnly: true
+        editable:
+          type: boolean
+          readOnly: true
+        payment_status:
+          type: string
+          readOnly: true
+          nullable: true
+        paid_amount:
+          type: string
+          readOnly: true
+          nullable: true
+        open_balance:
+          type: string
+          readOnly: true
+          nullable: true
+        is_partially_paid:
+          type: boolean
+          readOnly: true
+        created_by:
+          type: integer
+        created_by_name:
+          type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/TrackerStageEvent'
+          readOnly: true
+        payment:
+          allOf:
+          - $ref: '#/components/schemas/PaymentDetail'
+          readOnly: true
+          nullable: true
+      required:
+      - additional_charge_type_display
+      - branch
+      - branch_name
+      - category
+      - category_name
+      - created_at
+      - created_by
+      - created_by_name
+      - current_stage
+      - current_stage_code
+      - current_stage_entered_at
+      - current_stage_name
+      - days_at_stage
+      - editable
+      - effective_month
+      - events
+      - gst_amount
+      - gst_rate
+      - gst_rate_label
+      - gst_type
+      - gst_type_name
+      - id
+      - invoice_date
+      - invoice_number
+      - invoice_value
+      - is_overdue
+      - is_partially_paid
+      - mode
+      - mode_name
+      - net_invoice_value
+      - open_balance
+      - paid_amount
+      - party_name
+      - payment
+      - payment_status
+      - taxable_value
+      - unit
+      - unit_name
+      - updated_at
+    TrackerInvoiceList:
+      type: object
+      description: |-
+        Schema-only. Never instantiated at runtime.
+
+        The same fields as `InvoiceListSerializer` — but its seven
+        `SerializerMethodField`s carry no return type hint, and drf-spectacular
+        defaults an unhinted method field to `string`. Published as-is that would
+        describe four booleans and three nullable strings as plain non-null
+        strings: precisely the confidently-wrong type a generated client cannot
+        recover from. Each is re-declared here as what the getter really returns:
+
+            days_at_stage      `services.days_at_stage` -> Decimal, which DRF's
+                               JSON encoder renders as a NUMBER, not a string
+            is_overdue         bool
+            editable           bool
+            is_partially_paid  bool
+            payment_status     PaymentDetail.Status, or null when the invoice has
+            paid_amount        no payment row yet; the two amounts are `str()` of
+            open_balance       a Decimal, so decimal STRINGS or null
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        invoice_date:
+          type: string
+          format: date
+        effective_month:
+          type: string
+          format: date
+        party_name:
+          type: string
+          maxLength: 255
+        party_code:
+          type: string
+          maxLength: 50
+        party_gstin:
+          type: string
+          maxLength: 20
+        invoice_number:
+          type: string
+          maxLength: 100
+        taxable_value:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,13}(?:\.\d{0,2})?$
+        gst_type:
+          type: integer
+        gst_type_name:
+          type: string
+          readOnly: true
+        gst_rate:
+          type: integer
+        gst_rate_label:
+          type: string
+          readOnly: true
+        gst_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,13}(?:\.\d{0,2})?$
+          readOnly: true
+        additional_charge_type:
+          oneOf:
+          - $ref: '#/components/schemas/AdditionalChargeTypeEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+        additional_charge_type_display:
+          type: string
+          readOnly: true
+        additional_charge_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,13}(?:\.\d{0,2})?$
+        invoice_value:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,13}(?:\.\d{0,2})?$
+        debit_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,13}(?:\.\d{0,2})?$
+        hold_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,13}(?:\.\d{0,2})?$
+        net_invoice_value:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,13}(?:\.\d{0,2})?$
+          readOnly: true
+        category:
+          type: integer
+        category_name:
+          type: string
+          readOnly: true
+        unit:
+          type: integer
+        unit_name:
+          type: string
+          readOnly: true
+        branch:
+          type: integer
+        branch_name:
+          type: string
+          readOnly: true
+        mode:
+          type: integer
+        mode_name:
+          type: string
+          readOnly: true
+        current_stage:
+          type: integer
+        current_stage_code:
+          type: string
+          readOnly: true
+        current_stage_name:
+          type: string
+          readOnly: true
+        status:
+          $ref: '#/components/schemas/StatusCd2Enum'
+        current_stage_entered_at:
+          type: string
+          format: date-time
+        is_locked:
+          type: boolean
+        rejection_pending:
+          type: boolean
+        days_at_stage:
+          type: number
+          format: double
+          readOnly: true
+        is_overdue:
+          type: boolean
+          readOnly: true
+        editable:
+          type: boolean
+          readOnly: true
+        payment_status:
+          type: string
+          readOnly: true
+          nullable: true
+        paid_amount:
+          type: string
+          readOnly: true
+          nullable: true
+        open_balance:
+          type: string
+          readOnly: true
+          nullable: true
+        is_partially_paid:
+          type: boolean
+          readOnly: true
+        created_by:
+          type: integer
+        created_by_name:
+          type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - additional_charge_type_display
+      - branch
+      - branch_name
+      - category
+      - category_name
+      - created_at
+      - created_by
+      - created_by_name
+      - current_stage
+      - current_stage_code
+      - current_stage_entered_at
+      - current_stage_name
+      - days_at_stage
+      - editable
+      - effective_month
+      - gst_amount
+      - gst_rate
+      - gst_rate_label
+      - gst_type
+      - gst_type_name
+      - id
+      - invoice_date
+      - invoice_number
+      - invoice_value
+      - is_overdue
+      - is_partially_paid
+      - mode
+      - mode_name
+      - net_invoice_value
+      - open_balance
+      - paid_amount
+      - party_name
+      - payment_status
+      - taxable_value
+      - unit
+      - unit_name
+      - updated_at
+    TrackerLookups:
+      type: object
+      properties:
+        categories:
+          type: array
+          items:
+            $ref: '#/components/schemas/TrackerCategory'
+        units:
+          type: array
+          items:
+            $ref: '#/components/schemas/Unit'
+        branches:
+          type: array
+          items:
+            $ref: '#/components/schemas/TrackerBranch'
+        modes:
+          type: array
+          items:
+            $ref: '#/components/schemas/InvoiceMode'
+        gst_types:
+          type: array
+          items:
+            $ref: '#/components/schemas/GstType'
+        gst_rates:
+          type: array
+          items:
+            $ref: '#/components/schemas/GstRate'
+        stages:
+          type: array
+          items:
+            $ref: '#/components/schemas/Stage'
+      required:
+      - branches
+      - categories
+      - gst_rates
+      - gst_types
+      - modes
+      - stages
+      - units
+    TrackerMyQueue:
+      type: object
+      properties:
+        stages:
+          type: array
+          items:
+            $ref: '#/components/schemas/TrackerMyQueueStage'
+        invoices:
+          type: array
+          items:
+            $ref: '#/components/schemas/TrackerQueueInvoice'
+      required:
+      - invoices
+      - stages
+    TrackerMyQueueStage:
+      type: object
+      properties:
+        code:
+          type: string
+        name:
+          type: string
+        order:
+          type: integer
+        count:
+          type: integer
+      required:
+      - code
+      - count
+      - name
+      - order
+    TrackerQueueInvoice:
+      type: object
+      description: |-
+        Schema-only. Never instantiated at runtime.
+
+        `MyQueueView` serialises its rows with `InvoiceListSerializer` and then
+        MUTATES each row dict, adding return-tracking keys that exist in no
+        serializer but which the Current-vs-Returned tab split depends on.
+        `arrived_via_return` is set on every row; the other four are added only
+        when it is True, so they are declared optional.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        invoice_date:
+          type: string
+          format: date
+        effective_month:
+          type: string
+          format: date
+        party_name:
+          type: string
+          maxLength: 255
+        party_code:
+          type: string
+          maxLength: 50
+        party_gstin:
+          type: string
+          maxLength: 20
+        invoice_number:
+          type: string
+          maxLength: 100
+        taxable_value:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,13}(?:\.\d{0,2})?$
+        gst_type:
+          type: integer
+        gst_type_name:
+          type: string
+          readOnly: true
+        gst_rate:
+          type: integer
+        gst_rate_label:
+          type: string
+          readOnly: true
+        gst_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,13}(?:\.\d{0,2})?$
+          readOnly: true
+        additional_charge_type:
+          oneOf:
+          - $ref: '#/components/schemas/AdditionalChargeTypeEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+        additional_charge_type_display:
+          type: string
+          readOnly: true
+        additional_charge_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,13}(?:\.\d{0,2})?$
+        invoice_value:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,13}(?:\.\d{0,2})?$
+        debit_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,13}(?:\.\d{0,2})?$
+        hold_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,13}(?:\.\d{0,2})?$
+        net_invoice_value:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,13}(?:\.\d{0,2})?$
+          readOnly: true
+        category:
+          type: integer
+        category_name:
+          type: string
+          readOnly: true
+        unit:
+          type: integer
+        unit_name:
+          type: string
+          readOnly: true
+        branch:
+          type: integer
+        branch_name:
+          type: string
+          readOnly: true
+        mode:
+          type: integer
+        mode_name:
+          type: string
+          readOnly: true
+        current_stage:
+          type: integer
+        current_stage_code:
+          type: string
+          readOnly: true
+        current_stage_name:
+          type: string
+          readOnly: true
+        status:
+          $ref: '#/components/schemas/StatusCd2Enum'
+        current_stage_entered_at:
+          type: string
+          format: date-time
+        is_locked:
+          type: boolean
+        rejection_pending:
+          type: boolean
+        days_at_stage:
+          type: number
+          format: double
+          readOnly: true
+        is_overdue:
+          type: boolean
+          readOnly: true
+        editable:
+          type: boolean
+          readOnly: true
+        payment_status:
+          type: string
+          readOnly: true
+          nullable: true
+        paid_amount:
+          type: string
+          readOnly: true
+          nullable: true
+        open_balance:
+          type: string
+          readOnly: true
+          nullable: true
+        is_partially_paid:
+          type: boolean
+          readOnly: true
+        created_by:
+          type: integer
+        created_by_name:
+          type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        arrived_via_return:
+          type: boolean
+        return_reason:
+          type: string
+        returned_from:
+          type: string
+        returned_by:
+          type: string
+          nullable: true
+        returned_at:
+          type: string
+          format: date-time
+      required:
+      - additional_charge_type_display
+      - arrived_via_return
+      - branch
+      - branch_name
+      - category
+      - category_name
+      - created_at
+      - created_by
+      - created_by_name
+      - current_stage
+      - current_stage_code
+      - current_stage_entered_at
+      - current_stage_name
+      - days_at_stage
+      - editable
+      - effective_month
+      - gst_amount
+      - gst_rate
+      - gst_rate_label
+      - gst_type
+      - gst_type_name
+      - id
+      - invoice_date
+      - invoice_number
+      - invoice_value
+      - is_overdue
+      - is_partially_paid
+      - mode
+      - mode_name
+      - net_invoice_value
+      - open_balance
+      - paid_amount
+      - party_name
+      - payment_status
+      - taxable_value
+      - unit
+      - unit_name
+      - updated_at
+    TrackerStageEvent:
+      type: object
+      description: |-
+        Schema-only alias of `StageEventSerializer`, with one correction.
+
+        `acted_by_name` walks `acted_by.username` with `default=None`, so it is
+        NULL on every event the engine wrote unattended (a scheduled JSAP sync, an
+        auto-advance). The base serializer leaves drf-spectacular describing it as
+        a non-null string.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        stage:
+          type: integer
+        stage_name:
+          type: string
+          readOnly: true
+        stage_code:
+          type: string
+          readOnly: true
+        event_type:
+          $ref: '#/components/schemas/EventTypeEnum'
+        stage_status:
+          type: string
+          maxLength: 30
+        hold_type:
+          oneOf:
+          - $ref: '#/components/schemas/HoldTypeEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,13}(?:\.\d{0,2})?$
+          nullable: true
+        receiving_note:
+          oneOf:
+          - $ref: '#/components/schemas/ReceivingNoteEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+        remarks:
+          type: string
+        acted_by:
+          type: integer
+          nullable: true
+        acted_by_name:
+          type: string
+          readOnly: true
+          nullable: true
+        entered_at:
+          type: string
+          format: date-time
+        exited_at:
+          type: string
+          format: date-time
+          nullable: true
+        days_spent:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
+          nullable: true
+      required:
+      - acted_by_name
+      - entered_at
+      - event_type
+      - id
+      - stage
+      - stage_code
+      - stage_name
+    TrackerValidationError:
+      type: object
+      properties:
+        detail:
+          type: string
+        message:
+          type: string
+        error:
+          type: string
+        success:
+          type: boolean
+      required:
+      - detail
+      - error
+      - message
+      - success
+    Unit:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 100
+        is_active:
+          type: boolean
+        sort_order:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+      required:
+      - id
+      - name
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 150
+        username:
+          type: string
+          maxLength: 150
+        email:
+          type: string
+          format: email
+          nullable: true
+          maxLength: 150
+        phone:
+          type: string
+          nullable: true
+          maxLength: 15
+        role:
+          type: string
+          readOnly: true
+        role_display:
+          type: string
+          readOnly: true
+        extra_roles:
+          type: array
+          items:
+            $ref: '#/components/schemas/Role'
+          readOnly: true
+        roles:
+          type: array
+          items:
+            type: string
+          readOnly: true
+        company:
+          allOf:
+          - $ref: '#/components/schemas/Company'
+          nullable: true
+          readOnly: true
+        main_group:
+          allOf:
+          - $ref: '#/components/schemas/MainGroup'
+          nullable: true
+          readOnly: true
+        main_groups:
+          type: array
+          items:
+            $ref: '#/components/schemas/MainGroup'
+          readOnly: true
+        state:
+          allOf:
+          - $ref: '#/components/schemas/State'
+          nullable: true
+          readOnly: true
+        states:
+          type: array
+          items:
+            $ref: '#/components/schemas/State'
+          readOnly: true
+        category:
+          allOf:
+          - $ref: '#/components/schemas/Category'
+          nullable: true
+          readOnly: true
+        categories:
+          type: array
+          items:
+            $ref: '#/components/schemas/Category'
+          readOnly: true
+        sub_group:
+          type: string
+          nullable: true
+        is_active:
+          type: boolean
+          readOnly: true
+        is_superuser:
+          type: boolean
+          readOnly: true
+        is_staff:
+          type: boolean
+          readOnly: true
+        last_login:
+          type: string
+          format: date-time
+          readOnly: true
+        date_joined:
+          type: string
+          format: date-time
+          readOnly: true
+        extra_pages:
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - categories
+      - category
+      - company
+      - created_at
+      - date_joined
+      - extra_roles
+      - id
+      - is_active
+      - is_staff
+      - is_superuser
+      - last_login
+      - main_group
+      - main_groups
+      - name
+      - role
+      - role_display
+      - roles
+      - state
+      - states
+      - username
+    UserListForAssignment:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/User'
+      required:
+      - data
+      - success
+    UserParties:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/UserPartiesData'
+      required:
+      - data
+      - success
+    UserPartiesData:
+      type: object
+      properties:
+        parties:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserPartyAssignmentItem'
+        user:
+          $ref: '#/components/schemas/UserPartiesUser'
+        card_codes:
+          type: array
+          items:
+            type: string
+        total_assigned:
+          type: integer
+      required:
+      - card_codes
+      - parties
+      - total_assigned
+      - user
+    UserPartiesError:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+      required:
+      - message
+      - success
+    UserPartiesUser:
+      type: object
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        name:
+          type: string
+      required:
+      - id
+      - name
+      - username
+    UserPartyAssignmentItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        card_code:
+          type: string
+        card_name:
+          type: string
+        state:
+          type: string
+          nullable: true
+        main_group:
+          type: string
+          nullable: true
+        category:
+          type: string
+          nullable: true
+        assigned_at:
+          type: string
+          format: date-time
+      required:
+      - assigned_at
+      - card_code
+      - card_name
+      - category
+      - id
+      - main_group
+      - state
     WorkingStatusEnum:
       enum:
       - Working

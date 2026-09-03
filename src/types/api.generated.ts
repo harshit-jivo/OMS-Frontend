@@ -431,19 +431,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /**
-         * @description Exchange credentials for a JWT pair.
-         *
-         *     Necessarily `AllowAny`, and therefore the one endpoint that most needs a
-         *     rate limit: nothing throttled it, so passwords could be guessed at whatever
-         *     speed the network allowed. `ScopedRateThrottle` applies the `login` rate
-         *     from settings (10/min per IP by default) rather than the looser `anon` one.
-         *
-         *     Keyed by IP, which is the only identifier available before authentication.
-         *     A shared office NAT therefore shares one bucket — the rate is set high
-         *     enough that ordinary humans never reach it and low enough that guessing is
-         *     hopeless.
-         */
+        /** @description Exchange credentials for a JWT pair. Returns two materially different bodies: 200 carries `data.user` and `data.tokens`, while 401 carries `errors` and no `data` at all. */
         post: operations["v1_auth_login_create"];
         delete?: never;
         options?: never;
@@ -614,6 +602,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** @description The authenticated session identity. `data` is the full `UserSerializer` record for `request.user` — roles, assignments and `extra_pages` — which the frontend route guards read. Single code path: no error branch of its own. */
         get: operations["v1_auth_profile_retrieve"];
         put?: never;
         post?: never;
@@ -667,18 +656,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * @description The role vocabulary. Any authenticated user.
-         *
-         *     Deliberately NOT admin-only: `approvals` reads it to build the approver
-         *     picker, and that page is open to `Payments_Dashboard` holders who are not
-         *     administrators. It exposes role names, not who holds them.
-         *
-         *     Had no `permission_classes` at all, which under DRF's default meant
-         *     `AllowAny` — the silent-hole case that Phase 2.1's
-         *     `DEFAULT_PERMISSION_CLASSES` exists to eliminate.
-         */
-        get: operations["v1_auth_roles_retrieve"];
+        /** @description The active role vocabulary, as a bare array of `{id, name, display_name}`. No envelope. */
+        get: operations["v1_auth_roles_list"];
         put?: never;
         post?: never;
         delete?: never;
@@ -790,14 +769,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * @description The parties assigned to a user — own record, or any record for an admin.
-         *
-         *     Was `AllowAny`, which exposed the whole customer-to-salesperson map to
-         *     anonymous callers. Scoped rather than admin-gated because the dashboard
-         *     calls this for the logged-in user on every load; only the assignment-
-         *     management screen reads someone else's.
-         */
+        /** @description Parties assigned to `user_id`. 403 when a non-admin asks for someone else's record and 404 when the user does not exist; both carry `{success: false, message}` and no `data`. */
         get: operations["v1_auth_users_parties_retrieve"];
         put?: never;
         post?: never;
@@ -840,18 +812,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * @description The full user roster. Any authenticated user.
-         *
-         *     Was `AllowAny`, and `UserSerializer` listed `password` in its fields — so
-         *     this endpoint handed every account's password hash to anonymous callers.
-         *     Both halves are fixed: the hash is gone from the serializer and the roster
-         *     now needs a login.
-         *
-         *     Not admin-only, for the same reason as `RoleListView`: the approvals
-         *     configuration page builds its approver picker from this and is open to
-         *     `Payments_Dashboard` holders.
-         */
+        /** @description The active user roster, wrapped in `{success, data}`. The envelope is the point: every other list under `/auth/` returns a bare array, so clients must unwrap this one. */
         get: operations["v1_auth_users_list_retrieve"];
         put?: never;
         post?: never;
@@ -2720,6 +2681,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** @description One order with its items. Mounted twice — `/orderdetailsbyid/{order_id}/` and `/{order_id}/orderdetails/` — and both routes answer with the same `OrderDetailSerializer` body. Not scoped to the caller: any authenticated user may read any order id. */
         get: operations["v1_orders_orderdetails_retrieve"];
         put?: never;
         post?: never;
@@ -2736,7 +2698,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["v1_orders_orderlogs_retrieve"];
+        /**
+         * @description The audit timeline for one order, oldest first, with the "Order Created" row (action_id 1) excluded.
+         *
+         *     Note `performed_by_name`: an order sitting at "Rate approval" has its latest rate-approval log blanked to `performed_by=None` (or a synthetic pending row created) before serialising, and DRF OMITS the `performed_by_name` key entirely for such a row rather than sending null. Treat it as possibly-absent, not merely nullable.
+         */
+        get: operations["v1_orders_orderlogs_list"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2787,52 +2754,9 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * @description Advance (or reject) an order through its configured status flow.
+         * @description Advance or reject one order. The body is `{status: <status id>, reason?: <text>}`.
          *
-         *     Every transition runs under `transaction.atomic()` with the order row held
-         *     by `select_for_update()`. It previously ran with neither, across ~380 lines
-         *     and several dependent writes — the defect `approvals/services.py` names in
-         *     its own opening docstring as the reason its design differs:
-         *
-         *         "UpdateOrderStatusView.post is neither, across ~380 lines and several
-         *          dependent writes — so two approvers acting at once can both pass the
-         *          pending check and double-advance a document."
-         *
-         *     That is exactly right, and the multi-approver rate-approval path is where
-         *     it bit hardest. Two approvers submitting together both read
-         *     `rate_approval.status == "PENDING"`, both record a decision, and both then
-         *     ask `_has_pending_rate_approvals` — which by then answers "none pending" for
-         *     both. The order advanced twice, with two status logs and two notification
-         *     fan-outs. The guards were all present and all correct; they were simply
-         *     reading uncommitted state.
-         *
-         *     The lock serialises them. The second approver now blocks, re-reads
-         *     committed state, and takes the branch that was always meant for them:
-         *     "You have already approved this order."
-         *
-         *     Two things had to be true before locking was safe:
-         *
-         *     * **No network calls inside the transaction.** `send_order_notifications`
-         *       is called from nine points in this method and ends in
-         *       `requests.post(..., timeout=15)` per recipient. Holding a row lock across
-         *       that would trade a rare silent corruption for a routine hang. It now
-         *       defers through `transaction.on_commit` — see that function.
-         *
-         *     * **The hand-rolled rollbacks still work.** Several paths save the new
-         *       status and then restore `previous_status` on failure. Inside
-         *       `atomic()`, `return Response(...)` does NOT roll back — only an exception
-         *       does — so those restores are still doing the work. Leave them, and
-         *       do not convert them to exceptions without reading each one first.
-         *
-         *     What atomic() DOES fix for free is the crash case: the method saved the new
-         *     status at the top and validated entitlement ~60 lines later, so a process
-         *     death in between left an order advanced with no approval recorded. That
-         *     window is now rolled back by the database.
-         *
-         *     Deliberately unchanged: the 71 sites keying business logic off mutable
-         *     status NAMES, and the hardcoded status ids. Both are real problems and both
-         *     are a separate change — locking a fragile flow is still strictly better
-         *     than leaving it racy.
+         *     The response body is built by `orders.services.order_status.apply_order_status_transition`, not by this view, and that function has nine return points. The posted `status` id is also NOT always the status the order ends up in: the flow configuration can override it, and the multi-approver branch rolls it back — so read the `status` NAME in the response rather than assuming the one you sent.
          */
         post: operations["v1_orders_update_status_create"];
         delete?: never;
@@ -2848,6 +2772,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** @description Bill-to and ship-to addresses for one party, split by `address_type` and optionally narrowed by `category`. Either list can be empty; `is_fallback` is always False. */
         get: operations["v1_orders_addresses_retrieve"];
         put?: never;
         post?: never;
@@ -2894,18 +2819,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * @description Factory dispatch locations, for the "dispatch from" selector.
-         *
-         *     Reads `sap_sync.Branch` — the model the SAP sync writes and the one that
-         *     matches the table. It used to read `orders.Branches`, a second unmanaged
-         *     model on the same table that declared every column wrongly.
-         *
-         *     `distinct('bpl_name')` is deliberate and Postgres-specific (DISTINCT ON):
-         *     the table is unique on (bpl_id, category), so one physical factory appears
-         *     once per company DB it exists in, and the selector wants it once.
-         */
-        get: operations["v1_orders_branch_retrieve"];
+        /** @description Factory dispatch locations for the "dispatch from" selector. A bare array. Note `bpl_id` is a STRING here even though the column is an integer — see `orders.serializers.BranchSerializer` for why that is deliberate. */
+        get: operations["v1_orders_branch_list"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2923,6 +2838,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * @description The single order-write endpoint: create, save-as-draft and edit all post here, and an `order_id` in the BODY (not the URL) is what makes it an edit.
+         *
+         *     The response is not one shape. Six success branches exist — staff/standard/distributor, each for create and edit — and they agree on `id`, `order_number`, `total_amount`, `status`, `needs_approval` and `message` only. `order_type`, `employee_id`, `company`, `flagged_items` and `remarks` are each sent by some branches and not others, and the create and edit paths are separated by status code (201 vs 200).
+         */
         post: operations["v1_orders_create_create"];
         delete?: never;
         options?: never;
@@ -3049,7 +2969,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["v1_orders_list_retrieve"];
+        /** @description The approval queues and the dashboard list. A bare array of hand-built rows — no serializer describes it, and the shape is NOT `OrderListByUserIdSerializer`. Filtered by the `status`, `user_id`, `billing`, `include_sap` and `approval_pending` query parameters, but the row shape is the same on every branch. */
+        get: operations["v1_orders_list_list"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3195,12 +3116,15 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["v1_orders_notifications_retrieve"];
+        /** @description The caller's 50 most recent notifications, newest first. A bare array, hard-capped at 50 with no pagination and no total. */
+        get: operations["v1_orders_notifications_list"];
         put?: never;
+        /** @description Mark every unread notification of the caller as read. Reads nothing from the request body and always answers 200, even when nothing was unread. */
         post: operations["v1_orders_notifications_create"];
         delete?: never;
         options?: never;
         head?: never;
+        /** @description Mark one notification as read. Reads nothing from the request body: the id comes from the URL. */
         patch: operations["v1_orders_notifications_partial_update"];
         trace?: never;
     };
@@ -3211,12 +3135,15 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["v1_orders_notifications_retrieve_2"];
+        /** @description The caller's 50 most recent notifications, newest first. A bare array, hard-capped at 50 with no pagination and no total. */
+        get: operations["v1_orders_notifications_list_2"];
         put?: never;
+        /** @description Mark every unread notification of the caller as read. Reads nothing from the request body and always answers 200, even when nothing was unread. */
         post: operations["v1_orders_notifications_create_2"];
         delete?: never;
         options?: never;
         head?: never;
+        /** @description Mark one notification as read. Reads nothing from the request body: the id comes from the URL. */
         patch: operations["v1_orders_notifications_partial_update_2"];
         trace?: never;
     };
@@ -3252,6 +3179,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** @description One order with its items. Mounted twice — `/orderdetailsbyid/{order_id}/` and `/{order_id}/orderdetails/` — and both routes answer with the same `OrderDetailSerializer` body. Not scoped to the caller: any authenticated user may read any order id. */
         get: operations["v1_orders_orderdetailsbyid_retrieve"];
         put?: never;
         post?: never;
@@ -3284,7 +3212,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["v1_orders_ordersbyuser_retrieve"];
+        /** @description Every order created by `user_id`, newest first. Roles in `ORDERS_CROSS_USER_ROLES` may read any user; everyone else only themselves, and gets 403 otherwise. */
+        get: operations["v1_orders_ordersbyuser_list"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3300,7 +3229,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["v1_orders_parties_retrieve"];
+        /** @description The parties assigned to the calling user, as picker options. A bare array, ordered by card_name, and scoped to `request.user` — it takes no user parameter. */
+        get: operations["v1_orders_parties_list"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3332,7 +3262,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["v1_orders_party_products_retrieve"];
+        /** @description The products one party may be sold, with that party's rate — the product cascade on the Add Sales screen. A bare array. An assignment whose item_code has no active SAP product is skipped, so this can be shorter than the assignment list and can legitimately be empty. */
+        get: operations["v1_orders_party_products_list"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3364,7 +3295,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["v1_orders_products_retrieve"];
+        /** @description The product catalogue for the order form's picker, limited to item codes still active in SAP and optionally narrowed by the `category`, `brand`, `variety` and `type` query parameters. A bare array — the serializer was always there, spectacular simply cannot see it through a bare APIView. */
+        get: operations["v1_orders_products_list"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3427,7 +3359,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["v1_orders_schemes_retrieve"];
+        /** @description Active scheme products, optionally filtered by the `state_code` query parameter (matched against either the state code or its name). A bare array; `item_name` is added in Python after the query, so it is present on every row even though it is not a column. */
+        get: operations["v1_orders_schemes_list"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3444,7 +3377,7 @@ export interface paths {
             cookie?: never;
         };
         /** @description Read / update / delete a single scheme. */
-        get: operations["v1_orders_schemes_retrieve_2"];
+        get: operations["v1_orders_schemes_retrieve"];
         /** @description Read / update / delete a single scheme. */
         put: operations["v1_orders_schemes_update"];
         post?: never;
@@ -3511,7 +3444,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["v1_orders_status_retrieve"];
+        /** @description Every row of the order-status table as `{id, name}`. A bare array — no envelope, no pagination, and no `code`, which is the column the rest of the API keys off. */
+        get: operations["v1_orders_status_list"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4560,6 +4494,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** @description Distinct product sub groups ("varieties"), sorted case-insensitively, over active non-deleted products. Always 200; there is no error branch. `varieties` and `sub_groups` are the same list — `varieties` is the legacy key. */
         get: operations["v1_sap_product_varieties_retrieve"];
         put?: never;
         post?: never;
@@ -5227,8 +5162,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["v1_tracker_invoices_retrieve"];
+        /** @description Invoices visible to this user, as a BARE ARRAY — there is no envelope and no pagination. Note the rows are the LIST shape: no `events`, no `payment` object. POST to the same URL answers with the fuller DETAIL shape instead. */
+        get: operations["v1_tracker_invoices_list"];
         put?: never;
+        /** @description Create an invoice at the entry stage. The 201 body is the DETAIL serializer (`events` and `payment` included), NOT the list shape this endpoint returns on GET. */
         post: operations["v1_tracker_invoices_create"];
         delete?: never;
         options?: never;
@@ -5243,7 +5180,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["v1_tracker_invoices_retrieve_2"];
+        /** @description One invoice in full. 404 (with an empty body) both when no such invoice exists and when it lies outside the scope of this user — the two are deliberately indistinguishable. */
+        get: operations["v1_tracker_invoices_retrieve"];
         put?: never;
         post?: never;
         /**
@@ -5258,6 +5196,7 @@ export interface paths {
         delete: operations["v1_tracker_invoices_destroy"];
         options?: never;
         head?: never;
+        /** @description Partial update of an entry-stage invoice; the 200 body is the DETAIL shape. 403 (a `detail` sentence) when the invoice is locked or has left the entry desk, or when the caller is not on the entry desk. */
         patch: operations["v1_tracker_invoices_partial_update"];
         trace?: never;
     };
@@ -5335,7 +5274,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Everything the entry form / filters need in one call. */
+        /** @description Everything the entry form and the tracker filters need, in one call. All seven keys are always present (possibly as empty arrays); every list is restricted to `is_active` rows. */
         get: operations["v1_tracker_lookups_retrieve"];
         put?: never;
         post?: never;
@@ -5352,14 +5291,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * @description The actionable inbox: invoices parked at a stage this user handles.
-         *
-         *     The head-office / entry desk is shared: any entry-desk user sees every
-         *     invoice at the entry stage (freshly created or returned back), regardless of
-         *     creator. Returns every stage the user works (so all their desks show as tabs
-         *     even when empty) alongside the pending invoices.
-         */
+        /** @description The actionable inbox. `stages` lists EVERY stage this user works (so empty desks still render as tabs) with a pending count; `invoices` holds the in-progress invoices parked at those stages. Each invoice row is the list shape plus `arrived_via_return`, and — only when that is true — `return_reason`, `returned_from`, `returned_by` and `returned_at`, which drive the Current / Returned split. */
         get: operations["v1_tracker_my_queue_retrieve"];
         put?: never;
         post?: never;
@@ -5601,6 +5533,13 @@ export interface components {
             refresh: string;
             readonly access: string;
         };
+        /**
+         * @description * `DEMURRAGE` - Demurrage
+         *     * `LABOUR_COST` - Labour Cost
+         *     * `POINT_VALUE` - Point Value
+         * @enum {string}
+         */
+        AdditionalChargeTypeEnum: "DEMURRAGE" | "LABOUR_COST" | "POINT_VALUE";
         ApprovalLevel: {
             readonly id: number;
             workflow: number;
@@ -5744,6 +5683,47 @@ export interface components {
          * @enum {string}
          */
         CompanyEnum: "OIL" | "BEVERAGES" | "MART";
+        CreateOrder: {
+            /** @default  */
+            card_code: string;
+            card_name?: string;
+            /** @default 0 */
+            bill_to_id: number;
+            /** @default  */
+            bill_to_address: string;
+            /** @default 0 */
+            ship_to_id: number;
+            /** @default  */
+            ship_to_address: string;
+            /** @default 0 */
+            dispatch_from_id: number;
+            /** @default  */
+            dispatch_from_name: string;
+            /** @default  */
+            company: string;
+            /** @default  */
+            po_number: string;
+            /** @default  */
+            warehouse_code: string;
+            /** @default false */
+            is_foc: boolean;
+            /** @default  */
+            remarks: string;
+            items: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Format: decimal
+             * @default 0.0000
+             */
+            price_list_basic: string;
+            /** Format: date */
+            delivery_date?: string | null;
+            /** @default PARTY */
+            order_type: string;
+            /** @default  */
+            employee_id: string;
+        };
         /**
          * @description * `critical` - critical
          *     * `degraded` - degraded
@@ -5768,6 +5748,28 @@ export interface components {
          * @enum {string}
          */
         DocumentTypeEnum: "PAYMENT" | "DEPOSIT" | "ORDER";
+        /**
+         * @description * `RECEIVE` - Received
+         *     * `ADVANCE` - Advanced
+         *     * `RETURN` - Returned
+         *     * `NOTE` - Note
+         * @enum {string}
+         */
+        EventTypeEnum: "RECEIVE" | "ADVANCE" | "RETURN" | "NOTE";
+        GstRate: {
+            readonly id: number;
+            label: string;
+            /** Format: decimal */
+            rate: string;
+            is_active?: boolean;
+            sort_order?: number;
+        };
+        GstType: {
+            readonly id: number;
+            name: string;
+            is_active?: boolean;
+            sort_order?: number;
+        };
         HealthCheckResult: {
             name: string;
             criticality: components["schemas"]["CriticalityEnum"];
@@ -5788,6 +5790,12 @@ export interface components {
             status: components["schemas"]["Status837Enum"];
             checks: components["schemas"]["HealthCheckResult"][];
         };
+        /**
+         * @description * `FULL` - Full hold (work on it later)
+         *     * `PARTIAL` - Partial hold (portion of value)
+         * @enum {string}
+         */
+        HoldTypeEnum: "FULL" | "PARTIAL";
         InvoiceLog: {
             readonly id: number;
             readonly supersedes_so_number: string;
@@ -5831,6 +5839,12 @@ export interface components {
          * @enum {string}
          */
         InvoiceLogStatusEnum: "PENDING" | "APPROVED" | "REJECTED" | "EDITED" | "ERROR" | "POSTED_TO_SAP" | "CL_RAISED";
+        InvoiceMode: {
+            readonly id: number;
+            name: string;
+            is_active?: boolean;
+            sort_order?: number;
+        };
         InvoiceRefLogs: {
             readonly id: number;
             ref_id: string;
@@ -5843,6 +5857,32 @@ export interface components {
             /** Format: date-time */
             readonly posted_at: string;
             posted_by: number;
+        };
+        /**
+         * @description Only the entry-stage fields are writable. Flow state is engine-managed.
+         *     `invoice_value` is NOT accepted — it is always derived on the server as
+         *     taxable + GST amount + additional charge.
+         */
+        InvoiceWrite: {
+            /** Format: date */
+            invoice_date: string;
+            /** Format: date */
+            effective_month: string;
+            party_name: string;
+            party_code?: string;
+            party_gstin?: string;
+            invoice_number: string;
+            /** Format: decimal */
+            taxable_value: string;
+            gst_type: number;
+            gst_rate: number;
+            additional_charge_type?: components["schemas"]["AdditionalChargeTypeEnum"] | components["schemas"]["BlankEnum"];
+            /** Format: decimal */
+            additional_charge_amount?: string;
+            category: number;
+            unit: number;
+            branch: number;
+            mode: number;
         };
         LabelItem: {
             readonly id: number;
@@ -5868,14 +5908,349 @@ export interface components {
          * @enum {string}
          */
         LivenessStatusEnum: "up";
+        Login: {
+            username: string;
+            password: string;
+        };
+        LoginFailure: {
+            success: boolean;
+            message: string;
+            errors: {
+                [key: string]: string[];
+            };
+        };
+        LoginSuccess: {
+            success: boolean;
+            message: string;
+            data: components["schemas"]["LoginSuccessData"];
+        };
+        LoginSuccessData: {
+            user: components["schemas"]["User"];
+            tokens: components["schemas"]["LoginTokens"];
+        };
+        LoginTokens: {
+            access: string;
+            refresh: string;
+            token_type: string;
+            expires_in: number;
+        };
         MainGroup: {
             readonly id: number;
             name: string;
+        };
+        NotificationAck: {
+            message: string;
+        };
+        NotificationError: {
+            error: string;
         };
         NutritionUOM: {
             readonly id: number;
             uom_name: string;
             uom_unit: string;
+        };
+        OrderCreateResult: {
+            id: number;
+            order_number: string;
+            total_amount: string;
+            status: string;
+            needs_approval: boolean;
+            message: string;
+            order_type?: string;
+            employee_id?: string | null;
+            company?: string | null;
+            flagged_items?: string[];
+            remarks?: string;
+        };
+        /** @description Schema alias for `OrderDetailSerializer`, with its method fields typed. */
+        OrderDetail: {
+            readonly id: number;
+            order_number: string;
+            card_code: string;
+            card_name: string;
+            bill_to_id?: number;
+            bill_to_address?: string | null;
+            ship_to_id?: number;
+            ship_to_address?: string | null;
+            dispatch_from_id?: number;
+            dispatch_from_name?: string | null;
+            company?: string | null;
+            po_number?: string | null;
+            warehouse_code?: string;
+            is_foc?: boolean;
+            remarks?: string | null;
+            /** Format: decimal */
+            total_amount?: string;
+            status: string;
+            status_display: string;
+            created_by?: number | null;
+            readonly created_by_name: string | null;
+            /** Format: date-time */
+            readonly created_at: string;
+            /** Format: date */
+            delivery_date?: string | null;
+            sap_created?: boolean;
+            sap_doc_number?: string | null;
+            quotation_cancelled?: boolean;
+            approved_by?: number | null;
+            /** Format: date-time */
+            approved_at?: string | null;
+            rejected_by?: number | null;
+            /** Format: date-time */
+            rejected_at?: string | null;
+            rejection_reason?: string | null;
+            reject_reason?: string;
+            /** Format: date-time */
+            readonly updated_at: string;
+            readonly items: components["schemas"]["OrderItemDetail"][];
+            readonly items_count: number;
+            readonly party_state: string | null;
+            readonly rate_approvals: components["schemas"]["OrderRateApproval"][];
+            readonly vareity_cost: components["schemas"]["OrderVarietyCost"];
+        };
+        OrderEditResult: {
+            id: number;
+            order_number: string;
+            total_amount: string;
+            status: string;
+            needs_approval: boolean;
+            message: string;
+            order_type?: string;
+            employee_id?: string | null;
+            company?: string | null;
+        };
+        OrderItemApprover: {
+            id: number;
+            name: string;
+        };
+        /** @description Schema alias for `OrderItemSerializer`, with its method fields typed. */
+        OrderItemDetail: {
+            readonly id: number;
+            readonly scheme_id: number | null;
+            readonly scheme_name: string | null;
+            readonly scheme_item_code: string | null;
+            readonly is_scheme_visible: boolean;
+            readonly schemes: components["schemas"]["OrderItemScheme"][];
+            readonly approval_approvers: components["schemas"]["OrderItemApprover"][];
+            readonly variety: string;
+            readonly variety_type: string;
+            /** Format: double */
+            readonly last_purchase_price: number | null;
+            item_code: string;
+            item_name?: string | null;
+            category?: string | null;
+            brand?: string | null;
+            sub_group?: string | null;
+            item_type?: string | null;
+            /** Format: decimal */
+            qty?: string;
+            /** Format: decimal */
+            pcs?: string;
+            /** Format: decimal */
+            boxes?: string;
+            /** Format: decimal */
+            ltrs?: string;
+            /** Format: decimal */
+            price_list_basic?: string;
+            /** Format: decimal */
+            basic_price?: string;
+            /** Format: decimal */
+            total?: string;
+            /** Format: decimal */
+            tax_rate?: string;
+            /** Format: decimal */
+            qty_scheme?: string | null;
+            is_auto_free?: boolean;
+            combo_source_code?: string | null;
+            order: number;
+            scheme?: number | null;
+        };
+        /**
+         * @description Schema alias for `OrderItemSchemeSerializer`.
+         *
+         *     Both getters return None when the line carries no scheme id, which is the
+         *     common case.
+         */
+        OrderItemScheme: {
+            readonly id: number;
+            readonly scheme_id: number | null;
+            readonly scheme_name: string | null;
+            readonly scheme_item_code: string | null;
+            /** Format: decimal */
+            readonly scheme_qty: string;
+            /** Format: decimal */
+            qty_scheme?: string | null;
+        };
+        OrderLifecycleError: {
+            detail: string;
+            message: string;
+            error: string;
+            success: boolean;
+        };
+        /** @description Schema alias for `OrderListByUserIdSerializer`. */
+        OrderListByUserId: {
+            readonly id: number;
+            order_number: string;
+            order_type?: components["schemas"]["OrderTypeEnum"];
+            card_code: string;
+            card_name: string;
+            is_foc?: boolean;
+            /** Format: decimal */
+            total_amount?: string;
+            status: number;
+            status_name: string;
+            readonly status_display: string;
+            readonly created_by: number;
+            readonly created_by_name: string | null;
+            /** Format: date-time */
+            readonly created_at: string;
+            /** Format: date */
+            delivery_date?: string | null;
+        };
+        OrderListRow: {
+            id: number;
+            order_number: string;
+            order_type: string;
+            employee_id: string | null;
+            card_code: string;
+            card_name: string;
+            total_amount: string;
+            status: string;
+            status_display: string;
+            sap_doc_number: string;
+            items_count: number;
+            created_by: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date */
+            delivery_date: string | null;
+            is_foc: boolean;
+        };
+        OrderRateApproval: {
+            readonly id: number;
+            approver: number;
+            readonly approver_name: string;
+            status?: components["schemas"]["OrderRateApprovalStatusEnum"];
+            remarks?: string | null;
+            /** Format: date-time */
+            approved_at?: string | null;
+            /** Format: date-time */
+            readonly created_at: string;
+        };
+        /**
+         * @description * `PENDING` - Pending
+         *     * `APPROVED` - Approved
+         *     * `REJECTED` - Rejected
+         * @enum {string}
+         */
+        OrderRateApprovalStatusEnum: "PENDING" | "APPROVED" | "REJECTED";
+        OrderStatusAlreadyDecided: {
+            message: string;
+            order_id: number;
+            status: string;
+            approval_status: string;
+        };
+        OrderStatusOption: {
+            id: number;
+            name: string;
+        };
+        OrderStatusUpdate: {
+            status: number;
+            reason?: string;
+        };
+        OrderStatusUpdateBadRequest: components["schemas"]["OrderStatusAlreadyDecided"] | components["schemas"]["OrderStatusUpdateInvalid"];
+        OrderStatusUpdateForbidden: {
+            message?: string;
+            detail?: string;
+            error?: string;
+            success?: boolean;
+        };
+        OrderStatusUpdateInvalid: {
+            status?: string[];
+            reason?: string[];
+            detail: string;
+            message: string;
+            error: string;
+            success: boolean;
+        };
+        OrderStatusUpdateResult: {
+            message: string;
+            order_id: number;
+            status: string;
+            approval_status?: string;
+            pending_approvers?: string[];
+        };
+        /**
+         * @description * `PARTY` - Party
+         *     * `STAFF` - Staff
+         *     * `DISTRIBUTOR` - Distributor
+         * @enum {string}
+         */
+        OrderTypeEnum: "PARTY" | "STAFF" | "DISTRIBUTOR";
+        OrderVarietyCost: {
+            /** Format: double */
+            commodity_price: number;
+            /** Format: double */
+            other_total: number;
+            /** Format: double */
+            premium_total: number;
+        };
+        /** @description Schema alias for `orders.serializers.BranchSerializer`. */
+        OrdersBranch: {
+            bpl_id: string;
+            bpl_name: string;
+            category: components["schemas"]["CategoryEnum"];
+        };
+        OrdersByUserForbidden: {
+            detail: string;
+        };
+        /** @description Schema alias for `OrdersLogSerializer` — `performed_by_name` optional. */
+        OrdersLog: {
+            readonly id: number;
+            readonly status_id: number;
+            readonly status_name: string;
+            readonly remarks: string;
+            performed_by_name?: string;
+            /** Format: date-time */
+            readonly created_at: string;
+        };
+        /** @description Schema alias for `orders.serializers.NotificationSerializer`. */
+        OrdersNotification: {
+            readonly id: number;
+            message: string;
+            is_read?: boolean;
+            /** Format: date-time */
+            readonly created_at: string;
+            readonly order_id: number;
+        };
+        /** @description Schema alias for `orders.serializers.PartyAddressSerializer`. */
+        OrdersPartyAddress: {
+            readonly id: number;
+            full_address?: string | null;
+            gst_number?: string | null;
+            address_type: string;
+            address_name: string;
+            category?: string | null;
+        };
+        /** @description Schema alias for `orders.serializers.ProductSerializer`. */
+        OrdersProduct: {
+            readonly id: number;
+            item_code: string;
+            item_name: string;
+            category?: string | null;
+            brand?: string | null;
+            variety?: string | null;
+            /** Format: decimal */
+            sal_factor2?: string;
+            /** Format: decimal */
+            tax_rate?: string;
+            sal_pack_unit?: string | null;
+        };
+        OrdersQueryError: {
+            detail: string;
+            message: string;
+            error: string;
+            success: boolean;
         };
         PaginatedApprovalWorkflowList: {
             /** @example 123 */
@@ -5939,7 +6314,6 @@ export interface components {
         };
         Party: {
             readonly id: number;
-            readonly addresses: components["schemas"]["PartyAddress"][];
             card_code: string;
             card_name: string;
             address?: string | null;
@@ -5967,6 +6341,14 @@ export interface components {
             /** Format: date-time */
             readonly synced_at: string;
         };
+        PartyAddresses: {
+            bill_to: components["schemas"]["OrdersPartyAddress"][];
+            ship_to: components["schemas"]["OrdersPartyAddress"][];
+            is_fallback: boolean;
+        };
+        PartyAddressesError: {
+            error: string;
+        };
         PartyList: {
             readonly id: number;
             card_code: string;
@@ -5977,6 +6359,53 @@ export interface components {
             category?: string | null;
             /** Format: date-time */
             readonly synced_at: string;
+        };
+        PartyOption: {
+            value: string;
+            card_code: string;
+            card_name: string;
+            label: string;
+            category: string | null;
+            state: string | null;
+        };
+        PartyProductFreeItem: {
+            item_code: string;
+            item_name: string | null;
+            category: string;
+            brand: string | null;
+            variety: string | null;
+            sub_group: string | null;
+            /** Format: double */
+            sal_factor2: number | null;
+            sal_pack_unit: string | null;
+            /** Format: double */
+            tax_rate: number | null;
+            /** Format: double */
+            basic_rate: number;
+        };
+        PartyProductRow: {
+            free_item: components["schemas"]["PartyProductFreeItem"] | null;
+            item_code: string;
+            category: string;
+            /** Format: double */
+            basic_rate: number;
+            /** Format: date-time */
+            updated_at: string | null;
+            item_name: string | null;
+            /** Format: double */
+            sal_factor2: number | null;
+            /** Format: double */
+            tax_rate: number | null;
+            sal_pack_unit: string | null;
+            brand: string | null;
+            variety: string | null;
+            sub_group: string | null;
+            combo_scheme_id: number | null;
+            combo_scheme_name: string | null;
+            is_combo: boolean;
+            free_item_code: string | null;
+            /** Format: double */
+            free_qty_per_unit: number | null;
         };
         PatchedApprovalLevel: {
             readonly id?: number;
@@ -6106,6 +6535,32 @@ export interface components {
             created_by?: number;
             readonly deleted_by?: number | null;
         };
+        /**
+         * @description Only the entry-stage fields are writable. Flow state is engine-managed.
+         *     `invoice_value` is NOT accepted — it is always derived on the server as
+         *     taxable + GST amount + additional charge.
+         */
+        PatchedInvoiceWrite: {
+            /** Format: date */
+            invoice_date?: string;
+            /** Format: date */
+            effective_month?: string;
+            party_name?: string;
+            party_code?: string;
+            party_gstin?: string;
+            invoice_number?: string;
+            /** Format: decimal */
+            taxable_value?: string;
+            gst_type?: number;
+            gst_rate?: number;
+            additional_charge_type?: components["schemas"]["AdditionalChargeTypeEnum"] | components["schemas"]["BlankEnum"];
+            /** Format: decimal */
+            additional_charge_amount?: string;
+            category?: number;
+            unit?: number;
+            branch?: number;
+            mode?: number;
+        };
         PatchedLabelItem: {
             readonly id?: number;
             item_name?: string;
@@ -6195,6 +6650,30 @@ export interface components {
             sort_order?: number;
             is_active?: boolean;
         };
+        PaymentDetail: {
+            /** Format: decimal */
+            discount_pct?: string;
+            /** Format: decimal */
+            tds_pct?: string;
+            hold_added_back?: boolean;
+            /** Format: decimal */
+            readonly discount_amount: string;
+            /** Format: decimal */
+            readonly tds_amount: string;
+            /** Format: decimal */
+            paid_amount?: string;
+            /** Format: decimal */
+            readonly open_balance: string;
+            readonly status: components["schemas"]["PaymentDetailStatusEnum"];
+            /** Format: date-time */
+            readonly updated_at: string;
+        };
+        /**
+         * @description * `OPEN` - Open
+         *     * `PAID` - Paid
+         * @enum {string}
+         */
+        PaymentDetailStatusEnum: "OPEN" | "PAID";
         /**
          * @description Admin CRUD for the method -> SAP account mapping.
          *
@@ -6239,11 +6718,31 @@ export interface components {
             readonly created_at: string;
             is_active?: string | null;
         };
+        Profile: {
+            success: boolean;
+            data: components["schemas"]["User"];
+        };
         Readiness: {
             status: components["schemas"]["Status837Enum"];
             checks: {
                 [key: string]: string;
             };
+        };
+        /**
+         * @description * `ON_TIME` - On time
+         *     * `LATE` - Late received (After 6 PM)
+         * @enum {string}
+         */
+        ReceivingNoteEnum: "ON_TIME" | "LATE";
+        Role: {
+            readonly id: number;
+            name: string;
+            display_name: string;
+        };
+        RoleListItem: {
+            id: number;
+            name: string;
+            display_name: string;
         };
         SKU: {
             readonly id: number;
@@ -6286,6 +6785,31 @@ export interface components {
             is_active?: boolean;
             sort_order?: number;
         };
+        SapProductVarietyList: {
+            category: string;
+            count: number;
+            varieties: string[];
+            sub_groups: string[];
+        };
+        SchemeListRow: {
+            scheme_id: number;
+            scheme_name: string;
+            state_code: string | null;
+            item_code: string | null;
+            item_name: string;
+        };
+        Stage: {
+            readonly id: number;
+            code: string;
+            name: string;
+            order: number;
+            threshold_days?: number;
+            status_choices?: unknown;
+            requires_status?: boolean;
+            can_return?: boolean;
+            is_terminal?: boolean;
+            is_active?: boolean;
+        };
         State: {
             readonly id: number;
             name: string;
@@ -6298,6 +6822,12 @@ export interface components {
          * @enum {string}
          */
         Status837Enum: "up" | "down" | "degraded";
+        /**
+         * @description * `IN_PROGRESS` - In Progress
+         *     * `COMPLETED` - Completed
+         * @enum {string}
+         */
+        StatusCd2Enum: "IN_PROGRESS" | "COMPLETED";
         StorageType: {
             readonly id: number;
             name: string;
@@ -6334,6 +6864,386 @@ export interface components {
          * @enum {string}
          */
         SyncTypeEnum: "PRODUCT" | "PARTY" | "PARTY_ADDRESS" | "ALL";
+        /**
+         * @description Schema-only alias — see `TrackerCategorySerializer`. `Branch` is already
+         *     taken by the orders/HANA branch serializer.
+         */
+        TrackerBranch: {
+            readonly id: number;
+            name: string;
+            is_active?: boolean;
+            sort_order?: number;
+        };
+        /**
+         * @description Schema-only alias with the same fields.
+         *
+         *     `CategorySerializer` would be published under the component name
+         *     `Category`, which an unrelated serializer in another app already owns. Two
+         *     different classes claiming one component name makes the schema wrong for
+         *     one of them, silently. Renaming here keeps both honest.
+         */
+        TrackerCategory: {
+            readonly id: number;
+            name: string;
+            is_active?: boolean;
+            sort_order?: number;
+        };
+        TrackerError: {
+            detail: string;
+            message?: string;
+            error?: string;
+            success?: boolean;
+        };
+        /**
+         * @description Schema-only counterpart of `InvoiceDetailSerializer` — the list shape
+         *     plus the full stage-event log and the payment row.
+         *
+         *     `payment` is a reverse one-to-one that does not exist until the invoice
+         *     reaches the payment desk, and DRF renders a missing one as null rather than
+         *     omitting the key; hence `allow_null`.
+         */
+        TrackerInvoiceDetail: {
+            readonly id: number;
+            /** Format: date */
+            invoice_date: string;
+            /** Format: date */
+            effective_month: string;
+            party_name: string;
+            party_code?: string;
+            party_gstin?: string;
+            invoice_number: string;
+            /** Format: decimal */
+            taxable_value: string;
+            gst_type: number;
+            readonly gst_type_name: string;
+            gst_rate: number;
+            readonly gst_rate_label: string;
+            /** Format: decimal */
+            readonly gst_amount: string;
+            additional_charge_type?: components["schemas"]["AdditionalChargeTypeEnum"] | components["schemas"]["BlankEnum"];
+            readonly additional_charge_type_display: string;
+            /** Format: decimal */
+            additional_charge_amount?: string;
+            /** Format: decimal */
+            invoice_value: string;
+            /** Format: decimal */
+            debit_amount?: string;
+            /** Format: decimal */
+            hold_amount?: string;
+            /** Format: decimal */
+            readonly net_invoice_value: string;
+            category: number;
+            readonly category_name: string;
+            unit: number;
+            readonly unit_name: string;
+            branch: number;
+            readonly branch_name: string;
+            mode: number;
+            readonly mode_name: string;
+            current_stage: number;
+            readonly current_stage_code: string;
+            readonly current_stage_name: string;
+            status?: components["schemas"]["StatusCd2Enum"];
+            /** Format: date-time */
+            current_stage_entered_at: string;
+            is_locked?: boolean;
+            rejection_pending?: boolean;
+            /** Format: double */
+            readonly days_at_stage: number;
+            readonly is_overdue: boolean;
+            readonly editable: boolean;
+            readonly payment_status: string | null;
+            readonly paid_amount: string | null;
+            readonly open_balance: string | null;
+            readonly is_partially_paid: boolean;
+            created_by: number;
+            readonly created_by_name: string;
+            /** Format: date-time */
+            readonly created_at: string;
+            /** Format: date-time */
+            readonly updated_at: string;
+            readonly events: components["schemas"]["TrackerStageEvent"][];
+            readonly payment: components["schemas"]["PaymentDetail"] | null;
+        };
+        /**
+         * @description Schema-only. Never instantiated at runtime.
+         *
+         *     The same fields as `InvoiceListSerializer` — but its seven
+         *     `SerializerMethodField`s carry no return type hint, and drf-spectacular
+         *     defaults an unhinted method field to `string`. Published as-is that would
+         *     describe four booleans and three nullable strings as plain non-null
+         *     strings: precisely the confidently-wrong type a generated client cannot
+         *     recover from. Each is re-declared here as what the getter really returns:
+         *
+         *         days_at_stage      `services.days_at_stage` -> Decimal, which DRF's
+         *                            JSON encoder renders as a NUMBER, not a string
+         *         is_overdue         bool
+         *         editable           bool
+         *         is_partially_paid  bool
+         *         payment_status     PaymentDetail.Status, or null when the invoice has
+         *         paid_amount        no payment row yet; the two amounts are `str()` of
+         *         open_balance       a Decimal, so decimal STRINGS or null
+         */
+        TrackerInvoiceList: {
+            readonly id: number;
+            /** Format: date */
+            invoice_date: string;
+            /** Format: date */
+            effective_month: string;
+            party_name: string;
+            party_code?: string;
+            party_gstin?: string;
+            invoice_number: string;
+            /** Format: decimal */
+            taxable_value: string;
+            gst_type: number;
+            readonly gst_type_name: string;
+            gst_rate: number;
+            readonly gst_rate_label: string;
+            /** Format: decimal */
+            readonly gst_amount: string;
+            additional_charge_type?: components["schemas"]["AdditionalChargeTypeEnum"] | components["schemas"]["BlankEnum"];
+            readonly additional_charge_type_display: string;
+            /** Format: decimal */
+            additional_charge_amount?: string;
+            /** Format: decimal */
+            invoice_value: string;
+            /** Format: decimal */
+            debit_amount?: string;
+            /** Format: decimal */
+            hold_amount?: string;
+            /** Format: decimal */
+            readonly net_invoice_value: string;
+            category: number;
+            readonly category_name: string;
+            unit: number;
+            readonly unit_name: string;
+            branch: number;
+            readonly branch_name: string;
+            mode: number;
+            readonly mode_name: string;
+            current_stage: number;
+            readonly current_stage_code: string;
+            readonly current_stage_name: string;
+            status?: components["schemas"]["StatusCd2Enum"];
+            /** Format: date-time */
+            current_stage_entered_at: string;
+            is_locked?: boolean;
+            rejection_pending?: boolean;
+            /** Format: double */
+            readonly days_at_stage: number;
+            readonly is_overdue: boolean;
+            readonly editable: boolean;
+            readonly payment_status: string | null;
+            readonly paid_amount: string | null;
+            readonly open_balance: string | null;
+            readonly is_partially_paid: boolean;
+            created_by: number;
+            readonly created_by_name: string;
+            /** Format: date-time */
+            readonly created_at: string;
+            /** Format: date-time */
+            readonly updated_at: string;
+        };
+        TrackerLookups: {
+            categories: components["schemas"]["TrackerCategory"][];
+            units: components["schemas"]["Unit"][];
+            branches: components["schemas"]["TrackerBranch"][];
+            modes: components["schemas"]["InvoiceMode"][];
+            gst_types: components["schemas"]["GstType"][];
+            gst_rates: components["schemas"]["GstRate"][];
+            stages: components["schemas"]["Stage"][];
+        };
+        TrackerMyQueue: {
+            stages: components["schemas"]["TrackerMyQueueStage"][];
+            invoices: components["schemas"]["TrackerQueueInvoice"][];
+        };
+        TrackerMyQueueStage: {
+            code: string;
+            name: string;
+            order: number;
+            count: number;
+        };
+        /**
+         * @description Schema-only. Never instantiated at runtime.
+         *
+         *     `MyQueueView` serialises its rows with `InvoiceListSerializer` and then
+         *     MUTATES each row dict, adding return-tracking keys that exist in no
+         *     serializer but which the Current-vs-Returned tab split depends on.
+         *     `arrived_via_return` is set on every row; the other four are added only
+         *     when it is True, so they are declared optional.
+         */
+        TrackerQueueInvoice: {
+            readonly id: number;
+            /** Format: date */
+            invoice_date: string;
+            /** Format: date */
+            effective_month: string;
+            party_name: string;
+            party_code?: string;
+            party_gstin?: string;
+            invoice_number: string;
+            /** Format: decimal */
+            taxable_value: string;
+            gst_type: number;
+            readonly gst_type_name: string;
+            gst_rate: number;
+            readonly gst_rate_label: string;
+            /** Format: decimal */
+            readonly gst_amount: string;
+            additional_charge_type?: components["schemas"]["AdditionalChargeTypeEnum"] | components["schemas"]["BlankEnum"];
+            readonly additional_charge_type_display: string;
+            /** Format: decimal */
+            additional_charge_amount?: string;
+            /** Format: decimal */
+            invoice_value: string;
+            /** Format: decimal */
+            debit_amount?: string;
+            /** Format: decimal */
+            hold_amount?: string;
+            /** Format: decimal */
+            readonly net_invoice_value: string;
+            category: number;
+            readonly category_name: string;
+            unit: number;
+            readonly unit_name: string;
+            branch: number;
+            readonly branch_name: string;
+            mode: number;
+            readonly mode_name: string;
+            current_stage: number;
+            readonly current_stage_code: string;
+            readonly current_stage_name: string;
+            status?: components["schemas"]["StatusCd2Enum"];
+            /** Format: date-time */
+            current_stage_entered_at: string;
+            is_locked?: boolean;
+            rejection_pending?: boolean;
+            /** Format: double */
+            readonly days_at_stage: number;
+            readonly is_overdue: boolean;
+            readonly editable: boolean;
+            readonly payment_status: string | null;
+            readonly paid_amount: string | null;
+            readonly open_balance: string | null;
+            readonly is_partially_paid: boolean;
+            created_by: number;
+            readonly created_by_name: string;
+            /** Format: date-time */
+            readonly created_at: string;
+            /** Format: date-time */
+            readonly updated_at: string;
+            arrived_via_return: boolean;
+            return_reason?: string;
+            returned_from?: string;
+            returned_by?: string | null;
+            /** Format: date-time */
+            returned_at?: string;
+        };
+        /**
+         * @description Schema-only alias of `StageEventSerializer`, with one correction.
+         *
+         *     `acted_by_name` walks `acted_by.username` with `default=None`, so it is
+         *     NULL on every event the engine wrote unattended (a scheduled JSAP sync, an
+         *     auto-advance). The base serializer leaves drf-spectacular describing it as
+         *     a non-null string.
+         */
+        TrackerStageEvent: {
+            readonly id: number;
+            stage: number;
+            readonly stage_name: string;
+            readonly stage_code: string;
+            event_type: components["schemas"]["EventTypeEnum"];
+            stage_status?: string;
+            hold_type?: components["schemas"]["HoldTypeEnum"] | components["schemas"]["BlankEnum"];
+            /** Format: decimal */
+            amount?: string | null;
+            receiving_note?: components["schemas"]["ReceivingNoteEnum"] | components["schemas"]["BlankEnum"];
+            remarks?: string;
+            acted_by?: number | null;
+            readonly acted_by_name: string | null;
+            /** Format: date-time */
+            entered_at: string;
+            /** Format: date-time */
+            exited_at?: string | null;
+            /** Format: decimal */
+            days_spent?: string | null;
+        };
+        TrackerValidationError: {
+            detail: string;
+            message: string;
+            error: string;
+            success: boolean;
+        };
+        Unit: {
+            readonly id: number;
+            name: string;
+            is_active?: boolean;
+            sort_order?: number;
+        };
+        User: {
+            readonly id: number;
+            name: string;
+            username: string;
+            /** Format: email */
+            email?: string | null;
+            phone?: string | null;
+            readonly role: string;
+            readonly role_display: string;
+            readonly extra_roles: components["schemas"]["Role"][];
+            readonly roles: string[];
+            readonly company: components["schemas"]["Company"] | null;
+            readonly main_group: components["schemas"]["MainGroup"] | null;
+            readonly main_groups: components["schemas"]["MainGroup"][];
+            readonly state: components["schemas"]["State"] | null;
+            readonly states: components["schemas"]["State"][];
+            readonly category: components["schemas"]["Category"] | null;
+            readonly categories: components["schemas"]["Category"][];
+            sub_group?: string | null;
+            readonly is_active: boolean;
+            readonly is_superuser: boolean;
+            readonly is_staff: boolean;
+            /** Format: date-time */
+            readonly last_login: string;
+            /** Format: date-time */
+            readonly date_joined: string;
+            extra_pages?: unknown;
+            /** Format: date-time */
+            readonly created_at: string;
+        };
+        UserListForAssignment: {
+            success: boolean;
+            data: components["schemas"]["User"][];
+        };
+        UserParties: {
+            success: boolean;
+            data: components["schemas"]["UserPartiesData"];
+        };
+        UserPartiesData: {
+            parties: components["schemas"]["UserPartyAssignmentItem"][];
+            user: components["schemas"]["UserPartiesUser"];
+            card_codes: string[];
+            total_assigned: number;
+        };
+        UserPartiesError: {
+            success: boolean;
+            message: string;
+        };
+        UserPartiesUser: {
+            id: number;
+            username: string;
+            name: string;
+        };
+        UserPartyAssignmentItem: {
+            id: number;
+            card_code: string;
+            card_name: string;
+            state: string | null;
+            main_group: string | null;
+            category: string | null;
+            /** Format: date-time */
+            assigned_at: string;
+        };
         /**
          * @description * `Working` - Working
          *     * `Under Repair` - Under Repair
@@ -7101,14 +8011,29 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Login"];
+                "application/x-www-form-urlencoded": components["schemas"]["Login"];
+                "multipart/form-data": components["schemas"]["Login"];
+            };
+        };
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["LoginSuccess"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginFailure"];
+                };
             };
         };
     };
@@ -7270,12 +8195,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["Profile"];
+                };
             };
         };
     };
@@ -7322,7 +8248,7 @@ export interface operations {
             };
         };
     };
-    v1_auth_roles_retrieve: {
+    v1_auth_roles_list: {
         parameters: {
             query?: never;
             header?: never;
@@ -7331,12 +8257,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["RoleListItem"][];
+                };
             };
         };
     };
@@ -7461,7 +8388,10 @@ export interface operations {
     };
     v1_auth_users_parties_retrieve: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Scope the assignments to one category. The literal value `all` bypasses scoping and returns every category. Any other value is honoured only if it is one of the user's own categories, otherwise the user's primary category is used. */
+                category?: string;
+            };
             header?: never;
             path: {
                 user_id: number;
@@ -7470,12 +8400,29 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["UserParties"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserPartiesError"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserPartiesError"];
+                };
             };
         };
     };
@@ -7506,12 +8453,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["UserListForAssignment"];
+                };
             };
         };
     };
@@ -10265,16 +11213,26 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["OrderDetail"];
+                };
+            };
+            /** @description No order with this id (`get_object_or_404`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrdersQueryError"];
+                };
             };
         };
     };
-    v1_orders_orderlogs_retrieve: {
+    v1_orders_orderlogs_list: {
         parameters: {
             query?: never;
             header?: never;
@@ -10285,12 +11243,22 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["OrdersLog"][];
+                };
+            };
+            /** @description No order with this id (`get_object_or_404`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrdersQueryError"];
+                };
             };
         };
     };
@@ -10343,14 +11311,48 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrderStatusUpdate"];
+                "application/x-www-form-urlencoded": components["schemas"]["OrderStatusUpdate"];
+                "multipart/form-data": components["schemas"]["OrderStatusUpdate"];
+            };
+        };
         responses: {
-            /** @description No response body */
+            /** @description The transition was applied — or, in the "already rejected" and "waiting for remaining approvers" branches, deliberately not applied. Every 200 branch sends `message`, `order_id` and `status`; the rate-approval ones add `approval_status`, and one of them adds `pending_approvers`. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["OrderStatusUpdateResult"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrderStatusUpdateBadRequest"];
+                };
+            };
+            /** @description Either the order is not assigned to this user for rate approval (the view's own `{"message": ...}`) or DRF refused the request (the `detail`/`message`/`error`/`success` envelope). The two do not share a key, so both are optional here. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrderStatusUpdateForbidden"];
+                };
+            };
+            /** @description No order with this id, or no order status with the posted `status` id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrderLifecycleError"];
+                };
             };
         };
     };
@@ -10363,12 +11365,22 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["PartyAddresses"];
+                };
+            };
+            /** @description `card_code` was missing from the query string. The view returns this itself, so the body is `{"error": ...}` and nothing else. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartyAddressesError"];
+                };
             };
         };
     };
@@ -10390,7 +11402,7 @@ export interface operations {
             };
         };
     };
-    v1_orders_branch_retrieve: {
+    v1_orders_branch_list: {
         parameters: {
             query?: never;
             header?: never;
@@ -10399,12 +11411,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["OrdersBranch"][];
+                };
             };
         };
     };
@@ -10415,14 +11428,52 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateOrder"];
+                "application/x-www-form-urlencoded": components["schemas"]["CreateOrder"];
+                "multipart/form-data": components["schemas"]["CreateOrder"];
+            };
+        };
         responses: {
-            /** @description No response body */
+            /** @description An EDIT — the request carried an `order_id`. Three branches land here (staff update, standard update, distributor edit) and their key sets differ; see the per-field notes on the schema. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["OrderEditResult"];
+                };
+            };
+            /** @description A CREATE — no `order_id` in the request. Three branches land here (staff, standard, distributor) and their key sets differ; see the per-field notes on the schema. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrderCreateResult"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                    } | {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Edit mode only: the `order_id` in the body matches no order (`get_object_or_404`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrderLifecycleError"];
+                };
             };
         };
     };
@@ -10571,7 +11622,7 @@ export interface operations {
             };
         };
     };
-    v1_orders_list_retrieve: {
+    v1_orders_list_list: {
         parameters: {
             query?: never;
             header?: never;
@@ -10580,12 +11631,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["OrderListRow"][];
+                };
             };
         };
     };
@@ -10687,7 +11739,7 @@ export interface operations {
             };
         };
     };
-    v1_orders_notifications_retrieve: {
+    v1_orders_notifications_list: {
         parameters: {
             query?: never;
             header?: never;
@@ -10696,12 +11748,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["OrdersNotification"][];
+                };
             };
         };
     };
@@ -10714,12 +11767,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["NotificationAck"];
+                };
             };
         };
     };
@@ -10732,16 +11786,35 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["NotificationAck"];
+                };
+            };
+            /** @description No `pk` in the URL. Reachable because this same view is routed both at `/notifications/` and at `/notifications/{pk}/`. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationError"];
+                };
+            };
+            /** @description No notification with that id BELONGING TO THE CALLER — the lookup is scoped to `request.user`, so another user's id reads as not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationError"];
+                };
             };
         };
     };
-    v1_orders_notifications_retrieve_2: {
+    v1_orders_notifications_list_2: {
         parameters: {
             query?: never;
             header?: never;
@@ -10752,12 +11825,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["OrdersNotification"][];
+                };
             };
         };
     };
@@ -10772,12 +11846,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["NotificationAck"];
+                };
             };
         };
     };
@@ -10792,12 +11867,31 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["NotificationAck"];
+                };
+            };
+            /** @description No `pk` in the URL. Reachable because this same view is routed both at `/notifications/` and at `/notifications/{pk}/`. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationError"];
+                };
+            };
+            /** @description No notification with that id BELONGING TO THE CALLER — the lookup is scoped to `request.user`, so another user's id reads as not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationError"];
+                };
             };
         };
     };
@@ -10830,12 +11924,22 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["OrderDetail"];
+                };
+            };
+            /** @description No order with this id (`get_object_or_404`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrdersQueryError"];
+                };
             };
         };
     };
@@ -10857,7 +11961,7 @@ export interface operations {
             };
         };
     };
-    v1_orders_ordersbyuser_retrieve: {
+    v1_orders_ordersbyuser_list: {
         parameters: {
             query?: never;
             header?: never;
@@ -10868,16 +11972,26 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["OrderListByUserId"][];
+                };
+            };
+            /** @description A non-privileged caller (anyone outside `ORDERS_CROSS_USER_ROLES`, and not staff/superuser) asked for another user's orders. The view writes this body itself, so it is `{"detail": ...}` alone. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrdersByUserForbidden"];
+                };
             };
         };
     };
-    v1_orders_parties_retrieve: {
+    v1_orders_parties_list: {
         parameters: {
             query?: never;
             header?: never;
@@ -10886,12 +12000,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["PartyOption"][];
+                };
             };
         };
     };
@@ -10949,7 +12064,7 @@ export interface operations {
             };
         };
     };
-    v1_orders_party_products_retrieve: {
+    v1_orders_party_products_list: {
         parameters: {
             query?: never;
             header?: never;
@@ -10960,12 +12075,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["PartyProductRow"][];
+                };
             };
         };
     };
@@ -10987,7 +12103,7 @@ export interface operations {
             };
         };
     };
-    v1_orders_products_retrieve: {
+    v1_orders_products_list: {
         parameters: {
             query?: never;
             header?: never;
@@ -10996,12 +12112,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["OrdersProduct"][];
+                };
             };
         };
     };
@@ -11059,7 +12176,7 @@ export interface operations {
             };
         };
     };
-    v1_orders_schemes_retrieve: {
+    v1_orders_schemes_list: {
         parameters: {
             query?: never;
             header?: never;
@@ -11068,16 +12185,17 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["SchemeListRow"][];
+                };
             };
         };
     };
-    v1_orders_schemes_retrieve_2: {
+    v1_orders_schemes_retrieve: {
         parameters: {
             query?: never;
             header?: never;
@@ -11211,7 +12329,7 @@ export interface operations {
             };
         };
     };
-    v1_orders_status_retrieve: {
+    v1_orders_status_list: {
         parameters: {
             query?: never;
             header?: never;
@@ -11220,12 +12338,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["OrderStatusOption"][];
+                };
             };
         };
     };
@@ -12496,10 +13615,14 @@ export interface operations {
     v1_sap_addresses_list: {
         parameters: {
             query?: {
+                category?: string;
+                city?: string;
+                country?: string;
                 /** @description A page number within the paginated result set. */
                 page?: number;
                 /** @description Number of results to return per page. */
                 page_size?: number;
+                state?: string;
             };
             header?: never;
             path?: never;
@@ -12594,6 +13717,9 @@ export interface operations {
     v1_sap_parties_list: {
         parameters: {
             query?: {
+                category?: string;
+                chain?: string;
+                country?: string;
                 /** @description A page number within the paginated result set. */
                 page?: number;
                 /** @description Number of results to return per page. */
@@ -12677,19 +13803,23 @@ export interface operations {
     };
     v1_sap_product_varieties_retrieve: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Restrict to one product category (case-insensitive exact match). Omitted or blank returns the sub groups of every category. */
+                category?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["SapProductVarietyList"];
+                };
             };
         };
     };
@@ -12700,6 +13830,9 @@ export interface operations {
                 page?: number;
                 /** @description Number of results to return per page. */
                 page_size?: number;
+                sub_group?: string;
+                type?: string;
+                variety?: string;
             };
             header?: never;
             path?: never;
@@ -13636,21 +14769,41 @@ export interface operations {
             };
         };
     };
-    v1_tracker_invoices_retrieve: {
+    v1_tracker_invoices_list: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Branch id. */
+                branch?: number;
+                /** @description Category id. */
+                category?: number;
+                /** @description Accounting period as "YYYY-MM". An unparseable value is ignored, not rejected. */
+                effective_month?: string;
+                /** @description Case-insensitive substring of the invoice number. */
+                invoice_number?: string;
+                /** @description Only the literal `true` filters (keeps overdue rows, applied in Python after serialisation). Any other value is ignored. */
+                overdue?: string;
+                /** @description Case-insensitive substring of the party name. */
+                party?: string;
+                /** @description Current stage CODE (e.g. `entry`), exact match. */
+                stage?: string;
+                /** @description Invoice status, exact match. */
+                status?: "COMPLETED" | "IN_PROGRESS";
+                /** @description Unit id. */
+                unit?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["TrackerInvoiceList"][];
+                };
             };
         };
     };
@@ -13661,18 +14814,33 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvoiceWrite"];
+                "application/x-www-form-urlencoded": components["schemas"]["InvoiceWrite"];
+                "multipart/form-data": components["schemas"]["InvoiceWrite"];
+            };
+        };
         responses: {
-            /** @description No response body */
-            200: {
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["TrackerInvoiceDetail"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackerValidationError"];
+                };
             };
         };
     };
-    v1_tracker_invoices_retrieve_2: {
+    v1_tracker_invoices_retrieve: {
         parameters: {
             query?: never;
             header?: never;
@@ -13683,8 +14851,16 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackerInvoiceDetail"];
+                };
+            };
+            /** @description Not found, or outside the scope of this user. EMPTY body — the response carries no JSON at all, not even `detail`. */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -13703,8 +14879,23 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
+            /** @description Soft-deleted. Empty body. */
             204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackerError"];
+                };
+            };
+            /** @description Not found, or outside the scope of this user. EMPTY body — the response carries no JSON at all, not even `detail`. */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -13721,10 +14912,40 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PatchedInvoiceWrite"];
+                "application/x-www-form-urlencoded": components["schemas"]["PatchedInvoiceWrite"];
+                "multipart/form-data": components["schemas"]["PatchedInvoiceWrite"];
+            };
+        };
         responses: {
-            /** @description No response body */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackerInvoiceDetail"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackerValidationError"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackerError"];
+                };
+            };
+            /** @description Not found, or outside the scope of this user. EMPTY body — the response carries no JSON at all, not even `detail`. */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -13799,12 +15020,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["TrackerLookups"];
+                };
             };
         };
     };
@@ -13817,12 +15039,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No response body */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["TrackerMyQueue"];
+                };
             };
         };
     };

@@ -3806,6 +3806,47 @@ backend work, and out of scope here; this document's honest assessment from
 2026-08-27 (see "3.2 — generated types, and the honest size of them" above)
 still holds.
 
+**Later the same day, 131 of those operations were closed: 1,119 → 988.**
+The backend gained `@extend_schema` on 27 views, chosen by tracing which
+endpoints this frontend actually calls rather than by working down the list —
+`ProfileView` and `LoginView` (every page load and the session gate),
+`OrdersByUserView` / `OrderDetailsByOrderView` / `OrderListView` (the three
+behind `useCurrentUserOrders`, `useOrderDetailsFetcher` and `useOrderQueue`,
+feeding a dozen screens between them), `UpdateOrderStatusView` (every approve
+and reject in the app), the tracker's `MyQueueView` / `LookupsView` /
+`InvoiceDetailView`, and the order-entry cascade `PartyProductsView` /
+`PartyView`. 27 views closed 131 operations because Phase 6.2 mounts every
+route at both `/api/` and `/api/v1/`, and several views carry more than one
+method.
+
+`npm run types:api` was re-run against the new schema and **`tsc -b` stayed
+clean** — which is the result that matters: the newly-generated real types
+agreed with every hand-written interface already in the tree, and
+`conformance.ts` (which fails the build if the server can send something the
+client's type forbids) still compiles. Had any declaration been wrong, this is
+where it would have surfaced.
+
+Two traps were found and avoided on the backend side, both of which would have
+produced *confidently wrong* types — worse than the `unknown` they replaced,
+because the compiler would then have enforced a lie:
+
+* **Component-name collisions.** `orders` and `sap_sync` each define a
+  `ProductSerializer`, a `PartyAddressSerializer` and a `BranchSerializer`, on
+  different models with different fields. `drf-spectacular` names a component
+  after the serializer *class*, so the first pass silently overwrote
+  `sap_sync`'s — `Branch` went from its 7 fields to `orders`' 3 — which would
+  have handed this frontend a wrong type for the SAP master-data endpoints.
+* **`SerializerMethodField` silently defaults to `string`.** Unhinted method
+  fields were about to be published as `string` when they are booleans and
+  numbers: `is_overdue`, `editable`, `is_partially_paid`, `days_at_stage`, and
+  nine fields on `UserSerializer` including `roles` (an array) and `company`
+  (an object or null).
+
+The remaining 988 are still the long tail, and still not worth closing
+wholesale — the value was never coverage, it was that a rename on a
+high-traffic endpoint now breaks the build instead of production. Do the rest
+opportunistically, as those views are touched.
+
 ### Phase 5.5 — virtualization, folded into Phase 4
 
 Product_Stock, InvoiceReview and Scheme_Manager's main lists are now
