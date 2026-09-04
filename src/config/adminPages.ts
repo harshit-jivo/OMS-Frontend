@@ -53,6 +53,12 @@ export const GRANTABLE_PAGE_KEYS = GRANTABLE_ADMIN_PAGES.map((page) => page.key)
 export const PAYMENT_ACTION_PERMISSIONS: GrantablePage[] = [
   { key: "Payments_Create", label: "Payments — Create", path: "/Payments_Dashboard" },
   { key: "Payments_Approve", label: "Payments — Approve", path: "/Payments_Dashboard" },
+  // The handover check: a second person confirms the physical cash or cheque
+  // against the entry before it may enter the approval chain. Independent of
+  // Create and Approve — holding either confers nothing here — and the server
+  // separately forbids verifying a receipt you raised yourself, so this grant
+  // is only ever useful to someone other than the creator.
+  { key: "Payments_Verify", label: "Payments — Verify", path: "/Payments_Dashboard" },
   { key: "Deposit_Create", label: "Deposit — Create", path: "/Payments_Dashboard" },
   { key: "Deposit_Approve", label: "Deposit — Approve", path: "/Payments_Dashboard" },
   // Unlike the four above, this one DOES open a page — the analytics dashboard
