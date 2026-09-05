@@ -1,8 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import approvalService, {
-  COMPANY_OPTIONS,
   type Company,
   type MethodMappingRow,
   type SapBank,
@@ -39,9 +38,20 @@ export default function ConfigTab({
   canEdit: boolean;
   flash: Flash;
 }) {
-  const [company, setCompany] = useState<Company>(
-    (COMPANY_OPTIONS[0]?.value as Company) ?? "OIL",
-  );
+  // Companies come from the server, not a frontend constant: the canonical
+  // list lives in CATEGORY_CHOICES and a company added or renamed there must
+  // not need a release here.
+  const { data: companies } = useQuery({
+    queryKey: ["payments", "companies"],
+    queryFn: () => approvalService.listCompanies(),
+  });
+  const [company, setCompany] = useState<Company | "">("");
+  // Settle on the first company the server offers, once, without overriding a
+  // choice the user has already made.
+  useEffect(() => {
+    if (!company && companies?.length) setCompany(companies[0].company);
+  }, [companies, company]);
+
   const queryClient = useQueryClient();
   /*
    * Mappings and banks stay in ONE queryFn, as the original `Promise.all` did:
@@ -96,14 +106,20 @@ export default function ConfigTab({
   };
 
   const save = async () => {
-    if (!editing || !choice) return;
+    // CASH is configured by its G/L, every other tender by its house bank —
+    // the backend refuses the wrong one for either, so only the relevant
+    // field is sent. `mapping_id` makes this a PATCH of the existing row
+    // rather than a second one.
+    if (!editing) return;
+    if (!(editing.is_cash ? choice.trim() : choice)) return;
     setBusy(true);
     try {
       await approvalService.saveMethodMapping({
         id: editing.mapping_id ?? undefined,
         company,
         payment_method: editing.payment_method,
-        bank_key: choice,
+        bank_key: editing.is_cash ? "" : choice,
+        ...(editing.is_cash ? { gl_account: choice.trim() } : {}),
       });
       flash("Mapping saved");
       setEditing(null);
@@ -145,9 +161,9 @@ export default function ConfigTab({
               onChange={(e) => setCompany(e.target.value as Company)}
               aria-label="Company"
             >
-              {COMPANY_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
+              {(companies ?? []).map((c) => (
+                <option key={c.company} value={c.company}>
+                  {c.display_name}
                 </option>
               ))}
             </select>
@@ -158,6 +174,15 @@ export default function ConfigTab({
             >
               Sync Banks From SAP
             </button>
+            {/* Kept from the removed bank panel: it is the only thing telling
+                an admin whether the accounts behind these mappings were read
+                from SAP just now or served from cache. */}
+            {meta?.synced_at && (
+              <span className="apv-muted">
+                {meta.stale ? "Stale — " : ""}
+                synced {new Date(meta.synced_at).toLocaleString("en-GB")}
+              </span>
+            )}
           </div>
         </div>
 
@@ -178,59 +203,12 @@ export default function ConfigTab({
 
         {error && <div className="apv-note apv-note-err">{error}</div>}
 
-        {/* Side by side on a desktop, stacked on a phone — see .apv-config-grid */}
-        <div className="apv-config-grid">
-          <section>
-            <h4 className="apv-sub">Available SAP Bank Accounts</h4>
-            <div className="apv-table-wrap">
-              <Table density="compact">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Bank</TableHead>
-                    <TableHead>Account Number</TableHead>
-                    <TableHead>GL Account</TableHead>
-                    <TableHead>Branch</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {banks.map((b) => (
-                    <TableRow key={b.key}>
-                      <TableCell>{b.display_name}</TableCell>
-                      <TableCell>
-                        <code>{b.account_number || "-"}</code>
-                      </TableCell>
-                      <TableCell>
-                        <code>{b.gl_account}</code>
-                      </TableCell>
-                      <TableCell>{b.branch || "-"}</TableCell>
-                    </TableRow>
-                  ))}
-                  {!banks.length && !loading && (
-                    <TableRow>
-                      <TableCell colSpan={4}>No accounts returned by SAP.</TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-            {meta && (
-              <div className="apv-muted apv-muted-spaced">
-                Last sync:{" "}
-                {meta.synced_at
-                  ? new Date(meta.synced_at).toLocaleString()
-                  : "never"}
-                {" | "}
-                {meta.stale
-                  ? "Cached (SAP unreachable)"
-                  : meta.source === "cache"
-                    ? "Cached"
-                    : "Live from SAP"}
-                {" | "}
-                {meta.bank_count} account{meta.bank_count === 1 ? "" : "s"}
-              </div>
-            )}
-          </section>
-
+        {/* One section now. The "Available SAP Bank Accounts" panel that sat
+            beside this listed SAP's house banks as a reference table — the
+            same accounts the picker already offers, so it duplicated the
+            mapping without configuring anything. The account each method
+            posts to is named in the table below. */}
+        <div>
           <section>
             <h4 className="apv-sub">Payment Method Mapping</h4>
             <div className="apv-table-wrap">
@@ -240,8 +218,6 @@ export default function ConfigTab({
                     <TableHead>Payment Method</TableHead>
                     <TableHead>Company Deposit Account</TableHead>
                     <TableHead>GL Account</TableHead>
-                    <TableHead>Account Number</TableHead>
-                    <TableHead>Branch</TableHead>
                     <TableHead>Status</TableHead>
                     {canEdit && <TableHead />}
                   </TableRow>
@@ -250,22 +226,14 @@ export default function ConfigTab({
                   {rows.map((r) => (
                     <TableRow key={r.payment_method}>
                       <TableCell>{r.label}</TableCell>
-                      <TableCell>
-                        {r.is_cash ? (
-                          <span className="apv-muted">
-                            Cash G/L (company mapping)
-                          </span>
-                        ) : (
-                          r.bank_name || "-"
-                        )}
-                      </TableCell>
+                      {/* SAP's own name for the account, which already
+                          carries its number — so cash reads "CASH SALE" and a
+                          bank reads "ICICI BANK LTD - 629305042195", and the
+                          separate number and branch columns are unnecessary. */}
+                      <TableCell>{r.account_name || "-"}</TableCell>
                       <TableCell>
                         <code>{r.gl_account || "-"}</code>
                       </TableCell>
-                      <TableCell>
-                        <code>{r.account_number || "-"}</code>
-                      </TableCell>
-                      <TableCell>{r.branch || "-"}</TableCell>
                       <TableCell>
                         <span
                           className={`apv-pill${r.valid ? " ok" : " err"}`}
@@ -280,9 +248,22 @@ export default function ConfigTab({
                       </TableCell>
                       {canEdit && (
                         <TableCell className="apv-cell-right">
-                          {/* Cash has no house bank account to choose. */}
+                          {/* Cash edits its G/L rather than picking a bank,
+                              but it IS editable — the account lives in this
+                              same mapping table now. */}
                           {r.is_cash ? (
-                            <span className="apv-muted">-</span>
+                            <div className="apv-row-actions">
+                              <button
+                                className="apv-btn"
+                                onClick={() => {
+                                  setEditing(r);
+                                  setChoice(r.gl_account);
+                                }}
+                                aria-label={`Edit ${r.label} G/L account`}
+                              >
+                                Edit
+                              </button>
+                            </div>
                           ) : (
                             <div className="apv-row-actions">
                               <button
@@ -331,7 +312,11 @@ export default function ConfigTab({
 
       {editing && (
         <Modal
-          title={`${editing.label} - company deposit account`}
+          title={
+            editing.is_cash
+              ? `${editing.label} - G/L account`
+              : `${editing.label} - company deposit account`
+          }
           onClose={() => setEditing(null)}
           footer={
             <>
@@ -352,17 +337,38 @@ export default function ConfigTab({
             <span>Payment method</span>
             <input value={editing.label} readOnly />
           </label>
-          <label className="apv-field">
-            <span>Company deposit account</span>
-            <select value={choice} onChange={(e) => setChoice(e.target.value)}>
-              <option value="">Select an account...</option>
-              {banks.map((b) => (
-                <option key={b.key} value={b.key}>
-                  {b.display_name} - {b.account_number} - GL {b.gl_account}
-                </option>
-              ))}
-            </select>
-          </label>
+          {editing.is_cash ? (
+            /* Cash has no house bank to pick from — SAP publishes bank
+               accounts as DSC1 rows and a drawer has none — so its G/L is
+               typed directly. The value is never defaulted here: it comes
+               from the row the API returned, and the backend owns what is
+               valid. */
+            <label className="apv-field">
+              <span>G/L account</span>
+              <input
+                value={choice}
+                onChange={(e) => setChoice(e.target.value)}
+                placeholder="Cash G/L account code"
+                inputMode="numeric"
+              />
+              <span className="apv-hint">
+                The account cash receipts debit, and the same account a
+                deposit of that cash credits.
+              </span>
+            </label>
+          ) : (
+            <label className="apv-field">
+              <span>Company deposit account</span>
+              <select value={choice} onChange={(e) => setChoice(e.target.value)}>
+                <option value="">Select an account...</option>
+                {banks.map((b) => (
+                  <option key={b.key} value={b.key}>
+                    {b.display_name} - {b.account_number} - GL {b.gl_account}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
         </Modal>
       )}
     </>

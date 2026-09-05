@@ -17,6 +17,14 @@ import type { Schemas } from "../types/api";
 /** Company IS category — OIL/BEVERAGES/MART map 1:1 to SAP company databases. */
 export type Company = "OIL" | "BEVERAGES" | "MART";
 
+/** One company as the server describes it — see `listCompanies`. */
+export interface PaymentCompany {
+  id: number;
+  company: Company;
+  display_name: string;
+  is_active: boolean;
+}
+
 export const COMPANY_OPTIONS: { value: Company; label: string }[] = [
   { value: "OIL", label: "Jivo Oil" },
   { value: "BEVERAGES", label: "Jivo Beverages" },
@@ -250,6 +258,12 @@ export interface MethodMappingRow {
   gl_account: string;
   bank_code: string;
   bank_name: string;
+  /**
+   * The account's own name in SAP's chart of accounts, e.g.
+   * "ICICI BANK LTD - 629305042195". Already carries the account number, so
+   * the table shows this instead of separate number and branch columns.
+   */
+  account_name: string;
   account_number: string;
   branch: string;
   configured: boolean;
@@ -257,50 +271,6 @@ export interface MethodMappingRow {
   error: string;
 }
 
-export interface CompanyMapping {
-  id: number;
-  company: Company;
-  display_name: string;
-  company_db: string;
-  hana_schema: string;
-  default_bpl_id: number | null;
-  /**
-   * SAP G/L for cash receipts.
-   *
-   * Lives here, not in the payment-method mapping, because cash is the one
-   * tender that does NOT land in a bank: SAP publishes bank accounts as House
-   * Bank Accounts (DSC1) and a cash drawer has no such row, so there is
-   * nothing to pick from and the account must be named directly.
-   */
-  cash_gl_account: string;
-  /**
-   * SAP G/L a DEPOSIT credits — the drawer being emptied.
-   *
-   * A second field rather than a reuse of `cash_gl_account` because SAP
-   * validates the two roles differently: a receipt's CashAccount must be a
-   * cash-flow account (OACT.Finanse='Y'), while a deposit posts as a DocType
-   * 'A' transfer whose CardCode must NOT be one. Blank falls back to
-   * `cash_gl_account` on the server.
-   */
-  deposit_source_gl_account: string;
-  is_active: boolean;
-  sort_order: number;
-}
-
-export type CompanyMappingPayload = Partial<
-  Pick<
-    CompanyMapping,
-    | "company"
-    | "display_name"
-    | "company_db"
-    | "hana_schema"
-    | "default_bpl_id"
-    | "cash_gl_account"
-    | "deposit_source_gl_account"
-    | "is_active"
-    | "sort_order"
-  >
->;
 
 /**
  * Mirrors payments/serializers.py CollectionPersonSerializer — and, unlike the
@@ -544,7 +514,13 @@ const approvalService = {
     id?: number;
     company: Company;
     payment_method: string;
+    /** Blank for CASH — a drawer is not a house bank. */
     bank_key: string;
+    /**
+     * CASH only. A banked tender takes its G/L from the house bank in SAP and
+     * the backend refuses one sent here, so it is omitted for those.
+     */
+    gl_account?: string;
     is_active?: boolean;
   }): Promise<void> => {
     const { id, ...body } = payload;
@@ -566,32 +542,20 @@ const approvalService = {
     await api.delete(`/payments/admin/method-mappings/${id}/`);
   },
 
-  // ---- Company mappings (admin CRUD) ----------------------------------
-  listCompanyMappings: async (): Promise<CompanyMapping[]> => {
-    const res = await api.get("/payments/company-mappings/");
-    return rows<CompanyMapping>(res.data);
-  },
-
-  createCompanyMapping: async (
-    payload: CompanyMappingPayload,
-  ): Promise<CompanyMapping> => {
-    const res = await api.post("/payments/company-mappings/", payload);
-    return unwrap<CompanyMapping>(res.data);
-  },
-
-  updateCompanyMapping: async (
-    id: number,
-    payload: CompanyMappingPayload,
-  ): Promise<CompanyMapping> => {
-    const res = await api.patch(`/payments/company-mappings/${id}/`, payload);
-    return unwrap<CompanyMapping>(res.data);
-  },
-
-  deleteCompanyMapping: async (id: number): Promise<void> => {
-    await api.delete(`/payments/company-mappings/${id}/`);
-  },
-
   // ---- Lookups for dropdowns ------------------------------------------
+  /**
+   * The companies payments may transact in, from the server.
+   *
+   * The canonical list is CATEGORY_CHOICES on the backend. COMPANY_OPTIONS
+   * above is a static fallback kept for the screens that have not moved yet;
+   * anything company-aware should prefer this, so a company added or renamed
+   * server-side needs no frontend release.
+   */
+  listCompanies: async (): Promise<PaymentCompany[]> => {
+    const res = await api.get("/payments/companies/");
+    return rows<PaymentCompany>(res.data);
+  },
+
   listRoles: async (): Promise<Role[]> => {
     const res = await api.get("/auth/roles/");
     return rows<Role>(res.data);
