@@ -254,6 +254,9 @@ describe("behaviour preserved from the sidebar", () => {
   const cases: Array<[string, Partial<Session>, boolean]> = [
     ["/Label_Checker", { role: "legal", roles: ["legal"] }, true],
     ["/Label_Checker", { role: "billing", roles: ["billing"] }, false],
+    // The `Legal` grant admits without the role, and covers both legal pages.
+    ["/Label_Checker", { role: "billing", roles: ["billing"], grants: ["Legal"] }, true],
+    ["/Nutrition_Manager", { role: "billing", roles: ["billing"], grants: ["Legal"] }, true],
     ["/Sales_Invoice", { role: "billing", roles: ["billing"] }, true],
     ["/Sales_Invoice", { role: "manager", roles: ["manager"] }, false],
     ["/Add_Sales", { role: "manager", roles: ["manager"] }, true],

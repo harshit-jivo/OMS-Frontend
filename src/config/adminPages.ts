@@ -27,6 +27,10 @@ export const GRANTABLE_ADMIN_PAGES: GrantablePage[] = [
   { key: "HAIS", label: "Hardware Assets (HAIS)", path: "/HAIS" },
   { key: "Distributor", label: "Distributor", path: "/Distributor" },
   { key: "Mart_Approval", label: "Mart Approval", path: "/Mart_Approval" },
+  // One key for the whole Legal module — unlocks Label Checker AND Nutrition
+  // Manager, the way "Distributor" covers both distributor routes. Mirrors
+  // the backend gate on legal/views.py (HasKeyOrRole, legal-role fallback).
+  { key: "Legal", label: "Legal (Labels & Nutrition)", path: "/Label_Checker" },
   // System — one page carrying live device activity and version analytics.
   // "Device_Activity" and "Version_Management" are deliberately no longer
   // grantable: the pages they gated are gone, so offering those permissions
