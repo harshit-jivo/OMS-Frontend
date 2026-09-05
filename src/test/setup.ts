@@ -41,6 +41,64 @@ api.defaults.adapter = async (config) => ({
   config,
 });
 
+/**
+ * Give the suite a working Web Storage.
+ *
+ * Node 25 ships its own `localStorage` / `sessionStorage` globals. They are
+ * installed on `globalThis` before jsdom runs and they are NOT the DOM
+ * Storage interface — `localStorage.clear` is `undefined`. Under vitest's
+ * jsdom environment `window` IS `globalThis`, so `window.localStorage` is that
+ * same object and there is no jsdom storage left to fall back to.
+ *
+ * The effect was total: the `beforeEach` below threw during setup, so every
+ * test in the repository failed with `localStorage.clear is not a function`
+ * regardless of what it tested.
+ *
+ * A Map-backed shim rather than a re-export of jsdom's: it is the whole
+ * Storage contract the app uses (`src/auth/session.ts` reads these as bare
+ * globals), it isolates cleanly per test, and it does not depend on which
+ * storage implementation the Node version of the day decides to expose.
+ * Installed only when the global is unusable, so a fixed Node — or a browser
+ * runner — keeps its own.
+ */
+class MemoryStorage implements Storage {
+  #entries = new Map<string, string>();
+
+  get length(): number {
+    return this.#entries.size;
+  }
+
+  key(index: number): string | null {
+    return [...this.#entries.keys()][index] ?? null;
+  }
+
+  getItem(key: string): string | null {
+    return this.#entries.get(String(key)) ?? null;
+  }
+
+  setItem(key: string, value: string): void {
+    this.#entries.set(String(key), String(value));
+  }
+
+  removeItem(key: string): void {
+    this.#entries.delete(String(key));
+  }
+
+  clear(): void {
+    this.#entries.clear();
+  }
+}
+
+for (const name of ["localStorage", "sessionStorage"] as const) {
+  if (typeof globalThis[name]?.clear !== "function") {
+    Object.defineProperty(globalThis, name, {
+      value: new MemoryStorage(),
+      configurable: true,
+      writable: true,
+    });
+  }
+}
+
 beforeEach(() => {
   // jsdom shares one window across a file. Without this, a page that writes to
   // storage leaks its state into the next test in the same file.

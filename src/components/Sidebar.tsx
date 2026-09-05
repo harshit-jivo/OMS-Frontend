@@ -152,6 +152,8 @@ const SIDEBAR_SECTIONS: SidebarSectionDef[] = [
     links: [
       { to: "/Label_Checker", label: "Label Checker", icon: HiDocumentCheck },
       { to: "/Nutrition_Manager", label: "Nutrition Manager", icon: HiClipboardDocumentList },
+      { to: "/Compliance_Rules", label: "Compliance Rules", icon: HiShieldCheck },
+      { to: "/Label_History", label: "Check History", icon: HiClock },
     ],
   },
   {

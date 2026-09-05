@@ -68,6 +68,8 @@ const PaymentsDashboard = lazy(() => import("./pages/Payments/ApprovalManagement
 // import Sales_Quotation from "./pages/Sales_Quotation";  // DISABLED 2026-08-27 — quotation flow closed
 const LabelChecker = lazy(() => import("./pages/Label_Checker"));
 const NutritionManager = lazy(() => import("./pages/Nutrition_Manager"));
+const ComplianceRules = lazy(() => import("./pages/Compliance_Rules"));
+const LabelHistory = lazy(() => import("./pages/Label_History"));
 const Einvoice = lazy(() => import("./pages/Einvoice"));
 const Ewaybill = lazy(() => import("./pages/Ewaybill"));
 const Tracker_Entry = lazy(() => import("./pages/Tracker_Entry"));
@@ -493,6 +495,24 @@ function App() {
           element={
             <ProtectedPage>
               <NutritionManager />
+            </ProtectedPage>
+          }
+        />
+
+        <Route
+          path="/Compliance_Rules"
+          element={
+            <ProtectedPage>
+              <ComplianceRules />
+            </ProtectedPage>
+          }
+        />
+
+        <Route
+          path="/Label_History"
+          element={
+            <ProtectedPage>
+              <LabelHistory />
             </ProtectedPage>
           }
         />

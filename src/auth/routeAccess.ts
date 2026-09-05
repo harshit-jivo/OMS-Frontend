@@ -162,11 +162,16 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   "/Ap_Invoice_Entry": { trackerPage: "Ap_Invoice_Entry" },
 
   // --- Legal --------------------------------------------------------------
-  // One `Legal` grant covers both pages (the module is one desk); the role is
+  // One `Legal` grant covers the whole module (it is one desk); the role is
   // the transitional fallback, mirroring the backend's HasKeyOrRole gate on
-  // every legal/ endpoint (legal/views.py).
+  // every legal/ endpoint (legal/views.py). Compliance_Rules edits what the
+  // checker enforces, so it is the same grant rather than a tighter one:
+  // splitting them would mean a reviewer who cannot fix the rule they just
+  // watched misfire.
   "/Label_Checker": { permissions: ["Legal"], roles: ["legal"] },
   "/Nutrition_Manager": { permissions: ["Legal"], roles: ["legal"] },
+  "/Compliance_Rules": { permissions: ["Legal"], roles: ["legal"] },
+  "/Label_History": { permissions: ["Legal"], roles: ["legal"] },
 
   // --- Sales --------------------------------------------------------------
   // Phase 4: these carry BOTH a registry permission key and the legacy role
