@@ -102,6 +102,8 @@ const PAGES: Array<SmokeEntry<any>> = [
   page("/Ap_Invoice_Entry", () => import("./Ap_Invoice_Entry")),
   page("/Label_Checker", () => import("./Label_Checker")),
   page("/Nutrition_Manager", () => import("./Nutrition_Manager")),
+  page("/Compliance_Rules", () => import("./Compliance_Rules")),
+  page("/Label_History", () => import("./Label_History")),
       page("/FOC", () => import("./FOC")),
   // `/FOC` mounts the FOC page; `Add_Sales` is mounted with `focMode` on its
   // own route, and both shapes are worth covering.

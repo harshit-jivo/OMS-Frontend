@@ -1,10 +1,18 @@
 /* ──────────────────────────────────────────────────────────────────────────
- * Label Checker — flat compliance report.
+ * Label Checker — flat compliance report, label beside the findings.
  *
- * Flat surfaces only: no shadows, no gradients. 0.5px hairline borders, font
+ * Conventions carried over from the previous report page, unchanged: flat
+ * surfaces only (no shadows, no gradients), 0.5px hairline borders, font
  * weights 400 (body) / 500 (headings & labels), sentence case, 16px padding
  * inside cards, 10px gaps between them. Colour used sparingly:
- *   ok #16a34a · warn #b45309 / #d97706 · accent #2563eb · slate text.
+ *   ok #16a34a · bad #b91c1c · accent #2563eb · slate text.
+ *
+ * What changed: the old page had one status colour for problems (amber, for
+ * MISSING/MISMATCH) and reserved red for request errors. The checker now
+ * returns a two-valued verdict, and a FAILED statutory declaration is not an
+ * amber "look at this" — it is the thing the page exists to report. So FAIL
+ * takes the red that `.lc-error` already established on this page, and no
+ * amber remains.
  * ────────────────────────────────────────────────────────────────────────── */
 
 .lc-page {
@@ -17,8 +25,12 @@
   --accent: #2563eb;
   --ok: #16a34a;
   --ok-ink: #15803d;
-  --warn: #d97706;
-  --warn-ink: #b45309;
+  --ok-soft: #f0fdf4;
+  --ok-line: #bbf7d0;
+  --bad: #dc2626;
+  --bad-ink: #b91c1c;
+  --bad-soft: #fef2f2;
+  --bad-line: #fecaca;
 
   min-height: calc(100svh - 64px);
   background: #f4f6f9;
@@ -105,109 +117,113 @@
   margin: 16px 0 0;
   padding: 10px 14px;
   border-radius: 9px;
-  background: #fef2f2;
-  border: 0.5px solid #fecaca;
-  color: #b91c1c;
+  background: var(--bad-soft);
+  border: 0.5px solid var(--bad-line);
+  color: var(--bad-ink);
   font-size: 0.85rem;
   line-height: 1.45;
 }
 
 .lc-error svg {
   flex: none;
+  width: 16px;
+  height: 16px;
   margin-top: 1px;
 }
 
 .lc-error-bar {
   display: flex;
-  margin: 0 0 16px;
+  margin: 0 0 10px;
 }
 
 /* ── Empty state ────────────────────────────────────────────────────────── */
 .lc-empty {
-  max-width: 560px;
+  max-width: 620px;
   margin: clamp(24px, 6vh, 72px) auto 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
   text-align: center;
 }
 
 .lc-empty-badge {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   padding: 5px 12px;
   border-radius: 999px;
-  background: var(--surface);
   border: 0.5px solid var(--line);
-  color: var(--accent);
-  font-size: 12px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.74rem;
   font-weight: 500;
+}
+
+.lc-empty-badge svg {
+  width: 14px;
+  height: 14px;
+  color: var(--accent);
 }
 
 .lc-empty-title {
-  margin: 16px 0 24px;
-  font-size: clamp(1.3rem, 3.2vw, 1.7rem);
+  margin: 14px 0 6px;
+  font-size: 1.5rem;
   font-weight: 500;
   letter-spacing: -0.01em;
-  white-space: nowrap;
+}
+
+.lc-empty-lead {
+  margin: 0 auto 20px;
+  max-width: 460px;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.55;
 }
 
 .lc-drop {
-  width: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: 48px 24px;
-  border: 1.5px dashed #cbd5e1;
+  gap: 6px;
+  padding: 34px 20px;
   border-radius: 14px;
+  border: 1px dashed #cbd5e1;
   background: var(--surface);
   cursor: pointer;
   transition: border-color 0.15s ease, background 0.15s ease;
 }
 
 .lc-drop:hover,
-.lc-drop:focus-visible {
+.lc-drop:focus-visible,
+.lc-drop.is-dragging {
   border-color: var(--accent);
-  background: var(--soft);
+  background: #f8fbff;
   outline: none;
 }
 
-.lc-drop.is-dragging {
-  border-color: var(--accent);
-  background: #eff6ff;
+.lc-drop-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  margin-bottom: 4px;
+  border-radius: 11px;
+  background: var(--soft);
+  color: var(--accent);
 }
 
-.lc-drop-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 52px;
-  height: 52px;
-  margin-bottom: 4px;
-  border-radius: 12px;
-  background: var(--soft);
-  border: 0.5px solid var(--line);
-  color: var(--accent);
-  font-size: 1.5rem;
+.lc-drop-icon svg {
+  width: 19px;
+  height: 19px;
 }
 
 .lc-drop-title {
   margin: 0;
-  font-size: 0.98rem;
+  font-size: 0.9rem;
   font-weight: 500;
-  color: var(--ink);
 }
 
 .lc-drop-hint {
   margin: 0;
-  font-size: 0.82rem;
   color: var(--faint);
-}
-
-.lc-empty .lc-btn-primary {
-  margin-top: 18px;
+  font-size: 0.78rem;
 }
 
 /* ── Top bar ────────────────────────────────────────────────────────────── */
@@ -215,642 +231,356 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 14px;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
   padding: 12px 16px;
-  margin-bottom: 16px;
-  border: 0.5px solid var(--line);
   border-radius: 12px;
+  border: 0.5px solid var(--line);
   background: var(--surface);
 }
 
-.lc-topbar-file {
+.lc-file {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  gap: 2px;
   min-width: 0;
-  font-size: 0.9rem;
 }
 
-.lc-topbar-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 34px;
-  flex: none;
-  border-radius: 8px;
-  background: var(--soft);
-  border: 0.5px solid var(--line);
-  color: var(--muted);
-  font-size: 1.15rem;
-}
-
-.lc-topbar-file strong {
-  font-weight: 500;
+.lc-file-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 0.9rem;
+  font-weight: 500;
 }
 
-.lc-topbar-size {
-  flex: none;
+.lc-file-meta {
   color: var(--faint);
-  font-size: 0.8rem;
+  font-size: 0.76rem;
 }
 
-.lc-topbar-item {
+.lc-actions {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-width: 0;
-  margin-left: auto;
+  flex-wrap: wrap;
 }
 
-.lc-topbar-item-label {
-  flex: none;
-  font-size: 0.8rem;
-  font-weight: 500;
+.lc-select-label {
   color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 500;
 }
 
 .lc-select {
   min-height: 38px;
-  max-width: 260px;
-  padding: 0 30px 0 12px;
+  max-width: 240px;
+  padding: 0 10px;
   border-radius: 9px;
   border: 0.5px solid var(--line);
-  background: var(--surface)
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%2364748b' stroke-width='1.6'%3E%3Cpath d='M6 8l4 4 4-4'/%3E%3C/svg%3E")
-    no-repeat right 9px center / 16px;
+  background: var(--surface);
   color: var(--ink);
   font-family: inherit;
-  font-size: 0.86rem;
-  font-weight: 500;
-  cursor: pointer;
-  appearance: none;
-  -webkit-appearance: none;
-  text-overflow: ellipsis;
-}
-
-.lc-select:hover:not(:disabled) {
-  border-color: #cbd5e1;
-}
-
-.lc-select:focus-visible {
-  outline: none;
-  border-color: var(--accent);
+  font-size: 0.84rem;
 }
 
 .lc-select:disabled {
   opacity: 0.6;
-  cursor: not-allowed;
 }
 
-.lc-topbar-actions {
+/* ── Split layout ───────────────────────────────────────────────────────── */
+.lc-split {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.85fr) minmax(360px, 1.15fr);
+  align-items: start;
+  gap: 10px;
+}
+
+.lc-pane {
+  border-radius: 12px;
+  border: 0.5px solid var(--line);
+  background: var(--surface);
+  padding: 16px;
+}
+
+/* The label follows the reader down the checklist. `top` clears the app
+   header; `max-height` keeps a tall artwork from pushing its own scrollbar
+   off the bottom of the viewport. */
+.lc-pane-image {
+  position: sticky;
+  top: 12px;
+  max-height: calc(100svh - 96px);
+  overflow: auto;
+}
+
+.lc-label-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 9px;
+  border: 0.5px solid var(--line);
+  background: var(--soft);
+}
+
+.lc-image-placeholder {
   display: flex;
+  flex-direction: column;
   align-items: center;
   gap: 8px;
-  flex: none;
-  flex-wrap: wrap;
-  justify-content: flex-end;
+  padding: 40px 16px;
+  border-radius: 9px;
+  background: var(--soft);
+  color: var(--muted);
+  text-align: center;
+  font-size: 0.83rem;
+  line-height: 1.5;
 }
 
-/* ── Idle / analysing state ─────────────────────────────────────────────── */
+.lc-image-placeholder svg {
+  width: 20px;
+  height: 20px;
+  color: var(--faint);
+}
+
+.lc-image-placeholder p {
+  margin: 0;
+  max-width: 280px;
+}
+
+/* ── States ─────────────────────────────────────────────────────────────── */
 .lc-state {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 10px;
-  min-height: 320px;
-  padding: 40px;
+  gap: 8px;
+  padding: 56px 20px;
   text-align: center;
-  border: 0.5px solid var(--line);
-  border-radius: 14px;
-  background: var(--surface);
-  color: var(--muted);
 }
 
-.lc-state > svg {
-  font-size: 2.2rem;
-  color: #cbd5e1;
+.lc-state-icon {
+  width: 26px;
+  height: 26px;
+  color: var(--faint);
 }
 
-.lc-state h2 {
+.lc-state-title {
   margin: 0;
-  font-size: 1.1rem;
+  font-size: 1rem;
   font-weight: 500;
-  color: var(--ink);
 }
 
-.lc-state p {
+.lc-state-text {
   margin: 0;
-  max-width: 42ch;
-  font-size: 0.9rem;
+  max-width: 340px;
+  color: var(--muted);
+  font-size: 0.85rem;
   line-height: 1.5;
 }
 
-/* ── Report ─────────────────────────────────────────────────────────────── */
-.lc-report {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-/* Summary metrics */
-.lc-metrics {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.lc-metric {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 16px;
-  border: 0.5px solid var(--line);
-  border-radius: 12px;
-  background: var(--surface);
-}
-
-.lc-metric-num {
-  font-size: 1.9rem;
-  font-weight: 500;
-  line-height: 1;
-  letter-spacing: -0.02em;
-  font-variant-numeric: tabular-nums;
-}
-
-.lc-num-ok {
-  color: var(--ok-ink);
-}
-
-.lc-num-warn {
-  color: var(--warn-ink);
-}
-
-.lc-metric-label {
-  font-size: 0.86rem;
-  color: var(--muted);
-}
-
-.lc-metric-sub {
-  font-size: 0.78rem;
-  color: var(--faint);
-}
-
-/* Single warning banner */
-.lc-banner {
+/* ── Verdict banner ─────────────────────────────────────────────────────── */
+.lc-verdict {
   display: flex;
   align-items: flex-start;
-  gap: 12px;
-  padding: 16px;
-  border: 0.5px solid #fcd34d;
-  border-radius: 12px;
-  background: #fffbeb;
-}
-
-.lc-banner-icon {
-  flex: none;
-  margin-top: 1px;
-  font-size: 1.3rem;
-  color: var(--warn);
-}
-
-.lc-banner-text {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-}
-
-.lc-banner-text strong {
-  font-weight: 500;
-  color: var(--warn-ink);
-  font-size: 0.95rem;
-}
-
-.lc-banner-text span {
-  font-size: 0.84rem;
-  line-height: 1.45;
-  color: #92702a;
-}
-
-/* Tabs */
-.lc-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  padding: 4px 0;
-  border-bottom: 0.5px solid var(--line);
-}
-
-.lc-tab {
-  padding: 8px 14px;
-  border: none;
-  border-bottom: 2px solid transparent;
-  background: transparent;
-  color: var(--muted);
-  font-size: 0.86rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: color 0.15s ease, border-color 0.15s ease;
-}
-
-.lc-tab:hover {
-  color: var(--ink);
-}
-
-.lc-tab.is-active {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
-}
-
-/* Sections (accordion) */
-.lc-sections {
-  display: flex;
-  flex-direction: column;
   gap: 10px;
-}
-
-.lc-section {
-  border: 0.5px solid var(--line);
-  border-radius: 12px;
-  background: var(--surface);
-  overflow: hidden;
-}
-
-.lc-section-head {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 16px;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  font-family: inherit;
-  text-align: left;
-  transition: background 0.15s ease;
-}
-
-.lc-section-head:hover {
-  background: var(--soft);
-}
-
-.lc-section-name {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 0.96rem;
-  font-weight: 500;
-  color: var(--ink);
-}
-
-.lc-section-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  flex: none;
-  border-radius: 8px;
-  background: var(--soft);
-  border: 0.5px solid var(--line);
-  color: var(--muted);
-  font-size: 1.05rem;
-}
-
-.lc-section-right {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.lc-badge {
-  padding: 4px 10px;
-  border-radius: 999px;
+  margin-bottom: 10px;
+  padding: 12px 14px;
+  border-radius: 10px;
   border: 0.5px solid transparent;
-  font-size: 0.74rem;
-  font-weight: 500;
-  white-space: nowrap;
+  font-size: 0.86rem;
 }
 
-.lc-badge-ok {
-  background: #f0fdf4;
-  border-color: #bbf7d0;
+.lc-verdict svg {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+}
+
+.lc-verdict div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lc-verdict strong {
+  font-weight: 500;
+}
+
+.lc-verdict span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.lc-verdict.is-ok {
+  background: var(--ok-soft);
+  border-color: var(--ok-line);
   color: var(--ok-ink);
 }
 
-.lc-badge-warn {
-  background: #fffbeb;
-  border-color: #fde68a;
-  color: var(--warn-ink);
+.lc-verdict.is-bad {
+  background: var(--bad-soft);
+  border-color: var(--bad-line);
+  color: var(--bad-ink);
 }
 
-.lc-section-caret {
-  color: var(--faint);
-  font-size: 1.1rem;
-  transition: transform 0.2s ease;
-}
-
-.lc-section.is-open .lc-section-caret {
-  transform: rotate(180deg);
-}
-
-.lc-section-body {
-  padding: 0 16px;
-  border-top: 0.5px solid var(--line);
-}
-
-/* Rows */
-.lc-row {
+.lc-report-actions {
   display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 16px 0;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+  padding-bottom: 14px;
   border-bottom: 0.5px solid var(--line);
 }
 
-.lc-section-body > .lc-row:last-child {
+/* ── Markdown report ────────────────────────────────────────────────────── */
+.lc-md {
+  font-size: 0.87rem;
+  line-height: 1.6;
+}
+
+.lc-md-h1 {
+  margin: 0 0 10px;
+  font-size: 1.05rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.lc-md-h2 {
+  margin: 20px 0 8px;
+  padding-top: 14px;
+  border-top: 0.5px solid var(--line);
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.lc-md-h2:first-child,
+.lc-md-h1 + .lc-md-h2 {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+.lc-md-p {
+  margin: 0 0 6px;
+  color: var(--muted);
+}
+
+.lc-md-p strong {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.lc-md-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lc-md-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px 0;
+  border-bottom: 0.5px solid var(--line);
+}
+
+.lc-md-list .lc-md-item:last-child {
   border-bottom: none;
 }
 
-.lc-row-icon {
-  flex: none;
-  margin-top: 1px;
-  display: inline-flex;
-  font-size: 1.15rem;
-}
-
-.lc-row-icon-ok {
-  color: var(--ok);
-}
-
-.lc-row-icon-warn {
-  color: var(--warn);
-}
-
-.lc-row-icon-na {
-  color: var(--faint);
-}
-
-/* Subtle left accent on rows that need attention */
-.lc-row.is-missing,
-.lc-row.is-mismatch {
-  box-shadow: inset 2px 0 0 var(--warn);
+/* A failed rule carries a left rule in its own colour: scannable down the
+   page without adding a second badge to every row. */
+.lc-md-item.is-fail {
+  box-shadow: inset 2px 0 0 var(--bad);
   padding-left: 10px;
 }
 
-/* Status pill shown next to a row label */
-.lc-pill {
-  display: inline-flex;
-  align-items: center;
-  margin-left: 8px;
-  padding: 1px 8px;
+.lc-md-item-text {
+  min-width: 0;
+  color: var(--muted);
+}
+
+.lc-md-item-text strong {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.lc-md-item-text em {
+  color: var(--faint);
+  font-style: normal;
+  font-size: 0.82em;
+}
+
+.lc-md-status {
+  flex: none;
+  margin-top: 1px;
+  padding: 2px 8px;
   border-radius: 999px;
   border: 0.5px solid transparent;
   font-size: 0.66rem;
   font-weight: 500;
-  letter-spacing: 0.02em;
-  text-transform: none;
+  letter-spacing: 0.03em;
 }
 
-.lc-pill-warn {
-  background: #fffbeb;
-  border-color: #fde68a;
-  color: var(--warn-ink);
-}
-
-.lc-pill-muted {
-  background: var(--soft);
-  border-color: var(--line);
-  color: var(--muted);
-}
-
-.lc-row-text {
-  min-width: 0;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.lc-row-label {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  font-size: 0.7rem;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--faint);
-}
-
-.lc-value {
-  font-size: 0.96rem;
-  font-weight: 400;
-  line-height: 1.45;
-  color: var(--ink);
-  word-break: break-word;
-}
-
-.lc-value-missing {
-  color: var(--warn-ink);
-  font-style: italic;
-}
-
-.lc-row-note {
-  font-size: 0.8rem;
-  line-height: 1.45;
-  color: var(--muted);
-}
-
-.lc-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.lc-chip {
-  padding: 3px 10px;
-  border-radius: 999px;
-  background: var(--soft);
-  border: 0.5px solid var(--line);
-  color: var(--ink);
-  font-size: 0.84rem;
-}
-
-/* Object values (cost_block, compliance_section) as a key/value list */
-.lc-kv {
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.lc-kv > div {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 7px 0;
-  border-bottom: 0.5px solid var(--line);
-}
-
-.lc-kv > div:last-child {
-  border-bottom: none;
-}
-
-.lc-kv dt {
-  flex: none;
-  font-size: 0.84rem;
-  color: var(--muted);
-}
-
-.lc-kv dd {
-  margin: 0;
-  font-size: 0.9rem;
-  color: var(--ink);
-  text-align: right;
-  word-break: break-word;
-}
-
-/* Nutrition table */
-.lc-nutri-wrap {
-  overflow-x: auto;
-  border: 0.5px solid var(--line);
-  border-radius: 10px;
-}
-
-.lc-nutri {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.86rem;
-}
-
-.lc-nutri thead th {
-  padding: 10px 14px;
-  text-align: left;
-  background: var(--soft);
-  border-bottom: 0.5px solid var(--line);
-  color: var(--muted);
-  font-weight: 500;
-  white-space: nowrap;
-}
-
-.lc-nutri th:not(:first-child),
-.lc-nutri td:not(:first-child) {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-
-.lc-nutri td {
-  padding: 9px 14px;
-  border-bottom: 0.5px solid var(--line);
-  color: var(--ink);
-}
-
-.lc-nutri tbody tr:last-child td {
-  border-bottom: none;
-}
-
-.lc-nutri tbody tr:hover {
-  background: var(--soft);
-}
-
-.lc-nutri tbody tr.is-mismatch {
-  background: #fffbeb;
-}
-
-.lc-nutri tbody tr.is-mismatch:hover {
-  background: #fef3c7;
-}
-
-/* Per-row status flag inside the nutrition table */
-.lc-nutri-flag {
-  display: inline-flex;
-  align-items: center;
-  padding: 1px 8px;
-  border-radius: 999px;
-  border: 0.5px solid transparent;
-  font-size: 0.7rem;
-  font-weight: 500;
-}
-
-.lc-flag-ok {
-  background: #f0fdf4;
-  border-color: #bbf7d0;
+.lc-md-status-pass {
+  background: var(--ok-soft);
+  border-color: var(--ok-line);
   color: var(--ok-ink);
 }
 
-.lc-flag-mismatch,
-.lc-flag-missing {
-  background: #fffbeb;
-  border-color: #fde68a;
-  color: var(--warn-ink);
-}
-
-.lc-flag-na {
-  background: var(--soft);
-  border-color: var(--line);
-  color: var(--muted);
+.lc-md-status-fail {
+  background: var(--bad-soft);
+  border-color: var(--bad-line);
+  color: var(--bad-ink);
 }
 
 /* ── Responsive ─────────────────────────────────────────────────────────── */
-@media (max-width: 640px) {
-  .lc-page {
-    border-radius: 18px 18px 0 0;
-    padding: 12px 10px 18px;
-  }
-
-  .lc-metrics {
+@media (max-width: 900px) {
+  .lc-split {
     grid-template-columns: 1fr;
   }
 
+  /* Stacked, a sticky image pane would sit on top of the report it belongs
+     beside. */
+  .lc-pane-image {
+    position: static;
+    max-height: 420px;
+  }
+}
+
+@media (max-width: 640px) {
   .lc-topbar {
-    flex-direction: column;
     align-items: stretch;
+    flex-direction: column;
   }
 
-  .lc-topbar-item {
-    margin-left: 0;
-  }
-
-  .lc-select {
-    flex: 1;
-    max-width: none;
-  }
-
-  .lc-topbar-actions {
+  .lc-actions {
     justify-content: space-between;
   }
 
-  .lc-empty-title {
-    white-space: normal;
+  .lc-select {
+    max-width: none;
+    flex: 1;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .lc-btn,
-  .lc-drop,
-  .lc-section-head,
-  .lc-section-caret,
-  .lc-tab {
+  .lc-drop {
     transition: none;
   }
 
   .lc-spinner {
-    animation: none;
+    animation-duration: 2s;
   }
 }
 
-/* ── Print ──────────────────────────────────────────────────────────────── */
 @media print {
   .lc-topbar,
-  .lc-tabs {
-    display: none !important;
+  .lc-report-actions {
+    display: none;
   }
 
   .lc-page {
@@ -858,14 +588,324 @@
     padding: 0;
   }
 
-  .lc-section-body {
-    display: block !important;
+  .lc-split {
+    grid-template-columns: 1fr;
   }
 
-  .lc-metric,
-  .lc-banner,
-  .lc-section,
-  .lc-row {
+  .lc-pane {
+    border: none;
+    padding: 0;
+  }
+
+  .lc-pane-image {
+    position: static;
+    max-height: none;
+  }
+
+  .lc-md-item {
     break-inside: avoid;
+  }
+}
+
+/* ── Highlight overlay ──────────────────────────────────────────────────────
+ * Boxes are positioned in PERCENTAGES of this wrapper, which is sized to the
+ * image itself (`fit-content`, not the pane). That is what keeps a highlight
+ * on its words at every column width and zoom level with no measurement in
+ * JS — see LabelImage.tsx.
+ * ────────────────────────────────────────────────────────────────────────── */
+.lc-image-wrap {
+  position: relative;
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 auto;
+}
+
+.lc-region {
+  position: absolute;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.12s ease, box-shadow 0.12s ease;
+}
+
+.lc-region.is-fail {
+  border-color: var(--bad);
+  background: rgba(220, 38, 38, 0.14);
+}
+
+/* Passes are confirmation, not alarm: a hairline and a wash, so twenty of
+   them read as background while three failures still carry the eye. */
+.lc-region.is-pass {
+  border-width: 1px;
+  border-color: rgba(22, 163, 74, 0.55);
+  background: rgba(22, 163, 74, 0.07);
+}
+
+.lc-region.is-fail {
+  /* Restated after .is-pass so the heavier weight wins regardless of order. */
+  border-width: 2px;
+}
+
+/* The selected box lifts off the label rather than merely darkening — at a
+   glance, one box should be obviously the one being read about. */
+.lc-region.is-active {
+  background: rgba(220, 38, 38, 0.26);
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.25);
+}
+
+.lc-region.is-pass.is-active {
+  background: rgba(22, 163, 74, 0.24);
+  box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.25);
+}
+
+.lc-region:hover {
+  background: rgba(220, 38, 38, 0.24);
+}
+
+.lc-region.is-pass:hover {
+  background: rgba(22, 163, 74, 0.22);
+}
+
+/* The number sits OUTSIDE the box, top-left, so it never covers the very text
+   the box is drawing attention to. */
+.lc-region-tag {
+  position: absolute;
+  top: -9px;
+  left: -9px;
+  display: grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--bad);
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+/* ── Findings checklist ─────────────────────────────────────────────────── */
+.lc-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.lc-tab {
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 0.5px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.lc-tab.is-active {
+  background: var(--soft);
+  border-color: var(--line);
+  color: var(--ink);
+}
+
+.lc-finding-list {
+  margin: 0 0 4px;
+  padding: 0;
+  list-style: none;
+}
+
+.lc-finding {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 8px;
+  border: none;
+  border-bottom: 0.5px solid var(--line);
+  border-radius: 6px;
+  background: none;
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.lc-finding-list li:last-child .lc-finding {
+  border-bottom: none;
+}
+
+.lc-finding:hover {
+  background: var(--soft);
+}
+
+.lc-finding.is-active {
+  background: #f8fbff;
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.lc-finding.is-fail {
+  box-shadow: inset 2px 0 0 var(--bad);
+}
+
+.lc-finding.is-fail.is-active {
+  background: var(--bad-soft);
+}
+
+/* The marker carries the number that is drawn on the label. */
+.lc-finding-mark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  border-radius: 999px;
+  background: var(--bad);
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+
+.lc-finding.is-pass .lc-finding-mark {
+  background: transparent;
+  color: var(--ok);
+}
+
+.lc-finding.is-pass .lc-finding-mark svg {
+  width: 16px;
+  height: 16px;
+}
+
+.lc-finding-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.lc-finding-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.lc-finding-head strong {
+  color: var(--ink);
+  font-size: 0.87rem;
+  font-weight: 500;
+}
+
+.lc-finding-pin {
+  display: inline-flex;
+  color: var(--faint);
+}
+
+.lc-finding-pin svg {
+  width: 13px;
+  height: 13px;
+}
+
+.lc-finding-remarks {
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.55;
+}
+
+.lc-finding-quote {
+  color: var(--ink);
+  font-size: 0.81rem;
+  font-style: italic;
+  opacity: 0.75;
+}
+
+.lc-finding-note {
+  color: var(--faint);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+/* Screen-reader-only text for the pin's label. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media print {
+  /* Boxes must survive printing — a printed report with no marks loses the
+     point — but browsers drop backgrounds by default. */
+  .lc-region {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  .lc-tabs {
+    display: none;
+  }
+}
+
+/* ── Legend ─────────────────────────────────────────────────────────────── */
+.lc-legend {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.lc-legend-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.lc-legend-key i {
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  border: 1px solid transparent;
+}
+
+.lc-legend-key.is-fail i {
+  border-color: var(--bad);
+  background: rgba(220, 38, 38, 0.14);
+}
+
+.lc-legend-key.is-pass i {
+  border-color: rgba(22, 163, 74, 0.55);
+  background: rgba(22, 163, 74, 0.07);
+}
+
+.lc-legend-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  cursor: pointer;
+  user-select: none;
+}
+
+.lc-legend-toggle input {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+@media print {
+  .lc-legend-toggle {
+    display: none;
   }
 }
