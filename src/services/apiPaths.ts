@@ -70,9 +70,33 @@ if (API_VERSION && !/^v\d+$/.test(API_VERSION)) {
  *
  * Derived by stripping a trailing `/api` OR `/api/v<n>`, so it stays correct
  * whichever of the two an environment file points at. Used for things the API
- * prefix does not cover — media files, the HAIS QR link.
+ * prefix does not cover — media files.
+ *
+ * NOT for links a HUMAN opens. This is the API server; the web app is a
+ * different origin, and `APP_ORIGIN` below is the one that answers "where does
+ * a person go". The HAIS QR used to be built from this, which put every
+ * printed sticker's URL on the Django host, where the route does not exist.
  */
 export const API_ORIGIN = RAW_BASE.replace(/\/api(\/v\d+)?$/i, "");
+
+/**
+ * Where the WEB APP is served from — the base for any link a person opens.
+ *
+ * `VITE_PUBLIC_APP_URL` when set, otherwise wherever this bundle happens to be
+ * running. The env var exists because of the HAIS QR: a sticker is PHYSICAL,
+ * and one printed from a `localhost:5173` dev session carries a dead URL onto
+ * a laptop for the rest of its life. Set it in the deployed environment and
+ * the printed code is right no matter who prints it.
+ *
+ * It is deliberately NOT derived from `VITE_API_BASE_URL`: the API and the app
+ * are different origins in this deployment, which is precisely the bug this
+ * replaces.
+ */
+export const APP_ORIGIN = (
+  (import.meta.env.VITE_PUBLIC_APP_URL as string | undefined) ||
+  (typeof window === "undefined" ? "" : window.location.origin) ||
+  ""
+).replace(/\/+$/, "");
 
 /**
  * The prefix every API path hangs off: `/api`, or `/api/v1` when versioned.

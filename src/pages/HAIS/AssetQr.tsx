@@ -2,7 +2,7 @@ import { QRCodeCanvas } from "qrcode.react";
 import { HiOutlinePrinter } from "react-icons/hi2";
 
 import { Button } from "@/components/ui/button";
-import { API_ORIGIN } from "../../services/api";
+import { APP_ORIGIN } from "../../services/apiPaths";
 import { qrValueFor, type Asset } from "../../services/haisService";
 
 import { MONO } from "./assetTone";
@@ -19,12 +19,19 @@ type Props = {
  * and shows all the device details. A Print button lays out the QR + labels so it
  * can be stuck on the physical asset.
  *
- * The link's base comes from the env file: API_ORIGIN is derived from
- * VITE_API_BASE_URL (its host without the trailing /api). So the QR always
- * points at whatever server the env is configured for — no hardcoded URL.
- * (Falls back to the current site origin only if the env base is relative.)
+ * THE LINK POINTS AT THE WEB APP, NOT THE API.
+ *
+ * It used to be built from `API_ORIGIN`, which is the Django host — so every
+ * sticker printed carried `http://<api-host>:8081/hais/device/<serial>`, and
+ * `/hais/device/:code` is a route in THIS app, not a URL Django serves. Every
+ * scan landed on the server's own 404 page.
+ *
+ * `APP_ORIGIN` is `VITE_PUBLIC_APP_URL` when the environment sets it, and the
+ * current origin otherwise. Set it wherever stickers are printed from: a QR is
+ * physical, and one printed from a dev session is wrong for the life of the
+ * device.
  */
-const QR_BASE = (API_ORIGIN || window.location.origin).replace(/\/+$/, "");
+const QR_BASE = APP_ORIGIN;
 
 export default function AssetQr({ asset, size = 128 }: Props) {
   const serial = asset.qr_code || qrValueFor(asset.serial_num);

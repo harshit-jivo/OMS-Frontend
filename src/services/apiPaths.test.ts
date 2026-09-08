@@ -122,3 +122,27 @@ describe("edge cases", () => {
     await expect(load("")).rejects.toThrow(/VITE_API_BASE_URL/);
   });
 });
+
+/**
+ * The QR base.
+ *
+ * A HAIS sticker is PHYSICAL. Getting this wrong does not show up as a failing
+ * request — it shows up months later as a laptop with a dead QR on it, which
+ * is why it is pinned rather than left to the next reader's judgement.
+ */
+describe("APP_ORIGIN", () => {
+  it("is not the API origin", async () => {
+    // The bug this replaces: the QR was built from API_ORIGIN, so every
+    // sticker pointed at the Django host, where /hais/device/:code is not a
+    // route and the server answers its own 404.
+    const { API_ORIGIN, APP_ORIGIN } = await import("./apiPaths");
+    if (API_ORIGIN) {
+      expect(APP_ORIGIN).not.toBe(API_ORIGIN);
+    }
+  });
+
+  it("carries no trailing slash, so a path can be appended directly", async () => {
+    const { APP_ORIGIN } = await import("./apiPaths");
+    expect(APP_ORIGIN).not.toMatch(/\/$/);
+  });
+});
