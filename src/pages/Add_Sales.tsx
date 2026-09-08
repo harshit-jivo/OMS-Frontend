@@ -57,18 +57,27 @@ const createEmptyRow = (): SalesRow => ({
   schemes: [],
 });
 
-const applyFocPricingToRow = (row: SalesRow): SalesRow => ({
-  ...row,
-  isScheme: false,
-  scheme: "",
-  schemeQty: "",
-  schemes: [],
-  priceListBasic: "0",
-  amount:
-    Number(row.qty) > 0 && Number(row.basicPrice) > 0
-      ? (Number(row.qty) * Number(row.basicPrice)).toFixed(2)
-      : "",
-});
+/** An FOC line ships free, but SAP still needs a non-zero rate: an invoice
+ *  totalling 0 generates no IRN, so a token rate has always been keyed by hand.
+ *  0.001 is that convention as a default, so nobody has to remember it. An
+ *  operator can still overwrite it -- any rate they type themselves is kept. */
+export const FOC_TOKEN_BASIC_PRICE = "0.001";
+
+const applyFocPricingToRow = (row: SalesRow): SalesRow => {
+  const basicPrice =
+    Number(row.basicPrice) > 0 ? row.basicPrice : FOC_TOKEN_BASIC_PRICE;
+  return {
+    ...row,
+    isScheme: false,
+    scheme: "",
+    schemeQty: "",
+    schemes: [],
+    priceListBasic: "0",
+    basicPrice,
+    amount:
+      Number(row.qty) > 0 ? (Number(row.qty) * Number(basicPrice)).toFixed(2) : "",
+  };
+};
 
 const normalizeOptionText = (value: unknown) =>
   String(value ?? "").trim().toLowerCase();
@@ -1343,7 +1352,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
         row.basicPrice =
           isFocOrder || partyProduct.basic_rate == null
             ? isFocOrder
-              ? "0"
+              ? FOC_TOKEN_BASIC_PRICE
               : ""
             : String(partyProduct.basic_rate);
         row.priceListBasic = isFocOrder
@@ -1882,7 +1891,7 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
           basicPrice:
             isFocOrder || product.basic_rate == null
               ? isFocOrder
-                ? "0"
+                ? FOC_TOKEN_BASIC_PRICE
                 : ""
               : String(product.basic_rate),
           priceListBasic: isFocOrder
