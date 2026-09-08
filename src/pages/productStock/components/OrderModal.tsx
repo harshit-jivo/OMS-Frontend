@@ -1,11 +1,23 @@
 /**
  * The "Open Sales Orders" dialog — opened by clicking a party in the party
- * filter dropdown. Lets the user pick which of that party's open sales
- * orders should drive the demand numbers on the main table.
+ * picker. Lets the user pick which of that party's open sales orders should
+ * drive the demand numbers on the main table.
  */
-import { HiDocumentText, HiExclamationTriangle, HiMagnifyingGlass, HiXMark } from "react-icons/hi2";
+import { HiOutlineDocumentText, HiOutlineExclamationTriangle } from "react-icons/hi2";
 
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { FilterBar, FilterCount, FilterSearch } from "@/components/ui/filter-bar";
+import { EmptyState } from "@/components/ui/page";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -49,99 +61,71 @@ export default function OrderModal({ ps }: { ps: ProductStockState }) {
       }}
     >
       {orderModal && (
-        <DialogContent
-          title="Order items"
-          variant="bare"
-          size="auto"
-          showClose={false}
-          className="ps-order-modal"
-        >
-          <div className="ps-order-modal-head">
-            <div>
-              <span className="ps-order-modal-kicker">Open Sales Orders</span>
-              <h2 id="ps-order-modal-title">
-                {getPartyName(orderModal.party) || getPartyCode(orderModal.party)}
-              </h2>
-              <p>{getPartyCode(orderModal.party)}</p>
-            </div>
-            <button
-              type="button"
-              className="ps-modal-close"
-              onClick={closeOrderModal}
-              aria-label="Close"
-            >
-              <HiXMark />
-            </button>
-          </div>
+        <DialogContent title="Open sales orders" size="lg">
+          <DialogHeader>
+            <DialogTitle>
+              <span className="flex min-w-0 flex-col">
+                <span className="truncate">
+                  {getPartyName(orderModal.party) || getPartyCode(orderModal.party)}
+                </span>
+                <span className="text-[11.5px] font-normal text-subtle">
+                  {getPartyCode(orderModal.party)} · open sales orders
+                </span>
+              </span>
+            </DialogTitle>
+          </DialogHeader>
 
-          <div className="ps-order-modal-body">
+          <DialogBody className="space-y-3">
             {orderModal.loading ? (
-              <div className="ps-state ps-order-modal-state">
-                <span className="ps-spinner" />
-                Loading open sales orders...
+              <div className="space-y-2" aria-label="Loading open sales orders">
+                <Skeleton className="h-9 w-full" />
+                <Skeleton className="h-9 w-full" />
+                <Skeleton className="h-9 w-full" />
               </div>
             ) : orderModal.error ? (
-              <div className="ps-state ps-state-error ps-order-modal-state">
-                <HiExclamationTriangle />
-                {orderModal.error}
-              </div>
+              <EmptyState
+                icon={HiOutlineExclamationTriangle}
+                title="Could not load open sales orders"
+                hint={orderModal.error}
+              />
             ) : orderModal.orders.length === 0 ? (
-              <div className="ps-state ps-order-modal-state">
-                <HiDocumentText />
-                No open sales orders found.
-              </div>
+              <EmptyState
+                icon={HiOutlineDocumentText}
+                title="No open sales orders"
+                hint="This party has nothing outstanding."
+              />
             ) : (
               <>
-                <label className="ps-order-search">
-                  <HiMagnifyingGlass />
-                  <input
-                    type="text"
+                <FilterBar className="border-0 bg-transparent p-0">
+                  <FilterSearch
                     value={orderSearch}
                     onChange={(event) => setOrderSearch(event.target.value)}
-                    placeholder="Search SO number or reference"
+                    placeholder="SO number or reference…"
+                    fieldClassName="min-w-[220px]"
                     autoFocus
                   />
-                </label>
-                <div className="ps-order-modal-actions">
-                  <span>{selectedModalOrderCount} selected for this party</span>
-                  <div>
-                    <button
-                      type="button"
-                      className="ps-order-action-btn"
-                      onClick={selectVisibleSalesOrders}
-                      disabled={filteredModalOrders.length === 0}
-                    >
-                      Select Visible
-                    </button>
-                    <button
-                      type="button"
-                      className="ps-order-action-btn"
-                      onClick={clearModalPartyOrders}
-                      disabled={selectedModalOrderCount === 0}
-                    >
-                      Clear Party
-                    </button>
-                    <button type="button" className="ps-order-action-btn primary" onClick={closeOrderModal}>
-                      Done
-                    </button>
-                  </div>
-                </div>
+                  <FilterCount>
+                    {selectedModalOrderCount} selected for this party
+                  </FilterCount>
+                </FilterBar>
+
                 {filteredModalOrders.length === 0 ? (
-                  <div className="ps-state ps-order-modal-state">
-                    <HiDocumentText />
-                    No sales order found for this search.
-                  </div>
+                  <EmptyState
+                    icon={HiOutlineDocumentText}
+                    title="No sales order matches that search"
+                    hint="Try the SO number on its own."
+                  />
                 ) : (
-                  <div className="ps-order-table-wrap">
+                  <div className="max-h-[420px] overflow-auto rounded-sm border border-line">
                     <Table density="compact">
                       <TableHeader>
                         <TableRow>
-                          <TableHead>Sales Order</TableHead>
-                          <TableHead>Order Date</TableHead>
-                          <TableHead>Due Date</TableHead>
-                          <TableHead>Items</TableHead>
-                          <TableHead>Open Qty</TableHead>
-                          <TableHead>Select</TableHead>
+                          <TableHead>Sales order</TableHead>
+                          <TableHead>Order date</TableHead>
+                          <TableHead>Due date</TableHead>
+                          <TableHead className="text-right">Items</TableHead>
+                          <TableHead className="text-right">Open qty</TableHead>
+                          <TableHead className="text-right">Select</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -162,33 +146,39 @@ export default function OrderModal({ ps }: { ps: ProductStockState }) {
 
                           return (
                             <TableRow
-                              className={isSelected ? "is-selected" : ""}
+                              className={isSelected ? "bg-brand-soft" : ""}
                               key={getSalesOrderKeyForParty(order, modalPartyCode)}
                             >
                               <TableCell>
-                                <span className="ps-order-doc">
+                                <span className="block font-semibold text-ink">
                                   SO #{order.DocNum || order.DocEntry}
                                 </span>
                                 {order.NumAtCard && (
-                                  <span className="ps-order-ref">Ref: {order.NumAtCard}</span>
+                                  <span className="block text-[11.5px] text-subtle">
+                                    Ref: {order.NumAtCard}
+                                  </span>
                                 )}
                               </TableCell>
-                              <TableCell>{formatOrderDate(order.DocDate)}</TableCell>
-                              <TableCell>{formatOrderDate(order.DocDueDate)}</TableCell>
-                              <TableCell>
-                                <span className="ps-order-pill">{uniqueItems.size}</span>
+                              <TableCell className="whitespace-nowrap">
+                                {formatOrderDate(order.DocDate)}
                               </TableCell>
-                              <TableCell className="ps-order-qty">
+                              <TableCell className="whitespace-nowrap">
+                                {formatOrderDate(order.DocDueDate)}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <Badge tone="neutral">{uniqueItems.size}</Badge>
+                              </TableCell>
+                              <TableCell className="text-right tabular-nums">
                                 {formatQuantity(totalOpenQty)}
                               </TableCell>
-                              <TableCell>
-                                <button
-                                  type="button"
-                                  className="ps-order-select-btn"
+                              <TableCell className="text-right">
+                                <Button
+                                  size="sm"
+                                  variant={isSelected ? "danger" : "secondary"}
                                   onClick={() => toggleSalesOrder(order)}
                                 >
                                   {isSelected ? "Remove" : "Add"}
-                                </button>
+                                </Button>
                               </TableCell>
                             </TableRow>
                           );
@@ -199,7 +189,23 @@ export default function OrderModal({ ps }: { ps: ProductStockState }) {
                 )}
               </>
             )}
-          </div>
+          </DialogBody>
+
+          <DialogFooter>
+            <Button
+              className="mr-auto"
+              onClick={selectVisibleSalesOrders}
+              disabled={filteredModalOrders.length === 0}
+            >
+              Select visible
+            </Button>
+            <Button onClick={clearModalPartyOrders} disabled={selectedModalOrderCount === 0}>
+              Clear party
+            </Button>
+            <Button variant="primary" onClick={closeOrderModal}>
+              Done
+            </Button>
+          </DialogFooter>
         </DialogContent>
       )}
     </Dialog>

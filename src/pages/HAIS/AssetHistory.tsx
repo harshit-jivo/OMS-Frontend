@@ -1,26 +1,12 @@
+/**
+ * Full movement trail of a single device — every handover, in order, showing
+ * WHEN it moved, TO/FROM whom, and WHY. Newest entry first, on `ui/timeline`.
+ */
+import { SectionHeading } from "@/components/ui/page";
+import { Timeline, TimelineHead, TimelineItem, TimelineNote } from "@/components/ui/timeline";
 import { configSummary, type AssetHistoryEntry } from "../../services/haisService";
 
-/** Accent colour (as a `.hais-history-dot--*` modifier) for the timeline dot,
- *  by the kind of movement. */
-function dotTone(action?: string): "handover" | "maintenance" | "eol" | "default" {
-  switch ((action || "").toLowerCase()) {
-    case "assigned":
-    case "reassigned":
-    case "handover":
-      return "handover"; // blue — handover
-    case "config updated":
-    case "sent for service":
-    case "service":
-      return "maintenance"; // amber — maintenance
-    case "scrapped":
-    case "not working":
-      return "eol"; // red — end of life
-    case "returned":
-      return "default"; // slate — back to store
-    default:
-      return "default";
-  }
-}
+import { NOTE, historyTone } from "./assetTone";
 
 /** Headline for an entry, e.g. "Handed over to Priya Nair". */
 function title(h: AssetHistoryEntry): string {
@@ -52,50 +38,42 @@ function meta(h: AssetHistoryEntry): string {
   return [emp, h.department, h.location].filter(Boolean).join(" · ");
 }
 
-/**
- * Full movement trail of a single device — every handover, in order, showing
- * WHEN it moved, TO/FROM whom, and WHY. Newest entry first, timeline style.
- */
-export default function AssetHistory({ history }: { history?: AssetHistoryEntry[] }) {
+export default function AssetHistory({
+  history,
+  heading = true,
+}: {
+  history?: AssetHistoryEntry[];
+  /** Off when the dialog around it already names the section. */
+  heading?: boolean;
+}) {
   const entries = [...(history ?? [])].reverse();
 
   return (
-    <div className="nic-subsection">
-      <h4 className="nic-subsection-title">History</h4>
+    <div className="space-y-3">
+      {heading ? <SectionHeading>History</SectionHeading> : null}
       {entries.length === 0 ? (
-        <p className="nic-note">No history recorded yet.</p>
+        <p className={NOTE}>No history recorded yet.</p>
       ) : (
-        <div className="hais-history-list">
+        // `ml-1.5` so the dot sits inside the card, not on its edge.
+        <Timeline className="ml-1.5">
           {entries.map((h, i) => {
-            const last = i === entries.length - 1;
             const metaLine = meta(h);
             return (
-              <div key={i} className="hais-history-row">
-                {/* marker column: dot + connecting line */}
-                <div className="hais-history-marker">
-                  <span className={`hais-history-dot hais-history-dot--${dotTone(h.action)}`} />
-                  {!last && <span className="hais-history-connector" />}
-                </div>
-
-                {/* content column */}
-                <div className={`hais-history-content${last ? " hais-history-content--last" : ""}`}>
-                  <div className="nic-note hais-history-date">
-                    {h.date || "—"}
-                  </div>
-                  <div className="hais-history-title">{title(h)}</div>
-                  {metaLine && <div className="nic-note hais-history-sub">{metaLine}</div>}
-                  {h.reason && <div className="nic-note hais-history-reason">{h.reason}</div>}
-                  {h.config_change && (
-                    <div className="nic-note hais-history-sub">Change: {h.config_change}</div>
-                  )}
-                  {h.config && configSummary(h.config) && (
-                    <div className="nic-note hais-history-sub">Config: {configSummary(h.config)}</div>
-                  )}
-                </div>
-              </div>
+              <TimelineItem key={i} tone={historyTone(h.action)} last={i === entries.length - 1}>
+                <TimelineHead>
+                  {title(h)}
+                  <time>{h.date || "—"}</time>
+                </TimelineHead>
+                {metaLine && <TimelineNote>{metaLine}</TimelineNote>}
+                {h.reason && <TimelineNote className="text-body">{h.reason}</TimelineNote>}
+                {h.config_change && <TimelineNote>Change: {h.config_change}</TimelineNote>}
+                {h.config && configSummary(h.config) && (
+                  <TimelineNote>Config: {configSummary(h.config)}</TimelineNote>
+                )}
+              </TimelineItem>
             );
           })}
-        </div>
+        </Timeline>
       )}
     </div>
   );

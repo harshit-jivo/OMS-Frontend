@@ -30,6 +30,7 @@ export const TEST_SESSION: Session = {
   companyName: "Test Co",
   mainGroupId: "1",
   mainGroupName: "Main",
+  categories: [],
 };
 
 /**

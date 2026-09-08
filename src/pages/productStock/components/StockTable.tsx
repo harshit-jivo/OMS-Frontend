@@ -1,12 +1,13 @@
 /**
  * The main stock table — Phase 5.5's priority virtualization target.
  *
- * Rows are windowed with `@tanstack/react-virtual` over the existing
- * `.ps-table-wrap` scroll container (already `max-height` + `overflow: auto`
- * in `Product_Stock.css`, so no layout change was needed to host it). Only
- * the DOM-mounting strategy changes: the visible rows, their markup and
- * their styling are byte-for-byte what `pageProducts.map(...)` rendered
- * before the split.
+ * Rows are windowed with `@tanstack/react-virtual` over this component's OWN
+ * scroll container, not the page's. That matters: DESIGN_SYSTEM §1.6 explains
+ * why `useWindowVirtualizer` is wrong in this app (`document.body` scrolls,
+ * `window.scrollY` never moves), and the reason this table was never caught by
+ * that bug is that it passes an explicit `getScrollElement`. The container has
+ * to keep a real `max-height` + `overflow` for that to hold — it did as
+ * `.ps-table-wrap`, and the utilities below say the same thing.
  *
  * A product row and its (optional) expanded "ordered by" detail row are two
  * separate `<tr>`s, so they cannot be virtualized as one `Fragment` item the
@@ -17,16 +18,23 @@
  * Real row counts here are tiny — `ITEMS_PER_PAGE` caps a page at 15 rows,
  * 16 with a detail row expanded — so `overscan` is set high enough that
  * every row is always in the rendered range and nothing is ever clipped by
- * scroll position. That keeps rendering pixel-identical to the unvirtualized
- * version today, while the table is wired for the row counts a future
- * removal of client paging would introduce.
+ * scroll position.
  */
 import { useMemo, useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { HiCube, HiExclamationTriangle } from "react-icons/hi2";
+import { HiOutlineCube, HiOutlineExclamationTriangle } from "react-icons/hi2";
 
 import { Badge } from "@/components/ui/badge";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Card, EmptyState } from "@/components/ui/page";
+import { TableSkeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 import {
   STOCK_TONE,
@@ -78,7 +86,7 @@ export default function StockTable({ ps }: { ps: ProductStockState }) {
       if (canShowPartyDemand && isDemandExpanded) {
         items.push({
           kind: "detail",
-          key: `${product.display_key}__demand`,
+          key: product.display_key + "__demand",
           partyDemandRows,
         });
       }
@@ -103,38 +111,43 @@ export default function StockTable({ ps }: { ps: ProductStockState }) {
       : 0;
 
   return (
-    <section className="ps-table-card">
+    <Card className="overflow-hidden p-0">
       {loading || partyOrdersLoading || productOrdersLoading ? (
-        <div className="ps-state">
-          <span className="ps-spinner" />
-          {partyOrdersLoading || productOrdersLoading
-            ? "Loading ordered products..."
-            : "Loading stock..."}
-        </div>
+        <TableSkeleton
+          columns={COLUMN_COUNT}
+          label={
+            partyOrdersLoading || productOrdersLoading
+              ? "Loading ordered products"
+              : "Loading stock"
+          }
+        />
       ) : error ? (
-        <div className="ps-state ps-state-error">
-          <HiExclamationTriangle />
-          {error}
-        </div>
+        <EmptyState icon={HiOutlineExclamationTriangle} title="Could not load stock" hint={error} />
       ) : pageProducts.length === 0 ? (
-        <div className="ps-state">
-          <HiCube />
-          No stock records found.
-        </div>
+        <EmptyState
+          icon={HiOutlineCube}
+          title="No stock records found"
+          hint="Try clearing a filter, or widening the warehouse selection."
+        />
       ) : (
-        <div className="ps-table-wrap" ref={scrollRef}>
+        // The virtualizer's scroll element. `max-h` + `overflow-auto` are load
+        // bearing — see the note at the top of this file.
+        <div
+          className="max-h-[calc(100svh-320px)] w-full overflow-auto max-lg:max-h-none"
+          ref={scrollRef}
+        >
           <Table density="compact">
             <TableHeader>
               <TableRow>
-                <TableHead>Item Code</TableHead>
+                <TableHead>Item code</TableHead>
                 <TableHead>Product</TableHead>
                 <TableHead>Category</TableHead>
                 <TableHead>Pack</TableHead>
-                <TableHead>Warehouse Stock</TableHead>
-                <TableHead>Warehouse Qty Ltrs</TableHead>
-                <TableHead>Order Required Qty</TableHead>
-                <TableHead>Order Required Qty Ltrs</TableHead>
-                <TableHead>Left Over</TableHead>
+                <TableHead className="text-right">Warehouse stock</TableHead>
+                <TableHead className="text-right">Warehouse qty (L)</TableHead>
+                <TableHead className="text-right">Order required qty</TableHead>
+                <TableHead className="text-right">Order required qty (L)</TableHead>
+                <TableHead className="text-right">Left over</TableHead>
                 <TableHead>Status</TableHead>
               </TableRow>
             </TableHeader>
@@ -154,17 +167,24 @@ export default function StockTable({ ps }: { ps: ProductStockState }) {
                       key={item.key}
                       data-index={virtualRow.index}
                       ref={rowVirtualizer.measureElement}
-                      className="ps-demand-detail-row"
+                      className="bg-surface"
                     >
                       <TableCell colSpan={COLUMN_COUNT}>
-                        <div className="ps-demand-detail-panel">
-                          <div className="ps-demand-detail-title">Ordered by</div>
-                          <div className="ps-demand-detail-list">
+                        <div className="py-1">
+                          <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-subtle">
+                            Ordered by
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
                             {item.partyDemandRows.map((row) => (
-                              <span className="ps-demand-party-chip" key={row.partyCode}>
-                                <strong>{row.partyName}</strong>
-                                <small>{row.partyCode}</small>
-                                <em>{formatQuantity(row.qty)}</em>
+                              <span
+                                className="inline-flex items-baseline gap-1.5 rounded-full border border-line bg-card px-2.5 py-1 text-[12px]"
+                                key={row.partyCode}
+                              >
+                                <strong className="font-semibold text-ink">{row.partyName}</strong>
+                                <small className="text-[11px] text-subtle">{row.partyCode}</small>
+                                <em className="not-italic font-semibold tabular-nums text-brand">
+                                  {formatQuantity(row.qty)}
+                                </em>
                               </span>
                             ))}
                           </div>
@@ -195,13 +215,21 @@ export default function StockTable({ ps }: { ps: ProductStockState }) {
                     key={item.key}
                     data-index={virtualRow.index}
                     ref={rowVirtualizer.measureElement}
-                    className={status === "shortage" || status === "out" ? "ps-row-out" : ""}
+                    className={status === "shortage" || status === "out" ? "bg-bad-soft/40" : ""}
                   >
-                    <TableCell className="ps-code">{product.item_code || "-"}</TableCell>
+                    <TableCell className="font-mono text-[12px] text-ink">
+                      {product.item_code || "—"}
+                    </TableCell>
                     <TableCell>
                       <button
                         type="button"
-                        className={`ps-product-name-btn${product.item_code ? " has-demand" : ""}`}
+                        /* Opens this product's demand, so it is a row action
+                           carrying the DESIGN_SYSTEM §1.1 reset rather than a
+                           `ui/button`. */
+                        className={
+                          "flex w-full cursor-pointer appearance-none flex-col items-start gap-0.5 border-0 bg-transparent p-0 text-left [font-family:inherit] text-[13px] disabled:cursor-wait " +
+                          (product.item_code ? "hover:underline" : "")
+                        }
                         onClick={() => {
                           if (!product.item_code) return;
                           if (!canShowPartyDemand || selectedProductCode !== product.item_code) {
@@ -221,11 +249,11 @@ export default function StockTable({ ps }: { ps: ProductStockState }) {
                         }}
                         disabled={isProductDemandLoading}
                       >
-                        <span className="ps-product-name">{product.item_name || "-"}</span>
+                        <span className="font-semibold text-ink">{product.item_name || "—"}</span>
                         {product.item_code && (
-                          <span className="ps-product-demand-hint">
+                          <span className="text-[11px] text-brand">
                             {isProductDemandLoading
-                              ? "Loading"
+                              ? "Loading…"
                               : canShowPartyDemand
                                 ? isDemandExpanded
                                   ? "Hide parties"
@@ -235,19 +263,26 @@ export default function StockTable({ ps }: { ps: ProductStockState }) {
                         )}
                       </button>
                     </TableCell>
-                    <TableCell>{product.category || "-"}</TableCell>
-                    <TableCell>{product.sal_pack_unit || "-"}</TableCell>
-                    <TableCell className="ps-stock">{formatQuantity(stock)}</TableCell>
-                    <TableCell className="ps-stock">
+                    <TableCell>{product.category || "—"}</TableCell>
+                    <TableCell>{product.sal_pack_unit || "—"}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {formatQuantity(stock)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
                       {formatRoundedQuantity(warehouseQtyLtrs)}
                     </TableCell>
-                    <TableCell className="ps-stock">
-                      <span className="ps-required-qty">{formatQuantity(pendingRequiredQty)}</span>
+                    <TableCell className="text-right font-semibold tabular-nums text-brand">
+                      {formatQuantity(pendingRequiredQty)}
                     </TableCell>
-                    <TableCell className="ps-stock">
+                    <TableCell className="text-right tabular-nums">
                       {formatRoundedQuantity(requiredQtyLtrs)}
                     </TableCell>
-                    <TableCell className={`ps-stock ${leftOverStock < 0 ? "ps-stock-negative" : ""}`}>
+                    <TableCell
+                      className={
+                        "text-right tabular-nums " +
+                        (leftOverStock < 0 ? "font-semibold text-bad" : "")
+                      }
+                    >
                       {formatQuantity(leftOverStock)}
                     </TableCell>
                     <TableCell>
@@ -276,6 +311,6 @@ export default function StockTable({ ps }: { ps: ProductStockState }) {
           </Table>
         </div>
       )}
-    </section>
+    </Card>
   );
 }

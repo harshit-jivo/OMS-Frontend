@@ -1,23 +1,34 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import {
-  HiChevronUpDown,
-  HiExclamationTriangle,
-  HiInbox,
-  HiMagnifyingGlass,
-  HiXMark,
-} from "react-icons/hi2";
+/**
+ * The Approval console's shared presentational pieces.
+ *
+ * These once filled the role a component library would, because the app had
+ * none. It has one now, so every export here is a thin adapter onto
+ * `components/ui/` — the names and props are unchanged so the ten files that
+ * import them did not have to move, but nothing in this file draws its own
+ * box any more.
+ *
+ * Keeping the adapters rather than rewriting ten call sites is deliberate:
+ * `Modal`, `EmptyState` and `ErrorState` carry console-specific defaults
+ * (unmount-based closing, the retry button's wording) that would otherwise be
+ * repeated at each site.
+ */
+import { useEffect, useRef, type ReactNode } from "react";
+import { HiOutlineExclamationTriangle, HiOutlineInbox } from "react-icons/hi2";
 
 import type { RequestStatus } from "../../services/approvalService";
 import { Badge, type BadgeTone } from "@/components/ui/badge";
-import { Dialog, DialogClose, DialogContent } from "@/components/ui/dialog";
-
-/**
- * Reusable presentational primitives for the Approval console.
- *
- * The app ships no component library, so these fill the role shadcn/ui would:
- * one implementation of table shell, modal, badge and the loading/empty/error
- * states, used by every tab.
- */
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { SearchSelect as UiSearchSelect } from "@/components/ui/dropdown";
+import { EmptyState as UiEmptyState } from "@/components/ui/page";
+import { Skeleton } from "@/components/ui/skeleton";
 
 // ---------------------------------------------------------------------------
 // Status badge
@@ -50,16 +61,19 @@ export function ActivePill({ active }: { active: boolean }) {
 // Async states
 // ---------------------------------------------------------------------------
 
+/**
+ * A skeleton that is a `<tbody>`, because every call site drops it inside an
+ * existing `<table>` whose header must stay put while the rows load. That is
+ * why it is not `ui/skeleton`'s `TableSkeleton`, which renders its own block.
+ */
 export function TableSkeleton({ rows = 5, cols = 5 }: { rows?: number; cols?: number }) {
   return (
-    <tbody>
+    <tbody aria-hidden="true">
       {Array.from({ length: rows }).map((_, r) => (
         <tr key={r}>
           {Array.from({ length: cols }).map((__, c) => (
-            <td key={c}>
-              <div
-                className={`apv-skeleton${c === 0 ? " apv-skeleton-first" : ""}`}
-              />
+            <td key={c} className="px-3 py-2">
+              <Skeleton className={"h-3.5 " + (c === 0 ? "w-2/3" : "w-1/2")} />
             </td>
           ))}
         </tr>
@@ -77,27 +91,17 @@ export function EmptyState({
   hint?: string;
   action?: ReactNode;
 }) {
-  return (
-    <div className="apv-empty">
-      <HiInbox size={30} className="apv-empty-icon" />
-      <div className="apv-empty-title">{title}</div>
-      {hint && <div>{hint}</div>}
-      {action && <div className="apv-empty-action">{action}</div>}
-    </div>
-  );
+  return <UiEmptyState icon={HiOutlineInbox} title={title} hint={hint} action={action} />;
 }
 
 export function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
-    <div className="apv-error">
-      <HiExclamationTriangle size={26} className="apv-error-icon" />
-      <div>{message}</div>
-      {onRetry && (
-        <button type="button" className="apv-btn" onClick={onRetry}>
-          Try again
-        </button>
-      )}
-    </div>
+    <UiEmptyState
+      icon={HiOutlineExclamationTriangle}
+      title="Could not load this"
+      hint={message}
+      action={onRetry ? <Button onClick={onRetry}>Try again</Button> : undefined}
+    />
   );
 }
 
@@ -114,9 +118,14 @@ export interface ComboOption {
 }
 
 /**
- * Type-to-filter picker. A plain <select> is unusable once a list runs to
- * dozens of users, so this filters as you type and supports full keyboard
- * navigation (↑ ↓ Enter Escape).
+ * Type-to-filter picker.
+ *
+ * Was 150 lines of hand-written combobox: its own open state, an outside-click
+ * listener, an active-index cursor, `scrollIntoView` on arrow keys, and a
+ * `mousedown` handler that existed only because its own outside-click listener
+ * would otherwise close the list before a click landed. `ui/dropdown`'s
+ * `SearchSelect` is the same control (DESIGN_SYSTEM §5a), so this is now the
+ * name adapter for the console's `ComboOption` shape.
  */
 export function SearchSelect({
   id,
@@ -139,147 +148,17 @@ export function SearchSelect({
   disabled?: boolean;
   loading?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const [active, setActive] = useState(0);
-
-  const rootRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const listRef = useRef<HTMLUListElement>(null);
-
-  const selected = options.find((o) => o.value === value) ?? null;
-
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return options;
-    return options.filter(
-      (o) =>
-        o.label.toLowerCase().includes(q) || (o.hint ? o.hint.toLowerCase().includes(q) : false),
-    );
-  }, [options, query]);
-
-  /** Single entry point for open/close so the search state always resets. */
-  const setOpenState = (next: boolean) => {
-    setOpen(next);
-    setQuery("");
-    setActive(0);
-  };
-
-  // Close on outside click.
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) {
-        setOpen(false);
-        setQuery("");
-        setActive(0);
-      }
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [open]);
-
-  // Focus the search box when the list opens. Query/highlight are reset by
-  // the handlers that toggle `open`, not here — resetting state inside an
-  // effect causes an extra render pass.
-  useEffect(() => {
-    if (open) inputRef.current?.focus();
-  }, [open]);
-
-  // Keep the highlighted row in view during keyboard navigation.
-  useEffect(() => {
-    if (!open) return;
-    const node = listRef.current?.children[active] as HTMLElement | undefined;
-    node?.scrollIntoView({ block: "nearest" });
-  }, [active, open]);
-
-  const commit = (option: ComboOption) => {
-    onChange(option.value);
-    setOpenState(false);
-  };
-
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setActive((i) => Math.min(i + 1, filtered.length - 1));
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setActive((i) => Math.max(i - 1, 0));
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      const option = filtered[active];
-      if (option) commit(option);
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      setOpenState(false);
-    }
-  };
-
   return (
-    <div className="apv-combo" ref={rootRef}>
-      <button
-        id={id}
-        type="button"
-        className="apv-combo-trigger"
-        onClick={() => !disabled && setOpenState(!open)}
-        disabled={disabled || loading}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-      >
-        <span className={selected ? "" : "apv-combo-placeholder"}>
-          {loading ? "Loading…" : selected ? selected.label : placeholder}
-        </span>
-        <HiChevronUpDown className="apv-combo-caret" />
-      </button>
-
-      {open && (
-        <div className="apv-combo-pop">
-          <div className="apv-combo-search">
-            <HiMagnifyingGlass className="apv-combo-search-icon" />
-            <input
-              ref={inputRef}
-              className="apv-combo-input"
-              value={query}
-              placeholder={searchPlaceholder}
-              onChange={(e) => {
-                setQuery(e.target.value);
-                setActive(0);
-              }}
-              onKeyDown={onKeyDown}
-            />
-          </div>
-
-          {filtered.length === 0 ? (
-            <div className="apv-combo-empty">{emptyText}</div>
-          ) : (
-            <ul className="apv-combo-list" role="listbox" ref={listRef}>
-              {filtered.map((o, i) => (
-                <li
-                  key={o.value}
-                  role="option"
-                  aria-selected={o.value === value}
-                  className={
-                    "apv-combo-item" +
-                    (i === active ? " is-active" : "") +
-                    (o.value === value ? " is-selected" : "")
-                  }
-                  onMouseEnter={() => setActive(i)}
-                  onMouseDown={(e) => {
-                    // mousedown, not click — the outside-click handler would
-                    // close the list before a click ever lands.
-                    e.preventDefault();
-                    commit(o);
-                  }}
-                >
-                  <span className="apv-combo-item-label">{o.label}</span>
-                  {o.hint && <span className="apv-combo-item-hint">{o.hint}</span>}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-    </div>
+    <UiSearchSelect<string | number>
+      id={id}
+      value={value}
+      onChange={onChange}
+      options={options}
+      placeholder={loading ? "Loading…" : placeholder}
+      searchPlaceholder={searchPlaceholder}
+      emptyText={emptyText}
+      disabled={disabled || loading}
+    />
   );
 }
 
@@ -288,27 +167,17 @@ export function SearchSelect({
 // ---------------------------------------------------------------------------
 
 /**
- * The Approval console's modal — nine call sites behind one component, which is
- * why this one is worth converting over the pages' one-off overlays.
+ * The Approval console's modal — nine call sites behind one component.
  *
- * It had more of the behaviour than most hand-rolled modals in this codebase:
- * Escape, a body-scroll lock, `aria-modal` and a real accessible name. What it
- * still could not do is the part that is genuinely hard to hand-write:
- *
- *   * **Trap focus.** Tab walked straight out of the modal into the page
- *     behind, which stayed reachable and clickable.
- *   * **Hide the background from assistive tech.** `aria-modal` is advisory;
- *     the rest of the page stayed in the accessibility tree.
- *   * **Put focus back.** On close, focus fell to `<body>`, so the next Tab
- *     restarted from the top of the sidebar.
+ * It draws through `ui/dialog`'s `panel` variant now rather than through
+ * `.apv-modal`, which means it picks up `tw-page` as well: a dialog is
+ * portaled to `body`, outside the `<Page>` that opened it, so without that
+ * reset every control inside it rendered at the 18px root size
+ * (DESIGN_SYSTEM §1.3).
  *
  * The props are unchanged, so all nine call sites are untouched — `Modal` is
  * mounted only when it is open, so `open` is a constant here and closing is
  * still reported through `onClose`.
- *
- * `variant="bare"` because `.apv-modal` already sets the width, radius, shadow
- * and the head/body/foot flex column. The close button stays in the head where
- * that stylesheet positions it, so the primitive's own is switched off.
  */
 export function Modal({
   title,
@@ -356,21 +225,12 @@ export function Modal({
         if (!next) onClose();
       }}
     >
-      <DialogContent
-        title={title}
-        variant="bare"
-        size="auto"
-        showClose={false}
-        className={`apv-modal${wide ? " is-wide" : ""}`}
-      >
-        <div className="apv-modal-head">
-          <h3>{title}</h3>
-          <DialogClose type="button" className="apv-btn apv-btn-icon" aria-label="Close">
-            <HiXMark />
-          </DialogClose>
-        </div>
-        <div className="apv-modal-body">{children}</div>
-        {footer && <div className="apv-modal-foot">{footer}</div>}
+      <DialogContent title={title} size={wide ? "lg" : "md"}>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+        </DialogHeader>
+        <DialogBody>{children}</DialogBody>
+        {footer && <DialogFooter>{footer}</DialogFooter>}
       </DialogContent>
     </Dialog>
   );
@@ -400,21 +260,16 @@ export function ConfirmDialog({
       onClose={onCancel}
       footer={
         <>
-          <button type="button" className="apv-btn" onClick={onCancel} disabled={busy}>
+          <Button onClick={onCancel} disabled={busy}>
             Cancel
-          </button>
-          <button
-            type="button"
-            className={`apv-btn ${danger ? "apv-btn-danger" : "apv-btn-primary"}`}
-            onClick={onConfirm}
-            disabled={busy}
-          >
+          </Button>
+          <Button variant={danger ? "danger" : "primary"} onClick={onConfirm} disabled={busy}>
             {busy ? "Working…" : confirmLabel}
-          </button>
+          </Button>
         </>
       }
     >
-      <p className="apv-confirm-message">{message}</p>
+      <p className="m-0 text-[13px] text-body">{message}</p>
     </Modal>
   );
 }

@@ -25,6 +25,7 @@ import {
   EMPTY_COUNTS,
   extractMessage,
   extractRecords,
+  newestFirst,
   formatAmount,
   NO_RECORDS,
   normalizeStatus,
@@ -54,6 +55,17 @@ import type {
  * buried in this hook, is what that guard is checking for; the hook takes the
  * results as plain booleans like any other derived input.
  */
+/**
+ * A question the reviewer has been asked but not yet answered.
+ *
+ * One shape for all five verbs so the page renders one Dialog rather than
+ * five, and so a second question cannot open over the first.
+ */
+export type PendingAction = {
+  kind: "approve" | "reject" | "delete" | "edit" | "post";
+  record: InvoiceRecord;
+};
+
 export type UseInvoiceReviewOptions = {
   canApproveReject: boolean;
   canPostToSap: boolean;
@@ -133,7 +145,15 @@ export function useInvoiceReview({ canApproveReject, canPostToSap }: UseInvoiceR
       // Deleted rows never come back: the endpoint hides them unless
       // include_deleted is set, which nothing here asks for.
       const query = statusFilter === "ALL" ? "" : `?status=${statusFilter}`;
-      return extractRecords(await apiFetch<unknown>(`/api/invoice/logs/all/${query}`));
+      /*
+       * Newest first, and here rather than per tab: the seven tabs are ONE
+       * query with a different `status` param, so a tab that forgot to sort
+       * would be a tab that quietly disagreed with the other six. See
+       * `newestFirst` for why it copies.
+       */
+      return newestFirst(
+        extractRecords(await apiFetch<unknown>(`/api/invoice/logs/all/${query}`)),
+      );
     },
   });
 
@@ -170,26 +190,40 @@ export function useInvoiceReview({ canApproveReject, canPostToSap }: UseInvoiceR
     return versions;
   }, [historyRecords]);
 
-  const handleAction = async (record: InvoiceRecord, status: InvoiceStatus) => {
+  /*
+   * ─────────────────────────────────────────────────────────────────────────
+   * ASKING BEFORE ACTING
+   * ─────────────────────────────────────────────────────────────────────────
+   * Approve, reject, delete, edit and post each used to ask through
+   * `window.confirm`, and reject collected its mandatory reason through
+   * `window.prompt` — which cannot be validated before it closes, so an empty
+   * reason came back as an error banner AFTER the reviewer had already
+   * committed. The design system's rule is the opposite: disable the confirm
+   * and say why (§6).
+   *
+   * The question is now `pending`, which the page renders as a Dialog and
+   * answers by calling `confirmPending`. The hook still owns what each verb
+   * DOES; it no longer owns how it is asked.
+   */
+  const [pending, setPending] = useState<PendingAction | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
+
+  const ask = (next: PendingAction) => {
+    setRejectReason("");
+    setActionError("");
+    setPending(next);
+  };
+
+  const handleAction = (record: InvoiceRecord, status: InvoiceStatus) => {
     if (record.id === undefined || record.id === null) {
       setActionError("This invoice has no identifier and cannot be updated.");
       return;
     }
-    const label = `SO #${record.so_number || record.id}`;
-    let rejectionReason: string | undefined;
+    ask({ kind: status === "APPROVED" ? "approve" : "reject", record });
+  };
 
-    if (status === "REJECTED") {
-      const reason = window.prompt(`Enter a reason for rejecting ${label}:`);
-      if (reason === null) return; // reviewer cancelled
-      if (!reason.trim()) {
-        setActionError("A rejection reason is required to reject an invoice.");
-        return;
-      }
-      rejectionReason = reason.trim();
-    } else if (!window.confirm(`Are you sure you want to approve ${label}?`)) {
-      return;
-    }
-
+  const runAction = async (record: InvoiceRecord, status: InvoiceStatus) => {
+    const rejectionReason = rejectReason.trim();
     setActionId(record.id);
     setActionError("");
     setActionMessage("");
@@ -203,6 +237,7 @@ export function useInvoiceReview({ canApproveReject, canPostToSap }: UseInvoiceR
         extractMessage(data, status === "APPROVED" ? "Invoice approved." : "Invoice rejected."),
       );
       setSelected(null);
+      setPending(null);
       await loadInvoices();
     } catch (err) {
       console.error(err);
@@ -224,20 +259,15 @@ export function useInvoiceReview({ canApproveReject, canPostToSap }: UseInvoiceR
   // One confirmation, no reason prompt: the reviewer deleting the row is already
   // recorded against it, and the delete is reversible, so making them type a
   // reason bought nothing.
-  const handleDelete = async (record: InvoiceRecord) => {
+  const handleDelete = (record: InvoiceRecord) => {
     if (record.id === undefined || record.id === null) {
       setActionError("This invoice has no identifier and cannot be deleted.");
       return;
     }
-    const label = `SO #${record.so_number || record.id}`;
-    if (
-      !window.confirm(
-        `Remove ${label} from the review screen?\n\nIt will no longer appear on any tab.`,
-      )
-    ) {
-      return;
-    }
+    ask({ kind: "delete", record });
+  };
 
+  const runDelete = async (record: InvoiceRecord) => {
     setActionId(record.id);
     setActionError("");
     setActionMessage("");
@@ -245,6 +275,7 @@ export function useInvoiceReview({ canApproveReject, canPostToSap }: UseInvoiceR
       const data = await deleteInvoice(record.id);
       setActionMessage(extractMessage(data, "Invoice deleted."));
       setSelected(null);
+      setPending(null);
       await loadInvoices();
     } catch (err) {
       console.error(err);
@@ -267,9 +298,11 @@ export function useInvoiceReview({ canApproveReject, canPostToSap }: UseInvoiceR
       setActionError("This invoice has no identifier and cannot be edited.");
       return;
     }
-    const label = `SO #${record.so_number || record.id}`;
-    if (!window.confirm(`Edit ${label} and resubmit it for approval?`)) return;
+    ask({ kind: "edit", record });
+  };
 
+  const runEdit = (record: InvoiceRecord) => {
+    setPending(null);
     setActionError("");
     setActionMessage("");
     sessionStorage.setItem(
@@ -442,13 +475,17 @@ export function useInvoiceReview({ canApproveReject, canPostToSap }: UseInvoiceR
       setActionError("This invoice has no identifier and cannot be posted.");
       return;
     }
-    const label = `SO #${record.so_number || record.id}`;
-    if (!window.confirm(`Post ${label} to SAP HANA?`)) return;
+    ask({ kind: "post", record });
+  };
 
+  const runPostToSap = (record: InvoiceRecord) => {
+    const label = `SO #${record.so_number || record.id}`;
+    setPending(null);
     setActionError("");
     setActionMessage("");
     setSelected(null);
     setPostingRecord(record);
+
 
     const payload = parsePayload(record.invoice_payload);
     sapPost.run({
@@ -489,6 +526,35 @@ export function useInvoiceReview({ canApproveReject, canPostToSap }: UseInvoiceR
         }
       },
     });
+  };
+
+  /*
+   * Whether the pending question can be answered yes.
+   *
+   * Only reject has a condition, and it is the one the `prompt` could not
+   * enforce: a rejection with no reason is a dead end for whoever picks the
+   * invoice up next. Disabling the confirm and saying why beats an error
+   * banner after the fact.
+   */
+  const canConfirmPending =
+    !pending || pending.kind !== "reject" || rejectReason.trim().length > 0;
+
+  /** Answer the pending question. One dispatcher, so the page needs no verbs. */
+  const confirmPending = () => {
+    if (!pending || !canConfirmPending) return;
+    const { kind, record } = pending;
+    switch (kind) {
+      case "approve":
+        return void runAction(record, "APPROVED");
+      case "reject":
+        return void runAction(record, "REJECTED");
+      case "delete":
+        return void runDelete(record);
+      case "edit":
+        return runEdit(record);
+      case "post":
+        return runPostToSap(record);
+    }
   };
 
   // The bill print for the invoice that was just posted, offered on the loader's
@@ -598,6 +664,12 @@ export function useInvoiceReview({ canApproveReject, canPostToSap }: UseInvoiceR
     handleAction,
     handleDelete,
     handleEdit,
+    pending,
+    setPending,
+    rejectReason,
+    setRejectReason,
+    canConfirmPending,
+    confirmPending,
 
     // History drawer
     historyFor,

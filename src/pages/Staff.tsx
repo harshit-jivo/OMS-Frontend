@@ -1,11 +1,38 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+/**
+ * Staff Orders — an internal order raised against an employee ID rather than a
+ * party, priced from each product's staff rate.
+ *
+ * Rows are built and then Confirmed; a confirmed row locks and the totals
+ * count only confirmed rows, which is why Add Item is unavailable until every
+ * row is confirmed.
+ */
+import { Fragment, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { ChangeEvent, FormEvent } from "react";
-import { ordersService } from "../services/ordersService";
-import type { Product } from "../services/ordersService";
-import { userService } from "../services/userService";
-import { useUILabels } from "../services/uiConfig";
-import "../styles/Add_Sales.css";
+import { HiOutlinePlus, HiOutlineTrash } from "react-icons/hi2";
+
+import { Badge } from "@/components/ui/badge";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { DetailFields } from "@/components/ui/detail";
+import { Field, FormGrid, Input, Select } from "@/components/ui/form";
+import {
+  Card,
+  Notice,
+  Page,
+  PageHeader,
+  SectionHeading,
+  Stat,
+  StatRow,
+} from "@/components/ui/page";
 import {
   Table,
   TableBody,
@@ -14,7 +41,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { showToast } from "@/lib/toastStore";
+import { ordersService } from "../services/ordersService";
+import type { Product } from "../services/ordersService";
+import { userService } from "../services/userService";
+import { useUILabels } from "../services/uiConfig";
 
 type StaffRow = {
   category: string;
@@ -48,12 +79,12 @@ const formatDateInput = (date: Date) => {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return year + "-" + month + "-" + day;
 };
 
 const getProductType = (itemName: string) => {
   const match = itemName.match(/(\d+\.?\d*)\s*(LTR|ML|KG|GM|GMS|L)/i);
-  return match ? `${match[1]} ${match[2].toUpperCase()}` : "Others";
+  return match ? match[1] + " " + match[2].toUpperCase() : "Others";
 };
 
 /** The three envelopes this API has used for a list: bare, `{data}`, and
@@ -83,12 +114,11 @@ const NO_ROWS: BranchOption[] = [];
 const NO_PRODUCTS: Product[] = [];
 const NO_CATEGORIES: string[] = [];
 
+const money = (n: number, decimals = 2) =>
+  n.toLocaleString("en-IN", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+
 export default function Staff() {
   const { t } = useUILabels();
-  const typeDropdownRefs = useRef<Record<number, HTMLDivElement | null>>({});
-  const itemDropdownRefs = useRef<Record<number, HTMLDivElement | null>>({});
-  const typeTriggerRefs = useRef<Record<number, HTMLButtonElement | null>>({});
-  const itemTriggerRefs = useRef<Record<number, HTMLButtonElement | null>>({});
   const [employeeName, setEmployeeName] = useState("");
   /*
    * One query for all three, matching the original `Promise.all`. That grouping
@@ -123,42 +153,16 @@ export default function Staff() {
   });
   const branches = staffData?.branches ?? NO_ROWS;
   const products = staffData?.products ?? NO_PRODUCTS;
-  const categoryOptions = staffData?.categoryOptions ?? NO_CATEGORIES;
+  const categories = staffData?.categoryOptions ?? NO_CATEGORIES;
+
   const [showSuccess, setShowSuccess] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [savedOrderNumber, setSavedOrderNumber] = useState("");
-  const [typeSearch, setTypeSearch] = useState<Record<number, string>>({});
-  const [itemSearch, setItemSearch] = useState<Record<number, string>>({});
-  const [typeDropdownOpen, setTypeDropdownOpen] = useState<Record<number, boolean>>({});
-  const [itemDropdownOpen, setItemDropdownOpen] = useState<Record<number, boolean>>({});
-  const [dropdownPosition, setDropdownPosition] = useState<
-    Record<string, { top: number; left: number; width: number }>
-  >({});
   const [formData, setFormData] = useState({
     dispatch: "",
     date: formatDateInput(new Date()),
   });
   const [rows, setRows] = useState<StaffRow[]>([createEmptyRow()]);
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      const target = event.target as Node;
-      const typeClicked = Object.values(typeDropdownRefs.current).some((ref) =>
-        ref?.contains(target),
-      );
-      const itemClicked = Object.values(itemDropdownRefs.current).some((ref) =>
-        ref?.contains(target),
-      );
-
-      if (!typeClicked) setTypeDropdownOpen({});
-      if (!itemClicked) setItemDropdownOpen({});
-    };
-
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  const categories = useMemo(() => categoryOptions, [categoryOptions]);
 
   const confirmedRows = rows.filter((row) => row.confirmed);
   const canAddMoreItems = rows.length > 0 && rows.every((row) => row.confirmed);
@@ -262,39 +266,27 @@ export default function Staff() {
       nextRows[index] = row;
       return nextRows;
     });
-
-    if (name === "category") {
-      setTypeSearch((prev) => ({ ...prev, [index]: "" }));
-      setItemSearch((prev) => ({ ...prev, [index]: "" }));
-      setTypeDropdownOpen((prev) => ({ ...prev, [index]: false }));
-      setItemDropdownOpen((prev) => ({ ...prev, [index]: false }));
-    }
-
-    if (name === "type") {
-      setItemSearch((prev) => ({ ...prev, [index]: "" }));
-      setTypeSearch((prev) => ({ ...prev, [index]: "" }));
-      setTypeDropdownOpen((prev) => ({ ...prev, [index]: false }));
-      setItemDropdownOpen((prev) => ({ ...prev, [index]: false }));
-    }
-
-    if (name === "item") {
-      setItemSearch((prev) => ({ ...prev, [index]: "" }));
-      setItemDropdownOpen((prev) => ({ ...prev, [index]: false }));
-    }
   };
 
-  const handleRowChange = (index: number, e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+  const handleRowChange = (
+    index: number,
+    e: ChangeEvent<HTMLInputElement | HTMLSelectElement>,
+  ) => {
     updateRowField(index, e.target.name, e.target.value);
   };
 
   const isRowValid = (row: StaffRow) =>
-    row.category && row.type && row.item && Number(row.qty) > 0 && Number(row.priceListBasic) >= 0;
+    Boolean(row.category) &&
+    Boolean(row.type) &&
+    Boolean(row.item) &&
+    Number(row.qty) > 0 &&
+    Number(row.priceListBasic) >= 0;
 
   const handleConfirmRow = (index: number) => {
-    if (!isRowValid(rows[index])) {
-      alert("Please complete this item before confirming it.");
-      return;
-    }
+    // Guarded by the button's `disabled` too — this is the second lock, not
+    // the message. The `alert("Please complete this item…")` it replaces fired
+    // AFTER the press, which is the pattern DESIGN_SYSTEM §6 exists to end.
+    if (!isRowValid(rows[index])) return;
 
     setRows((currentRows) =>
       currentRows.map((row, rowIndex) => (rowIndex === index ? { ...row, confirmed: true } : row)),
@@ -319,72 +311,28 @@ export default function Staff() {
     setRows((currentRows) => [...currentRows, createEmptyRow()]);
   };
 
-  const openTypeDropdown = (index: number) => {
-    const rect = typeTriggerRefs.current[index]?.getBoundingClientRect();
-    if (!rect) return;
-
-    setItemDropdownOpen({});
-    setDropdownPosition((prev) => ({
-      ...prev,
-      [`type-${index}`]: {
-        top: rect.bottom + 4,
-        left: rect.left,
-        width: Math.max(rect.width, 260),
-      },
-    }));
-    setTypeDropdownOpen((prev) => ({ ...prev, [index]: !prev[index] }));
-  };
-
-  const openItemDropdown = (index: number) => {
-    const rect = itemTriggerRefs.current[index]?.getBoundingClientRect();
-    if (!rect) return;
-
-    setTypeDropdownOpen({});
-    setDropdownPosition((prev) => ({
-      ...prev,
-      [`item-${index}`]: {
-        top: rect.bottom + 4,
-        left: rect.left,
-        width: Math.max(rect.width, 320),
-      },
-    }));
-    setItemDropdownOpen((prev) => ({ ...prev, [index]: !prev[index] }));
-  };
-
   const handleClear = () => {
     setEmployeeName("");
     setFormData({ dispatch: "", date: formatDateInput(new Date()) });
     setRows([createEmptyRow()]);
-    setTypeSearch({});
-    setItemSearch({});
-    setTypeDropdownOpen({});
-    setItemDropdownOpen({});
     setShowSuccess(false);
     setSavedOrderNumber("");
   };
 
+  /*
+   * Everything the save needs. Four `alert()` calls checked these AFTER the
+   * button was pressed; the button says so instead, and stays disabled.
+   */
+  const blockers: string[] = [];
+  if (!formData.dispatch) blockers.push("choose where it dispatches from");
+  if (!employeeName.trim()) blockers.push("enter an employee ID");
+  if (!confirmedRows.length) blockers.push("confirm at least one item");
+  if (rows.some((row) => !row.confirmed && row.item)) blockers.push("confirm the item in progress");
+  const canSave = blockers.length === 0;
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-
-    if (!formData.dispatch) {
-      alert("Please select dispatch from.");
-      return;
-    }
-
-    if (!employeeName.trim()) {
-      alert("Please enter Employee ID.");
-      return;
-    }
-
-    if (!confirmedRows.length) {
-      alert("Please confirm at least one item before saving.");
-      return;
-    }
-
-    if (rows.some((row) => !row.confirmed && row.item)) {
-      alert("Please confirm the current item before saving.");
-      return;
-    }
+    if (!canSave || isSaving) return;
 
     const selectedBranch = branches.find(
       (branch) => String(branch.bpl_id) === String(formData.dispatch),
@@ -437,521 +385,374 @@ export default function Staff() {
       setShowSuccess(true);
       setRows([createEmptyRow()]);
     } catch (error) {
-      console.log("Error saving staff order:", error);
-      alert("Failed to save staff order.");
+      console.error("Error saving staff order:", error);
+      showToast({
+        title: "Could not save the staff order",
+        message: "Nothing was submitted. Check your connection and try again.",
+      });
     } finally {
       setIsSaving(false);
     }
   };
 
+  /** Pack types available within a row's chosen category. */
+  const typeOptionsFor = (category: string) =>
+    [
+      ...new Set(
+        products
+          .filter((product) => normalizeCategory(product.category) === normalizeCategory(category))
+          .map((product) => getProductType(product.item_name)),
+      ),
+    ].sort((a, b) => {
+      if (a === "Others") return 1;
+      if (b === "Others") return -1;
+      return parseFloat(a) - parseFloat(b);
+    });
+
+  /** Items within a row's chosen category and (optional) type. */
+  const itemOptionsFor = (category: string, type: string) =>
+    products.filter((product) => {
+      const sameCategory =
+        normalizeCategory(product.category) === normalizeCategory(category);
+      const sameType = type ? getProductType(product.item_name) === type : true;
+      return sameCategory && sameType;
+    });
+
+  const dispatchName = useMemo(
+    () =>
+      branches.find((branch) => String(branch.bpl_id) === String(formData.dispatch))?.bpl_name ||
+      "",
+    [branches, formData.dispatch],
+  );
+
   return (
-    <div className="sl-page app-page">
-      <div className="sl-header app-page-head">
-        <div>
-          <h1 className="sl-title app-page-title">Staff Orders</h1>
-        </div>
-      </div>
+    <Page>
+      <Breadcrumbs items={[{ label: "Orders" }, { label: "Staff Orders" }]} />
+
+      <PageHeader
+        eyebrow="Orders"
+        title="Staff Orders"
+        description="An internal order against an employee ID, priced from each product's staff rate."
+      />
 
       {/* One failing endpoint used to blank the branch list, the category list
           AND the item catalogue at once, with only a console.log to show for
           it — three empty dropdowns that look like configuration, not failure. */}
       {staffLoadFailed && (
-        <div className="sl-field-error" role="alert">
-          Could not load branches, categories or the item catalogue. Refresh to try again.
-        </div>
+        <Notice tone="bad" title="Could not load the form">
+          Branches, categories or the item catalogue failed to load, so those lists are empty
+          because of the failure rather than because there is nothing in them. Refresh to try
+          again.
+        </Notice>
       )}
 
-      <form className="sl-form" onSubmit={handleSubmit}>
-        <div className="sl-section-label">Order Details</div>
-        <div className="sl-grid sl-order-grid">
-          <div className="sl-field">
-            <label className="sl-label" htmlFor="employeeName">
-              Employee ID
-            </label>
-            <div className="sl-input-wrap">
-              <input
-                id="employeeName"
-                type="text"
-                value={employeeName}
-                onChange={(e) => setEmployeeName(e.target.value)}
-                placeholder="Enter Employee ID"
-                required
-              />
-            </div>
-          </div>
+      <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4 sm:space-y-6">
+        <Card>
+          <FormGrid>
+            <Field label="Employee ID" required>
+              {(control) => (
+                <Input
+                  {...control}
+                  value={employeeName}
+                  onChange={(e) => setEmployeeName(e.target.value)}
+                  placeholder="Enter employee ID"
+                  required
+                />
+              )}
+            </Field>
 
-          <div className="sl-field">
-            <label className="sl-label" htmlFor="dispatch">
-              Dispatch From
-            </label>
-            <div className="sl-input-wrap">
-              <select
-                id="dispatch"
-                name="dispatch"
-                value={formData.dispatch}
-                onChange={(e) => setFormData((prev) => ({ ...prev, dispatch: e.target.value }))}
-                required
+            <Field label="Dispatch from" required>
+              {(control) => (
+                <Select
+                  {...control}
+                  value={formData.dispatch}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, dispatch: e.target.value }))}
+                  required
+                >
+                  <option value="">Select a branch</option>
+                  {branches.map((branch) => (
+                    <option key={branch.bpl_id} value={branch.bpl_id}>
+                      {branch.bpl_name}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </Field>
+
+            <Field label="Date" hint="Today. Staff orders dispatch same-day.">
+              {(control) => <Input {...control} type="date" value={formData.date} readOnly />}
+            </Field>
+          </FormGrid>
+        </Card>
+
+        <section className="space-y-3">
+          <SectionHeading>Items</SectionHeading>
+
+          {/*
+            `overflow-x-auto`, and the two pickers below are native <select>s
+            because of it.
+
+            They were hand-rolled popups positioned with
+            `getBoundingClientRect()` — viewport coordinates, which only work
+            on a `position: fixed` element. The rule that made them fixed
+            (`.staff-order-table .staff-floating-menu`) is COMMENTED OUT in
+            `Add_Sales.css`, so they were absolutely positioned inside this
+            scrolling wrapper using fixed-position numbers, and landed in the
+            wrong place. A native select's list is drawn by the browser outside
+            the document, so it can neither be clipped by this container nor
+            mispositioned by it. The lists are short — items are already scoped
+            to one category and one pack type.
+          */}
+          <Card className="overflow-hidden p-0">
+            <div className="overflow-x-auto">
+              <Table density="compact">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="min-w-[130px]">Category</TableHead>
+                    <TableHead className="min-w-[110px]">Type</TableHead>
+                    <TableHead className="min-w-[200px]">Item</TableHead>
+                    <TableHead className="text-right">Pcs</TableHead>
+                    <TableHead className="w-[92px]">Boxes</TableHead>
+                    <TableHead className="w-[92px]">Qty</TableHead>
+                    <TableHead className="text-right">Ltrs</TableHead>
+                    <TableHead className="text-right">
+                      {t("price_list", "Price List (Basic)")}
+                    </TableHead>
+                    <TableHead className="text-right">Tax %</TableHead>
+                    <TableHead className="text-right">Amount</TableHead>
+                    <TableHead className="text-right" aria-label="Actions" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {rows.map((row, index) => {
+                    const typeOptions = typeOptionsFor(row.category);
+                    const itemOptions = itemOptionsFor(row.category, row.type);
+                    const rowValid = isRowValid(row);
+
+                    return (
+                      <Fragment key={index}>
+                        <TableRow className={row.confirmed ? "bg-ok-soft/40" : ""}>
+                          <TableCell>
+                            <Select
+                              name="category"
+                              value={row.category}
+                              onChange={(e) => handleRowChange(index, e)}
+                              disabled={row.confirmed}
+                              aria-label={"Category for item " + (index + 1)}
+                              className="h-control-sm"
+                              required
+                            >
+                              <option value="">Select</option>
+                              {categories.map((category) => (
+                                <option key={category} value={category}>
+                                  {category}
+                                </option>
+                              ))}
+                            </Select>
+                          </TableCell>
+
+                          <TableCell>
+                            <Select
+                              name="type"
+                              value={row.type}
+                              onChange={(e) => handleRowChange(index, e)}
+                              disabled={row.confirmed || !row.category}
+                              aria-label={"Pack type for item " + (index + 1)}
+                              className="h-control-sm"
+                            >
+                              <option value="">
+                                {row.category ? "Select" : "Category first"}
+                              </option>
+                              {typeOptions.map((type) => (
+                                <option key={type} value={type}>
+                                  {type}
+                                </option>
+                              ))}
+                            </Select>
+                          </TableCell>
+
+                          <TableCell>
+                            <Select
+                              name="item"
+                              value={row.item}
+                              onChange={(e) => handleRowChange(index, e)}
+                              disabled={row.confirmed || !row.category}
+                              aria-label={"Item " + (index + 1)}
+                              className="h-control-sm"
+                              required
+                            >
+                              <option value="">
+                                {row.category ? "Select" : "Category first"}
+                              </option>
+                              {itemOptions.map((product) => (
+                                <option
+                                  key={
+                                    (product.item_code || product.item_name) +
+                                    "-" +
+                                    (product.category || "")
+                                  }
+                                  value={product.item_name}
+                                >
+                                  {product.item_name}
+                                  {product.item_code ? " · " + product.item_code : ""}
+                                </option>
+                              ))}
+                            </Select>
+                          </TableCell>
+
+                          <TableCell className="text-right tabular-nums text-subtle">
+                            {row.pcs ? Number(row.pcs).toFixed(1) : "—"}
+                          </TableCell>
+
+                          <TableCell>
+                            <Input
+                              type="number"
+                              name="boxes"
+                              value={row.boxes}
+                              onChange={(e) => handleRowChange(index, e)}
+                              disabled={row.confirmed}
+                              aria-label={"Boxes for item " + (index + 1)}
+                              className="h-control-sm text-right tabular-nums"
+                            />
+                          </TableCell>
+
+                          <TableCell>
+                            <Input
+                              type="number"
+                              name="qty"
+                              value={row.qty}
+                              onChange={(e) => handleRowChange(index, e)}
+                              disabled={row.confirmed}
+                              aria-label={"Quantity for item " + (index + 1)}
+                              className="h-control-sm text-right tabular-nums"
+                              required
+                            />
+                          </TableCell>
+
+                          <TableCell className="text-right tabular-nums text-subtle">
+                            {row.ltrs || "—"}
+                          </TableCell>
+
+                          <TableCell className="text-right tabular-nums text-subtle">
+                            {row.priceListBasic || "—"}
+                          </TableCell>
+
+                          <TableCell className="text-right tabular-nums text-subtle">
+                            {row.tax ? Number(row.tax).toFixed(2) : "—"}
+                          </TableCell>
+
+                          <TableCell className="text-right font-semibold tabular-nums text-ink">
+                            {row.amount || "—"}
+                          </TableCell>
+
+                          <TableCell>
+                            <span className="flex items-center justify-end gap-1">
+                              {row.confirmed ? (
+                                <>
+                                  <Badge tone="ok">Confirmed</Badge>
+                                  <Button size="xs" onClick={() => handleEditRow(index)}>
+                                    Edit
+                                  </Button>
+                                </>
+                              ) : (
+                                <Button
+                                  size="xs"
+                                  variant="success"
+                                  onClick={() => handleConfirmRow(index)}
+                                  disabled={!rowValid}
+                                  title={
+                                    rowValid
+                                      ? undefined
+                                      : "Choose a category, type and item, and enter a quantity."
+                                  }
+                                >
+                                  Confirm
+                                </Button>
+                              )}
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleDeleteRow(index)}
+                                aria-label={"Delete item " + (index + 1)}
+                                title="Delete item"
+                              >
+                                <HiOutlineTrash />
+                              </Button>
+                            </span>
+                          </TableCell>
+                        </TableRow>
+                      </Fragment>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+
+            <div className="border-t border-line px-4 py-3">
+              <Button
+                onClick={handleAddRow}
+                disabled={!canAddMoreItems}
+                title={canAddMoreItems ? undefined : "Confirm the current item first."}
               >
-                <option value="">--select--</option>
-                {branches.map((branch) => (
-                  <option key={branch.bpl_id} value={branch.bpl_id}>
-                    {branch.bpl_name}
-                  </option>
-                ))}
-              </select>
+                <HiOutlinePlus aria-hidden="true" />
+                Add item
+              </Button>
             </div>
-          </div>
+          </Card>
+        </section>
 
-          <div className="sl-field">
-            <label className="sl-label" htmlFor="date">
-              Date
-            </label>
-            <div className="sl-input-wrap">
-              <input id="date" type="date" value={formData.date} readOnly />
-            </div>
-          </div>
-        </div>
+        <StatRow>
+          <Stat label="Total" value={"₹" + money(totalAmount)} />
+          <Stat label="Tax" value={"₹" + money(taxAmount)} />
+          <Stat label="Grand total" value={"₹" + money(grandTotal)} tone="brand" />
+        </StatRow>
 
-        <div className="sl-table-wrap">
-          <Table density="compact">
-            <colgroup>
-              <col className="sl-col-category" />
-              <col className="sl-col-type" />
-              <col className="sl-col-item" />
-              <col className="sl-col-pcs" />
-              <col className="sl-col-boxes" />
-              <col className="sl-col-qty" />
-              <col className="sl-col-ltrs" />
-              <col className="sl-col-price-list-basic" />
-              <col className="sl-col-tax" />
-              <col className="sl-col-amount" />
-              <col className="sl-col-actions" />
-            </colgroup>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Category</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Item</TableHead>
-                <TableHead>Pcs</TableHead>
-                <TableHead>Boxes</TableHead>
-                <TableHead>Qty</TableHead>
-                <TableHead>Ltrs</TableHead>
-                <TableHead>{t("price_list", "Price List (Basic)")}</TableHead>
-                <TableHead>Tax %</TableHead>
-                <TableHead>Amount</TableHead>
-                <TableHead>X</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((row, index) => {
-                const typeOptions = [
-                  ...new Set(
-                    products
-                      .filter(
-                        (product) =>
-                          normalizeCategory(product.category) === normalizeCategory(row.category),
-                      )
-                      .map((product) => getProductType(product.item_name)),
-                  ),
-                ].sort((a, b) => {
-                  if (a === "Others") return 1;
-                  if (b === "Others") return -1;
-                  return parseFloat(a) - parseFloat(b);
-                });
-                const filteredTypeOptions = typeOptions.filter((type) =>
-                  type.toLowerCase().includes((typeSearch[index] || "").toLowerCase()),
-                );
-                const itemOptions = products.filter((product) => {
-                  const sameCategory =
-                    normalizeCategory(product.category) === normalizeCategory(row.category);
-
-                  const sameType = row.type ? getProductType(product.item_name) === row.type : true;
-
-                  return sameCategory && sameType;
-                });
-                const filteredItemOptions = itemOptions.filter((product) =>
-                  product.item_name.toLowerCase().includes((itemSearch[index] || "").toLowerCase()),
-                );
-
-                return (
-                  <Fragment key={index}>
-                    <TableRow>
-                      <TableCell>
-                        <select
-                          name="category"
-                          value={row.category}
-                          onChange={(e) => handleRowChange(index, e)}
-                          disabled={row.confirmed}
-                          required
-                        >
-                          <option value="">--select--</option>
-                          {categories.map((category) => (
-                            <option key={category} value={category}>
-                              {category}
-                            </option>
-                          ))}
-                        </select>
-                      </TableCell>
-
-                      <TableCell>
-                        <div
-                          className={`sl-party-dropdown${typeDropdownOpen[index] ? " open" : ""}`}
-                          ref={(node) => {
-                            typeDropdownRefs.current[index] = node;
-                          }}
-                        >
-                          <button
-                            type="button"
-                            className="sl-party-trigger"
-                            ref={(node) => {
-                              typeTriggerRefs.current[index] = node;
-                            }}
-                            onClick={() => openTypeDropdown(index)}
-                            disabled={row.confirmed || !row.category}
-                          >
-                            <span className="sl-party-trigger-text">
-                              {row.type || (row.category ? "--select--" : "Select category first")}
-                            </span>
-                            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                              <path
-                                d="M3 4.5L6 7.5L9 4.5"
-                                stroke="#64748b"
-                                strokeWidth="1.4"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              />
-                            </svg>
-                          </button>
-                          {typeDropdownOpen[index] && (
-                            <div
-                              className="sl-party-menu staff-floating-menu"
-                              style={dropdownPosition[`type-${index}`]}
-                            >
-                              <div className="sl-party-search-wrap">
-                                <input
-                                  type="text"
-                                  className="sl-party-search"
-                                  value={typeSearch[index] || ""}
-                                  onChange={(e) =>
-                                    setTypeSearch((prev) => ({
-                                      ...prev,
-                                      [index]: e.target.value,
-                                    }))
-                                  }
-                                  placeholder="Search type..."
-                                  autoFocus
-                                />
-                              </div>
-                              <div className="sl-party-options">
-                                {filteredTypeOptions.length > 0 ? (
-                                  filteredTypeOptions.map((type) => (
-                                    <button
-                                      type="button"
-                                      key={type}
-                                      className="sl-party-option"
-                                      onClick={() => updateRowField(index, "type", type)}
-                                    >
-                                      <span className="sl-party-option-label">{type}</span>
-                                    </button>
-                                  ))
-                                ) : (
-                                  <div className="sl-party-empty">No types found</div>
-                                )}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </TableCell>
-
-                      <TableCell>
-                        <div
-                          className={`sl-party-dropdown${itemDropdownOpen[index] ? " open" : ""}`}
-                          ref={(node) => {
-                            itemDropdownRefs.current[index] = node;
-                          }}
-                        >
-                          <button
-                            type="button"
-                            className="sl-party-trigger"
-                            ref={(node) => {
-                              itemTriggerRefs.current[index] = node;
-                            }}
-                            onClick={() => openItemDropdown(index)}
-                            disabled={row.confirmed || !row.category}
-                          >
-                            <span className="sl-party-trigger-text">
-                              {row.item || (row.category ? "--select--" : "Select category first")}
-                            </span>
-                            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                              <path
-                                d="M3 4.5L6 7.5L9 4.5"
-                                stroke="#64748b"
-                                strokeWidth="1.4"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              />
-                            </svg>
-                          </button>
-                          {itemDropdownOpen[index] && (
-                            <div
-                              className="sl-party-menu staff-floating-menu"
-                              style={dropdownPosition[`item-${index}`]}
-                            >
-                              <div className="sl-party-search-wrap">
-                                <input
-                                  type="text"
-                                  className="sl-party-search"
-                                  value={itemSearch[index] || ""}
-                                  onChange={(e) =>
-                                    setItemSearch((prev) => ({
-                                      ...prev,
-                                      [index]: e.target.value,
-                                    }))
-                                  }
-                                  placeholder="Search item..."
-                                  autoFocus
-                                />
-                              </div>
-                              <div className="sl-party-options">
-                                {filteredItemOptions.length > 0 ? (
-                                  filteredItemOptions.map((product) => (
-                                    <button
-                                      type="button"
-                                      key={`${product.item_code || product.item_name}-${product.category || ""}`}
-                                      className="sl-party-option"
-                                      onClick={() =>
-                                        updateRowField(index, "item", product.item_name)
-                                      }
-                                    >
-                                      <span className="sl-party-option-label">
-                                        {product.item_name}
-                                      </span>
-                                      {product.item_code && (
-                                        <span className="sl-party-option-code">
-                                          {product.item_code}
-                                        </span>
-                                      )}
-                                    </button>
-                                  ))
-                                ) : (
-                                  <div className="sl-party-empty">No items found</div>
-                                )}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </TableCell>
-
-                      <TableCell className="sl-pcs-cell">
-                        <input
-                          className="sl-compact-number-input"
-                          type="number"
-                          value={row.pcs ? Number(row.pcs).toFixed(1) : ""}
-                          readOnly
-                        />
-                      </TableCell>
-
-                      <TableCell className="sl-boxes-cell">
-                        <input
-                          className="sl-size-input"
-                          type="number"
-                          name="boxes"
-                          value={row.boxes}
-                          onChange={(e) => handleRowChange(index, e)}
-                          disabled={row.confirmed}
-                          required
-                        />
-                      </TableCell>
-
-                      <TableCell className="sl-qty-cell">
-                        <input
-                          className="sl-size-input"
-                          type="number"
-                          name="qty"
-                          value={row.qty}
-                          onChange={(e) => handleRowChange(index, e)}
-                          disabled={row.confirmed}
-                          required
-                        />
-                      </TableCell>
-
-                      <TableCell className="sl-ltrs-cell">
-                        <input
-                          className="sl-compact-number-input"
-                          type="number"
-                          value={row.ltrs}
-                          readOnly
-                        />
-                      </TableCell>
-
-                      <TableCell className="sl-price-list-basic-cell">
-                        <input
-                          className="sl-compact-number-input"
-                          type="number"
-                          value={row.priceListBasic}
-                          readOnly
-                        />
-                      </TableCell>
-
-                      <TableCell>
-                        <input
-                          type="text"
-                          value={row.tax ? Number(row.tax).toFixed(2) : ""}
-                          readOnly
-                        />
-                      </TableCell>
-
-                      <TableCell>
-                        <input type="number" value={row.amount} readOnly />
-                      </TableCell>
-
-                      <TableCell className="sl-row-actions">
-                        {!row.confirmed ? (
-                          <button
-                            type="button"
-                            className="sl-confirm-item-btn"
-                            onClick={() => handleConfirmRow(index)}
-                          >
-                            Confirm
-                          </button>
-                        ) : (
-                          <>
-                            <span className="sl-row-confirmed-badge">Confirmed</span>
-                            <button
-                              type="button"
-                              className="sl-edit-item-btn"
-                              onClick={() => handleEditRow(index)}
-                            >
-                              Edit
-                            </button>
-                          </>
-                        )}
-                        <button
-                          type="button"
-                          className="sl-delete-btn"
-                          onClick={() => handleDeleteRow(index)}
-                          aria-label={`Delete item ${index + 1}`}
-                          title="Delete item"
-                        >
-                          <svg
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="1.8"
-                          >
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M3 6h18" />
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              d="M8 6V4.5A1.5 1.5 0 019.5 3h5A1.5 1.5 0 0116 4.5V6"
-                            />
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              d="M19 6l-1 13a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"
-                            />
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              d="M10 11v6M14 11v6"
-                            />
-                          </svg>
-                        </button>
-                      </TableCell>
-                    </TableRow>
-                  </Fragment>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </div>
-
-        {canAddMoreItems && (
-          <button type="button" className="sl-add-row" onClick={handleAddRow}>
-            <span>+ Add Item</span>
-          </button>
-        )}
-
-        <div className="sl-section-label">Summary</div>
-        <div className="sl-grid sl-summary-grid">
-          <div className="sl-field">
-            <label className="sl-label">Total</label>
-            <div className="sl-input-wrap">
-              <input type="text" value={totalAmount.toFixed(2)} readOnly />
-            </div>
-          </div>
-
-          <div className="sl-field">
-            <label className="sl-label">Tax</label>
-            <div className="sl-input-wrap">
-              <input type="text" value={taxAmount.toFixed(2)} readOnly />
-            </div>
-          </div>
-
-          <div className="sl-field">
-            <label className="sl-label">Grand Total</label>
-            <div className="sl-input-wrap">
-              <input type="text" value={grandTotal.toFixed(1)} readOnly />
-            </div>
-          </div>
-        </div>
-
-        <div className="sl-actions">
-          <button
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button type="button" onClick={handleClear} disabled={isSaving}>
+            Clear
+          </Button>
+          <Button
             type="submit"
-            className="sl-btn-save"
-            disabled={
-              isSaving ||
-              confirmedRows.length === 0 ||
-              rows.some((row) => !row.confirmed && row.item)
-            }
+            variant="primary"
+            disabled={isSaving || !canSave}
+            // Says which of the four things is missing, rather than an alert
+            // after the press naming only the first.
+            title={canSave ? undefined : "First " + blockers.join(", ") + "."}
           >
-            <span>{isSaving ? "Saving..." : "Save Staff Order"}</span>
-          </button>
-          <button type="button" className="sl-btn-clear" onClick={handleClear}>
-            <span>Clear</span>
-          </button>
+            {isSaving ? "Saving…" : "Save staff order"}
+          </Button>
         </div>
       </form>
 
       <Dialog
-        open={Boolean(showSuccess)}
+        open={showSuccess}
         onOpenChange={(next) => {
           if (!next) setShowSuccess(false);
         }}
       >
         {showSuccess && (
-          <DialogContent
-            title="Saved"
-            variant="bare"
-            size="auto"
-            showClose={false}
-            className="sl-modal sl-success-modal"
-          >
-            <div className="sl-success-mark" aria-hidden="true" />
-            <div className="sl-modal-title">Staff order prepared successfully</div>
-            <div className="sl-success-details">
-              <div className="sl-success-row">
-                <span>Employee</span>
-                <strong>{employeeName || "-"}</strong>
-              </div>
-              <div className="sl-success-row">
-                <span>Status</span>
-                <strong>Saved</strong>
-              </div>
-              <div className="sl-success-row">
-                <span>Order No.</span>
-                <strong>{savedOrderNumber || "-"}</strong>
-              </div>
-            </div>
-            <div className="sl-modal-actions">
-              <button type="button" className="sl-modal-btn" onClick={() => setShowSuccess(false)}>
-                OK
-              </button>
-            </div>
+          <DialogContent title="Staff order saved" size="sm">
+            <DialogHeader>
+              <DialogTitle>Staff order prepared</DialogTitle>
+            </DialogHeader>
+            <DialogBody>
+              <DetailFields
+                items={[
+                  ["Employee", employeeName || "—"],
+                  ["Dispatch from", dispatchName || "—"],
+                  ["Order no.", savedOrderNumber || "—"],
+                  ["Status", <Badge key="s" tone="ok">Saved</Badge>],
+                ]}
+              />
+            </DialogBody>
+            <DialogFooter>
+              <Button variant="primary" onClick={() => setShowSuccess(false)}>
+                Done
+              </Button>
+            </DialogFooter>
           </DialogContent>
         )}
       </Dialog>
-    </div>
+    </Page>
   );
 }

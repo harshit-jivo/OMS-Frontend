@@ -50,6 +50,7 @@ import {
 import { type OrderHeaderInput, type PoFieldConfig } from "./orderHeaderSchema";
 import { NO_PROBLEMS, hasProblems, orderProblems } from "./orderProblems";
 import {
+  FOC_TOKEN_BASIC_PRICE,
   applyFocPricingToRow,
   computeLandingPrice,
   recalculateRowTotals as recalculateRowTotalsFor,
@@ -1518,7 +1519,7 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
         row.basicPrice =
           isFocOrder || partyProduct.basic_rate == null
             ? isFocOrder
-              ? "0"
+              ? FOC_TOKEN_BASIC_PRICE
               : ""
             : String(partyProduct.basic_rate);
         row.priceListBasic = isFocOrder ? "0" : computeLandingPrice(row.basicPrice, row.tax);

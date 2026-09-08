@@ -1,6 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { Html5Qrcode } from "html5-qrcode";
-import { ErrorAlert } from "../../components/NicUI";
+
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Notice } from "@/components/ui/page";
+
+import { NOTE } from "./assetTone";
 
 type Props = {
   /** Fired once with the decoded text when a QR is read. */
@@ -73,20 +83,19 @@ export default function QrScanner({ onDecode, onClose }: Props) {
   }, []);
 
   return (
-    <div className="hais-scanner-overlay" onClick={onClose}>
-      <div className="hais-scanner-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="hais-scanner-head">
-          <h3 className="nic-modal-title">Scan device QR</h3>
-          <button className="hais-detail-close" onClick={onClose} aria-label="Close">
-            &times;
-          </button>
-        </div>
-        <div id={READER_ID} className="hais-scanner-reader" />
-        <p className="nic-note hais-scanner-hint">
-          Point the camera at the QR sticker on the device.
-        </p>
-        <ErrorAlert>{error}</ErrorAlert>
-      </div>
-    </div>
+    <Dialog open onOpenChange={(next) => !next && onClose()}>
+      <DialogContent title="Scan device QR" size="sm">
+        <DialogHeader>
+          <DialogTitle>Scan device QR</DialogTitle>
+        </DialogHeader>
+        <DialogBody className="space-y-3">
+          {/* The library draws the video into this box; the fixed height keeps
+              the dialog from jumping as the camera starts. */}
+          <div id={READER_ID} className="min-h-[280px] overflow-hidden rounded-md bg-ink" />
+          <p className={`${NOTE} text-center`}>Point the camera at the QR sticker on the device.</p>
+          {error && <Notice tone="bad">{error}</Notice>}
+        </DialogBody>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -1,16 +1,23 @@
+/**
+ * HAIS — Hardware Asset Identification System.
+ *
+ * One route, seven tabs. "edit" is a sub-view reached from the register or the
+ * lookup, not a tab: it belongs to the register, so the register's tab stays
+ * selected and the breadcrumb trail is what takes you back.
+ */
 import { useState } from "react";
-import { HiArrowLeft } from "react-icons/hi2";
-import AssetRegister from "./AssetRegister";
+
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { Page, PageHeader } from "@/components/ui/page";
+import { Tab, TabList } from "@/components/ui/tabs";
+import { haisService } from "../../services/haisService";
+
 import AssetForm from "./AssetForm";
 import AssetLookup from "./AssetLookup";
-import OptionManager from "./OptionManager";
+import AssetRegister from "./AssetRegister";
 import HaisReports from "./HaisReports";
-import { haisService } from "../../services/haisService";
-import "../../styles/Order_Flow_Settings.css";
-import "../../styles/Einvoice.css";
+import OptionManager from "./OptionManager";
 
-// Tabs shown across the top. "edit" is a sub-view (reached from the register /
-// lookup), not a tab, so it is not listed here.
 type Tab = "list" | "add" | "lookup" | "asset-types" | "departments" | "storage-types" | "reports";
 type View = Tab | "edit";
 
@@ -47,30 +54,37 @@ export default function HAIS() {
 
   // Which tab should read as active (edit belongs to the register).
   const activeTab: Tab = view === "edit" ? "list" : view;
+  const activeLabel = TABS.find((t) => t.key === activeTab)?.label ?? "";
 
   return (
-    <div className="nic-page">
-      <div className="ofs-header">
-        <div>
-          <span className="ofs-kicker">HAIS · Hardware Asset Identification</span>
-          <h1>Hardware Assets</h1>
-        </div>
-      </div>
+    <Page>
+      <Breadcrumbs
+        items={
+          view === "edit"
+            ? [
+                { label: "HAIS" },
+                { label: "Asset Register", onClick: backToList },
+                { label: editId ?? "Edit" },
+              ]
+            : [{ label: "HAIS" }, { label: activeLabel }]
+        }
+      />
 
-      {/* Tab bar */}
-      <div className="nic-tabs nic-tabs--tight">
+      <PageHeader
+        eyebrow="HAIS · Hardware Asset Identification"
+        title="Hardware Assets"
+        description="Every device the company owns: who holds it, what is in it, and where it has been."
+      />
+
+      <TabList label="Hardware asset views">
         {TABS.map((t) => (
-          <button
-            key={t.key}
-            className={`nic-tab ${activeTab === t.key ? "nic-tab-active" : ""}`}
-            onClick={() => openTab(t.key)}
-          >
+          <Tab key={t.key} selected={activeTab === t.key} onClick={() => openTab(t.key)}>
             {t.label}
-          </button>
+          </Tab>
         ))}
-      </div>
+      </TabList>
 
-      <div className="ofs-grid">
+      <div role="tabpanel">
         {view === "list" && (
           <AssetRegister
             onEdit={editAsset}
@@ -82,15 +96,7 @@ export default function HAIS() {
         {view === "add" && <AssetForm key="add" editId={null} onSaved={backToList} />}
 
         {view === "edit" && (
-          <>
-            <div className="nic-actions-row nic-actions-row--offset">
-              <button className="nic-tab" onClick={backToList}>
-                <HiArrowLeft className="nic-icon-lead" />
-                Back to Assets
-              </button>
-            </div>
-            <AssetForm key={editId ?? "edit"} editId={editId} onSaved={backToList} />
-          </>
+          <AssetForm key={editId ?? "edit"} editId={editId} onSaved={backToList} />
         )}
 
         {view === "lookup" && <AssetLookup onEdit={editAsset} />}
@@ -124,6 +130,6 @@ export default function HAIS() {
 
         {view === "reports" && <HaisReports />}
       </div>
-    </div>
+    </Page>
   );
 }

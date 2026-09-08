@@ -112,16 +112,20 @@ test.describe("smoke path: login to order submission", () => {
 
     await page.getByPlaceholder("username").fill("vrtester");
     await page.getByPlaceholder("••••••••").fill("does-not-matter-its-mocked");
-    await page.getByRole("button", { name: "Log in to your account" }).click();
+    await page.getByRole("button", { name: "Log in" }).click();
 
-    // Success indicator: the toast `handleLogin` shows before its
-    // `setTimeout`-delayed redirect (Login.tsx:135, :144).
-    await expect(page.getByText("Login successful. Redirecting...")).toBeVisible();
+    // Success indicator: the notice `handleLogin` shows before its
+    // `setTimeout`-delayed redirect (Login.tsx:122). It was a toast and the
+    // wording was "Login successful. Redirecting..."; the conversion made it
+    // an inline `Notice` on the card, which is why this assertion moved.
+    await expect(page.getByText("Signed in. Taking you through…")).toBeVisible();
 
     // Success indicator: the redirect itself. Admin holds none of
     // tracker/legal/hais/distributor/mart_approval, so `landingPathFor`
-    // (config/pageAccess.ts:80-88) sends it to /Dashboard.
-    await page.waitForURL(/\/Dashboard/);
+    // (config/pageAccess.ts) sends it to /Home — the launcher that replaced
+    // /Dashboard as the landing page when the sales analytics moved behind
+    // the `Sales_Dashboard` permission.
+    await page.waitForURL(/\/Home/);
     await settle(page);
 
     // ---- 2. Build an order ------------------------------------------------
@@ -133,7 +137,7 @@ test.describe("smoke path: login to order submission", () => {
     // interactions.visual.spec.ts.
     const pick = async (placeholder: string, option: string) => {
       await page.getByPlaceholder(placeholder).click();
-      await page.locator(".sl-party-option").filter({ hasText: option }).first().click();
+      await page.getByRole("option").filter({ hasText: option }).first().click();
     };
 
     await pick("Search party...", "Northern Traders");
@@ -150,12 +154,12 @@ test.describe("smoke path: login to order submission", () => {
     await expect(page.getByRole("button", { name: "+ Add Item" })).toBeVisible();
 
     await page.getByRole("button", { name: "+ Add Item" }).click();
-    await page.locator(".sl-pick-item").filter({ hasText: "JIVO CANOLA OIL 1 LTR" }).click();
-    await page.locator(".sl-wiz-input").filter({ hasText: "Boxes" }).locator("input").fill("5");
+    await page.getByRole("button", { name: /JIVO CANOLA OIL 1 LTR/ }).click();
+    await page.getByLabel("Boxes").fill("5");
     await page.getByRole("button", { name: "Add Item", exact: true }).click();
 
     // Success indicator: the row landed in the order (the item list's own
-    // count, "sl-wiz-items-meta" in OrderWizard.tsx) — not just that the
+    // count, in step 2's header) — not just that the
     // add-item modal accepted it, which the existing wizard tests already
     // check via the Pcs field inside that modal.
     await expect(page.getByText("1 item")).toBeVisible();
@@ -186,7 +190,7 @@ test.describe("smoke path: login to order submission", () => {
     });
 
     await page.getByRole("button", { name: "Save Order" }).click();
-    await page.getByRole("button", { name: "Yes, Create New" }).click();
+    await page.getByRole("button", { name: "Yes, create" }).click();
 
     await expect.poll(() => posted.length).toBe(1);
     // A light sanity check that this posted the order actually built above,
@@ -204,7 +208,7 @@ test.describe("smoke path: login to order submission", () => {
     // Dismissing it closes the loop: `handleSuccessClose` clears
     // `saveSuccess` and (for a fresh order, not a resumed one) leaves the
     // form already reset by `resetOrderForm` (useSalesOrderForm.ts:1092-1094).
-    await page.getByRole("button", { name: "OK" }).click();
+    await page.getByRole("button", { name: "Done" }).click();
     await expect(page.getByText("Order created successfully")).toHaveCount(0);
     await expect(page.getByPlaceholder("Search party...")).toBeVisible();
   });

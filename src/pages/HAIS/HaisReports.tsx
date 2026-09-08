@@ -1,9 +1,19 @@
 import { useEffect, useState } from "react";
-import { HiArrowPath, HiArrowDownTray, HiMagnifyingGlass } from "react-icons/hi2";
-import { ErrorAlert } from "../../components/NicUI";
-import { messageFrom } from "@/lib/apiError";
-import { haisService, holderLabel, type Asset } from "../../services/haisService";
-import { startExcelExport, exportDateStamp, type ExcelRow } from "../../utils/excelExport";
+import {
+  HiOutlineArrowDownTray,
+  HiOutlineArrowPath,
+  HiOutlineComputerDesktop,
+  HiOutlineExclamationTriangle,
+  HiOutlineShieldCheck,
+  HiOutlineUserGroup,
+  HiOutlineUserMinus,
+} from "react-icons/hi2";
+
+import { Button } from "@/components/ui/button";
+import { FilterBar, FilterSearch, FilterSpacer } from "@/components/ui/filter-bar";
+import { Card, CardHeader, CardTitle, EmptyState, Stat, StatRow } from "@/components/ui/page";
+import { TableSkeleton } from "@/components/ui/skeleton";
+import { Tab, TabList } from "@/components/ui/tabs";
 import {
   Table,
   TableBody,
@@ -11,7 +21,15 @@ import {
   TableHead,
   TableHeader,
   TableRow,
+  TableEmpty,
 } from "@/components/ui/table";
+import { messageFrom } from "@/lib/apiError";
+import { showToast } from "@/lib/toastStore";
+import { cn } from "@/lib/utils";
+import { haisService, holderLabel, type Asset } from "../../services/haisService";
+import { startExcelExport, exportDateStamp, type ExcelRow } from "../../utils/excelExport";
+
+import { MONO } from "./assetTone";
 
 type ReportKey =
   | "unassigned"
@@ -150,14 +168,6 @@ export default function HaisReports() {
   const byCategory = groupCount(visible, (a) => (a.asset_type as string) || "");
   const byStatus = groupCount(visible, (a) => (a.working_status as string) || "");
 
-  const cards = [
-    { label: "Total Devices", value: visible.length },
-    { label: "Assigned", value: assigned.length },
-    { label: "Unassigned", value: unassigned.length },
-    { label: "Needs Attention", value: attention.length },
-    { label: "Warranty ≤60d / Expired", value: warranty.length },
-  ];
-
   // --- Excel export of the active report ---
   const exportExcel = () => {
     let data: ExcelRow[] = [];
@@ -182,7 +192,7 @@ export default function HaisReports() {
       case "byStatus": data = byStatus.map(([n, c]) => ({ Status: n, Devices: c })); name = "By_Status"; break;
     }
     if (data.length === 0) {
-      window.alert("Nothing to export for this report.");
+      showToast({ title: "Nothing to export", message: "This report has no rows." });
       return;
     }
     startExcelExport(data, {
@@ -191,119 +201,130 @@ export default function HaisReports() {
     });
   };
 
+  const activeLabel = REPORTS.find((r) => r.key === report)?.label ?? "";
+
   return (
-    <section className="ofs-card ofs-card--wide">
-      <div className="ofs-card-head nic-head--split">
-        <div className="nic-head-title">
-          <span className="ofs-card-mark" />
-          <h2>Reports</h2>
-        </div>
-        <div className="nic-actions-inline">
-          <button className="ofs-primary" onClick={exportExcel}>
-            <HiArrowDownTray className="nic-icon-lead" />
-            Export Excel
-          </button>
-          <button className="nic-tab" onClick={reload} disabled={busy}>
-            <HiArrowPath className="nic-icon-lead" />
-            {busy ? "Loading…" : "Refresh"}
-          </button>
-        </div>
-      </div>
+    <div className="space-y-4 sm:space-y-6">
+      <FilterBar>
+        <FilterSearch
+          label="Search by serial No. (or Asset ID / user)"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="e.g. DL5440X92KK"
+          className={MONO}
+          fieldClassName="min-w-[280px] max-w-[520px]"
+        />
+        <FilterSpacer />
+        <Button variant="ghost" onClick={reload} disabled={busy}>
+          <HiOutlineArrowPath aria-hidden="true" /> {busy ? "Loading…" : "Refresh"}
+        </Button>
+        <Button onClick={exportExcel} disabled={busy}>
+          <HiOutlineArrowDownTray aria-hidden="true" /> Export Excel
+        </Button>
+      </FilterBar>
 
-      {/* Search — mostly by serial number */}
-      <div className="nic-filter-row">
-        <label className="nic-field nic-field--grow">
-          <span className="nic-label">Search by Serial No. (or Asset ID / user)</span>
-          <div className="nic-search-wrap">
-            <HiMagnifyingGlass className="nic-search-icon" />
-            <input
-              className="nic-input nic-input--search nic-mono"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="e.g. DL5440X92KK"
+      {error ? (
+        <Card>
+          <EmptyState icon={HiOutlineComputerDesktop} title="Could not load devices" hint={error} />
+        </Card>
+      ) : (
+        <>
+          <StatRow>
+            <Stat label="Total devices" value={visible.length} icon={HiOutlineComputerDesktop} loading={busy} />
+            <Stat label="Assigned" value={assigned.length} icon={HiOutlineUserGroup} tone="ok" loading={busy} />
+            <Stat label="Unassigned" value={unassigned.length} icon={HiOutlineUserMinus} loading={busy} />
+            <Stat
+              label="Needs attention"
+              value={attention.length}
+              icon={HiOutlineExclamationTriangle}
+              tone={attention.length ? "bad" : "neutral"}
+              loading={busy}
             />
-          </div>
-        </label>
-        {q && (
-          <button className="nic-tab" onClick={() => setSearch("")}>Clear</button>
-        )}
-      </div>
+            <Stat
+              label={`Warranty ≤${WARRANTY_SOON_DAYS}d`}
+              hint="Expiring or expired"
+              value={warranty.length}
+              icon={HiOutlineShieldCheck}
+              tone={warranty.length ? "hold" : "neutral"}
+              loading={busy}
+            />
+          </StatRow>
 
-      <ErrorAlert>{error}</ErrorAlert>
+          <TabList label="Reports">
+            {REPORTS.map((r) => (
+              <Tab key={r.key} selected={report === r.key} onClick={() => setReport(r.key)}>
+                {r.label}
+              </Tab>
+            ))}
+          </TabList>
 
-      {/* Summary cards */}
-      <div className="hais-report-cards">
-        {cards.map((c) => (
-          <div className="hais-report-card" key={c.label}>
-            <div className="hais-report-card-value">{c.value}</div>
-            <div className="hais-report-card-label">{c.label}</div>
-          </div>
-        ))}
-      </div>
+          <Card className="overflow-hidden p-0" role="tabpanel">
+            <CardHeader className="mb-0 border-b border-line px-4 py-3">
+              <CardTitle>{activeLabel}</CardTitle>
+            </CardHeader>
+            {busy ? (
+              <TableSkeleton rows={5} columns={5} />
+            ) : (
+              <div className="overflow-x-auto">
+                {report === "unassigned" && (
+                  <DeviceTable rows={unassigned} columns={UNASSIGNED_COLS} empty="No unassigned devices — everything is issued." />
+                )}
+                {report === "assigned" && (
+                  <DeviceTable rows={assigned} columns={ASSIGNED_COLS} empty="No assigned devices." />
+                )}
+                {report === "attention" && (
+                  <DeviceTable rows={attention} columns={ATTENTION_COLS} empty="No devices under repair or not working." />
+                )}
 
-      {/* Report picker */}
-      <div className="nic-tabs nic-tabs--spaced">
-        {REPORTS.map((r) => (
-          <button
-            key={r.key}
-            className={`nic-tab ${report === r.key ? "nic-tab-active" : ""}`}
-            onClick={() => setReport(r.key)}
-          >
-            {r.label}
-          </button>
-        ))}
-      </div>
+                {report === "warranty" && (
+                  <Table density="compact">
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Asset ID</TableHead>
+                        <TableHead>Serial No.</TableHead>
+                        <TableHead>Category</TableHead>
+                        <TableHead>Warranty ends</TableHead>
+                        <TableHead>Days left</TableHead>
+                        <TableHead>Current user</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {warranty.length === 0 ? (
+                        <TableEmpty colSpan={6}>
+                          No warranties expiring in {WARRANTY_SOON_DAYS} days.
+                        </TableEmpty>
+                      ) : (
+                        warranty.map(({ a, days }) => (
+                          <TableRow key={a.asset_id}>
+                            <TableCell className={`${MONO} text-ink`}>{a.asset_id}</TableCell>
+                            <TableCell className={MONO}>{a.serial_num}</TableCell>
+                            <TableCell>{a.asset_type as string}</TableCell>
+                            <TableCell className="whitespace-nowrap">{a.warranty_ends}</TableCell>
+                            <TableCell
+                              className={cn(
+                                "whitespace-nowrap font-semibold",
+                                days < 0 ? "text-bad" : days <= 30 ? "text-hold" : "text-body",
+                              )}
+                            >
+                              {warrantyDaysLabel(days)}
+                            </TableCell>
+                            <TableCell>{holderLabel(a)}</TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                )}
 
-      {/* Report body */}
-      <div className="nic-table-wrap">
-        {report === "unassigned" && (
-          <DeviceTable rows={unassigned} columns={UNASSIGNED_COLS} empty="No unassigned devices — everything is issued." />
-        )}
-        {report === "assigned" && (
-          <DeviceTable rows={assigned} columns={ASSIGNED_COLS} empty="No assigned devices." />
-        )}
-        {report === "attention" && (
-          <DeviceTable rows={attention} columns={ATTENTION_COLS} empty="No devices under repair or not working." />
-        )}
-
-        {report === "warranty" && (
-          <Table density="compact">
-            <TableHeader>
-              <TableRow>
-                <TableHead>Asset ID</TableHead>
-                <TableHead>Serial No.</TableHead>
-                <TableHead>Category</TableHead>
-                <TableHead>Warranty Ends</TableHead>
-                <TableHead>Days Left</TableHead>
-                <TableHead>Current User</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {warranty.length === 0 ? (
-                <TableRow><TableCell colSpan={6} className="nic-note">No warranties expiring in {WARRANTY_SOON_DAYS} days.</TableCell></TableRow>
-              ) : (
-                warranty.map(({ a, days }) => (
-                  <TableRow key={a.asset_id}>
-                    <TableCell className="nic-mono">{a.asset_id}</TableCell>
-                    <TableCell className="nic-mono">{a.serial_num}</TableCell>
-                    <TableCell>{a.asset_type as string}</TableCell>
-                    <TableCell>{a.warranty_ends}</TableCell>
-                    <TableCell className={`nic-due${days < 0 ? " nic-due--overdue" : days <= 30 ? " nic-due--soon" : ""}`}>
-                      {warrantyDaysLabel(days)}
-                    </TableCell>
-                    <TableCell>{holderLabel(a)}</TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        )}
-
-        {report === "byDept" && <CountTable title="Department" data={byDept} />}
-        {report === "byCategory" && <CountTable title="Category" data={byCategory} />}
-        {report === "byStatus" && <CountTable title="Working Status" data={byStatus} />}
-      </div>
-    </section>
+                {report === "byDept" && <CountTable title="Department" data={byDept} />}
+                {report === "byCategory" && <CountTable title="Category" data={byCategory} />}
+                {report === "byStatus" && <CountTable title="Working status" data={byStatus} />}
+              </div>
+            )}
+          </Card>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -311,16 +332,22 @@ function DeviceTable({ rows, columns, empty }: { rows: Asset[]; columns: Column[
   return (
     <Table density="compact">
       <TableHeader>
-        <TableRow>{columns.map(([h]) => <TableHead key={h}>{h}</TableHead>)}</TableRow>
+        <TableRow>
+          {columns.map(([h]) => (
+            <TableHead key={h}>{h}</TableHead>
+          ))}
+        </TableRow>
       </TableHeader>
       <TableBody>
         {rows.length === 0 ? (
-          <TableRow><TableCell colSpan={columns.length} className="nic-note">{empty}</TableCell></TableRow>
+          <TableEmpty colSpan={columns.length}>{empty}</TableEmpty>
         ) : (
           rows.map((a) => (
             <TableRow key={a.asset_id}>
               {columns.map(([h, get], i) => (
-                <TableCell key={h} className={i <= 1 ? "nic-mono" : undefined}>{String(get(a) ?? "") || "—"}</TableCell>
+                <TableCell key={h} className={i <= 1 ? cn(MONO, i === 0 && "text-ink") : undefined}>
+                  {String(get(a) ?? "") || "—"}
+                </TableCell>
               ))}
             </TableRow>
           ))
@@ -335,17 +362,26 @@ function CountTable({ title, data }: { title: string; data: [string, number][] }
   return (
     <Table density="compact">
       <TableHeader>
-        <TableRow><TableHead>{title}</TableHead><TableHead className="nic-col-narrow">Devices</TableHead></TableRow>
+        <TableRow>
+          <TableHead>{title}</TableHead>
+          <TableHead className="w-32 text-right">Devices</TableHead>
+        </TableRow>
       </TableHeader>
       <TableBody>
         {data.length === 0 ? (
-          <TableRow><TableCell colSpan={2} className="nic-note">No data.</TableCell></TableRow>
+          <TableEmpty colSpan={2}>No data.</TableEmpty>
         ) : (
           <>
             {data.map(([name, count]) => (
-              <TableRow key={name}><TableCell>{name}</TableCell><TableCell>{count}</TableCell></TableRow>
+              <TableRow key={name}>
+                <TableCell>{name}</TableCell>
+                <TableCell className="text-right tabular-nums">{count}</TableCell>
+              </TableRow>
             ))}
-            <TableRow className="nic-row-total"><TableCell>Total</TableCell><TableCell>{total}</TableCell></TableRow>
+            <TableRow className="bg-surface font-semibold text-ink hover:bg-surface">
+              <TableCell>Total</TableCell>
+              <TableCell className="text-right tabular-nums">{total}</TableCell>
+            </TableRow>
           </>
         )}
       </TableBody>

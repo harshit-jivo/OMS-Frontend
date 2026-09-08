@@ -1,11 +1,33 @@
-import "../styles/Notifications.css";
-
 /**
- * Custom "explain first" notification-permission modal for the web app.
- * Matches the OMS design system; shown BEFORE the browser permission dialog.
- * The OS prompt (`Notification.requestPermission()`) only fires from the
- * "Allow Notifications" button — never automatically, never via alert/confirm.
+ * The "explain first" notification-permission prompt.
+ *
+ * Shown BEFORE the browser's own permission dialog. The OS prompt
+ * (`Notification.requestPermission()`) only fires from the "Allow" button —
+ * never automatically, and never from an `alert`/`confirm`.
+ *
+ * Why the explain-first step exists at all: a browser gives each origin ONE
+ * chance at the permission prompt. Dismissed or denied, it cannot be asked
+ * again from script — the user has to go into site settings. So asking cold,
+ * at load, spends the only ask on someone who has no idea what it is for.
+ *
+ * This was a hand-rolled overlay: a fixed div with an `onClick` to dismiss and
+ * a `stopPropagation` on the card. It is `ui/dialog` now, which brings the
+ * focus trap, Escape, the scroll lock and `aria-modal` it never had — and the
+ * `tw-page` reset, without which its buttons rendered at the 18px root size
+ * (DESIGN_SYSTEM §1.3).
  */
+import { HiOutlineBell, HiOutlineCheck } from "react-icons/hi2";
+
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 type Props = {
   open: boolean;
@@ -27,81 +49,59 @@ export default function NotificationPermissionModal({
   onAllow,
   onDismiss,
 }: Props) {
-  if (!open) return null;
-
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="oms-notif-title"
-      onClick={onDismiss}
-      className="notif-modal-overlay"
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        // Dismissing is a real answer here ("maybe later"), so Escape and the
+        // close button route to the same handler as the button — but not while
+        // the OS prompt is being raised.
+        if (!next && !submitting) onDismiss();
+      }}
     >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="notif-modal-card"
-      >
-        <div aria-hidden="true" className="notif-modal-icon">
-          <svg
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="#2563eb"
-            strokeWidth="1.8"
-            className="notif-modal-icon-svg"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
-            />
-          </svg>
-        </div>
-
-        <h2 id="oms-notif-title" className="notif-modal-title">
-          Stay Updated
-        </h2>
-        <p className="notif-modal-subtitle">
-          Never miss an important approval or workflow update.
-        </p>
-
-        <div className="notif-modal-benefits">
-          {BENEFITS.map((benefit) => (
-            <div key={benefit} className="notif-modal-benefit">
-              <svg
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="#22c55e"
-                strokeWidth="2"
-                className="notif-modal-benefit-icon"
+      {open && (
+        <DialogContent title="Notifications" size="sm">
+          <DialogHeader className="items-start">
+            <div className="min-w-0">
+              <span
+                aria-hidden="true"
+                className="mb-2 flex size-11 items-center justify-center rounded-full bg-brand-soft text-[20px] text-brand"
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M5 13l4 4L19 7"
-                />
-              </svg>
-              <span className="notif-modal-benefit-text">{benefit}</span>
+                <HiOutlineBell />
+              </span>
+              <DialogTitle>Stay updated</DialogTitle>
+              <DialogDescription>
+                Never miss an important approval or workflow update.
+              </DialogDescription>
             </div>
-          ))}
-        </div>
+          </DialogHeader>
 
-        <button
-          onClick={onAllow}
-          disabled={submitting}
-          className={`notif-modal-btn-allow${
-            submitting ? " notif-modal-btn-allow--submitting" : ""
-          }`}
-        >
-          {submitting ? "Please wait…" : "Allow Notifications"}
-        </button>
-        <button
-          onClick={onDismiss}
-          disabled={submitting}
-          className="notif-modal-btn-dismiss"
-        >
-          Maybe Later
-        </button>
-      </div>
-    </div>
+          <DialogBody>
+            <ul className="m-0 list-none space-y-2 p-0">
+              {BENEFITS.map((benefit) => (
+                <li key={benefit} className="flex items-center gap-2 text-[13px] text-body">
+                  <span
+                    aria-hidden="true"
+                    className="flex size-4 shrink-0 items-center justify-center rounded-full bg-ok-soft text-[11px] text-ok"
+                  >
+                    <HiOutlineCheck />
+                  </span>
+                  {benefit}
+                </li>
+              ))}
+            </ul>
+          </DialogBody>
+
+          <DialogFooter>
+            <Button onClick={onDismiss} disabled={submitting}>
+              Maybe later
+            </Button>
+            <Button variant="primary" onClick={onAllow} disabled={submitting}>
+              {submitting ? "Please wait…" : "Allow notifications"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      )}
+    </Dialog>
   );
 }

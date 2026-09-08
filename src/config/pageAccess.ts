@@ -85,5 +85,5 @@ export function landingPathFor(role?: string | null): string {
   if (normalizeRole(role) === "hais") return "/HAIS";
   if (normalizeRole(role) === "distributor") return "/Distributor";
   if (normalizeRole(role) === "mart_approval") return "/Mart_Approval";
-  return "/Dashboard";
+  return "/Home";
 }

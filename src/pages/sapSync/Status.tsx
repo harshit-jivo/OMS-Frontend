@@ -1,11 +1,27 @@
+/**
+ * SAP Sync · Status — the counts, and the buttons that refresh them.
+ *
+ * The tab exists to answer one question: did the data arrive? So the two
+ * things it must never do are report a failure as a zero, and report a
+ * success without saying what changed.
+ */
 import { useState } from "react";
 import { HiArrowPath, HiBuildingOffice2, HiCube, HiMapPin, HiUsers } from "react-icons/hi2";
 import { useQueryClient } from "@tanstack/react-query";
-import { sapService } from "../services/sapService";
-import { useSapAddresses, useSapBranches, useSapParties, useSapProducts } from "../lib/sapQueries";
-import "../styles/Status.css";
+
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardHeader, CardTitle, Notice, Stat, StatRow } from "@/components/ui/page";
 import { messageFrom } from "@/lib/apiError";
+import { showToast } from "@/lib/toastStore";
+import {
+  useSapAddresses,
+  useSapBranches,
+  useSapParties,
+  useSapProducts,
+} from "../../lib/sapQueries";
+import { sapService } from "../../services/sapService";
+import { num } from "./format";
 
 interface LastSync {
   type: string;
@@ -67,7 +83,7 @@ export default function Status() {
     setLastSync(entry);
   };
 
-  const syncData = async (syncType: string) => {
+  const syncData = async (syncType: string, label: string) => {
     setLoading(syncType);
 
     try {
@@ -84,13 +100,19 @@ export default function Status() {
         // four fetchers, leaving Products, Parties & Addresses, Branches and
         // Logs showing pre-sync data until the page was reloaded.
         void queryClient.invalidateQueries({ queryKey: ["sap"] });
-        alert(data?.message || "Sync completed successfully");
+        showToast({
+          title: label + " synced",
+          message: data?.message || "The counts above are up to date.",
+        });
       } else {
-        alert("Sync failed: " + (data?.message || "Unknown error"));
+        showToast({
+          title: label + " sync failed",
+          message: data?.message || "SAP reported a failure but gave no reason.",
+        });
       }
     } catch (err) {
       saveLastSync(syncType, "failed");
-      alert("Sync failed: " + messageFrom(err, "Unknown error"));
+      showToast({ title: label + " sync failed", message: messageFrom(err, "Unknown error") });
       console.error(err);
     } finally {
       setLoading(null);
@@ -144,102 +166,94 @@ export default function Status() {
    * that is really a failure is the worst possible thing for a screen whose
    * entire job is telling you whether the data arrived.
    */
-  const failed = modules
-    .filter((module) => module.failed)
-    .map((module) => module.label);
+  const failed = modules.filter((module) => module.failed).map((module) => module.label);
 
   return (
-    <div className="st-page app-page">
+    <div className="space-y-4 sm:space-y-6">
       {failed.length > 0 && (
-        <p className="st-load-error" role="alert">
-          Could not load {failed.join(", ")} — the counts below are incomplete.
-        </p>
+        <Notice tone="bad" title="Some counts are missing">
+          Could not load {failed.join(", ")}. The totals below are incomplete — a zero here may
+          mean the list is empty, or that the request for it failed.
+        </Notice>
       )}
 
-      {/* ── KPI cards ── */}
-      <div className="st-kpi-row">
-        {modules.map((module) => {
-          const Icon = module.icon;
-          return (
-            <article
-              className={`st-kpi ${loading === module.key ? "st-kpi-busy" : ""}`}
-              key={module.key}
-            >
-              <span className="st-kpi-icon" aria-hidden="true">
-                <Icon />
-              </span>
-              <div className="st-kpi-body">
-                <span className="st-kpi-value">{module.count.toLocaleString("en-IN")}</span>
-                <span className="st-kpi-label">{module.label}</span>
-                <span className="st-kpi-hint">{module.hint}</span>
-              </div>
-            </article>
-          );
-        })}
-      </div>
+      <StatRow>
+        {modules.map((module) => (
+          <Stat
+            key={module.key}
+            // A count that failed to load shows a dash rather than a zero, for
+            // the reason in the comment above.
+            value={module.failed ? "—" : num(module.count)}
+            label={module.label}
+            hint={module.hint}
+            icon={module.icon}
+            tone={module.failed ? "bad" : "neutral"}
+          />
+        ))}
+      </StatRow>
 
-      {/* ── Sync actions ── */}
-      <section className="st-panel st-sync-panel">
-        <div className="st-panel-head">
+      <Card>
+        <CardHeader>
           <div>
-            <div className="st-section-label">Manual Sync</div>
-            <h2 className="st-panel-title">Pull fresh data from SAP</h2>
+            <CardTitle>Pull fresh data from SAP</CardTitle>
+            <p className="m-0 mt-1 text-[12px] text-subtle">
+              {num(totalRecords)} records held locally across 4 modules
+            </p>
           </div>
-          <button
-            type="button"
-            className={`st-sync-all ${loading === "all" ? "st-sync-all-busy" : ""}`}
-            onClick={() => syncData("all")}
+          <Button
+            variant="primary"
+            onClick={() => void syncData("all", "Everything")}
             disabled={busy}
           >
-            <HiArrowPath className={loading === "all" ? "st-spin" : ""} aria-hidden="true" />
-            {loading === "all" ? "Syncing everything…" : "Sync All"}
-          </button>
-        </div>
+            <HiArrowPath className={loading === "all" ? "animate-spin" : ""} aria-hidden="true" />
+            {loading === "all" ? "Syncing everything…" : "Sync all"}
+          </Button>
+        </CardHeader>
 
-        <div className="st-sync-grid">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-2.5">
           {modules.map((module) => {
             const Icon = module.icon;
             const isActive = loading === module.key;
             return (
-              <button
+              <Button
                 key={module.key}
-                type="button"
-                className={`st-sync-btn ${isActive ? "st-sync-active" : ""}`}
-                onClick={() => syncData(module.key)}
+                onClick={() => void syncData(module.key, module.label)}
                 disabled={busy}
+                // Two lines of copy, so this cannot keep the 40px field height.
+                // `h-auto` only wins because `Button` runs its classes through
+                // `cn`, which has been taught the `h-control` token — see the
+                // tailwind-merge trap in DESIGN_SYSTEM §1.4.
+                className="h-auto items-start justify-start gap-3 px-3 py-3 text-left"
               >
-                <span className="st-sync-btn-icon" aria-hidden="true">
-                  <Icon className={isActive ? "st-spin" : ""} />
-                </span>
-                <span className="st-sync-btn-copy">
-                  <span className="st-sync-btn-title">
-                    {isActive ? "Syncing…" : `Sync ${module.label}`}
+                <Icon
+                  className={
+                    "mt-px shrink-0 text-[15px] text-brand" + (isActive ? " animate-spin" : "")
+                  }
+                  aria-hidden="true"
+                />
+                <span className="flex min-w-0 flex-col gap-0.5">
+                  <span className="font-semibold text-ink">
+                    {isActive ? "Syncing…" : "Sync " + module.label}
                   </span>
-                  <span className="st-sync-btn-hint">{module.hint}</span>
+                  <span className="text-[12px] font-normal text-subtle">{module.hint}</span>
                 </span>
-              </button>
+              </Button>
             );
           })}
         </div>
 
-        <div className="st-sync-foot">
-          <span>
-            <strong>{totalRecords.toLocaleString("en-IN")}</strong> records held locally across 4
-            modules
-          </span>
-          <span className="st-last-inline">
-            Last run:{" "}
-            <strong>
-              {lastSync ? `${lastSync.type} · ${lastSync.date} ${lastSync.time}` : "No sync yet"}
-            </strong>
-            {lastSync?.status && (
-              <Badge tone={lastSync.status === "success" ? "ok" : "bad"}>
-                {lastSync.status === "success" ? "Success" : "Failed"}
-              </Badge>
-            )}
-          </span>
-        </div>
-      </section>
+        <p className="m-0 mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-3 text-[12px] text-subtle">
+          Last run:{" "}
+          <strong className="font-semibold text-ink">
+            {lastSync ? lastSync.type + " · " + lastSync.date + " " + lastSync.time : "No sync yet"}
+          </strong>
+          {lastSync?.status && (
+            <Badge tone={lastSync.status === "success" ? "ok" : "bad"}>
+              {lastSync.status === "success" ? "Success" : "Failed"}
+            </Badge>
+          )}
+        </p>
+      </Card>
     </div>
   );
 }

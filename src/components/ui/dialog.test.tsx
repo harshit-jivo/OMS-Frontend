@@ -187,6 +187,33 @@ describe("Dialog", () => {
     expect(screen.queryByRole("button", { name: "Close" })).not.toBeInTheDocument();
   });
 
+  it("gives the corner close button the form-control reset", async () => {
+    // It shipped without one. Preflight is not imported, so a bare <button>
+    // keeps the UA's `border: 2px outset` and grey `buttonface` — a raised
+    // 1997 toolbar button in the corner of every dialog in the app. Radix
+    // needs its own element here (it carries the DialogClose behaviour), so
+    // it cannot go through `ui/button` and has to carry the reset itself.
+    const user = userEvent.setup();
+    function WithClose() {
+      const [open, setOpen] = useState(false);
+      return (
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogTrigger asChild>
+            <button type="button">Open</button>
+          </DialogTrigger>
+          <DialogContent title="Confirm">body</DialogContent>
+        </Dialog>
+      );
+    }
+    render(<WithClose />);
+    await user.click(screen.getByRole("button", { name: "Open" }));
+
+    const close = screen.getByRole("button", { name: "Close" });
+    expect(close.className).toContain("appearance-none");
+    expect(close.className).toContain("border-0");
+    expect(close.className).toContain("bg-transparent");
+  });
+
   it("applies the size the caller asked for", async () => {
     const user = userEvent.setup();
     function Sized() {
@@ -284,5 +311,29 @@ describe("a dialog that must not be dismissed", () => {
       </Dialog>,
     );
     expect(baseElement.querySelector(".ao-loading-overlay")).not.toBeNull();
+  });
+});
+
+describe("the converted-page reset", () => {
+  // A dialog is portaled to body, OUTSIDE the page's `.tw-page`, so without
+  // its own reset `index.css`'s unlayered `input { font: inherit }` reaches
+  // every control inside it at the 18px root size. Found on the Scheme
+  // editor, which has eleven of them.
+  it("carries tw-page on a panel dialog", async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+    await user.click(screen.getByRole("button", { name: "Open" }));
+    expect(screen.getByRole("dialog").className).toContain("tw-page");
+  });
+
+  it("leaves a bare dialog to its legacy stylesheet", () => {
+    render(
+      <Dialog open>
+        <DialogContent title="Legacy" variant="bare" size="auto" className="ir-modal">
+          <p>old</p>
+        </DialogContent>
+      </Dialog>,
+    );
+    expect(screen.getByRole("dialog").className).not.toContain("tw-page");
   });
 });

@@ -1,5 +1,7 @@
 import { Fragment, useMemo, type ReactNode } from "react";
 
+import { cn } from "@/lib/utils";
+
 /**
  * A deliberately small Markdown renderer for the label compliance report.
  *
@@ -34,6 +36,16 @@ import { Fragment, useMemo, type ReactNode } from "react";
  * Unsupported syntax is not an error. It renders as what it is: text. That is
  * the right failure mode for a document a person is reading — a stray `#` in a
  * remark should look like a `#`, not blank the section.
+ *
+ * ── On the conversion ─────────────────────────────────────────────────────
+ * The status pills and the failing row's left rule use the label overlay's
+ * literal reds and greens rather than `--color-bad` / `--color-ok`, for the
+ * reason given in `LabelImage.tsx`: this report describes boxes drawn on a
+ * photograph, and a pill in a different red from the box it reports is a
+ * different thing on the page rather than the same thing twice.
+ *
+ * `data-status` carries the verdict for tests, so an assertion survives a
+ * restyle — the class list is now four utilities where it was one name.
  */
 
 type Props = {
@@ -82,8 +94,15 @@ const inline = (text: string, keyPrefix: string): ReactNode[] => {
   return nodes;
 };
 
+/* One member per `kind`, rather than `kind: "h1" | "h2" | "p"` on a shared one.
+   A discriminant has to be a single literal for narrowing to remove the member:
+   with the three folded together, ruling out "h1", "h2" and "p" in turn still
+   left the text variant in play, so the `list` branch below could not see
+   `items`. */
 type Block =
-  | { kind: "h1" | "h2" | "p"; text: string }
+  | { kind: "h1"; text: string }
+  | { kind: "h2"; text: string }
+  | { kind: "p"; text: string }
   | { kind: "list"; items: { status: "PASS" | "FAIL" | null; text: string }[] };
 
 /** Group lines into blocks, so consecutive bullets share one `<ul>`. */
@@ -123,51 +142,71 @@ export default function MarkdownReport({ source, className }: Props) {
   const blocks = useMemo(() => parse(source), [source]);
 
   return (
-    <div className={className ? `lc-md ${className}` : "lc-md"}>
+    <div className={cn("text-[15.5px] leading-relaxed", className)}>
       {blocks.map((block, blockIndex) => {
         const key = `b${blockIndex}`;
         if (block.kind === "h1") {
           return (
-            <h2 key={key} className="lc-md-h1">
+            <h2
+              key={key}
+              className="m-0 mb-2.5 text-[19px] font-medium tracking-tight text-ink"
+            >
               {inline(block.text, key)}
             </h2>
           );
         }
         if (block.kind === "h2") {
           return (
-            <h3 key={key} className="lc-md-h2">
+            <h3
+              key={key}
+              // The rule above a section, dropped for the first one — a
+              // report should not open with a horizontal line.
+              className="m-0 mb-2 mt-5 border-t-[0.5px] border-line pt-3.5 text-[16px] font-medium text-body first:mt-0 first:border-t-0 first:pt-0"
+            >
               {inline(block.text, key)}
             </h3>
           );
         }
         if (block.kind === "p") {
           return (
-            <p key={key} className="lc-md-p">
+            <p key={key} className="m-0 mb-1.5 text-body [&_strong]:font-medium [&_strong]:text-ink">
               {inline(block.text, key)}
             </p>
           );
         }
         return (
-          <ul key={key} className="lc-md-list">
+          <ul key={key} className="m-0 list-none p-0">
             {block.items.map((item, itemIndex) => {
               const itemKey = `${key}-i${itemIndex}`;
               return (
                 <li
                   key={itemKey}
-                  className={
-                    item.status
-                      ? `lc-md-item is-${item.status.toLowerCase()}`
-                      : "lc-md-item"
-                  }
+                  data-status={item.status ?? undefined}
+                  className={cn(
+                    "flex items-start gap-2.5 border-b-[0.5px] border-line py-2.5 last:border-b-0",
+                    // A failed rule carries a left rule in its own colour:
+                    // scannable down the page without adding a second badge to
+                    // every row.
+                    item.status === "FAIL" && "pl-2.5 shadow-[inset_2px_0_0_#dc2626]",
+                    // A printed finding split across two pages is unreadable.
+                    "print:break-inside-avoid",
+                  )}
                 >
                   {item.status ? (
                     <span
-                      className={`lc-md-status lc-md-status-${item.status.toLowerCase()}`}
+                      data-status={item.status}
+                      className={cn(
+                        "mt-px flex-none rounded-full border-[0.5px] px-2 py-0.5",
+                        "text-[11.5px] font-medium tracking-wide",
+                        item.status === "FAIL"
+                          ? "border-danger-line bg-danger-soft text-[#b91c1c]"
+                          : "border-[#bbf7d0] bg-ok-soft text-[#15803d]",
+                      )}
                     >
                       {item.status}
                     </span>
                   ) : null}
-                  <span className="lc-md-item-text">
+                  <span className="min-w-0 text-body [&_em]:text-[0.86em] [&_em]:not-italic [&_em]:text-subtle [&_strong]:font-medium [&_strong]:text-ink">
                     {inline(item.text, itemKey)}
                   </span>
                 </li>

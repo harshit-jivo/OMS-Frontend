@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  HiArrowLeft,
-  HiCheckCircle,
-  HiClock,
-  HiExclamationCircle,
-  HiExclamationTriangle,
+  HiOutlineArrowLeft,
+  HiOutlineCheckCircle,
+  HiOutlineClock,
+  HiOutlineExclamationTriangle,
+  HiOutlineFunnel,
 } from "react-icons/hi2";
 
 import {
@@ -22,9 +22,36 @@ import {
   type Finding,
   type LabelReport,
 } from "../components/legal/labelReport";
-import "../styles/Order_Flow_Settings.css";
-import "../styles/Label_Checker.css";
-import "../styles/Compliance_Rules.css";
+import { Badge } from "@/components/ui/badge";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { Button } from "@/components/ui/button";
+import {
+  FilterBar,
+  FilterCount,
+  FilterSelect,
+  FilterSpacer,
+} from "@/components/ui/filter-bar";
+import {
+  Card,
+  EmptyState,
+  Notice,
+  Page,
+  PageHeader,
+  Stat,
+  StatRow,
+} from "@/components/ui/page";
+import { Pagination } from "@/components/ui/pagination";
+import { TableSkeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Tab, TabList } from "@/components/ui/tabs";
+import { cn } from "@/lib/utils";
 
 /**
  * Label check history — every check that has been run, reopenable.
@@ -149,50 +176,107 @@ export default function LabelHistory() {
 
   if (openId !== null) {
     return (
-      <div className="lc-page app-page">
-        <div className="lc-topbar">
-          <div className="lc-file">
-            <span className="lc-file-name">{detail?.file_name ?? "Check"}</span>
-            <span className="lc-file-meta">
-              {detail?.uploaded_at ? formatWhen(detail.uploaded_at) : null}
-              {detail?.checked_by_name ? ` · ${detail.checked_by_name}` : null}
-              {detail?.item_name ? ` · ${detail.item_name}` : null}
-            </span>
-          </div>
-          <button
-            type="button"
-            className="lc-btn lc-btn-ghost"
-            onClick={() => {
-              setOpenId(null);
-              setDetail(null);
-            }}
-          >
-            <HiArrowLeft aria-hidden="true" /> Back to history
-          </button>
-        </div>
+      /*
+       * The detail view was its own page shell — `lc-page app-page`, a
+       * hand-built topbar and a ghost button for the way back. It is the
+       * app's page now, so a reader arriving here from the table gets the
+       * same breadcrumbs, the same header and the same back affordance they
+       * get everywhere else, and the viewer beside it is identical to the one
+       * on Label Checker rather than a near-copy.
+       */
+      <Page>
+        <Breadcrumbs
+          items={[
+            { label: "Legal" },
+            {
+              label: "Check History",
+              onClick: () => {
+                setOpenId(null);
+                setDetail(null);
+              },
+            },
+            { label: detail?.file_name ?? "Check" },
+          ]}
+        />
+
+        <PageHeader
+          title={detail?.file_name ?? "Check"}
+          description={
+            [
+              detail?.uploaded_at ? formatWhen(detail.uploaded_at) : null,
+              detail?.checked_by_name,
+              detail?.item_name,
+            ]
+              .filter(Boolean)
+              .join(" · ") || undefined
+          }
+          badges={
+            detail ? (
+              <Badge tone={summary.compliant ? "ok" : "bad"}>
+                {summary.compliant ? "Compliant" : `${summary.failed} failed`}
+              </Badge>
+            ) : null
+          }
+          actions={
+            <Button
+              onClick={() => {
+                setOpenId(null);
+                setDetail(null);
+              }}
+            >
+              <HiOutlineArrowLeft aria-hidden="true" /> Back to history
+            </Button>
+          }
+        />
 
         {detailLoading ? (
-          <div className="lc-state" role="status" aria-live="polite">
-            <span className="lc-spinner lc-spinner-lg" aria-hidden="true" />
-            <p className="lc-state-text">Opening the report…</p>
+          <div
+            className="flex flex-col items-center gap-2 px-5 py-14 text-center"
+            role="status"
+            aria-live="polite"
+          >
+            <span
+              aria-hidden="true"
+              className="size-[30px] rounded-full border-[3px] border-line-strong border-t-brand motion-safe:animate-spin"
+            />
+            <p className="m-0 text-[14.5px] text-body">Opening the report…</p>
           </div>
         ) : detail ? (
-          <div className="lc-split">
-            <section className="lc-pane lc-pane-image" aria-label="Checked label">
+          /* The same two panes as Label Checker, and for the same reasons —
+             see the long note there on why they are not `Card`s. */
+          <div className="grid grid-cols-1 items-start gap-2.5 min-[900px]:grid-cols-[minmax(280px,0.85fr)_minmax(360px,1.15fr)] print:grid-cols-1">
+            <section
+              aria-label="Checked label"
+              className={cn(
+                "rounded-xl border-[0.5px] border-line bg-card p-4",
+                "max-h-[420px] overflow-auto",
+                "min-[900px]:sticky min-[900px]:top-3 min-[900px]:max-h-[calc(100svh-96px)]",
+                "print:static print:max-h-none print:overflow-visible print:border-0 print:p-0",
+              )}
+            >
               {detail.image_url ? (
                 <>
-                  <div className="lc-legend">
-                    <span className="lc-legend-key is-fail">
-                      <i aria-hidden="true" /> {summary.failed} failed
+                  <div className="mb-2.5 flex flex-wrap items-center gap-3 text-[13px] text-body">
+                    <span className="inline-flex items-center gap-1.5">
+                      <i
+                        aria-hidden="true"
+                        className="size-[11px] rounded-[3px] border border-[#dc2626] bg-[rgba(220,38,38,0.14)]"
+                      />{" "}
+                      {summary.failed} failed
                     </span>
-                    <span className="lc-legend-key is-pass">
-                      <i aria-hidden="true" /> {locatedPasses} passed
+                    <span className="inline-flex items-center gap-1.5">
+                      <i
+                        aria-hidden="true"
+                        className="size-[11px] rounded-[3px] border border-[rgba(22,163,74,0.55)] bg-[rgba(22,163,74,0.07)]"
+                      />{" "}
+                      {locatedPasses} passed
                     </span>
-                    <label className="lc-legend-toggle">
+                    <label className="ml-auto inline-flex cursor-pointer select-none items-center gap-1.5 print:hidden">
                       <input
                         type="checkbox"
                         checked={showPasses}
                         onChange={(event) => setShowPasses(event.target.checked)}
+                        className="m-0 size-[13px] accent-brand"
                       />
                       Show passed
                     </label>
@@ -210,9 +294,9 @@ export default function LabelHistory() {
                   />
                 </>
               ) : (
-                <div className="lc-image-placeholder">
-                  <HiClock aria-hidden="true" />
-                  <p>
+                <div className="flex flex-col items-center gap-2 rounded-[9px] bg-surface px-4 py-10 text-center text-[14px] leading-relaxed text-body">
+                  <HiOutlineClock aria-hidden="true" className="text-[18px]" />
+                  <p className="m-0">
                     This check predates stored previews, so the artwork is not
                     available. The findings below are unaffected.
                   </p>
@@ -220,20 +304,31 @@ export default function LabelHistory() {
               )}
             </section>
 
-            <section className="lc-pane lc-pane-report" aria-label="Compliance report">
-              <div className={`lc-verdict${summary.compliant ? " is-ok" : " is-bad"}`}>
-                {summary.compliant ? (
-                  <HiCheckCircle aria-hidden="true" />
-                ) : (
-                  <HiExclamationTriangle aria-hidden="true" />
+            <section
+              aria-label="Compliance report"
+              className="rounded-xl border-[0.5px] border-line bg-card p-4 print:border-0 print:p-0"
+            >
+              <div
+                className={cn(
+                  "mb-2.5 flex items-start gap-2.5 rounded-[10px] border-[0.5px] p-3 text-[14.5px]",
+                  summary.compliant
+                    ? "border-ok-soft bg-ok-soft text-ok"
+                    : "border-danger-line bg-danger-soft text-[#b91c1c]",
+                  "[&>svg]:mt-px [&>svg]:size-[18px] [&>svg]:flex-none",
                 )}
-                <div>
-                  <strong>
+              >
+                {summary.compliant ? (
+                  <HiOutlineCheckCircle aria-hidden="true" />
+                ) : (
+                  <HiOutlineExclamationTriangle aria-hidden="true" />
+                )}
+                <div className="flex flex-col gap-0.5">
+                  <strong className="font-medium">
                     {summary.compliant
                       ? "Compliant — every rule passed"
                       : `${summary.failed} of ${summary.total} rules failed`}
                   </strong>
-                  <span>
+                  <span className="text-[13px] text-body">
                     {summary.passed} passed · {summary.failed} failed
                     {detail.ocr_available === false
                       ? " · OCR unavailable, AI review only"
@@ -242,26 +337,17 @@ export default function LabelHistory() {
                 </div>
               </div>
 
-              <div className="lc-tabs" role="tablist" aria-label="Report view">
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={view === "report"}
-                  className={`lc-tab${view === "report" ? " is-active" : ""}`}
-                  onClick={() => setView("report")}
-                >
+              {/* Was a hand-rolled `role="tablist"` with two bare buttons —
+                  no arrow-key handling and no `tabpanel` relationship.
+                  `TabList` owns both. */}
+              <TabList className="mb-3 print:hidden" label="Report view">
+                <Tab selected={view === "report"} onClick={() => setView("report")}>
                   Report
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={view === "text"}
-                  className={`lc-tab${view === "text" ? " is-active" : ""}`}
-                  onClick={() => setView("text")}
-                >
+                </Tab>
+                <Tab selected={view === "text"} onClick={() => setView("text")}>
                   Plain text
-                </button>
-              </div>
+                </Tab>
+              </TabList>
 
               {view === "report" ? (
                 <FindingsChecklist
@@ -277,117 +363,131 @@ export default function LabelHistory() {
             </section>
           </div>
         ) : null}
-      </div>
+      </Page>
     );
   }
 
   /* ── List ─────────────────────────────────────────────────────────────── */
 
   return (
-    <div className="ofs-page">
-      <div className="ofs-header">
-        <div>
-          <span className="ofs-kicker">Legal</span>
-          <h1>
-            <HiClock aria-hidden="true" /> Label Check History
-          </h1>
-          <p>
-            Every label that has been checked, newest first. Opening one shows
-            the report exactly as it was reported at the time.
-          </p>
-        </div>
-        <label className="lc-legend-toggle">
-          <input
-            type="checkbox"
-            checked={failedOnly}
-            onChange={(event) => {
-              setPage(1);
-              setFailedOnly(event.target.checked);
-            }}
-          />
-          Only checks with failures
-        </label>
-      </div>
+    <Page>
+      <Breadcrumbs items={[{ label: "Legal" }, { label: "Check History" }]} />
 
-      {error && (
-        <div className="ofs-alert">
-          <HiExclamationCircle aria-hidden="true" /> {error}
-        </div>
+      <PageHeader
+        title="Label Check History"
+        description="Every label that has been checked, newest first. Opening one shows the report exactly as it was reported at the time."
+      />
+
+      <StatRow>
+        <Stat
+          icon={HiOutlineClock}
+          tone="brand"
+          label="Checks recorded"
+          value={total}
+          hint={failedOnly ? "with failures" : "all time"}
+          loading={loading}
+        />
+      </StatRow>
+
+      <FilterBar>
+        <FilterSelect
+          label="Result"
+          icon={HiOutlineFunnel}
+          // The only filter on this bar. Without a cap it takes the whole
+          // width, which reads as a form rather than a toolbar.
+          fieldClassName="max-w-[280px] flex-none"
+          value={failedOnly ? "failed" : "all"}
+          onChange={(event) => {
+            setPage(1);
+            setFailedOnly(event.target.value === "failed");
+          }}
+        >
+          <option value="all">All checks</option>
+          <option value="failed">Only checks with failures</option>
+        </FilterSelect>
+        <FilterSpacer />
+        <FilterCount>
+          {total} check{total === 1 ? "" : "s"}
+        </FilterCount>
+      </FilterBar>
+
+      {error ? (
+        <Notice tone="bad" title="Something went wrong">
+          {error}
+        </Notice>
+      ) : null}
+
+      {loading ? (
+        <TableSkeleton columns={5} label="Loading history" />
+      ) : rows.length === 0 ? (
+        <Card>
+          <EmptyState
+            icon={HiOutlineClock}
+            title={failedOnly ? "No failed checks" : "Nothing checked yet"}
+            hint={
+              failedOnly
+                ? "Every check in this period passed. Switch the filter to see them all."
+                : "Run a check from the Label Checker and it will be recorded here."
+            }
+          />
+        </Card>
+      ) : (
+        <Card className="overflow-hidden p-0">
+          <div className="overflow-x-auto">
+            <Table density="compact">
+              <TableHeader>
+                <TableRow className="bg-surface hover:bg-surface">
+                  <TableHead>Label</TableHead>
+                  <TableHead>Result</TableHead>
+                  <TableHead>Item</TableHead>
+                  <TableHead>Checked by</TableHead>
+                  <TableHead>Checked at</TableHead>
+                  <TableHead>Rules</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((row) => {
+                  const failed = row.summary?.failed ?? 0;
+                  return (
+                    <TableRow key={row.id}>
+                      <TableCell>
+                        {/* The file name opens the report — it is what a
+                            reviewer recognises the record by, so it is the
+                            link rather than a separate View action. */}
+                        <Button
+                          variant="link"
+                          size="inline"
+                          className="font-semibold text-brand hover:text-brand"
+                          onClick={() => void open(row.id)}
+                        >
+                          {row.file_name}
+                        </Button>
+                      </TableCell>
+                      <TableCell>
+                        <Badge tone={failed ? "bad" : "ok"}>
+                          {failed ? `${failed} failed` : "Compliant"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-ink">{row.item_name || "—"}</TableCell>
+                      <TableCell>{row.checked_by_name || "—"}</TableCell>
+                      <TableCell className="whitespace-nowrap">
+                        {formatWhen(row.uploaded_at)}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        {row.summary?.total ?? "—"}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        </Card>
       )}
 
-      <section className="ofs-card ofs-card--wide">
-        <div className="ofs-card-head">
-          <span className="ofs-card-mark" />
-          <h2>{total} check{total === 1 ? "" : "s"}</h2>
-        </div>
-
-        {loading ? (
-          <div className="ofs-loading">
-            <span className="ofs-spinner" />
-            <span>Loading history…</span>
-          </div>
-        ) : rows.length === 0 ? (
-          <p className="cr-hint">
-            {failedOnly
-              ? "No checks have failed. Untick the filter to see them all."
-              : "No labels have been checked yet."}
-          </p>
-        ) : (
-          <div className="cr-list">
-            {rows.map((row) => {
-              const failed = row.summary?.failed ?? 0;
-              return (
-                <div key={row.id} className="cr-row">
-                  <button
-                    type="button"
-                    className="cr-row-main"
-                    onClick={() => void open(row.id)}
-                  >
-                    <span className="cr-row-name">
-                      {row.file_name}
-                      <span
-                        className={`lc-md-status lc-md-status-${failed ? "fail" : "pass"}`}
-                      >
-                        {failed ? `${failed} failed` : "Compliant"}
-                      </span>
-                    </span>
-                    <span className="cr-row-meta">
-                      {formatWhen(row.uploaded_at)}
-                      {row.checked_by_name ? ` · ${row.checked_by_name}` : ""}
-                      {row.item_name ? ` · ${row.item_name}` : ""}
-                      {row.summary?.total ? ` · ${row.summary.total} rules` : ""}
-                    </span>
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {totalPages > 1 && (
-          <div className="cr-actions">
-            <button
-              type="button"
-              className="ofs-refresh"
-              disabled={page <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-            >
-              Previous
-            </button>
-            <span className="cr-hint" style={{ margin: 0 }}>
-              Page {page} of {totalPages}
-            </span>
-            <button
-              type="button"
-              className="ofs-refresh"
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            >
-              Next
-            </button>
-          </div>
-        )}
-      </section>
-    </div>
+      {totalPages > 1 ? (
+        <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
+      ) : null}
+    </Page>
   );
 }

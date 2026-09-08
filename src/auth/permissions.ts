@@ -50,6 +50,15 @@ export interface Session {
   companyName: string;
   mainGroupId: string;
   mainGroupName: string;
+  /**
+   * The product categories this user is assigned, uppercased — OIL,
+   * BEVERAGES, MART.
+   *
+   * Empty means "not assigned any", which is a real and different state from
+   * "assigned all": the Sales Invoice branch gate shows the full choice only
+   * when this is empty, and otherwise picks from it.
+   */
+  categories: string[];
 }
 
 export const ADMIN_ROLE = "admin";

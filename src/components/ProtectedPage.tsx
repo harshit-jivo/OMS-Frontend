@@ -58,7 +58,7 @@ export default function ProtectedPage({ children }: { children: ReactNode }) {
   // (`/hais/device/:code`) is public and deliberately renders WITHOUT the
   // shell. `routeAccess.test.ts` asserts that stays true.
   if (!canAccess(session, accessFor(location.pathname))) {
-    return <Navigate to="/Dashboard" replace />;
+    return <Navigate to="/Home" replace />;
   }
 
   // The Suspense boundary sits INSIDE the shell, not around it.

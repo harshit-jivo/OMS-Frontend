@@ -3,25 +3,33 @@
  * an unexpected giveaway. Also dry-runs the engine over a draft line so a scheme
  * can be verified before it goes near a real order.
  *
- * Split out of `Scheme_Manager.tsx` (Phase 4) verbatim — it was already fully
- * self-contained (its own local state, no page-level props beyond the
- * catalogue and the name resolver).
+ * Fully self-contained: its own local state, no page-level props beyond the
+ * catalogue and the name resolver.
  */
 import { useState } from "react";
 
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import type { SearchSelectOption } from "@/components/ui/dropdown";
+import { SearchSelect } from "@/components/ui/dropdown";
+import { Field, FormGrid, Input, Select } from "@/components/ui/form";
+import { Notice } from "@/components/ui/page";
 import { schemeService } from "@/services/schemeService";
 import type { ApplicableScheme, SchemeProposal } from "@/services/schemeService";
 import { describeBenefit, describeScope, describeTrigger } from "@/services/schemeService";
 
 import { apiErrorText, CATEGORIES } from "../schemeManagerHelpers";
-import type { CatalogueItem } from "../types";
-import ItemPicker from "./ItemPicker";
+import { PRODUCT_PICKER_LIMIT } from "./productOptions";
+
+const RESULT = "rounded-sm border border-line bg-surface px-3.5 py-3";
+const RESULT_TITLE = "flex flex-wrap items-center gap-2 text-[13.5px] font-semibold text-ink";
+const RESULT_LINE = "mt-1 text-[12.5px] text-body";
 
 export default function VendorCheck({
-  products,
+  itemOptions,
   itemNameOf,
 }: {
-  products: CatalogueItem[];
+  itemOptions: SearchSelectOption<string>[];
   itemNameOf: (itemCode: string) => string;
 }) {
   const [cardCode, setCardCode] = useState("");
@@ -90,82 +98,80 @@ export default function VendorCheck({
   };
 
   return (
-    <>
-      <section className="sch-section">
-        <div className="sch-grid">
-          <div>
-            <label className="sch-label">Vendor card code</label>
-            <input
-              className="sch-input"
-              value={cardCode}
-              onChange={(e) => setCardCode(e.target.value)}
-              placeholder="CUSTA000123"
-            />
-          </div>
-          <div>
-            <label className="sch-label">Category</label>
-            <select
-              className="sch-select"
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-            >
-              <option value="">All</option>
-              {CATEGORIES.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
+    <div className="space-y-5">
+      <section className="space-y-4">
+        <FormGrid>
+          <Field label="Vendor card code">
+            {(control) => (
+              <Input
+                {...control}
+                value={cardCode}
+                onChange={(e) => setCardCode(e.target.value)}
+                placeholder="CUSTA000123"
+                autoComplete="off"
+              />
+            )}
+          </Field>
+          <Field label="Category">
+            {(control) => (
+              <Select {...control} value={category} onChange={(e) => setCategory(e.target.value)}>
+                <option value="">All</option>
+                {CATEGORIES.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </Field>
+        </FormGrid>
 
-        <div className="sch-check-actions">
-          <button
-            type="button"
-            className="sch-btn-primary"
-            disabled={!cardCode.trim() || isChecking}
-            onClick={check}
-          >
-            {isChecking ? "Checking..." : "What do they get?"}
-          </button>
-          <button type="button" className="sch-btn" onClick={() => setShowDryRun((p) => !p)}>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="primary" disabled={!cardCode.trim() || isChecking} onClick={check}>
+            {isChecking ? "Checking…" : "What do they get?"}
+          </Button>
+          <Button onClick={() => setShowDryRun((p) => !p)}>
             {showDryRun ? "Hide line test" : "Test a line"}
-          </button>
+          </Button>
         </div>
 
-        {error && (
-          <div className="sch-notice error sch-notice--tight">
-            <span>{error}</span>
-          </div>
-        )}
+        {error && <Notice tone="bad">{error}</Notice>}
 
         {applicable && (
-          <div className="sch-check-results">
+          <div className="space-y-2">
             {applicable.length === 0 ? (
-              <div className="sch-hint">No scheme reaches this vendor.</div>
+              <p className="m-0 text-[13px] text-subtle">No scheme reaches this vendor.</p>
             ) : (
               <>
-                <div className="sch-hint sch-hint--mb10">
-                  Treated as state <strong>{applicable[0].context.state_code || "—"}</strong>, main
-                  group <strong>{applicable[0].context.main_group || "—"}</strong>.
-                </div>
+                <p className="m-0 text-[12.5px] text-subtle">
+                  Treated as state{" "}
+                  <strong className="font-semibold text-ink">
+                    {applicable[0].context.state_code || "—"}
+                  </strong>
+                  , main group{" "}
+                  <strong className="font-semibold text-ink">
+                    {applicable[0].context.main_group || "—"}
+                  </strong>
+                  .
+                </p>
                 {applicable.map((scheme) => (
-                  <div key={scheme.scheme_id} className="sch-result">
-                    <div className="sch-result-title">
+                  <div key={scheme.scheme_id} className={RESULT}>
+                    <div className={RESULT_TITLE}>
                       {scheme.name}
-                      {scheme.category && <span className="sch-chip green">{scheme.category}</span>}
-                      <span className="sch-chip blue">
-                        because of {describeScope({
+                      {scheme.category && <Badge tone="ok">{scheme.category}</Badge>}
+                      <Badge tone="info">
+                        because of{" "}
+                        {describeScope({
                           scope_type: scheme.granted_by.scope_type,
                           scope_value: scheme.granted_by.scope_value,
                           category: "",
                         })}
-                      </span>
+                      </Badge>
                     </div>
-                    <div className="sch-result-line">
+                    <div className={RESULT_LINE}>
                       {scheme.triggers.map((t) => describeTrigger(t, itemNameOf)).join(" · ")}
                     </div>
-                    <div className="sch-result-line give">
+                    <div className={`${RESULT_LINE} font-semibold text-ok`}>
                       {scheme.benefits.map((b) => describeBenefit(b, itemNameOf)).join(" · ")}
                     </div>
                   </div>
@@ -177,86 +183,98 @@ export default function VendorCheck({
       </section>
 
       {showDryRun && (
-        <section className="sch-section">
-          <div className="sch-block-title">Test one order line</div>
-          <div className="sch-grid">
-            <div>
-              <label className="sch-label">Product ordered</label>
-              <ItemPicker
-                value={itemCode}
-                products={products}
-                onChange={setItemCode}
-                placeholder="search the product..."
-              />
-            </div>
-            <div>
-              <label className="sch-label">How many</label>
-              <input
-                type="number"
-                min="0"
-                className="sch-input"
-                value={qty}
-                onChange={(e) => setQty(e.target.value)}
-                placeholder="10"
-              />
-            </div>
-            <div>
-              <label className="sch-label">Combo free item</label>
-              <ItemPicker
-                value={comboFreeItem}
-                products={products}
-                onChange={setComboFreeItem}
-                placeholder="1+1 only..."
-                allowClear
-                clearLabel="not a combo"
-              />
-            </div>
-            <div>
-              <label className="sch-label">Combo free qty</label>
-              <input
-                type="number"
-                min="0"
-                className="sch-input"
-                value={comboFreeQty}
-                onChange={(e) => setComboFreeQty(e.target.value)}
-                placeholder="1+1 only"
-              />
-            </div>
-          </div>
+        <section className="space-y-4 border-t border-line pt-5">
+          <h4 className="m-0 text-[11px] font-semibold uppercase tracking-wider text-subtle">
+            Test one order line
+          </h4>
+          <FormGrid>
+            <Field label="Product ordered">
+              {(control) => (
+                <SearchSelect
+                  id={control.id}
+                  value={itemCode}
+                  onChange={setItemCode}
+                  options={itemOptions}
+                  placeholder="search the product…"
+                  searchPlaceholder="Product name or code"
+                  maxShown={PRODUCT_PICKER_LIMIT}
+                />
+              )}
+            </Field>
+            <Field label="How many">
+              {(control) => (
+                <Input
+                  {...control}
+                  type="number"
+                  min="0"
+                  value={qty}
+                  onChange={(e) => setQty(e.target.value)}
+                  placeholder="10"
+                />
+              )}
+            </Field>
+            <Field label="Combo free item" hint="1+1 packs only.">
+              {(control) => (
+                <SearchSelect
+                  id={control.id}
+                  value={comboFreeItem}
+                  onChange={setComboFreeItem}
+                  options={itemOptions}
+                  placeholder="not a combo"
+                  searchPlaceholder="Product name or code"
+                  clearLabel="not a combo"
+                  maxShown={PRODUCT_PICKER_LIMIT}
+                />
+              )}
+            </Field>
+            <Field label="Combo free qty">
+              {(control) => (
+                <Input
+                  {...control}
+                  type="number"
+                  min="0"
+                  value={comboFreeQty}
+                  onChange={(e) => setComboFreeQty(e.target.value)}
+                  placeholder="1+1 only"
+                />
+              )}
+            </Field>
+          </FormGrid>
 
-          <div className="sch-run-row">
-            <button
-              type="button"
-              className="sch-btn-primary"
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              variant="primary"
               disabled={!cardCode.trim() || !itemCode.trim() || isChecking}
               onClick={runPreview}
             >
-              {isChecking ? "Running..." : "Run the test"}
-            </button>
+              {isChecking ? "Running…" : "Run the test"}
+            </Button>
             {!cardCode.trim() && (
-              <span className="sch-hint sch-hint--ml10">
-                Enter a card code above first.
-              </span>
+              <span className="text-[12.5px] text-subtle">Enter a card code above first.</span>
             )}
           </div>
 
           {proposals && (
-            <div className="sch-check-results">
+            <div className="space-y-2">
               {proposals.length === 0 ? (
-                <div className="sch-hint">Nothing fires on this line.</div>
+                <p className="m-0 text-[13px] text-subtle">Nothing fires on this line.</p>
               ) : (
                 proposals.map((proposal, index) => (
-                  <div key={index} className="sch-result">
-                    <div className="sch-result-title">{proposal.scheme_name}</div>
-                    <div className="sch-result-line">
+                  <div key={index} className={RESULT}>
+                    <div className={RESULT_TITLE}>{proposal.scheme_name}</div>
+                    <div className={RESULT_LINE}>
                       {proposal.qty_is_user_supplied ? (
                         <>
-                          Applies, but has no rule — <strong>the quantity is typed by hand</strong>.
+                          Applies, but has no rule —{" "}
+                          <strong className="font-semibold text-ink">
+                            the quantity is typed by hand
+                          </strong>
+                          .
                         </>
                       ) : (
                         <>
                           On {proposal.qualifying_qty} ordered →{" "}
-                          <strong>
+                          <strong className="font-semibold text-ok">
                             {proposal.qty} {proposal.free_uom.toLowerCase()} of{" "}
                             {itemNameOf(proposal.benefit_item_code)}
                           </strong>{" "}
@@ -264,7 +282,7 @@ export default function VendorCheck({
                         </>
                       )}
                     </div>
-                    <div className="sch-result-meta">
+                    <div className="mt-1 text-[12px] text-subtle">
                       because of{" "}
                       {describeScope({
                         scope_type: proposal.scope_type,
@@ -279,6 +297,6 @@ export default function VendorCheck({
           )}
         </section>
       )}
-    </>
+    </div>
   );
 }

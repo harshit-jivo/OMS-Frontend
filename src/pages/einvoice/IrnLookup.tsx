@@ -4,6 +4,10 @@ import { einvoiceService } from "../../services/einvoiceService";
 import { NicField, JsonView, DetailsView, ErrorAlert } from "../../components/NicUI";
 import { messageFrom } from "@/lib/apiError";
 import DateInput from "../../components/DateInput";
+import { Button } from "@/components/ui/button";
+import { Input, Select } from "@/components/ui/form";
+import { Card, CardHeader, CardTitle } from "@/components/ui/page";
+import { Tab, TabList } from "@/components/ui/tabs";
 
 type Mode = "irn" | "doc" | "rejected";
 
@@ -41,41 +45,43 @@ export default function IrnLookup() {
   };
 
   return (
-    <section className="ofs-card ofs-card--wide">
-      <div className="ofs-card-head">
-        <span className="ofs-card-mark" />
-        <h2>Lookup</h2>
-      </div>
+    <Card>
+      <CardHeader>
+        <CardTitle>Lookup</CardTitle>
+      </CardHeader>
 
-      <div className="nic-tabs" style={{ margin: "0 0 16px" }}>
+      <TabList label="Lookup by" className="mb-4">
         {([["irn", "By IRN"], ["doc", "By Document"], ["rejected", "Rejected IRNs"]] as [Mode, string][]).map(
           ([m, label]) => (
-            <button key={m} className={`nic-tab ${mode === m ? "nic-tab-active" : ""}`}
-              onClick={() => { setMode(m); setData(null); setError(""); }}>
+            <Tab
+              key={m}
+              selected={mode === m}
+              onClick={() => { setMode(m); setData(null); setError(""); }}
+            >
               {label}
-            </button>
+            </Tab>
           )
         )}
-      </div>
+      </TabList>
 
       {mode === "irn" ? (
-        <div className="nic-form-grid">
+        <div className="grid gap-x-5 gap-y-4 grid-cols-[repeat(auto-fit,minmax(220px,1fr))]">
           <NicField label="IRN" full>
-            <input className="nic-input nic-mono" value={irn} onChange={(e) => setIrn(e.target.value)}
+            <Input className="font-mono" value={irn} onChange={(e) => setIrn(e.target.value)}
               placeholder="64-character IRN hash" />
           </NicField>
         </div>
       ) : mode === "doc" ? (
-        <div className="nic-form-grid">
+        <div className="grid gap-x-5 gap-y-4 grid-cols-[repeat(auto-fit,minmax(220px,1fr))]">
           <NicField label="Doc Type">
-            <select className="nic-select" value={doctype} onChange={(e) => setDoctype(e.target.value)}>
+            <Select value={doctype} onChange={(e) => setDoctype(e.target.value)}>
               <option value="INV">INV</option>
               <option value="CRN">CRN</option>
               <option value="DBN">DBN</option>
-            </select>
+            </Select>
           </NicField>
           <NicField label="Doc Number">
-            <input className="nic-input" value={docnum} onChange={(e) => setDocnum(e.target.value)}
+            <Input value={docnum} onChange={(e) => setDocnum(e.target.value)}
               placeholder="626070175" />
           </NicField>
           <NicField label="Doc Date" hint="dd/mm/yyyy">
@@ -83,27 +89,27 @@ export default function IrnLookup() {
           </NicField>
         </div>
       ) : (
-        <div className="nic-form-grid">
+        <div className="grid gap-x-5 gap-y-4 grid-cols-[repeat(auto-fit,minmax(220px,1fr))]">
           <NicField label="Date" hint="dd/mm/yyyy — IRNs the taxpayer rejected on this date">
             <DateInput value={rejDate} onChange={setRejDate} placeholder="03/07/2026" />
           </NicField>
         </div>
       )}
 
-      <div className="nic-actions-row">
-        <button className="ofs-primary" onClick={() => void run()} disabled={busy}>
-          <HiMagnifyingGlass className="nic-icon-lead" />
+      <div className="mt-4 flex flex-wrap items-center gap-2.5">
+        <Button variant="primary" onClick={() => void run()} disabled={busy}>
+          <HiMagnifyingGlass aria-hidden="true" />
           {busy ? "Searching…" : "Search"}
-        </button>
+        </Button>
       </div>
 
       <ErrorAlert>{error}</ErrorAlert>
       {data ? (
-        <div className="nic-result">
+        <div className="mt-5 space-y-4">
           <DetailsView data={data} />
           <JsonView data={data} title="Raw JSON" />
         </div>
       ) : null}
-    </section>
+    </Card>
   );
 }

@@ -30,11 +30,14 @@ export default function ProblemSummary({ problems }: { problems: OrderProblems }
   ];
 
   return (
-    <div className="sl-problem-summary" role="alert">
-      <div className="sl-problem-summary-title">
+    <div
+      className="mb-3.5 rounded-md border border-danger-line bg-danger-soft px-4 py-3 text-bad"
+      role="alert"
+    >
+      <div className="mb-1.5 text-[13px] font-semibold">
         {messages.length === 1 ? "One thing to fix before saving:" : "Fix these before saving:"}
       </div>
-      <ul>
+      <ul className="m-0 list-disc pl-4.5 text-[12.5px] leading-relaxed">
         {messages.map((message) => (
           <li key={message}>{message}</li>
         ))}

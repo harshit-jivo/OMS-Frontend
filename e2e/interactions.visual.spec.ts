@@ -141,10 +141,21 @@ test.describe("approval management", () => {
  * picture of an empty filter card, which is exactly what both had.
  */
 test.describe("filtered reports", () => {
-  /** Open a `.dr-dropdown` by its trigger text and tick its first real option. */
+  /**
+   * Open the Main Group filter and tick everything in it.
+   *
+   * Was a `.dr-dropdown` opened by its trigger TEXT ("Select Main Group") and
+   * an option picked by class. It is `FilterMultiSelect` now: the trigger is
+   * labelled, and each option is a real checkbox inside a `<label>`, so both
+   * halves have an accessible handle. "Select all" rather than the first
+   * option because the point of the helper is to get the report past its
+   * "nothing chosen" gate, not to pick a particular group.
+   */
   const pickFirstGroup = async (page: import("@playwright/test").Page) => {
-    await page.getByText("Select Main Group", { exact: true }).click();
-    await page.locator(".dr-dropdown-menu .dr-dropdown-item:not(.dr-select-all)").first().click();
+    await page.getByLabel("Main Group").click();
+    // By name, not "Select all": that row only renders when more than one
+    // option MATCHES (ui/dropdown), and the fixture holds exactly one group.
+    await page.getByRole("checkbox", { name: "Main Group" }).check();
   };
 
   test("sales report with a main group chosen", async ({ appPage }) => {
@@ -161,8 +172,8 @@ test.describe("filtered reports", () => {
 
     // The user dropdown is `disabled` until the group above is set, so this
     // click would silently do nothing if the order were reversed.
-    await appPage.getByRole("button", { name: "-- Select User --" }).click();
-    await appPage.locator(".sl-party-option").filter({ hasText: "Amit Kumar" }).first().click();
+    await appPage.getByLabel("User").click();
+    await appPage.getByRole("option").filter({ hasText: "Amit Kumar" }).first().click();
     await settle(appPage);
 
     await expect(appPage).toHaveScreenshot("personwise-report-filtered.png", { fullPage: true });
@@ -203,7 +214,7 @@ test.describe("add sales wizard", () => {
     // focused (Add_Sales.tsx:2697-2701), so the placeholder is the handle.
     const pick = async (placeholder: string, option: string) => {
       await page.getByPlaceholder(placeholder).click();
-      await page.locator(".sl-party-option").filter({ hasText: option }).first().click();
+      await page.getByRole("option").filter({ hasText: option }).first().click();
     };
 
     await pick("Search party...", "Northern Traders");
@@ -217,8 +228,8 @@ test.describe("add sales wizard", () => {
   /** Step 2: open the item modal, choose a product, give it boxes, confirm. */
   const addConfirmedItem = async (page: import("@playwright/test").Page) => {
     await page.getByRole("button", { name: "+ Add Item" }).click();
-    await page.locator(".sl-pick-item").filter({ hasText: "JIVO CANOLA OIL 1 LTR" }).click();
-    await page.locator(".sl-wiz-input").filter({ hasText: "Boxes" }).locator("input").fill("5");
+    await page.getByRole("button", { name: /JIVO CANOLA OIL 1 LTR/ }).click();
+    await page.getByLabel("Boxes").fill("5");
     await page.getByRole("button", { name: "Add Item", exact: true }).click();
   };
 
@@ -230,7 +241,7 @@ test.describe("add sales wizard", () => {
     // `PARTY_ROWS` has card_name/card_code; this page reads value/label. With
     // the old fixture these options rendered blank.
     await expect(
-      appPage.locator(".sl-party-option-label").filter({ hasText: "Northern Traders" }),
+      appPage.getByRole("option").filter({ hasText: "Northern Traders" }),
     ).toBeVisible();
   });
 
@@ -263,7 +274,7 @@ test.describe("add sales wizard", () => {
     await appPage.getByRole("button", { name: "Continue" }).click();
     await appPage.getByRole("button", { name: "+ Add Item" }).click();
 
-    await appPage.locator(".sl-pick-item").filter({ hasText: "JIVO CANOLA OIL 1 LTR" }).click();
+    await appPage.getByRole("button", { name: /JIVO CANOLA OIL 1 LTR/ }).click();
 
     // Pcs comes from the product's sal_factor2 and is readOnly. A catalogue
     // fixture missing it would leave pcs at 0, and rowProblem would refuse the
@@ -272,7 +283,7 @@ test.describe("add sales wizard", () => {
     // toHaveValue, not toContainText: Pcs is a readOnly <input>, so its value is
     // not text content and a text assertion would pass on a blank field.
     await expect(
-      appPage.locator(".sl-wiz-input").filter({ hasText: "Pcs" }).locator("input"),
+      appPage.getByLabel("Pcs"),
     ).toHaveValue("12.0");
   });
 
@@ -288,7 +299,11 @@ test.describe("add sales wizard", () => {
 
     // PO renders only on step 3, which is why the `required={poField.required}`
     // binding had no test when it was changed.
-    const po = appPage.locator("#wiz-po");
+    //
+    // By label, not by `#wiz-po`: the field is a `Field` now and `Field`
+    // generates its own id with `useId`, so a hardcoded id would be a handle
+    // on markup rather than on the control the user actually sees.
+    const po = appPage.getByLabel("PO Number");
     await expect(po).toBeVisible();
     await expect(po).not.toHaveAttribute("required", /.*/);
   });
@@ -350,7 +365,7 @@ test.describe("add sales wizard", () => {
     await expect(appPage.getByText("1 box (24 pcs)")).toBeVisible();
 
     await appPage.getByRole("button", { name: "Save Order" }).click();
-    await appPage.getByRole("button", { name: "Yes, Create New" }).click();
+    await appPage.getByRole("button", { name: "Yes, create" }).click();
 
     await expect.poll(() => bodies.length).toBe(1);
     const body = bodies[0];
@@ -434,12 +449,12 @@ test.describe("add sales wizard", () => {
     await completeStepOne(appPage);
     await appPage.getByRole("button", { name: "Continue" }).click();
     await appPage.getByRole("button", { name: "+ Add Item" }).click();
-    await appPage.locator(".sl-pick-item").filter({ hasText: "JIVO CANOLA OIL 1 LTR" }).click();
+    await appPage.getByRole("button", { name: /JIVO CANOLA OIL 1 LTR/ }).click();
 
     // Confirm with no quantity typed.
     await appPage.getByRole("button", { name: "Add Item", exact: true }).click();
 
-    await expect(appPage.locator(".sl-field-error")).toHaveText(
+    await expect(appPage.getByRole("alert")).toHaveText(
       "Enter boxes and quantity greater than 0.",
     );
     // And it did not confirm: the modal is still open.
@@ -451,9 +466,9 @@ test.describe("add sales wizard", () => {
     await completeStepOne(appPage);
     await appPage.getByRole("button", { name: "Continue" }).click();
     await appPage.getByRole("button", { name: "+ Add Item" }).click();
-    await appPage.locator(".sl-pick-item").filter({ hasText: "JIVO CANOLA OIL 1 LTR" }).click();
+    await appPage.getByRole("button", { name: /JIVO CANOLA OIL 1 LTR/ }).click();
 
-    const boxes = appPage.locator(".sl-wiz-input").filter({ hasText: "Boxes" }).locator("input");
+    const boxes = appPage.getByLabel("Boxes");
     // One key at a time, NOT `fill`. The rows live in a react-hook-form field
     // array now, and every keystroke goes through `update()` — if that
     // remounted the input, `fill` would still pass while a human typing "12"
@@ -466,7 +481,7 @@ test.describe("add sales wizard", () => {
     // And the derived fields followed along: 12 boxes x 12 per box. `Qty`
     // exactly — "Pcs" and "Price List" both contain it as a substring.
     await expect(
-      appPage.locator(".sl-wiz-input").filter({ hasText: /^Qty$/ }).locator("input"),
+      appPage.getByLabel("Qty", { exact: true }),
     ).toHaveValue("144");
   });
 
@@ -551,8 +566,13 @@ test.describe("ui labels", () => {
     // covered by a screenshot that could not see the table at all.
     await gotoStable(appPage, "/UI_Labels");
 
-    await expect(appPage.getByRole("cell", { name: "po_number" })).toBeVisible();
-    await expect(appPage.getByRole("cell", { name: "delivery_date" })).toBeVisible();
+    // `exact`, because a role-name match is a SUBSTRING match by default and
+    // the Actions cell in the same row is named "Edit po_number Delete
+    // po_number" — which made this a strict-mode violation, not a miss.
+    await expect(appPage.getByRole("cell", { name: "po_number", exact: true })).toBeVisible();
+    await expect(
+      appPage.getByRole("cell", { name: "delivery_date", exact: true }),
+    ).toBeVisible();
     // The row whose flags Add Sales actually reads. `is_required: false` here
     // is the "PO is not mandatory" decision, in the table that encodes it.
     await expect(appPage.getByRole("cell", { name: "PO Number" })).toBeVisible();
@@ -560,11 +580,13 @@ test.describe("ui labels", () => {
 
   test("the search box narrows the table", async ({ appPage }) => {
     await gotoStable(appPage, "/UI_Labels");
-    await appPage.getByPlaceholder(/search/i).fill("delivery");
+    await appPage.getByPlaceholder(/field key/i).fill("delivery");
     await settle(appPage);
 
-    await expect(appPage.getByRole("cell", { name: "delivery_date" })).toBeVisible();
-    await expect(appPage.getByRole("cell", { name: "po_number" })).toHaveCount(0);
+    await expect(
+      appPage.getByRole("cell", { name: "delivery_date", exact: true }),
+    ).toBeVisible();
+    await expect(appPage.getByRole("cell", { name: "po_number", exact: true })).toHaveCount(0);
   });
 });
 
@@ -590,8 +612,10 @@ test.describe("inventory report", () => {
     // load with a `null`-means-all sentinel, so this is the behaviour most at
     // risk from it — and the picker is invisible to a route screenshot.
     await gotoStable(appPage, "/Inventory_Report");
-    await appPage.getByRole("button", { name: /All warehouses \(2\)/ }).click();
-    await appPage.getByRole("checkbox").first().uncheck();
+    await appPage.getByLabel("Warehouses").click();
+    // By NAME: the first checkbox in the panel is "Select all", and unticking
+    // that drops every column rather than the one this test is about.
+    await appPage.getByRole("checkbox", { name: "LDH" }).uncheck();
     await settle(appPage);
 
     await expect(appPage.getByRole("columnheader", { name: "LDH" })).toHaveCount(0);
@@ -606,14 +630,14 @@ test.describe("dashboard state-item panel", () => {
     // endpoint had no fixture, so this panel has always rendered its empty
     // branch — and the route baseline photographed the empty branch as
     // coverage. This asserts the populated one before anything is baselined.
-    await gotoStable(appPage, "/Dashboard");
+    await gotoStable(appPage, "/Sales_Dashboard");
 
     // The panel lists a state picker and the top VARIETIES for the selected
     // state — not item names, which is what the fixture's `variety` field is
     // for. Both states plus a variety proves the payload was read, not just
     // that a heading exists.
-    await expect(appPage.getByRole("button", { name: "Punjab" })).toBeVisible();
-    await expect(appPage.getByRole("button", { name: "Kerala" })).toBeVisible();
+    await expect(appPage.getByRole("tab", { name: "Punjab" })).toBeVisible();
+    await expect(appPage.getByRole("tab", { name: "Kerala" })).toBeVisible();
     await expect(appPage.getByText("Canola").first()).toBeVisible();
   });
 });
@@ -631,7 +655,7 @@ test.describe("dashboard charts", () => {
   test("top parties badges, the status legend, and the order-detail modal it opens", async ({
     appPage,
   }) => {
-    await gotoStable(appPage, "/Dashboard");
+    await gotoStable(appPage, "/Sales_Dashboard");
 
     // Three distinctly-coloured badges prove the nth-child cycle runs per
     // row, not just that the list rendered. `{ exact: true }` because the
@@ -640,11 +664,10 @@ test.describe("dashboard charts", () => {
     await expect(appPage.getByText("Southern Supply Co", { exact: true })).toBeVisible();
     await expect(appPage.getByText("Ravi Menon", { exact: true })).toBeVisible();
 
-    // Admin is not a review/billing role, so the legend is clickable —
-    // exercising `.db-pie-cell--clickable`, not just the base `.db-pie-cell`.
-    const completedLegendItem = appPage.locator(".db-legend-item--clickable", {
-      hasText: "Completed",
-    });
+    // Admin is not a review/billing role, so the legend is clickable. The
+    // title is the handle: the button's own text is "Completed" plus a count,
+    // and `.db-legend-item--clickable` went with the conversion.
+    const completedLegendItem = appPage.getByTitle("View Completed orders");
     await expect(completedLegendItem).toBeVisible();
     await completedLegendItem.click();
     await settle(appPage);
@@ -653,11 +676,13 @@ test.describe("dashboard charts", () => {
     await appPage.getByRole("button", { name: "View" }).first().click();
     await settle(appPage);
 
-    // The hand-rolled order-detail modal, stacked over the status-orders
-    // dialog it was opened from — `.db-status-modal-backdrop--stacked`
-    // (was `style={{ zIndex: 1100 }}`) has to out-rank it or this would be
-    // hidden behind the dialog it came from.
-    await expect(appPage.locator(".db-order-detail-modal")).toBeVisible();
+    // The order-detail dialog, stacked over the status-orders dialog it was
+    // opened from — it has to out-rank the one it came from or it would be
+    // hidden behind it. It is `ui/dialog` now, so the accessible name is the
+    // handle rather than `.db-order-detail-modal`.
+    await expect(
+      appPage.getByRole("dialog", { name: "Order detail" }),
+    ).toBeVisible();
     await expect(appPage).toHaveScreenshot("dashboard-order-detail-modal.png");
   });
 
@@ -666,7 +691,7 @@ test.describe("dashboard charts", () => {
     // undefined : "1 / -1"`) only applies off the admin role the rest of
     // this suite defaults to.
     await asRole(appPage, "manager");
-    await gotoStable(appPage, "/Dashboard");
+    await gotoStable(appPage, "/Sales_Dashboard");
 
     await expect(appPage.getByText("Northern Traders", { exact: true })).toBeVisible();
     await expect(appPage).toHaveScreenshot("dashboard-manager-charts-row.png", {
@@ -824,7 +849,7 @@ test.describe("ui labels dialogs", () => {
 
   test("the delete confirmation", async ({ appPage }) => {
     await gotoStable(appPage, "/UI_Labels");
-    await appPage.getByRole("button", { name: "Delete label" }).first().click();
+    await appPage.getByRole("button", { name: /^Delete / }).first().click();
     await settle(appPage);
 
     await expect(appPage.getByRole("dialog")).toBeVisible();
@@ -848,7 +873,7 @@ test.describe("ui labels dialogs", () => {
 test.describe("sidebar notifications", () => {
   test("the bell, with an unread badge", async ({ appPage }) => {
     await asRole(appPage, "billing");
-    await gotoStable(appPage, "/Dashboard");
+    await gotoStable(appPage, "/Sales_Dashboard");
 
     // 2 unread of 3, from the fixture. Without this the badge is absent and
     // the shot would be of a bell with nothing on it.
@@ -858,9 +883,9 @@ test.describe("sidebar notifications", () => {
 
   test("the notifications dialog", async ({ appPage }) => {
     await asRole(appPage, "billing");
-    await gotoStable(appPage, "/Dashboard");
+    await gotoStable(appPage, "/Sales_Dashboard");
 
-    await appPage.locator("button.header-bell-btn").click();
+    await appPage.getByRole("button", { name: /^Notifications/ }).click();
     await settle(appPage);
 
     await expect(appPage.getByRole("dialog")).toBeVisible();
@@ -881,7 +906,7 @@ test.describe("sidebar notifications", () => {
 test.describe("status tracking detail", () => {
   test("the order detail table", async ({ appPage }) => {
     await gotoStable(appPage, "/Auditor_status_tracking");
-    await appPage.locator("button.ao-btn-icon.view").first().click();
+    await appPage.getByRole("button", { name: /^View order / }).first().click();
     await settle(appPage);
 
     await expect(appPage.getByText("JIVO CANOLA OIL 1 LTR").first()).toBeVisible();
@@ -903,11 +928,13 @@ test.describe("status tracking detail", () => {
    */
   test("the billing order log timeline", async ({ appPage }) => {
     await gotoStable(appPage, "/Billing_status_tracking");
-    await appPage.locator("button.ao-btn-icon.view").first().click();
+    await appPage.getByRole("button", { name: /^View order / }).first().click();
     await settle(appPage);
 
-    await expect(appPage.getByText("Order Log Timeline")).toBeVisible();
-    await expect(appPage.getByText("Rate not approved")).toBeVisible();
+    // The card is headed "Order log" since the conversion — it was "Order Log
+    // Timeline".
+    await expect(appPage.getByText("Order log")).toBeVisible();
+    await expect(appPage.getByText("Rate not approved").first()).toBeVisible();
     await expect(appPage).toHaveScreenshot("order-log-timeline.png", { fullPage: true });
   });
 });
@@ -934,7 +961,7 @@ test.describe("order queue detail", () => {
   ] as const) {
     test(`${slug} — the order detail table`, async ({ appPage }) => {
       await gotoStable(appPage, path);
-      await appPage.locator("button.ao-btn-icon.view").first().click();
+      await appPage.getByRole("button", { name: /^View order / }).first().click();
       await settle(appPage);
 
       // Without a row the table renders its empty state and the screenshot
@@ -977,7 +1004,10 @@ test.describe("manager report detail", () => {
    */
   test("the order detail table", async ({ appPage }) => {
     await gotoStable(appPage, "/Daily_Report");
-    await appPage.locator("button.ao-btn-icon.view").first().click();
+    // The report tables' row action is a "View" button carrying `title="View
+    // order"`; the queue pages' is an icon with `aria-label="View order
+    // <number>"`. Different components, different handles.
+    await appPage.getByTitle("View order").first().click();
     await settle(appPage);
 
     await expect(appPage.getByText("JIVO CANOLA OIL 1 LTR").first()).toBeVisible();
@@ -1003,7 +1033,7 @@ test.describe("manager report detail", () => {
 test.describe("tracker admin lookups", () => {
   const openLookups = async (appPage: Page) => {
     await gotoStable(appPage, "/Tracker_Admin");
-    await appPage.getByRole("button", { name: "Lookups", exact: true }).click();
+    await appPage.getByRole("tab", { name: "Lookups", exact: true }).click();
     await settle(appPage);
   };
 
@@ -1017,7 +1047,7 @@ test.describe("tracker admin lookups", () => {
     // `gst_rates` is the other row shape — label + rate, not name — and the
     // only kind whose columns differ. One fixture for all six would have left
     // this table drawing empty cells and passing.
-    await appPage.getByRole("button", { name: "GST Rates", exact: true }).click();
+    await appPage.getByRole("tab", { name: "GST Rates", exact: true }).click();
     await settle(appPage);
 
     await expect(appPage).toHaveScreenshot("tracker-admin-lookups-rates.png", { fullPage: true });
@@ -1176,12 +1206,15 @@ test.describe("a page that crashes", () => {
     await expect(appPage.getByRole("alert")).toContainText("Something went wrong");
     await expect(appPage.getByRole("alert")).toContainText("Tracker Reports");
 
-    // The shell is still mounted: this is the whole difference.
-    const dashboard = appPage.getByRole("link", { name: "Dashboard", exact: true });
-    await expect(dashboard).toBeVisible();
+    // The shell is still mounted: this is the whole difference. "Home" rather
+    // than "Dashboard" — the launcher replaced /Dashboard as the landing page
+    // when the sales analytics moved behind the `Sales_Dashboard` permission
+    // (DESIGN_SYSTEM §11), and the rail's first link went with it.
+    const home = appPage.getByRole("link", { name: "Home", exact: true });
+    await expect(home).toBeVisible();
 
     // And navigating away clears it, because the boundary is keyed on the path.
-    await dashboard.click();
+    await home.click();
     await settle(appPage);
     await expect(appPage.getByRole("alert")).toHaveCount(0);
   });
@@ -1214,7 +1247,9 @@ test.describe("phase 3.1 conversions", () => {
     // "one draft" apart from "no drafts" and from "the fetch failed" — three
     // states this page used to render as the same reassuring empty box.
     await expect(appPage.getByText("Total: 1")).toBeVisible();
-    await expect(appPage.getByRole("cell", { name: "SO-202606" })).toBeVisible();
+    await expect(
+      appPage.getByRole("cell", { name: "SO-202606", exact: true }),
+    ).toBeVisible();
     // Drafts is the ONLY status this page may show. Six orders come back from
     // `/orders/ordersbyuser/`; `getDrafts` keeps the one whose status_display
     // is "draft", and a conversion that lost the filter would show all six.
@@ -1262,7 +1297,7 @@ test.describe("phase 3.1 conversions", () => {
 
   test("the e-invoice Logs tab", async ({ appPage }) => {
     await gotoStable(appPage, "/Einvoice");
-    await appPage.getByRole("button", { name: "Logs", exact: true }).click();
+    await appPage.getByRole("tab", { name: "Logs", exact: true }).click();
     await settle(appPage);
 
     // The three totals come off `data.totals`, the envelope that the
@@ -1298,8 +1333,11 @@ test.describe("phase 3.1 conversions", () => {
      * an empty SAP table. Assert a real number is there.
      */
     await expect(appPage.getByText("records held locally across 4 modules")).toBeVisible();
-    await expect(appPage.locator(".st-kpi-value").first()).not.toHaveText("0");
-    await expect(appPage.locator(".st-load-error")).toHaveCount(0);
+    // `.st-kpi-value` / `.st-load-error` went with the conversion. A failed
+    // module renders an em dash rather than a zero (sapSync/Status.tsx), so
+    // "no dash anywhere" is the same claim the class check was making.
+    await expect(appPage.getByText("—", { exact: true })).toHaveCount(0);
+    await expect(appPage.getByRole("alert")).toHaveCount(0);
   });
 });
 
@@ -1329,7 +1367,7 @@ test.describe("phase 3.1 batch 2", () => {
     // category is blank. So all three parties are listed and the fixture's two
     // are assigned — which is the only combination that can show a checked box
     // AND an unchecked one on the same screen.
-    await appPage.getByPlaceholder("Type name to search...").click();
+    await appPage.getByLabel("User").click();
     // The dropdown itself is never in the seeded screenshot below — it closes
     // the moment a name is clicked — so it gets its own baseline here. This is
     // the only pixel proof the user-search dropdown's markup has, covering the
@@ -1344,7 +1382,7 @@ test.describe("phase 3.1 batch 2", () => {
     // so without this it would never be pixel-checked at all.
     await expect(appPage).toHaveScreenshot("party-assignment-assigned.png", { fullPage: true });
 
-    await appPage.getByRole("button", { name: "+ Assign New Parties" }).click();
+    await appPage.getByRole("button", { name: "Assign parties" }).click();
     await settle(appPage);
 
     const boxFor = (name: string) =>
@@ -1356,7 +1394,7 @@ test.describe("phase 3.1 batch 2", () => {
     // could not tell a correct seed from a select-all stuck on.
     await expect(boxFor("Southern Supply Co")).not.toBeChecked();
     // Which is exactly what the header counts, so it fails loudly either way.
-    await expect(appPage.getByText("Select All (1/2)")).toBeVisible();
+    await expect(appPage.getByText("Select all 2 shown (1 chosen)")).toBeVisible();
 
     await expect(appPage).toHaveScreenshot("party-assignment-seeded.png", { fullPage: true });
   });
@@ -1389,7 +1427,7 @@ test.describe("phase 3.1 batch 2", () => {
     // this page fails at either link independently. The catalogue lives behind
     // a searchable select, so it has to be opened before it can be asserted —
     // which is precisely why the empty catalogue went unnoticed for so long.
-    await appPage.getByPlaceholder("Search product…").click();
+    await appPage.getByRole("button", { name: "Search product…" }).first().click();
     await expect(appPage.getByText("JIVO CHAKKI ATTA 5 KG")).toBeVisible();
   });
 });
@@ -1471,7 +1509,7 @@ test.describe("phase 3.1 approval writes", () => {
     // The success dialog is rendered from the RESPONSE, so it proves the
     // mutation's `onSuccess` ran with the body the server sent — not merely
     // that a request went out.
-    await expect(appPage.getByText("Order Completed")).toBeVisible();
+    await expect(appPage.getByRole("dialog")).toContainText("Order completed");
     await expect(appPage.getByText("Order accepted successfully")).toBeVisible();
 
     expect(posted).toHaveLength(1);
@@ -1555,7 +1593,7 @@ test.describe("phase 6.3 coverage", () => {
   test("Party_Product_Assignment shows a party's grid", async ({ appPage }) => {
     await gotoStable(appPage, "/Party_Product_Assignment");
 
-    await appPage.getByPlaceholder("Type name or code to search...").click();
+    await appPage.getByLabel("Parties").click();
     await appPage.getByText("Northern Traders").first().click();
     // Close the picker before the shot: it is an absolutely-positioned panel
     // that covers the top third of the grid, which is the part being watched.
@@ -1575,10 +1613,10 @@ test.describe("phase 6.3 coverage", () => {
   test("Party_Product_Assignment's add-products modal", async ({ appPage }) => {
     await gotoStable(appPage, "/Party_Product_Assignment");
 
-    await appPage.getByPlaceholder("Type name or code to search...").click();
+    await appPage.getByLabel("Parties").click();
     await appPage.getByText("Northern Traders").first().click();
     await appPage.getByRole("heading", { name: "Party Product Assignment" }).click();
-    await appPage.getByRole("button", { name: "+ Add Products" }).click();
+    await appPage.getByRole("button", { name: "Add products", exact: true }).click();
     await settle(appPage);
 
     /*
@@ -1596,7 +1634,7 @@ test.describe("phase 6.3 coverage", () => {
      * shot DOES watch is the modal chrome: header, search field, empty state
      * and footer, which is where most of its inline styles live.
      */
-    await expect(appPage.getByText("No products match your search")).toBeVisible();
+    await expect(appPage.getByText("No products match")).toBeVisible();
 
     // Viewport, not full page: a modal is positioned against the viewport, and
     // a full-page shot of one is mostly the dimmed content behind it.
@@ -1620,7 +1658,10 @@ test.describe("e-invoice tabs", () => {
   for (const tab of ["Generate", "Cancel", "Lookup", "QR Code", "Tools"]) {
     test(`the ${tab} tab`, async ({ appPage }) => {
       await gotoStable(appPage, "/Einvoice");
-      await appPage.getByRole("button", { name: tab, exact: true }).click();
+      // By role: these became real `role="tab"` elements when the Invoices
+      // module converted, so `getByRole("button")` stopped matching them and
+      // every one of these five clicks had been timing out since.
+      await appPage.getByRole("tab", { name: tab, exact: true }).click();
       await settle(appPage);
 
       const slug = tab.toLowerCase().replace(/[^a-z]+/g, "-");
@@ -1638,13 +1679,9 @@ test.describe("HAIS tabs", () => {
   for (const tab of ["Add Asset", "Lookup", "Asset Type", "Departments", "Storage Type", "Reports"]) {
     test(`the ${tab} tab`, async ({ appPage }) => {
       await gotoStable(appPage, "/HAIS");
-      // Scoped to the tab bar: the Asset Register panel carries its own "Add
-      // Asset" and "Lookup" buttons, so an unscoped name matches two elements.
-      await appPage
-        .locator(".nic-tabs")
-        .first()
-        .getByRole("button", { name: tab, exact: true })
-        .click();
+      // By role: the Asset Register panel carries its own "Add asset" and
+      // "Lookup" BUTTONS, and the tab strip's entries are tabs.
+      await appPage.getByRole("tab", { name: tab, exact: true }).click();
       await settle(appPage);
 
       const slug = tab.toLowerCase().replace(/[^a-z]+/g, "-");
@@ -1667,11 +1704,7 @@ test.describe("HAIS asset lookup", () => {
     appPage,
   }) => {
     await gotoStable(appPage, "/HAIS");
-    await appPage
-      .locator(".nic-tabs")
-      .first()
-      .getByRole("button", { name: "Lookup", exact: true })
-      .click();
+    await appPage.getByRole("tab", { name: "Lookup", exact: true }).click();
     await settle(appPage);
 
     await appPage.getByPlaceholder("Type the Asset ID").fill("HAIS-001");
@@ -1688,7 +1721,7 @@ test.describe("HAIS asset lookup", () => {
     await appPage.getByRole("button", { name: "Handover" }).click();
     await settle(appPage);
 
-    await expect(appPage.getByText("Currently with:")).toBeVisible();
+    await expect(appPage.getByText(/Currently with/)).toBeVisible();
     await expect(appPage).toHaveScreenshot("hais-handover-modal.png");
   });
 });

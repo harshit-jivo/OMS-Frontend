@@ -1,12 +1,12 @@
 /**
- * The `.ps-product-demand-panel` — shown once a product is selected from the
- * main table, listing every open sales-order line demanding it.
+ * Shown once a product is selected from the main table, listing every open
+ * sales-order line demanding it.
  */
-import {
-  HiDocumentText,
-  HiExclamationTriangle,
-} from "react-icons/hi2";
+import { HiOutlineDocumentText, HiOutlineExclamationTriangle } from "react-icons/hi2";
 
+import { Button } from "@/components/ui/button";
+import { Card, CardHeader, CardTitle, EmptyState } from "@/components/ui/page";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -38,72 +38,95 @@ export default function ProductDemandPanel({ ps }: { ps: ProductStockState }) {
   } = ps;
 
   return (
-    <section className="ps-product-demand-panel">
-      <div className="ps-product-demand-head">
-        <div>
-          <span className="ps-order-modal-kicker">Product Demand</span>
-          <h2>{selectedProduct?.item_name || selectedProductCode}</h2>
-          <p>
-            {selectedProductCode} | {selectedProductPartyCount} parties | Required{" "}
+    <Card className="overflow-hidden p-0">
+      <CardHeader className="mb-0 border-b border-line px-4 py-3">
+        <div className="min-w-0">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-subtle">
+            Product demand
+          </span>
+          <CardTitle>{selectedProduct?.item_name || selectedProductCode}</CardTitle>
+          <p className="m-0 mt-0.5 text-[12px] text-subtle">
+            {selectedProductCode} · {selectedProductPartyCount} parties · Required{" "}
             {formatQuantity(selectedProductRequiredQty)}
           </p>
         </div>
-        <button type="button" className="ps-order-action-btn" onClick={() => clearProductDemand()}>
+        <Button size="xs" onClick={() => clearProductDemand()}>
           Clear
-        </button>
-      </div>
+        </Button>
+      </CardHeader>
 
       {productOrdersLoading ? (
-        <div className="ps-product-demand-state">
-          <span className="ps-spinner" />
-          Loading parties and sales orders...
+        <div className="space-y-2 p-4" aria-label="Loading parties and sales orders">
+          <Skeleton className="h-8 w-full" />
+          <Skeleton className="h-8 w-full" />
+          <Skeleton className="h-8 w-full" />
         </div>
       ) : productOrderError ? (
-        <div className="ps-product-demand-state ps-state-error">
-          <HiExclamationTriangle />
-          {productOrderError}
-        </div>
+        <EmptyState
+          icon={HiOutlineExclamationTriangle}
+          title="Could not load demand"
+          hint={productOrderError}
+        />
       ) : productDemandRows.length === 0 ? (
-        <div className="ps-product-demand-state">
-          <HiDocumentText />
-          No open sales order found for this product.
-        </div>
+        <EmptyState
+          icon={HiOutlineDocumentText}
+          title="No open sales order for this product"
+          hint="Nothing is currently demanding it."
+        />
       ) : (
-        <div className="ps-product-demand-table-wrap">
+        <div className="overflow-x-auto">
           <Table density="compact">
             <TableHeader>
               <TableRow>
                 <TableHead>Party</TableHead>
-                <TableHead>Sales Order</TableHead>
-                <TableHead>Due Date</TableHead>
+                <TableHead>Sales order</TableHead>
+                <TableHead>Due date</TableHead>
                 <TableHead>Warehouse</TableHead>
-                <TableHead>Open Qty</TableHead>
-                <TableHead>Stock</TableHead>
+                <TableHead className="text-right">Open qty</TableHead>
+                <TableHead className="text-right">Stock</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {productDemandRows.map((row) => {
                 const lineStock = getProductLineStock(row.line);
                 const openQty = toStockNumber(row.line.OpenQty);
-                const rowKey = `${row.order.CardCode}-${row.order.DocEntry}-${row.line.LineNum}`;
+                const rowKey =
+                  row.order.CardCode + "-" + row.order.DocEntry + "-" + row.line.LineNum;
 
                 return (
                   <TableRow key={rowKey}>
                     <TableCell>
-                      <span className="ps-order-doc">{row.order.CardName || row.order.CardCode}</span>
-                      <span className="ps-order-ref">{row.order.CardCode}</span>
+                      <span className="block font-semibold text-ink">
+                        {row.order.CardName || row.order.CardCode}
+                      </span>
+                      <span className="block text-[11.5px] text-subtle">
+                        {row.order.CardCode}
+                      </span>
                     </TableCell>
                     <TableCell>
-                      <span className="ps-order-doc">SO #{row.order.DocNum || row.order.DocEntry}</span>
+                      <span className="block font-semibold text-ink">
+                        SO #{row.order.DocNum || row.order.DocEntry}
+                      </span>
                       {row.order.NumAtCard && (
-                        <span className="ps-order-ref">Ref: {row.order.NumAtCard}</span>
+                        <span className="block text-[11.5px] text-subtle">
+                          Ref: {row.order.NumAtCard}
+                        </span>
                       )}
                     </TableCell>
-                    <TableCell>{formatOrderDate(row.order.DocDueDate)}</TableCell>
-                    <TableCell>{getOrderLineWarehouseCode(row.line) || "-"}</TableCell>
-                    <TableCell className="ps-order-qty">{formatQuantity(openQty)}</TableCell>
+                    <TableCell className="whitespace-nowrap">
+                      {formatOrderDate(row.order.DocDueDate)}
+                    </TableCell>
+                    <TableCell>{getOrderLineWarehouseCode(row.line) || "—"}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {formatQuantity(openQty)}
+                    </TableCell>
+                    {/* Negative means this line cannot be filled from stock —
+                        the one number on the row worth colouring. */}
                     <TableCell
-                      className={`ps-order-qty ${lineStock - openQty < 0 ? "ps-stock-negative" : ""}`}
+                      className={
+                        "text-right tabular-nums " +
+                        (lineStock - openQty < 0 ? "font-semibold text-bad" : "")
+                      }
                     >
                       {formatQuantity(lineStock)}
                     </TableCell>
@@ -114,6 +137,6 @@ export default function ProductDemandPanel({ ps }: { ps: ProductStockState }) {
           </Table>
         </div>
       )}
-    </section>
+    </Card>
   );
 }

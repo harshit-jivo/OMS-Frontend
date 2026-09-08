@@ -107,7 +107,10 @@ const apInvoiceService = {
     const { data } = await api.get("/service-layer/ap/open-grpos/", {
       params: { branch, ...opts },
     });
-    return data.grpos as GrpoSummary[];
+    // `data.grpos` was returned unguarded, so a response without it — an
+    // error body, or a Service Layer that answered a bare array — reached
+    // the page as `undefined` and crashed the browse panel on `.length`.
+    return (Array.isArray(data) ? data : (data?.grpos ?? [])) as GrpoSummary[];
   },
 
   async getGrpo(

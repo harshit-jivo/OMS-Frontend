@@ -336,7 +336,21 @@ export interface RateApproval {
 
 export interface Order {
   id: number;
-  status?: number;
+  /**
+   * The status CODE — "BILLING_REJECTED", "APPROVED", "REJECTED".
+   *
+   * Typed `number` until now, which was simply wrong: the backend sends
+   * `serializers.CharField(source="status.code")` (orders/serializers.py:451).
+   * Both readers already coerced it with `String(...)`, so nothing behaved
+   * badly — but the type said every comparison against a code string was
+   * comparing a number to a literal, i.e. dead code. The tracking page's
+   * whole accepted/rejected vocabulary is built on those comparisons, and
+   * anyone trusting the type would have deleted them.
+   *
+   * `status_display` is the human label ("Rejected by Auditor"); this is the
+   * machine one. Neither is the numeric id — that is `status_id`.
+   */
+  status?: string;
   order_number: string;
   order_type?: "PARTY" | "STAFF";
   employee_id?: string;

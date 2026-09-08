@@ -22,7 +22,8 @@ import PageLoading from "./components/PageLoading";
  */
 import Login from "./pages/Login";
 import ProtectedPage from "./components/ProtectedPage";
-const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Home = lazy(() => import("./pages/Home"));
+const Sales_Dashboard = lazy(() => import("./pages/Sales_Dashboard"));
 const App_User = lazy(() => import("./pages/App_User"));
 const Sap_sync = lazy(() => import("./pages/Sap_Sync"));
 const Add_Sales = lazy(() => import("./pages/Add_Sales"));
@@ -65,7 +66,6 @@ const Page_Permissions = lazy(() => import("./pages/Page_Permissions"));
 const Role_Permissions = lazy(() => import("./pages/Role_Permissions"));
 const UI_Labels = lazy(() => import("./pages/UI_Labels"));
 const PaymentsDashboard = lazy(() => import("./pages/Payments/ApprovalManagement"));
-// import Sales_Quotation from "./pages/Sales_Quotation";  // DISABLED 2026-08-27 — quotation flow closed
 const LabelChecker = lazy(() => import("./pages/Label_Checker"));
 const NutritionManager = lazy(() => import("./pages/Nutrition_Manager"));
 const ComplianceRules = lazy(() => import("./pages/Compliance_Rules"));
@@ -78,7 +78,6 @@ const Tracker_Admin = lazy(() => import("./pages/Tracker_Admin"));
 const Tracker_Reports = lazy(() => import("./pages/Tracker_Reports"));
 const Tracker_Alerts = lazy(() => import("./pages/Tracker_Alerts"));
 const Tracker_Invoices = lazy(() => import("./pages/Tracker_Invoices"));
-const Profile = lazy(() => import("./pages/Profile"));
 const Device_Management = lazy(() => import("./pages/Device_Management"));
 const Invoice_Report = lazy(() => import("./pages/Invoice_Report"));
 const HAIS = lazy(() => import("./pages/HAIS"));
@@ -111,23 +110,30 @@ function App() {
         {/* Standalone device page opened by scanning a device QR (no sidebar). */}
         <Route path="/hais/device/:code" element={<AssetPublicView />} />
 
+        {/* The landing page: every screen this user may open, as tiles.
+            Open to any signed-in user because it holds nothing but links —
+            see auth/routeAccess.ts. */}
         <Route
-          path="/Dashboard"
+          path="/Home"
           element={
             <ProtectedPage>
-              <Dashboard />
+              <Home />
             </ProtectedPage>
           }
         />
 
+        {/* The old `/Dashboard`, now permission-bound. The bare `/Dashboard`
+            URL still works — bookmarks point at it — and forwards here, where
+            ProtectedPage applies the gate. */}
         <Route
-          path="/Profile"
+          path="/Sales_Dashboard"
           element={
             <ProtectedPage>
-              <Profile />
+              <Sales_Dashboard />
             </ProtectedPage>
           }
         />
+        <Route path="/Dashboard" element={<Navigate to="/Sales_Dashboard" replace />} />
 
         {/* System — Device & Version Management (admin) */}
         <Route
@@ -462,19 +468,11 @@ function App() {
           }
         />
 
-        {/* Sales Quotation — DISABLED 2026-08-27. The quotation flow is
-            closed and no longer used; its backend routes and views are
-            commented out in OMS-Backend (orders/urls.py, sap_sync/urls.py).
-            The SalesQuotationLog table is kept, so history stays queryable.
-        <Route
-          path="/Sales_Quotation"
-          element={
-            <ProtectedPage>
-              <Sales_Quotation />
-            </ProtectedPage>
-          }
-        />
-        */}
+        {/* Sales Quotation was here — DISABLED 2026-08-27, page deleted in the
+            2026-09 sweep. The flow is closed: its backend routes and views are
+            commented out in OMS-Backend (orders/urls.py, sap_sync/urls.py),
+            and the SalesQuotationLog table is kept so history stays queryable.
+            The component is recoverable from git if the flow ever reopens. */}
 
        
 
@@ -555,7 +553,7 @@ function App() {
 
 
         {/* Any unknown path falls back to the dashboard instead of a blank page. */}
-        <Route path="*" element={<Navigate to="/Dashboard" replace />} />
+        <Route path="*" element={<Navigate to="/Home" replace />} />
         <Route
           path="/Einvoice"
           element={

@@ -1,3 +1,31 @@
+/* ──────────────────────────────────────────────────────────────────────────
+ * Invoice processing modal
+ *
+ * A calm, human-friendly window over the (otherwise very technical) job of
+ * posting an invoice to SAP. The user never sees sessions, drafts, payloads,
+ * endpoints or JSON — only a reassuring "production line" while we work, a
+ * clear success, or a translated, actionable error. The real SAP work runs
+ * untouched in useSapPost; this component only reflects its high-level status.
+ *
+ * ── On the conversion ─────────────────────────────────────────────────────
+ * This was a hand-rolled overlay behind a 791-line stylesheet: a fixed div
+ * with an `onClick` to dismiss, a `stopPropagation` on the card, and a
+ * `keydown` listener of its own for Escape. It is `ui/dialog` now, which
+ * brings the focus trap, the scroll lock and `aria-modal` it never had, and
+ * the `tw-page` reset it needed (DESIGN_SYSTEM §1.3) — the buttons inside it
+ * were rendering at the 18px root size.
+ *
+ * The three animations utilities could not express — the pulsing halo, the
+ * hero glyph's swap-and-bob, the highlight sweeping a parked progress bar —
+ * are now theme tokens in `tailwind.css` (`animate-halo`, `animate-emoji`,
+ * `animate-sweep`), written `motion-safe:` at every call site because all
+ * three are decoration.
+ *
+ * One thing the stylesheet had is deliberately gone: the box-shadow heartbeat
+ * on the active rail dot. The sweeping progress bar already says "still
+ * working", and a second looping animation two inches away was competing with
+ * it rather than adding to it.
+ * ────────────────────────────────────────────────────────────────────────── */
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   HiArrowPath,
@@ -9,21 +37,18 @@ import {
   HiDocumentText,
   HiExclamationTriangle,
   HiUserCircle,
-  HiXMark,
 } from "react-icons/hi2";
-import type { SapPostState } from "../pages/SalesInvoice/useSapPost";
-import { translateSapError } from "../pages/SalesInvoice/sapErrorTranslator";
-import "../styles/MissionControlLoader.css";
 
-/* ──────────────────────────────────────────────────────────────────────────
- * Invoice processing modal
- *
- * A calm, human-friendly window over the (otherwise very technical) job of
- * posting an invoice to SAP. The user never sees sessions, drafts, payloads,
- * endpoints or JSON — only a reassuring "production line" while we work, a clear
- * success, or a translated, actionable error. The real SAP work runs untouched
- * in useSapPost; this component only reflects its high-level status.
- * ────────────────────────────────────────────────────────────────────────── */
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
+import { translateSapError } from "../pages/SalesInvoice/sapErrorTranslator";
+import type { SapPostState } from "../pages/SalesInvoice/useSapPost";
 
 // Reassurance copy for the processing state. These deliberately do NOT map to the
 // real backend steps — they simply rotate to show that work is happening.
@@ -44,6 +69,9 @@ const formatMoney = (value: number) =>
 
 const orDash = (value: unknown) =>
   value === undefined || value === null || String(value).trim() === "" ? "—" : String(value);
+
+/** The centred hero column every state shares. */
+const STAGE = "flex flex-col items-center px-6 py-8 text-center";
 
 type Props = {
   state: SapPostState;
@@ -80,150 +108,186 @@ export default function MissionControlLoader({
   const isSuccess = status === "success";
   const isError = status === "error";
 
-  /* Move focus to the primary action when the run settles, and let Esc dismiss a
-   * settled modal (never while a live financial transaction is in flight). */
+  /* Move focus to the primary action when the run settles. Radix focuses the
+   * first focusable element on open, which while running is the panel itself
+   * — right — but on settling would be the close corner rather than Done. */
   const primaryRef = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
     if (isSuccess || isError) primaryRef.current?.focus();
   }, [isSuccess, isError]);
-
-  useEffect(() => {
-    if (isRunning) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [isRunning, onClose]);
 
   const friendly = useMemo(
     () => (isError ? translateSapError(rawError || errorMessage) : null),
     [isError, rawError, errorMessage],
   );
 
-  if (status === "idle") return null;
-
-  const titleId = "mcl-title";
-  const descId = "mcl-desc";
+  /* Nothing dismisses this while the post is in flight — not Escape, not the
+   * backdrop, not a close button. A live financial transaction is running and
+   * a dismissed modal would leave the page looking idle while SAP writes. */
+  const blockWhileRunning = (event: { preventDefault: () => void }) => {
+    if (isRunning) event.preventDefault();
+  };
 
   return (
-    <div
-      className="mcl-backdrop"
-      role="presentation"
-      onClick={() => {
-        if (!isRunning) onClose();
+    <Dialog
+      open={status !== "idle"}
+      onOpenChange={(next) => {
+        if (!next && !isRunning) onClose();
       }}
     >
-      <section
-        className={`mcl-card mcl-card-${status}`}
-        role="alertdialog"
-        aria-modal="true"
-        aria-busy={isRunning}
-        aria-labelledby={titleId}
-        aria-describedby={descId}
-        onClick={(event) => event.stopPropagation()}
-      >
-        {!isRunning && (
-          <button type="button" className="mcl-x" aria-label="Close" onClick={onClose}>
-            <HiXMark aria-hidden="true" />
-          </button>
-        )}
+      {status !== "idle" && (
+        <DialogContent
+          title={
+            isSuccess
+              ? "Invoice created"
+              : isError
+                ? "Invoice not created"
+                : "Creating your invoice"
+          }
+          size="sm"
+          // An alertdialog, not a dialog: it interrupts to report the outcome
+          // of something the user already started.
+          role="alertdialog"
+          aria-busy={isRunning}
+          showClose={!isRunning}
+          // The heavier blur is the original's, and it is not decoration — it
+          // is how the screen says "you are blocked while this posts".
+          overlayClassName="backdrop-blur-[6px]"
+          onEscapeKeyDown={blockWhileRunning}
+          onPointerDownOutside={blockWhileRunning}
+          onInteractOutside={blockWhileRunning}
+          className={cn(
+            "border",
+            isSuccess && "border-ok/30",
+            isError && "border-hold/25",
+            !isSuccess && !isError && "border-line",
+          )}
+        >
+          {/* RunningStage mounts fresh on every run, so its animation always starts
+              from the beginning without resetting state inside an effect. */}
+          {isRunning && <RunningStage doc={doc} />}
 
-        {/* RunningStage mounts fresh on every run, so its animation always starts
-            from the beginning without resetting state inside an effect. */}
-        {isRunning && <RunningStage doc={doc} titleId={titleId} />}
+          {/* ── Success ───────────────────────────────────────────────────── */}
+          {isSuccess && (
+            <>
+              <DialogBody className={STAGE}>
+                <span
+                  aria-hidden="true"
+                  className="grid size-14 place-items-center rounded-full bg-ok-soft text-[30px] text-ok"
+                >
+                  <HiCheckCircle />
+                </span>
+                <h2 className="m-0 mt-4 text-[19px] font-bold tracking-tight text-ink">
+                  Invoice created
+                </h2>
+                <p className="m-0 mt-1.5 text-[13.5px] text-body" role="status">
+                  Your invoice has been created successfully and is ready to go.
+                </p>
 
-        {/* ── Success ───────────────────────────────────────────────────── */}
-        {isSuccess && (
-          <div className="mcl-stage">
-            <div className="mcl-badge mcl-badge-ok" aria-hidden="true">
-              <HiCheckCircle />
-            </div>
-            <h2 id={titleId} className="mcl-title">
-              Invoice created
-            </h2>
-            <p id={descId} className="mcl-sub" role="status">
-              Your invoice has been created successfully and is ready to go.
-            </p>
+                <div className="mt-4 flex w-full items-center justify-between gap-3 rounded-card border border-ok/30 bg-ok-soft px-4 py-2.5">
+                  <span className="text-[11.5px] font-semibold uppercase tracking-wide text-ok">
+                    Invoice number
+                  </span>
+                  <strong className="text-[15px] font-bold text-ink">
+                    {invoiceNumber ? `#${invoiceNumber}` : "Created"}
+                  </strong>
+                </div>
 
-            <div className="mcl-invoice-chip">
-              <span>Invoice number</span>
-              <strong>{invoiceNumber ? `#${invoiceNumber}` : "Created"}</strong>
-            </div>
+                <SummaryPanel doc={doc} />
+              </DialogBody>
 
-            <SummaryPanel doc={doc} />
+              <DialogFooter>
+                {onOpenReport && (
+                  <Button variant="ghost" onClick={onOpenReport}>
+                    <HiDocumentText aria-hidden="true" /> Generate Invoice Report
+                  </Button>
+                )}
+                <Button ref={primaryRef} variant="success" onClick={onClose}>
+                  Done
+                </Button>
+              </DialogFooter>
+            </>
+          )}
 
-            <div className="mcl-actions">
-              {onOpenReport && (
-                <button type="button" className="mcl-btn mcl-btn-ghost" onClick={onOpenReport}>
-                  <HiDocumentText aria-hidden="true" /> Generate Invoice Report
-                </button>
-              )}
-              <button ref={primaryRef} type="button" className="mcl-btn mcl-btn-ok" onClick={onClose}>
-                Done
-              </button>
-            </div>
-          </div>
-        )}
+          {/* ── Failure — swaps into the same centred area the loader used ──── */}
+          {isError && friendly && (
+            <>
+              <DialogBody className={STAGE}>
+                <span
+                  aria-hidden="true"
+                  className="grid size-14 place-items-center rounded-full bg-hold-soft text-[30px] text-hold"
+                >
+                  <HiExclamationTriangle />
+                </span>
+                <span className="mt-4 rounded-full bg-hold-soft px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-hold">
+                  Production Halted
+                </span>
+                <h2 className="m-0 mt-2.5 text-[19px] font-bold tracking-tight text-ink">
+                  {friendly.title}
+                </h2>
 
-        {/* ── Failure — swaps into the same centred area the loader used ──── */}
-        {isError && friendly && (
-          <div className="mcl-stage">
-            <div className="mcl-badge mcl-badge-warn" aria-hidden="true">
-              <HiExclamationTriangle />
-            </div>
-            <span className="mcl-error-banner">Production Halted</span>
-            <h2 id={titleId} className="mcl-error-title">
-              {friendly.title}
-            </h2>
+                <div className="mt-3 w-full text-left">
+                  {friendly.summary && (
+                    <p className="m-0 text-[13.5px] text-body">{friendly.summary}</p>
+                  )}
 
-            <div id={descId} className="mcl-error-body">
-              {friendly.summary && <p className="mcl-error-what">{friendly.summary}</p>}
+                  {friendly.facts.length > 0 && (
+                    <dl className="m-0 mt-3 divide-y divide-line rounded-card border border-line bg-surface">
+                      {friendly.facts.map((fact) => (
+                        <div
+                          key={fact.label}
+                          className="flex items-center justify-between gap-3 px-3 py-2"
+                        >
+                          <dt className="text-[12px] text-subtle">{fact.label}</dt>
+                          <dd className="m-0 text-right text-[13px] font-semibold text-ink">
+                            {fact.value}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                  )}
 
-              {friendly.facts.length > 0 && (
-                <dl className="mcl-error-facts">
-                  {friendly.facts.map((fact) => (
-                    <div key={fact.label}>
-                      <dt>{fact.label}</dt>
-                      <dd>{fact.value}</dd>
-                    </div>
-                  ))}
-                </dl>
-              )}
+                  <p className="m-0 mt-3 text-[13.5px] font-semibold text-ink">
+                    {friendly.action}
+                  </p>
+                  <p className="m-0 mt-1.5 text-[12.5px] text-subtle">
+                    {friendly.transient
+                      ? "This is usually temporary — trying again often works."
+                      : "No invoice was created, so it's safe to fix the details and retry."}
+                  </p>
+                </div>
 
-              <p className="mcl-error-do">{friendly.action}</p>
-              <p className="mcl-error-safe">
-                {friendly.transient
-                  ? "This is usually temporary — trying again often works."
-                  : "No invoice was created, so it's safe to fix the details and retry."}
-              </p>
-            </div>
+                <TechnicalDetails
+                  rawError={rawError}
+                  errorMessage={errorMessage}
+                  logs={logs}
+                />
+              </DialogBody>
 
-            <div className="mcl-actions">
-              <button type="button" className="mcl-btn mcl-btn-ghost" onClick={onClose}>
-                Close
-              </button>
-              {onRaiseCl && (
-                <button type="button" className="mcl-btn mcl-btn-cl" onClick={onRaiseCl}>
-                  <HiBanknotes aria-hidden="true" /> Raise CL
-                </button>
-              )}
-              <button ref={primaryRef} type="button" className="mcl-btn mcl-btn-warn" onClick={onRetry}>
-                <HiArrowPath aria-hidden="true" /> Retry
-              </button>
-            </div>
-
-            <TechnicalDetails rawError={rawError} errorMessage={errorMessage} logs={logs} />
-          </div>
-        )}
-      </section>
-    </div>
+              <DialogFooter>
+                <Button variant="ghost" onClick={onClose}>
+                  Close
+                </Button>
+                {onRaiseCl && (
+                  <Button onClick={onRaiseCl}>
+                    <HiBanknotes aria-hidden="true" /> Raise CL
+                  </Button>
+                )}
+                <Button ref={primaryRef} variant="primary" onClick={onRetry}>
+                  <HiArrowPath aria-hidden="true" /> Retry
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      )}
+    </Dialog>
   );
 }
 
 /* ── Running: the reassuring "production line" ─────────────────────────────── */
 
-function RunningStage({ doc, titleId }: { doc: SapPostState["doc"]; titleId: string }) {
+function RunningStage({ doc }: { doc: SapPostState["doc"] }) {
   // Rotate the reassurance stage; advance then hold on the last one (looping back
   // would read as "going backwards"). setState only ever runs in the callbacks.
   const [stageIndex, setStageIndex] = useState(0);
@@ -249,82 +313,113 @@ function RunningStage({ doc, titleId }: { doc: SapPostState["doc"]; titleId: str
   const stage = FACTORY_STAGES[stageIndex];
 
   return (
-    <div className="mcl-stage">
+    <DialogBody className={STAGE}>
       {/* Persistent, calm status for screen readers (the rotating visual below is
           decorative and hidden from assistive tech). */}
-      <p className="mcl-sr-only" role="status">
-        Creating your invoice. This usually takes under a minute, please keep this window open.
+      <p className="sr-only" role="status">
+        Creating your invoice. This usually takes under a minute, please keep this window
+        open.
       </p>
 
-      <div className="mcl-hero" aria-hidden="true">
-        <span className="mcl-hero-ring" />
-        <span className="mcl-hero-ring mcl-hero-ring-2" />
-        <span key={stageIndex} className="mcl-hero-emoji">
+      <div className="relative grid size-24 place-items-center" aria-hidden="true">
+        {/* Two halos, the second half a cycle behind, so the pulse never rests. */}
+        <span className="absolute inset-0 rounded-full bg-[radial-gradient(circle,rgba(37,99,235,0.16),rgba(37,99,235,0)_70%)] motion-safe:animate-halo" />
+        <span className="absolute inset-0 rounded-full bg-[radial-gradient(circle,rgba(37,99,235,0.16),rgba(37,99,235,0)_70%)] [animation-delay:1s] motion-safe:animate-halo" />
+        {/* Keyed on the stage so each glyph remounts and plays its swap-in. */}
+        <span
+          key={stageIndex}
+          className="relative grid size-[72px] place-items-center rounded-full border border-line bg-white text-[34px] leading-none shadow-[0_10px_24px_-12px_rgba(37,99,235,0.5)] motion-safe:animate-emoji"
+        >
           {stage.emoji}
         </span>
       </div>
 
-      <h2 id={titleId} className="mcl-title">
+      <h2 className="m-0 mt-5 text-[19px] font-bold tracking-tight text-ink">
         Creating your invoice
       </h2>
-      <p key={stageIndex} className="mcl-rotating" aria-hidden="true">
+      <p
+        key={stageIndex}
+        className="m-0 mt-2.5 min-h-[1.2em] text-[16px] font-bold tracking-tight text-brand motion-safe:animate-page"
+        aria-hidden="true"
+      >
         {stage.label}…
       </p>
 
-
-      <div className="mcl-progress">
-        <div className="mcl-progress-track">
-          <div className="mcl-progress-fill" style={{ width: `${pct}%` }}>
-            <span className="mcl-progress-shimmer" aria-hidden="true" />
-          </div>
+      <div
+        className="mt-6 h-2 w-full overflow-hidden rounded-full border border-line bg-surface-strong"
+        role="progressbar"
+        aria-valuenow={pct}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label="Invoice progress"
+      >
+        <div
+          className="relative h-full overflow-hidden rounded-full bg-gradient-to-r from-[#1d4ed8] to-[#3b82f6] transition-[width] duration-500 ease-out"
+          style={{ width: `${pct}%` }}
+        >
+          <span
+            aria-hidden="true"
+            className="absolute inset-0 bg-gradient-to-r from-transparent via-white/55 to-transparent motion-safe:animate-sweep"
+          />
         </div>
       </div>
 
-      <div className="mcl-rail" aria-hidden="true">
+      <div className="mt-3.5 flex gap-2" aria-hidden="true">
         {FACTORY_STAGES.map((_, index) => (
           <span
             key={index}
-            className={`mcl-rail-dot${
-              index < stageIndex ? " is-done" : index === stageIndex ? " is-active" : ""
-            }`}
+            className={cn(
+              "size-[7px] rounded-full border transition-colors",
+              index <= stageIndex ? "border-brand bg-brand" : "border-line bg-surface-strong",
+              index === stageIndex && "scale-[1.35]",
+            )}
           />
         ))}
       </div>
 
       <SummaryPanel doc={doc} />
-
-    </div>
+    </DialogBody>
   );
 }
 
 /* ── Business-friendly summary (no SAP terminology) ────────────────────────── */
 
 function SummaryPanel({ doc }: { doc: SapPostState["doc"] }) {
+  const rows = [
+    { icon: HiCube, label: "Reference", value: orDash(doc.draftNo), clamp: false },
+    { icon: HiUserCircle, label: "Customer", value: orDash(doc.customer), clamp: true },
+    {
+      icon: HiBuildingOffice2,
+      label: "Items",
+      value: doc.itemCount === null ? "…" : String(doc.itemCount),
+      clamp: false,
+    },
+  ];
+
   return (
-    <dl className="mcl-summary">
-      <div>
-        <dt>
-          <HiCube aria-hidden="true" /> Reference
-        </dt>
-        <dd>{orDash(doc.draftNo)}</dd>
-      </div>
-      <div>
-        <dt>
-          <HiUserCircle aria-hidden="true" /> Customer
-        </dt>
-        <dd className="mcl-clamp" title={orDash(doc.customer)}>
-          {orDash(doc.customer)}
+    <dl className="m-0 mt-6 w-full divide-y divide-line rounded-card border border-line bg-surface text-left">
+      {rows.map(({ icon: Icon, label, value, clamp }) => (
+        <div key={label} className="flex items-center justify-between gap-3 px-3.5 py-2.5">
+          <dt className="flex items-center gap-1.5 text-[12px] text-subtle">
+            <Icon aria-hidden="true" className="text-[14px]" />
+            {label}
+          </dt>
+          <dd
+            className={cn(
+              "m-0 text-right text-[13px] font-semibold text-ink",
+              clamp && "max-w-[200px] truncate",
+            )}
+            title={clamp ? value : undefined}
+          >
+            {value}
+          </dd>
+        </div>
+      ))}
+      <div className="flex items-center justify-between gap-3 bg-surface-strong px-3.5 py-2.5">
+        <dt className="text-[12.5px] font-semibold text-ink">Total</dt>
+        <dd className="m-0 text-[15px] font-bold tabular-nums text-ink">
+          {formatMoney(doc.total)}
         </dd>
-      </div>
-      <div>
-        <dt>
-          <HiBuildingOffice2 aria-hidden="true" /> Items
-        </dt>
-        <dd>{doc.itemCount === null ? "…" : doc.itemCount}</dd>
-      </div>
-      <div className="mcl-summary-total">
-        <dt>Total</dt>
-        <dd>{formatMoney(doc.total)}</dd>
       </div>
     </dl>
   );
@@ -342,31 +437,56 @@ function TechnicalDetails({
   logs: SapPostState["logs"];
 }) {
   const raw = (rawError || errorMessage || "").trim();
+
+  const tone: Record<string, string> = {
+    ok: "text-ok",
+    warn: "text-hold",
+    error: "text-danger",
+  };
+
   return (
-    <details className="mcl-tech">
-      <summary>
-        <HiChevronDown className="mcl-tech-chevron" aria-hidden="true" />
+    <details className="group mt-5 w-full text-left">
+      <summary
+        className={cn(
+          // `list-none` plus the WebKit marker reset: without both, Safari and
+          // Chrome each draw a disclosure triangle beside our own chevron.
+          "flex cursor-pointer list-none items-center gap-1.5 rounded-md px-1 py-1.5",
+          "text-[12.5px] font-semibold text-subtle hover:text-ink",
+          "[&::-webkit-details-marker]:hidden",
+        )}
+      >
+        <HiChevronDown
+          aria-hidden="true"
+          className="transition-transform group-open:rotate-180"
+        />
         Show technical details
       </summary>
-      <div className="mcl-tech-body">
+
+      <div className="mt-2 space-y-3 rounded-card border border-line bg-surface p-3">
         {raw && (
-          <>
-            <span className="mcl-tech-label">System response</span>
-            <pre className="mcl-tech-pre">{raw}</pre>
-          </>
+          <div>
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-subtle">
+              System response
+            </span>
+            <pre className="m-0 mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-sm bg-white p-2.5 font-mono text-[11.5px] leading-relaxed text-body">
+              {raw}
+            </pre>
+          </div>
         )}
         {logs.length > 0 && (
-          <>
-            <span className="mcl-tech-label">Activity</span>
-            <div className="mcl-tech-log">
+          <div>
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-subtle">
+              Activity
+            </span>
+            <div className="mt-1.5 max-h-40 space-y-1 overflow-auto rounded-sm bg-white p-2.5 font-mono text-[11.5px]">
               {logs.map((line) => (
-                <div className={`mcl-tech-line mcl-tech-${line.level}`} key={line.id}>
-                  <span className="mcl-tech-time">{line.time}</span>
-                  <span>{line.text}</span>
+                <div key={line.id} className={cn("flex gap-2", tone[line.level] ?? "text-body")}>
+                  <span className="shrink-0 text-subtle">{line.time}</span>
+                  <span className="min-w-0 break-words">{line.text}</span>
                 </div>
               ))}
             </div>
-          </>
+          </div>
         )}
       </div>
     </details>

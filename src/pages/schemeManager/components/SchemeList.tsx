@@ -1,61 +1,64 @@
 /**
- * The scheme list — Phase 4 split, plus row virtualization.
- *
- * Rendering is unchanged: every row, chip and detail panel below is the same
- * markup `Scheme_Manager.tsx` used to render inline via `schemes.map(...)`.
- * What changed is HOW MANY of those rows are ever mounted at once.
+ * The scheme list — one accordion row per scheme, virtualized.
  *
  * ─────────────────────────────────────────────────────────────────────────
- * WHY `useWindowVirtualizer`, NOT a scrolling container
+ * THE SCROLL CONTAINER IS `document.body`
  * ─────────────────────────────────────────────────────────────────────────
- * `.sch-list` has never had an inner scrollbar — it sizes to its content and
- * the whole document scrolls. Giving it its own `overflow-y` + fixed height to
- * virtualize the usual way would be a real visual change (a new scrollbar
- * nested inside the page), which this split may not introduce. `useWindowVirtualizer`
- * measures against the document/window scroll position instead, so the page
- * keeps scrolling exactly as it always did — only the OFF-SCREEN rows stop
- * being mounted. Same technique as `invoiceReview/components/InvoiceTable.tsx`.
+ * The list has never had an inner scrollbar — it sizes to its content and the
+ * page scrolls. It used `useWindowVirtualizer` for that, which reads
+ * `window.scrollY` — and `window.scrollY` is ALWAYS 0 here: `index.css` gives
+ * `html, body, #root` `height: 100%` and `overflow-x: hidden` on html and
+ * body, which makes BODY the scrolling box rather than the viewport. So the
+ * virtualizer's idea of "where am I in the list" never moved, and every
+ * scheme past the first screenful was unreachable. `e2e/virtualization.spec.ts`
+ * pins the Invoice Review half of the same defect.
+ *
+ * `useVirtualizer` with an explicit `getScrollElement` measures the box that
+ * actually scrolls.
  *
  * ─────────────────────────────────────────────────────────────────────────
  * WHY `measureElement`, NOT A FIXED ROW HEIGHT
  * ─────────────────────────────────────────────────────────────────────────
- * A collapsed row and an expanded one (the `sch-detail` accordion panel) differ
- * by a few hundred pixels, and only one row expands at a time (`expandedId`).
- * `measureElement` (a `ResizeObserver` under the hood — the same technique
- * `productStock/components/StockTable.tsx` uses for its own expand/collapse
- * row) keeps the virtualizer's notion of each row's height matched to what is
- * actually on screen, so expanding/collapsing never desyncs the scrollbar.
+ * A collapsed row and an expanded one differ by a few hundred pixels, and only
+ * one row expands at a time (`expandedId`). `measureElement` (a
+ * `ResizeObserver` under the hood) keeps the virtualizer's notion of each
+ * row's height matched to what is on screen, so expanding never desyncs the
+ * scrollbar.
  *
  * ─────────────────────────────────────────────────────────────────────────
- * THE BORDER-TOP FIX
+ * THE DIVIDER
  * ─────────────────────────────────────────────────────────────────────────
- * `.sch-item + .sch-item` (adjacent-sibling CSS) drew the divider between
- * rows in the original, unvirtualized markup. Windowing only ever mounts a
- * contiguous slice, so that selector still matches between two rows that are
- * both on screen — but the FIRST rendered row of a given window has no
- * `.sch-item` before it in the DOM (a spacer `<div>` stands in for the
- * skipped rows instead), so it would silently lose its divider depending on
- * scroll position. The inline `borderTop` below reproduces the exact same
- * rule (`1px solid var(--sch-line)`, skipped on the very first scheme) from
- * the row's own list index instead of DOM adjacency, so the divider is
- * correct regardless of which rows happen to be mounted.
+ * Windowing only ever mounts a contiguous slice, with a spacer `<div>`
+ * standing in for the rows above it — so an adjacent-sibling rule
+ * (`.row + .row`) would drop the first mounted row's divider depending on
+ * scroll position. The divider is decided from the row's own list index
+ * instead (`index > 0`), which is right regardless of which rows are mounted.
  */
 import { useState } from "react";
-import { useWindowVirtualizer } from "@tanstack/react-virtual";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import {
+  HiOutlineChevronRight,
+  HiOutlinePencilSquare,
+  HiOutlineTag,
+  HiOutlineTrash,
+} from "react-icons/hi2";
 
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, EmptyState } from "@/components/ui/page";
+import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 import type { Scheme } from "@/services/schemeService";
 import { describeBenefit, describeScope, describeTrigger } from "@/services/schemeService";
 
-import { CaretIcon, PencilIcon, TrashIcon } from "./icons";
-
 // A reasonable average collapsed-row height: enough that the spacer divs keep
 // the scrollbar close to accurate without measuring every row up front. Real
-// visible rows always render at their true (measured) height regardless of
-// this estimate — only the space standing in for UNRENDERED rows depends on it.
+// visible rows always render at their true (measured) height regardless.
 const ESTIMATED_ROW_HEIGHT = 66;
 const ROW_OVERSCAN = 12;
 
-const DIVIDER = { borderTop: "1px solid var(--sch-line)" } as const;
+const BLOCK_TITLE = "mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-subtle";
+const BLOCK_LIST = "m-0 list-none space-y-1 p-0 text-[13px] text-body";
 
 export default function SchemeList({
   schemes,
@@ -82,16 +85,16 @@ export default function SchemeList({
   deactivate: (scheme: Scheme) => void;
   loadSchemes: () => void;
 }) {
-  // Where the list starts in the document, so the window virtualizer can
-  // translate its own (list-relative) offsets into real scroll positions. A
-  // ref callback rather than a measuring effect: React calls it once the div
-  // is actually in the document, so `offsetTop` is read straight off the live
-  // node on every render from then on — no extra render pass to converge on.
+  // Where the list starts in the document, so the virtualizer can translate
+  // its own (list-relative) offsets into real scroll positions. A ref
+  // callback rather than a measuring effect: React calls it once the div is
+  // in the document, so `offsetTop` is read off the live node on every render.
   const [wrapNode, setWrapNode] = useState<HTMLDivElement | null>(null);
   const scrollMargin = wrapNode?.offsetTop ?? 0;
 
-  const rowVirtualizer = useWindowVirtualizer({
+  const rowVirtualizer = useVirtualizer({
     count: schemes.length,
+    getScrollElement: () => (typeof document === "undefined" ? null : document.body),
     estimateSize: () => ESTIMATED_ROW_HEIGHT,
     overscan: ROW_OVERSCAN,
     scrollMargin,
@@ -104,204 +107,227 @@ export default function SchemeList({
       ? rowVirtualizer.getTotalSize() - virtualRows[virtualRows.length - 1].end
       : 0;
 
+  if (isLoading) {
+    return (
+      <Card className="space-y-3">
+        <Skeleton className="h-14 w-full" />
+        <Skeleton className="h-14 w-full" />
+        <Skeleton className="h-14 w-full" />
+      </Card>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <Card>
+        <EmptyState
+          icon={HiOutlineTag}
+          title="Could not load schemes"
+          hint={loadError}
+          action={<Button onClick={loadSchemes}>Try again</Button>}
+        />
+      </Card>
+    );
+  }
+
+  if (schemes.length === 0) {
+    return (
+      <Card>
+        <EmptyState
+          icon={HiOutlineTag}
+          title="No schemes yet"
+          hint="A scheme is an offer: what a vendor has to buy, and what they get free."
+          action={
+            <Button variant="primary" onClick={openNew}>
+              New scheme
+            </Button>
+          }
+        />
+      </Card>
+    );
+  }
+
   return (
-    <div className="sch-list" ref={setWrapNode}>
-      {isLoading ? (
-        <div className="sch-skeleton-wrap">
-          <div className="sch-skeleton" />
-          <div className="sch-skeleton" />
-          <div className="sch-skeleton" />
-        </div>
-      ) : loadError ? (
-        <div className="sch-state error">
-          <h3>Could not load schemes</h3>
-          <p>{loadError}</p>
-          <button type="button" className="sch-btn" onClick={() => loadSchemes()}>
-            Try again
-          </button>
-        </div>
-      ) : schemes.length === 0 ? (
-        <div className="sch-state">
-          <h3>No schemes yet</h3>
-          <p>A scheme is an offer: what a vendor has to buy, and what they get free.</p>
-          <button type="button" className="sch-btn-primary" onClick={openNew}>
-            + New scheme
-          </button>
-        </div>
-      ) : (
-        <>
-          {paddingTop > 0 && <div aria-hidden="true" style={{ height: paddingTop }} />}
-          {virtualRows.map((virtualRow) => {
-            const scheme = schemes[virtualRow.index];
-            if (!scheme) return null;
-            const isOpen = expandedId === scheme.id;
-            const grants = scheme.assignments.filter((a) => !a.is_exclusion);
-            const exclusions = scheme.assignments.filter((a) => a.is_exclusion);
-            const buy = scheme.triggers[0]
-              ? describeTrigger(scheme.triggers[0], itemNameOf)
-              : "no rule set";
-            const get = scheme.benefits[0]
-              ? describeBenefit(scheme.benefits[0], itemNameOf)
-              : "nothing set";
-            const extras =
-              scheme.triggers.length + scheme.benefits.length - 2;
+    <Card className="overflow-hidden p-0">
+      <div ref={setWrapNode}>
+        {paddingTop > 0 && <div aria-hidden="true" style={{ height: paddingTop }} />}
+        {virtualRows.map((virtualRow) => {
+          const scheme = schemes[virtualRow.index];
+          if (!scheme) return null;
+          const isOpen = expandedId === scheme.id;
+          const grants = scheme.assignments.filter((a) => !a.is_exclusion);
+          const exclusions = scheme.assignments.filter((a) => a.is_exclusion);
+          const buy = scheme.triggers[0]
+            ? describeTrigger(scheme.triggers[0], itemNameOf)
+            : "no rule set";
+          const get = scheme.benefits[0]
+            ? describeBenefit(scheme.benefits[0], itemNameOf)
+            : "nothing set";
+          const extras = scheme.triggers.length + scheme.benefits.length - 2;
 
-            return (
-              <div
-                key={scheme.id}
-                data-index={virtualRow.index}
-                ref={rowVirtualizer.measureElement}
-                style={virtualRow.index > 0 ? DIVIDER : undefined}
-                className={[
-                  "sch-item",
-                  isOpen ? "is-open" : "",
-                  scheme.is_active ? "" : "is-inactive",
-                ]
-                  .filter(Boolean)
-                  .join(" ")}
-              >
-                <div className="sch-row">
-                  <button
-                    type="button"
-                    className="sch-row-open"
-                    onClick={() => setExpandedId(isOpen ? null : scheme.id)}
-                    aria-expanded={isOpen}
+          return (
+            <div
+              key={scheme.id}
+              data-index={virtualRow.index}
+              ref={rowVirtualizer.measureElement}
+              className={cn(
+                virtualRow.index > 0 && "border-t border-line",
+                !scheme.is_active && "bg-surface/60",
+              )}
+            >
+              <div className="flex items-stretch">
+                <button
+                  type="button"
+                  onClick={() => setExpandedId(isOpen ? null : scheme.id)}
+                  aria-expanded={isOpen}
+                  className={cn(
+                    "appearance-none border-0 bg-transparent [font-family:inherit] cursor-pointer",
+                    "flex min-w-0 flex-1 items-center gap-3 px-4 py-3 text-left",
+                    "transition-colors hover:bg-surface focus-visible:outline-none focus-visible:shadow-focus",
+                  )}
+                >
+                  <HiOutlineChevronRight
+                    aria-hidden="true"
+                    className={cn(
+                      "size-4 shrink-0 text-subtle transition-transform",
+                      isOpen && "rotate-90",
+                    )}
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="flex flex-wrap items-center gap-2">
+                      <span
+                        className={cn(
+                          "text-[13.5px] font-semibold",
+                          scheme.is_active ? "text-ink" : "text-subtle line-through",
+                        )}
+                      >
+                        {scheme.name}
+                      </span>
+                      {!scheme.is_active && <Badge tone="bad">Off</Badge>}
+                    </span>
+                    {/* The whole offer as one sentence — this line is what the
+                        list is for. */}
+                    <span className="mt-0.5 block text-[12.5px] text-subtle">
+                      {buy} → <strong className="font-semibold text-ink">{get}</strong>
+                      {extras > 0 ? ` · +${extras} more` : ""}
+                    </span>
+                  </span>
+                  <span className="hidden shrink-0 items-center gap-2 sm:flex">
+                    {scheme.category && <Badge tone="ok">{scheme.category}</Badge>}
+                    {grants.length === 0 ? (
+                      <Badge tone="hold">Nobody yet</Badge>
+                    ) : (
+                      <span className="text-[12px] text-subtle">
+                        {describeScope(grants[0])}
+                        {grants.length > 1 ? ` +${grants.length - 1}` : ""}
+                        {exclusions.length ? " *" : ""}
+                      </span>
+                    )}
+                  </span>
+                </button>
+
+                <div className="flex shrink-0 items-center gap-0.5 pr-3">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => openEdit(scheme)}
+                    title="Edit"
+                    aria-label={`Edit ${scheme.code}`}
                   >
-                    <CaretIcon />
-                    <div className="sch-row-main">
-                      <div className="sch-row-title">
-                        <span className="sch-row-name">{scheme.name}</span>
-                        {!scheme.is_active && <span className="sch-chip red">Off</span>}
-                      </div>
-                      {/* The whole offer as one sentence — this line is what the
-                          list is for. */}
-                      <div className="sch-row-sum">
-                        {buy} → <strong>{get}</strong>
-                        {extras > 0 ? ` · +${extras} more` : ""}
-                      </div>
-                    </div>
-                    <div className="sch-row-side">
-                      {scheme.category && <span className="sch-chip green">{scheme.category}</span>}
-                      {grants.length === 0 ? (
-                        <span className="sch-chip amber">Nobody yet</span>
-                      ) : (
-                        <span className="sch-reach">
-                          {describeScope(grants[0])}
-                          {grants.length > 1 ? ` +${grants.length - 1}` : ""}
-                          {exclusions.length ? " *" : ""}
-                        </span>
-                      )}
-                    </div>
-                  </button>
+                    <HiOutlinePencilSquare aria-hidden="true" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="text-danger hover:bg-danger-soft hover:text-danger"
+                    onClick={() => deleteScheme(scheme)}
+                    title="Delete"
+                    aria-label={`Delete ${scheme.code}`}
+                  >
+                    <HiOutlineTrash aria-hidden="true" />
+                  </Button>
+                </div>
+              </div>
 
-                  <div className="sch-row-tools">
-                    <button
-                      type="button"
-                      className="sch-icon-btn"
-                      onClick={() => openEdit(scheme)}
-                      title="Edit"
-                      aria-label={`Edit ${scheme.code}`}
-                    >
-                      <PencilIcon />
-                    </button>
-                    <button
-                      type="button"
-                      className="sch-icon-btn is-danger"
-                      onClick={() => deleteScheme(scheme)}
-                      title="Delete"
-                      aria-label={`Delete ${scheme.code}`}
-                    >
-                      <TrashIcon />
-                    </button>
+              {isOpen && (
+                <div className="border-t border-line bg-surface px-4 py-4">
+                  <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
+                    <div>
+                      <div className={BLOCK_TITLE}>To earn it</div>
+                      <ul className={BLOCK_LIST}>
+                        {scheme.triggers.map((trigger, i) => (
+                          <li key={i}>{describeTrigger(trigger, itemNameOf)}</li>
+                        ))}
+                      </ul>
+                    </div>
+                    <div>
+                      <div className={BLOCK_TITLE}>They get</div>
+                      <ul className={BLOCK_LIST}>
+                        {scheme.benefits.map((benefit, i) => (
+                          <li key={i} className="font-semibold text-ok">
+                            {describeBenefit(benefit, itemNameOf)}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                    <div>
+                      <div className={BLOCK_TITLE}>Sent to</div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {grants.length === 0 && exclusions.length === 0 ? (
+                          <Badge tone="hold">Nobody yet</Badge>
+                        ) : (
+                          <>
+                            {grants.map((assignment, i) => (
+                              <Badge key={assignment.id ?? `g${i}`} tone="info">
+                                {describeScope(assignment)}
+                              </Badge>
+                            ))}
+                            {exclusions.map((assignment, i) => (
+                              <Badge key={assignment.id ?? `e${i}`} tone="bad">
+                                not {describeScope(assignment)}
+                              </Badge>
+                            ))}
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    <div>
+                      <div className={BLOCK_TITLE}>Runs</div>
+                      <ul className={BLOCK_LIST}>
+                        <li>
+                          {scheme.valid_from || scheme.valid_to
+                            ? `${scheme.valid_from || "any time"} to ${scheme.valid_to || "no end"}`
+                            : "Always"}
+                        </li>
+                        <li className="text-subtle">
+                          {scheme.code}
+                          {scheme.category ? ` · ${scheme.category}` : " · all categories"}
+                          {scheme.stackable ? " · combines with others" : ""}
+                        </li>
+                        {scheme.description && (
+                          <li className="text-subtle">{scheme.description}</li>
+                        )}
+                      </ul>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex gap-2">
+                    <Button size="sm" onClick={() => openEdit(scheme)}>
+                      <HiOutlinePencilSquare aria-hidden="true" /> Edit
+                    </Button>
+                    {scheme.is_active && (
+                      <Button size="sm" onClick={() => deactivate(scheme)}>
+                        Turn off
+                      </Button>
+                    )}
                   </div>
                 </div>
-
-                {isOpen && (
-                  <div className="sch-detail">
-                    <div className="sch-detail-grid">
-                      <div className="sch-block">
-                        <div className="sch-block-title">To earn it</div>
-                        <ul>
-                          {scheme.triggers.map((trigger, i) => (
-                            <li key={i}>{describeTrigger(trigger, itemNameOf)}</li>
-                          ))}
-                        </ul>
-                      </div>
-                      <div className="sch-block">
-                        <div className="sch-block-title">They get</div>
-                        <ul>
-                          {scheme.benefits.map((benefit, i) => (
-                            <li key={i} className="give">
-                              {describeBenefit(benefit, itemNameOf)}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                      <div className="sch-block">
-                        <div className="sch-block-title">Sent to</div>
-                        <div className="sch-tags">
-                          {grants.length === 0 && exclusions.length === 0 ? (
-                            <span className="sch-chip amber">Nobody yet</span>
-                          ) : (
-                            <>
-                              {grants.map((assignment, i) => (
-                                <span key={assignment.id ?? `g${i}`} className="sch-chip blue">
-                                  {describeScope(assignment)}
-                                </span>
-                              ))}
-                              {exclusions.map((assignment, i) => (
-                                <span key={assignment.id ?? `e${i}`} className="sch-chip red">
-                                  not {describeScope(assignment)}
-                                </span>
-                              ))}
-                            </>
-                          )}
-                        </div>
-                      </div>
-                      <div className="sch-block">
-                        <div className="sch-block-title">Runs</div>
-                        <ul>
-                          <li>
-                            {scheme.valid_from || scheme.valid_to
-                              ? `${scheme.valid_from || "any time"} to ${scheme.valid_to || "no end"}`
-                              : "Always"}
-                          </li>
-                          <li className="muted">
-                            {scheme.code}
-                            {scheme.category ? ` · ${scheme.category}` : " · all categories"}
-                            {scheme.stackable ? " · combines with others" : ""}
-                          </li>
-                          {scheme.description && <li className="muted">{scheme.description}</li>}
-                        </ul>
-                      </div>
-                    </div>
-
-                    <div className="sch-actions">
-                      <button
-                        type="button"
-                        className="sch-btn sch-btn-sm"
-                        onClick={() => openEdit(scheme)}
-                      >
-                        Edit
-                      </button>
-                      {scheme.is_active && (
-                        <button
-                          type="button"
-                          className="sch-btn sch-btn-sm"
-                          onClick={() => deactivate(scheme)}
-                        >
-                          Turn off
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-          {paddingBottom > 0 && <div aria-hidden="true" style={{ height: paddingBottom }} />}
-        </>
-      )}
-    </div>
+              )}
+            </div>
+          );
+        })}
+        {paddingBottom > 0 && <div aria-hidden="true" style={{ height: paddingBottom }} />}
+      </div>
+    </Card>
   );
 }

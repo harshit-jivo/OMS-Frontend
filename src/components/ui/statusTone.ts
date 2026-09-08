@@ -84,6 +84,24 @@ const STATUS_TONE: Record<string, BadgeTone> = {
   // screen as `pending_approval`, and it is the difference between "someone is
   // dealing with it" and "nothing moves until you act".
   need_approval: "note",
+
+  // The OMS order flow, read from `orders_orderstatus` rather than guessed.
+  // Seven of its twelve statuses were falling through to grey, so a table of
+  // live orders showed no colour at all — the badge said the same "nothing
+  // to see" for an order awaiting a rate approval as for a draft.
+  //
+  // The split follows this file's own rule: an approval WAITING ON A PERSON is
+  // `note` ("nothing moves until you act"), work in progress is `hold`
+  // ("someone is on it"), and a fresh order is `info` because it is neither.
+  rate_approval: "note",
+  auditor_approval: "note",
+  mart_approval: "note",
+  order_created: "info",
+  billing: "hold",
+  billing_pending: "hold",
+  billing_rejected: "bad",
+  // `draft` stays neutral deliberately: a draft is genuinely inert, and grey
+  // is the honest colour for "not in the flow yet".
   needs_approval: "note",
   awaiting_action: "note",
   action_required: "note",

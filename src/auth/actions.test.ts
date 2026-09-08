@@ -27,6 +27,7 @@ function session(overrides: Partial<Session> = {}): Session {
     companyName: "",
     mainGroupId: "",
     mainGroupName: "",
+    categories: [],
     ...overrides,
   };
 }
@@ -198,7 +199,7 @@ describe("no call site decides permissions on its own any more", () => {
     // Route access belongs to `ProtectedPage` alone. A second guard here would
     // be free to disagree with the table — and the ones removed did, bouncing
     // administrators off pages the sidebar showed them.
-    expect(code(path)).not.toMatch(/<Navigate to="\/Dashboard"/);
+    expect(code(path)).not.toMatch(/<Navigate to="\/(Home|Dashboard|Sales_Dashboard)"/);
   });
 
   it("the comment-stripper does not defeat the test above", () => {

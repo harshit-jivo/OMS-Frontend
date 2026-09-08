@@ -1,9 +1,26 @@
+/**
+ * Staff Rate Assignment — which products staff may order, and at what rate.
+ *
+ * Ticking a product assigns it; the rate field appears once it is ticked.
+ * Un-ticking one that WAS assigned removes it on save, which is why the save
+ * accepts a removal-only change (see `removedProducts`).
+ */
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { HiOutlineCube } from "react-icons/hi2";
+
+import { Badge } from "@/components/ui/badge";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { Button } from "@/components/ui/button";
+import { FilterBar, FilterCount, FilterSearch } from "@/components/ui/filter-bar";
+import { Input } from "@/components/ui/form";
+import { Card, EmptyState, Page, PageHeader } from "@/components/ui/page";
+import { Pagination } from "@/components/ui/pagination";
+import { Skeleton } from "@/components/ui/skeleton";
+import { showToast } from "@/lib/toastStore";
 import { ordersService } from "../services/ordersService";
 import { sapService } from "../services/sapService";
 import type { Product } from "../services/sapService";
-import "../styles/Staff_Rate_Assignment.css";
 
 const itemsPerPage = 24;
 
@@ -19,7 +36,7 @@ export default function Staff_Rate_Assignment() {
   const [isSaving, setIsSaving] = useState(false);
   const [rawPage, setRawPage] = useState(1);
 
-  const getProductKey = (product: Product) => `${product.item_code}-${product.category || ""}`;
+  const getProductKey = (product: Product) => product.item_code + "-" + (product.category || "");
 
   /*
    * The merge is the query; the three EDITABLE vars below are seeded from it.
@@ -115,8 +132,6 @@ export default function Staff_Rate_Assignment() {
      against `totalPages` derived from fetched data. Deriving the page during
      render does the same job with no setState in an effect at all. */
   const currentPage = Math.min(rawPage, totalPages);
-  const setCurrentPage = (next: number | ((page: number) => number)) =>
-    setRawPage((page) => (typeof next === "function" ? next(Math.min(page, totalPages)) : next));
 
   const paginatedProducts = useMemo(
     () => filteredProducts.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage),
@@ -158,34 +173,31 @@ export default function Staff_Rate_Assignment() {
       }));
   }, [products, selectedProducts, assignedProductKeys]);
 
+  /*
+   * The first product missing a usable rate, and the reason Save is disabled.
+   *
+   * Both were `alert()` calls fired after the press — one for "select
+   * something", one naming the first product with a bad rate. The button says
+   * it instead, so a rate that is blank or negative is visible BEFORE
+   * committing rather than after (DESIGN_SYSTEM §6).
+   */
+  const missingRate = useMemo(
+    () =>
+      selectedProducts.find((product) => {
+        const rate = staffRates[getProductKey(product)];
+        return rate === undefined || rate === "" || Number(rate) < 0;
+      }),
+    [selectedProducts, staffRates],
+  );
+  const nothingToSave = selectedProducts.length === 0 && removedProducts.length === 0;
+  const blockedBecause = nothingToSave
+    ? "Tick a product, or untick one that is currently assigned."
+    : missingRate
+      ? "Enter a rate of zero or more for " + missingRate.item_name + "."
+      : undefined;
+
   const handleSave = async () => {
-    // `removedProducts` is derived above now, so this local copy is gone —
-    // kept commented rather than deleted, per the repo's standing rule:
-    //
-    // const selectedProductKeys = new Set(selectedProducts.map(getProductKey));
-    // const removedProducts = products
-    //   .filter((product) => assignedProductKeys.includes(getProductKey(product)))
-    //   .filter((product) => !selectedProductKeys.has(getProductKey(product)))
-    //   .map((product) => ({
-    //     product_id: product.id,
-    //     item_code: product.item_code,
-    //     category: product.category || "",
-    //   }));
-
-    if (!selectedProducts.length && !removedProducts.length) {
-      alert("Please select at least one product or remove an assigned product.");
-      return;
-    }
-
-    const missingRate = selectedProducts.find((product) => {
-      const rate = staffRates[getProductKey(product)];
-      return rate === undefined || rate === "" || Number(rate) < 0;
-    });
-
-    if (missingRate) {
-      alert(`Please enter a valid staff rate for ${missingRate.item_name}.`);
-      return;
-    }
+    if (blockedBecause || isSaving) return;
 
     const payload = selectedProducts.map((product) => ({
       product_id: product.id,
@@ -198,122 +210,171 @@ export default function Staff_Rate_Assignment() {
       setIsSaving(true);
       await ordersService.saveStaffProductRates(payload, removedProducts);
       await fetchProducts();
-      alert("Staff product rates saved successfully.");
+      showToast({
+        title: "Staff rates saved",
+        message:
+          payload.length +
+          " product" +
+          (payload.length === 1 ? "" : "s") +
+          " assigned" +
+          (removedProducts.length
+            ? ", " + removedProducts.length + " removed"
+            : "") +
+          ".",
+      });
     } catch (error) {
       console.error("Error saving staff product rates:", error);
-      alert("Failed to save staff product rates.");
+      showToast({
+        title: "Could not save the staff rates",
+        message: "Nothing was changed. Check your connection and try again.",
+      });
     } finally {
       setIsSaving(false);
     }
   };
 
   return (
-    <div className="app-page">
-      <div className="sra-card">
-        <div className="sra-head">
-          <h1 className="sra-title">Staff Rate Assignment</h1>
-        </div>
+    <Page>
+      <Breadcrumbs items={[{ label: "Orders" }, { label: "Staff Rate Assignment" }]} />
 
-        <div className="sra-toolbar">
-          <input
-            type="text"
-            placeholder="Search products..." aria-label="Search products"
-            value={search}
-            onChange={(event) => {
-              setSearch(event.target.value);
-              setRawPage(1);
-            }}
-            className="sra-input sra-search"
-          />
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={isSaving || (selectedProducts.length === 0 && removedProducts.length === 0)}
-            className="sra-save"
+      <PageHeader
+        eyebrow="Orders"
+        title="Staff Rate Assignment"
+        description="Which products staff may order, and the rate each is sold to them at."
+        badges={
+          selectedProducts.length > 0 ? (
+            <Badge tone="info">{selectedProducts.length} assigned</Badge>
+          ) : undefined
+        }
+        actions={
+          <Button
+            variant="primary"
+            onClick={() => void handleSave()}
+            disabled={isSaving || Boolean(blockedBecause)}
+            title={blockedBecause}
           >
-            {isSaving ? "Saving..." : `Save Selected (${selectedProducts.length})`}
-          </button>
-        </div>
-      </div>
+            {isSaving ? "Saving…" : "Save changes"}
+          </Button>
+        }
+      />
 
-      <div className="sra-panel">
-        {loading ? (
-          <div className="sra-state">Loading products...</div>
-        ) : filteredProducts.length > 0 ? (
-          <div className="sra-grid">
+      <FilterBar>
+        <FilterSearch
+          value={search}
+          onChange={(event) => {
+            setSearch(event.target.value);
+            setRawPage(1);
+          }}
+          placeholder="Product name, code, category, brand or variety…"
+          fieldClassName="min-w-[300px]"
+        />
+        <FilterCount>
+          {filteredProducts.length > 0
+            ? "Showing " + pageStart + "–" + pageEnd + " of " + filteredProducts.length
+            : "No products"}
+          {removedProducts.length > 0 ? " · " + removedProducts.length + " to remove" : ""}
+        </FilterCount>
+      </FilterBar>
+
+      {loading ? (
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-2.5">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <Skeleton className="h-20 w-full" key={i} />
+          ))}
+        </div>
+      ) : filteredProducts.length === 0 ? (
+        <Card>
+          <EmptyState
+            icon={HiOutlineCube}
+            title={search ? "No products match this search" : "No products loaded"}
+            hint={search ? "Try the item code on its own." : undefined}
+          />
+        </Card>
+      ) : (
+        <>
+          <ul className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-2.5 p-0">
             {paginatedProducts.map((product) => {
               const productKey = getProductKey(product);
               const isSelected = selectedProducts.some(
                 (item) => getProductKey(item) === productKey,
               );
+              const rate = staffRates[productKey] ?? "";
+              const rateBad = isSelected && (rate === "" || Number(rate) < 0);
 
               return (
-                <div
-                  key={productKey}
-                  className={`sra-product${isSelected ? " is-selected" : ""}`}
-                  onClick={() => toggleProduct(product)}
-                >
-                  <input type="checkbox" checked={isSelected} readOnly className="sra-check" />
-                  <div className="sra-product-body">
-                    <div className="sra-product-name">{product.item_name}</div>
-                    <div className="sra-product-meta">
-                      {product.item_code} | {product.category || "-"}
-                    </div>
-                    {isSelected && (
-                      <div className="sra-rate" onClick={(event) => event.stopPropagation()}>
-                        <label className="sra-rate-label">Staff Rate</label>
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          placeholder="0.00"
-                          aria-label={`Staff rate for ${product.item_name}`}
-                          value={staffRates[productKey] || ""}
-                          onChange={(event) =>
-                            setStaffRates((current) => ({
-                              ...current,
-                              [productKey]: event.target.value,
-                            }))
-                          }
-                          className="sra-input"
-                        />
-                      </div>
-                    )}
-                  </div>
-                </div>
+                <li key={productKey}>
+                  {/*
+                    A label wrapping a real checkbox, not a div with an
+                    `onClick` and a `readOnly` checkbox painted on it. That is
+                    what makes the whole card clickable AND keyboard-operable,
+                    which the div never was.
+                  */}
+                  <label
+                    className={
+                      "flex cursor-pointer items-start gap-2.5 rounded-sm border p-3 text-[13px] transition-colors " +
+                      (isSelected
+                        ? "border-brand-line bg-brand-soft"
+                        : "border-line bg-card hover:border-line-strong hover:bg-surface")
+                    }
+                  >
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 size-3.5 shrink-0 accent-brand"
+                      checked={isSelected}
+                      onChange={() => toggleProduct(product)}
+                    />
+                    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                      <span className="font-semibold text-ink">{product.item_name}</span>
+                      <span className="text-[11.5px] text-subtle">
+                        {product.item_code} · {product.category || "—"}
+                      </span>
+
+                      {isSelected && (
+                        // Typing a rate must not toggle the checkbox the
+                        // surrounding label is for.
+                        <span
+                          className="mt-1.5 flex items-center gap-2"
+                          onClick={(event) => event.preventDefault()}
+                        >
+                          <span className="shrink-0 text-[11.5px] text-subtle">Rate ₹</span>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            placeholder="0.00"
+                            aria-label={"Staff rate for " + product.item_name}
+                            aria-invalid={rateBad || undefined}
+                            value={rate}
+                            onChange={(event) =>
+                              setStaffRates((current) => ({
+                                ...current,
+                                [productKey]: event.target.value,
+                              }))
+                            }
+                            className={
+                              "h-control-sm w-28 text-right tabular-nums " +
+                              (rateBad ? "border-bad" : "")
+                            }
+                          />
+                        </span>
+                      )}
+                    </span>
+                  </label>
+                </li>
               );
             })}
-            <div className="sra-pager">
-              <span className="sra-pager-count">
-                Showing {pageStart}-{pageEnd} of {filteredProducts.length} products
-              </span>
-              <div className="sra-pager-nav">
-                <button
-                  type="button"
-                  onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
-                  disabled={currentPage === 1}
-                  className="sra-pager-btn"
-                >
-                  Prev
-                </button>
-                <span className="sra-pager-page">
-                  {currentPage} / {totalPages}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
-                  disabled={currentPage === totalPages}
-                  className="sra-pager-btn"
-                >
-                  Next
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="sra-state">No products found.</div>
-        )}
-      </div>
-    </div>
+          </ul>
+
+          {totalPages > 1 && (
+            <Pagination
+              page={currentPage}
+              totalPages={totalPages}
+              onPageChange={setRawPage}
+              summary={"Showing " + pageStart + "–" + pageEnd + " of " + filteredProducts.length}
+            />
+          )}
+        </>
+      )}
+    </Page>
   );
 }

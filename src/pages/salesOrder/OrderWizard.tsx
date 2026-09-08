@@ -17,18 +17,84 @@
  * are inert. Wrapping it in a form turns them all live at once. The legacy
  * branch is where they already are live, and `interactions.visual.spec.ts`
  * asserts that difference.
+ *
+ * ── On the conversion ─────────────────────────────────────────────────────
+ * The last unconverted form in the app, and the one that was left until last
+ * on purpose: people have muscle memory for it, so this is a restyle, not a
+ * redesign. Every step, every field, every validation gate and the order they
+ * appear in are unchanged.
+ *
+ * Three things did change, because they were bugs rather than style:
+ *
+ * · THE ITEM MODAL IS A REAL DIALOG. It was a fixed div with `role="dialog"`
+ *   and `aria-modal` asserted by hand — no focus trap, no scroll lock, no
+ *   Escape. Tab walked straight out of it into the page behind. `ui/dialog`
+ *   owns all of that, and brings the `tw-page` reset a portaled panel needs
+ *   (DESIGN_SYSTEM §1.3).
+ * · THE STEPPER IS A LIST, not a row of anonymous buttons — and a completed
+ *   step's tick is no longer the only thing saying so, since `aria-current`
+ *   now marks the step you are on.
+ * · THE SCHEME TOGGLE IS A REAL CHECKBOX in a label. It was a `<label>`
+ *   wrapping a visually-hidden input and a `<span>` slider, which worked, but
+ *   the switch had no accessible name at all.
+ *
+ * What did NOT change, deliberately: the party / bill-to / ship-to comboboxes
+ * still carry their own open state, refs and outside-click handling from
+ * `useSalesOrderForm`, rather than becoming `ui/dropdown`'s `SearchSelect`.
+ * That state is SHARED with `LegacyOrderForm`, so swapping the control means
+ * changing the hook underneath both forms at once — a bigger and riskier
+ * change than a restyle, and its own piece of work.
  */
 import { Fragment } from "react";
+import {
+  HiChevronDown,
+  HiMagnifyingGlass,
+  HiMinus,
+  HiOutlinePencil,
+  HiOutlineTrash,
+  HiPlus,
+} from "react-icons/hi2";
 
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Field, Input, Select, Textarea } from "@/components/ui/form";
+import { cn } from "@/lib/utils";
 import type { PartyProduct } from "@/services/ordersService";
 
 import FieldError from "./FieldError";
 import ProblemSummary from "./ProblemSummary";
 import WarehouseField from "./WarehouseField";
 import { stepOneComplete, stepThreeComplete } from "./orderHeaderSchema";
-import { computeLandingPrice } from "./rowTotals";
+import { FOC_TOKEN_BASIC_PRICE, computeLandingPrice } from "./rowTotals";
 import { PICKER_FACETS, type PickerFacet, type SalesOrderForm } from "./useSalesOrderForm";
 import { createEmptyRow, type SalesRow } from "../salesOrderRow";
+
+/* ── Shared class recipes ─────────────────────────────────────────────────
+ * Named where they repeat, inline where they do not. These four are the ones
+ * that appear on three or more elements; anything used twice is written out
+ * at both sites, because a name that saves ten characters costs a lookup.
+ */
+
+/** The white card a step, the stepper and the footer each sit on. */
+const PANEL = "rounded-md border border-line bg-card shadow-card";
+
+/** The eyebrow over a step title, and over the modal's own heading. */
+const EYEBROW = "text-[11px] font-bold uppercase tracking-[0.08em] text-brand";
+
+/** A dropdown panel: the party/bill/ship/dispatch/company menus share it. */
+const MENU =
+  "absolute left-0 right-0 top-[calc(100%+6px)] z-[1301] overflow-hidden rounded-md border border-brand-line bg-card shadow-panel";
+
+/** One option inside that panel. */
+const OPTION =
+  "flex w-full cursor-pointer appearance-none flex-col items-start gap-0.5 rounded-lg border-0 bg-transparent px-2.5 py-2.5 text-left [font-family:inherit] transition-colors hover:bg-surface";
 
 export default function OrderWizard({ form }: { form: SalesOrderForm }) {
   const {
@@ -131,43 +197,6 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
     selectedCompanyLabel,
   } = form;
 
-  const chevronIcon = (
-    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-      <path
-        d="M3 4.5L6 7.5L9 4.5"
-        stroke="#64748b"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-  const trashIcon = (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3 6h18" />
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M8 6V4.5A1.5 1.5 0 019.5 3h5A1.5 1.5 0 0116 4.5V6"
-      />
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M19 6l-1 13a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"
-      />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M10 11v6M14 11v6" />
-    </svg>
-  );
-  const pencilIcon = (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4 12.5-12.5z"
-      />
-    </svg>
-  );
-
   // ---------------------------------------------------------------------------
   // Add Item picker — search first, filters second.
   // ---------------------------------------------------------------------------
@@ -244,7 +273,7 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
         basicPrice:
           isFocOrder || product.basic_rate == null
             ? isFocOrder
-              ? "0"
+              ? FOC_TOKEN_BASIC_PRICE
               : ""
             : String(product.basic_rate),
         priceListBasic: isFocOrder
@@ -284,38 +313,67 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
   const renderSchemePanel = (row: SalesRow, index: number) => {
     if (isSchemePanelHidden(row)) return null;
     return (
-      <div className={`sl-scheme-panel${row.isScheme ? " is-active" : ""}`}>
-        <div className="sl-scheme-panel-head">
+      <div
+        className={cn(
+          "mt-4 overflow-hidden rounded-md border bg-card shadow-card",
+          row.isScheme ? "border-line-strong" : "border-line",
+        )}
+      >
+        <div className="flex flex-col items-stretch justify-between gap-3.5 border-b border-line bg-surface p-3.5 sm:flex-row sm:items-center">
           <div>
-            <div className="sl-scheme-eyebrow">Optional promotion</div>
-            <div className="sl-scheme-title">Add scheme to this item</div>
+            <div className="text-[10px] font-extrabold uppercase tracking-[0.08em] text-subtle">
+              Optional promotion
+            </div>
+            <div className="mt-0.5 text-[13px] font-bold text-ink">
+              Add scheme to this item
+            </div>
           </div>
-          <div className="sl-scheme-toggle-compact">
-            <span className="sl-scheme-toggle-label">{row.isScheme ? "Enabled" : "Disabled"}</span>
-            <label className="sl-switch">
+          {/*
+            A real checkbox in a label, so the switch has an accessible name
+            and answers the space bar. It was a bare input inside a label with
+            no text, and a `<span>` doing the drawing.
+          */}
+          <label className="flex h-[34px] min-w-[132px] cursor-pointer items-center justify-between gap-2 rounded-full border border-line-strong bg-card px-2.5">
+            <span className="text-[11px] font-extrabold text-ink-soft">
+              {row.isScheme ? "Enabled" : "Disabled"}
+            </span>
+            <span className="relative inline-block h-5 w-9 shrink-0">
               <input
                 type="checkbox"
+                className="peer absolute inset-0 z-10 m-0 size-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
                 checked={row.isScheme}
                 onChange={(e) => handleRowSchemeToggle(index, e.target.checked)}
                 disabled={row.confirmed}
+                aria-label="Add scheme to this item"
               />
-              <span className="sl-switch-slider" />
-            </label>
-          </div>
+              <span
+                aria-hidden="true"
+                className="absolute inset-0 rounded-full bg-line-strong transition-colors peer-checked:bg-[#0f766e] peer-focus-visible:shadow-focus"
+              />
+              <span
+                aria-hidden="true"
+                className="absolute left-[3px] top-[3px] size-4 rounded-full bg-white shadow-[0_1px_2px_rgba(15,23,42,0.2)] transition-transform peer-checked:translate-x-[18px]"
+              />
+            </span>
+          </label>
         </div>
 
         {row.isScheme && (
-          <div className="sl-scheme-panel-body">
-            <div className="sl-scheme-dropdown-field">
-              <div className="sl-scheme-table-head">
+          <div className="grid items-start gap-3 p-3.5 lg:grid-cols-[minmax(0,560px)_160px]">
+            <div className="flex min-w-0 flex-col gap-2">
+              <div className="grid grid-cols-[1fr_80px_48px] items-center gap-2 px-0.5 text-[11px] font-extrabold uppercase tracking-[0.04em] text-subtle sm:grid-cols-[minmax(220px,360px)_90px_56px]">
                 <span>Scheme</span>
                 <span>Qty</span>
                 <span>Action</span>
               </div>
               {(row.schemes.length ? row.schemes : [{ scheme: "", schemeQty: "" }]).map(
                 (schemeRow, schemeIndex) => (
-                  <div className="sl-scheme-table-row" key={`${index}-${schemeIndex}`}>
-                    <select
+                  <div
+                    className="grid grid-cols-[1fr_80px_48px] items-center gap-2 rounded-md border border-line bg-surface p-2 sm:grid-cols-[minmax(220px,360px)_90px_56px]"
+                    key={`${index}-${schemeIndex}`}
+                  >
+                    <Select
+                      aria-label="Scheme"
                       value={schemeRow.scheme}
                       onChange={(e) =>
                         handleSchemeChange(index, schemeIndex, "scheme", e.target.value)
@@ -328,9 +386,10 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
                           {scheme.scheme_name}
                         </option>
                       ))}
-                    </select>
-                    <input
+                    </Select>
+                    <Input
                       type="text"
+                      aria-label="Scheme quantity"
                       value={schemeRow.schemeQty}
                       placeholder="0"
                       onChange={(e) =>
@@ -338,39 +397,37 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
                       }
                       disabled={row.confirmed}
                     />
-                    <button
-                      type="button"
-                      className="sl-remove-scheme-btn"
+                    <Button
+                      variant="ghost"
+                      size="icon"
                       onClick={() => handleRemoveScheme(index, schemeIndex)}
                       disabled={row.confirmed}
                       aria-label="Remove scheme"
                       title="Remove scheme"
                     >
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path strokeLinecap="round" d="M5 12h14" />
-                      </svg>
-                    </button>
+                      <HiMinus aria-hidden="true" />
+                    </Button>
                   </div>
                 ),
               )}
-              <button
-                type="button"
-                className="sl-add-scheme-btn"
+              <Button
+                variant="ghost"
+                size="sm"
+                className="self-start"
                 onClick={() => handleAddScheme(index)}
                 disabled={row.confirmed}
               >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path strokeLinecap="round" d="M12 5v14M5 12h14" />
-                </svg>
-                Add Scheme
-              </button>
+                <HiPlus aria-hidden="true" /> Add Scheme
+              </Button>
             </div>
 
-            <div className="sl-scheme-total-card">
-              <span className="sl-scheme-field-label">Total Ltrs</span>
-              <input
+            <div className="flex flex-col gap-1.5 rounded-md border border-line bg-surface p-3">
+              <span className="text-[11px] font-extrabold text-ink-soft">Total Ltrs</span>
+              <Input
                 type="text"
                 name="totalLtrs"
+                aria-label="Total Ltrs"
+                className="bg-white font-extrabold text-ink"
                 value={
                   row.schemes.length
                     ? (
@@ -381,7 +438,9 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
                 }
                 readOnly
               />
-              <small>Base ltrs plus selected scheme quantity</small>
+              <small className="text-[11px] leading-snug text-subtle">
+                Base ltrs plus selected scheme quantity
+              </small>
             </div>
           </div>
         )}
@@ -479,57 +538,78 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
     const activeFacetCount = PICKER_FACETS.filter((facet) => row[facet]).length;
 
     return (
-      <div className="sl-pick">
-        <aside className="sl-pick-filters">
-          <div className="sl-pick-filters-head">
-            <span>Filters</span>
+      <div className="grid min-h-0 grid-rows-[auto_1fr] md:h-full md:grid-cols-[30%_70%] md:grid-rows-1">
+        <aside className="min-h-0 max-h-[34%] overflow-y-auto border-b border-line bg-surface p-3.5 pb-5 md:max-h-none md:border-b-0 md:border-r">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-subtle">
+              Filters
+            </span>
             {activeFacetCount > 0 && (
-              <button type="button" onClick={() => clearPickerFacets(index)}>
+              <Button variant="link" size="inline" onClick={() => clearPickerFacets(index)}>
                 Clear all
-              </button>
+              </Button>
             )}
           </div>
           {facetGroups.map((group) => (
-            <div className="sl-pick-facet" key={group.key}>
-              <div className="sl-pick-facet-title">{group.label}</div>
+            <div
+              className="mt-4 border-t border-line pt-3.5 first:mt-0 first:border-t-0 first:pt-0"
+              key={group.key}
+            >
+              <div className="mb-1.5 text-[11px] font-bold uppercase tracking-[0.04em] text-subtle">
+                {group.label}
+              </div>
               {group.options.length === 0 ? (
-                <div className="sl-pick-facet-empty">—</div>
+                <div className="text-[12px] text-line-strong">—</div>
               ) : (
-                <div className="sl-pick-facet-list">
-                  {group.options.map((option) => (
-                    <button
-                      type="button"
-                      key={`${group.key}-${option.value}`}
-                      className={`sl-pick-facet-option${
-                        row[group.key] === option.value ? " is-active" : ""
-                      }`}
-                      onClick={() =>
-                        setPickerFacet(
-                          index,
-                          group.key,
-                          row[group.key] === option.value ? "" : option.value,
-                        )
-                      }
-                    >
-                      <span>{option.value}</span>
-                      <em>{option.count}</em>
-                    </button>
-                  ))}
+                <div className="flex max-h-[190px] flex-col gap-0.5 overflow-y-auto">
+                  {group.options.map((option) => {
+                    const active = row[group.key] === option.value;
+                    return (
+                      <button
+                        type="button"
+                        key={`${group.key}-${option.value}`}
+                        aria-pressed={active}
+                        className={cn(
+                          "flex w-full cursor-pointer appearance-none items-center justify-between gap-2",
+                          "rounded-lg border px-2.5 py-1.5 text-left text-[12.5px] leading-snug",
+                          "[font-family:inherit] transition-colors",
+                          active
+                            ? "border-brand bg-card font-semibold text-brand"
+                            : "border-transparent bg-transparent text-ink-soft hover:bg-brand-soft",
+                        )}
+                        onClick={() =>
+                          setPickerFacet(index, group.key, active ? "" : option.value)
+                        }
+                      >
+                        <span className="min-w-0 truncate">{option.value}</span>
+                        <em
+                          className={cn(
+                            "flex-none text-[11px] font-semibold not-italic",
+                            active ? "text-brand" : "text-subtle",
+                          )}
+                        >
+                          {option.count}
+                        </em>
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </div>
           ))}
         </aside>
 
-        <div className="sl-pick-results">
-          <div className="sl-pick-search">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <circle cx="7" cy="7" r="4.6" stroke="#94a3b8" strokeWidth="1.5" />
-              <path d="M10.5 10.5L14 14" stroke="#94a3b8" strokeWidth="1.5" strokeLinecap="round" />
-            </svg>
-            <input
+        <div className="flex min-h-0 min-w-0 flex-col">
+          <div className="relative px-4 pb-2.5 pt-3.5">
+            <HiMagnifyingGlass
+              aria-hidden="true"
+              className="pointer-events-none absolute left-[26px] top-1/2 -translate-y-[40%] text-[16px] text-subtle"
+            />
+            <Input
               type="text"
               autoFocus
+              aria-label="Search products"
+              className="h-[42px] pl-9 pr-9 text-[14px]"
               value={itemSearch}
               onChange={(e) => setItemSearch(e.target.value)}
               placeholder="Search any product — name, code, brand, sub group..."
@@ -537,7 +617,7 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
             {itemSearch && (
               <button
                 type="button"
-                className="sl-pick-search-clear"
+                className="absolute right-6 top-1/2 grid size-[22px] -translate-y-[40%] cursor-pointer appearance-none place-items-center rounded-full border-0 bg-surface-strong text-[15px] leading-none text-body [font-family:inherit] hover:bg-line-strong"
                 onClick={() => setItemSearch("")}
                 aria-label="Clear search"
               >
@@ -546,41 +626,60 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
             )}
           </div>
 
-          <div className="sl-pick-count">
+          <div className="px-4 pb-2 text-[11px] font-bold uppercase tracking-[0.05em] text-subtle">
             {results.length} product{results.length === 1 ? "" : "s"}
             {activeFacetCount > 0 || term ? " matching" : " available"}
           </div>
 
-          <div className="sl-pick-list">
+          <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3.5">
             {results.length === 0 ? (
-              <div className="sl-pick-empty">
-                <p>Nothing matches that.</p>
-                <span>Try fewer words, or clear a filter on the left.</span>
+              <div className="px-4 py-12 text-center">
+                <p className="m-0 mb-1 text-[14px] font-semibold text-body">
+                  Nothing matches that.
+                </p>
+                <span className="text-[12.5px] text-subtle">
+                  Try fewer words, or clear a filter on the left.
+                </span>
               </div>
             ) : (
-              results.map((product) => (
-                <button
-                  type="button"
-                  key={`${product.item_code}-${product.category}`}
-                  className={`sl-pick-item${product.item_name === row.item ? " is-active" : ""}`}
-                  onClick={() => selectProductForRow(index, product)}
-                >
-                  <span className="sl-pick-item-main">
-                    <span className="sl-pick-item-name">{product.item_name}</span>
-                    <span className="sl-pick-item-meta">
-                      {[product.category, product.brand, product.variety]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </span>
-                  </span>
-                  <span className="sl-pick-item-side">
-                    <span className="sl-pick-item-size">{getProductType(product.item_name)}</span>
-                    {!isFocOrder && product.basic_rate !== null && product.basic_rate !== "" && (
-                      <span className="sl-pick-item-rate">₹ {product.basic_rate}</span>
+              results.map((product) => {
+                const active = product.item_name === row.item;
+                return (
+                  <button
+                    type="button"
+                    key={`${product.item_code}-${product.category}`}
+                    className={cn(
+                      "flex w-full cursor-pointer appearance-none items-center justify-between gap-3",
+                      "rounded-[10px] border px-3 py-2.5 text-left [font-family:inherit] transition-colors",
+                      active
+                        ? "border-brand bg-brand-soft"
+                        : "border-transparent bg-transparent hover:border-brand-line hover:bg-brand-soft/50",
                     )}
-                  </span>
-                </button>
-              ))
+                    onClick={() => selectProductForRow(index, product)}
+                  >
+                    <span className="flex min-w-0 flex-col gap-0.5">
+                      <span className="text-[13.5px] font-semibold leading-snug text-ink">
+                        {product.item_name}
+                      </span>
+                      <span className="text-[11.5px] text-subtle">
+                        {[product.category, product.brand, product.variety]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </span>
+                    </span>
+                    <span className="flex flex-none items-center gap-2.5">
+                      <span className="rounded-full bg-surface-strong px-2.5 py-0.5 text-[11px] font-semibold text-body">
+                        {getProductType(product.item_name)}
+                      </span>
+                      {!isFocOrder && product.basic_rate !== null && product.basic_rate !== "" && (
+                        <span className="min-w-[62px] text-right text-[12.5px] font-bold text-ink">
+                          ₹ {product.basic_rate}
+                        </span>
+                      )}
+                    </span>
+                  </button>
+                );
+              })
             )}
           </div>
         </div>
@@ -589,215 +688,249 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
   };
 
   const renderItemModal = () => {
-    if (itemModalIndex === null) return null;
-    const row = rows[itemModalIndex];
-    if (!row) return null;
-    const index = itemModalIndex;
+    const row = itemModalIndex === null ? null : rows[itemModalIndex];
 
     return (
-      <div className="sl-modal-overlay">
-        <div
-          className={`sl-wiz-modal${isPickingItem ? " is-picking" : ""}`}
-          role="dialog"
-          aria-modal="true"
-          aria-label={itemModalIsNew ? "Add item" : "Edit item"}
-        >
-          <div className="sl-wiz-modal-head">
-            <div>
-              <div className="sl-wiz-eyebrow">{itemModalIsNew ? "Add item" : "Edit item"}</div>
-              <h3 className="sl-wiz-modal-title">
-                {isPickingItem ? "Choose a product" : row.item || "Select a product"}
-              </h3>
-            </div>
-            <button
-              type="button"
-              className="sl-wiz-icon-btn"
-              onClick={cancelItemModal}
-              aria-label="Close"
-              title="Close"
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" />
-              </svg>
-            </button>
-          </div>
+      <Dialog
+        open={row != null}
+        onOpenChange={(next) => {
+          // Escape and the backdrop mean Cancel, which puts the row back the
+          // way it was — the same as the Cancel button. Anything else would
+          // leave a half-built row behind in the list.
+          if (!next) cancelItemModal();
+        }}
+      >
+        {row != null && itemModalIndex !== null && (
+          <DialogContent
+            title={itemModalIsNew ? "Add item" : "Edit item"}
+            // The picker needs room for a facet rail beside a result list; the
+            // quantity form does not.
+            size={isPickingItem ? "xl" : "md"}
+            className={cn(isPickingItem && "h-[min(680px,88vh)]")}
+          >
+            <DialogHeader className="items-start">
+              <div className="min-w-0">
+                <div className={EYEBROW}>{itemModalIsNew ? "Add item" : "Edit item"}</div>
+                <DialogTitle className="mt-0.5">
+                  {isPickingItem ? "Choose a product" : row.item || "Select a product"}
+                </DialogTitle>
+              </div>
+            </DialogHeader>
 
-          <div className={`sl-wiz-modal-body${isPickingItem ? " is-picking" : ""}`}>
-            {isPickingItem ? (
-              renderItemPicker(row, index)
-            ) : (
-              <>
-                <div className="sl-pick-chosen">
-                  <div className="sl-pick-chosen-main">
-                    <div className="sl-pick-chosen-name">{row.item}</div>
-                    <div className="sl-pick-chosen-meta">
-                      {[row.category, row.brand, row.variety, row.type]
-                        .filter(Boolean)
-                        .map((part) => (
-                          <span className="sl-pick-tag" key={part}>
-                            {part}
-                          </span>
-                        ))}
+            <DialogBody className={cn(isPickingItem && "overflow-hidden p-0")}>
+              {isPickingItem ? (
+                renderItemPicker(row, itemModalIndex)
+              ) : (
+                <>
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3.5 rounded-md border border-brand-line bg-brand-soft/40 px-3.5 py-3">
+                    <div className="min-w-0">
+                      <div className="text-[14.5px] font-bold tracking-tight text-ink">
+                        {row.item}
+                      </div>
+                      <div className="mt-1.5 flex flex-wrap gap-1.5">
+                        {[row.category, row.brand, row.variety, row.type]
+                          .filter(Boolean)
+                          .map((part) => (
+                            <span
+                              className="rounded-full border border-line bg-card px-2.5 py-0.5 text-[11px] font-semibold text-body"
+                              key={part}
+                            >
+                              {part}
+                            </span>
+                          ))}
+                      </div>
                     </div>
+                    <Button
+                      onClick={() => {
+                        setItemSearch("");
+                        setIsPickingItem(true);
+                      }}
+                    >
+                      Change item
+                    </Button>
                   </div>
-                  <button
-                    type="button"
-                    className="sl-wiz-btn sl-wiz-btn-ghost"
-                    onClick={() => {
-                      setItemSearch("");
-                      setIsPickingItem(true);
-                    }}
-                  >
-                    Change item
-                  </button>
-                </div>
-                <div className="sl-wiz-item-fields">
-                  <div className="sl-wiz-input">
-                    <label>Boxes</label>
-                    <input
-                      type="number"
-                      name="boxes"
-                      aria-label="Boxes"
-                      value={row.boxes}
-                      onChange={(e) => handleRowChange(index, e)}
-                    />
-                  </div>
-                  <div className="sl-wiz-input">
-                    <label>Qty</label>
-                    <input
-                      type="number"
-                      name="qty"
-                      aria-label="Qty"
-                      value={row.qty}
-                      onChange={(e) => handleRowChange(index, e)}
-                    />
-                  </div>
-                  <div className="sl-wiz-input">
-                    <label>Pcs</label>
-                    <input
-                      type="number"
-                      aria-label="Pcs"
-                      value={row.pcs ? Number(row.pcs).toFixed(1) : ""}
-                      readOnly
-                    />
-                  </div>
-                  <div className="sl-wiz-input">
-                    <label>Ltrs</label>
-                    <input type="number" aria-label="Ltrs" value={row.ltrs} readOnly />
-                  </div>
-                  <div className="sl-wiz-input">
-                    <label>Price List</label>
-                    <input type="number" aria-label="Price List" value={row.priceListBasic} readOnly />
-                  </div>
-                  <div className="sl-wiz-input">
-                    <label>Basic Price</label>
-                    <input
-                      type="number"
-                      name="basicPrice"
-                      aria-label="Basic Price"
-                      value={row.basicPrice}
-                      onChange={(e) => handleRowChange(index, e)}
-                    />
-                  </div>
-                  <div className="sl-wiz-input">
-                    <label>Tax %</label>
-                    <input type="text" aria-label="Tax %" value={Number(row.tax).toFixed(2)} readOnly />
-                  </div>
-                  <div className="sl-wiz-input">
-                    <label>Amount</label>
-                    <input type="number" aria-label="Amount" value={row.amount} readOnly />
-                  </div>
-                </div>
-                {row.item && !isFocOrder && renderSchemePanel(row, index)}
-              </>
-            )}
-          </div>
 
-          {/* The reason this row will not confirm. It was an `alert()`, which
-              covers the fields it is talking about and has to be dismissed
-              before they can be looked at. */}
-          <FieldError message={confirmProblems[row.uid]} />
+                  <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(132px,1fr))]">
+                    {/*
+                      Eight fields, four of them read-only derivations. The
+                      editable ones stay in the same order they have always
+                      been in — Boxes, Qty, then price — because that is the
+                      order the numbers arrive off a purchase order.
+                    */}
+                    <Field label="Boxes">
+                      {(control) => (
+                        <Input
+                          {...control}
+                          type="number"
+                          name="boxes"
+                          value={row.boxes}
+                          onChange={(e) => handleRowChange(itemModalIndex, e)}
+                        />
+                      )}
+                    </Field>
+                    <Field label="Qty">
+                      {(control) => (
+                        <Input
+                          {...control}
+                          type="number"
+                          name="qty"
+                          value={row.qty}
+                          onChange={(e) => handleRowChange(itemModalIndex, e)}
+                        />
+                      )}
+                    </Field>
+                    <Field label="Pcs">
+                      {(control) => (
+                        <Input
+                          {...control}
+                          type="number"
+                          value={row.pcs ? Number(row.pcs).toFixed(1) : ""}
+                          readOnly
+                        />
+                      )}
+                    </Field>
+                    <Field label="Ltrs">
+                      {(control) => (
+                        <Input {...control} type="number" value={row.ltrs} readOnly />
+                      )}
+                    </Field>
+                    <Field label="Price List">
+                      {(control) => (
+                        <Input
+                          {...control}
+                          type="number"
+                          value={row.priceListBasic}
+                          readOnly
+                        />
+                      )}
+                    </Field>
+                    <Field label="Basic Price">
+                      {(control) => (
+                        <Input
+                          {...control}
+                          type="number"
+                          name="basicPrice"
+                          value={row.basicPrice}
+                          onChange={(e) => handleRowChange(itemModalIndex, e)}
+                        />
+                      )}
+                    </Field>
+                    <Field label="Tax %">
+                      {(control) => (
+                        <Input
+                          {...control}
+                          type="text"
+                          value={Number(row.tax).toFixed(2)}
+                          readOnly
+                        />
+                      )}
+                    </Field>
+                    <Field label="Amount">
+                      {(control) => (
+                        <Input {...control} type="number" value={row.amount} readOnly />
+                      )}
+                    </Field>
+                  </div>
 
-          <div className="sl-wiz-modal-foot">
-            {isPickingItem && row.item && (
-              <button
-                type="button"
-                className="sl-wiz-btn sl-wiz-btn-ghost sl-pick-back"
-                onClick={() => setIsPickingItem(false)}
-              >
-                ← Back to quantities
-              </button>
-            )}
-            <button type="button" className="sl-wiz-btn sl-wiz-btn-ghost" onClick={cancelItemModal}>
-              Cancel
-            </button>
-            {!isPickingItem && (
-              <button
-                type="button"
-                className="sl-wiz-btn sl-wiz-btn-primary"
-                onClick={confirmItemModal}
-              >
-                {itemModalIsNew ? "Add Item" : "Save Changes"}
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
+                  {row.item && !isFocOrder && renderSchemePanel(row, itemModalIndex)}
+
+                  {/* The reason this row will not confirm. It was an `alert()`,
+                      which covers the fields it is talking about and has to be
+                      dismissed before they can be looked at. */}
+                  <FieldError message={confirmProblems[row.uid]} />
+                </>
+              )}
+            </DialogBody>
+
+            <DialogFooter>
+              {isPickingItem && row.item && (
+                <Button className="mr-auto" onClick={() => setIsPickingItem(false)}>
+                  ← Back to quantities
+                </Button>
+              )}
+              <Button onClick={cancelItemModal}>Cancel</Button>
+              {!isPickingItem && (
+                <Button variant="primary" onClick={confirmItemModal}>
+                  {itemModalIsNew ? "Add Item" : "Save Changes"}
+                </Button>
+              )}
+            </DialogFooter>
+          </DialogContent>
+        )}
+      </Dialog>
     );
   };
 
   const renderItemSummaryCard = (row: SalesRow, index: number) => (
     <Fragment key={`sum-${index}`}>
-      <div className="sl-wiz-item-summary">
-        <div className="sl-wiz-item-summary-main">
-          <span className="sl-wiz-item-summary-name">{row.item || "Item"}</span>
-          <span className="sl-wiz-item-summary-meta">
+      <div className="flex items-center gap-3.5 rounded-md border border-line bg-card px-4 py-3">
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="truncate text-[14px] font-semibold text-ink">
+            {row.item || "Item"}
+          </span>
+          <span className="text-[12px] text-subtle">
             {row.type ? `${row.type} · ` : ""}
             {row.boxes ? `${row.boxes} box · ` : ""}
             Qty {row.qty || 0}
           </span>
         </div>
-        <span className="sl-wiz-item-summary-amount">₹ {Number(row.amount || 0).toFixed(2)}</span>
-        <div className="sl-wiz-item-summary-actions">
-          <button
-            type="button"
-            className="sl-wiz-icon-btn"
+        <span className="whitespace-nowrap text-[15px] font-bold text-ink">
+          ₹ {Number(row.amount || 0).toFixed(2)}
+        </span>
+        <div className="flex flex-none gap-1.5">
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={() => openEditItem(index)}
             aria-label="Edit item"
             title="Edit item"
           >
-            {pencilIcon}
-          </button>
-          <button
-            type="button"
-            className="sl-wiz-icon-btn sl-wiz-danger"
+            <HiOutlinePencil aria-hidden="true" />
+          </Button>
+          <Button
+            variant="danger"
+            size="icon"
             onClick={() => handleDeleteRow(index)}
             aria-label="Delete item"
             title="Delete item"
           >
-            {trashIcon}
-          </button>
+            <HiOutlineTrash aria-hidden="true" />
+          </Button>
         </div>
       </div>
 
       {/* Free lines belonging to the item above. No edit/delete: they follow the
-          parent, so you change them by changing it. */}
+          parent, so you change them by changing it. They are indented, tinted
+          and dashed so they read as part of the line above rather than as
+          another thing that was ordered. */}
       {getDerivedLines(row, index).map((line) => (
-        <div className="sl-wiz-item-summary is-free" key={line.key}>
-          <div className="sl-wiz-item-summary-main">
-            <span className="sl-wiz-item-summary-name">
+        <div
+          className="ml-6 flex items-center gap-3.5 rounded-md border border-dashed border-line bg-surface px-4 py-2"
+          key={line.key}
+        >
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <span className="truncate text-[14px] font-semibold text-body">
               {line.itemName}
-              <span className={`sl-wiz-free-badge is-${line.kind}`}>
+              <span
+                className={cn(
+                  "ml-2 inline-block rounded-full px-1.5 py-px align-middle text-[11px] font-semibold tracking-[0.02em]",
+                  // The two kinds are tinted apart so a combo's free half and
+                  // a scheme giveaway are told apart at a glance rather than
+                  // by reading the sub-text.
+                  line.kind === "combo" ? "bg-ok-soft text-ok" : "bg-brand-soft text-brand",
+                )}
+              >
                 {line.kind === "combo" ? "Combo" : "Scheme"}
               </span>
             </span>
-            <span className="sl-wiz-item-summary-meta">
+            <span className="text-[12px] text-subtle">
               {line.note}
               {line.itemCode ? ` · ${line.itemCode}` : ""} · Qty {line.qtyLabel}
             </span>
           </div>
-          <span className="sl-wiz-item-summary-amount">₹ 0.00</span>
-          <div className="sl-wiz-item-summary-actions" />
+          <span className="whitespace-nowrap text-[15px] font-semibold text-body">₹ 0.00</span>
+          {/* Keeps the amount column aligned with the paid rows above. */}
+          <div className="w-control-sm flex-none" aria-hidden="true" />
         </div>
       ))}
     </Fragment>
@@ -811,12 +944,14 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
     setSearch: (value: string) => void;
     selectedLabel: string;
     placeholder: string;
+    controlId?: string;
     children: React.ReactNode;
   }) => (
-    <div className={`sl-party-dropdown sl-combo${config.open ? " open" : ""}`} ref={config.refEl}>
-      <input
+    <div className={cn("relative", config.open ? "z-[1300]" : "z-[1]")} ref={config.refEl}>
+      <Input
+        id={config.controlId}
         type="text"
-        className="sl-combo-input"
+        className="pr-8"
         placeholder={config.placeholder}
         aria-label={config.placeholder}
         role="combobox"
@@ -832,292 +967,372 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
           config.setSearch("");
         }}
       />
-      <span className="sl-combo-caret" aria-hidden="true">
-        {chevronIcon}
+      <span
+        className={cn(
+          "pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-subtle transition-transform",
+          config.open && "rotate-180",
+        )}
+        aria-hidden="true"
+      >
+        <HiChevronDown />
       </span>
       {config.open && (
-        <div className="sl-party-menu">
-          <div className="sl-party-options">{config.children}</div>
+        <div className={MENU}>
+          {/* A real listbox of real options. These were anonymous <button>s,
+              which meant the only handle a test had was a class name — and
+              a screen reader got "button" with no sense of a set. */}
+          <div role="listbox" aria-label={config.placeholder} className="max-h-60 overflow-y-auto p-1.5">
+            {config.children}
+          </div>
         </div>
       )}
     </div>
   );
 
+  /** The dispatch and company pickers: a button, not a search box. */
+  const renderTriggerSelect = (config: {
+    refEl: React.RefObject<HTMLDivElement | null>;
+    open: boolean;
+    toggle: () => void;
+    label: string;
+    selectedLabel: string;
+    placeholder: string;
+    controlId?: string;
+    className?: string;
+    children: React.ReactNode;
+  }) => (
+    <div
+      className={cn("relative", config.open ? "z-[1300]" : "z-[1]", config.className)}
+      ref={config.refEl}
+    >
+      <button
+        type="button"
+        id={config.controlId}
+        className={cn(
+          "flex h-control w-full cursor-pointer appearance-none items-center justify-between gap-2",
+          "rounded-sm border border-line-strong bg-card px-3 text-[13px] text-ink",
+          "[font-family:inherit] shadow-[0_1px_2px_rgba(15,23,42,0.04)]",
+          "transition-colors hover:border-brand hover:shadow-focus",
+          "focus-visible:border-brand focus-visible:outline-none focus-visible:shadow-focus",
+        )}
+        aria-haspopup="listbox"
+        aria-expanded={config.open}
+        aria-label={config.label}
+        onClick={config.toggle}
+      >
+        <span className="min-w-0 truncate text-left">
+          {config.selectedLabel || config.placeholder}
+        </span>
+        <HiChevronDown aria-hidden="true" className="flex-none text-subtle" />
+      </button>
+      {config.open && (
+        <div className={MENU}>
+          <div role="listbox" aria-label={config.label} className="max-h-60 overflow-y-auto p-1.5">
+            {config.children}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  /**
+   * The props every option in every picker carries.
+   *
+   * `role="option"` + `aria-selected`, not just a class: these were anonymous
+   * `<button>`s, so a screen reader heard "button" with no sense of belonging
+   * to a set, and a test had nothing to hold but a class name.
+   */
+  const optionProps = (selected: boolean) => ({
+    role: "option" as const,
+    "aria-selected": selected,
+    className: cn(
+      OPTION,
+      selected && "bg-surface shadow-[inset_3px_0_0_var(--color-line-strong)]",
+    ),
+  });
+
+  const emptyOption = (text: string) => (
+    <div className="px-3 py-3.5 text-[13px] text-subtle">{text}</div>
+  );
+
   const renderStepParty = () => (
-    <div className="sl-wiz-step">
-      <div className="sl-wiz-step-intro">
-        <div className="sl-wiz-eyebrow">Step 1</div>
-        <h2 className="sl-wiz-step-title">Party Information</h2>
-        <p className="sl-wiz-step-sub">
+    <div className={cn(PANEL, "p-5 motion-safe:animate-page")}>
+      <div className="mb-4.5">
+        <div className={EYEBROW}>Step 1</div>
+        <h2 className="m-0 mt-1 text-[19px] font-bold tracking-tight text-ink">
+          Party Information
+        </h2>
+        <p className="m-0 mt-1 text-[13px] text-subtle">
           Choose the party — bill-to and ship-to fill in automatically.
         </p>
       </div>
-      <div className="sl-wiz-field-grid">
-        <div className="sl-field sl-wiz-field-full">
-          <label className="sl-label">Party Name</label>
-          {renderCombo({
-            refEl: partyDropdownRef,
-            open: partyDropdownOpen,
-            setOpen: setPartyDropdownOpen,
-            search: partySearch,
-            setSearch: setPartySearch,
-            selectedLabel: selectedPartyLabel,
-            placeholder: "Search party...",
-            children:
-              filteredParties.length > 0 ? (
-                filteredParties.map((party) => (
-                  <button
-                    type="button"
-                    key={`${party.value}-${party.category || ""}`}
-                    className={`sl-party-option${
-                      party.value === formData.parties &&
-                      String(party.category || "").toUpperCase() ===
-                        selectedPartyCategory.toUpperCase()
-                        ? " is-selected"
-                        : ""
-                    }`}
-                    onClick={() => handlePartySelect(party.value, party.category || "")}
-                  >
-                    <span className="sl-party-option-label">{party.label}</span>
-                    <span className="sl-party-option-code">
-                      {[party.value, party.category].filter(Boolean).join(" | ")}
-                    </span>
-                  </button>
-                ))
-              ) : (
-                <div className="sl-party-empty">No parties found</div>
-              ),
-          })}
-          <FieldError message={problems.header.parties} />
-        </div>
+      <div className="grid grid-cols-1 gap-3.5 md:grid-cols-2 lg:grid-cols-3">
+        <Field label="Party Name" span="full" error={problems.header.parties}>
+          {(control) =>
+            renderCombo({
+              refEl: partyDropdownRef,
+              open: partyDropdownOpen,
+              setOpen: setPartyDropdownOpen,
+              search: partySearch,
+              setSearch: setPartySearch,
+              selectedLabel: selectedPartyLabel,
+              placeholder: "Search party...",
+              controlId: control.id,
+              children:
+                filteredParties.length > 0 ? (
+                  filteredParties.map((party) => (
+                    <button
+                      type="button"
+                      key={`${party.value}-${party.category || ""}`}
+                      {...optionProps(
+                        party.value === formData.parties &&
+                          String(party.category || "").toUpperCase() ===
+                            selectedPartyCategory.toUpperCase(),
+                      )}
+                      onClick={() => handlePartySelect(party.value, party.category || "")}
+                    >
+                      <span className="text-[13px] font-medium text-ink">{party.label}</span>
+                      <span className="text-[11px] text-subtle">
+                        {[party.value, party.category].filter(Boolean).join(" | ")}
+                      </span>
+                    </button>
+                  ))
+                ) : (
+                  emptyOption("No parties found")
+                ),
+            })
+          }
+        </Field>
 
-        <div className="sl-field">
-          <label className="sl-label">Bill To Address</label>
-          {renderCombo({
-            refEl: billDropdownRef,
-            open: billDropdownOpen,
-            setOpen: setBillDropdownOpen,
-            search: billSearch,
-            setSearch: setBillSearch,
-            selectedLabel: selectedBillAddressLabel,
-            placeholder: "Search bill to...",
-            children:
-              filteredBillAddresses.length > 0 ? (
-                filteredBillAddresses.map((b) => (
-                  <button
-                    type="button"
-                    key={b.id}
-                    className={`sl-party-option${
-                      String(b.id) === formData.billAddress ? " is-selected" : ""
-                    }`}
-                    onClick={() => handleBillAddressSelect(String(b.id))}
-                  >
-                    <span className="sl-party-option-label">
-                      {b.address_name || b.full_address || b.address_id}
-                    </span>
-                  </button>
-                ))
-              ) : (
-                <div className="sl-party-empty">No addresses found</div>
-              ),
-          })}
-          <FieldError message={problems.header.billAddress} />
-        </div>
+        <Field label="Bill To Address" error={problems.header.billAddress}>
+          {(control) =>
+            renderCombo({
+              refEl: billDropdownRef,
+              open: billDropdownOpen,
+              setOpen: setBillDropdownOpen,
+              search: billSearch,
+              setSearch: setBillSearch,
+              selectedLabel: selectedBillAddressLabel,
+              placeholder: "Search bill to...",
+              controlId: control.id,
+              children:
+                filteredBillAddresses.length > 0 ? (
+                  filteredBillAddresses.map((b) => (
+                    <button
+                      type="button"
+                      key={b.id}
+                      {...optionProps(String(b.id) === formData.billAddress)}
+                      onClick={() => handleBillAddressSelect(String(b.id))}
+                    >
+                      <span className="text-[13px] font-medium text-ink">
+                        {b.address_name || b.full_address || b.address_id}
+                      </span>
+                    </button>
+                  ))
+                ) : (
+                  emptyOption("No addresses found")
+                ),
+            })
+          }
+        </Field>
 
-        <div className="sl-field">
-          <label className="sl-label">Ship To Address</label>
-          {renderCombo({
-            refEl: shipDropdownRef,
-            open: shipDropdownOpen,
-            setOpen: setShipDropdownOpen,
-            search: shipSearch,
-            setSearch: setShipSearch,
-            selectedLabel: selectedShipAddressLabel,
-            placeholder: "Search ship to...",
-            children:
-              filteredShipAddresses.length > 0 ? (
-                filteredShipAddresses.map((s) => (
-                  <button
-                    type="button"
-                    key={s.id}
-                    className={`sl-party-option${
-                      String(s.id) === formData.shipAddress ? " is-selected" : ""
-                    }`}
-                    onClick={() => handleShipAddressSelect(String(s.id))}
-                  >
-                    <span className="sl-party-option-label">
-                      {s.address_name || s.full_address || s.address_id}
-                    </span>
-                  </button>
-                ))
-              ) : (
-                <div className="sl-party-empty">No addresses found</div>
-              ),
-          })}
-          <FieldError message={problems.header.shipAddress} />
-        </div>
+        <Field label="Ship To Address" error={problems.header.shipAddress}>
+          {(control) =>
+            renderCombo({
+              refEl: shipDropdownRef,
+              open: shipDropdownOpen,
+              setOpen: setShipDropdownOpen,
+              search: shipSearch,
+              setSearch: setShipSearch,
+              selectedLabel: selectedShipAddressLabel,
+              placeholder: "Search ship to...",
+              controlId: control.id,
+              children:
+                filteredShipAddresses.length > 0 ? (
+                  filteredShipAddresses.map((s) => (
+                    <button
+                      type="button"
+                      key={s.id}
+                      {...optionProps(String(s.id) === formData.shipAddress)}
+                      onClick={() => handleShipAddressSelect(String(s.id))}
+                    >
+                      <span className="text-[13px] font-medium text-ink">
+                        {s.address_name || s.full_address || s.address_id}
+                      </span>
+                    </button>
+                  ))
+                ) : (
+                  emptyOption("No addresses found")
+                ),
+            })
+          }
+        </Field>
 
-        <div className="sl-field">
-          <label className="sl-label">Dispatch From</label>
-          <div className="sl-wiz-dispatch">
-            <div
-              className={`sl-party-dropdown sl-wiz-dispatch-select${
-                dispatchDropdownOpen ? " open" : ""
-              }`}
-              ref={dispatchDropdownRef}
-            >
-              <button
-                type="button"
-                className="sl-party-trigger"
-                aria-haspopup="listbox"
-                aria-expanded={dispatchDropdownOpen}
-                aria-label="Dispatch From"
-                onClick={() => setDispatchDropdownOpen((prev) => !prev)}
-              >
-                <span>{selectedDispatchLabel || "--select--"}</span>
-                {chevronIcon}
-              </button>
-              {dispatchDropdownOpen && (
-                <div className="sl-party-menu">
-                  <div className="sl-party-options">
-                    {branch.length > 0 ? (
-                      branch.map((d) => (
-                        <button
-                          type="button"
-                          key={d.bpl_id}
-                          className={`sl-party-option${
-                            String(d.bpl_id) === formData.dispatch ? " is-selected" : ""
-                          }`}
-                          onClick={() => handleDispatchSelect(String(d.bpl_id))}
-                        >
-                          <span className="sl-party-option-label">{d.bpl_name}</span>
-                        </button>
-                      ))
+        <Field label="Dispatch From">
+          {(control) => (
+            <div className="relative flex items-center gap-2">
+              {renderTriggerSelect({
+                refEl: dispatchDropdownRef,
+                open: dispatchDropdownOpen,
+                toggle: () => setDispatchDropdownOpen((prev) => !prev),
+                label: "Dispatch From",
+                selectedLabel: selectedDispatchLabel,
+                placeholder: "--select--",
+                controlId: control.id,
+                className: "min-w-0 flex-1",
+                children:
+                  branch.length > 0 ? (
+                    branch.map((d) => (
+                      <button
+                        type="button"
+                        key={d.bpl_id}
+                        {...optionProps(String(d.bpl_id) === formData.dispatch)}
+                        onClick={() => handleDispatchSelect(String(d.bpl_id))}
+                      >
+                        <span className="text-[13px] font-medium text-ink">{d.bpl_name}</span>
+                      </button>
+                    ))
+                  ) : (
+                    emptyOption("No dispatch locations found")
+                  ),
+              })}
+              <div className="relative flex-none" ref={dispatchInfoRef}>
+                <button
+                  type="button"
+                  className={cn(
+                    "size-[30px] cursor-pointer appearance-none rounded-full border border-line-strong",
+                    "bg-surface font-serif text-[13px] font-bold italic text-subtle",
+                    "transition-colors hover:border-brand hover:bg-brand-soft hover:text-brand",
+                    "focus-visible:outline-none focus-visible:shadow-focus",
+                  )}
+                  onClick={() => setDispatchInfoOpen((prev) => !prev)}
+                  aria-label="Dispatch location details"
+                  aria-expanded={dispatchInfoOpen}
+                  title="Dispatch location details"
+                >
+                  i
+                </button>
+                {dispatchInfoOpen && (
+                  <div className="absolute right-0 top-[calc(100%+8px)] z-40 w-60 rounded-[10px] border border-line bg-card p-3.5 shadow-panel">
+                    <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.06em] text-subtle">
+                      Dispatch location
+                    </div>
+                    {selectedDispatch ? (
+                      <dl className="m-0 flex flex-col gap-[7px]">
+                        <div className="flex justify-between gap-3">
+                          <dt className="text-[12px] text-subtle">Name</dt>
+                          <dd className="m-0 text-right text-[12px] font-semibold text-ink">
+                            {selectedDispatch.bpl_name || "—"}
+                          </dd>
+                        </div>
+                        <div className="flex justify-between gap-3">
+                          <dt className="text-[12px] text-subtle">Branch ID</dt>
+                          <dd className="m-0 text-right text-[12px] font-semibold text-ink">
+                            {selectedDispatch.bpl_id ?? "—"}
+                          </dd>
+                        </div>
+                        {selectedDispatch.address && (
+                          <div className="flex justify-between gap-3">
+                            <dt className="text-[12px] text-subtle">Address</dt>
+                            <dd className="m-0 text-right text-[12px] font-semibold text-ink">
+                              {selectedDispatch.address}
+                            </dd>
+                          </div>
+                        )}
+                      </dl>
                     ) : (
-                      <div className="sl-party-empty">No dispatch locations found</div>
+                      <p className="m-0 text-[12px] leading-relaxed text-subtle">
+                        This is the default dispatch branch for your orders.
+                      </p>
                     )}
                   </div>
-                </div>
-              )}
+                )}
+              </div>
+              <input type="hidden" name="dispatch" value={formData.dispatch} />
             </div>
-            <div className="sl-wiz-info" ref={dispatchInfoRef}>
-              <button
-                type="button"
-                className="sl-wiz-info-btn"
-                onClick={() => setDispatchInfoOpen((prev) => !prev)}
-                aria-label="Dispatch location details"
-                title="Dispatch location details"
-              >
-                i
-              </button>
-              {dispatchInfoOpen && (
-                <div className="sl-wiz-info-pop">
-                  <div className="sl-wiz-info-pop-title">Dispatch location</div>
-                  {selectedDispatch ? (
-                    <dl className="sl-wiz-info-list">
-                      <div>
-                        <dt>Name</dt>
-                        <dd>{selectedDispatch.bpl_name || "—"}</dd>
-                      </div>
-                      <div>
-                        <dt>Branch ID</dt>
-                        <dd>{selectedDispatch.bpl_id ?? "—"}</dd>
-                      </div>
-                      {selectedDispatch.address && (
-                        <div>
-                          <dt>Address</dt>
-                          <dd>{selectedDispatch.address}</dd>
-                        </div>
-                      )}
-                    </dl>
-                  ) : (
-                    <p className="sl-wiz-info-empty">
-                      This is the default dispatch branch for your orders.
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
-            <input type="hidden" name="dispatch" value={formData.dispatch} />
-          </div>
-        </div>
+          )}
+        </Field>
 
-        <div className="sl-field">
-          <label className="sl-label">Date</label>
-          <div className="sl-input-wrap">
-            <input type="date" name="date" aria-label="Date" value={formData.date} readOnly />
-            <div className="sl-focus-line" />
-          </div>
-        </div>
+        <Field label="Date">
+          {(control) => (
+            <Input {...control} type="date" name="date" value={formData.date} readOnly />
+          )}
+        </Field>
 
-        <div className="sl-field">
-          <label className="sl-label" htmlFor="wiz-delivery-date">
-            Delivery Date
-          </label>
-          <div className="sl-input-wrap">
-            <input
-              id="wiz-delivery-date"
+        <Field label="Delivery Date" error={problems.header.Deliverydate}>
+          {(control) => (
+            <Input
+              {...control}
               type="date"
               name="Deliverydate"
               value={formData.Deliverydate}
               onChange={handleChange}
             />
-            <div className="sl-focus-line" />
-          </div>
-          <FieldError message={problems.header.Deliverydate} />
-        </div>
+          )}
+        </Field>
       </div>
     </div>
   );
 
   const renderStepItems = () => (
-    <div className="sl-wiz-step">
-      <div className="sl-wiz-items-head">
-        <div className="sl-wiz-step-intro">
-          <div className="sl-wiz-eyebrow">Step 2</div>
-          <h2 className="sl-wiz-step-title">Items</h2>
+    <div className={cn(PANEL, "p-5 motion-safe:animate-page")}>
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div>
+          <div className={EYEBROW}>Step 2</div>
+          <h2 className="m-0 mt-1 text-[19px] font-bold tracking-tight text-ink">Items</h2>
         </div>
-        <div className="sl-wiz-items-meta">
-          <span>
+        <div className="flex flex-col items-end gap-0.5">
+          <span className="text-[12px] text-subtle">
             {/* Counts the free lines too, so the number matches what is listed. */}
             {visibleLineCount} item{visibleLineCount === 1 ? "" : "s"}
           </span>
-          <strong>₹ {totalAmount.toFixed(2)}</strong>
+          <strong className="text-[18px] font-bold text-ink">₹ {totalAmount.toFixed(2)}</strong>
         </div>
       </div>
       {confirmedRows.length > 0 ? (
-        <div className="sl-wiz-item-list">
+        <div className="flex flex-col gap-3">
           {rows.map((row, index) => (row.confirmed ? renderItemSummaryCard(row, index) : null))}
         </div>
       ) : (
-        <div className="sl-wiz-item-empty">
-          <p>No items added yet.</p>
-          <span>Click “Add Item” to start building this order.</span>
+        <div className="flex flex-col items-center gap-1 rounded-md border-[1.5px] border-dashed border-line-strong bg-surface px-4 py-9 text-center">
+          <p className="m-0 text-[14px] font-semibold text-ink-soft">No items added yet.</p>
+          <span className="text-[12px] text-subtle">
+            Click “Add Item” to start building this order.
+          </span>
         </div>
       )}
-      <button type="button" className="sl-wiz-add-item" onClick={openAddItem}>
+      <button
+        type="button"
+        className={cn(
+          "mt-3.5 w-full cursor-pointer appearance-none rounded-md border-[1.5px] border-dashed border-line-strong",
+          "bg-surface p-3 text-[13px] font-semibold text-brand [font-family:inherit]",
+          "transition-colors hover:border-brand hover:bg-brand-soft",
+          "focus-visible:outline-none focus-visible:shadow-focus",
+        )}
+        onClick={openAddItem}
+      >
         + Add Item
       </button>
     </div>
   );
 
   const renderStepSummary = () => (
-    <div className="sl-wiz-step">
-      <div className="sl-wiz-step-intro">
-        <div className="sl-wiz-eyebrow">Step 3</div>
-        <h2 className="sl-wiz-step-title">Order Summary</h2>
+    <div className={cn(PANEL, "p-5 motion-safe:animate-page")}>
+      <div className="mb-4.5">
+        <div className={EYEBROW}>Step 3</div>
+        <h2 className="m-0 mt-1 text-[19px] font-bold tracking-tight text-ink">Order Summary</h2>
       </div>
-      <div className="sl-wiz-field-grid">
+      <div className="grid grid-cols-1 gap-3.5 md:grid-cols-2 lg:grid-cols-3">
         {canEditPoNumber && (
-          <div className="sl-field">
-            <label className="sl-label" htmlFor="wiz-po">
-              {poField.label}
-              {poField.required && <span className="sl-req-mark"> *</span>}
-            </label>
-            <div className="sl-input-wrap">
-              <input
+          <Field
+            label={poField.label}
+            required={poField.required}
+            error={problems.header.poNumber}
+          >
+            {(control) => (
+              <Input
+                {...control}
                 type="text"
-                id="wiz-po"
                 name="poNumber"
                 value={formData.poNumber}
                 onChange={handleChange}
@@ -1127,173 +1342,187 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
                 // form element wraps this — see the 3.4 migration notes.
                 required={poField.required}
               />
-              <div className="sl-focus-line" />
-            </div>
-            <FieldError message={problems.header.poNumber} />
-          </div>
+            )}
+          </Field>
         )}
         {isMartOrder && <WarehouseField form={form} />}
-        <div className="sl-field">
-          <label className="sl-label">Company</label>
-          <div
-            className={`sl-party-dropdown${companyDropdownOpen ? " open" : ""}`}
-            ref={companyDropdownRef}
-          >
-            <button
-              type="button"
-              className="sl-party-trigger"
-              aria-haspopup="listbox"
-              aria-expanded={companyDropdownOpen}
-              aria-label="Company"
-              onClick={() => setCompanyDropdownOpen((prev) => !prev)}
-            >
-              <span>{selectedCompanyLabel || "Select Company"}</span>
-              {chevronIcon}
-            </button>
-            {companyDropdownOpen && (
-              <div className="sl-party-menu">
-                <div className="sl-party-options">
-                  {company.length > 0 ? (
-                    company.map((item) => (
-                      <button
-                        type="button"
-                        key={item.id}
-                        className={`sl-party-option${
-                          String(item.id) === formData.company ? " is-selected" : ""
-                        }`}
-                        onClick={() => handleCompanySelect(String(item.id))}
-                      >
-                        <span className="sl-party-option-label">{item.name}</span>
-                      </button>
-                    ))
-                  ) : (
-                    <div className="sl-party-empty">No companies found</div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
+        <Field label="Company">
+          {(control) =>
+            renderTriggerSelect({
+              refEl: companyDropdownRef,
+              open: companyDropdownOpen,
+              toggle: () => setCompanyDropdownOpen((prev) => !prev),
+              label: "Company",
+              selectedLabel: selectedCompanyLabel,
+              placeholder: "Select Company",
+              controlId: control.id,
+              children:
+                company.length > 0 ? (
+                  company.map((item) => (
+                    <button
+                      type="button"
+                      key={item.id}
+                      {...optionProps(String(item.id) === formData.company)}
+                      onClick={() => handleCompanySelect(String(item.id))}
+                    >
+                      <span className="text-[13px] font-medium text-ink">{item.name}</span>
+                    </button>
+                  ))
+                ) : (
+                  emptyOption("No companies found")
+                ),
+            })
+          }
+        </Field>
+      </div>
+
+      <div className="my-4.5 overflow-hidden rounded-md border border-line">
+        <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
+          <span className="text-[13px] text-subtle">Total</span>
+          <strong className="text-[14px] font-semibold text-ink">
+            ₹ {totalAmount.toFixed(2)}
+          </strong>
+        </div>
+        <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
+          <span className="text-[13px] text-subtle">Tax</span>
+          <strong className="text-[14px] font-semibold text-ink">₹ {taxAmount.toFixed(2)}</strong>
+        </div>
+        <div className="flex items-center justify-between bg-brand-soft px-4 py-2.5">
+          <span className="text-[13px] text-brand">Grand Total</span>
+          <strong className="text-[18px] font-bold text-brand">₹ {grandTotal.toFixed(2)}</strong>
         </div>
       </div>
 
-      <div className="sl-wiz-totals">
-        <div className="sl-wiz-total-row">
-          <span>Total</span>
-          <strong>₹ {totalAmount.toFixed(2)}</strong>
-        </div>
-        <div className="sl-wiz-total-row">
-          <span>Tax</span>
-          <strong>₹ {taxAmount.toFixed(2)}</strong>
-        </div>
-        <div className="sl-wiz-total-row sl-wiz-total-grand">
-          <span>Grand Total</span>
-          <strong>₹ {grandTotal.toFixed(2)}</strong>
-        </div>
-      </div>
-
-      <div className="sl-field sl-full">
-        <label className="sl-label" htmlFor="wiz-comment">
-          Comment
-        </label>
-        <div className="sl-input-wrap sl-input-wrap-textarea">
-          <textarea
-            id="wiz-comment"
+      <Field label="Comment" span="full">
+        {(control) => (
+          <Textarea
+            {...control}
             name="comment"
             rows={3}
             placeholder="Add a note..."
             value={formData.comment}
             onChange={(e) => setFormData((prev) => ({ ...prev, comment: e.target.value }))}
           />
-          <div className="sl-focus-line" />
-        </div>
-      </div>
+        )}
+      </Field>
     </div>
   );
 
   const renderStepReview = () => (
-    <div className="sl-wiz-step">
-      <div className="sl-wiz-step-intro">
-        <div className="sl-wiz-eyebrow">Step 4</div>
-        <h2 className="sl-wiz-step-title">Review &amp; Submit</h2>
-        <p className="sl-wiz-step-sub">Confirm the details below before saving.</p>
+    <div className={cn(PANEL, "p-5 motion-safe:animate-page")}>
+      <div className="mb-4.5">
+        <div className={EYEBROW}>Step 4</div>
+        <h2 className="m-0 mt-1 text-[19px] font-bold tracking-tight text-ink">
+          Review &amp; Submit
+        </h2>
+        <p className="m-0 mt-1 text-[13px] text-subtle">Confirm the details below before saving.</p>
       </div>
       {/* Everything still wrong, on the step that has the Save button. The
           individual messages are on steps 1 and 3, which the user has left by
           the time they press it — a message they have to navigate back to is
           only half an answer. */}
       <ProblemSummary problems={problems} />
-      <div className="sl-wiz-review">
-        <div className="sl-wiz-review-hero">
-          <span className="sl-wiz-review-label">Party</span>
-          <strong className="sl-wiz-review-party">{selectedPartyLabel || "—"}</strong>
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-1 rounded-md border border-brand-line bg-brand-soft px-4.5 py-4">
+          <span className={EYEBROW}>Party</span>
+          <strong className="text-[20px] font-extrabold tracking-tight text-ink">
+            {selectedPartyLabel || "—"}
+          </strong>
         </div>
-        <div className="sl-wiz-review-secondary">
-          <div>
-            <span>Bill To</span>
-            <em>{selectedBillAddressLabel || "—"}</em>
-          </div>
-          <div>
-            <span>Ship To</span>
-            <em>{selectedShipAddressLabel || "—"}</em>
-          </div>
-          <div>
-            <span>Dispatch</span>
-            <em>{selectedDispatchLabel || "—"}</em>
-          </div>
-          <div>
-            <span>Delivery Date</span>
-            <em>{formData.Deliverydate || "—"}</em>
-          </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {[
+            { label: "Bill To", value: selectedBillAddressLabel },
+            { label: "Ship To", value: selectedShipAddressLabel },
+            { label: "Dispatch", value: selectedDispatchLabel },
+            { label: "Delivery Date", value: formData.Deliverydate },
+          ].map((entry) => (
+            <div className="flex flex-col gap-0.5" key={entry.label}>
+              <span className="text-[11px] font-semibold uppercase tracking-[0.02em] text-subtle">
+                {entry.label}
+              </span>
+              <em className="text-[13px] font-medium not-italic text-ink-soft">
+                {entry.value || "—"}
+              </em>
+            </div>
+          ))}
         </div>
-        <div className="sl-wiz-review-items">
-          <div className="sl-wiz-review-items-head">
-            <span>Items</span>
-            <span>{visibleLineCount}</span>
+        <div className="overflow-hidden rounded-md border border-line">
+          <div className="flex items-center justify-between border-b border-line bg-surface px-4 py-2.5">
+            <span className="text-[12px] font-bold uppercase tracking-[0.04em] text-subtle">
+              Items
+            </span>
+            <span className="text-[12px] font-bold uppercase tracking-[0.04em] text-subtle">
+              {visibleLineCount}
+            </span>
           </div>
           {/* Free lines are listed here too. This is the last screen before the
               order is saved, so it has to match what actually gets sent. */}
           {rows.map((row, index) =>
             row.confirmed ? (
               <Fragment key={`rev-${index}`}>
-                <div className="sl-wiz-review-item">
-                  <strong>{row.item || "Item"}</strong>
-                  <span>Qty {row.qty || 0}</span>
-                  <span className="sl-wiz-review-item-amt">
+                <div className="flex items-center gap-3 border-b border-line px-4 py-2.5 last:border-b-0">
+                  <strong className="min-w-0 flex-1 text-[14px] font-bold text-ink">
+                    {row.item || "Item"}
+                  </strong>
+                  <span className="text-[12px] text-subtle">Qty {row.qty || 0}</span>
+                  <span className="text-[12px] font-bold text-ink">
                     ₹ {Number(row.amount || 0).toFixed(2)}
                   </span>
                 </div>
                 {getDerivedLines(row, index).map((line) => (
-                  <div className="sl-wiz-review-item is-free" key={line.key}>
-                    <strong>
+                  <div
+                    className="flex items-center gap-3 border-b border-line bg-surface py-2.5 pl-[34px] pr-4 last:border-b-0"
+                    key={line.key}
+                  >
+                    <strong className="min-w-0 flex-1 text-[14px] font-semibold text-body">
                       {line.itemName}
-                      <span className={`sl-wiz-free-badge is-${line.kind}`}>
+                      <span
+                        className={cn(
+                          "ml-2 inline-block rounded-full px-1.5 py-px align-middle text-[11px] font-semibold",
+                          line.kind === "combo"
+                            ? "bg-ok-soft text-ok"
+                            : "bg-brand-soft text-brand",
+                        )}
+                      >
                         {line.kind === "combo" ? "Combo" : "Scheme"}
                       </span>
                     </strong>
-                    <span>Qty {line.qtyLabel}</span>
-                    <span className="sl-wiz-review-item-amt">₹ 0.00</span>
+                    <span className="text-[12px] text-subtle">Qty {line.qtyLabel}</span>
+                    <span className="text-[12px] font-semibold text-body">₹ 0.00</span>
                   </div>
                 ))}
               </Fragment>
             ) : null,
           )}
         </div>
-        <div className="sl-wiz-review-foot">
+        <div className="flex flex-col gap-2.5">
           {formData.poNumber && (
-            <div className="sl-wiz-review-kv">
-              <span>{poField.label}</span>
-              <strong>{formData.poNumber}</strong>
+            <div className="flex items-start justify-between gap-4">
+              <span className="flex-none text-[12px] font-semibold uppercase tracking-[0.02em] text-subtle">
+                {poField.label}
+              </span>
+              <strong className="text-right text-[14px] font-bold text-ink">
+                {formData.poNumber}
+              </strong>
             </div>
           )}
           {formData.comment && (
-            <div className="sl-wiz-review-kv">
-              <span>Comments</span>
-              <strong>{formData.comment}</strong>
+            <div className="flex items-start justify-between gap-4">
+              <span className="flex-none text-[12px] font-semibold uppercase tracking-[0.02em] text-subtle">
+                Comments
+              </span>
+              <strong className="text-right text-[14px] font-bold text-ink">
+                {formData.comment}
+              </strong>
             </div>
           )}
-          <div className="sl-wiz-review-kv sl-wiz-review-total">
-            <span>Grand Total</span>
-            <strong>₹ {grandTotal.toFixed(2)}</strong>
+          <div className="flex items-start justify-between gap-4 border-t border-dashed border-line-strong pt-3">
+            <span className="flex-none text-[12px] font-semibold uppercase tracking-[0.02em] text-subtle">
+              Grand Total
+            </span>
+            <strong className="text-right text-[20px] font-bold text-brand">
+              ₹ {grandTotal.toFixed(2)}
+            </strong>
           </div>
         </div>
       </div>
@@ -1324,47 +1553,87 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
     setShowSaveConfirm(true);
   };
 
+  /**
+   * The stepper.
+   *
+   * An ordered list rather than a row of buttons, and each node carries
+   * `aria-current="step"` — the tick and the blue fill were the only thing
+   * saying where you were, which is nothing at all to a screen reader.
+   */
   const renderStepper = () => (
-    <div className="sl-wiz-stepper">
-      {wizardSteps.map((step, i) => (
-        <Fragment key={step.n}>
-          <button
-            type="button"
-            className={`sl-wiz-step-node${currentStep === step.n ? " is-active" : ""}${
-              currentStep > step.n ? " is-complete" : ""
-            }`}
-            onClick={() => {
-              if (step.n < currentStep) setCurrentStep(step.n);
-            }}
-            disabled={step.n > currentStep}
-          >
-            <span className="sl-wiz-step-num">{currentStep > step.n ? "✓" : step.n}</span>
-            <span className="sl-wiz-step-label">{step.label}</span>
-          </button>
-          {i < wizardSteps.length - 1 && (
-            <span className={`sl-wiz-step-line${currentStep > step.n ? " is-complete" : ""}`} />
-          )}
-        </Fragment>
-      ))}
-    </div>
+    <ol className={cn(PANEL, "m-0 flex list-none items-center gap-1.5 px-4.5 py-3.5")}>
+      {wizardSteps.map((step, i) => {
+        const active = currentStep === step.n;
+        const complete = currentStep > step.n;
+        return (
+          <Fragment key={step.n}>
+            <li className="flex-none">
+              <button
+                type="button"
+                aria-current={active ? "step" : undefined}
+                className={cn(
+                  "inline-flex cursor-pointer appearance-none items-center gap-2.5 rounded-lg border-0",
+                  "bg-transparent px-1.5 py-1 [font-family:inherit] transition-opacity",
+                  "focus-visible:outline-none focus-visible:shadow-focus",
+                  "disabled:cursor-default disabled:opacity-55",
+                )}
+                onClick={() => {
+                  if (step.n < currentStep) setCurrentStep(step.n);
+                }}
+                disabled={step.n > currentStep}
+              >
+                <span
+                  className={cn(
+                    "inline-flex size-[26px] flex-shrink-0 items-center justify-center rounded-full",
+                    "border-[1.5px] text-[12px] font-bold",
+                    complete && "border-transparent bg-brand text-white",
+                    active && "border-brand bg-brand-soft text-brand",
+                    !complete && !active && "border-transparent bg-surface-strong text-subtle",
+                  )}
+                >
+                  {complete ? "✓" : step.n}
+                </span>
+                <span
+                  className={cn(
+                    "whitespace-nowrap text-[13px] font-semibold max-sm:hidden",
+                    active ? "text-ink" : complete ? "text-ink-soft" : "text-subtle",
+                  )}
+                >
+                  {step.label}
+                </span>
+              </button>
+            </li>
+            {i < wizardSteps.length - 1 && (
+              <li
+                aria-hidden="true"
+                className={cn(
+                  "h-0.5 min-w-4 flex-1 rounded-sm",
+                  complete ? "bg-brand" : "bg-line",
+                )}
+              />
+            )}
+          </Fragment>
+        );
+      })}
+    </ol>
   );
 
   const renderWizardFooter = () => (
-    <div className="sl-wiz-footer">
-      {currentStep > 1 ? (
-        <button
-          type="button"
-          className="sl-wiz-btn sl-wiz-btn-ghost"
-          onClick={() => setCurrentStep((s) => Math.max(1, s - 1))}
-        >
-          Back
-        </button>
-      ) : (
-        <button type="button" className="sl-wiz-btn sl-wiz-btn-ghost" onClick={handleClearForm}>
-          Clear
-        </button>
+    <div
+      className={cn(
+        PANEL,
+        "sticky bottom-0 flex items-center gap-3 px-4.5 py-3.5",
+        // Translucent, so the content scrolling under it stays half-visible
+        // rather than being hidden by a solid bar.
+        "bg-card/90 backdrop-blur-[8px] shadow-[0_-2px_16px_rgba(15,23,42,0.05)]",
       )}
-      <div className="sl-wiz-footer-spacer" />
+    >
+      {currentStep > 1 ? (
+        <Button onClick={() => setCurrentStep((s) => Math.max(1, s - 1))}>Back</Button>
+      ) : (
+        <Button onClick={handleClearForm}>Clear</Button>
+      )}
+      <div className="flex-1" />
       {/*
         Save as Draft, on every step.
 
@@ -1384,42 +1653,38 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
         requires mode "edit", so inside this component the guard is always true.
         Copying it across would have been a condition that cannot be false.
       */}
-      <button
-        type="button"
-        className="sl-wiz-btn sl-wiz-btn-ghost"
+      <Button
         onClick={handleSaveDraft}
         disabled={isSaving || isSavingDraft || !formData.parties}
       >
         {isSavingDraft ? "Saving Draft..." : "Save as Draft"}
-      </button>
+      </Button>
       {currentStep < 4 ? (
-        <button
-          type="button"
-          className="sl-wiz-btn sl-wiz-btn-primary"
+        <Button
+          variant="primary"
           disabled={!canAdvance(currentStep)}
           onClick={() => {
             if (canAdvance(currentStep)) setCurrentStep((s) => Math.min(4, s + 1));
           }}
         >
           Continue
-        </button>
+        </Button>
       ) : (
-        <button
-          type="button"
-          className="sl-wiz-btn sl-wiz-btn-primary"
+        <Button
+          variant="primary"
           disabled={isSaving || confirmedRows.length === 0}
           onClick={handleWizardSubmit}
         >
           {isSaving ? "Saving..." : "Save Order"}
-        </button>
+        </Button>
       )}
     </div>
   );
 
-  const renderWizard = () => (
-    <div className="sl-wiz">
+  return (
+    <div className="flex flex-col gap-4.5">
       {renderStepper()}
-      <div className="sl-wiz-body">
+      <div className="min-h-[200px]">
         {currentStep === 1 && renderStepParty()}
         {currentStep === 2 && renderStepItems()}
         {currentStep === 3 && renderStepSummary()}
@@ -1429,6 +1694,4 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
       {renderItemModal()}
     </div>
   );
-
-  return renderWizard();
 }

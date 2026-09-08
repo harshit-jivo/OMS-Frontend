@@ -71,12 +71,13 @@ import { renderPage } from "../test/renderPage";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const PAGES: Array<SmokeEntry<any>> = [
   page("/", () => import("./Login")),
-  page("/Dashboard", () => import("./Dashboard")),
-  page("/Profile", () => import("./Profile")),
+  page("/Home", () => import("./Home")),
+  page("/Sales_Dashboard", () => import("./Sales_Dashboard")),
   page("/App_User", () => import("./App_User")),
   page("/Sap_Sync", () => import("./Sap_Sync")),
   page("/Device_Management", () => import("./Device_Management")),
   page("/Page_Permissions", () => import("./Page_Permissions")),
+  page("/Role_Permissions", () => import("./Role_Permissions")),
   page("/UI_Labels", () => import("./UI_Labels")),
   page("/Party_Assignment", () => import("./Party_Assignment")),
   page("/Party_Product_Assignment", () => import("./Party_Product_Assignment")),

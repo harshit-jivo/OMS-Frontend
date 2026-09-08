@@ -1,8 +1,15 @@
+/**
+ * Generic master-data screen: lists every value from a DB dropdown table and
+ * lets the user add a new one. Input is forced to CAPITAL letters as you type,
+ * matching how the values are stored.
+ */
 import { useEffect, useState } from "react";
-import { HiPlusCircle } from "react-icons/hi2";
-import { NicField, ErrorAlert, SuccessAlert } from "../../components/NicUI";
-import { messageFrom } from "@/lib/apiError";
-import { type HaisOption } from "../../services/haisService";
+import { HiOutlinePlus } from "react-icons/hi2";
+
+import { Button } from "@/components/ui/button";
+import { Field, Input } from "@/components/ui/form";
+import { Card, CardHeader, CardTitle, EmptyState } from "@/components/ui/page";
+import { TableSkeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -11,6 +18,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { messageFrom } from "@/lib/apiError";
+import { showToast } from "@/lib/toastStore";
+import { type HaisOption } from "../../services/haisService";
 
 type Props = {
   /** Plural title, e.g. "Departments". */
@@ -23,24 +33,19 @@ type Props = {
   create: (name: string) => Promise<HaisOption>;
 };
 
-/**
- * Generic master-data screen: lists every value from a DB dropdown table and
- * lets the user add a new one. Input is forced to CAPITAL letters as you type,
- * matching how the values are stored.
- */
 export default function OptionManager({ title, singular, load, create }: Props) {
   const [rows, setRows] = useState<HaisOption[]>([]);
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
 
   useEffect(() => {
     let alive = true;
     load()
       .then((r) => alive && setRows(r))
-      .catch(() => alive && setError(`Could not load ${title} from the server.`))
+      .catch(() => alive && setLoadError(`Could not load ${title} from the server.`))
       .finally(() => alive && setLoading(false));
     return () => {
       alive = false;
@@ -50,7 +55,6 @@ export default function OptionManager({ title, singular, load, create }: Props) 
   const add = async () => {
     const value = name.trim().toUpperCase();
     setError("");
-    setSuccess("");
     if (!value) {
       setError(`${singular} name is required.`);
       return;
@@ -63,75 +67,88 @@ export default function OptionManager({ title, singular, load, create }: Props) 
     try {
       await create(value);
       setName("");
-      setSuccess(`${singular} "${value}" added.`);
+      showToast({ title: `${singular} added`, message: value });
       setRows(await load());
     } catch (err) {
-      setError(messageFrom(err, "Request failed"));
+      showToast({
+        title: `Could not add the ${singular.toLowerCase()}`,
+        message: messageFrom(err, "The server refused the request."),
+      });
     } finally {
       setBusy(false);
     }
   };
 
+  const example =
+    singular === "Department" ? "ACCOUNTS" : singular === "Storage Type" ? "SSD" : "LAPTOP";
+
   return (
-    <section className="ofs-card ofs-card--wide">
-      <div className="ofs-card-head">
-        <span className="ofs-card-mark" />
-        <h2>{title}</h2>
-      </div>
-
-      {/* Add row */}
-      <div className="nic-form-grid">
-        <NicField label={`Add ${singular}`} hint="Stored in CAPITAL letters">
-          <input
-            className="nic-input"
-            value={name}
-            // Force uppercase as the user types.
-            onChange={(e) => setName(e.target.value.toUpperCase())}
-            onKeyDown={(e) => e.key === "Enter" && void add()}
-            placeholder={`e.g. ${singular === "Department" ? "ACCOUNTS" : singular === "Storage Type" ? "SSD" : "LAPTOP"}`}
-          />
-        </NicField>
-      </div>
-
-      <div className="nic-actions-row">
-        <button className="ofs-primary" onClick={() => void add()} disabled={busy}>
-          <HiPlusCircle className="nic-icon-lead" />
-          {busy ? "Adding…" : `Add ${singular}`}
-        </button>
-      </div>
-
-      <ErrorAlert>{error}</ErrorAlert>
-      <SuccessAlert>{success}</SuccessAlert>
-
-      {/* List */}
-      <div className="nic-table-wrap nic-table-wrap--offset">
-        <Table density="compact">
-          <TableHeader>
-            <TableRow>
-              <TableHead className="nic-col-tiny">#</TableHead>
-              <TableHead>{singular}</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {loading ? (
-              <TableRow>
-                <TableCell colSpan={2} className="nic-note">Loading…</TableCell>
-              </TableRow>
-            ) : rows.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={2} className="nic-note">No {title.toLowerCase()} yet — add one above.</TableCell>
-              </TableRow>
-            ) : (
-              rows.map((r, i) => (
-                <TableRow key={r.id}>
-                  <TableCell>{i + 1}</TableCell>
-                  <TableCell>{r.name}</TableCell>
-                </TableRow>
-              ))
+    <div className="space-y-4 sm:space-y-6">
+      <Card>
+        <form
+          className="flex flex-wrap items-end gap-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void add();
+          }}
+        >
+          <Field
+            label={`Add ${singular.toLowerCase()}`}
+            hint={error ? undefined : "Stored in CAPITAL letters"}
+            error={error || undefined}
+            className="min-w-[240px] max-w-[420px] flex-1"
+          >
+            {(c) => (
+              <Input
+                {...c}
+                value={name}
+                // Force uppercase as the user types.
+                onChange={(e) => setName(e.target.value.toUpperCase())}
+                placeholder={`e.g. ${example}`}
+                autoComplete="off"
+              />
             )}
-          </TableBody>
-        </Table>
-      </div>
-    </section>
+          </Field>
+          {/* The field always has a line under it (hint or error), so the
+              button sits on the control, not the caption. */}
+          <Button type="submit" variant="primary" disabled={busy} className="mb-[21px]">
+            <HiOutlinePlus aria-hidden="true" /> {busy ? "Adding…" : `Add ${singular.toLowerCase()}`}
+          </Button>
+        </form>
+      </Card>
+
+      <Card className="overflow-hidden p-0">
+        <CardHeader className="mb-0 border-b border-line px-4 py-3">
+          <CardTitle>
+            {title}{" "}
+            <span className="font-medium text-subtle">{loading ? "" : `(${rows.length})`}</span>
+          </CardTitle>
+        </CardHeader>
+        {loading ? (
+          <TableSkeleton rows={4} columns={2} />
+        ) : loadError ? (
+          <EmptyState title={`Could not load ${title.toLowerCase()}`} hint={loadError} />
+        ) : rows.length === 0 ? (
+          <EmptyState title={`No ${title.toLowerCase()} yet`} hint="Add one above." />
+        ) : (
+          <Table density="compact">
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-16">#</TableHead>
+                <TableHead>{singular}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((r, i) => (
+                <TableRow key={r.id}>
+                  <TableCell className="text-subtle">{i + 1}</TableCell>
+                  <TableCell className="font-medium text-ink">{r.name}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </Card>
+    </div>
   );
 }

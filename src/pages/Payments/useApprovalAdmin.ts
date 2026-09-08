@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useAction } from "../../auth/actions";
+import { showToast } from "@/lib/toastStore";
 
 /**
  * Minimal async-resource hook.
@@ -94,26 +95,25 @@ export function useResource<T>(
 
 /** Transient success/failure banner. */
 export function useToast() {
-  const [toast, setToast] = useState<{ text: string; kind: "ok" | "err" } | null>(
-    null,
-  );
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
+  /*
+   * The console had its OWN toast: a piece of state, a 3s timer, a cleanup
+   * effect, and a fixed-position div rendered by the shell. That made two
+   * toast stacks in one app — this one and `lib/toastStore` — which could
+   * show two unrelated messages in two different corners at once.
+   *
+   * `flash(text, kind)` keeps its signature, because roughly twenty call
+   * sites across five tabs pass it down as a prop. It just goes to the real
+   * toaster now. `toast` stays in the return so those files still destructure
+   * cleanly; it is always null, and the shell no longer renders anything for
+   * it.
+   */
   const flash = useCallback((text: string, kind: "ok" | "err" = "ok") => {
-    if (timer.current) clearTimeout(timer.current);
-    setToast({ text, kind });
-    timer.current = setTimeout(() => setToast(null), 3000);
+    showToast({ title: kind === "err" ? "Could not save" : "Saved", message: text });
   }, []);
 
-  useEffect(
-    () => () => {
-      if (timer.current) clearTimeout(timer.current);
-    },
-    [],
-  );
-
-  return { toast, flash };
+  return { toast: null, flash };
 }
+
 
 /**
  * Config-edit gate — mirrors approvals/permissions.py IsApprovalAdmin.

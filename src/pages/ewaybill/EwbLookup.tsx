@@ -3,6 +3,10 @@ import { HiMagnifyingGlass } from "react-icons/hi2";
 import { ewaybillService } from "../../services/ewaybillService";
 import { NicField, JsonView, DetailsView, ErrorAlert } from "../../components/NicUI";
 import { messageFrom } from "@/lib/apiError";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/form";
+import { Card, CardHeader, CardTitle } from "@/components/ui/page";
+import { Tab, TabList } from "@/components/ui/tabs";
 
 type Mode = "ewb" | "irn" | "gstin" | "transporter";
 const MODES: [Mode, string][] = [
@@ -35,42 +39,44 @@ export default function EwbLookup() {
   const placeholder = { ewb: "391010809803", irn: "64-character IRN", gstin: "06AACCJ4223F1Z0", transporter: "Transporter ID" }[mode];
 
   return (
-    <section className="ofs-card ofs-card--wide">
-      <div className="ofs-card-head">
-        <span className="ofs-card-mark" />
-        <h2>Lookup</h2>
-      </div>
+    <Card>
+      <CardHeader>
+        <CardTitle>Lookup</CardTitle>
+      </CardHeader>
 
-      <div className="nic-tabs" style={{ margin: "0 0 16px" }}>
+      <TabList label="Lookup by" className="mb-4">
         {MODES.map(([m, label]) => (
-          <button key={m} className={`nic-tab ${mode === m ? "nic-tab-active" : ""}`}
-            onClick={() => { setMode(m); setData(null); setError(""); setValue(""); }}>
+          <Tab
+            key={m}
+            selected={mode === m}
+            onClick={() => { setMode(m); setData(null); setError(""); setValue(""); }}
+          >
             {label}
-          </button>
+          </Tab>
         ))}
-      </div>
+      </TabList>
 
-      <div className="nic-form-grid">
+      <div className="grid gap-x-5 gap-y-4 grid-cols-[repeat(auto-fit,minmax(220px,1fr))]">
         <NicField label={MODES.find(([m]) => m === mode)![1]} full>
-          <input className="nic-input nic-mono" value={value} onChange={(e) => setValue(e.target.value)}
+          <Input className="font-mono" value={value} onChange={(e) => setValue(e.target.value)}
             placeholder={placeholder} />
         </NicField>
       </div>
 
-      <div className="nic-actions-row">
-        <button className="ofs-primary" onClick={() => void run()} disabled={busy}>
-          <HiMagnifyingGlass className="nic-icon-lead" />
+      <div className="mt-4 flex flex-wrap items-center gap-2.5">
+        <Button variant="primary" onClick={() => void run()} disabled={busy}>
+          <HiMagnifyingGlass aria-hidden="true" />
           {busy ? "Searching…" : "Search"}
-        </button>
+        </Button>
       </div>
 
       <ErrorAlert>{error}</ErrorAlert>
       {data ? (
-        <div className="nic-result">
+        <div className="mt-5 space-y-4">
           <DetailsView data={data} />
           <JsonView data={data} title="Raw JSON" />
         </div>
       ) : null}
-    </section>
+    </Card>
   );
 }

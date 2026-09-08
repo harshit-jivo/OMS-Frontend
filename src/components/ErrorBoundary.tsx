@@ -33,7 +33,7 @@ export default class ErrorBoundary extends Component<Props, State> {
   };
 
   handleHome = () => {
-    window.location.href = "/Dashboard";
+    window.location.href = "/Home";
   };
 
   render() {

@@ -45,18 +45,38 @@ export const computeLandingPrice = (
  * is reachable. Fixing it changes what saved orders are worth, which is a
  * decision rather than a cleanup.
  */
-export const applyFocPricingToRow = (row: SalesRow): SalesRow => ({
-  ...row,
-  isScheme: false,
-  scheme: "",
-  schemeQty: "",
-  schemes: [],
-  priceListBasic: "0",
-  amount:
-    Number(row.qty) > 0 && Number(row.basicPrice) > 0
-      ? (Number(row.qty) * Number(row.basicPrice)).toFixed(2)
-      : "",
-});
+/**
+ * The rate an FOC line carries.
+ *
+ * An FOC line ships free, but SAP still needs a non-zero rate: an invoice
+ * totalling 0 generates no IRN, so a token rate has always been keyed by hand
+ * (0.001 on 70 lines, 0.01 on 105, 0.1 on 31). This is that convention as a
+ * default, so nobody has to remember it. Kept in step with the backend's
+ * `FOC_TOKEN_BASIC_PRICE` and sap_sync's `FOC_TOKEN_UNIT_PRICE`.
+ */
+export const FOC_TOKEN_BASIC_PRICE = "0.001";
+
+/**
+ * FOC pricing for one row.
+ *
+ * A rate the operator typed themselves is KEPT — only a blank or zero falls
+ * back to the token. That matters: FOC lines are occasionally billed at a
+ * nominal rate the billing team chooses, and overwriting it would silently
+ * undo their decision.
+ */
+export const applyFocPricingToRow = (row: SalesRow): SalesRow => {
+  const basicPrice = Number(row.basicPrice) > 0 ? row.basicPrice : FOC_TOKEN_BASIC_PRICE;
+  return {
+    ...row,
+    isScheme: false,
+    scheme: "",
+    schemeQty: "",
+    schemes: [],
+    priceListBasic: "0",
+    basicPrice,
+    amount: Number(row.qty) > 0 ? (Number(row.qty) * Number(basicPrice)).toFixed(2) : "",
+  };
+};
 
 /** Which number the user changed, and therefore which ones follow from it. */
 export type RowTotalsSource = "boxes" | "qty" | "price";

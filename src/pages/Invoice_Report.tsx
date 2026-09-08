@@ -1,13 +1,28 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import {
-  HiArrowTopRightOnSquare,
-  HiDocumentText,
-  HiMagnifyingGlass,
-  HiXMark,
+  HiOutlineArrowTopRightOnSquare,
+  HiOutlineDocumentText,
+  HiOutlineMagnifyingGlass,
+  HiOutlineXMark,
 } from "react-icons/hi2";
+
+import { Badge } from "@/components/ui/badge";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { Button } from "@/components/ui/button";
+import { Field, Input } from "@/components/ui/form";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  EmptyState,
+  Notice,
+  Page,
+  PageHeader,
+} from "@/components/ui/page";
+import { SegmentedControl } from "@/components/ui/segmented";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useBillPrint, openBillPrint } from "../hooks/useBillPrint";
-import "../styles/Invoice_Report.css";
 
 // Oil, beverage and mart are separate SAP company databases with separate
 // Crystal reports, and the same DocNum exists in all three meaning a DIFFERENT
@@ -63,7 +78,7 @@ export default function Invoice_Report() {
   // disagree are worse than one, and this was the one that was mistaken.
   //
   //   const role = (localStorage.getItem("role") || "").toLowerCase();
-  //   if (role !== "billing") return <Navigate to="/Dashboard" replace />;
+  //   if (role !== "billing") return <Navigate to="/Home" replace />;
   //
   // `auth/routeAccess.ts` carries the same rule (`roles: ["billing"]`) with the
   // admin bypass every other route gets.
@@ -92,121 +107,124 @@ export default function Invoice_Report() {
   };
 
   return (
-    <div className="invr-page">
-      <div className="invr-header">
-        <div>
-          <h1 className="invr-title">Invoice Report</h1>
-          <p className="invr-subtitle">
-            Pick a company and enter a Doc Number to fetch and preview the
-            invoice bill print.
-          </p>
-        </div>
-      </div>
+    <Page>
+      <Breadcrumbs items={[{ label: "Invoices" }, { label: "Invoice Report" }]} />
 
-      <form className="invr-form-card" onSubmit={handleSubmit}>
-        <div className="invr-field invr-field-branch">
-          <span className="invr-label" id="invr-branch-label">
-            Company
-          </span>
-          <div
-            className="invr-segmented"
-            role="radiogroup"
-            aria-labelledby="invr-branch-label"
-          >
-            {BRANCHES.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                role="radio"
-                aria-checked={branch === option.value}
-                className={`invr-segment${
-                  branch === option.value ? " invr-segment-active" : ""
-                }`}
-                onClick={() => setBranch(option.value)}
-              >
-                {option.label}
-              </button>
-            ))}
+      <PageHeader
+        title="Invoice Report"
+        description="Pick a company and enter a Doc Number to fetch and preview the invoice bill print."
+      />
+
+      <Card>
+        <form className="flex flex-wrap items-end gap-3" onSubmit={handleSubmit}>
+          <div className="flex min-w-0 flex-col gap-1.5">
+            <span id="invr-branch-label" className="text-[12px] font-medium text-body">
+              Company
+            </span>
+            {/* Was a local `BranchPicker`, on the grounds that it was the only
+                segmented control in the app. It was the only CONVERTED one —
+                Inventory Report and Open SO had their own — so it is
+                `ui/segmented` now. */}
+            <SegmentedControl
+              aria-labelledby="invr-branch-label"
+              value={branch}
+              onChange={setBranch}
+              options={BRANCHES}
+            />
           </div>
-        </div>
-        <div className="invr-field">
-          <label className="invr-label" htmlFor="invr-docnum">
-            Doc Number
-          </label>
-          <input
-            id="invr-docnum"
-            className="invr-input"
-            type="text"
-            inputMode="numeric"
-            placeholder="e.g. 626070545"
-            value={docNum}
-            onChange={(e) => setDocNum(e.target.value)}
-            autoComplete="off"
-          />
-        </div>
-        <div className="invr-actions">
-          <button className="invr-btn invr-btn-primary" type="submit">
-            <HiMagnifyingGlass aria-hidden="true" />
-            Get Invoice
-          </button>
-          {activeDocNum && (
-            <button
-              className="invr-btn invr-btn-ghost"
-              type="button"
-              onClick={handleClear}
-            >
-              <HiXMark aria-hidden="true" />
-              Clear
-            </button>
-          )}
-        </div>
-        {error && <p className="invr-error">{error}</p>}
-      </form>
+
+          {/* The error belongs to this field, not to the page: it is "that is
+              not a Doc Number", said where the Doc Number is typed. */}
+          <Field
+            label="Doc Number"
+            error={error || undefined}
+            className="min-w-[200px] flex-1 basis-[200px]"
+          >
+            {(control) => (
+              <Input
+                {...control}
+                type="text"
+                inputMode="numeric"
+                placeholder="e.g. 626070545"
+                value={docNum}
+                onChange={(e) => setDocNum(e.target.value)}
+                autoComplete="off"
+              />
+            )}
+          </Field>
+
+          <div className="flex shrink-0 items-center gap-1.5">
+            <Button type="submit" variant="primary">
+              <HiOutlineMagnifyingGlass aria-hidden="true" /> Get Invoice
+            </Button>
+            {activeDocNum ? (
+              <Button type="button" onClick={handleClear}>
+                <HiOutlineXMark aria-hidden="true" /> Clear
+              </Button>
+            ) : null}
+          </div>
+        </form>
+      </Card>
 
       {activeDocNum ? (
-        <div className="invr-viewer-card">
-          <div className="invr-viewer-head">
-            <span className="invr-viewer-title">
-              <HiDocumentText aria-hidden="true" />
+        <Card className="p-0">
+          <CardHeader className="mb-0 border-b border-line px-4 py-3">
+            <CardTitle className="flex items-center gap-2">
+              <HiOutlineDocumentText
+                aria-hidden="true"
+                className="size-4 text-subtle [stroke-width:1.5]"
+              />
               Bill_{activeDocNum}.pdf
-              <span className="invr-viewer-branch">{branchLabel(activeBranch)}</span>
-            </span>
+              {/* The branch of the PDF ON SCREEN, which is not necessarily the
+                  one in the picker — the same DocNum is a different invoice in
+                  each company, so this has to say which one you are looking
+                  at. */}
+              <Badge tone="neutral">{branchLabel(activeBranch)}</Badge>
+            </CardTitle>
             {/* A button, not a link: the PDF has to be FETCHED with the access
                 token before there is anything to open, and an <a href> to the
                 endpoint sends no token at all. `openBillPrint` opens the tab
                 synchronously and points it at the blob afterwards, so the
                 popup blocker still attributes it to this click. */}
-            <button
+            <Button
               type="button"
-              className="invr-btn invr-btn-ghost"
+              size="sm"
+              variant="ghost"
               disabled={preview.loading}
               onClick={() => {
                 void openBillPrint({ docNum: activeDocNum, branch: activeBranch })
                   .then((message) => setError(message));
               }}
             >
-              <HiArrowTopRightOnSquare aria-hidden="true" />
-              Open in new tab
-            </button>
+              <HiOutlineArrowTopRightOnSquare aria-hidden="true" /> Open in new tab
+            </Button>
+          </CardHeader>
+
+          <div className="p-4">
+            {preview.loading ? (
+              <Skeleton className="h-[70vh] min-h-[420px] w-full" />
+            ) : null}
+            {preview.error ? <Notice tone="bad">{preview.error}</Notice> : null}
+            {/* An <iframe> handed an error response renders a blank rectangle or
+                raw JSON, so it is only mounted once there is a real PDF. */}
+            {preview.url ? (
+              <iframe
+                className="h-[70vh] min-h-[420px] w-full rounded-sm border border-line bg-surface"
+                title={`Invoice ${activeDocNum}`}
+                src={preview.url}
+              />
+            ) : null}
           </div>
-          {preview.loading && <div className="invr-loading">Loading invoice…</div>}
-          {preview.error && <p className="invr-error">{preview.error}</p>}
-          {/* An <iframe> handed an error response renders a blank rectangle or
-              raw JSON, so it is only mounted once there is a real PDF. */}
-          {preview.url && (
-            <iframe
-              className="invr-pdf-frame"
-              title={`Invoice ${activeDocNum}`}
-              src={preview.url}
-            />
-          )}
-        </div>
+        </Card>
       ) : (
-        <div className="invr-empty">
-          <HiDocumentText aria-hidden="true" />
-          <p>No invoice loaded yet. Enter a Doc Number above to preview its PDF.</p>
-        </div>
+        <Card>
+          <EmptyState
+            icon={HiOutlineDocumentText}
+            title="No invoice loaded yet"
+            hint="Enter a Doc Number above to fetch its bill print and preview the PDF here."
+          />
+        </Card>
       )}
-    </div>
+    </Page>
   );
 }

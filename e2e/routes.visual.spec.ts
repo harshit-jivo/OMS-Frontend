@@ -25,8 +25,10 @@ import { expect, gotoStable, routeFonts, test } from "./harness";
  */
 const ROUTES: Array<[name: string, path: string]> = [
   // Landing and shell
-  ["dashboard", "/Dashboard"],
-  ["profile", "/Profile"],
+  ["home", "/Home"],
+  ["sales-dashboard", "/Sales_Dashboard"],
+  // No "/Profile": Profile is a dialog off the header now, not a route
+  // (DESIGN_SYSTEM §12). `AppHeader.test.tsx` and `ProfileDialog` cover it.
 
   // Tables — Phase 2.1, the biggest single group
   ["app-user", "/App_User"],

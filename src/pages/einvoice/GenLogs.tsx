@@ -5,6 +5,9 @@ import { einvoiceService } from "../../services/einvoiceService";
 import type { GenerationLog } from "../../services/einvoiceService";
 import { StatusBadge, ValidationList, JsonView, ErrorAlert } from "../../components/NicUI";
 import { messageFrom } from "@/lib/apiError";
+import { Button } from "@/components/ui/button";
+import { Card, CardHeader, CardTitle } from "@/components/ui/page";
+import { Tab, TabList } from "@/components/ui/tabs";
 import {
   Table,
   TableBody,
@@ -63,52 +66,50 @@ export default function GenLogs() {
   const tone = (o: string) => (o === "SUCCESS" ? "ok" : o === "FAILED" ? "err" : "muted");
 
   return (
-    <section className="ofs-card ofs-card--wide">
-      <div className="ofs-card-head nic-head--split">
-        <div className="nic-head-title">
-          <span className="ofs-card-mark" />
-          <h2>Auto-Generation Logs</h2>
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2.5">
+          <CardTitle>Auto-Generation Logs</CardTitle>
         </div>
-        <button
-          className="ofs-refresh"
+        <Button
+          variant="ghost"
           onClick={() => void queryClient.invalidateQueries({ queryKey: ["einvoice", "logs"] })}
         >
           Refresh
-        </button>
-      </div>
-      <p className="nic-note">
+        </Button>
+      </CardHeader>
+      <p className="text-[12.5px] leading-relaxed text-subtle">
         Every automatic IRN attempt (from invoice creation, the polling job, or a manual retry).
         Failures show the exact NIC error / validation cause.
       </p>
 
       {data ? (
-        <div className="nic-totals">
+        <div className="my-3 flex flex-wrap gap-2">
           <StatusBadge tone="ok">{data.totals.SUCCESS} success</StatusBadge>
           <StatusBadge tone="err">{data.totals.FAILED} failed</StatusBadge>
           <StatusBadge tone="muted">{data.totals.SKIPPED} skipped</StatusBadge>
         </div>
       ) : null}
 
-      <div className="nic-tabs nic-tabs--tight">
+      <TabList label="Filter logs by outcome">
         {FILTERS.map((f) => (
-          <button key={f || "all"} className={`nic-tab ${filter === f ? "nic-tab-active" : ""}`}
-            onClick={() => setFilter(f)}>
+          <Tab key={f || "all"} selected={filter === f} onClick={() => setFilter(f)}>
             {f || "All"}
-          </button>
+          </Tab>
         ))}
-      </div>
+      </TabList>
 
       <ErrorAlert>{error}</ErrorAlert>
 
       {loading ? (
-        <div className="ofs-loading"><span className="ofs-spinner" /><span>Loading logs…</span></div>
+        <div className="flex items-center gap-2 text-[13px] text-subtle" role="status"><span className="size-4 animate-spin rounded-full border-2 border-line border-t-brand" aria-hidden="true" /><span>Loading logs…</span></div>
       ) : !data?.results.length ? (
-        <p className="nic-note">No log entries yet.</p>
+        <p className="text-[12.5px] leading-relaxed text-subtle">No log entries yet.</p>
       ) : (
-        <div className="nic-table-wrap">
+        <div className="overflow-x-auto rounded-card border border-line">
           <Table density="compact">
             <TableHeader>
-              <TableRow>
+              <TableRow className="bg-surface hover:bg-surface">
                 <TableHead>When</TableHead><TableHead>DocEntry</TableHead><TableHead>Doc No</TableHead><TableHead>Trigger</TableHead>
                 <TableHead>Attempt</TableHead><TableHead>Outcome</TableHead><TableHead>Cause / IRN</TableHead><TableHead></TableHead>
               </TableRow>
@@ -117,41 +118,41 @@ export default function GenLogs() {
               {data.results.map((log) => (
                 <Fragment key={log.id}>
                   <TableRow>
-                    <TableCell className="nic-nowrap">{new Date(log.created_at).toLocaleString()}</TableCell>
+                    <TableCell className="whitespace-nowrap">{new Date(log.created_at).toLocaleString()}</TableCell>
                     <TableCell>{log.docentry}</TableCell>
-                    <TableCell>{log.doc_no || "—"}</TableCell>
+                    <TableCell className="whitespace-nowrap">{log.doc_no || "—"}</TableCell>
                     <TableCell>{log.trigger}</TableCell>
                     <TableCell>{log.attempt_no}</TableCell>
                     <TableCell><StatusBadge tone={tone(log.outcome)}>{log.outcome}</StatusBadge></TableCell>
                     <TableCell>
                       {log.irn ? (
-                        <span className="nic-mono" title={log.irn}>{log.irn.slice(0, 18)}…</span>
+                        <span className="font-mono text-[12px]" title={log.irn}>{log.irn.slice(0, 18)}…</span>
                       ) : null}
                       {log.outcome === "SUCCESS" && log.error_message ? (
-                        <div className={`nic-note nic-note--err${log.irn ? " nic-note--stacked" : ""}`}>
+                        <div className={`text-[12.5px] font-semibold leading-relaxed text-danger${log.irn ? " mt-1" : ""}`}>
                           {log.error_message}
                         </div>
                       ) : null}
                       {log.outcome !== "SUCCESS" && (log.error_code || log.error_message) ? (
-                        <div className={`nic-note${log.irn ? " nic-note--stacked" : ""}`}>
-                          {log.error_code ? <code className="nic-code">{log.error_code}</code> : null}
+                        <div className={`text-[12.5px] leading-relaxed text-subtle${log.irn ? " mt-1" : ""}`}>
+                          {log.error_code ? <code className="mr-1.5 font-mono text-[12px]">{log.error_code}</code> : null}
                           {log.error_message}
                         </div>
                       ) : null}
                     </TableCell>
-                    <TableCell className="nic-nowrap">
+                    <TableCell className="whitespace-nowrap">
                       {log.validation_errors?.length ? (
-                        <button className="ofs-secondary nic-btn-xs"
+                        <Button size="sm"
                           onClick={() => setExpanded(expanded === log.id ? null : log.id)}>
                           Details
-                        </button>
+                        </Button>
                       ) : null}
                       {log.outcome !== "SUCCESS" && !log.irn ? (
-                        <button className="ofs-primary nic-btn-xs nic-btn-xs--next"
+                        <Button size="sm" variant="primary"
                           onClick={() => void retry(log)} disabled={retrying === log.id}>
-                          <HiArrowPath className="nic-icon-inline" />
+                          <HiArrowPath aria-hidden="true" />
                           {retrying === log.id ? "…" : "Retry"}
-                        </button>
+                        </Button>
                       ) : null}
                     </TableCell>
                   </TableRow>
@@ -169,6 +170,6 @@ export default function GenLogs() {
           </Table>
         </div>
       )}
-    </section>
+    </Card>
   );
 }

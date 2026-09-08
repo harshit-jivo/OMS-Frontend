@@ -1,27 +1,20 @@
-import { cloneElement, isValidElement, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
-  HiCheckCircle,
-  HiLockClosed,
-  HiPencilSquare,
-  HiPlusCircle,
-  HiTrash,
-  HiMagnifyingGlass,
+  HiOutlineArrowRight,
+  HiOutlineCheckCircle,
+  HiOutlineLockClosed,
+  HiOutlinePencilSquare,
+  HiOutlinePlus,
+  HiOutlineTrash,
 } from "react-icons/hi2";
-import trackerService, { ADDITIONAL_CHARGE_TYPES } from "../services/trackerService";
-import type { Invoice, InvoiceWrite, Vendor } from "../services/trackerService";
-import "../styles/Tracker.css";
+
 import { Badge } from "@/components/ui/badge";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { Button } from "@/components/ui/button";
+import { DetailField, DetailGrid } from "@/components/ui/detail";
 import {
   Dialog,
   DialogBody,
@@ -30,13 +23,31 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Toast } from "@/components/ui/toast";
+import { FilterBar, FilterCount, FilterDate, FilterSearch, FilterSpacer } from "@/components/ui/filter-bar";
+import { Field, FormGrid, Input, Select } from "@/components/ui/form";
+import { Card, CardHeader, CardTitle, Page, PageHeader } from "@/components/ui/page";
+import { TableSkeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableEmpty,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { fmtDate, fmtMonth, money, todayISO } from "@/components/tracker/format";
+import InvoiceDetailDialog from "@/components/tracker/InvoiceDetailDialog";
 import { errorBody, fieldError, messageFrom } from "@/lib/apiError";
+import { showToast } from "@/lib/toastStore";
+import { cn } from "@/lib/utils";
 import {
   toInvoicePayload,
   trackerInvoiceSchema,
   type TrackerInvoiceInput,
 } from "@/schemas/trackerInvoice";
+import trackerService, { ADDITIONAL_CHARGE_TYPES } from "../services/trackerService";
+import type { Invoice, InvoiceWrite, Vendor } from "../services/trackerService";
 
 const EMPTY: InvoiceWrite = {
   invoice_date: "",
@@ -54,31 +65,6 @@ const EMPTY: InvoiceWrite = {
   unit: 0,
   branch: 0,
   mode: 0,
-};
-
-const money = (v: string | number) =>
-  Number(v || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-const fmtDate = (v?: string | null) => {
-  if (!v) return "-";
-  const d = new Date(v);
-  return Number.isNaN(d.getTime()) ? v : d.toLocaleDateString("en-GB");
-};
-
-// Today's date as YYYY-MM-DD (local), used to cap the invoice-date picker.
-const todayISO = () => {
-  const d = new Date();
-  const off = d.getTimezoneOffset();
-  return new Date(d.getTime() - off * 60000).toISOString().slice(0, 10);
-};
-
-// Effective month display: first-of-month date -> "Mon YYYY".
-const fmtMonth = (v?: string | null) => {
-  if (!v) return "-";
-  const d = new Date(v);
-  return Number.isNaN(d.getTime())
-    ? v
-    : d.toLocaleDateString("en-GB", { month: "short", year: "numeric" });
 };
 
 // Omni search: match a query against every meaningful invoice field.
@@ -155,7 +141,6 @@ export default function Tracker_Entry() {
 
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [advRemarks, setAdvRemarks] = useState("");
-  const [toast, setToast] = useState("");
   const [vendorOpen, setVendorOpen] = useState(false);
   const [delInv, setDelInv] = useState<Invoice | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -164,21 +149,18 @@ export default function Tracker_Entry() {
   const [detailInv, setDetailInv] = useState<Invoice | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
-  const flash = (msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast(""), 2600);
-  };
+  const flash = (title: string, message = "") => showToast({ title, message });
 
   const doDelete = async () => {
     if (!delInv) return;
     setDeleting(true);
     try {
       await trackerService.deleteInvoice(delInv.id);
-      flash(`Invoice ${delInv.invoice_number} deleted`);
+      flash("Invoice deleted", `${delInv.invoice_number} is off the entry desk.`);
       setDelInv(null);
       refresh();
     } catch (err) {
-      flash(messageFrom(err, "Delete failed"));
+      flash("Could not delete the invoice", messageFrom(err, "The server refused the request."));
     } finally {
       setDeleting(false);
     }
@@ -247,10 +229,10 @@ export default function Tracker_Entry() {
     try {
       if (editingId) {
         await trackerService.updateInvoice(editingId, payload);
-        flash("Invoice updated");
+        flash("Invoice updated", form.invoice_number);
       } else {
         await trackerService.createInvoice(payload);
-        flash("Invoice created");
+        flash("Invoice created", form.invoice_number);
       }
       reset({ ...EMPTY });
       setEditingId(null);
@@ -266,7 +248,7 @@ export default function Tracker_Entry() {
         setShowReview(false); // send them back to the form to fix it
         setError("invoice_number", { type: "server", message: duplicate });
       }
-      flash(duplicate ?? messageFrom(err, "Save failed"));
+      flash("Could not save the invoice", duplicate ?? messageFrom(err, "The server refused the request."));
     } finally {
       setSaving(false);
     }
@@ -350,45 +332,64 @@ export default function Tracker_Entry() {
       });
       setAdvRemarks("");
       flash(
-        `Advanced ${res.processed_count} invoice(s)` +
-          (res.errors.length ? `, ${res.errors.length} failed` : ""),
+        `Advanced ${res.processed_count} invoice${res.processed_count === 1 ? "" : "s"}`,
+        res.errors.length ? `${res.errors.length} failed.` : "They are now at the next stage.",
       );
       refresh();
     } catch (err) {
-      flash(messageFrom(err, "Advance failed"));
+      flash("Could not advance", messageFrom(err, "The server refused the request."));
     }
   };
 
-  const field = (key: keyof TrackerInvoiceInput, label: string, node: React.ReactNode) => {
-    // Labels here are visual-only (no htmlFor/id): give the control an
-    // accessible name that matches what's on screen, without touching layout.
-    const labeledNode =
-      isValidElement(node) && !(node.props as { "aria-label"?: string })["aria-label"]
-        ? cloneElement(node as React.ReactElement<{ "aria-label"?: string }>, {
-            "aria-label": label,
-          })
-        : node;
-    return (
-      <div className="trk-field">
-        <label>{label}</label>
-        {labeledNode}
-        {errors[key] && <span className="trk-err">{errors[key]?.message}</span>}
-      </div>
-    );
-  };
-
-  const sel = (key: keyof TrackerInvoiceInput, options: { id: number; label: string }[]) => (
-    <select value={form[key] as number} onChange={(e) => setField(key, Number(e.target.value))}>
-      <option value={0}>Select…</option>
-      {options.map((o) => (
-        <option key={o.id} value={o.id}>
-          {o.label}
-        </option>
-      ))}
-    </select>
+  /** A labelled control wired to the schema's error for that key. */
+  const field = (
+    key: keyof TrackerInvoiceInput,
+    label: string,
+    render: (control: {
+      id: string;
+      "aria-describedby": string | undefined;
+      "aria-invalid": boolean | undefined;
+      required: boolean;
+    }) => React.ReactNode,
+    span?: "full",
+  ) => (
+    <Field key={key} label={label} error={errors[key]?.message} span={span}>
+      {render}
+    </Field>
   );
 
-  if (!lookups) return <div className="trk-page">Loading…</div>;
+  /** The id-valued selects: category, unit, branch, GST type and rate. */
+  const sel = (key: keyof TrackerInvoiceInput, options: { id: number; label: string }[]) =>
+    function SelectControl(control: {
+      id: string;
+      "aria-describedby": string | undefined;
+      "aria-invalid": boolean | undefined;
+    }) {
+      return (
+        <Select
+          {...control}
+          value={form[key] as number}
+          onChange={(e) => setField(key, Number(e.target.value))}
+        >
+          <option value={0}>Select…</option>
+          {options.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.label}
+            </option>
+          ))}
+        </Select>
+      );
+    };
+
+  if (!lookups) {
+    return (
+      <Page>
+        <Card>
+          <TableSkeleton rows={5} columns={6} />
+        </Card>
+      </Page>
+    );
+  }
 
   const nameOf = (id: number, list: { id: number; name: string }[]) =>
     list.find((x) => x.id === id)?.name || "-";
@@ -403,146 +404,168 @@ export default function Tracker_Entry() {
   const addAmount = Number(form.additional_charge_amount || 0);
   const invoiceValueCalc = taxableNum + gstAmount + addAmount;
 
+  const vendorOptions = vendorMatches.map((v) => ({
+    value: v.card_code,
+    label: v.card_name,
+    hint: [v.card_code, v.state, v.gstin].filter(Boolean).join(" · "),
+  }));
+
+  const reviewRows: [string, string][] = [
+    ["Invoice date", fmtDate(form.invoice_date)],
+    ["Effective month", form.effective_month ? fmtMonth(`${form.effective_month}-01`) : "—"],
+    ["Party name", form.party_name],
+    ["GST number", form.party_gstin || "—"],
+    ["Invoice number", form.invoice_number],
+    ["Taxable value", `₹${money(form.taxable_value)}`],
+    ["GST", nameOf(form.gst_type, lookups.gst_types)],
+    ["Rate of GST", rateOf(form.gst_rate)],
+    ["GST amount", `₹${money(gstAmount)}`],
+    [
+      "Additional charge",
+      form.additional_charge_type
+        ? `${chargeLabel(form.additional_charge_type)} — ₹${money(addAmount)}`
+        : "None",
+    ],
+    ["Invoice value", `₹${money(invoiceValueCalc)}`],
+    ["Category", nameOf(form.category, lookups.categories)],
+    ["Unit", nameOf(form.unit, lookups.units)],
+    ["Branch", nameOf(form.branch, lookups.branches)],
+    ["Mode of invoice", nameOf(form.mode, lookups.modes)],
+  ];
+
   return (
-    <div className="trk-page">
-      <div className="trk-header">
-        <div>
-          <h1>Invoice Entry</h1>
-          <div className="trk-sub">
-            Create invoices, review before submitting, and advance them to the next stage.
-          </div>
-        </div>
-        <button className="trk-btn trk-btn-primary" onClick={openCreate}>
-          <HiPlusCircle /> Add Invoice
-        </button>
-      </div>
+    <Page>
+      <Breadcrumbs items={[{ label: "Tracker" }, { label: "Invoice Entry" }]} />
+
+      <PageHeader
+        title="Invoice Entry"
+        description="Create invoices, review before submitting, and advance them to the next stage."
+        actions={
+          <Button variant="primary" onClick={openCreate}>
+            <HiOutlinePlus aria-hidden="true" /> Add invoice
+          </Button>
+        }
+      />
 
       {/* ---- Entry form (modal) ---- */}
       <Dialog
-        open={Boolean(showForm)}
+        open={showForm}
         onOpenChange={(next) => {
           if (!next) cancelEdit();
         }}
       >
         {showForm && (
-          <DialogContent title="Invoice form">
+          <DialogContent title="Invoice form" size="lg">
             <DialogHeader>
               <DialogTitle>{editingId ? `Edit invoice #${editingId}` : "New invoice"}</DialogTitle>
             </DialogHeader>
             <DialogBody>
-              <div className="trk-form-grid">
-                {field(
-                  "invoice_date",
-                  "Invoice Date",
-                  <input
+              <FormGrid>
+                {field("invoice_date", "Invoice date", (c) => (
+                  <Input
+                    {...c}
                     type="date"
                     value={form.invoice_date}
                     max={todayISO()}
                     onChange={(e) => setField("invoice_date", e.target.value)}
-                  />,
-                )}
-                {field(
-                  "effective_month",
-                  "Effective Month",
-                  <input
+                  />
+                ))}
+                {field("effective_month", "Effective month", (c) => (
+                  <Input
+                    {...c}
                     type="month"
                     value={form.effective_month}
                     onChange={(e) => setField("effective_month", e.target.value)}
-                  />,
-                )}
+                  />
+                ))}
+
+                {/* The party is typed OR picked. It is not a plain SearchSelect:
+                    an invoice may name a party SAP has never heard of, so the
+                    free text is the value and the vendor list only fills the
+                    code and GSTIN beside it. */}
                 {field(
                   "party_name",
-                  "Party Name (search SAP vendors)",
-                  <div className="trk-combo">
-                    <input
-                      value={form.party_name}
-                      autoComplete="off"
-                      aria-label="Party Name (search SAP vendors)"
-                      placeholder={vendors.length ? "Type to search vendors…" : "Loading vendors…"}
-                      onChange={(e) => {
-                        setValue("party_name", e.target.value, {
-                          shouldValidate: true,
-                          shouldTouch: true,
-                        });
-                        // Typing over a picked vendor un-picks it: the code and GSTIN below
-                        // belong to the name that was there before.
-                        setValue("party_code", "");
-                        setValue("party_gstin", "");
-                        setVendorOpen(true);
-                      }}
-                      onFocus={() => setVendorOpen(true)}
-                      onBlur={() => setTimeout(() => setVendorOpen(false), 150)}
-                    />
-                    {vendorOpen && vendors.length > 0 && (
-                      <div className="trk-combo-list">
-                        {vendorMatches.length === 0 ? (
-                          <div className="trk-combo-empty">
-                            No matching vendor — you can still type a name.
-                          </div>
-                        ) : (
-                          vendorMatches.map((v) => (
-                            <div
-                              key={v.card_code}
-                              className="trk-combo-item"
-                              onMouseDown={(e) => {
-                                e.preventDefault();
-                                pickVendor(v);
-                              }}
-                            >
-                              <div>
-                                {v.card_name}
-                                {v.card_type && (
-                                  <Badge
-                                    outlined
-                                    tone={v.card_type === "C" ? "ok" : "info"}
-                                    className="trk-badge-mini"
-                                  >
-                                    {v.card_type === "C" ? "Customer" : "Vendor"}
-                                  </Badge>
-                                )}
-                              </div>
-                              <div>
-                                <span className="code">
-                                  {v.card_code}
-                                  {v.state ? ` · ${v.state}` : ""}
-                                </span>
-                                {v.gstin && <span className="gst"> · {v.gstin}</span>}
-                              </div>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    )}
-                  </div>,
+                  "Party name",
+                  (c) => (
+                    <div className="relative">
+                      <Input
+                        {...c}
+                        value={form.party_name}
+                        autoComplete="off"
+                        placeholder={vendors.length ? "Type to search vendors…" : "Loading vendors…"}
+                        onChange={(e) => {
+                          setValue("party_name", e.target.value, {
+                            shouldValidate: true,
+                            shouldTouch: true,
+                          });
+                          // Typing over a picked vendor un-picks it: the code and
+                          // GSTIN below belong to the name that was there before.
+                          setValue("party_code", "");
+                          setValue("party_gstin", "");
+                          setVendorOpen(true);
+                        }}
+                        onFocus={() => setVendorOpen(true)}
+                        onBlur={() => setTimeout(() => setVendorOpen(false), 150)}
+                      />
+                      {vendorOpen && vendors.length > 0 && (
+                        <div className="absolute left-0 right-0 top-[calc(100%+4px)] z-30 max-h-64 overflow-y-auto rounded-card border border-line bg-card p-1 shadow-panel">
+                          {vendorOptions.length === 0 ? (
+                            <p className="m-0 px-2.5 py-3 text-center text-[12px] text-subtle">
+                              No matching vendor — you can still type a name.
+                            </p>
+                          ) : (
+                            vendorOptions.map((o) => (
+                              <button
+                                key={o.value}
+                                type="button"
+                                className="flex w-full appearance-none flex-col items-start gap-0.5 rounded-sm border-0 bg-transparent px-2.5 py-1.5 text-left [font-family:inherit] cursor-pointer hover:bg-surface"
+                                onMouseDown={(e) => {
+                                  e.preventDefault();
+                                  const v = vendorMatches.find((m) => m.card_code === o.value);
+                                  if (v) pickVendor(v);
+                                }}
+                              >
+                                <span className="text-[13px] font-medium text-ink">{o.label}</span>
+                                <span className="text-[11px] text-subtle">{o.hint}</span>
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ),
                 )}
-                <div className="trk-field">
-                  <label>GST Number</label>
-                  <input
-                    value={form.party_gstin}
-                    aria-label="GST Number"
-                    readOnly
-                    placeholder={form.party_code ? "" : "Auto-filled when a vendor is selected"}
-                    className={`trk-ro${form.party_gstin ? "" : " trk-ro--faint"}`}
-                  />
-                </div>
-                {field(
-                  "invoice_number",
-                  "Invoice Number",
-                  <input
+
+                <Field
+                  label="GST number"
+                  hint={form.party_code ? undefined : "Auto-filled when a vendor is picked."}
+                >
+                  {(c) => (
+                    <Input
+                      {...c}
+                      value={form.party_gstin}
+                      readOnly
+                      className="bg-surface-strong text-body"
+                    />
+                  )}
+                </Field>
+
+                {field("invoice_number", "Invoice number", (c) => (
+                  <Input
+                    {...c}
                     value={form.invoice_number}
                     onChange={(e) => setField("invoice_number", e.target.value)}
-                  />,
-                )}
-                {field(
-                  "taxable_value",
-                  "Taxable Value",
-                  <input
+                  />
+                ))}
+                {field("taxable_value", "Taxable value", (c) => (
+                  <Input
+                    {...c}
                     type="number"
                     step="0.01"
                     value={form.taxable_value}
                     onChange={(e) => setField("taxable_value", e.target.value)}
-                  />,
-                )}
+                  />
+                ))}
                 {field(
                   "gst_type",
                   "GST",
@@ -559,51 +582,51 @@ export default function Tracker_Entry() {
                     lookups.gst_rates.map((g) => ({ id: g.id, label: g.label })),
                   ),
                 )}
-                <div className="trk-field">
-                  <label>GST Amount</label>
-                  <input
-                    value={`₹ ${money(gstAmount)}`}
-                    aria-label="GST Amount"
-                    readOnly
-                    className="trk-ro"
-                  />
-                </div>
-                {field(
-                  "additional_charge_type",
-                  "Additional Charge (optional)",
-                  <select
+                <Field label="GST amount">
+                  {(c) => (
+                    <Input
+                      {...c}
+                      value={`₹ ${money(gstAmount)}`}
+                      readOnly
+                      className="bg-surface-strong text-body"
+                    />
+                  )}
+                </Field>
+                {field("additional_charge_type", "Additional charge (optional)", (c) => (
+                  <Select
+                    {...c}
                     value={form.additional_charge_type}
                     onChange={(e) => setField("additional_charge_type", e.target.value)}
                   >
                     <option value="">None</option>
-                    {ADDITIONAL_CHARGE_TYPES.map((c) => (
-                      <option key={c.value} value={c.value}>
-                        {c.label}
+                    {ADDITIONAL_CHARGE_TYPES.map((ch) => (
+                      <option key={ch.value} value={ch.value}>
+                        {ch.label}
                       </option>
                     ))}
-                  </select>,
-                )}
-                {field(
-                  "additional_charge_amount",
-                  "Additional Charge Amount",
-                  <input
+                  </Select>
+                ))}
+                {field("additional_charge_amount", "Additional charge amount", (c) => (
+                  <Input
+                    {...c}
                     type="number"
                     step="0.01"
                     value={form.additional_charge_amount}
                     disabled={!form.additional_charge_type}
                     placeholder={form.additional_charge_type ? "" : "Select a charge type first"}
                     onChange={(e) => setField("additional_charge_amount", e.target.value)}
-                  />,
-                )}
-                <div className="trk-field">
-                  <label>Invoice Value (auto)</label>
-                  <input
-                    value={`₹ ${money(invoiceValueCalc)}`}
-                    aria-label="Invoice Value (auto)"
-                    readOnly
-                    className="trk-net"
                   />
-                </div>
+                ))}
+                <Field label="Invoice value (auto)">
+                  {(c) => (
+                    <Input
+                      {...c}
+                      value={`₹ ${money(invoiceValueCalc)}`}
+                      readOnly
+                      className="bg-brand-soft font-bold text-brand"
+                    />
+                  )}
+                </Field>
                 {field(
                   "category",
                   "Category",
@@ -630,89 +653,86 @@ export default function Tracker_Entry() {
                 )}
                 {field(
                   "mode",
-                  "Mode of Invoice",
+                  "Mode of invoice",
                   sel(
                     "mode",
                     lookups.modes.map((m) => ({ id: m.id, label: m.name })),
                   ),
                 )}
-              </div>
+              </FormGrid>
             </DialogBody>
             <DialogFooter>
-              <button className="trk-btn trk-btn-ghost" onClick={cancelEdit}>
-                Cancel
-              </button>
-              <button className="trk-btn trk-btn-primary" onClick={onReview}>
-                <HiCheckCircle /> Review & {editingId ? "Update" : "Submit"}
-              </button>
+              <Button onClick={cancelEdit}>Cancel</Button>
+              <Button variant="primary" onClick={() => void onReview()}>
+                <HiOutlineCheckCircle aria-hidden="true" /> Review &amp;{" "}
+                {editingId ? "update" : "submit"}
+              </Button>
             </DialogFooter>
           </DialogContent>
         )}
       </Dialog>
 
       {/* ---- Head office / entry queue (shared across entry users) ---- */}
-      <div className="trk-card">
-        <div className="trk-header trk-header--tight">
-          <div>
-            <h3 className="trk-heading-flush">Head Office Queue</h3>
-            <div className="trk-sub">
-              All invoices at the entry stage — created here or returned back — from any user.
-            </div>
-          </div>
-          <div className="trk-row-gap">
-            <div className="trk-search">
-              <HiMagnifyingGlass className="trk-search-icon" />
-              <input
-                className="trk-search-input"
-                placeholder="Search invoice no., party, GSTIN, category…"
-                aria-label="Search invoice no., party, GSTIN, category"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
-            <div className="trk-field trk-field--flush">
-              <input
-                type="month"
-                value={monthFilter}
-                title="Filter by effective month"
-                aria-label="Filter by effective month"
-                onChange={(e) => setMonthFilter(e.target.value)}
-              />
-            </div>
-            {monthFilter && (
-              <button
-                className="trk-btn trk-btn-ghost trk-btn--md"
-                onClick={() => setMonthFilter("")}
-              >
-                Clear
-              </button>
-            )}
-          </div>
-        </div>
-
-        {selected.size > 0 && (
-          <div className="trk-actionbar">
-            <span className="trk-count">{selected.size} selected</span>
-            <input
-              className="trk-remarks"
-              placeholder="Remarks (optional)"
-              aria-label="Remarks (optional)"
-              value={advRemarks}
-              onChange={(e) => setAdvRemarks(e.target.value)}
-            />
-            <button className="trk-btn trk-btn-success" onClick={bulkAdvance}>
-              <HiPlusCircle /> Advance to next stage
-            </button>
-          </div>
+      <FilterBar>
+        <FilterSearch
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Invoice no., party, GSTIN, category…"
+          fieldClassName="min-w-[280px]"
+        />
+        <FilterDate
+          label="Effective month"
+          type="month"
+          value={monthFilter}
+          onChange={(e) => setMonthFilter(e.target.value)}
+          fieldClassName="max-w-[200px]"
+        />
+        {monthFilter && (
+          <Button variant="ghost" onClick={() => setMonthFilter("")}>
+            Clear
+          </Button>
         )}
+        <FilterSpacer />
+        <FilterCount>
+          {shownMine.length} {shownMine.length === 1 ? "invoice" : "invoices"}
+        </FilterCount>
+      </FilterBar>
 
-        <div className="trk-table-wrap">
+      {selected.size > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-card border border-brand-line bg-brand-soft/60 px-4 py-3">
+          <span className="text-[13px] font-semibold text-ink">{selected.size} selected</span>
+          <Input
+            className="min-w-[220px] flex-1"
+            placeholder="Remarks (optional)"
+            aria-label="Remarks (optional)"
+            value={advRemarks}
+            onChange={(e) => setAdvRemarks(e.target.value)}
+          />
+          <Button variant="primary" onClick={() => void bulkAdvance()}>
+            <HiOutlineArrowRight aria-hidden="true" /> Advance to next stage
+          </Button>
+        </div>
+      )}
+
+      <Card className="overflow-hidden p-0">
+        <CardHeader className="mb-0 border-b border-line px-4 py-3">
+          <div className="min-w-0">
+            <CardTitle>Head office queue</CardTitle>
+            <p className="m-0 mt-0.5 text-[12.5px] text-subtle">
+              All invoices at the entry stage — created here or returned back — from any user.
+            </p>
+          </div>
+        </CardHeader>
+
+        <div className="overflow-x-auto">
           <Table density="compact">
             <TableHeader>
               <TableRow>
-                <TableHead>
+                <TableHead className="w-10">
                   <input
                     type="checkbox"
+                    className="size-4 cursor-pointer accent-brand"
+                    aria-label="Select every editable invoice"
                     checked={allSelected}
                     onChange={(e) =>
                       setSelected(e.target.checked ? new Set(selectableIds) : new Set())
@@ -721,152 +741,128 @@ export default function Tracker_Entry() {
                 </TableHead>
                 <TableHead>Invoice No.</TableHead>
                 <TableHead>Party</TableHead>
-                <TableHead>Inv. Date</TableHead>
-                <TableHead>Eff. Month</TableHead>
-                <TableHead>Value</TableHead>
+                <TableHead>Inv. date</TableHead>
+                <TableHead>Eff. month</TableHead>
+                <TableHead className="text-right">Value</TableHead>
                 <TableHead>GST</TableHead>
                 <TableHead>Category</TableHead>
-                <TableHead>Created By</TableHead>
+                <TableHead>Created by</TableHead>
                 <TableHead>Days</TableHead>
                 <TableHead>State</TableHead>
-                <TableHead></TableHead>
+                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {shownMine.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={12}>
-                    <div className="trk-empty">
-                      {search.trim() || monthFilter
-                        ? "No invoices match your filters."
-                        : "No invoices yet."}
-                    </div>
-                  </TableCell>
-                </TableRow>
-              )}
-              {shownMine.map((inv) => (
-                <TableRow
-                  key={inv.id}
-                  className={`trk-clickable${
-                    inv.is_overdue ? " trk-row-overdue" : inv.is_locked ? " trk-row-locked" : ""
-                  }`}
-                  title="Click to view full invoice details"
-                  onClick={() => openDetail(inv)}
-                >
-                  <TableCell onClick={(e) => e.stopPropagation()}>
-                    {inv.editable ? (
-                      <input
-                        type="checkbox"
-                        checked={selected.has(inv.id)}
-                        onChange={() => toggle(inv.id)}
-                      />
-                    ) : (
-                      <HiLockClosed title="Locked — advanced to next stage" color="#9ca3af" />
-                    )}
-                  </TableCell>
-                  <TableCell>{inv.invoice_number}</TableCell>
-                  <TableCell>{inv.party_name}</TableCell>
-                  <TableCell>{fmtDate(inv.invoice_date)}</TableCell>
-                  <TableCell>{fmtMonth(inv.effective_month)}</TableCell>
-                  <TableCell>₹{money(inv.invoice_value)}</TableCell>
-                  <TableCell>
-                    {inv.gst_type_name} {inv.gst_rate_label}
-                  </TableCell>
-                  <TableCell>{inv.category_name}</TableCell>
-                  <TableCell>{inv.created_by_name}</TableCell>
-                  <TableCell>
-                    <Badge outlined tone={inv.is_overdue ? "bad" : "neutral"}>
-                      {inv.days_at_stage}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    {inv.editable ? (
-                      <Badge tone="hold" outlined>
-                        Editable
+              {shownMine.length === 0 ? (
+                <TableEmpty colSpan={12}>
+                  {search.trim() || monthFilter
+                    ? "No invoices match these filters."
+                    : "Nothing at the entry desk."}
+                </TableEmpty>
+              ) : (
+                shownMine.map((inv) => (
+                  <TableRow
+                    key={inv.id}
+                    className={cn("cursor-pointer", !inv.editable && "opacity-70")}
+                    title="Click to view full invoice details"
+                    onClick={() => void openDetail(inv)}
+                  >
+                    <TableCell onClick={(e) => e.stopPropagation()}>
+                      {inv.editable ? (
+                        <input
+                          type="checkbox"
+                          className="size-4 cursor-pointer accent-brand"
+                          aria-label={`Select invoice ${inv.invoice_number}`}
+                          checked={selected.has(inv.id)}
+                          onChange={() => toggle(inv.id)}
+                        />
+                      ) : (
+                        <HiOutlineLockClosed
+                          aria-label="Locked — advanced to the next stage"
+                          className="size-4 text-subtle"
+                        />
+                      )}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap font-medium text-ink">
+                      {inv.invoice_number}
+                    </TableCell>
+                    <TableCell>{inv.party_name}</TableCell>
+                    <TableCell className="whitespace-nowrap">{fmtDate(inv.invoice_date)}</TableCell>
+                    <TableCell className="whitespace-nowrap">
+                      {fmtMonth(inv.effective_month)}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-right tabular-nums">
+                      ₹{money(inv.invoice_value)}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap">
+                      {inv.gst_type_name} {inv.gst_rate_label}
+                    </TableCell>
+                    <TableCell>{inv.category_name}</TableCell>
+                    <TableCell>{inv.created_by_name}</TableCell>
+                    <TableCell>
+                      <Badge outlined tone={inv.is_overdue ? "bad" : "neutral"}>
+                        {inv.days_at_stage}
                       </Badge>
-                    ) : (
-                      <Badge outlined>Locked</Badge>
-                    )}
-                  </TableCell>
-                  <TableCell onClick={(e) => e.stopPropagation()}>
-                    {inv.editable && (
-                      <div className="trk-row-actions">
-                        <button
-                          className="trk-btn trk-btn-ghost trk-btn--sm-wide"
-                          onClick={() => startEdit(inv)}
-                        >
-                          <HiPencilSquare /> Edit
-                        </button>
-                        <button
-                          className="trk-btn trk-btn-danger trk-btn--sm-wide"
-                          title="Delete this invoice entry"
-                          onClick={() => setDelInv(inv)}
-                        >
-                          <HiTrash /> Delete
-                        </button>
-                      </div>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
+                    </TableCell>
+                    <TableCell>
+                      <Badge tone={inv.editable ? "hold" : "neutral"} outlined>
+                        {inv.editable ? "Editable" : "Locked"}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="w-px" onClick={(e) => e.stopPropagation()}>
+                      {inv.editable && (
+                        <div className="flex flex-nowrap justify-end gap-1">
+                          <Button variant="ghost" size="xs" onClick={() => startEdit(inv)}>
+                            <HiOutlinePencilSquare aria-hidden="true" /> Edit
+                          </Button>
+                          <Button
+                            variant="danger"
+                            size="xs"
+                            title="Delete this invoice entry"
+                            onClick={() => setDelInv(inv)}
+                          >
+                            <HiOutlineTrash aria-hidden="true" /> Delete
+                          </Button>
+                        </div>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
             </TableBody>
           </Table>
         </div>
-      </div>
+      </Card>
 
       {/* ---- Review modal ---- */}
       <Dialog
-        open={Boolean(showReview)}
+        open={showReview}
         onOpenChange={(next) => {
-          if (!next) (() => setShowReview(false))();
+          if (!next) setShowReview(false);
         }}
       >
         {showReview && (
-          <DialogContent title="Review before submitting">
+          <DialogContent title="Review before submitting" size="lg">
             <DialogHeader>
               <DialogTitle>Review before {editingId ? "updating" : "submitting"}</DialogTitle>
             </DialogHeader>
             <DialogBody>
-              <div className="trk-review-grid">
-                {[
-                  ["Invoice Date", fmtDate(form.invoice_date)],
-                  [
-                    "Effective Month",
-                    form.effective_month ? fmtMonth(`${form.effective_month}-01`) : "—",
-                  ],
-                  ["Party Name", form.party_name],
-                  ["GST Number", form.party_gstin || "—"],
-                  ["Invoice Number", form.invoice_number],
-                  ["Taxable Value", `₹${money(form.taxable_value)}`],
-                  ["GST", nameOf(form.gst_type, lookups.gst_types)],
-                  ["Rate of GST", rateOf(form.gst_rate)],
-                  ["GST Amount", `₹${money(gstAmount)}`],
-                  [
-                    "Additional Charge",
-                    form.additional_charge_type
-                      ? `${chargeLabel(form.additional_charge_type)} — ₹${money(addAmount)}`
-                      : "None",
-                  ],
-                  ["Invoice Value", `₹${money(invoiceValueCalc)}`],
-                  ["Category", nameOf(form.category, lookups.categories)],
-                  ["Unit", nameOf(form.unit, lookups.units)],
-                  ["Branch", nameOf(form.branch, lookups.branches)],
-                  ["Mode of Invoice", nameOf(form.mode, lookups.modes)],
-                ].map(([k, v]) => (
-                  <div className="trk-review-item" key={k}>
-                    <span className="k">{k}</span>
-                    <span className="v">{v || "-"}</span>
-                  </div>
+              <DetailGrid>
+                {reviewRows.map(([label, value]) => (
+                  <DetailField
+                    key={label}
+                    label={label}
+                    value={value}
+                    strong={label === "Invoice value"}
+                  />
                 ))}
-              </div>
+              </DetailGrid>
             </DialogBody>
             <DialogFooter>
-              <button className="trk-btn trk-btn-ghost" onClick={() => setShowReview(false)}>
-                Go back & correct
-              </button>
-              <button className="trk-btn trk-btn-primary" onClick={onConfirm} disabled={saving}>
-                {saving ? "Saving…" : editingId ? "Confirm update" : "Confirm & submit"}
-              </button>
+              <Button onClick={() => setShowReview(false)}>Go back &amp; correct</Button>
+              <Button variant="primary" onClick={() => void onConfirm()} disabled={saving}>
+                {saving ? "Saving…" : editingId ? "Confirm update" : "Confirm &amp; submit"}
+              </Button>
             </DialogFooter>
           </DialogContent>
         )}
@@ -876,157 +872,42 @@ export default function Tracker_Entry() {
       <Dialog
         open={Boolean(delInv)}
         onOpenChange={(next) => {
-          if (!next) (() => !deleting && setDelInv(null))();
+          if (!next && !deleting) setDelInv(null);
         }}
       >
         {delInv && (
-          <DialogContent title="Delete invoice">
+          <DialogContent title="Delete invoice" size="sm">
             <DialogHeader>
-              <DialogTitle>Delete invoice?</DialogTitle>
+              <DialogTitle>Delete {delInv.invoice_number}?</DialogTitle>
             </DialogHeader>
-            <DialogBody>
-              <p className="trk-heading-flush">
-                Delete invoice <b>{delInv.invoice_number}</b> — {delInv.party_name} (₹
-                {money(delInv.invoice_value)})?
+            <DialogBody className="space-y-2 text-[13px] text-body">
+              <p className="m-0">
+                <strong className="font-semibold text-ink">{delInv.party_name}</strong> · ₹
+                {money(delInv.invoice_value)}
               </p>
-              <p className="trk-sub trk-sub--top">
+              <p className="m-0">
                 It will be removed from the entry desk. This can only be done while the invoice is
                 still at the entry stage.
               </p>
             </DialogBody>
             <DialogFooter>
-              <button
-                className="trk-btn trk-btn-ghost"
-                disabled={deleting}
-                onClick={() => setDelInv(null)}
-              >
+              <Button disabled={deleting} onClick={() => setDelInv(null)}>
                 Cancel
-              </button>
-              <button className="trk-btn trk-btn-danger" disabled={deleting} onClick={doDelete}>
-                <HiTrash /> {deleting ? "Deleting…" : "Delete"}
-              </button>
+              </Button>
+              <Button variant="danger" disabled={deleting} onClick={() => void doDelete()}>
+                <HiOutlineTrash aria-hidden="true" /> {deleting ? "Deleting…" : "Delete"}
+              </Button>
             </DialogFooter>
           </DialogContent>
         )}
       </Dialog>
 
       {/* ---- Invoice detail (read-only) ---- */}
-      <Dialog
-        open={Boolean(detailInv)}
-        onOpenChange={(next) => {
-          if (!next) (() => setDetailInv(null))();
-        }}
-      >
-        {detailInv && (
-          <DialogContent title="Invoice detail">
-            <DialogHeader>
-              <DialogTitle>
-                Invoice {detailInv.invoice_number}
-                {detailLoading && <span className="trk-sub"> · loading…</span>}
-              </DialogTitle>
-            </DialogHeader>
-            <DialogBody>
-              <div className="trk-review-grid">
-                {[
-                  ["Invoice Number", detailInv.invoice_number],
-                  ["Invoice Date", fmtDate(detailInv.invoice_date)],
-                  ["Effective Month", fmtMonth(detailInv.effective_month)],
-                  ["Party Name", detailInv.party_name],
-                  ["Party Code", detailInv.party_code || "—"],
-                  ["GST Number", detailInv.party_gstin || "—"],
-                  ["Taxable Value", `₹${money(detailInv.taxable_value)}`],
-                  ["GST", `${detailInv.gst_type_name} ${detailInv.gst_rate_label}`],
-                  ["GST Amount", `₹${money(detailInv.gst_amount)}`],
-                  [
-                    "Additional Charge",
-                    detailInv.additional_charge_type
-                      ? `${detailInv.additional_charge_type_display} — ₹${money(detailInv.additional_charge_amount)}`
-                      : "None",
-                  ],
-                  ["Invoice Value", `₹${money(detailInv.invoice_value)}`],
-                  ["Category", detailInv.category_name],
-                  ["Unit", detailInv.unit_name],
-                  ["Branch", detailInv.branch_name],
-                  ["Mode", detailInv.mode_name],
-                  ["Current Stage", detailInv.current_stage_name],
-                  ["Status", detailInv.status === "COMPLETED" ? "Completed" : "In Progress"],
-                  ["Days at Stage", detailInv.days_at_stage],
-                  ["Created By", detailInv.created_by_name],
-                  ["Created At", fmtDate(detailInv.created_at)],
-                ].map(([k, v]) => (
-                  <div className="trk-review-item" key={k}>
-                    <span className="k">{k}</span>
-                    <span className="v">{v || "-"}</span>
-                  </div>
-                ))}
-              </div>
-
-              {detailInv.events && detailInv.events.length > 0 && (
-                <div className="trk-block-offset">
-                  <h4 className="trk-heading-block">Stage Timeline</h4>
-                  <div className="trk-table-wrap">
-                    <Table density="compact">
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Stage</TableHead>
-                          <TableHead>Event</TableHead>
-                          <TableHead>Status</TableHead>
-                          <TableHead>By</TableHead>
-                          <TableHead>Entered</TableHead>
-                          <TableHead>Exited</TableHead>
-                          <TableHead>Days</TableHead>
-                          <TableHead>Remarks</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {detailInv.events.map((ev) => (
-                          <TableRow key={ev.id}>
-                            <TableCell>{ev.stage_name}</TableCell>
-                            <TableCell>{ev.event_type}</TableCell>
-                            <TableCell>{ev.stage_status || "—"}</TableCell>
-                            <TableCell>{ev.acted_by_name || "—"}</TableCell>
-                            <TableCell>{fmtDate(ev.entered_at)}</TableCell>
-                            <TableCell>{ev.exited_at ? fmtDate(ev.exited_at) : "—"}</TableCell>
-                            <TableCell>{ev.days_spent ?? "—"}</TableCell>
-                            <TableCell>{ev.remarks || "—"}</TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </div>
-              )}
-
-              {detailInv.payment && (
-                <div className="trk-block-offset">
-                  <h4 className="trk-heading-block">Payment</h4>
-                  <div className="trk-review-grid">
-                    {[
-                      ["Discount", `₹${money(detailInv.payment.discount_amount)}`],
-                      ["TDS", `₹${money(detailInv.payment.tds_amount)}`],
-                      ["Paid", `₹${money(detailInv.payment.paid_amount)}`],
-                      ["Open Balance", `₹${money(detailInv.payment.open_balance)}`],
-                      ["Status", detailInv.payment.status],
-                    ].map(([k, v]) => (
-                      <div className="trk-review-item" key={k}>
-                        <span className="k">{k}</span>
-                        <span className="v">{v}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </DialogBody>
-            <DialogFooter>
-              <button className="trk-btn trk-btn-ghost" onClick={() => setDetailInv(null)}>
-                Close
-              </button>
-            </DialogFooter>
-          </DialogContent>
-        )}
-      </Dialog>
-
-      <Toast message={toast} />
-    </div>
+      <InvoiceDetailDialog
+        invoice={detailInv}
+        loading={detailLoading}
+        onClose={() => setDetailInv(null)}
+      />
+    </Page>
   );
 }

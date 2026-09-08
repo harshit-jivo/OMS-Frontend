@@ -1,9 +1,41 @@
+/**
+ * Saved Drafts — the orders someone started and did not send.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * THE DELETE CONFIRMATION IS NOT `window.confirm` ANY MORE
+ * ─────────────────────────────────────────────────────────────────────────
+ * It was `window.confirm(...)` for the question and `alert(...)` for the
+ * failure. Both are native modals: they block the whole tab, they cannot be
+ * styled, they cannot say WHICH party the draft was for beyond what fits in
+ * one line, and on failure the `alert` said "Unable to delete this draft."
+ * without the reason the server gave.
+ *
+ * It is a real dialog and a toast now — the same pattern as every other
+ * destructive action in the app, so a delete here behaves like a delete
+ * anywhere else.
+ */
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { HiOutlineDocumentPlus, HiOutlineInbox, HiOutlineTrash } from "react-icons/hi2";
+
 import { ordersService } from "../services/ordersService";
 import type { Order } from "../services/ordersService";
 import { getCurrentUser } from "../services/authService";
+import { messageFrom } from "@/lib/apiError";
+import { showToast } from "@/lib/toastStore";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Card, EmptyState, Notice, Page, PageHeader } from "@/components/ui/page";
+import { TableSkeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -12,7 +44,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import "../styles/Drafts.css";
 
 const formatDateTime = (value?: string | null) => {
   if (!value) return "-";
@@ -44,6 +75,7 @@ export default function Drafts() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<Order | null>(null);
 
   /*
    * `isError` is new. The old effect caught everything into
@@ -65,9 +97,6 @@ export default function Drafts() {
   };
 
   const handleDelete = async (order: Order) => {
-    if (!window.confirm(`Delete draft ${order.order_number}? This cannot be undone.`)) {
-      return;
-    }
     try {
       setDeletingId(order.id);
       await ordersService.deleteDraft(order.id);
@@ -76,75 +105,159 @@ export default function Drafts() {
       // list — and Add_Sales, which navigates back here after saving — would
       // show it again.
       await queryClient.invalidateQueries({ queryKey: DRAFTS_KEY });
+      setConfirmDelete(null);
+      showToast({
+        title: "Draft deleted",
+        message: `${order.order_number} is gone.`,
+      });
     } catch (error) {
-      console.log("Error deleting draft:", error);
-      alert("Unable to delete this draft.");
+      // The server's own reason, not "Unable to delete this draft." — a draft
+      // that will not delete is usually one that has already been submitted,
+      // and that is worth being told.
+      showToast({
+        title: "Could not delete the draft",
+        message: messageFrom(error, "The server refused the request."),
+      });
     } finally {
       setDeletingId(null);
     }
   };
 
   return (
-    <div className="drf-page">
-      <div className="drf-head">
-        <h4 className="drf-title">Saved Drafts</h4>
-        <span className="drf-total">Total: {drafts.length}</span>
-      </div>
+    <Page>
+      <Breadcrumbs items={[{ label: "Orders" }, { label: "Drafts" }]} />
+
+      <PageHeader
+        title="Saved Drafts"
+        description="Orders you started and have not sent. Continuing one reopens it in Add Sales."
+        badges={drafts.length ? <span className="text-[13px] text-subtle">Total: {drafts.length}</span> : null}
+      />
+
+      {isError ? (
+        <Notice tone="bad" title="Could not load your drafts">
+          Refresh the page to try again. This is a load failure, not an empty
+          list — anything you saved is still there.
+        </Notice>
+      ) : null}
 
       {loading ? (
-        <p className="drf-loading">Loading drafts...</p>
-      ) : isError ? (
-        <div className="drf-state drf-state--error">
-          Could not load your drafts. Refresh the page to try again.
-        </div>
-      ) : drafts.length === 0 ? (
-        <div className="drf-state drf-state--empty">
-          No saved drafts. Use "Save as Draft" on the Add Sales page to create one.
-        </div>
-      ) : (
-        <div className="drf-scroll">
-          <Table density="compact" className="drf-table">
-            <TableHeader>
-              <TableRow>
-                <TableHead>Draft No.</TableHead>
-                <TableHead>Party</TableHead>
-                <TableHead>Items</TableHead>
-                <TableHead>Total</TableHead>
-                <TableHead>Last Saved</TableHead>
-                <TableHead className="drf-actions-head">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {drafts.map((order) => (
-                <TableRow key={order.id}>
-                  <TableCell>{order.order_number}</TableCell>
-                  <TableCell>{order.card_name || order.card_code || "-"}</TableCell>
-                  <TableCell>{Array.isArray(order.items) ? order.items.length : 0}</TableCell>
-                  <TableCell>{Number(order.total_amount || 0).toFixed(2)}</TableCell>
-                  <TableCell>{formatDateTime(order.created_at)}</TableCell>
-                  <TableCell className="drf-actions">
-                    <button
-                      type="button"
-                      onClick={() => handleContinue(order)}
-                      className="drf-btn drf-btn--continue"
-                    >
-                      Continue
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(order)}
-                      disabled={deletingId === order.id}
-                      className="drf-btn drf-btn--delete"
-                    >
-                      {deletingId === order.id ? "Deleting..." : "Delete"}
-                    </button>
-                  </TableCell>
+        <TableSkeleton columns={6} label="Loading drafts" />
+      ) : !isError && drafts.length === 0 ? (
+        <Card>
+          <EmptyState
+            icon={HiOutlineInbox}
+            title="No saved drafts"
+            hint='Use "Save as Draft" on the Add Sales page to keep an order you are not ready to send.'
+            action={
+              <Button variant="primary" onClick={() => navigate("/Add_Sales")}>
+                <HiOutlineDocumentPlus aria-hidden="true" /> New sales order
+              </Button>
+            }
+          />
+        </Card>
+      ) : !isError ? (
+        <Card className="overflow-hidden p-0">
+          <div className="overflow-x-auto">
+            <Table density="compact">
+              <TableHeader>
+                <TableRow className="bg-surface hover:bg-surface">
+                  <TableHead>Draft No.</TableHead>
+                  <TableHead>Party</TableHead>
+                  <TableHead className="text-right">Items</TableHead>
+                  <TableHead className="text-right">Total</TableHead>
+                  <TableHead>Last Saved</TableHead>
+                  <TableHead className="w-px whitespace-nowrap">Actions</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      )}
-    </div>
+              </TableHeader>
+              <TableBody>
+                {drafts.map((order) => (
+                  <TableRow key={order.id}>
+                    <TableCell className="whitespace-nowrap font-semibold text-brand">
+                      {order.order_number}
+                    </TableCell>
+                    <TableCell className="text-ink">
+                      {order.card_name || order.card_code || "-"}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {Array.isArray(order.items) ? order.items.length : 0}
+                    </TableCell>
+                    <TableCell className="text-right font-semibold tabular-nums text-ink">
+                      {Number(order.total_amount || 0).toFixed(2)}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap">
+                      {formatDateTime(order.created_at)}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-nowrap items-center justify-end gap-1">
+                        {/* Continuing is what this page is FOR, so it is the
+                            primary and delete is the quiet one beside it. */}
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          onClick={() => handleContinue(order)}
+                        >
+                          Continue
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-subtle hover:bg-danger-soft hover:text-danger"
+                          onClick={() => setConfirmDelete(order)}
+                          disabled={deletingId === order.id}
+                          aria-label={`Delete draft ${order.order_number}`}
+                        >
+                          <HiOutlineTrash aria-hidden="true" />
+                          {deletingId === order.id ? "Deleting…" : "Delete"}
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </Card>
+      ) : null}
+
+      <Dialog
+        open={Boolean(confirmDelete)}
+        onOpenChange={(next) => {
+          if (!next && deletingId === null) setConfirmDelete(null);
+        }}
+      >
+        {confirmDelete ? (
+          <DialogContent title="Delete draft" size="sm">
+            <DialogHeader>
+              <DialogTitle>Delete {confirmDelete.order_number}?</DialogTitle>
+            </DialogHeader>
+            <DialogBody>
+              <p className="m-0 text-[13px] text-body">
+                The draft for{" "}
+                <strong className="font-semibold text-ink">
+                  {confirmDelete.card_name || confirmDelete.card_code || "this party"}
+                </strong>{" "}
+                will be removed. This cannot be undone.
+              </p>
+            </DialogBody>
+            <DialogFooter>
+              <Button
+                onClick={() => setConfirmDelete(null)}
+                disabled={deletingId !== null}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                onClick={() => void handleDelete(confirmDelete)}
+                disabled={deletingId !== null}
+              >
+                <HiOutlineTrash aria-hidden="true" />
+                {deletingId !== null ? "Deleting…" : "Delete draft"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        ) : null}
+      </Dialog>
+    </Page>
   );
 }

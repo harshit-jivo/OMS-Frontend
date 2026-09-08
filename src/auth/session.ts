@@ -42,6 +42,7 @@ const KEYS = {
   companyName: "company_name",
   mainGroupId: "main_group_id",
   mainGroupName: "main_group_name",
+  categories: "categories",
 } as const;
 
 /**
@@ -109,6 +110,7 @@ export function loadSession(): Session | null {
     companyName: readString(KEYS.companyName),
     mainGroupId: readString(KEYS.mainGroupId),
     mainGroupName: readString(KEYS.mainGroupName),
+    categories: readList(KEYS.categories),
   };
 }
 
@@ -143,6 +145,29 @@ export interface ApiUser {
   is_staff?: boolean;
   company?: { id?: number | string; name?: string } | null;
   main_group?: { id?: number | string; name?: string } | null;
+  /** `{id, category}` — the primary category, or null. */
+  category?: { id?: number | string; category?: string } | null;
+  /** The full m2m. The server falls back to `[category]` when it is empty. */
+  categories?: Array<{ id?: number | string; category?: string } | string> | null;
+}
+
+/**
+ * Category names from either shape the API uses, uppercased and deduped.
+ *
+ * `categories` is the m2m and is preferred; `category` is the single FK and
+ * the fallback for payloads that predate it. The server already falls back
+ * one way (see `UserSerializer.get_categories`), so this is belt and braces
+ * for an older cached payload.
+ */
+function categoryNames(user: ApiUser): string[] {
+  const fromList = (user.categories ?? []).map((entry) =>
+    typeof entry === "string" ? entry : (entry?.category ?? ""),
+  );
+  const primary = user.category?.category ?? "";
+  const all = [...fromList, primary]
+    .map((name) => String(name).trim().toUpperCase())
+    .filter(Boolean);
+  return Array.from(new Set(all));
 }
 
 /**
@@ -182,6 +207,7 @@ export function sessionFromApi(user: ApiUser): Omit<Session, "userId"> & {
     companyName: user.company?.name ?? "",
     mainGroupId: String(user.main_group?.id ?? ""),
     mainGroupName: user.main_group?.name ?? "",
+    categories: categoryNames(user),
   };
 }
 
@@ -201,6 +227,7 @@ export function saveSession(session: Session): void {
     localStorage.setItem(KEYS.companyName, session.companyName);
     localStorage.setItem(KEYS.mainGroupId, session.mainGroupId);
     localStorage.setItem(KEYS.mainGroupName, session.mainGroupName);
+    localStorage.setItem(KEYS.categories, JSON.stringify(session.categories));
   } catch {
     // Storage full or unavailable. The in-memory session still works for this
     // tab; only persistence across a reload is lost, which is a far better

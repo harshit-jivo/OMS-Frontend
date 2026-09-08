@@ -1,20 +1,40 @@
-import { useEffect, useMemo, useState } from "react";
+/**
+ * Open SO — every open sales order in SAP, with the invoices punched against
+ * it and the quantity still to go out.
+ *
+ * The sorting, the committed-vs-draft date range, the search and the Excel
+ * layout are exactly as they were. What changed:
+ *
+ *   * the row was a `<tr role="button" tabIndex={0}>` with a keydown handler
+ *     standing in for Enter and Space. A row is not a button. Clicking it
+ *     still opens the order (that is how people use it), but the control a
+ *     keyboard reaches is a real button at the end of the row;
+ *   * the order modal was a hand-rolled backdrop with its own Escape listener
+ *     and `document.body.style.overflow = "hidden"`. It is a `Dialog` now,
+ *     which does both and traps focus as well;
+ *   * SAP's relationship map — sales order, then each AR invoice, then what
+ *     is still to dispatch — is drawn on `ui/timeline`, because that is what
+ *     a document flow is.
+ */
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-
-/** Stable empty, so the filter/sort memos settle. */
-const NO_ORDERS: PendingOrder[] = [];
 import {
-  HiArrowDownTray,
-  HiArrowPath,
-  HiChevronDown,
-  HiChevronRight,
-  HiChevronUp,
-  HiChevronUpDown,
-  HiClipboardDocumentList,
-  HiDocumentText,
-  HiTruck,
-  HiXMark,
+  HiOutlineArrowDownTray,
+  HiOutlineArrowPath,
+  HiOutlineArrowRight,
+  HiOutlineArchiveBox,
+  HiOutlineBeaker,
+  HiOutlineChevronDown,
+  HiOutlineChevronUp,
+  HiOutlineChevronUpDown,
+  HiOutlineClipboardDocumentList,
+  HiOutlineCube,
+  HiOutlineDocumentText,
+  HiOutlineInbox,
+  HiOutlineQueueList,
+  HiOutlineTruck,
 } from "react-icons/hi2";
+
 import { sapService } from "../services/sapService";
 import type {
   PendingDispatchRow,
@@ -22,8 +42,28 @@ import type {
   PendingOrderInvoice,
 } from "../services/sapService";
 import { startExcelExport, exportDateStamp } from "../utils/excelExport";
-import "../styles/SO_Invoice_Report.css";
 import { Badge, type BadgeTone } from "@/components/ui/badge";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { Button } from "@/components/ui/button";
+import { DetailField, DetailGrid } from "@/components/ui/detail";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  FilterActions,
+  FilterBar,
+  FilterDate,
+  FilterSearch,
+  FilterSegmented,
+  FilterSelect,
+} from "@/components/ui/filter-bar";
+import { Card, EmptyState, Notice, Page, PageHeader, SectionHeading, Stat, StatRow } from "@/components/ui/page";
+import { TableSkeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -32,8 +72,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Timeline, TimelineHead, TimelineItem, TimelineNote } from "@/components/ui/timeline";
+import { cn } from "@/lib/utils";
 
-/** Dispatch progress -> tone, read off the progress rules in SO_Invoice_Report.css. */
+/** Stable empty, so the filter/sort memos settle. */
+const NO_ORDERS: PendingOrder[] = [];
+
+/** Dispatch progress -> tone. Not a workflow status, so the mapping stays local. */
 const LINE_TONE: Record<string, BadgeTone> = {
   "NOT INVOICED": "neutral",
   "PARTLY INVOICED": "hold",
@@ -142,27 +187,28 @@ const compareOrders = (a: PendingOrder, b: PendingOrder, sort: SortState) => {
 interface OrderColumn {
   key: SortKey;
   label: string;
+  numeric?: boolean;
   className?: string;
 }
 
 /** The order-table columns, in screen order. Every one of them sorts. */
 const ORDER_COLUMNS: OrderColumn[] = [
-  { key: "order_date", label: "ORDER DATE" },
-  { key: "age", label: "AGE" },
-  { key: "sales_order", label: "SALES ORDER" },
-  { key: "invoice_count", label: "INVOICES" },
-  { key: "invoiced_pct", label: "BILLED", className: "sovi-col-progress" },
-  { key: "party_name", label: "PARTY NAME", className: "sovi-col-wide" },
-  { key: "location", label: "LOCATION" },
-  { key: "chain", label: "CHAIN" },
-  { key: "so_name", label: "SO NAME" },
-  { key: "dispatch_from", label: "DISPATCH FROM" },
-  { key: "pending_line_count", label: "LINES", className: "sovi-num" },
-  { key: "qty_ordered", label: "ORDERED", className: "sovi-num" },
-  { key: "qty_invoiced", label: "INVOICED", className: "sovi-num" },
-  { key: "qty_pending", label: "PENDING", className: "sovi-num" },
-  { key: "ltr_pending", label: "PEND. LTR", className: "sovi-num" },
-  { key: "boxes_pending", label: "PEND. BOX", className: "sovi-num" },
+  { key: "order_date", label: "Order date" },
+  { key: "age", label: "Age" },
+  { key: "sales_order", label: "Sales order" },
+  { key: "invoice_count", label: "Invoices" },
+  { key: "invoiced_pct", label: "Billed", className: "min-w-[120px]" },
+  { key: "party_name", label: "Party name", className: "min-w-[200px]" },
+  { key: "location", label: "Location" },
+  { key: "chain", label: "Chain" },
+  { key: "so_name", label: "SO name" },
+  { key: "dispatch_from", label: "Dispatch from" },
+  { key: "pending_line_count", label: "Lines", numeric: true },
+  { key: "qty_ordered", label: "Ordered", numeric: true },
+  { key: "qty_invoiced", label: "Invoiced", numeric: true },
+  { key: "qty_pending", label: "Pending", numeric: true },
+  { key: "ltr_pending", label: "Pend. ltr", numeric: true },
+  { key: "boxes_pending", label: "Pend. box", numeric: true },
 ];
 
 /** `YYYY-MM-DD` from local fields — `toISOString()` would shift east of UTC. */
@@ -184,11 +230,7 @@ const oneMonthAgo = (): string => {
   const back = new Date(now);
   back.setDate(1);
   back.setMonth(back.getMonth() - 1);
-  const lastDayOfThatMonth = new Date(
-    back.getFullYear(),
-    back.getMonth() + 1,
-    0,
-  ).getDate();
+  const lastDayOfThatMonth = new Date(back.getFullYear(), back.getMonth() + 1, 0).getDate();
   back.setDate(Math.min(day, lastDayOfThatMonth));
   return isoDate(back);
 };
@@ -204,8 +246,9 @@ const daysOpen = (orderDate: string | null): number | null => {
   return Math.max(0, Math.round((today - then) / 86_400_000));
 };
 
-export default function SO_Invoice_Report() {
+const numCell = "text-right tabular-nums";
 
+export default function SO_Invoice_Report() {
   const [branch, setBranch] = useState<Branch>("OIL");
   // Defaults to the last month of orders. Lazy initialisers so the dates are
   // computed once, not on every render. Clearing "from" widens the report to
@@ -214,22 +257,20 @@ export default function SO_Invoice_Report() {
   const [toDate, setToDate] = useState(() => isoDate(new Date()));
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
-  /** The order whose detail modal is open, or null when none is. */
+  /** The order whose detail dialog is open, or null when none is. */
   const [selected, setSelected] = useState<PendingOrder | null>(null);
   const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
 
   /*
    * The COMMITTED range, which is what the query is keyed on. `fromDate` and
-   * `toDate` are draft inputs — the old effect carried an `exhaustive-deps`
-   * disable precisely because listing them would fire a request per keystroke.
-   * Applying is an explicit act, so it gets its own state.
+   * `toDate` are draft inputs — keying on them would fire a request per
+   * keystroke. Applying is an explicit act, so it gets its own state.
    */
   const [applied, setApplied] = useState({ from: fromDate, to: toDate });
 
   const applyRange = () => {
     setApplied({ from: fromDate, to: toDate });
-    // The open modal's order may be gone (or stale) after a reload. Was done
-    // inside the fetch; re-expressing it as an effect on `orders` is the trap.
+    // The open dialog's order may be gone (or stale) after a reload.
     setSelected(null);
   };
 
@@ -242,9 +283,7 @@ export default function SO_Invoice_Report() {
     queryFn: async () => (await sapService.getPendingDispatch(branch, applied)).orders ?? [],
   });
 
-  const error = isError
-    ? "Could not load sales orders from SAP. Please try again in a moment."
-    : "";
+  const error = isError ? "Could not load sales orders from SAP. Please try again in a moment." : "";
 
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -264,8 +303,7 @@ export default function SO_Invoice_Report() {
         )
       );
     });
-    // Copied before sorting: `filter` already returns a new array, but sorting
-    // the state array in place would mutate it.
+    // Copied before sorting: sorting the state array in place would mutate it.
     return [...filtered].sort((a, b) => compareOrders(a, b, sort));
   }, [orders, search, sort, statusFilter]);
 
@@ -376,288 +414,194 @@ export default function SO_Invoice_Report() {
     });
   };
 
-  // ── Route access: now decided once, in components/ProtectedPage.tsx ───────
-  // The guard that used to sit here is commented out below rather than removed.
-  //
-  // It was not merely redundant, it was WRONG, and in the direction that hurts:
-  // `role !== "billing"` bounced an administrator off a page the sidebar showed
-  // them and the API served them, because it compared the primary role string
-  // alone — no `extra_roles`, no `is_superuser`, no `is_staff`. Two guards that
-  // disagree are worse than one, and this was the one that was mistaken.
-  //
-  //   const role = (localStorage.getItem("role") || "").toLowerCase();
-  //   if (role !== "billing") return <Navigate to="/Dashboard" replace />;
-  //
-  // `auth/routeAccess.ts` carries the same rule (`roles: ["billing"]`) with the
-  // admin bypass every other route gets.
-
   return (
-    <div className="sovi-page">
-      <div className="sovi-header">
-        <div>
-          <h1 className="sovi-title">Open And SO</h1>
-          <p className="sovi-subtitle">
-            Every open sales order in SAP with the invoices punched against it
-            and the quantity still to go out. Read straight from SAP — open an
-            order to see its document flow. Showing the last month by default;
-            clear the from-date for every open order.
-          </p>
-        </div>
-      </div>
+    <Page>
+      <Breadcrumbs items={[{ label: "Reports" }, { label: "Open SO" }]} />
 
-      <div className="sovi-controls">
-        <div className="sovi-field">
-          <span className="sovi-label" id="sovi-branch-label">
-            Company
-          </span>
-          <div
-            className="sovi-segmented"
-            role="radiogroup"
-            aria-labelledby="sovi-branch-label"
-          >
-            {BRANCHES.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                role="radio"
-                aria-checked={branch === option.value}
-                className={`sovi-segment${
-                  branch === option.value ? " sovi-segment-active" : ""
-                }`}
-                onClick={() => {
-                  setBranch(option.value);
-                  setSelected(null);
-                }}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="sovi-field">
-          <label className="sovi-label" htmlFor="sovi-from">
-            Order date from
-          </label>
-          <input
-            id="sovi-from"
-            className="sovi-input"
-            type="date"
-            value={fromDate}
-            onChange={(e) => setFromDate(e.target.value)}
-          />
-        </div>
-
-        <div className="sovi-field">
-          <label className="sovi-label" htmlFor="sovi-to">
-            To
-          </label>
-          <input
-            id="sovi-to"
-            className="sovi-input"
-            type="date"
-            value={toDate}
-            onChange={(e) => setToDate(e.target.value)}
-          />
-        </div>
-
-        <div className="sovi-field">
-          <label className="sovi-label" htmlFor="sovi-status">
-            Status
-          </label>
-          <select
-            id="sovi-status"
-            className="sovi-select"
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
-          >
-            <option value="ALL">All open orders</option>
-            <option value="NOT INVOICED">Nothing invoiced</option>
-            <option value="PARTLY INVOICED">Partly invoiced</option>
-          </select>
-        </div>
-
-        <div className="sovi-field sovi-field-grow">
-          <label className="sovi-label" htmlFor="sovi-search">
-            Search
-          </label>
-          <input
-            id="sovi-search"
-            className="sovi-input"
-            type="search"
-            placeholder="Party, item, SO or invoice number"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            autoComplete="off"
-          />
-        </div>
-
-        <div className="sovi-actions">
-          <button
-            type="button"
-            className="sovi-btn sovi-btn-ghost"
-            onClick={applyRange}
-            disabled={loading}
-          >
-            <HiArrowPath aria-hidden="true" />
-            {loading ? "Loading…" : "Apply"}
-          </button>
-          <button
-            type="button"
-            className="sovi-btn sovi-btn-primary"
+      <PageHeader
+        title="Open SO"
+        description="Every open sales order in SAP with the invoices punched against it and the quantity still to go out. Showing the last month by default; clear the from-date for every open order."
+        actions={
+          <Button
+            variant="primary"
             onClick={handleExport}
             disabled={loading || visible.length === 0}
           >
-            <HiArrowDownTray aria-hidden="true" />
-            Download Excel
-          </button>
-        </div>
-      </div>
+            <HiOutlineArrowDownTray aria-hidden="true" /> Download Excel
+          </Button>
+        }
+      />
 
-      {error && <p className="sovi-error">{error}</p>}
+      <FilterBar>
+        <FilterSegmented
+          label="Company"
+          value={branch}
+          options={BRANCHES}
+          onChange={(next) => {
+            setBranch(next);
+            setSelected(null);
+          }}
+        />
+        <FilterDate
+          label="Order date from"
+          value={fromDate}
+          onChange={(e) => setFromDate(e.target.value)}
+        />
+        <FilterDate label="To" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+        <FilterSelect
+          label="Status"
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+          fieldClassName="max-w-[190px] flex-none"
+        >
+          <option value="ALL">All open orders</option>
+          <option value="NOT INVOICED">Nothing invoiced</option>
+          <option value="PARTLY INVOICED">Partly invoiced</option>
+        </FilterSelect>
+        <FilterSearch
+          placeholder="Party, item, SO or invoice number"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          autoComplete="off"
+          fieldClassName="min-w-[240px]"
+        />
+        <FilterActions>
+          {/* The dates are drafts until this is pressed — see `applied`. */}
+          <Button onClick={applyRange} disabled={loading}>
+            <HiOutlineArrowPath
+              aria-hidden="true"
+              className={loading ? "motion-safe:animate-spin" : undefined}
+            />
+            {loading ? "Loading…" : "Apply"}
+          </Button>
+        </FilterActions>
+      </FilterBar>
 
-      {!loading && orders.length > 0 && (
-        <div className="sovi-summary">
-          <div className="sovi-stat">
-            <div className="sovi-stat-label">Open orders</div>
-            <div className="sovi-stat-value">{visible.length}</div>
-          </div>
-          <div className="sovi-stat">
-            <div className="sovi-stat-label">Invoices punched</div>
-            <div className="sovi-stat-value">{totals.invoices}</div>
-          </div>
-          <div className="sovi-stat">
-            <div className="sovi-stat-label">Pending lines</div>
-            <div className="sovi-stat-value">{totals.lines}</div>
-          </div>
-          <div className="sovi-stat">
-            <div className="sovi-stat-label">Pending pcs</div>
-            <div className="sovi-stat-value">{formatNum(totals.pcs, 0)}</div>
-          </div>
-          <div className="sovi-stat">
-            <div className="sovi-stat-label">Pending litres</div>
-            <div className="sovi-stat-value">{formatNum(totals.ltr, 0)}</div>
-          </div>
-          <div className="sovi-stat">
-            <div className="sovi-stat-label">Pending boxes</div>
-            <div className="sovi-stat-value">{formatNum(totals.boxes, 0)}</div>
-          </div>
-        </div>
-      )}
+      {error ? (
+        <Notice tone="bad" title="Could not load sales orders">
+          {error}
+        </Notice>
+      ) : null}
 
-      {loading ? (
-        <div className="sovi-state">Fetching open sales orders from SAP…</div>
-      ) : visible.length === 0 ? (
-        <div className="sovi-state">
-          {orders.length === 0
-            ? `No open sales orders for this company between ${formatDate(
-                fromDate || null,
-              ) || "the start"} and ${formatDate(toDate || null) || "today"}.`
-            : "No orders match the current filters."}
-        </div>
-      ) : (
-        <div className="sovi-table-card">
-          <Table density="compact">
-            <TableHeader>
-              <TableRow>
-                {ORDER_COLUMNS.map((column) => (
-                  <SortHeader
-                    key={column.key}
-                    column={column}
-                    sort={sort}
-                    onSort={toggleSort}
-                  />
-                ))}
-                <TableHead className="sovi-col-toggle" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {visible.map((order) => {
-                const age = daysOpen(order.order_date);
-                return (
+      <StatRow>
+        <Stat icon={HiOutlineClipboardDocumentList} tone="brand" label="Open orders" value={visible.length} loading={loading} />
+        <Stat icon={HiOutlineDocumentText} tone="neutral" label="Invoices" value={totals.invoices} loading={loading} />
+        <Stat icon={HiOutlineQueueList} tone="neutral" label="Pending lines" value={totals.lines} loading={loading} />
+        <Stat icon={HiOutlineCube} tone="hold" label="Pending pcs" value={formatNum(totals.pcs, 0)} loading={loading} />
+        <Stat icon={HiOutlineBeaker} tone="neutral" label="Pending litres" value={formatNum(totals.ltr, 0)} loading={loading} />
+        <Stat icon={HiOutlineArchiveBox} tone="neutral" label="Pending boxes" value={formatNum(totals.boxes, 0)} loading={loading} />
+      </StatRow>
+
+      <Card className="overflow-hidden p-0">
+        {loading ? (
+          <div className="p-4">
+            <TableSkeleton columns={8} label="Fetching open sales orders from SAP" />
+          </div>
+        ) : visible.length === 0 ? (
+          <EmptyState
+            icon={HiOutlineInbox}
+            title={orders.length === 0 ? "No open sales orders" : "No orders match the current filters"}
+            hint={
+              orders.length === 0
+                ? `Nothing open for this company between ${formatDate(applied.from || null) || "the start"} and ${formatDate(applied.to || null) || "today"}.`
+                : "Clear the search or the status filter to see them all."
+            }
+          />
+        ) : (
+          <div className="overflow-x-auto">
+            <Table density="compact">
+              <TableHeader>
+                <TableRow className="bg-surface hover:bg-surface">
+                  {ORDER_COLUMNS.map((column) => (
+                    <SortHeader key={column.key} column={column} sort={sort} onSort={toggleSort} />
+                  ))}
+                  <TableHead className="w-px" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {visible.map((order) => {
+                  const age = daysOpen(order.order_date);
+                  return (
                     <TableRow
                       key={order.so_doc_entry}
-                      className="sovi-order-row"
-                      tabIndex={0}
-                      role="button"
-                      aria-label={`Open sales order ${order.sales_order}`}
+                      className="cursor-pointer"
                       onClick={() => setSelected(order)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          setSelected(order);
-                        }
-                      }}
                     >
-                      <TableCell>{formatDate(order.order_date)}</TableCell>
+                      <TableCell className="whitespace-nowrap">{formatDate(order.order_date)}</TableCell>
                       <TableCell>
                         {age === null ? (
                           ""
                         ) : (
-                          <span
-                            className={`sovi-age${age > 30 ? " sovi-age-old" : ""}`}
-                          >
-                            {age}d
-                          </span>
+                          /* Past a month is where a "still open" becomes a
+                             "why is this still open". */
+                          <Badge tone={age > 30 ? "bad" : "neutral"}>{age}d</Badge>
                         )}
                       </TableCell>
-                      <TableCell className="sovi-doc">{order.sales_order}</TableCell>
+                      <TableCell className="whitespace-nowrap font-semibold text-brand">
+                        {order.sales_order}
+                      </TableCell>
                       <TableCell>
                         {order.invoice_count === 0 ? (
                           <Badge outlined>None</Badge>
                         ) : (
                           <Badge tone="hold" outlined>
-                            {order.invoice_count}{" "}
-                            {order.invoice_count === 1 ? "invoice" : "invoices"}
+                            {order.invoice_count} {order.invoice_count === 1 ? "invoice" : "invoices"}
                           </Badge>
                         )}
                       </TableCell>
-                      <TableCell className="sovi-col-progress">
+                      <TableCell>
                         <ProgressBar pct={order.invoiced_pct} />
                       </TableCell>
-                      <TableCell className="sovi-col-wide">{order.party_name}</TableCell>
-                      <TableCell>{order.location}</TableCell>
-                      <TableCell>{order.chain}</TableCell>
-                      <TableCell>{order.so_name}</TableCell>
-                      <TableCell>{order.dispatch_from}</TableCell>
-                      <TableCell className="sovi-num">
+                      <TableCell className="whitespace-nowrap text-ink">{order.party_name}</TableCell>
+                      <TableCell className="whitespace-nowrap">{order.location}</TableCell>
+                      <TableCell className="whitespace-nowrap">{order.chain}</TableCell>
+                      <TableCell className="whitespace-nowrap">{order.so_name}</TableCell>
+                      <TableCell className="whitespace-nowrap">{order.dispatch_from}</TableCell>
+                      <TableCell className={numCell}>
                         {order.pending_line_count}/{order.line_count}
                       </TableCell>
-                      <TableCell className="sovi-num">
-                        {formatNum(order.qty_ordered, 0)}
+                      <TableCell className={numCell}>{formatNum(order.qty_ordered, 0)}</TableCell>
+                      <TableCell className={numCell}>
+                        {order.qty_invoiced ? formatNum(order.qty_invoiced, 0) : "—"}
                       </TableCell>
-                      <TableCell className="sovi-num">
-                        {order.qty_invoiced
-                          ? formatNum(order.qty_invoiced, 0)
-                          : "—"}
-                      </TableCell>
-                      <TableCell className="sovi-num sovi-strong">
+                      <TableCell className={cn(numCell, "font-semibold text-ink")}>
                         {formatNum(order.qty_pending, 0)}
                       </TableCell>
-                      <TableCell className="sovi-num">
-                        {formatNum(order.ltr_pending, 0)}
-                      </TableCell>
-                      <TableCell className="sovi-num">
-                        {formatNum(order.boxes_pending, 0)}
-                      </TableCell>
-                      <TableCell className="sovi-col-toggle">
-                        <HiChevronRight
-                          className="sovi-chevron"
-                          aria-hidden="true"
-                        />
+                      <TableCell className={numCell}>{formatNum(order.ltr_pending, 0)}</TableCell>
+                      <TableCell className={numCell}>{formatNum(order.boxes_pending, 0)}</TableCell>
+                      <TableCell>
+                        {/* The keyboard-reachable way in. Stops propagation so
+                            the row's own click does not open it twice. */}
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          aria-label={`Open sales order ${order.sales_order}`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setSelected(order);
+                          }}
+                        >
+                          <HiOutlineArrowRight aria-hidden="true" />
+                        </Button>
                       </TableCell>
                     </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </div>
-      )}
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </Card>
 
-      {selected && (
-        <OrderModal order={selected} onClose={() => setSelected(null)} />
-      )}
-    </div>
+      <Dialog
+        open={Boolean(selected)}
+        onOpenChange={(next) => {
+          if (!next) setSelected(null);
+        }}
+      >
+        {selected ? <OrderDialogContent order={selected} /> : null}
+      </Dialog>
+    </Page>
   );
 }
 
@@ -678,33 +622,44 @@ function SortHeader({
 }) {
   const active = sort.key === column.key;
   const dir = active ? sort.dir : undefined;
+  const Icon = active
+    ? dir === "asc"
+      ? HiOutlineChevronUp
+      : HiOutlineChevronDown
+    : HiOutlineChevronUpDown;
   return (
-    <th
-      className={`sovi-th-sort${active ? " sovi-th-active" : ""}${
-        column.className ? ` ${column.className}` : ""
-      }`}
-      aria-sort={
-        active ? (dir === "asc" ? "ascending" : "descending") : "none"
-      }
+    <TableHead
+      className={cn(column.className, column.numeric && "text-right")}
+      aria-sort={active ? (dir === "asc" ? "ascending" : "descending") : "none"}
     >
       <button
         type="button"
-        className="sovi-sort-btn"
         onClick={() => onSort(column.key)}
         title={`Sort by ${column.label.toLowerCase()}`}
+        // The form-control reset — Preflight is not imported, and a <button>
+        // does not inherit FONT from its <th>: `[font:inherit]` is the whole
+        // shorthand (size, weight, family), spelled that way because
+        // `font-[inherit]` is ambiguous to Tailwind and came out as
+        // font-weight alone — every sortable heading rendered at the UA's
+        // 13.33px against the 11px of the plain heads beside it.
+        className={cn(
+          "group inline-flex appearance-none items-center gap-1 border-0 bg-transparent p-0",
+          "[font:inherit] [letter-spacing:inherit] uppercase text-inherit cursor-pointer",
+          "hover:text-ink focus-visible:outline-none focus-visible:shadow-focus rounded-sm",
+          column.numeric && "flex-row-reverse",
+          active && "text-brand",
+        )}
       >
         <span>{column.label}</span>
-        {active ? (
-          dir === "asc" ? (
-            <HiChevronUp className="sovi-sort-icon sovi-sort-on" aria-hidden="true" />
-          ) : (
-            <HiChevronDown className="sovi-sort-icon sovi-sort-on" aria-hidden="true" />
-          )
-        ) : (
-          <HiChevronUpDown className="sovi-sort-icon" aria-hidden="true" />
-        )}
+        <Icon
+          aria-hidden="true"
+          className={cn(
+            "size-3.5 shrink-0 transition-opacity",
+            active ? "opacity-100" : "opacity-30 group-hover:opacity-70",
+          )}
+        />
       </button>
-    </th>
+    </TableHead>
   );
 }
 
@@ -712,276 +667,211 @@ function SortHeader({
 function ProgressBar({ pct }: { pct: number }) {
   const clamped = Math.max(0, Math.min(100, pct));
   return (
-    <div className="sovi-progress" title={`${pct}% of the ordered qty billed`}>
-      <div className="sovi-progress-track">
+    <div
+      className="flex items-center gap-2"
+      title={`${pct}% of the ordered qty billed`}
+      role="progressbar"
+      aria-valuenow={Math.round(clamped)}
+      aria-valuemin={0}
+      aria-valuemax={100}
+    >
+      <div className="h-1.5 w-16 overflow-hidden rounded-full bg-surface-strong">
         <div
-          className={`sovi-progress-fill${clamped === 0 ? " sovi-progress-empty" : ""}`}
+          className={cn("h-full rounded-full", clamped >= 100 ? "bg-ok" : "bg-brand")}
           style={{ width: `${clamped}%` }}
         />
       </div>
-      <span className="sovi-progress-label">{Math.round(clamped)}%</span>
+      <span className="text-[11.5px] tabular-nums text-subtle">{Math.round(clamped)}%</span>
     </div>
   );
 }
 
 /**
  * One order in full: its lines on the left, SAP's relationship map on the
- * right. Closes on Escape, on the backdrop, or on the X.
+ * right. Everything about closing it — Escape, backdrop, the X, the scroll
+ * lock — is `Dialog`'s.
  */
-function OrderModal({
-  order,
-  onClose,
-}: {
-  order: PendingOrder;
-  onClose: () => void;
-}) {
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKeyDown);
-    // The page behind must not scroll under the modal — restore whatever the
-    // page had rather than hard-coding "auto".
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.removeEventListener("keydown", onKeyDown);
-      document.body.style.overflow = previousOverflow;
-    };
-  }, [onClose]);
-
+function OrderDialogContent({ order }: { order: PendingOrder }) {
   return (
-    <div
-      className="sovi-modal-overlay"
-      onClick={onClose}
-      role="presentation"
-    >
-      <div
-        className="sovi-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Sales order ${order.sales_order}`}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="sovi-modal-head">
-          <div>
-            <div className="sovi-modal-eyebrow">Sales Order</div>
-            <h2 className="sovi-modal-title">
-              {order.sales_order}
-              <Badge tone={order.invoice_count ? "hold" : "neutral"} outlined>
-                {order.status}
+    <DialogContent title={`Sales order ${order.sales_order}`} size="xl" className="max-w-[1180px]">
+      <DialogHeader>
+        <div className="min-w-0">
+          <p className="m-0 mb-0.5 text-[11px] font-semibold uppercase tracking-wider text-brand">
+            Sales order
+          </p>
+          <DialogTitle className="flex flex-wrap items-center gap-2">
+            {order.sales_order}
+            <Badge tone={order.invoice_count ? "hold" : "neutral"} outlined>
+              {order.status}
+            </Badge>
+          </DialogTitle>
+          <DialogDescription>
+            {order.party_name}
+            {order.card_code ? ` · ${order.card_code}` : ""} · {formatDate(order.order_date)}
+          </DialogDescription>
+        </div>
+      </DialogHeader>
+
+      <DialogBody className="space-y-6">
+        <DetailGrid>
+          <DetailField label="Ordered" value={formatNum(order.qty_ordered, 0)} />
+          <DetailField label="Invoiced" value={formatNum(order.qty_invoiced, 0)} />
+          <DetailField label="Pending" value={formatNum(order.qty_pending, 0)} />
+          <DetailField label="Pending ltr" value={formatNum(order.ltr_pending, 0)} />
+          <DetailField label="Pending box" value={formatNum(order.boxes_pending, 0)} />
+          <DetailField label="Billed" value={`${Math.round(order.invoiced_pct)}%`} />
+          <DetailField label="Location" value={order.location || "—"} />
+          <DetailField label="Chain" value={order.chain || "—"} />
+          <DetailField label="SO name" value={order.so_name || "—"} />
+          <DetailField label="Dispatch from" value={order.dispatch_from || "—"} />
+        </DetailGrid>
+
+        <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
+          <section className="min-w-0">
+            <div className="mb-2 flex items-center gap-2">
+              <SectionHeading>Lines</SectionHeading>
+              <Badge tone="neutral">
+                {order.pending_line_count} pending of {order.line_count}
               </Badge>
-            </h2>
-            <div className="sovi-modal-sub">
-              {order.party_name}
-              {order.card_code ? ` · ${order.card_code}` : ""} ·{" "}
-              {formatDate(order.order_date)}
             </div>
-          </div>
-          <button
-            type="button"
-            className="sovi-modal-close"
-            onClick={onClose}
-            aria-label="Close"
-          >
-            <HiXMark aria-hidden="true" />
-          </button>
-        </div>
-
-        <div className="sovi-modal-meta">
-          <ModalStat label="Ordered" value={formatNum(order.qty_ordered, 0)} />
-          <ModalStat label="Invoiced" value={formatNum(order.qty_invoiced, 0)} />
-          <ModalStat
-            label="Pending"
-            value={formatNum(order.qty_pending, 0)}
-            strong
-          />
-          <ModalStat label="Pending ltr" value={formatNum(order.ltr_pending, 0)} />
-          <ModalStat
-            label="Pending box"
-            value={formatNum(order.boxes_pending, 0)}
-          />
-          <ModalStat label="Billed" value={`${Math.round(order.invoiced_pct)}%`} />
-          <ModalStat label="Location" value={order.location || "—"} />
-          <ModalStat label="Chain" value={order.chain || "—"} />
-          <ModalStat label="SO name" value={order.so_name || "—"} />
-          <ModalStat label="Dispatch from" value={order.dispatch_from || "—"} />
-        </div>
-
-        <div className="sovi-modal-body">
-          <div className="sovi-modal-lines">
-            <div className="sovi-flow-title">
-              Lines ({order.pending_line_count} pending of {order.line_count})
-            </div>
-            <div className="sovi-lines-scroll">
+            <div className="overflow-x-auto rounded-card border border-line">
               <Table density="compact">
                 <TableHeader>
-                  <TableRow>
-                    <TableHead>SKU NO</TableHead>
-                    <TableHead className="sovi-col-wide">SKU NAME</TableHead>
+                  <TableRow className="bg-surface hover:bg-surface">
+                    <TableHead>SKU no</TableHead>
+                    <TableHead className="min-w-[200px]">SKU name</TableHead>
                     <TableHead>SKU</TableHead>
-                    <TableHead className="sovi-num">ORDERED</TableHead>
-                    <TableHead className="sovi-num">INVOICED</TableHead>
-                    <TableHead className="sovi-num">PENDING</TableHead>
-                    <TableHead className="sovi-num">LTR</TableHead>
-                    <TableHead className="sovi-num">BOXES</TableHead>
-                    <TableHead>INVOICE</TableHead>
-                    <TableHead>STATUS</TableHead>
+                    <TableHead className="text-right">Ordered</TableHead>
+                    <TableHead className="text-right">Invoiced</TableHead>
+                    <TableHead className="text-right">Pending</TableHead>
+                    <TableHead className="text-right">Ltr</TableHead>
+                    <TableHead className="text-right">Boxes</TableHead>
+                    <TableHead>Invoice</TableHead>
+                    <TableHead>Status</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {order.lines.map((line) => (
-                    <LineRow
-                      key={`${line.so_doc_entry}-${line.line_num}`}
-                      line={line}
-                    />
+                    <LineRow key={`${line.so_doc_entry}-${line.line_num}`} line={line} />
                   ))}
                 </TableBody>
               </Table>
             </div>
-          </div>
+          </section>
 
-          <div className="sovi-modal-flow">
-            <div className="sovi-flow-title">Relationship map</div>
+          <section className="min-w-0">
+            <SectionHeading className="mb-2">Relationship map</SectionHeading>
             <FlowMap order={order} />
-          </div>
+          </section>
         </div>
-      </div>
-    </div>
-  );
-}
-
-function ModalStat({
-  label,
-  value,
-  strong = false,
-}: {
-  label: string;
-  value: string;
-  strong?: boolean;
-}) {
-  return (
-    <div className="sovi-modal-stat">
-      <div className="sovi-modal-stat-label">{label}</div>
-      <div className={`sovi-modal-stat-value${strong ? " sovi-strong" : ""}`}>
-        {value}
-      </div>
-    </div>
+      </DialogBody>
+    </DialogContent>
   );
 }
 
 /**
- * SAP's relationship map, drawn top-down for the modal's right column: the
- * sales order, then everything drawn from it — each AR invoice, and what is
- * still to dispatch.
+ * SAP's relationship map, top-down: the sales order, then everything drawn
+ * from it — each AR invoice, and what is still to dispatch. A document flow
+ * is a sequence of things that happened, which is what `ui/timeline` draws.
  */
 function FlowMap({ order }: { order: PendingOrder }) {
+  const hasPending = order.qty_pending > 0;
+  const lastIsPending = hasPending;
   return (
-    <div className="sovi-map">
-      <div className="sovi-node sovi-node-so">
-        <div className="sovi-node-head">
-          <HiClipboardDocumentList aria-hidden="true" />
-          Sales Order
-        </div>
-        <div className="sovi-node-doc">{order.sales_order}</div>
-        <div className="sovi-node-meta">{formatDate(order.order_date)}</div>
-        <div className="sovi-node-meta">
-          {formatNum(order.qty_ordered, 0)} pcs ordered
-        </div>
-      </div>
+    <Timeline>
+      <TimelineItem tone="info" last={order.invoices.length === 0 && !hasPending}>
+        <TimelineHead>
+          <HiOutlineClipboardDocumentList aria-hidden="true" className="size-4 text-brand" />
+          Sales order {order.sales_order}
+        </TimelineHead>
+        <TimelineNote>{formatDate(order.order_date)}</TimelineNote>
+        <TimelineNote>{formatNum(order.qty_ordered, 0)} pcs ordered</TimelineNote>
+      </TimelineItem>
 
-      <div className="sovi-map-tree">
-        {order.invoices.map((invoice) => (
-          <InvoiceNode key={invoice.invoice_entry} invoice={invoice} />
-        ))}
+      {order.invoices.map((invoice, index) => (
+        <InvoiceNode
+          key={invoice.invoice_entry}
+          invoice={invoice}
+          last={!lastIsPending && index === order.invoices.length - 1}
+        />
+      ))}
 
-        {order.invoices.length === 0 && (
-          <div className="sovi-flow-empty">
-            No AR invoice has been raised against this order yet.
-          </div>
-        )}
+      {order.invoices.length === 0 ? (
+        <TimelineItem tone="neutral" last={!hasPending}>
+          <TimelineNote>No AR invoice has been raised against this order yet.</TimelineNote>
+        </TimelineItem>
+      ) : null}
 
-        {order.qty_pending > 0 && (
-          <div className="sovi-node sovi-node-pending">
-            <div className="sovi-node-head">
-              <HiTruck aria-hidden="true" />
-              Still to dispatch
-            </div>
-            <div className="sovi-node-doc">
-              {formatNum(order.qty_pending, 0)} pcs
-            </div>
-            <div className="sovi-node-meta">
-              {formatNum(order.ltr_pending, 0)} ltr ·{" "}
-              {formatNum(order.boxes_pending, 0)} box
-            </div>
-            <div className="sovi-node-meta">
-              {order.pending_line_count} of {order.line_count} lines
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
+      {hasPending ? (
+        <TimelineItem tone="hold" last>
+          <TimelineHead>
+            <HiOutlineTruck aria-hidden="true" className="size-4 text-hold" />
+            Still to dispatch
+          </TimelineHead>
+          <TimelineNote>
+            {formatNum(order.qty_pending, 0)} pcs · {formatNum(order.ltr_pending, 0)} ltr ·{" "}
+            {formatNum(order.boxes_pending, 0)} box
+          </TimelineNote>
+          <TimelineNote>
+            {order.pending_line_count} of {order.line_count} lines
+          </TimelineNote>
+        </TimelineItem>
+      ) : null}
+    </Timeline>
   );
 }
 
-function InvoiceNode({ invoice }: { invoice: PendingOrderInvoice }) {
+function InvoiceNode({ invoice, last }: { invoice: PendingOrderInvoice; last: boolean }) {
   return (
-    <div className="sovi-node sovi-node-inv">
-      <div className="sovi-node-head">
-        <HiDocumentText aria-hidden="true" />
-        AR Invoice
-      </div>
-      <div className="sovi-node-doc">{invoice.invoice_num}</div>
-      <div className="sovi-node-meta">{formatDate(invoice.invoice_date)}</div>
-      <div className="sovi-node-meta">
+    <TimelineItem tone="ok" last={last}>
+      <TimelineHead>
+        <HiOutlineDocumentText aria-hidden="true" className="size-4 text-ok" />
+        AR invoice {invoice.invoice_num}
+      </TimelineHead>
+      <TimelineNote>{formatDate(invoice.invoice_date)}</TimelineNote>
+      <TimelineNote>
         {formatNum(invoice.qty, 0)} pcs · {formatMoney(invoice.amount)}
-      </div>
-      <div className="sovi-node-meta">
-        {invoice.line_count} {invoice.line_count === 1 ? "line" : "lines"} from
-        this order
-      </div>
-    </div>
+      </TimelineNote>
+      <TimelineNote>
+        {invoice.line_count} {invoice.line_count === 1 ? "line" : "lines"} from this order
+      </TimelineNote>
+    </TimelineItem>
   );
 }
 
 function LineRow({ line }: { line: PendingDispatchRow }) {
   const done = line.qty_pcs <= 0;
   return (
-    <tr className={done ? "sovi-line-done" : ""}>
-      <td>{line.item_code}</td>
-      <td className="sovi-col-wide">{line.item_name}</td>
-      <td>{line.sku}</td>
-      <td className="sovi-num">{formatNum(line.qty_ordered, 0)}</td>
-      <td className="sovi-num">
+    <TableRow className={done ? "text-subtle" : undefined}>
+      <TableCell className="whitespace-nowrap font-mono text-[12px]">{line.item_code}</TableCell>
+      <TableCell className={done ? undefined : "text-ink"}>{line.item_name}</TableCell>
+      <TableCell className="whitespace-nowrap">{line.sku}</TableCell>
+      <TableCell className={numCell}>{formatNum(line.qty_ordered, 0)}</TableCell>
+      <TableCell className={numCell}>
         {line.qty_invoiced ? formatNum(line.qty_invoiced, 0) : "—"}
-      </td>
-      <td className="sovi-num sovi-strong">{formatNum(line.qty_pcs, 0)}</td>
-      <td className="sovi-num">{formatNum(line.total_ltr)}</td>
-      <td className="sovi-num">{formatNum(line.qty_boxes)}</td>
-      <td className="sovi-invoice">
+      </TableCell>
+      <TableCell className={cn(numCell, !done && "font-semibold text-ink")}>
+        {formatNum(line.qty_pcs, 0)}
+      </TableCell>
+      <TableCell className={numCell}>{formatNum(line.total_ltr)}</TableCell>
+      <TableCell className={numCell}>{formatNum(line.qty_boxes)}</TableCell>
+      <TableCell className="whitespace-nowrap">
         {line.invoice ? (
           line.invoice
         ) : line.order_invoices ? (
-          <span
-            className="sovi-invoice-order"
-            title="Raised against this order, on other lines"
-          >
+          <span title="Raised against this order, on other lines" className="inline-flex items-center gap-1">
             {line.order_invoices}
-            <span className="sovi-invoice-tag">SO</span>
+            <Badge tone="neutral">SO</Badge>
           </span>
         ) : (
           "—"
         )}
-      </td>
-      <td>
-        {/*
-          `line.status` is "NOT INVOICED" / "PARTLY INVOICED" / "INVOICED" —
-          dispatch progress, not a workflow status, so the mapping stays local.
-        */}
+      </TableCell>
+      <TableCell>
         <Badge outlined tone={LINE_TONE[line.status] ?? "neutral"}>
           {line.status}
         </Badge>
-      </td>
-    </tr>
+      </TableCell>
+    </TableRow>
   );
 }

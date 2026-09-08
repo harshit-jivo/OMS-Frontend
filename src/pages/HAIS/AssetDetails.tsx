@@ -1,21 +1,26 @@
-import { HiUserPlus, HiClipboardDocumentList, HiPencil } from "react-icons/hi2";
-import { StatusBadge } from "../../components/NicUI";
-import { configSummary, holderLabel, type Asset } from "../../services/haisService";
-import AssetQr from "./AssetQr";
+/**
+ * Read-only popup showing ALL data for a device (no history timeline) — the
+ * row-click view of the register.
+ */
+import { HiOutlineClipboardDocumentList, HiOutlinePencilSquare, HiOutlineUserPlus } from "react-icons/hi2";
 
-function statusTone(status?: string): "ok" | "err" | "warn" | "muted" {
-  switch ((status || "").toLowerCase()) {
-    case "working":
-      return "ok";
-    case "under repair":
-      return "warn";
-    case "not working":
-    case "scrapped":
-      return "err";
-    default:
-      return "muted";
-  }
-}
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { DetailFields } from "@/components/ui/detail";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { SectionHeading } from "@/components/ui/page";
+import { configSummary, holderLabel, type Asset } from "../../services/haisService";
+
+import AssetQr from "./AssetQr";
+import { MONO, assetStatusTone } from "./assetTone";
 
 type Row = [string, unknown];
 
@@ -23,17 +28,10 @@ function Section({ title, rows }: { title: string; rows: Row[] }) {
   const shown = rows.filter(([, v]) => v !== undefined && v !== null && String(v).trim() !== "");
   if (shown.length === 0) return null;
   return (
-    <>
-      <div className="hais-detail-section-title">{title}</div>
-      <div className="hais-detail-grid">
-        {shown.map(([k, v]) => (
-          <div className="hais-detail-item" key={k}>
-            <span className="k">{k}</span>
-            <span className="v">{String(v)}</span>
-          </div>
-        ))}
-      </div>
-    </>
+    <section className="space-y-2.5">
+      <SectionHeading>{title}</SectionHeading>
+      <DetailFields items={shown.map(([k, v]) => [k, String(v)])} />
+    </section>
   );
 }
 
@@ -45,29 +43,26 @@ type Props = {
   onHistory?: (asset: Asset) => void;
 };
 
-/** Read-only popup showing ALL data for a device (no history timeline). */
 export default function AssetDetails({ asset, onClose, onEdit, onHandover, onHistory }: Props) {
+  const status = (asset.working_status as string) || "—";
   return (
-    <div className="hais-detail-overlay" onClick={onClose}>
-      <div className="hais-detail-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="hais-detail-head">
-          <h3>
-            <span className="nic-mono">{asset.asset_id}</span>
-            <StatusBadge tone={statusTone(asset.working_status as string)}>
-              {(asset.working_status as string) || "—"}
-            </StatusBadge>
-          </h3>
-          <div className="hais-detail-sub-row">
-            <span className="hais-detail-sub">{asset.asset_type || "Asset"}</span>
-            <button className="hais-detail-close" onClick={onClose} aria-label="Close">
-              &times;
-            </button>
+    <Dialog open onOpenChange={(next) => !next && onClose()}>
+      <DialogContent title={`${asset.asset_id} — ${asset.asset_type || "Asset"}`} size="lg">
+        <DialogHeader className="items-start">
+          <div className="min-w-0">
+            <DialogTitle className="flex flex-wrap items-center gap-2">
+              <span className={`${MONO} text-[16px]`}>{asset.asset_id}</span>
+              <Badge tone={assetStatusTone(asset.working_status as string)} dot>
+                {status}
+              </Badge>
+            </DialogTitle>
+            <DialogDescription>{asset.asset_type || "Asset"}</DialogDescription>
           </div>
-        </div>
+        </DialogHeader>
 
-        <div className="hais-detail-body">
-          <div className="hais-detail-idrow">
-            <div className="hais-detail-idrow-info">
+        <DialogBody className="space-y-6">
+          <div className="flex flex-wrap items-start gap-6">
+            <div className="min-w-0 flex-1">
               <Section
                 title="Identification"
                 rows={[
@@ -76,7 +71,7 @@ export default function AssetDetails({ asset, onClose, onEdit, onHandover, onHis
                   ["Company", asset.company],
                   ["Model No.", asset.model_num],
                   ["Serial No.", asset.serial_num],
-                  ["Warranty Ends", asset.warranty_ends],
+                  ["Warranty ends", asset.warranty_ends],
                 ]}
               />
             </div>
@@ -88,23 +83,23 @@ export default function AssetDetails({ asset, onClose, onEdit, onHandover, onHis
             rows={[
               ["Processor", asset.processor],
               ["Memory (RAM)", asset.memory],
-              ["Operating System", asset.operating_system],
-              ["Storage Type", asset.storage_type],
+              ["Operating system", asset.operating_system],
+              ["Storage type", asset.storage_type],
               ["Storage", asset.storage],
               ["Summary", configSummary(asset)],
             ]}
           />
 
           <Section
-            title="Assignment & Tracking"
+            title="Assignment & tracking"
             rows={[
-              ["Current User", holderLabel(asset)],
-              ["Current User ID", asset.current_user_id],
-              ["Previous User", asset.prev_user_name || asset.prev_user_id],
+              ["Current user", holderLabel(asset)],
+              ["Current user ID", asset.current_user_id],
+              ["Previous user", asset.prev_user_name || asset.prev_user_id],
               ["Department", asset.department],
               ["Email ID", asset.email_id],
-              ["Current Location", asset.current_location],
-              ["Handover Date", asset.handover_date],
+              ["Current location", asset.current_location],
+              ["Handover date", asset.handover_date],
             ]}
           />
 
@@ -112,7 +107,7 @@ export default function AssetDetails({ asset, onClose, onEdit, onHandover, onHis
             title="Purchase"
             rows={[
               ["Invoice No.", asset.purchase_invoice_no],
-              ["Invoice Date", asset.purchase_invoice_date],
+              ["Invoice date", asset.purchase_invoice_date],
               ["Vendor", asset.vendor],
               ["Amount", asset.amount != null && asset.amount !== "" ? `₹ ${asset.amount}` : ""],
             ]}
@@ -121,28 +116,25 @@ export default function AssetDetails({ asset, onClose, onEdit, onHandover, onHis
           <Section
             title="Maintenance"
             rows={[
-              ["Date of Last Service", asset.date_of_last_service],
-              ["Working Status", asset.working_status],
+              ["Date of last service", asset.date_of_last_service],
+              ["Working status", asset.working_status],
               ["Remarks", asset.remarks],
             ]}
           />
-        </div>
+        </DialogBody>
 
-        <div className="hais-detail-foot">
-          <button className="ofs-primary" onClick={() => onHandover?.(asset)}>
-            <HiUserPlus className="nic-icon-lead" />
-            Handover
-          </button>
-          <button className="nic-tab" onClick={() => onHistory?.(asset)}>
-            <HiClipboardDocumentList className="nic-icon-lead" />
-            History
-          </button>
-          <button className="nic-tab" onClick={() => onEdit?.(asset.asset_id)}>
-            <HiPencil className="nic-icon-lead" />
-            Edit / Update Config
-          </button>
-        </div>
-      </div>
-    </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => onHistory?.(asset)}>
+            <HiOutlineClipboardDocumentList aria-hidden="true" /> History
+          </Button>
+          <Button variant="ghost" onClick={() => onEdit?.(asset.asset_id)}>
+            <HiOutlinePencilSquare aria-hidden="true" /> Edit / update config
+          </Button>
+          <Button variant="primary" onClick={() => onHandover?.(asset)}>
+            <HiOutlineUserPlus aria-hidden="true" /> Handover
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

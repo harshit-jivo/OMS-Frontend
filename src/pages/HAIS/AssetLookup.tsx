@@ -1,12 +1,28 @@
+/**
+ * Look one device up by Asset ID, or by scanning its QR with the camera.
+ */
 import { useState, Suspense, lazy } from "react";
-import { HiMagnifyingGlass, HiQrCode, HiPencil, HiUserPlus } from "react-icons/hi2";
-import { KeyValues, StatusBadge, ErrorAlert } from "../../components/NicUI";
+import {
+  HiOutlineMagnifyingGlass,
+  HiOutlinePencilSquare,
+  HiOutlineQrCode,
+  HiOutlineUserPlus,
+} from "react-icons/hi2";
+
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { DetailFields } from "@/components/ui/detail";
+import { Field, Input } from "@/components/ui/form";
+import { Card, CardHeader, CardTitle, Notice } from "@/components/ui/page";
 import { messageFrom } from "@/lib/apiError";
 import { haisService, configSummary, holderLabel, type Asset } from "../../services/haisService";
-import AssetHistory from "./AssetHistory";
+
 import AssetActionModal from "./AssetActionModal";
+import AssetHistory from "./AssetHistory";
+import { MONO, assetStatusTone } from "./assetTone";
+
 /*
- * The camera scanner is loaded when the user asks to scan — Phase 5.3.
+ * The camera scanner is loaded when the user asks to scan.
  *
  * `html5-qrcode` is ~350 kB and was pulled in by the HAIS page chunk, so
  * looking up an asset by typing its code downloaded a camera library that
@@ -26,20 +42,6 @@ function codeFromScan(text: string): string {
   const t = text.trim();
   const m = t.match(/\/hais\/device\/([^/?#]+)/i);
   return m ? decodeURIComponent(m[1]) : t;
-}
-
-function statusTone(status?: string): "ok" | "err" | "warn" | "muted" {
-  switch ((status || "").toLowerCase()) {
-    case "working":
-      return "ok";
-    case "under repair":
-      return "warn";
-    case "not working":
-    case "scrapped":
-      return "err";
-    default:
-      return "muted";
-  }
 }
 
 export default function AssetLookup({ onEdit }: Props) {
@@ -89,92 +91,103 @@ export default function AssetLookup({ onEdit }: Props) {
   };
 
   return (
-    <section className="ofs-card ofs-card--wide">
-      <div className="ofs-card-head">
-        <span className="ofs-card-mark" />
-        <h2>Asset Lookup</h2>
-      </div>
-
-      {/* Web is type-to-look-up only; QR scanning lives in the mobile app. */}
-      <div className="nic-form-grid">
-        <label className="nic-field nic-field--full">
-          <span className="nic-label">Asset ID</span>
-          <input
-            className="nic-input nic-mono"
-            value={assetId}
-            onChange={(e) => setAssetId(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && void run()}
-            placeholder="Type the Asset ID"
-          />
-        </label>
-      </div>
-
-      <div className="nic-actions-row">
-        <button className="ofs-primary" onClick={() => void run()} disabled={busy}>
-          <HiMagnifyingGlass className="nic-icon-lead" />
-          {busy ? "Searching…" : "Look up"}
-        </button>
-        <button className="nic-tab" onClick={() => setScanning(true)} disabled={busy}>
-          <HiQrCode className="nic-icon-lead" />
-          Scan QR
-        </button>
-      </div>
+    <div className="space-y-4 sm:space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>Asset Lookup</CardTitle>
+        </CardHeader>
+        <form
+          className="flex flex-wrap items-end gap-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void run();
+          }}
+        >
+          <Field label="Asset ID" error={error || undefined} className="min-w-[240px] flex-1">
+            {(c) => (
+              <Input
+                {...c}
+                className={MONO}
+                value={assetId}
+                onChange={(e) => setAssetId(e.target.value)}
+                placeholder="Type the Asset ID"
+                autoComplete="off"
+              />
+            )}
+          </Field>
+          {/* Sits on the field's control line even when the field grows an
+              error line below it. */}
+          <div className={`flex gap-1.5 ${error ? "self-start pt-[22px]" : ""}`}>
+            <Button type="submit" variant="primary" disabled={busy}>
+              <HiOutlineMagnifyingGlass aria-hidden="true" /> {busy ? "Searching…" : "Look up"}
+            </Button>
+            <Button type="button" onClick={() => setScanning(true)} disabled={busy}>
+              <HiOutlineQrCode aria-hidden="true" /> Scan QR
+            </Button>
+          </div>
+        </form>
+      </Card>
 
       {scanning && (
-        // No fallback: the scanner is a full-screen overlay, and flashing a
-        // placeholder overlay before the real one is worse than a brief pause
-        // on the button the user just pressed.
+        // No fallback: the scanner is a dialog, and flashing a placeholder
+        // before the real one is worse than a brief pause on the button.
         <Suspense fallback={null}>
           <QrScanner onDecode={(t) => void onScan(t)} onClose={() => setScanning(false)} />
         </Suspense>
       )}
 
-      <ErrorAlert>{error}</ErrorAlert>
-
       {asset && (
-        <div className="nic-result nic-result--offset">
-          <div className="nic-subsection">
-            <h4 className="nic-subsection-title">
-              {asset.asset_id}{" "}
-              <StatusBadge tone={statusTone(asset.working_status as string)}>
-                {(asset.working_status as string) || "—"}
-              </StatusBadge>
-            </h4>
-            <KeyValues
+        <>
+          <Card className="space-y-4">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <span className={`${MONO} text-[15px]`}>{asset.asset_id}</span>
+                <Badge tone={assetStatusTone(asset.working_status as string)} dot>
+                  {(asset.working_status as string) || "—"}
+                </Badge>
+              </CardTitle>
+              <div className="flex gap-1.5">
+                <Button size="xs" variant="ghost" onClick={() => onEdit?.(asset.asset_id)}>
+                  <HiOutlinePencilSquare aria-hidden="true" /> Edit / update config
+                </Button>
+                <Button size="xs" onClick={() => setAction("handover")}>
+                  <HiOutlineUserPlus aria-hidden="true" /> Handover
+                </Button>
+              </div>
+            </CardHeader>
+            <DetailFields
+              hideWhenEmpty
               items={[
                 ["Category", asset.asset_type],
                 ["Company", asset.company],
                 ["Model No.", asset.model_num],
                 ["Serial No.", asset.serial_num],
                 ["Configuration", configSummary(asset)],
-                ["Warranty Ends", asset.warranty_ends],
-                ["Current User", holderLabel(asset)],
-                ["Previous User", asset.prev_user_name || asset.prev_user_id],
+                ["Warranty ends", asset.warranty_ends],
+                ["Current user", holderLabel(asset)],
+                ["Previous user", asset.prev_user_name || asset.prev_user_id],
                 ["Department", asset.department],
                 ["Email ID", asset.email_id],
-                ["Current Location", asset.current_location],
-                ["Handover Date", asset.handover_date],
+                ["Current location", asset.current_location],
+                ["Handover date", asset.handover_date],
                 ["Vendor", asset.vendor],
-                ["Date of Last Service", asset.date_of_last_service],
+                ["Date of last service", asset.date_of_last_service],
               ]}
             />
-          </div>
+          </Card>
 
           {/* Full lifecycle — when the device moved, to whom, and why. */}
-          <AssetHistory history={asset.history} />
-
-          <div className="nic-actions-row">
-            <button className="ofs-primary" onClick={() => setAction("handover")}>
-              <HiUserPlus className="nic-icon-lead" />
-              Handover
-            </button>
-            <button className="nic-tab" onClick={() => onEdit?.(asset.asset_id)}>
-              <HiPencil className="nic-icon-lead" />
-              Edit / Update Config
-            </button>
-          </div>
-        </div>
+          <Card>
+            <AssetHistory history={asset.history} />
+          </Card>
+        </>
       )}
+
+      {!asset && !busy && !error ? (
+        <Notice tone="info">
+          Type an Asset ID above, or scan the QR sticker on the device.
+        </Notice>
+      ) : null}
 
       {asset && action && (
         <AssetActionModal
@@ -187,6 +200,6 @@ export default function AssetLookup({ onEdit }: Props) {
           }}
         />
       )}
-    </section>
+    </div>
   );
 }

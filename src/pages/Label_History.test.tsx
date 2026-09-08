@@ -111,7 +111,9 @@ describe("Label check history", () => {
     await screen.findByRole("heading", { name: /Label Check History/i });
     const user = userEvent.setup();
 
-    await user.click(screen.getByRole("checkbox", { name: /Only checks with failures/i }));
+    // The checkbox became a "Result" select in the filter bar, so it sits
+    // with the other filters instead of floating in the page header.
+    await user.selectOptions(screen.getByRole("combobox", { name: /Result/i }), "failed");
 
     await waitFor(() =>
       expect(list).toHaveBeenLastCalledWith(
@@ -185,8 +187,9 @@ describe("Label check history", () => {
   it("says so when nothing has been checked", async () => {
     await renderHistory([]);
 
+    expect(await screen.findByText(/Nothing checked yet/i)).toBeInTheDocument();
     expect(
-      await screen.findByText(/No labels have been checked yet/i),
+      screen.getByText(/Run a check from the Label Checker/i),
     ).toBeInTheDocument();
   });
 
@@ -196,8 +199,11 @@ describe("Label check history", () => {
     await screen.findByRole("heading", { name: /Label Check History/i });
     const user = userEvent.setup();
 
+    // `ui/pagination` now: numbered buttons with the arrows at the ends, and
+    // the position announced screen-reader-only rather than printed between
+    // them.
     expect(await screen.findByText("Page 1 of 3")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Previous" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Prev" })).toBeDisabled();
 
     await user.click(screen.getByRole("button", { name: "Next" }));
 

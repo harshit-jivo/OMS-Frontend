@@ -1,10 +1,48 @@
+/**
+ * Combo Mapping — which product a "A + B" combo pack gives away.
+ *
+ * A combo is named "A + B" and carries B free of cost. Mapping it to the paid
+ * product and the free product is what lets Add Sales split it into a priced
+ * line and a zero-priced one with the same number of pieces.
+ *
+ * The editor is inline under the row, not a dialog: the suggestion list is
+ * scored against the combo's NAME (the half after the "+" for the free item,
+ * before it for the paid one), and seeing the name it is matching against is
+ * the whole point of picking from a list rather than typing a code.
+ */
 import { useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { HiOutlinePuzzlePiece } from "react-icons/hi2";
+
+import { Badge } from "@/components/ui/badge";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  FilterBar,
+  FilterCheckbox,
+  FilterCount,
+  FilterSearch,
+  FilterSpacer,
+} from "@/components/ui/filter-bar";
+import { Input } from "@/components/ui/form";
+import { Card, EmptyState, Notice, Page, PageHeader } from "@/components/ui/page";
+import { SegmentedControl } from "@/components/ui/segmented";
+import { Skeleton } from "@/components/ui/skeleton";
+import { messageFrom } from "@/lib/apiError";
+import { showToast } from "@/lib/toastStore";
+import { cn } from "@/lib/utils";
+
 import { useSapProducts } from "../lib/sapQueries";
 import { userService } from "../services/userService";
 import type { ComboMapping } from "../services/userService";
-import { messageFrom } from "@/lib/apiError";
-import "../styles/Combo_Mapping.css";
 
 type CatalogueProduct = {
   item_code: string;
@@ -26,8 +64,17 @@ const parentHalfOf = (itemName: string) => asText(itemName.split("+")[0] || "");
 /** Which half of the combo the product list is currently choosing for. */
 type PickerTarget = "parent" | "free";
 
+const TARGETS = [
+  { value: "parent", label: "Parent (paid)" },
+  { value: "free", label: "Free" },
+] as const;
+
 /** Stable empty, so `visibleCombos` settles. */
 const NO_COMBOS: ComboMapping[] = [];
+
+const COL_LABEL = "mb-1 text-[11px] font-semibold uppercase tracking-wider text-subtle";
+const COL_NAME = "text-[13.5px] font-semibold text-ink";
+const COL_SUB = "mt-0.5 text-[12px] text-subtle";
 
 export default function Combo_Mapping() {
   const queryClient = useQueryClient();
@@ -55,7 +102,6 @@ export default function Combo_Mapping() {
   );
   const [search, setSearch] = useState("");
   const [showUnmappedOnly, setShowUnmappedOnly] = useState(false);
-  const [notice, setNotice] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
 
   // Editor state for the one combo currently open.
   const [editingKey, setEditingKey] = useState<string | null>(null);
@@ -66,6 +112,7 @@ export default function Combo_Mapping() {
   const [draftQty, setDraftQty] = useState("");
   const [pickerSearch, setPickerSearch] = useState("");
   const [savingKey, setSavingKey] = useState<string | null>(null);
+  const [confirmClear, setConfirmClear] = useState<ComboMapping | null>(null);
   const pickerInputRef = useRef<HTMLInputElement>(null);
 
   const loadCombos = () => queryClient.invalidateQueries({ queryKey: ["combo-mappings"] });
@@ -135,7 +182,6 @@ export default function Combo_Mapping() {
     setPickerTarget("parent");
     setDraftQty(combo.free_qty_per_unit != null ? String(combo.free_qty_per_unit) : "");
     setPickerSearch("");
-    setNotice(null);
     window.setTimeout(() => pickerInputRef.current?.focus(), 0);
   };
 
@@ -151,7 +197,6 @@ export default function Combo_Mapping() {
   const save = async (combo: ComboMapping, parentItemCode: string, freeItemCode: string) => {
     const key = comboKey(combo);
     setSavingKey(key);
-    setNotice(null);
     try {
       const response = await userService.saveComboMapping({
         item_code: combo.item_code,
@@ -160,14 +205,14 @@ export default function Combo_Mapping() {
         free_item_code: freeItemCode,
         free_qty_per_unit: draftQty.trim() ? Number(draftQty) : null,
       });
-      setNotice({ tone: "ok", text: response?.message || "Mapping saved" });
+      showToast({ title: response?.message || "Mapping saved", message: combo.item_name });
       closeEditor();
       await loadCombos();
     } catch (error) {
       console.error("Error saving combo mapping:", error);
-      setNotice({
-        tone: "error",
-        text: messageFrom(error, "Could not save the mapping"),
+      showToast({
+        title: "Could not save the mapping",
+        message: messageFrom(error, "The server refused the request."),
       });
     } finally {
       setSavingKey(null);
@@ -175,10 +220,8 @@ export default function Combo_Mapping() {
   };
 
   const clearMapping = async (combo: ComboMapping) => {
-    if (!window.confirm(`Remove the parent and free item from ${combo.item_name}?`)) return;
     const key = comboKey(combo);
     setSavingKey(key);
-    setNotice(null);
     try {
       const response = await userService.saveComboMapping({
         item_code: combo.item_code,
@@ -187,14 +230,15 @@ export default function Combo_Mapping() {
         free_item_code: "",
         free_qty_per_unit: null,
       });
-      setNotice({ tone: "ok", text: response?.message || "Mapping cleared" });
+      showToast({ title: response?.message || "Mapping cleared", message: combo.item_name });
+      setConfirmClear(null);
       closeEditor();
       await loadCombos();
     } catch (error) {
       console.error("Error clearing combo mapping:", error);
-      setNotice({
-        tone: "error",
-        text: messageFrom(error, "Could not clear the mapping"),
+      showToast({
+        title: "Could not clear the mapping",
+        message: messageFrom(error, "The server refused the request."),
       });
     } finally {
       setSavingKey(null);
@@ -202,260 +246,306 @@ export default function Combo_Mapping() {
   };
 
   return (
-    <div className="app-page">
-      <div className="cmb-card">
-        <div className="cmb-head">
-          <h1 className="cmb-title">Combo Mapping</h1>
-          <p className="cmb-intro">
-            A combo pack is named "A + B" and carries B free of cost. Map each combo to the product
-            it gives away — adding the combo to a sales order then adds a zero-priced line for that
-            product with the same number of pieces.
-          </p>
-        </div>
+    <Page>
+      <Breadcrumbs items={[{ label: "Schemes" }, { label: "Combo Mapping" }]} />
 
-        <div className="cmb-filters">
-          <input
-            type="text"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search combo or free item..."
-            className="cmb-search"
-          />
-          <label className="cmb-toggle">
-            <input
-              type="checkbox"
-              checked={showUnmappedOnly}
-              onChange={(event) => setShowUnmappedOnly(event.target.checked)}
-            />
-            Unmapped only
-          </label>
-          <span className="cmb-count">
+      <PageHeader
+        title="Combo Mapping"
+        description='A combo pack is named "A + B" and carries B free of cost. Map each combo to the product it gives away — adding the combo to a sales order then adds a zero-priced line for that product with the same number of pieces.'
+      />
+
+      <FilterBar>
+        <FilterSearch
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Combo, paid item or free item"
+          fieldClassName="min-w-[260px]"
+        />
+        <FilterCheckbox
+          label="Unmapped only"
+          checked={showUnmappedOnly}
+          onChange={(event) => setShowUnmappedOnly(event.target.checked)}
+        />
+        <FilterSpacer />
+        {!isLoading && !loadError ? (
+          <FilterCount>
             {mappedCount} of {combos.length} mapped
-          </span>
-        </div>
+          </FilterCount>
+        ) : null}
+      </FilterBar>
 
-        {notice && (
-          <div className={`cmb-notice cmb-notice--${notice.tone}`}>{notice.text}</div>
-        )}
-      </div>
+      {isLoading ? (
+        <Card className="space-y-3">
+          <Skeleton className="h-16 w-full" />
+          <Skeleton className="h-16 w-full" />
+          <Skeleton className="h-16 w-full" />
+        </Card>
+      ) : loadError ? (
+        <Card>
+          <EmptyState icon={HiOutlinePuzzlePiece} title="Could not load combo packs" hint={loadError} />
+        </Card>
+      ) : visibleCombos.length === 0 ? (
+        <Card>
+          <EmptyState
+            icon={HiOutlinePuzzlePiece}
+            title={combos.length === 0 ? "No combo packs yet" : "No combo packs match this filter"}
+            hint={
+              combos.length === 0
+                ? "A combo appears here once it is assigned to at least one party."
+                : undefined
+            }
+          />
+        </Card>
+      ) : (
+        <Card className="overflow-hidden p-0">
+          {visibleCombos.map((combo, index) => {
+            const key = comboKey(combo);
+            const isEditing = editingKey === key;
+            const isSaving = savingKey === key;
+            // Both halves or neither -- the API refuses a half-filled mapping
+            // because ordering needs a parent to price and a free item to give.
+            const bothHalvesChosen = Boolean(draftParentItem && draftFreeItem);
+            const mapped = Boolean(combo.parent_item_code && combo.free_item_code);
 
-      <div className="cmb-card">
-        {isLoading ? (
-          <div className="cmb-state">Loading combo packs...</div>
-        ) : loadError ? (
-          <div className="cmb-state cmb-state--error">{loadError}</div>
-        ) : visibleCombos.length === 0 ? (
-          <div className="cmb-state">
-            {combos.length === 0
-              ? "No combo packs are assigned to any party yet."
-              : "No combo packs match this filter."}
-          </div>
-        ) : (
-          <div className="cmb-rows">
-            {visibleCombos.map((combo) => {
-              const key = comboKey(combo);
-              const isEditing = editingKey === key;
-              const isSaving = savingKey === key;
-              // Both halves or neither -- the API refuses a half-filled mapping
-              // because ordering needs a parent to price and a free item to give.
-              const bothHalvesChosen = Boolean(draftParentItem && draftFreeItem);
-
-              return (
-                <div key={key} className={`cmb-row${isEditing ? " is-editing" : ""}`}>
-                  <div className="cmb-row-main">
-                    <div className="cmb-col cmb-col--combo">
-                      <div className="cmb-label">Combo</div>
-                      <div className="cmb-name">{combo.item_name}</div>
-                      <div className="cmb-sub">
-                        {combo.item_code} · {combo.category} · {combo.party_count}{" "}
-                        {combo.party_count === 1 ? "party" : "parties"}
-                      </div>
-                    </div>
-
-                    <div className="cmb-col">
-                      <div className="cmb-label">Parent (paid) item</div>
-                      {combo.parent_item_code ? (
-                        <>
-                          <div className="cmb-name cmb-name--parent">
-                            {combo.parent_item?.item_name ||
-                              `${combo.parent_item_code} (not in SAP)`}
-                          </div>
-                          <div className="cmb-sub">{combo.parent_item_code} · priced line</div>
-                        </>
-                      ) : (
-                        <div className="cmb-unmapped">Not mapped</div>
-                      )}
-                    </div>
-
-                    <div className="cmb-col">
-                      <div className="cmb-label">Free item</div>
-                      {combo.free_item_code ? (
-                        <>
-                          <div className="cmb-name cmb-name--free">
-                            {combo.free_item?.item_name || `${combo.free_item_code} (not in SAP)`}
-                          </div>
-                          <div className="cmb-sub">
-                            {combo.free_item_code} ·{" "}
-                            {combo.free_qty_per_unit
-                              ? `${combo.free_qty_per_unit} free per piece`
-                              : "same pieces as the combo"}
-                          </div>
-                        </>
-                      ) : (
-                        <div className="cmb-unmapped">Not mapped</div>
-                      )}
-                      {combo.is_partially_mapped && (
-                        <div className="cmb-partial">
-                          Only {combo.mapped_party_count} of {combo.party_count} parties carry this
-                          mapping. Saving applies it to all of them.
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="cmb-actions">
-                      <button
-                        type="button"
-                        onClick={() => (isEditing ? closeEditor() : openEditor(combo))}
-                        disabled={isSaving}
-                        className="cmb-btn"
-                      >
-                        {isEditing ? "Cancel" : combo.free_item_code ? "Change" : "Map"}
-                      </button>
-                      {combo.free_item_code && (
-                        <button
-                          type="button"
-                          onClick={() => clearMapping(combo)}
-                          disabled={isSaving}
-                          className="cmb-btn cmb-btn--clear"
-                        >
-                          Clear
-                        </button>
-                      )}
+            return (
+              <div
+                key={key}
+                className={cn(index > 0 && "border-t border-line", isEditing && "bg-brand-soft/30")}
+              >
+                <div className="grid gap-4 px-4 py-3.5 md:grid-cols-[1.4fr_1fr_1fr_auto] md:items-start">
+                  <div className="min-w-0">
+                    <div className={COL_LABEL}>Combo</div>
+                    <div className={COL_NAME}>{combo.item_name}</div>
+                    <div className={COL_SUB}>
+                      {combo.item_code} · {combo.category} · {combo.party_count}{" "}
+                      {combo.party_count === 1 ? "party" : "parties"}
                     </div>
                   </div>
 
-                  {isEditing && (
-                    <div className="cmb-editor">
-                      {/* Two halves, picked one at a time from the list below.
-                          Nothing is pre-selected: the names are inconsistent
-                          enough that a guess is wrong often enough to matter. */}
-                      <div className="cmb-targets">
-                        {(
-                          [
-                            ["parent", "Parent (paid)", draftParentItem],
-                            ["free", "Free", draftFreeItem],
-                          ] as [PickerTarget, string, string][]
-                        ).map(([target, label, value]) => {
-                          const active = pickerTarget === target;
+                  <div className="min-w-0">
+                    <div className={COL_LABEL}>Parent (paid) item</div>
+                    {combo.parent_item_code ? (
+                      <>
+                        <div className={cn(COL_NAME, "text-[13px]")}>
+                          {combo.parent_item?.item_name ||
+                            `${combo.parent_item_code} (not in SAP)`}
+                        </div>
+                        <div className={COL_SUB}>{combo.parent_item_code} · priced line</div>
+                      </>
+                    ) : (
+                      <Badge tone="hold">Not mapped</Badge>
+                    )}
+                  </div>
+
+                  <div className="min-w-0">
+                    <div className={COL_LABEL}>Free item</div>
+                    {combo.free_item_code ? (
+                      <>
+                        <div className={cn(COL_NAME, "text-[13px] text-ok")}>
+                          {combo.free_item?.item_name || `${combo.free_item_code} (not in SAP)`}
+                        </div>
+                        <div className={COL_SUB}>
+                          {combo.free_item_code} ·{" "}
+                          {combo.free_qty_per_unit
+                            ? `${combo.free_qty_per_unit} free per piece`
+                            : "same pieces as the combo"}
+                        </div>
+                      </>
+                    ) : (
+                      <Badge tone="hold">Not mapped</Badge>
+                    )}
+                    {combo.is_partially_mapped && (
+                      <p className="m-0 mt-1.5 text-[11.5px] text-hold">
+                        Only {combo.mapped_party_count} of {combo.party_count} parties carry this
+                        mapping. Saving applies it to all of them.
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="flex gap-1.5 md:justify-end">
+                    <Button
+                      size="sm"
+                      variant={mapped && !isEditing ? "ghost" : "secondary"}
+                      onClick={() => (isEditing ? closeEditor() : openEditor(combo))}
+                      disabled={isSaving}
+                    >
+                      {isEditing ? "Cancel" : mapped ? "Change" : "Map"}
+                    </Button>
+                    {combo.free_item_code && (
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        onClick={() => setConfirmClear(combo)}
+                        disabled={isSaving}
+                      >
+                        Clear
+                      </Button>
+                    )}
+                  </div>
+                </div>
+
+                {isEditing && (
+                  <div className="space-y-3 border-t border-line bg-surface px-4 py-4">
+                    {/* Two halves, picked one at a time from the list below.
+                        Nothing is pre-selected: the names are inconsistent
+                        enough that a guess is wrong often enough to matter. */}
+                    <div className="flex flex-wrap items-center gap-3">
+                      <SegmentedControl
+                        aria-label="Which half to pick"
+                        value={pickerTarget}
+                        onChange={(target) => {
+                          setPickerTarget(target);
+                          setPickerSearch("");
+                          window.setTimeout(() => pickerInputRef.current?.focus(), 0);
+                        }}
+                        options={TARGETS}
+                      />
+                      <span className="text-[12.5px] text-subtle">
+                        Paid:{" "}
+                        <strong className="font-semibold text-ink">
+                          {draftParentItem || "not selected"}
+                        </strong>
+                        {" · "}Free:{" "}
+                        <strong className="font-semibold text-ink">
+                          {draftFreeItem || "not selected"}
+                        </strong>
+                      </span>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      <Input
+                        ref={pickerInputRef}
+                        type="search"
+                        value={pickerSearch}
+                        onChange={(event) => setPickerSearch(event.target.value)}
+                        aria-label="Search products"
+                        placeholder={`Search the ${
+                          pickerTarget === "parent" ? "paid (parent)" : "free"
+                        } product — suggestions match "${
+                          (pickerTarget === "parent"
+                            ? parentHalfOf(combo.item_name || "")
+                            : freeHalfOf(combo.item_name || "")) || combo.item_name
+                        }"`}
+                        className="min-w-[260px] flex-1"
+                      />
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={draftQty}
+                        onChange={(event) => setDraftQty(event.target.value)}
+                        aria-label="Free per piece"
+                        placeholder="Free per piece (blank = 1)"
+                        className="w-56"
+                      />
+                    </div>
+
+                    <div
+                      role="listbox"
+                      aria-label="Products"
+                      className="max-h-72 overflow-y-auto rounded-sm border border-line bg-card"
+                    >
+                      {pickerResults.length === 0 ? (
+                        <p className="m-0 px-3 py-4 text-center text-[12.5px] text-subtle">
+                          No suggestions. Type a product name or item code to search.
+                        </p>
+                      ) : (
+                        pickerResults.map((product) => {
+                          const activeValue =
+                            pickerTarget === "parent" ? draftParentItem : draftFreeItem;
+                          const isChosen = activeValue === product.item_code;
                           return (
                             <button
-                              key={target}
+                              key={`${product.item_code}-${product.category}`}
                               type="button"
-                              onClick={() => {
-                                setPickerTarget(target);
-                                setPickerSearch("");
-                                window.setTimeout(() => pickerInputRef.current?.focus(), 0);
-                              }}
-                              className={`cmb-target${active ? " is-active" : ""}`}
+                              role="option"
+                              aria-selected={isChosen}
+                              onClick={() =>
+                                pickerTarget === "parent"
+                                  ? setDraftParentItem(product.item_code)
+                                  : setDraftFreeItem(product.item_code)
+                              }
+                              className={cn(
+                                "appearance-none border-0 bg-transparent [font-family:inherit] cursor-pointer",
+                                "flex w-full flex-wrap items-baseline gap-x-2 border-b border-line px-3 py-2 text-left text-[13px] last:border-b-0",
+                                "hover:bg-surface focus-visible:outline-none focus-visible:shadow-focus",
+                                isChosen ? "bg-brand-soft font-semibold text-brand" : "text-body",
+                              )}
                             >
-                              {label}: <span className="cmb-target-value">{value || "not selected"}</span>
+                              <span>{product.item_name}</span>
+                              <span className="text-[11.5px] text-subtle">
+                                {product.item_code} · {product.category}
+                                {product.sal_factor2
+                                  ? ` · ${Number(product.sal_factor2)} per box`
+                                  : ""}
+                              </span>
                             </button>
                           );
-                        })}
-                      </div>
-
-                      <div className="cmb-editor-fields">
-                        <input
-                          ref={pickerInputRef}
-                          type="text"
-                          value={pickerSearch}
-                          onChange={(event) => setPickerSearch(event.target.value)}
-                          placeholder={`Search the ${
-                            pickerTarget === "parent" ? "paid (parent)" : "free"
-                          } product — suggestions match "${
-                            (pickerTarget === "parent"
-                              ? parentHalfOf(combo.item_name || "")
-                              : freeHalfOf(combo.item_name || "")) || combo.item_name
-                          }"`}
-                          className="cmb-picker-search"
-                        />
-                        <div className="cmb-qty-wrap">
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            value={draftQty}
-                            onChange={(event) => setDraftQty(event.target.value)}
-                            placeholder="Free per piece (blank = 1)"
-                            className="cmb-qty"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="cmb-picker">
-                        {pickerResults.length === 0 ? (
-                          <div className="cmb-picker-empty">
-                            No suggestions. Type a product name or item code to search.
-                          </div>
-                        ) : (
-                          pickerResults.map((product) => {
-                            const activeValue =
-                              pickerTarget === "parent" ? draftParentItem : draftFreeItem;
-                            const isChosen = activeValue === product.item_code;
-                            return (
-                              <button
-                                key={`${product.item_code}-${product.category}`}
-                                type="button"
-                                onClick={() =>
-                                  pickerTarget === "parent"
-                                    ? setDraftParentItem(product.item_code)
-                                    : setDraftFreeItem(product.item_code)
-                                }
-                                className={`cmb-picker-row${isChosen ? " is-chosen" : ""}`}
-                              >
-                                <span className="cmb-picker-name">{product.item_name}</span>
-                                <span className="cmb-picker-meta">
-                                  {"  "}
-                                  {product.item_code} · {product.category}
-                                  {product.sal_factor2
-                                    ? ` · ${Number(product.sal_factor2)} per box`
-                                    : ""}
-                                </span>
-                              </button>
-                            );
-                          })
-                        )}
-                      </div>
-
-                      <div className="cmb-save-bar">
-                        <button
-                          type="button"
-                          onClick={() => save(combo, draftParentItem, draftFreeItem)}
-                          disabled={!bothHalvesChosen || isSaving}
-                          className={`cmb-btn-save${bothHalvesChosen ? " is-ready" : ""}`}
-                        >
-                          {isSaving ? "Saving..." : "Save mapping"}
-                        </button>
-                        <span className="cmb-save-hint">
-                          {bothHalvesChosen
-                            ? `Splits into ${draftParentItem} + ${draftFreeItem} for all ${
-                                combo.party_count
-                              } ${combo.party_count === 1 ? "party" : "parties"}`
-                            : !draftParentItem && !draftFreeItem
-                              ? "Pick the paid product, then the one it gives away"
-                              : !draftParentItem
-                                ? "Still needs the paid (parent) product"
-                                : "Still needs the free product"}
-                        </span>
-                      </div>
+                        })
+                      )}
                     </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </div>
+
+                    <div className="flex flex-wrap items-center gap-3">
+                      <Button
+                        variant="primary"
+                        onClick={() => save(combo, draftParentItem, draftFreeItem)}
+                        disabled={!bothHalvesChosen || isSaving}
+                      >
+                        {isSaving ? "Saving…" : "Save mapping"}
+                      </Button>
+                      <span className="text-[12.5px] text-subtle">
+                        {bothHalvesChosen
+                          ? `Splits into ${draftParentItem} + ${draftFreeItem} for all ${
+                              combo.party_count
+                            } ${combo.party_count === 1 ? "party" : "parties"}`
+                          : !draftParentItem && !draftFreeItem
+                            ? "Pick the paid product, then the one it gives away"
+                            : !draftParentItem
+                              ? "Still needs the paid (parent) product"
+                              : "Still needs the free product"}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </Card>
+      )}
+
+      <Dialog
+        open={confirmClear !== null}
+        onOpenChange={(next) => {
+          if (!next && savingKey === null) setConfirmClear(null);
+        }}
+      >
+        {confirmClear ? (
+          <DialogContent title="Clear mapping" size="sm">
+            <DialogHeader>
+              <DialogTitle>Clear {confirmClear.item_name}?</DialogTitle>
+            </DialogHeader>
+            <DialogBody>
+              <Notice tone="hold">
+                The parent and free item are removed for all {confirmClear.party_count}{" "}
+                {confirmClear.party_count === 1 ? "party" : "parties"}. Adding this combo to an
+                order will no longer add a free line until it is mapped again.
+              </Notice>
+            </DialogBody>
+            <DialogFooter>
+              <Button onClick={() => setConfirmClear(null)} disabled={savingKey !== null}>
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                onClick={() => void clearMapping(confirmClear)}
+                disabled={savingKey !== null}
+              >
+                {savingKey !== null ? "Working…" : "Clear mapping"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        ) : null}
+      </Dialog>
+    </Page>
   );
 }

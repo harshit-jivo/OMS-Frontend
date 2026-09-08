@@ -1,27 +1,25 @@
 /**
- * The `.ps-toolbar` search box plus the five filter dropdowns — party,
- * category, type, warehouse and stock status. Each dropdown owns its own
- * open/close state and outside-click ref, all of which live on the shared
- * `useProductStock` hook so this stays presentational.
+ * The stock filter bar: search, party, category, type, warehouse and stock
+ * status.
+ *
+ * This was FIVE hand-rolled dropdowns — five `…DropdownOpen` booleans and five
+ * refs on the shared hook, closed by one `document.addEventListener("mousedown")`
+ * that had to know about all of them. Four are now primitives that own their
+ * own open state (DESIGN_SYSTEM §5a); the fifth, Party, was never really a
+ * dropdown at all — see `PartyPickerDialog`.
  */
-import { HiMagnifyingGlass } from "react-icons/hi2";
+import { HiOutlineUsers } from "react-icons/hi2";
 
-import { STOCK_OPTIONS, getPartyCode, getPartyName, normalizeText } from "../productStockUtils";
+import { Button } from "@/components/ui/button";
+import {
+  FilterBar,
+  FilterMultiSelect,
+  FilterSearch,
+  FilterSelect,
+} from "@/components/ui/filter-bar";
+import { STOCK_OPTIONS, normalizeText } from "../productStockUtils";
 import type { ProductStockState } from "../useProductStock";
-
-function ChevronIcon() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-      <path
-        d="M3 4.5L6 7.5L9 4.5"
-        stroke="#64748b"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
+import PartyPickerDialog from "./PartyPickerDialog";
 
 export default function FilterToolbar({ ps }: { ps: ProductStockState }) {
   const {
@@ -30,422 +28,110 @@ export default function FilterToolbar({ ps }: { ps: ProductStockState }) {
     selectedProductCode,
     clearProductDemand,
 
-    partyDropdownOpen,
-    setPartyDropdownOpen,
-    partyDropdownRef,
     partyFilterLabel,
-    partySearch,
-    setPartySearch,
-    openParties,
-    filteredOpenParties,
     selectedPartyCodes,
-    setSelectedPartyCodes,
-    setSelectedSalesOrders,
-    handlePartyClick,
+    setPartyPickerOpen,
 
-    categoryDropdownOpen,
-    setCategoryDropdownOpen,
-    categoryDropdownRef,
-    categoryFilterLabel,
     categoryFilter,
     setCategoryFilter,
     categories,
 
-    typeDropdownOpen,
-    setTypeDropdownOpen,
-    typeDropdownRef,
-    typeFilterLabel,
     typeFilter,
     setTypeFilter,
     types,
 
-    warehouseDropdownOpen,
-    setWarehouseDropdownOpen,
-    warehouseDropdownRef,
-    warehouseFilterLabel,
-    warehouseSearch,
-    setWarehouseSearch,
     warehouses,
-    filteredWarehouses,
     warehouseFilters,
     setWarehouseFilters,
-    toggleWarehouseFilter,
 
-    stockDropdownOpen,
-    setStockDropdownOpen,
-    stockDropdownRef,
-    stockFilterLabel,
     stockFilters,
     setStockFilters,
-    toggleStockFilter,
   } = ps;
 
   return (
-    <section className="ps-toolbar">
-      <label className="ps-search">
-        <HiMagnifyingGlass />
-        <input
-          type="text"
+    <>
+      <FilterBar>
+        <FilterSearch
           value={searchText}
           onChange={(event) => {
             setSearchText(event.target.value);
             if (selectedProductCode) clearProductDemand(false);
           }}
-          placeholder="Search by product, warehouse code, variety or pack"
+          placeholder="Product, warehouse code, variety or pack…"
+          fieldClassName="min-w-[280px]"
         />
-      </label>
 
-      <div
-        className={`ps-warehouse-dropdown${partyDropdownOpen ? " open" : ""}`}
-        ref={partyDropdownRef}
-      >
-        <button
-          type="button"
-          className="ps-warehouse-trigger"
-          onClick={() => {
-            setPartyDropdownOpen((open) => !open);
-            setPartySearch("");
-          }}
+        {/*
+         * Party is a button, not a picker. Choosing a party here does not set
+         * a filter value — it opens that party's open sales orders so you can
+         * say which of them count. A row that looks like a checkbox and opens
+         * a modal instead is exactly the control that needs explaining, so it
+         * says what it does.
+         */}
+        <Button onClick={() => setPartyPickerOpen(true)} className="self-end">
+          <HiOutlineUsers aria-hidden="true" />
+          {partyFilterLabel}
+          {selectedPartyCodes.length > 0 && (
+            <span className="rounded-full bg-brand-soft px-1.5 text-[11px] font-bold text-brand">
+              {selectedPartyCodes.length}
+            </span>
+          )}
+        </Button>
+
+        <FilterSelect
+          label="Category"
+          value={categoryFilter}
+          onChange={(event) => setCategoryFilter(event.target.value)}
+          fieldClassName="max-w-[180px]"
         >
-          <span>{partyFilterLabel}</span>
-          <ChevronIcon />
-        </button>
+          <option value="all">All categories</option>
+          {categories.map((category) => (
+            <option key={category} value={normalizeText(category)}>
+              {category}
+            </option>
+          ))}
+        </FilterSelect>
 
-        {partyDropdownOpen && (
-          <div className="ps-warehouse-menu ps-party-menu">
-            <div className="ps-warehouse-search-wrap">
-              <HiMagnifyingGlass />
-              <input
-                type="text"
-                className="ps-warehouse-search-input"
-                placeholder="Search party..."
-                value={partySearch}
-                onChange={(event) => setPartySearch(event.target.value)}
-                autoFocus
-              />
-            </div>
-            <div className="ps-warehouse-options">
-              {openParties.length > 0 && (
-                <div className="ps-party-bulk-actions">
-                  <button
-                    type="button"
-                    className="ps-party-bulk-btn"
-                    onClick={() => {
-                      setSelectedPartyCodes(
-                        openParties.map((party) => getPartyCode(party)).filter(Boolean),
-                      );
-                      setSelectedSalesOrders({});
-                    }}
-                  >
-                    Select All
-                  </button>
-                  <button
-                    type="button"
-                    className="ps-party-bulk-btn"
-                    onClick={() => {
-                      setSelectedPartyCodes([]);
-                      setSelectedSalesOrders({});
-                      setPartySearch("");
-                    }}
-                  >
-                    Deselect All
-                  </button>
-                </div>
-              )}
-              {filteredOpenParties.length > 0 ? (
-                [...filteredOpenParties]
-                  .sort((a, b) => {
-                    const aCode = getPartyCode(a);
-                    const bCode = getPartyCode(b);
-                    const aSel = selectedPartyCodes.includes(aCode) ? 0 : 1;
-                    const bSel = selectedPartyCodes.includes(bCode) ? 0 : 1;
-                    if (aSel !== bSel) return aSel - bSel;
-                    const aName = (getPartyName(a) || aCode).toLowerCase();
-                    const bName = (getPartyName(b) || bCode).toLowerCase();
-                    return aName.localeCompare(bName);
-                  })
-                  .map((party) => {
-                    const partyCode = getPartyCode(party);
-                    const partyName = getPartyName(party);
-
-                    return (
-                      <button
-                        type="button"
-                        key={partyCode}
-                        aria-pressed={selectedPartyCodes.includes(partyCode)}
-                        className={`ps-party-option ps-warehouse-option${
-                          selectedPartyCodes.includes(partyCode) ? " is-selected" : ""
-                        }`}
-                        onClick={() => handlePartyClick(party)}
-                      >
-                        <span className="ps-party-option-row">
-                          <span
-                            className={`ps-party-check${
-                              selectedPartyCodes.includes(partyCode) ? " is-selected" : ""
-                            }`}
-                          />
-                          <span className="ps-party-option-text">
-                            <span className="ps-party-option-main">{partyName || partyCode}</span>
-                            <span className="ps-party-option-meta">
-                              {partyCode}
-                              {party.open_sales_order_count !== undefined
-                                ? ` | ${party.open_sales_order_count} open`
-                                : ""}
-                            </span>
-                          </span>
-                        </span>
-                      </button>
-                    );
-                  })
-              ) : (
-                <div className="ps-warehouse-empty">No party found</div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div
-        className={`ps-warehouse-dropdown${categoryDropdownOpen ? " open" : ""}`}
-        ref={categoryDropdownRef}
-      >
-        <button
-          type="button"
-          className="ps-warehouse-trigger"
-          onClick={() => setCategoryDropdownOpen((open) => !open)}
+        <FilterSelect
+          label="Type"
+          value={typeFilter}
+          onChange={(event) => setTypeFilter(event.target.value)}
+          fieldClassName="max-w-[170px]"
         >
-          <span>{categoryFilterLabel}</span>
-          <ChevronIcon />
-        </button>
+          <option value="all">All types</option>
+          {types.map((type) => (
+            <option key={type} value={normalizeText(type)}>
+              {type}
+            </option>
+          ))}
+        </FilterSelect>
 
-        {categoryDropdownOpen && (
-          <div className="ps-warehouse-menu">
-            <div className="ps-warehouse-options">
-              <button
-                type="button"
-                className={`ps-warehouse-option${categoryFilter === "all" ? " is-selected" : ""}`}
-                onClick={() => {
-                  setCategoryFilter("all");
-                  setCategoryDropdownOpen(false);
-                }}
-              >
-                All Categories
-              </button>
-              {categories.length > 0 ? (
-                categories.map((category) => (
-                  <button
-                    type="button"
-                    key={category}
-                    className={`ps-warehouse-option${
-                      normalizeText(category) === categoryFilter ? " is-selected" : ""
-                    }`}
-                    onClick={() => {
-                      setCategoryFilter(normalizeText(category));
-                      setCategoryDropdownOpen(false);
-                    }}
-                  >
-                    {category}
-                  </button>
-                ))
-              ) : (
-                <div className="ps-warehouse-empty">No category found</div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
+        <FilterMultiSelect
+          label="Warehouse"
+          value={warehouseFilters}
+          onChange={setWarehouseFilters}
+          options={warehouses.map((code) => ({ value: code, label: code }))}
+          searchable
+          searchPlaceholder="Warehouse code…"
+          placeholder="All warehouses"
+          emptyText="No warehouses"
+          fieldClassName="max-w-[200px]"
+        />
 
-      <div
-        className={`ps-warehouse-dropdown${typeDropdownOpen ? " open" : ""}`}
-        ref={typeDropdownRef}
-      >
-        <button
-          type="button"
-          className="ps-warehouse-trigger"
-          onClick={() => setTypeDropdownOpen((open) => !open)}
-        >
-          <span>{typeFilterLabel}</span>
-          <ChevronIcon />
-        </button>
+        <FilterMultiSelect
+          label="Stock"
+          value={stockFilters}
+          onChange={setStockFilters}
+          options={STOCK_OPTIONS.map((option) => ({
+            value: option.value,
+            label: option.label,
+          }))}
+          placeholder="All stock"
+          fieldClassName="max-w-[190px]"
+        />
+      </FilterBar>
 
-        {typeDropdownOpen && (
-          <div className="ps-warehouse-menu">
-            <div className="ps-warehouse-options">
-              <button
-                type="button"
-                className={`ps-warehouse-option${typeFilter === "all" ? " is-selected" : ""}`}
-                onClick={() => {
-                  setTypeFilter("all");
-                  setTypeDropdownOpen(false);
-                }}
-              >
-                All Types
-              </button>
-              {types.length > 0 ? (
-                types.map((type) => (
-                  <button
-                    type="button"
-                    key={type}
-                    className={`ps-warehouse-option${
-                      normalizeText(type) === typeFilter ? " is-selected" : ""
-                    }`}
-                    onClick={() => {
-                      setTypeFilter(normalizeText(type));
-                      setTypeDropdownOpen(false);
-                    }}
-                  >
-                    {type}
-                  </button>
-                ))
-              ) : (
-                <div className="ps-warehouse-empty">No type found</div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div
-        className={`ps-warehouse-dropdown${warehouseDropdownOpen ? " open" : ""}`}
-        ref={warehouseDropdownRef}
-      >
-        <button
-          type="button"
-          className="ps-warehouse-trigger"
-          onClick={() => {
-            setWarehouseDropdownOpen((open) => !open);
-            setWarehouseSearch("");
-          }}
-        >
-          <span>{warehouseFilterLabel}</span>
-          <ChevronIcon />
-        </button>
-
-        {warehouseDropdownOpen && (
-          <div className="ps-warehouse-menu">
-            <div className="ps-warehouse-search-wrap">
-              <HiMagnifyingGlass />
-              <input
-                type="text"
-                className="ps-warehouse-search-input"
-                placeholder="Search warehouse code..."
-                value={warehouseSearch}
-                onChange={(event) => setWarehouseSearch(event.target.value)}
-                autoFocus
-              />
-            </div>
-            <div className="ps-warehouse-options">
-              {warehouses.length > 0 && (
-                <div className="ps-party-bulk-actions">
-                  <button
-                    type="button"
-                    className="ps-party-bulk-btn"
-                    onClick={() => {
-                      setWarehouseFilters(warehouses);
-                      setWarehouseSearch("");
-                    }}
-                  >
-                    Select All
-                  </button>
-                  <button
-                    type="button"
-                    className="ps-party-bulk-btn"
-                    onClick={() => {
-                      setWarehouseFilters([]);
-                      setWarehouseSearch("");
-                    }}
-                  >
-                    Deselect All
-                  </button>
-                </div>
-              )}
-              {filteredWarehouses.length > 0 ? (
-                filteredWarehouses.map((warehouseCode) => (
-                  <button
-                    type="button"
-                    key={warehouseCode}
-                    aria-pressed={warehouseFilters.includes(warehouseCode)}
-                    className={`ps-party-option ps-warehouse-option${
-                      warehouseFilters.includes(warehouseCode) ? " is-selected" : ""
-                    }`}
-                    onClick={() => {
-                      toggleWarehouseFilter(warehouseCode);
-                    }}
-                  >
-                    <span className="ps-party-option-row">
-                      <span
-                        className={`ps-party-check${
-                          warehouseFilters.includes(warehouseCode) ? " is-selected" : ""
-                        }`}
-                      />
-                      <span className="ps-party-option-main">{warehouseCode}</span>
-                    </span>
-                  </button>
-                ))
-              ) : (
-                <div className="ps-warehouse-empty">No warehouse found</div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div
-        className={`ps-warehouse-dropdown${stockDropdownOpen ? " open" : ""}`}
-        ref={stockDropdownRef}
-      >
-        <button
-          type="button"
-          className="ps-warehouse-trigger"
-          onClick={() => setStockDropdownOpen((open) => !open)}
-        >
-          <span>{stockFilterLabel}</span>
-          <ChevronIcon />
-        </button>
-
-        {stockDropdownOpen && (
-          <div className="ps-warehouse-menu">
-            <div className="ps-warehouse-options">
-              <div className="ps-party-bulk-actions">
-                <button
-                  type="button"
-                  className="ps-party-bulk-btn"
-                  onClick={() => setStockFilters(STOCK_OPTIONS.map((option) => option.value))}
-                >
-                  Select All
-                </button>
-                <button
-                  type="button"
-                  className="ps-party-bulk-btn"
-                  onClick={() => setStockFilters([])}
-                >
-                  Deselect All
-                </button>
-              </div>
-              {STOCK_OPTIONS.map((option) => (
-                <button
-                  type="button"
-                  key={option.value}
-                  aria-pressed={stockFilters.includes(option.value)}
-                  className={`ps-party-option ps-warehouse-option${
-                    stockFilters.includes(option.value) ? " is-selected" : ""
-                  }`}
-                  onClick={() => toggleStockFilter(option.value)}
-                >
-                  <span className="ps-party-option-row">
-                    <span
-                      className={`ps-party-check${
-                        stockFilters.includes(option.value) ? " is-selected" : ""
-                      }`}
-                    />
-                    <span className="ps-party-option-main">{option.label}</span>
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-    </section>
+      <PartyPickerDialog ps={ps} />
+    </>
   );
 }

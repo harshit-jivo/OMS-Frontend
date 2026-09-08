@@ -3,6 +3,9 @@ import { HiHeart, HiKey, HiServerStack, HiIdentification } from "react-icons/hi2
 import { einvoiceService } from "../../services/einvoiceService";
 import { NicField, JsonView, StatusBadge, ErrorAlert } from "../../components/NicUI";
 import { messageFrom } from "@/lib/apiError";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/form";
+import { Card, CardHeader, CardTitle } from "@/components/ui/page";
 
 export default function EinvTools() {
   const [gstin, setGstin] = useState("");
@@ -23,67 +26,64 @@ export default function EinvTools() {
 
   return (
     <>
-      <section className="ofs-card">
-        <div className="ofs-card-head">
-          <span className="ofs-card-mark" />
-          <h2>Connection & Auth</h2>
-        </div>
-        <p className="nic-note">Check configuration and the NIC handshake without generating anything.</p>
-        <div className="nic-actions-row">
-          <button className="ofs-secondary" disabled={!!busy}
+      <Card>
+        <CardHeader>
+          <CardTitle>Connection & Auth</CardTitle>
+        </CardHeader>
+        <p className="text-[12.5px] leading-relaxed text-subtle">Check configuration and the NIC handshake without generating anything.</p>
+        <div className="mt-4 flex flex-wrap items-center gap-2.5">
+          <Button disabled={!!busy}
             onClick={() => void call("health", "Health", einvoiceService.health)}>
-            <HiServerStack className="nic-icon-lead" />
+            <HiServerStack aria-hidden="true" />
             {busy === "health" ? "…" : "Health"}
-          </button>
-          <button className="ofs-secondary" disabled={!!busy}
+          </Button>
+          <Button disabled={!!busy}
             onClick={() => void call("token", "Auth Token", einvoiceService.token)}>
-            <HiKey className="nic-icon-lead" />
+            <HiKey aria-hidden="true" />
             {busy === "token" ? "…" : "Get Token"}
-          </button>
-          <button className="ofs-secondary" disabled={!!busy}
+          </Button>
+          <Button disabled={!!busy}
             onClick={() => void call("hb", "Heartbeat", einvoiceService.heartbeat)}>
-            <HiHeart className="nic-icon-lead" />
+            <HiHeart aria-hidden="true" />
             {busy === "hb" ? "…" : "Heartbeat"}
-          </button>
+          </Button>
         </div>
-      </section>
+      </Card>
 
-      <section className="ofs-card">
-        <div className="ofs-card-head">
-          <span className="ofs-card-mark" />
-          <h2>GSTIN Master</h2>
-        </div>
-        <div className="nic-form-grid">
+      <Card>
+        <CardHeader>
+          <CardTitle>GSTIN Master</CardTitle>
+        </CardHeader>
+        <div className="grid gap-x-5 gap-y-4 grid-cols-[repeat(auto-fit,minmax(220px,1fr))]">
           <NicField label="GSTIN" full>
-            <input className="nic-input nic-mono" value={gstin} onChange={(e) => setGstin(e.target.value)}
+            <Input className="font-mono" value={gstin} onChange={(e) => setGstin(e.target.value)}
               placeholder="06AACCJ4223F1Z0" />
           </NicField>
         </div>
-        <div className="nic-actions-row">
-          <button className="ofs-secondary" disabled={!!busy || !gstin.trim()}
+        <div className="mt-4 flex flex-wrap items-center gap-2.5">
+          <Button disabled={!!busy || !gstin.trim()}
             onClick={() => void call("gstin", "GSTIN Details", () => einvoiceService.getGstin(gstin.trim()))}>
-            <HiIdentification className="nic-icon-lead" />
+            <HiIdentification aria-hidden="true" />
             {busy === "gstin" ? "…" : "Get Details"}
-          </button>
-          <button className="ofs-secondary" disabled={!!busy || !gstin.trim()}
+          </Button>
+          <Button disabled={!!busy || !gstin.trim()}
             onClick={() => void call("sync", "GSTIN Sync", () => einvoiceService.syncGstin(gstin.trim()))}>
             {busy === "sync" ? "…" : "Force Sync"}
-          </button>
+          </Button>
         </div>
-      </section>
+      </Card>
 
-      {error ? <div className="ofs-card ofs-card--wide"><ErrorAlert>{error}</ErrorAlert></div> : null}
+      {error ? <ErrorAlert>{error}</ErrorAlert> : null}
       {out ? (
-        <section className="ofs-card ofs-card--wide">
-          <div className="ofs-card-head">
-            <span className="ofs-card-mark" />
-            <h2>{out.title}</h2>
+        <Card>
+          <CardHeader>
+            <CardTitle>{out.title}</CardTitle>
             {isOk(out.data) !== null ? (
               <StatusBadge tone={isOk(out.data) ? "ok" : "err"}>{isOk(out.data) ? "OK" : "Not OK"}</StatusBadge>
             ) : null}
-          </div>
+          </CardHeader>
           <JsonView data={out.data} title="Response" open />
-        </section>
+        </Card>
       ) : null}
     </>
   );

@@ -1,13 +1,42 @@
+/**
+ * Payments Dashboard — Analytics.
+ *
+ * Every number comes from `/api/payments/dashboard/`; nothing on this screen is
+ * computed in the browser and nothing is hardcoded. That single call is
+ * deliberate: split per widget, a receipt posted between two requests would
+ * leave a KPI card contradicting the donut next to it.
+ *
+ * Charts are recharts, matching Dashboard/Device_Management/Tracker_Reports.
+ * They are lazy-loaded (see `DonutChart`) so the ~90 KB chart bundle is fetched
+ * only when this tab is opened, not on every visit to the console.
+ */
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  lazy,
-  Suspense,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+  HiOutlineArrowDownTray,
+  HiOutlineArrowTrendingUp,
+  HiOutlineBanknotes,
+  HiOutlineClock,
+  HiOutlineDocumentText,
+  HiOutlineExclamationTriangle,
+} from "react-icons/hi2";
 
+import { Button } from "@/components/ui/button";
+import {
+  FilterBar,
+  FilterDate,
+  FilterSelect,
+  FilterSpacer,
+} from "@/components/ui/filter-bar";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  Notice,
+  SectionHeading,
+  Stat,
+  StatRow,
+} from "@/components/ui/page";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useResource } from "./useApprovalAdmin";
 import paymentsDashboardService, {
   DATE_PRESETS,
@@ -24,19 +53,6 @@ import { EmptyState, ErrorState } from "./ApprovalUI";
 import CollectionTable from "./CollectionTable";
 import PersonDetailDialog from "./PersonDetailDialog";
 import { money, prettyDate, SLICE_COLORS, todayIso } from "./dashboardFormat";
-
-/**
- * Payments Dashboard — Analytics.
- *
- * Every number comes from `/api/payments/dashboard/`; nothing on this screen is
- * computed in the browser and nothing is hardcoded. That single call is
- * deliberate: split per widget, a receipt posted between two requests would
- * leave a KPI card contradicting the donut next to it.
- *
- * Charts are recharts, matching Dashboard/Device_Management/Tracker_Reports.
- * They are lazy-loaded (see `DonutChart`) so the ~90 KB chart bundle is fetched
- * only when this tab is opened, not on every visit to the console.
- */
 
 // Loaded on demand. Everything above the fold — filters, KPI cards — renders
 // from the same payload without waiting for the chart bundle.
@@ -100,9 +116,7 @@ function useCountUp(target: number, duration = 650): number {
     const start = from.current;
     from.current = target;
 
-    const reduced = window.matchMedia?.(
-      "(prefers-reduced-motion: reduce)",
-    )?.matches;
+    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
     if (reduced || start === target) return;
 
     let raf = 0;
@@ -127,46 +141,42 @@ function useCountUp(target: number, duration = 650): number {
 // KPI card
 // ===========================================================================
 
-interface KpiProps {
+/**
+ * A money KPI, counting up to its figure.
+ *
+ * `ui/page`'s `Stat` draws it. What stays here is the count-up and the
+ * `title` — these seven cards each carry a sentence explaining exactly which
+ * documents they count and which they exclude, which is the difference
+ * between a trustworthy figure and a suggestive one.
+ */
+function KpiCard({
+  label,
+  value,
+  hint,
+  tooltip,
+  icon,
+  tone,
+  loading,
+}: {
   label: string;
   value: number;
   hint: string;
   tooltip: string;
-  icon: string;
-  tone: "indigo" | "green" | "amber" | "violet" | "sky" | "slate" | "red";
+  icon: React.ComponentType<{ className?: string; "aria-hidden"?: boolean }>;
+  tone: "ok" | "hold" | "bad" | "brand" | "neutral";
   loading: boolean;
-}
-
-function KpiCard({ label, value, hint, tooltip, icon, tone, loading }: KpiProps) {
+}) {
   const shown = useCountUp(value);
-
-  if (loading) {
-    return (
-      <div className="pdash-kpi is-loading" aria-hidden="true">
-        <div className="pdash-skel pdash-skel-icon" />
-        <div className="pdash-kpi-body">
-          <div className="pdash-skel pdash-skel-line short" />
-          <div className="pdash-skel pdash-skel-line wide" />
-          <div className="pdash-skel pdash-skel-line short" />
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className={`pdash-kpi tone-${tone}`} tabIndex={0} title={tooltip}>
-      <span className="pdash-kpi-icon" aria-hidden="true">
-        {icon}
-      </span>
-      <div className="pdash-kpi-body">
-        <div className="pdash-kpi-label">{label}</div>
-        <div className="pdash-kpi-value">{money(shown)}</div>
-        <div className="pdash-kpi-hint">{hint}</div>
-      </div>
-      <span className="pdash-tip" role="tooltip">
-        {tooltip}
-      </span>
-    </div>
+    <Stat
+      label={label}
+      value={money(shown)}
+      hint={hint}
+      icon={icon}
+      tone={tone}
+      loading={loading}
+      title={tooltip}
+    />
   );
 }
 
@@ -211,29 +221,24 @@ function ChartCard({
 
   // Recomputed from the visible slices so the centre total and the legend
   // percentages agree with what is actually drawn.
-  const shownTotal = useMemo(
-    () => visible.reduce((sum, s) => sum + s.amount, 0),
-    [visible],
-  );
+  const shownTotal = useMemo(() => visible.reduce((sum, s) => sum + s.amount, 0), [visible]);
 
   const hasData = series.slices.some((s) => s.amount > 0);
 
   return (
-    <section className="apv-card pdash-chart-card">
-      <div className="apv-card-head">
-        <div>
-          <h3>{title}</h3>
-          <div className="pdash-card-sub">{subtitle}</div>
-        </div>
-      </div>
+    <Card>
+      <CardHeader className="mb-2 flex-col items-start gap-0">
+        <CardTitle>{title}</CardTitle>
+        <p className="m-0 text-[12px] text-subtle">{subtitle}</p>
+      </CardHeader>
 
       {loading ? (
-        <div className="pdash-chart-skel" aria-hidden="true">
-          <div className="pdash-skel pdash-skel-donut" />
-          <div className="pdash-chart-skel-legend">
-            <div className="pdash-skel pdash-skel-line" />
-            <div className="pdash-skel pdash-skel-line" />
-            <div className="pdash-skel pdash-skel-line" />
+        <div className="flex items-center gap-5" aria-hidden="true">
+          <Skeleton className="size-[150px] shrink-0 rounded-full" />
+          <div className="flex-1 space-y-2">
+            <Skeleton className="h-3.5 w-full" />
+            <Skeleton className="h-3.5 w-4/5" />
+            <Skeleton className="h-3.5 w-3/5" />
           </div>
         </div>
       ) : error ? (
@@ -244,50 +249,52 @@ function ChartCard({
           hint="Try a wider date range or a different company."
         />
       ) : (
-        <div className="pdash-chart-body">
-          <Suspense
-            fallback={<div className="pdash-skel pdash-skel-donut" />}
-          >
-            <DonutChart
-              slices={visible}
-              total={shownTotal}
-              centerLabel={centerLabel}
-            />
+        <div className="flex flex-wrap items-center gap-5">
+          <Suspense fallback={<Skeleton className="size-[150px] shrink-0 rounded-full" />}>
+            <DonutChart slices={visible} total={shownTotal} centerLabel={centerLabel} />
           </Suspense>
 
-          <ul className="pdash-legend">
+          <ul className="m-0 min-w-[180px] flex-1 list-none space-y-0.5 p-0">
             {series.slices.map((slice, index) => {
               const off = hidden.has(slice.key);
               // Percentages re-based on what is visible, so a legend showing
               // two of three slices still adds to 100%.
-              const percent = off
-                ? 0
-                : shownTotal
-                  ? (slice.amount / shownTotal) * 100
-                  : 0;
+              const percent = off ? 0 : shownTotal ? (slice.amount / shownTotal) * 100 : 0;
               return (
                 <li key={slice.key}>
                   <button
                     type="button"
-                    className={`pdash-legend-item${off ? " is-off" : ""}`}
+                    /* A legend toggle, not an action — hand-rolled with the
+                       DESIGN_SYSTEM §1.1 reset rather than `ui/button`. */
+                    className={
+                      "flex w-full cursor-pointer appearance-none items-center gap-2 rounded-sm border-0 bg-transparent px-1.5 py-1 text-left [font-family:inherit] text-[12px] transition-colors hover:bg-surface " +
+                      (off ? "opacity-50" : "")
+                    }
                     onClick={() => toggle(slice.key)}
                     aria-pressed={!off}
                     title={
                       off
-                        ? `${slice.label} — hidden. Click to show.`
-                        : `${slice.label}: ${money(slice.amount)} (${percent.toFixed(1)}% of shown). Click to hide.`
+                        ? slice.label + " — hidden. Click to show."
+                        : slice.label +
+                          ": " +
+                          money(slice.amount) +
+                          " (" +
+                          percent.toFixed(1) +
+                          "% of shown). Click to hide."
                     }
                   >
                     <span
-                      className="pdash-legend-dot"
+                      className="size-2.5 shrink-0 rounded-full"
                       style={{ background: SLICE_COLORS[index % SLICE_COLORS.length] }}
                       aria-hidden="true"
                     />
-                    <span className="pdash-legend-text">
-                      <span className="pdash-legend-label">{slice.label}</span>
-                      <span className="pdash-legend-value">
-                        {money(slice.amount)}
-                        <em>({percent.toFixed(1)}%)</em>
+                    <span className="flex min-w-0 flex-1 items-baseline justify-between gap-2">
+                      <span className={"truncate " + (off ? "line-through" : "text-ink")}>
+                        {slice.label}
+                      </span>
+                      <span className="shrink-0 tabular-nums text-body">
+                        {money(slice.amount)}{" "}
+                        <em className="not-italic text-subtle">({percent.toFixed(1)}%)</em>
                       </span>
                     </span>
                   </button>
@@ -297,13 +304,9 @@ function ChartCard({
           </ul>
         </div>
       )}
-    </section>
+    </Card>
   );
 }
-
-// ===========================================================================
-// Collection performance
-// ===========================================================================
 
 // ===========================================================================
 // Tab
@@ -424,174 +427,180 @@ export default function AnalyticsTab() {
     if (!f.date_from) return "";
     return f.date_from === f.date_to
       ? prettyDate(f.date_from)
-      : `${prettyDate(f.date_from)} – ${prettyDate(f.date_to)}`;
+      : prettyDate(f.date_from) + " – " + prettyDate(f.date_to);
   }, [dashboard.data.filters]);
 
-  return (
-    <div className="pdash">
-      {/* --- Filters ---------------------------------------------------- */}
-      <div className="pdash-filters">
-        <label className="pdash-filter">
-          <span className="pdash-filter-label">Company</span>
-          <select
-            value={company}
-            onChange={(e) => setCompany(e.target.value)}
-            title="Limit every figure on this page to one company. Each company is a separate SAP database."
-          >
-            <option value="">All Companies</option>
-            {companies.data.map((c) => (
-              <option key={c.company} value={c.company}>
-                {c.display_name || c.company}
-              </option>
-            ))}
-          </select>
-        </label>
+  const plural = (n: number, one: string, many: string) => n + " " + (n === 1 ? one : many);
 
-        <label className="pdash-filter">
-          <span className="pdash-filter-label">Date Range</span>
-          <select
-            value={preset}
-            onChange={(e) => setPreset(e.target.value as DatePreset)}
-            title="Dates are resolved on the server, so everyone sees the same period regardless of their device clock."
-          >
-            {DATE_PRESETS.map((p) => (
-              <option key={p.value} value={p.value}>
-                {p.label}
-              </option>
-            ))}
-          </select>
-        </label>
+  return (
+    <div className="space-y-4 sm:space-y-6">
+      {/* --- Filters ---------------------------------------------------- */}
+      <FilterBar>
+        <FilterSelect
+          label="Company"
+          value={company}
+          onChange={(e) => setCompany(e.target.value)}
+          title="Limit every figure on this page to one company. Each company is a separate SAP database."
+          fieldClassName="max-w-[220px]"
+        >
+          <option value="">All companies</option>
+          {companies.data.map((c) => (
+            <option key={c.company} value={c.company}>
+              {c.display_name || c.company}
+            </option>
+          ))}
+        </FilterSelect>
+
+        <FilterSelect
+          label="Date range"
+          value={preset}
+          onChange={(e) => setPreset(e.target.value as DatePreset)}
+          title="Dates are resolved on the server, so everyone sees the same period regardless of their device clock."
+          fieldClassName="max-w-[200px]"
+        >
+          {DATE_PRESETS.map((p) => (
+            <option key={p.value} value={p.value}>
+              {p.label}
+            </option>
+          ))}
+        </FilterSelect>
 
         {preset === "custom" && (
-          <div className="pdash-custom">
-            <label className="pdash-filter">
-              <span className="pdash-filter-label">From</span>
-              <input
-                type="date"
-                value={from}
-                max={to || undefined}
-                onChange={(e) => setFrom(e.target.value)}
-              />
-            </label>
-            <label className="pdash-filter">
-              <span className="pdash-filter-label">To</span>
-              <input
-                type="date"
-                value={to}
-                min={from || undefined}
-                onChange={(e) => setTo(e.target.value)}
-              />
-            </label>
-          </div>
+          <>
+            <FilterDate
+              label="From"
+              value={from}
+              max={to || undefined}
+              onChange={(e) => setFrom(e.target.value)}
+            />
+            <FilterDate
+              label="To"
+              value={to}
+              min={from || undefined}
+              onChange={(e) => setTo(e.target.value)}
+            />
+          </>
         )}
 
+        <FilterSpacer />
         {rangeText && !loading && (
-          <div className="pdash-range" title="The period every figure below covers.">
+          <span
+            className="self-end pb-2 text-[12px] font-semibold text-ink"
+            title="The period every figure below covers."
+          >
             {rangeText}
-          </div>
+          </span>
         )}
-      </div>
+      </FilterBar>
 
       {error && !loading && (
-        <div className="apv-notice apv-notice-warn pdash-error">
-          <span>{error}</span>
-          <button type="button" className="apv-btn" onClick={dashboard.reload}>
-            Retry
-          </button>
-        </div>
+        <Notice tone="bad" title="Could not load the dashboard">
+          <span className="flex flex-wrap items-center gap-3">
+            {error}
+            <Button size="xs" onClick={dashboard.reload}>
+              Retry
+            </Button>
+          </span>
+        </Notice>
       )}
 
       {/* --- KPI cards: settled in SAP ---------------------------------- */}
-      <div className="pdash-section-label">
-        <span>Posted to SAP</span>
-        <em>Settled in the books of record</em>
-      </div>
+      <section className="space-y-3">
+        <div>
+          <SectionHeading>Posted to SAP</SectionHeading>
+          <p className="m-0 mt-0.5 text-[12px] text-subtle">Settled in the books of record</p>
+        </div>
 
-      {/* Four cards, not five: "Total Payments" was removed because it summed
-          the same posted receipts as Received Total and always showed an
-          identical figure — two cards answering one question. */}
-      <div className="pdash-kpis">
-        <KpiCard
-          label="Deposit Total"
-          value={kpis.deposit_total}
-          hint={`${kpis.deposit_count} deposit${kpis.deposit_count === 1 ? "" : "s"} posted`}
-          tooltip="Deposits posted to SAP — money confirmed into company bank accounts. Measured by the amount banked, so any shortfall against what was collected is excluded."
-          icon="🏦"
-          tone="green"
-          loading={loading}
-        />
-        <KpiCard
-          label="Received Total"
-          value={kpis.received_total}
-          hint={`${kpis.received_count} receipt${kpis.received_count === 1 ? "" : "s"} settled`}
-          tooltip="Amount received from customers and confirmed in SAP. Anything not yet posted — including receipts SAP refused — appears under Not Yet in SAP instead."
-          icon="⤓"
-          tone="amber"
-          loading={loading}
-        />
-        <KpiCard
-          label="Against Invoice"
-          value={kpis.against_invoice}
-          hint={`${kpis.against_invoice_count} receipt${kpis.against_invoice_count === 1 ? "" : "s"} allocated`}
-          tooltip="Posted payments applied to customer invoices rather than taken on account. Together with Advance Payment this adds up to Received Total."
-          icon="▦"
-          tone="violet"
-          loading={loading}
-        />
-        <KpiCard
-          label="Advance Payment"
-          value={kpis.advance_payment}
-          hint={`${kpis.advance_count} receipt${kpis.advance_count === 1 ? "" : "s"} on account`}
-          tooltip="Posted payments with no invoice allocation — money taken on account, to be applied to an invoice later."
-          icon="↗"
-          tone="sky"
-          loading={loading}
-        />
-      </div>
+        {/* Four cards, not five: "Total Payments" was removed because it summed
+            the same posted receipts as Received Total and always showed an
+            identical figure — two cards answering one question. */}
+        <StatRow>
+          <KpiCard
+            label="Deposit total"
+            value={kpis.deposit_total}
+            hint={plural(kpis.deposit_count, "deposit posted", "deposits posted")}
+            tooltip="Deposits posted to SAP — money confirmed into company bank accounts. Measured by the amount banked, so any shortfall against what was collected is excluded."
+            icon={HiOutlineBanknotes}
+            tone="ok"
+            loading={loading}
+          />
+          <KpiCard
+            label="Received total"
+            value={kpis.received_total}
+            hint={plural(kpis.received_count, "receipt settled", "receipts settled")}
+            tooltip="Amount received from customers and confirmed in SAP. Anything not yet posted — including receipts SAP refused — appears under Not Yet in SAP instead."
+            icon={HiOutlineArrowDownTray}
+            tone="hold"
+            loading={loading}
+          />
+          <KpiCard
+            label="Against invoice"
+            value={kpis.against_invoice}
+            hint={plural(kpis.against_invoice_count, "receipt allocated", "receipts allocated")}
+            tooltip="Posted payments applied to customer invoices rather than taken on account. Together with Advance Payment this adds up to Received Total."
+            icon={HiOutlineDocumentText}
+            tone="brand"
+            loading={loading}
+          />
+          <KpiCard
+            label="Advance payment"
+            value={kpis.advance_payment}
+            hint={plural(kpis.advance_count, "receipt on account", "receipts on account")}
+            tooltip="Posted payments with no invoice allocation — money taken on account, to be applied to an invoice later."
+            icon={HiOutlineArrowTrendingUp}
+            tone="brand"
+            loading={loading}
+          />
+        </StatRow>
+      </section>
 
       {/* --- KPI cards: raised but not settled --------------------------
           Restricting the figures above to posted documents makes them
           trustworthy but would otherwise hide real work. These say what the
           posted totals are NOT counting. */}
-      <div className="pdash-section-label">
-        <span>Not Yet in SAP</span>
-        <em>Created but not settled — excluded from the totals above</em>
-      </div>
+      <section className="space-y-3">
+        <div>
+          <SectionHeading>Not yet in SAP</SectionHeading>
+          <p className="m-0 mt-0.5 text-[12px] text-subtle">
+            Created but not settled — excluded from the totals above
+          </p>
+        </div>
 
-      <div className="pdash-kpis pdash-kpis-pending">
-        <KpiCard
-          label="Pending Payments"
-          value={kpis.pending_receipts}
-          hint={`${kpis.pending_receipts_count} receipt${kpis.pending_receipts_count === 1 ? "" : "s"} not posted`}
-          tooltip="Payment receipts raised but not settled in SAP: draft, awaiting approval, mid-post, refused by SAP, or unconfirmed. Rejected and cancelled receipts are excluded — nothing is waiting on those."
-          icon="◷"
-          tone="slate"
-          loading={loading}
-        />
-        <KpiCard
-          label="Pending Deposits"
-          value={kpis.pending_deposits}
-          hint={`${kpis.pending_deposits_count} deposit${kpis.pending_deposits_count === 1 ? "" : "s"} not posted`}
-          tooltip="Bank deposits raised but not settled in SAP. Kept separate from pending payments because banking a receipt and recording it are different steps, and adding them would count the same money twice."
-          icon="◷"
-          tone="slate"
-          loading={loading}
-        />
-        <KpiCard
-          label="Needs Attention"
-          value={kpis.blocked_total}
-          hint={`${kpis.blocked_count} document${kpis.blocked_count === 1 ? "" : "s"} stuck`}
-          tooltip="The subset of pending work that will not clear on its own: SAP refused the document, or never answered. Everything else advances as the approval chain moves; these need somebody to correct and resubmit, or to reconcile."
-          icon="⚠"
-          tone="red"
-          loading={loading}
-        />
-      </div>
+        <StatRow>
+          <KpiCard
+            label="Pending payments"
+            value={kpis.pending_receipts}
+            hint={plural(kpis.pending_receipts_count, "receipt not posted", "receipts not posted")}
+            tooltip="Payment receipts raised but not settled in SAP: draft, awaiting approval, mid-post, refused by SAP, or unconfirmed. Rejected and cancelled receipts are excluded — nothing is waiting on those."
+            icon={HiOutlineClock}
+            tone="neutral"
+            loading={loading}
+          />
+          <KpiCard
+            label="Pending deposits"
+            value={kpis.pending_deposits}
+            hint={plural(kpis.pending_deposits_count, "deposit not posted", "deposits not posted")}
+            tooltip="Bank deposits raised but not settled in SAP. Kept separate from pending payments because banking a receipt and recording it are different steps, and adding them would count the same money twice."
+            icon={HiOutlineClock}
+            tone="neutral"
+            loading={loading}
+          />
+          <KpiCard
+            label="Needs attention"
+            value={kpis.blocked_total}
+            hint={plural(kpis.blocked_count, "document stuck", "documents stuck")}
+            tooltip="The subset of pending work that will not clear on its own: SAP refused the document, or never answered. Everything else advances as the approval chain moves; these need somebody to correct and resubmit, or to reconcile."
+            icon={HiOutlineExclamationTriangle}
+            tone={kpis.blocked_count > 0 ? "bad" : "neutral"}
+            loading={loading}
+          />
+        </StatRow>
+      </section>
 
       {/* --- Charts ----------------------------------------------------- */}
-      <div className="pdash-charts">
+      <div className="grid gap-4 xl:grid-cols-3">
         <ChartCard
-          title="Received Payments"
+          title="Received payments"
           subtitle="Posted receipts: invoice-linked versus on-account"
           series={charts.received}
           centerLabel="Total Received"
@@ -600,7 +609,7 @@ export default function AnalyticsTab() {
           onRetry={dashboard.reload}
         />
         <ChartCard
-          title="Received Payment Methods"
+          title="Received payment methods"
           subtitle="How the posted money arrived"
           series={charts.methods}
           centerLabel="Total Received"
@@ -609,7 +618,7 @@ export default function AnalyticsTab() {
           onRetry={dashboard.reload}
         />
         <ChartCard
-          title="Deposit Details"
+          title="Deposit details"
           subtitle="Posted deposits, by tender"
           series={charts.deposits}
           centerLabel="Total Deposited"

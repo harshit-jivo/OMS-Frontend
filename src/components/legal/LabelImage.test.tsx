@@ -225,14 +225,18 @@ describe("FindingsChecklist", () => {
     const user = userEvent.setup();
     render(<Harness />);
 
+    // `data-active`, not a class string: the emphasis is four utilities now,
+    // and asserting on class names would break on any restyle while telling
+    // you nothing about whether the box is actually emphasised.
     const box = screen.getByRole("button", { name: "Passed: Name of the food" });
-    expect(box.className).not.toContain("is-active");
+    expect(box).not.toHaveAttribute("data-active");
 
     await user.click(screen.getByRole("button", { name: /Name of the food.*PASS/s }));
 
-    expect(
-      screen.getByRole("button", { name: "Passed: Name of the food" }).className,
-    ).toContain("is-active");
+    expect(screen.getByRole("button", { name: "Passed: Name of the food" })).toHaveAttribute(
+      "data-active",
+      "true",
+    );
   });
 
   it("clicking the selected row again clears the emphasis", async () => {
@@ -244,7 +248,7 @@ describe("FindingsChecklist", () => {
     await user.click(row());
 
     expect(
-      screen.getByRole("button", { name: "Passed: Name of the food" }).className,
-    ).not.toContain("is-active");
+      screen.getByRole("button", { name: "Passed: Name of the food" }),
+    ).not.toHaveAttribute("data-active");
   });
 });

@@ -1,7 +1,19 @@
+/**
+ * Step 2 — which open sales orders (and which of their lines) the invoice
+ * covers.
+ *
+ * A master/detail: the order list on the left, the selected order's lines on
+ * the right with live warehouse stock per item, so the person invoicing can
+ * see whether the stock to fulfil a line actually exists.
+ */
 import { useEffect, useMemo, useState } from "react";
-import { HiArrowRight } from "react-icons/hi2";
-import { formatDateDisplay, formatMoney, lineKey, toNumber } from "./salesInvoice.utils";
-import { apiFetch, hanaUrl, type SalesInvoiceState } from "./useSalesInvoice";
+import { HiOutlineArrowRight, HiOutlineDocumentText } from "react-icons/hi2";
+
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { FilterBar, FilterCount, FilterSearch } from "@/components/ui/filter-bar";
+import { Card, CardHeader, CardTitle, EmptyState, Notice } from "@/components/ui/page";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -10,6 +22,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { cn } from "@/lib/utils";
+import { formatDateDisplay, formatMoney, lineKey, toNumber } from "./salesInvoice.utils";
+import { apiFetch, hanaUrl, type SalesInvoiceState } from "./useSalesInvoice";
 
 /** What an in-flight invoice log's status means for someone about to invoice
  *  this SO. SAP keeps reporting the order open until that invoice posts, so
@@ -48,8 +63,6 @@ type WarehouseStock = {
   quantity: number;
 };
 
-const cn = (...classes: Array<string | false | null | undefined>) => classes.filter(Boolean).join(" ");
-
 const getItemCodeKey = (itemCode?: string | null) => String(itemCode || "").trim().toUpperCase();
 
 const getWarehouseCode = (warehouse: InventoryWarehouse) =>
@@ -57,42 +70,31 @@ const getWarehouseCode = (warehouse: InventoryWarehouse) =>
 
 const getWarehouseQuantity = (warehouse: InventoryWarehouse) =>
   toNumber(
-    warehouse["SUM(Quantity)"]
-      ?? warehouse.Quantity
-      ?? warehouse.OnHand
-      ?? warehouse.AvailableQty
-      ?? warehouse.AvailableQuantity
-      ?? warehouse.TotalQty,
+    warehouse["SUM(Quantity)"] ??
+      warehouse.Quantity ??
+      warehouse.OnHand ??
+      warehouse.AvailableQty ??
+      warehouse.AvailableQuantity ??
+      warehouse.TotalQty,
   );
 
-const getWarehouseStockTone = (warehouseQuantity: number, openQty: number) => {
-  if (openQty > 0 && warehouseQuantity >= openQty) return "is-full";
-  if (warehouseQuantity <= 5 || (openQty >= 100 && warehouseQuantity / openQty <= 0.05)) return "is-critical";
-  if (warehouseQuantity > 0 && warehouseQuantity < openQty) return "is-partial";
-  return "is-critical";
-};
-
-const warehouseColorByCode: Record<string, number> = {
-  "BH-EC": 0,
-  "BH-FG": 1,
-  "BH-GR": 2,
-  "BH-LR": 3,
-  "BH-PF": 4,
-  "BH-UF": 5,
-  "GP-FG": 6,
-  "BH-PC": 7,
-  "BH-PP": 8,
-};
-
-const warehouseColorCount = 12;
-
-const getWarehouseColorTone = (warehouseCode: string) => {
-  const normalizedCode = warehouseCode.trim().toUpperCase();
-  const pinnedTone = warehouseColorByCode[normalizedCode];
-  if (pinnedTone !== undefined) return `si-warehouse-code-tone-${pinnedTone}`;
-
-  const hash = normalizedCode.split("").reduce((sum, char) => sum + char.charCodeAt(0), 0);
-  return `si-warehouse-code-tone-${hash % warehouseColorCount}`;
+/**
+ * Can this warehouse cover the open quantity?
+ *
+ * ONE colour system on the chip, not two. The old badge carried both a stock
+ * tone AND a per-warehouse identity hue picked from a 12-colour cycle — so a
+ * chip's colour meant "GP-FG" and "not enough stock" at the same time, and
+ * neither reliably. The warehouse CODE is printed on the chip and carries its
+ * own identity perfectly well; the colour is reserved for the thing a colour
+ * is good at, which is "is this fine, tight, or wrong" (DESIGN_SYSTEM §2).
+ */
+const stockTone = (warehouseQuantity: number, openQty: number) => {
+  if (openQty > 0 && warehouseQuantity >= openQty) return "bg-ok-soft text-ok";
+  if (warehouseQuantity <= 5 || (openQty >= 100 && warehouseQuantity / openQty <= 0.05)) {
+    return "bg-bad-soft text-bad";
+  }
+  if (warehouseQuantity > 0 && warehouseQuantity < openQty) return "bg-hold-soft text-hold";
+  return "bg-bad-soft text-bad";
 };
 
 const normalizeWarehouseStock = (warehouses: InventoryWarehouse[]) =>
@@ -106,13 +108,15 @@ const normalizeWarehouseStock = (warehouses: InventoryWarehouse[]) =>
 
 export default function OrdersStep({
   state,
-  continueLabel = "Next: Review Lines",
-  continueLoadingLabel = "Loading draft...",
+  continueLabel = "Next: review lines",
+  continueLoadingLabel = "Loading draft…",
   onContinue,
 }: Props) {
   const [query, setQuery] = useState("");
   const [activeOrderKey, setActiveOrderKey] = useState<string | null>(null);
-  const [warehouseStockByItemCode, setWarehouseStockByItemCode] = useState<Record<string, WarehouseStock[]>>({});
+  const [warehouseStockByItemCode, setWarehouseStockByItemCode] = useState<
+    Record<string, WarehouseStock[]>
+  >({});
   const selectedOrderCount = new Set(state.selectedLineList.map((line) => line.DocEntry)).size;
   const hasInvalidQty = state.selectedLineList.some(
     (line) => toNumber(line.invoiceQty) < 1 || toNumber(line.invoiceQty) > toNumber(line.OpenQty),
@@ -126,8 +130,8 @@ export default function OrdersStep({
     return state.salesOrders
       .map((order) => {
         const lines = state.getOrderLines(order).filter((line) =>
-          [line.ItemCode, line.Dscription, line.WhsCode, line.TaxCode, line.VatGroup].some((value) =>
-            String(value || "").toLowerCase().includes(normalized),
+          [line.ItemCode, line.Dscription, line.WhsCode, line.TaxCode, line.VatGroup].some(
+            (value) => String(value || "").toLowerCase().includes(normalized),
           ),
         );
         return lines.length > 0 ? { ...order, lines } : null;
@@ -135,25 +139,14 @@ export default function OrdersStep({
       .filter((order): order is NonNullable<typeof order> => Boolean(order));
   }, [query, state]);
 
-  const getDocKey = (order: typeof state.salesOrders[number], index: number) => `${order.DocEntry || order.DocNum || index}-${index}`;
+  const getDocKey = (order: (typeof state.salesOrders)[number], index: number) =>
+    `${order.DocEntry || order.DocNum || index}-${index}`;
 
   /* `activeOrderKey` is what the user last clicked; it goes stale as soon as the
      search box narrows the list out from under it. The render below already
      falls back to the first order in that case, so `activeKey` is just that same
      fallback expressed as a key — which is all the effect that used to live here
-     wrote back into state, one render later.
-
-  useEffect(() => {
-    if (filteredOrders.length === 0) {
-      setActiveOrderKey(null);
-      return;
-    }
-
-    const activeExists = filteredOrders.some((order, index) => getDocKey(order, index) === activeOrderKey);
-    if (!activeExists) setActiveOrderKey(getDocKey(filteredOrders[0], 0));
-  }, [activeOrderKey, filteredOrders]);
-  */
-
+     wrote back into state, one render later. */
   const activeOrderEntry = filteredOrders
     .map((order, index) => ({ order, index, key: getDocKey(order, index) }))
     .find((entry) => entry.key === activeOrderKey);
@@ -162,14 +155,19 @@ export default function OrdersStep({
   const activeKey =
     activeOrderEntry?.key ?? (filteredOrders.length > 0 ? getDocKey(filteredOrders[0], 0) : null);
   const activeUsedBy = activeOrder
-    ? state.usedSalesOrders?.[String(activeOrder.DocNum || activeOrder.DocEntry || activeOrderIndex + 1)]
+    ? state.usedSalesOrders?.[
+        String(activeOrder.DocNum || activeOrder.DocEntry || activeOrderIndex + 1)
+      ]
     : undefined;
   const activeOrderLines = activeOrder ? state.getOrderLines(activeOrder) : [];
   const activeOpenLines = activeOrderLines.filter((line) => toNumber(line.OpenQty) > 0);
   const selectedActiveOpenLineCount = activeOrder
-    ? activeOpenLines.filter((line) => state.selectedLines[lineKey(activeOrder.DocEntry, line.LineNum)]).length
+    ? activeOpenLines.filter(
+        (line) => state.selectedLines[lineKey(activeOrder.DocEntry, line.LineNum)],
+      ).length
     : 0;
-  const allActiveOpenLinesSelected = activeOpenLines.length > 0 && selectedActiveOpenLineCount === activeOpenLines.length;
+  const allActiveOpenLinesSelected =
+    activeOpenLines.length > 0 && selectedActiveOpenLineCount === activeOpenLines.length;
   /* No `useMemo`: its only dependency was `activeOrderLines`, a fresh array on
      every render, so the memo never hit and the React Compiler reported
      `Compilation Skipped: Existing memoization could not be preserved` for the
@@ -188,9 +186,10 @@ export default function OrdersStep({
 
   useEffect(() => {
     let active = true;
-    if (!activeItemCodesKey) return () => {
-      active = false;
-    };
+    if (!activeItemCodesKey)
+      return () => {
+        active = false;
+      };
 
     const loadWarehouseStock = async () => {
       const entries = await Promise.all(
@@ -237,222 +236,296 @@ export default function OrdersStep({
   };
 
   return (
-    <div className="si-orders-stage">
-      <section className="si-orders-main">
-        <input
-          className="si-search-input"
+    <div className="space-y-4">
+      <FilterBar>
+        <FilterSearch
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Filter by ItemCode, description, warehouse, or tax code"
+          placeholder="Item code, description, warehouse or tax code…"
+          fieldClassName="min-w-[320px]"
         />
+        <FilterCount>
+          {filteredOrders.length} order{filteredOrders.length === 1 ? "" : "s"}
+          {query ? " of " + state.salesOrders.length : ""}
+        </FilterCount>
+      </FilterBar>
 
-        {state.ordersError && <div className="si-inline-error">{state.ordersError}</div>}
+      {state.ordersError && <Notice tone="bad">{state.ordersError}</Notice>}
 
-        <div className="si-so-split">
-          {state.loadingOrders ? (
-            <div className="si-loader">Loading sales orders...</div>
-          ) : filteredOrders.length === 0 ? (
-            <div className="si-empty">No open sales order lines found.</div>
-          ) : (
-            <>
-              <div className="si-so-list-pane" aria-label="Sales orders">
-                {filteredOrders.map((order, index) => {
-                  const lines = state.getOrderLines(order);
-                  const openLines = lines.filter((line) => toNumber(line.OpenQty) > 0);
-                  const selectedCount = openLines.filter((line) => state.selectedLines[lineKey(order.DocEntry, line.LineNum)]).length;
-                  const docKey = getDocKey(order, index);
-                  const isActive = activeKey === docKey;
-                  const isSelected = selectedCount > 0;
-                  const docNum = order.DocNum || order.DocEntry || index + 1;
-                  const usedBy = state.usedSalesOrders?.[String(docNum)];
+      {state.loadingOrders ? (
+        <Card>
+          <div className="space-y-2" aria-label="Loading sales orders">
+            <Skeleton className="h-12 w-full" />
+            <Skeleton className="h-12 w-full" />
+            <Skeleton className="h-12 w-full" />
+          </div>
+        </Card>
+      ) : filteredOrders.length === 0 ? (
+        <Card>
+          <EmptyState
+            icon={HiOutlineDocumentText}
+            title={query ? "No line matches this search" : "No open sales order lines"}
+            hint={
+              query
+                ? "Try the item code on its own."
+                : "This party has nothing left to invoice."
+            }
+          />
+        </Card>
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-[minmax(240px,320px)_minmax(0,1fr)] lg:items-start">
+          {/* ── Master: the orders ── */}
+          <Card className="overflow-hidden p-0 lg:sticky lg:top-4">
+            <CardHeader className="mb-0 border-b border-line px-4 py-3">
+              <CardTitle>Sales orders</CardTitle>
+            </CardHeader>
+            <ul className="m-0 max-h-[520px] list-none divide-y divide-line overflow-y-auto p-0">
+              {filteredOrders.map((order, index) => {
+                const lines = state.getOrderLines(order);
+                const openLines = lines.filter((line) => toNumber(line.OpenQty) > 0);
+                const selectedCount = openLines.filter(
+                  (line) => state.selectedLines[lineKey(order.DocEntry, line.LineNum)],
+                ).length;
+                const docKey = getDocKey(order, index);
+                const isActive = activeKey === docKey;
+                const isSelected = selectedCount > 0;
+                const docNum = order.DocNum || order.DocEntry || index + 1;
+                const usedBy = state.usedSalesOrders?.[String(docNum)];
 
-                  return (
-                    <div
-                      className={`si-so-list-row${isActive ? " is-active" : ""}${isSelected ? " is-selected" : ""}${
-                        usedBy && !isSelected ? " is-already-logged" : ""
-                      }`}
-                      role="button"
-                      tabIndex={0}
-                      key={docKey}
+                return (
+                  <li
+                    key={docKey}
+                    className={cn(
+                      "flex items-start gap-2.5 px-3 py-2.5 transition-colors",
+                      isActive && "bg-brand-soft",
+                      !isActive && isSelected && "bg-surface",
+                      usedBy && !isSelected && "bg-hold-soft/40",
+                    )}
+                  >
+                    <input
+                      type="checkbox"
+                      className="mt-1 size-3.5 shrink-0 accent-brand"
+                      checked={isSelected}
+                      disabled={openLines.length === 0}
+                      onChange={() => state.toggleOrder(order)}
+                      aria-label={"Select sales order " + docNum}
+                    />
+                    <button
+                      type="button"
+                      /* Opens this order in the pane beside it. It was a
+                         `div role="button"` with a keydown handler standing in
+                         for one; a real button gets Enter and Space free. */
+                      className="min-w-0 flex-1 cursor-pointer appearance-none border-0 bg-transparent p-0 text-left [font-family:inherit]"
+                      aria-current={isActive ? "true" : undefined}
                       onClick={() => setActiveOrderKey(docKey)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" || event.key === " ") {
-                          event.preventDefault();
-                          setActiveOrderKey(docKey);
-                        }
-                      }}
                     >
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        disabled={openLines.length === 0}
-                        onClick={(event) => event.stopPropagation()}
-                        onChange={() => state.toggleOrder(order)}
-                        aria-label={`Select sales order ${docNum}`}
-                      />
-                      <span>
-                        <strong>
-                          SO #{docNum}
-                          {usedBy && (
-                            <em
-                              className="si-so-used-badge"
-                              title={`Invoice log #${usedBy.log_id}${
-                                usedBy.sap_doc_num ? ` · SAP invoice ${usedBy.sap_doc_num}` : ""
-                              }${usedBy.created_at ? ` · ${formatDateDisplay(usedBy.created_at)}` : ""}`}
-                            >
-                              {USED_STATUS_LABELS[usedBy.status] || "Already in a log"}
-                            </em>
-                          )}
-                        </strong>
-                        <small>
-                          {formatDateDisplay(order.DocDate)} - Due {formatDateDisplay(order.DocDueDate)}
-                        </small>
+                      <span className="flex flex-wrap items-center gap-1.5 text-[13px] font-semibold text-ink">
+                        SO #{docNum}
+                        {usedBy && (
+                          <Badge
+                            tone="hold"
+                            title={
+                              "Invoice log #" +
+                              usedBy.log_id +
+                              (usedBy.sap_doc_num ? " · SAP invoice " + usedBy.sap_doc_num : "") +
+                              (usedBy.created_at
+                                ? " · " + formatDateDisplay(usedBy.created_at)
+                                : "")
+                            }
+                          >
+                            {USED_STATUS_LABELS[usedBy.status] || "Already in a log"}
+                          </Badge>
+                        )}
                       </span>
-                    </div>
-                  );
-                })}
-              </div>
+                      <span className="block text-[11.5px] text-subtle">
+                        {formatDateDisplay(order.DocDate)} · Due{" "}
+                        {formatDateDisplay(order.DocDueDate)}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </Card>
 
-              <div className="si-so-lines-pane" aria-label="Sales order lines">
-                {activeOrder ? (
-                  <>
-                    <header className="si-so-lines-head">
-                      <div>
-                        <strong>
-                          SO #{activeOrder.DocNum || activeOrder.DocEntry || activeOrderIndex + 1}
-                          {activeUsedBy && (
-                            <em className="si-so-used-badge">
-                              {USED_STATUS_LABELS[activeUsedBy.status] || "Already in a log"}
-                            </em>
-                          )}
-                        </strong>
-                        <span>
-                          {activeUsedBy
-                            ? `Invoice log #${activeUsedBy.log_id} already covers this order`
-                            : `${formatDateDisplay(activeOrder.DocDate)} - Due ${formatDateDisplay(activeOrder.DocDueDate)}`}
-                        </span>
-                      </div>
-                      {/* <div className="si-so-lines-actions">
-                        <button
-                          className="si-so-process-btn"
-                          type="button"
-                          disabled={activeOpenLines.length === 0 || allActiveOpenLinesSelected}
-                          onClick={processActiveOrder}
-                        >
-                          Process Order
-                        </button>
-                        <button
-                          className="si-so-reject-btn"
-                          type="button"
-                          disabled={selectedActiveOpenLineCount === 0}
-                          onClick={rejectActiveOrder}
-                        >
-                          Reject Order
-                        </button>
-                      </div> */}
-                    </header>
-                    <div className="si-so-lines-table-wrap">
-                      {activeOrderLines.length === 0 ? (
-                        <div className="si-visible-empty-line">No lines found on this sales order.</div>
-                      ) : (
-                        <Table density="compact">
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead className="si-so-select-cell">
-                                <label className="si-so-select-all">
-                                  <input
-                                    type="checkbox"
-                                    checked={allActiveOpenLinesSelected}
-                                    disabled={activeOpenLines.length === 0}
-                                    onChange={() => (allActiveOpenLinesSelected ? rejectActiveOrder() : processActiveOrder())}
-                                    aria-label={`Select all open lines for sales order ${activeOrder.DocNum || activeOrder.DocEntry}`}
-                                  />
-                                  <span>Select</span>
-                                </label>
-                              </TableHead>
-                              <TableHead>Item Description</TableHead>
-                              <TableHead className="si-so-open-qty-head">Open Qty</TableHead>
-                              <TableHead>Warehouse Stock / Batches</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {activeOrderLines.map((line, lineIndex) => {
-                              const key = lineKey(activeOrder.DocEntry || activeOrderIndex, line.LineNum ?? lineIndex);
-                              const selected = state.selectedLines[key];
-                              const openQty = toNumber(line.OpenQty);
-                              const disabled = openQty <= 0;
-                              const warehouseStock = warehouseStockByItemCode[getItemCodeKey(line.ItemCode)] || [];
+          {/* ── Detail: the active order's lines ── */}
+          <Card className="overflow-hidden p-0">
+            {activeOrder ? (
+              <>
+                <CardHeader className="mb-0 flex-wrap border-b border-line px-4 py-3">
+                  <div className="min-w-0">
+                    <CardTitle>
+                      <span className="flex flex-wrap items-center gap-1.5">
+                        SO #{activeOrder.DocNum || activeOrder.DocEntry || activeOrderIndex + 1}
+                        {activeUsedBy && (
+                          <Badge tone="hold">
+                            {USED_STATUS_LABELS[activeUsedBy.status] || "Already in a log"}
+                          </Badge>
+                        )}
+                      </span>
+                    </CardTitle>
+                    <p className="m-0 mt-0.5 text-[11.5px] text-subtle">
+                      {activeUsedBy
+                        ? "Invoice log #" + activeUsedBy.log_id + " already covers this order"
+                        : formatDateDisplay(activeOrder.DocDate) +
+                          " · Due " +
+                          formatDateDisplay(activeOrder.DocDueDate)}
+                    </p>
+                  </div>
+                </CardHeader>
 
-                              return (
-                                <TableRow className={cn("si-so-line-row", selected && "is-selected", disabled && "is-disabled")} key={key}>
-                                  <TableCell className="si-so-select-cell">
-                                    <input
-                                      type="checkbox"
-                                      checked={Boolean(selected)}
-                                      disabled={disabled}
-                                      onChange={() => state.toggleLine(activeOrder, line)}
-                                      aria-label={`Select ${line.Dscription || line.ItemCode || "sales order line"}`}
-                                    />
-                                  </TableCell>
-                                  <TableCell>
-                                    <span className="si-so-item-description">{line.Dscription || "Unnamed SAP line"}</span>
-                                  </TableCell>
-                                  <TableCell>
-                                    <strong className="si-so-open-qty">{openQty.toLocaleString("en-IN")}</strong>
-                                  </TableCell>
-                                  <TableCell>
-                                    <div className="si-warehouse-stock-row" aria-label={`Warehouse stock for ${line.Dscription || line.ItemCode}`}>
-                                      {warehouseStock.length === 0 ? (
-                                        <em className="si-warehouse-stock-empty">No warehouse stock</em>
-                                      ) : (
-                                        warehouseStock.map((warehouse) => (
-                                          <em
-                                            className={cn(
-                                              "si-warehouse-stock-badge",
-                                              getWarehouseColorTone(warehouse.code),
-                                              getWarehouseStockTone(warehouse.quantity, openQty),
-                                            )}
-                                            key={warehouse.code}
-                                          >
-                                            {warehouse.code}: {warehouse.quantity.toLocaleString("en-IN")}
-                                          </em>
-                                        ))
-                                      )}
-                                    </div>
-                                  </TableCell>
-                                </TableRow>
-                              );
-                            })}
-                          </TableBody>
-                        </Table>
-                      )}
-                    </div>
-                  </>
+                {activeOrderLines.length === 0 ? (
+                  <EmptyState
+                    icon={HiOutlineDocumentText}
+                    title="No lines on this sales order"
+                  />
                 ) : (
-                  <div className="si-empty">Select a sales order to view items.</div>
-                )}
-              </div>
-            </>
-          )}
-        </div>
+                  <div className="overflow-x-auto">
+                    <Table density="compact">
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-[86px]">
+                            <label className="flex cursor-pointer items-center gap-1.5">
+                              <input
+                                type="checkbox"
+                                className="size-3.5 accent-brand"
+                                checked={allActiveOpenLinesSelected}
+                                disabled={activeOpenLines.length === 0}
+                                onChange={() =>
+                                  allActiveOpenLinesSelected
+                                    ? rejectActiveOrder()
+                                    : processActiveOrder()
+                                }
+                                aria-label={
+                                  "Select all open lines for sales order " +
+                                  (activeOrder.DocNum || activeOrder.DocEntry)
+                                }
+                              />
+                              Select
+                            </label>
+                          </TableHead>
+                          <TableHead>Item description</TableHead>
+                          <TableHead className="text-right">Open qty</TableHead>
+                          <TableHead>Warehouse stock</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {activeOrderLines.map((line, lineIndex) => {
+                          const key = lineKey(
+                            activeOrder.DocEntry || activeOrderIndex,
+                            line.LineNum ?? lineIndex,
+                          );
+                          const selected = state.selectedLines[key];
+                          const openQty = toNumber(line.OpenQty);
+                          const disabled = openQty <= 0;
+                          const warehouseStock =
+                            warehouseStockByItemCode[getItemCodeKey(line.ItemCode)] || [];
 
-      </section>
+                          return (
+                            <TableRow
+                              className={cn(selected && "bg-brand-soft", disabled && "opacity-55")}
+                              key={key}
+                            >
+                              <TableCell>
+                                <input
+                                  type="checkbox"
+                                  className="size-3.5 accent-brand"
+                                  checked={Boolean(selected)}
+                                  disabled={disabled}
+                                  onChange={() => state.toggleLine(activeOrder, line)}
+                                  aria-label={
+                                    "Select " +
+                                    (line.Dscription || line.ItemCode || "sales order line")
+                                  }
+                                />
+                              </TableCell>
+                              <TableCell className="font-semibold text-ink">
+                                {line.Dscription || "Unnamed SAP line"}
+                              </TableCell>
+                              <TableCell className="text-right font-semibold tabular-nums text-ink">
+                                {openQty.toLocaleString("en-IN")}
+                              </TableCell>
+                              <TableCell>
+                                <div
+                                  className="flex flex-wrap gap-1"
+                                  aria-label={
+                                    "Warehouse stock for " + (line.Dscription || line.ItemCode)
+                                  }
+                                >
+                                  {warehouseStock.length === 0 ? (
+                                    <span className="text-[11.5px] text-subtle">
+                                      No warehouse stock
+                                    </span>
+                                  ) : (
+                                    warehouseStock.map((warehouse) => (
+                                      <span
+                                        className={cn(
+                                          "rounded-full px-2 py-px text-[11px] font-semibold tabular-nums",
+                                          stockTone(warehouse.quantity, openQty),
+                                        )}
+                                        key={warehouse.code}
+                                        title={
+                                          warehouse.code +
+                                          " holds " +
+                                          warehouse.quantity.toLocaleString("en-IN") +
+                                          " against an open quantity of " +
+                                          openQty.toLocaleString("en-IN")
+                                        }
+                                      >
+                                        {warehouse.code}:{" "}
+                                        {warehouse.quantity.toLocaleString("en-IN")}
+                                      </span>
+                                    ))
+                                  )}
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </>
+            ) : (
+              <EmptyState
+                icon={HiOutlineDocumentText}
+                title="Select a sales order"
+                hint="Its lines and warehouse stock appear here."
+              />
+            )}
+          </Card>
+        </div>
+      )}
 
       {state.selectedLineList.length > 0 && (
-        <footer className={`si-order-selection-bar${state.selectedOrderAddressError ? " has-error" : ""}`}>
+        <Card className="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <strong>{state.selectedLineList.length} lines selected across {selectedOrderCount} orders</strong>
-            <span>
-              Total Qty: {state.totals.totalQty} - Taxable: {formatMoney(state.totals.taxable)} - Grand Total: {formatMoney(state.totals.grandTotal)}
+            <strong className="block text-[13px] font-semibold text-ink">
+              {state.selectedLineList.length} line
+              {state.selectedLineList.length === 1 ? "" : "s"} across {selectedOrderCount} order
+              {selectedOrderCount === 1 ? "" : "s"}
+            </strong>
+            <span className="text-[12px] tabular-nums text-subtle">
+              Qty {state.totals.totalQty} · Taxable {formatMoney(state.totals.taxable)} · Grand
+              total {formatMoney(state.totals.grandTotal)}
             </span>
             {state.selectedOrderAddressError && (
-              <span className="si-order-selection-error">{state.selectedOrderAddressError}</span>
+              <Notice tone="bad" className="mt-2">
+                {state.selectedOrderAddressError}
+              </Notice>
             )}
           </div>
-          <button
-            className="si-btn si-btn-primary si-order-selection-next"
-            type="button"
+          <Button
+            variant="primary"
             disabled={cannotContinue || state.loadingDraftDetails}
+            title={
+              state.selectedOrderAddressError
+                ? state.selectedOrderAddressError
+                : hasInvalidQty
+                  ? "One or more invoice quantities are outside the open quantity."
+                  : undefined
+            }
             onClick={() => {
               if (onContinue) {
                 onContinue();
@@ -462,9 +535,9 @@ export default function OrdersStep({
             }}
           >
             {state.loadingDraftDetails ? continueLoadingLabel : continueLabel}
-            <HiArrowRight aria-hidden="true" />
-          </button>
-        </footer>
+            <HiOutlineArrowRight aria-hidden="true" />
+          </Button>
+        </Card>
       )}
     </div>
   );

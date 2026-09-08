@@ -93,21 +93,38 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   },
 
   // --- Any signed-in user -------------------------------------------------
-  "/Dashboard": {
+  "/Home": {
     anyUser: true,
     note:
       "The landing page and the redirect target for every denied route, so " +
-      "gating it would strand users in a redirect loop. Its widgets are " +
-      "individually scoped server-side.",
+      "gating it would strand users in a redirect loop. It is safe to leave " +
+      "open because it holds no data: it renders LINKS to the routes below, " +
+      "each already guarded by this table, filtered through `canOpen`. A " +
+      "user with no grants sees an empty page, not a forbidden one.",
   },
-  "/Profile": { anyUser: true, note: "Your own account." },
+
+  // --- Sales dashboard ----------------------------------------------------
+  /*
+   * This WAS `/Dashboard`, and it was `anyUser` for one reason only: it
+   * doubled as the landing page, so gating it would have looped a denied
+   * user. `/Home` took that job, which freed this page to be what it is — an
+   * order and revenue analytics screen — and to carry a gate like every other
+   * page.
+   *
+   * The key alone, with no role fallback. A role list here would re-admit
+   * every desk unconditionally and make the grant decorative, which is the
+   * opposite of the point. Existing users keep their access through
+   * `users/migrations/0034`, which seeds `Sales_Dashboard` into the bundle of
+   * every role that could open the dashboard before the split — so the
+   * permission is real AND nobody loses a screen on deploy day.
+   */
+  "/Sales_Dashboard": { permissions: ["Sales_Dashboard"] },
 
   // --- Administration -----------------------------------------------------
   "/App_User": { permissions: ["App_User"] },
   "/Page_Permissions": { adminOnly: true },
   "/Role_Permissions": { adminOnly: true },
   "/UI_Labels": { adminOnly: true },
-  // "/Sales_Quotation": { adminOnly: true },
   //
   // Commented out with the route itself (App.tsx, DISABLED 2026-08-27 — the
   // quotation flow is closed and its backend routes are commented out too).
@@ -225,15 +242,27 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // existing intent to preserve and admin-only is the conservative reading.
   // Flagged rather than guessed: if these are meant to be used, they need a
   // link and a considered gate.
-  "/Staff": { adminOnly: true },
-  "/Staff_Rate_Assignment": { adminOnly: true },
+  // Grantable rather than adminOnly since the staff keys were registered.
+  // Admins are unaffected — `can()` admits them on every key — so nobody
+  // loses a page and no back-grant migration was needed.
+  "/Staff": { permissions: ["Staff"] },
+  "/Staff_Rate_Assignment": { permissions: ["Staff_Rate_Assignment"] },
 };
 
 /**
  * Routes that are pure redirects. They carry no gate of their own — whatever
  * they redirect TO is guarded, and gating both would just redirect twice.
  */
-export const REDIRECT_ROUTES = new Set(["/Approval_Management", "*"]);
+export const REDIRECT_ROUTES = new Set([
+  "/Approval_Management",
+  // The old dashboard URL. Bookmarks and saved links point at it, so it stays
+  // and forwards to `/Sales_Dashboard` — where `ProtectedPage` applies the new
+  // gate and sends anyone without the grant on to `/Home`. Redirecting it
+  // straight to `/Home` instead would have taken the page away from the people
+  // who DO hold the grant.
+  "/Dashboard",
+  "*",
+]);
 
 /** The access rule for a path. Unknown paths are admin-only — see the table. */
 export function accessFor(path: string): RouteAccess {

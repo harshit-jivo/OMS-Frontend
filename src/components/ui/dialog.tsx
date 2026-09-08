@@ -104,6 +104,22 @@ const contentVariants = cva(
     variants: {
       variant: {
         panel: [
+          /*
+           * `tw-page` — the converted-page reset, on the DIALOG too.
+           *
+           * A dialog is portaled to `body`, outside whatever `Page` it was
+           * opened from — so it is outside the page's `.tw-page`, and
+           * `index.css`'s unlayered `input, select, button { font: inherit }`
+           * was reaching every control in every panel dialog and rendering it
+           * at the 18px root size, exactly the trap `Page` documents. It was
+           * invisible on the confirm boxes (no controls) and plain on the
+           * Scheme editor (eleven of them). See tailwind.css §"THE
+           * CONVERTED-PAGE RESET".
+           *
+           * `panel` only: a `bare` dialog wears a legacy stylesheet that sets
+           * its own control sizes, and `revert-layer` here would fight it.
+           */
+          "tw-page",
           "flex max-h-[88vh] w-[calc(100%-2rem)] flex-col",
           "rounded-2xl bg-white shadow-panel",
         ],
@@ -202,6 +218,15 @@ export function DialogContent({
             data-slot="dialog-close"
             aria-label="Close"
             className={cn(
+              // The form-control reset, and it was missing.
+              //
+              // Preflight is not imported, so this rendered with the UA's
+              // `border: 2px outset` and grey `buttonface` — a raised 1997
+              // toolbar button in the corner of every dialog in the app. It
+              // is the exact trap `ui/button` documents, in the one place
+              // that does not go through `ui/button` (Radix needs its own
+              // element here for the `DialogClose` behaviour).
+              "appearance-none border-0 bg-transparent [font-family:inherit] cursor-pointer",
               "absolute right-4 top-4 rounded-md p-1.5 text-subtle",
               "transition-colors hover:bg-surface-strong hover:text-ink",
               "focus-visible:outline-none focus-visible:shadow-focus",

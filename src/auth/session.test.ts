@@ -88,6 +88,45 @@ describe("sessionFromApi", () => {
     const s = sessionFromApi({ id: 1, is_superuser: true });
     expect(isAdmin({ ...s })).toBe(true);
   });
+
+  /*
+   * Categories decide which branch Sales Invoice runs against, so the shapes
+   * the API has actually returned all have to land in the same place. The
+   * serializer exposes both a single `category` FK and a `categories` m2m, and
+   * an older cached payload can carry only the first.
+   */
+  it("reads categories from the m2m list", () => {
+    const s = sessionFromApi({
+      id: 1,
+      categories: [{ id: 1, category: "Oil" }, { id: 2, category: "Beverages" }],
+    });
+    expect(s.categories).toEqual(["OIL", "BEVERAGES"]);
+  });
+
+  it("falls back to the single category when the list is absent", () => {
+    const s = sessionFromApi({ id: 1, category: { id: 1, category: "oil" } });
+    expect(s.categories).toEqual(["OIL"]);
+  });
+
+  it("does not repeat the primary category already in the list", () => {
+    const s = sessionFromApi({
+      id: 1,
+      category: { id: 1, category: "Oil" },
+      categories: [{ id: 1, category: "Oil" }],
+    });
+    expect(s.categories).toEqual(["OIL"]);
+  });
+
+  it("reads a category list of bare strings", () => {
+    const s = sessionFromApi({ id: 1, categories: [" mart "] });
+    expect(s.categories).toEqual(["MART"]);
+  });
+
+  it("has no categories on a payload that carries none", () => {
+    // The state that means "assigned nothing", which the branch gate treats
+    // differently from "assigned one".
+    expect(sessionFromApi({ id: 1 }).categories).toEqual([]);
+  });
 });
 
 describe("saveSession / loadSession", () => {
@@ -98,6 +137,7 @@ describe("saveSession / loadSession", () => {
       role: "billing",
       extra_roles: [{ name: "admin" }],
       extra_pages: ["Sap_Sync"],
+      category: { id: 1, category: "Oil" },
     });
     localStorage.setItem("access", "token");
     saveSession(s);
@@ -106,6 +146,7 @@ describe("saveSession / loadSession", () => {
     expect(loaded).not.toBeNull();
     expect(loaded!.username).toBe("amit");
     expect(loaded!.grants).toEqual(["Sap_Sync"]);
+    expect(loaded!.categories).toEqual(["OIL"]);
     expect(isAdmin(loaded)).toBe(true);
     expect(can(loaded, "Sap_Sync")).toBe(true);
   });

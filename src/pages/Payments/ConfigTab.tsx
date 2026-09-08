@@ -1,5 +1,14 @@
+/**
+ * Which SAP house bank account each payment method posts to.
+ *
+ * NOT a bank master: SAP owns the accounts and this page never creates one. It
+ * stores only the business decision of which account a tender uses, because a
+ * single bank can expose several G/L accounts and OMS cannot guess which. Set
+ * once here, and no collector ever sees a G/L number.
+ */
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { HiOutlineArrowPath } from "react-icons/hi2";
 
 import approvalService, {
   COMPANY_OPTIONS,
@@ -8,11 +17,11 @@ import approvalService, {
   type SapBank,
 } from "../../services/approvalService";
 import { ConfirmDialog, Modal } from "./ApprovalUI";
-
-/** Stable empties, so `broken` and the row map settle. */
-const NO_ROWS: MethodMappingRow[] = [];
-const NO_BANKS: SapBank[] = [];
 import { messageFrom } from "./useApprovalAdmin";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Field, Input, Select } from "@/components/ui/form";
+import { Card, CardHeader, CardTitle, Notice, SectionHeading } from "@/components/ui/page";
 import {
   Table,
   TableBody,
@@ -22,23 +31,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
+/** Stable empties, so `broken` and the row map settle. */
+const NO_ROWS: MethodMappingRow[] = [];
+const NO_BANKS: SapBank[] = [];
+
 type Flash = (text: string, kind?: "ok" | "err") => void;
 
-/**
- * Which SAP house bank account each payment method posts to.
- *
- * NOT a bank master: SAP owns the accounts and this page never creates one. It
- * stores only the business decision of which account a tender uses, because a
- * single bank can expose several G/L accounts and OMS cannot guess which. Set
- * once here, and no collector ever sees a G/L number.
- */
-export default function ConfigTab({
-  canEdit,
-  flash,
-}: {
-  canEdit: boolean;
-  flash: Flash;
-}) {
+export default function ConfigTab({ canEdit, flash }: { canEdit: boolean; flash: Flash }) {
   const [company, setCompany] = useState<Company>(
     (COMPANY_OPTIONS[0]?.value as Company) ?? "OIL",
   );
@@ -121,7 +120,7 @@ export default function ConfigTab({
     setBusy(true);
     try {
       await approvalService.deleteMethodMapping(row.mapping_id);
-      flash(`${row.label} mapping removed`);
+      flash(row.label + " mapping removed");
       setConfirming(null);
       await load();
     } catch (err) {
@@ -134,177 +133,167 @@ export default function ConfigTab({
   const broken = rows.filter((r) => !r.valid);
 
   return (
-    <>
-      <div className="apv-card">
-        <div className="apv-card-head">
-          <h3>Payment Method Mapping</h3>
-          <div className="apv-actions-row apv-actions-row-center">
-            <select
-              className="apv-select"
-              value={company}
-              onChange={(e) => setCompany(e.target.value as Company)}
-              aria-label="Company"
-            >
-              {COMPANY_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-            <button
-              className="apv-btn"
-              onClick={() => void load(true)}
-              disabled={loading}
-            >
-              Sync Banks From SAP
-            </button>
-          </div>
+    <Card className="p-0">
+      <CardHeader className="mb-0 flex-wrap border-b border-line px-4 py-3">
+        <CardTitle>Payment method mapping</CardTitle>
+        <div className="flex flex-wrap items-center gap-2">
+          <Select
+            value={company}
+            onChange={(e) => setCompany(e.target.value as Company)}
+            aria-label="Company"
+            className="h-control-xs w-auto text-[12.5px]"
+          >
+            {COMPANY_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </Select>
+          <Button size="xs" onClick={() => void load(true)} disabled={loading}>
+            <HiOutlineArrowPath className={loading ? "animate-spin" : ""} aria-hidden="true" />
+            Sync banks from SAP
+          </Button>
         </div>
+      </CardHeader>
 
-        <div className="apv-note">
-          Configure which of OUR bank accounts each payment method is deposited
-          into, and therefore which G/L account SAP posts to. Accounts come from
-          SAP and cannot be edited here. For a cheque this is where we bank it —
-          the customer's own bank is entered by the collector on the payment.
-        </div>
+      <div className="space-y-4 p-4">
+        <p className="m-0 text-[12px] text-subtle">
+          Configure which of OUR bank accounts each payment method is deposited into, and
+          therefore which G/L account SAP posts to. Accounts come from SAP and cannot be edited
+          here. For a cheque this is where we bank it — the customer&apos;s own bank is entered
+          by the collector on the payment.
+        </p>
 
         {broken.length > 0 && (
-          <div className="apv-note apv-note-err">
-            <strong>Configuration error.</strong> {broken.length} payment method
-            {broken.length === 1 ? "" : "s"} cannot post:{" "}
-            {broken.map((r) => `${r.label} (${r.error})`).join("   ")}
-          </div>
+          <Notice tone="bad" title="Configuration error">
+            {broken.length} payment method{broken.length === 1 ? "" : "s"} cannot post:{" "}
+            {broken.map((r) => r.label + " (" + r.error + ")").join(", ")}
+          </Notice>
         )}
 
-        {error && <div className="apv-note apv-note-err">{error}</div>}
+        {error && <Notice tone="bad">{error}</Notice>}
 
-        {/* Side by side on a desktop, stacked on a phone — see .apv-config-grid */}
-        <div className="apv-config-grid">
-          <section>
-            <h4 className="apv-sub">Available SAP Bank Accounts</h4>
-            <div className="apv-table-wrap">
+        {/* Side by side on a desktop, stacked on a phone. */}
+        <div className="grid gap-4 xl:grid-cols-2 xl:items-start">
+          <section className="space-y-2">
+            <SectionHeading>Available SAP bank accounts</SectionHeading>
+            <div className="overflow-x-auto rounded-sm border border-line">
               <Table density="compact">
                 <TableHeader>
                   <TableRow>
                     <TableHead>Bank</TableHead>
-                    <TableHead>Account Number</TableHead>
-                    <TableHead>GL Account</TableHead>
+                    <TableHead>Account number</TableHead>
+                    <TableHead>G/L account</TableHead>
                     <TableHead>Branch</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {banks.map((b) => (
                     <TableRow key={b.key}>
-                      <TableCell>{b.display_name}</TableCell>
+                      <TableCell className="font-semibold text-ink">{b.display_name}</TableCell>
                       <TableCell>
-                        <code>{b.account_number || "-"}</code>
+                        <code className="font-mono text-[12px]">{b.account_number || "—"}</code>
                       </TableCell>
                       <TableCell>
-                        <code>{b.gl_account}</code>
+                        <code className="font-mono text-[12px]">{b.gl_account}</code>
                       </TableCell>
-                      <TableCell>{b.branch || "-"}</TableCell>
+                      <TableCell>{b.branch || "—"}</TableCell>
                     </TableRow>
                   ))}
                   {!banks.length && !loading && (
                     <TableRow>
-                      <TableCell colSpan={4}>No accounts returned by SAP.</TableCell>
+                      <TableCell colSpan={4} className="text-center text-subtle">
+                        No accounts returned by SAP.
+                      </TableCell>
                     </TableRow>
                   )}
                 </TableBody>
               </Table>
             </div>
             {meta && (
-              <div className="apv-muted apv-muted-spaced">
+              <p className="m-0 text-[11.5px] text-subtle">
                 Last sync:{" "}
-                {meta.synced_at
-                  ? new Date(meta.synced_at).toLocaleString()
-                  : "never"}
-                {" | "}
+                {meta.synced_at ? new Date(meta.synced_at).toLocaleString() : "never"}
+                {" · "}
                 {meta.stale
                   ? "Cached (SAP unreachable)"
                   : meta.source === "cache"
                     ? "Cached"
                     : "Live from SAP"}
-                {" | "}
+                {" · "}
                 {meta.bank_count} account{meta.bank_count === 1 ? "" : "s"}
-              </div>
+              </p>
             )}
           </section>
 
-          <section>
-            <h4 className="apv-sub">Payment Method Mapping</h4>
-            <div className="apv-table-wrap">
+          <section className="space-y-2">
+            <SectionHeading>Payment method mapping</SectionHeading>
+            <div className="overflow-x-auto rounded-sm border border-line">
               <Table density="compact">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Payment Method</TableHead>
-                    <TableHead>Company Deposit Account</TableHead>
-                    <TableHead>GL Account</TableHead>
-                    <TableHead>Account Number</TableHead>
+                    <TableHead>Payment method</TableHead>
+                    <TableHead>Company deposit account</TableHead>
+                    <TableHead>G/L account</TableHead>
+                    <TableHead>Account number</TableHead>
                     <TableHead>Branch</TableHead>
                     <TableHead>Status</TableHead>
-                    {canEdit && <TableHead />}
+                    {canEdit && <TableHead className="text-right" aria-label="Actions" />}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {rows.map((r) => (
                     <TableRow key={r.payment_method}>
-                      <TableCell>{r.label}</TableCell>
+                      <TableCell className="font-semibold text-ink">{r.label}</TableCell>
                       <TableCell>
                         {r.is_cash ? (
-                          <span className="apv-muted">
-                            Cash G/L (company mapping)
-                          </span>
+                          <span className="text-subtle">Cash G/L (company mapping)</span>
                         ) : (
-                          r.bank_name || "-"
+                          r.bank_name || "—"
                         )}
                       </TableCell>
                       <TableCell>
-                        <code>{r.gl_account || "-"}</code>
+                        <code className="font-mono text-[12px]">{r.gl_account || "—"}</code>
                       </TableCell>
                       <TableCell>
-                        <code>{r.account_number || "-"}</code>
+                        <code className="font-mono text-[12px]">{r.account_number || "—"}</code>
                       </TableCell>
-                      <TableCell>{r.branch || "-"}</TableCell>
+                      <TableCell>{r.branch || "—"}</TableCell>
                       <TableCell>
-                        <span
-                          className={`apv-pill${r.valid ? " ok" : " err"}`}
+                        <Badge
+                          tone={r.valid ? "ok" : r.configured ? "bad" : "neutral"}
                           title={r.error || undefined}
                         >
-                          {r.valid
-                            ? "Active"
-                            : r.configured
-                              ? "Invalid"
-                              : "Not set"}
-                        </span>
+                          {r.valid ? "Active" : r.configured ? "Invalid" : "Not set"}
+                        </Badge>
                       </TableCell>
                       {canEdit && (
-                        <TableCell className="apv-cell-right">
+                        <TableCell>
                           {/* Cash has no house bank account to choose. */}
                           {r.is_cash ? (
-                            <span className="apv-muted">-</span>
+                            <span className="flex justify-end text-subtle">—</span>
                           ) : (
-                            <div className="apv-row-actions">
-                              <button
-                                className="apv-btn"
+                            <span className="flex justify-end gap-1">
+                              <Button
+                                size="sm"
                                 onClick={() => {
                                   setEditing(r);
                                   setChoice(r.bank_key);
                                 }}
-                                aria-label={`Edit ${r.label} mapping`}
+                                aria-label={"Edit " + r.label + " mapping"}
                               >
                                 {r.configured ? "Edit" : "Map"}
-                              </button>
+                              </Button>
                               {r.configured && (
-                                <button
-                                  className="apv-btn"
+                                <Button
+                                  size="sm"
                                   onClick={() => setConfirming(r)}
-                                  aria-label={`Remove ${r.label} mapping`}
+                                  aria-label={"Remove " + r.label + " mapping"}
                                 >
                                   Remove
-                                </button>
+                                </Button>
                               )}
-                            </div>
+                            </span>
                           )}
                         </TableCell>
                       )}
@@ -320,7 +309,11 @@ export default function ConfigTab({
       {confirming && (
         <ConfirmDialog
           title="Remove mapping"
-          message={`Remove the deposit account for ${confirming.label}? Payments using this method cannot post to SAP until it is mapped again.`}
+          message={
+            "Remove the deposit account for " +
+            confirming.label +
+            "? Payments using this method cannot post to SAP until it is mapped again."
+          }
           confirmLabel="Remove"
           danger
           busy={busy}
@@ -331,40 +324,52 @@ export default function ConfigTab({
 
       {editing && (
         <Modal
-          title={`${editing.label} - company deposit account`}
+          title={editing.label + " — company deposit account"}
           onClose={() => setEditing(null)}
           footer={
             <>
-              <button className="apv-btn" onClick={() => setEditing(null)}>
+              <Button onClick={() => setEditing(null)} disabled={busy}>
                 Cancel
-              </button>
-              <button
-                className="apv-btn primary"
+              </Button>
+              <Button
+                variant="primary"
                 disabled={!choice || busy}
-                onClick={save}
+                onClick={() => void save()}
+                title={choice ? undefined : "Choose an account first."}
               >
-                {busy ? "Saving..." : "Save"}
-              </button>
+                {busy ? "Saving…" : "Save"}
+              </Button>
             </>
           }
         >
-          <label className="apv-field">
-            <span>Payment method</span>
-            <input value={editing.label} readOnly />
-          </label>
-          <label className="apv-field">
-            <span>Company deposit account</span>
-            <select value={choice} onChange={(e) => setChoice(e.target.value)}>
-              <option value="">Select an account...</option>
-              {banks.map((b) => (
-                <option key={b.key} value={b.key}>
-                  {b.display_name} - {b.account_number} - GL {b.gl_account}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="space-y-3">
+            <Field label="Payment method">
+              {(control) => <Input {...control} value={editing.label} readOnly disabled />}
+            </Field>
+            <Field
+              label="Company deposit account"
+              required
+              hint="The account SAP posts this tender into."
+            >
+              {(control) => (
+                <Select
+                  {...control}
+                  value={choice}
+                  onChange={(e) => setChoice(e.target.value)}
+                  autoFocus
+                >
+                  <option value="">Select an account…</option>
+                  {banks.map((b) => (
+                    <option key={b.key} value={b.key}>
+                      {b.display_name} — {b.account_number} — GL {b.gl_account}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </Field>
+          </div>
         </Modal>
       )}
-    </>
+    </Card>
   );
 }

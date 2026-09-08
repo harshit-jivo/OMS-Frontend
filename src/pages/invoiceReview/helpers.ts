@@ -93,6 +93,30 @@ export const extractRecords = (payload: unknown): InvoiceRecord[] => {
   return [];
 };
 
+/**
+ * Newest first — the order every tab lists in.
+ *
+ * The endpoint returns rows in insertion order, so the invoice someone just
+ * approved went to the BOTTOM of a list hundreds long, and a queue worked
+ * top-down showed the oldest thing first on all seven tabs.
+ *
+ * COPIES BEFORE SORTING. `extractRecords` hands back the response array
+ * itself when the body is a bare array, and `.sort()` mutates — sorting in
+ * place would reorder the body cached by TanStack Query, which is shared.
+ *
+ * A row with no `created_at` sorts to the END rather than the top: falling
+ * back to 0 would make it 1970, and a missing timestamp would jump a queue it
+ * knows nothing about.
+ */
+export const newestFirst = (rows: InvoiceRecord[]): InvoiceRecord[] => {
+  const time = (row: InvoiceRecord) => {
+    const parsed = row.created_at ? new Date(row.created_at).getTime() : Number.NaN;
+    // Unparseable is the same answer as absent: last.
+    return Number.isNaN(parsed) ? Number.NEGATIVE_INFINITY : parsed;
+  };
+  return [...rows].sort((a, b) => time(b) - time(a));
+};
+
 export const parsePayload = (payload: InvoiceRecord["invoice_payload"]): InvoicePayload => {
   if (!payload) return {};
   if (typeof payload === "string") {

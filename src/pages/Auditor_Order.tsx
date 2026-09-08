@@ -1,34 +1,52 @@
-﻿import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  HiOutlineArrowDownTray,
+  HiOutlineArrowPath,
+  HiOutlineCheckCircle,
+  HiOutlineClipboardDocumentList,
+  HiOutlineEye,
+  HiOutlineGift,
+  HiOutlineInbox,
+  HiOutlineXCircle,
+  HiOutlineXMark,
+} from "react-icons/hi2";
+
 import {
   getOrderItemSchemeNames,
-  getOrderItemSchemes,
   getOrderItemSchemeQtyText,
   getOrderItemTotalLtrs,
   ordersService,
 } from "../services/ordersService";
 import type { Order, OrderItem, OrderLog } from "../services/ordersService";
 import { exportToExcel } from "../utils/excelExport";
-import "../styles/Auditor_Order.css";
-import { useLocation, useNavigate } from "react-router-dom";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useOrderQueue, useOrderDetailsFetcher } from "../lib/approvalQueries";
-import { useUILabels } from "../services/uiConfig";
-import ItemSection from "../components/order-items/ItemSection";
-import PartyHeader from "../components/order-items/PartyHeader";
-import {
-  buildOrderTimelineLogs,
-  getOrderLogDisplayRemark,
-  getOrderLogDisplayTitle,
-  getOrderLogTone,
-} from "../utils/orderTrackingTimeline";
 import api from "../services/api";
+import { messageFrom } from "@/lib/apiError";
+import { showToast } from "@/lib/toastStore";
+import { Badge } from "@/components/ui/badge";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { Button } from "@/components/ui/button";
+import { DetailField, DetailGrid } from "@/components/ui/detail";
 import {
-  HiCheckCircle, // Approve
-  HiXCircle, // Reject
-  HiEye, // View
-  HiArrowDownTray, // Download
-  HiArrowPath, // Track
-} from "react-icons/hi2";
+  FilterBar,
+  FilterCount,
+  FilterDate,
+  FilterSpacer,
+} from "@/components/ui/filter-bar";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  EmptyState,
+  Page,
+  PageHeader,
+  Stat,
+  StatRow,
+} from "@/components/ui/page";
+import { Pagination } from "@/components/ui/pagination";
+import { TableSkeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -37,10 +55,58 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { Pagination } from "@/components/ui/pagination";
-import { TableSkeleton } from "@/components/ui/skeleton";
-import { messageFrom } from "@/lib/apiError";
+import { toneForStatus } from "@/components/ui/statusTone";
+import {
+  ApprovalBusyDialog,
+  ApprovalConfirmDialog,
+  ApprovalReviewDialog,
+  ApprovalSuccessDialog,
+  type ApprovalAction,
+} from "@/components/orders/ApprovalDialogs";
+import { OrderItemsTable } from "@/components/orders/OrderItemsTable";
+import { OrderTimelineDialog } from "@/components/orders/OrderTimelineDialog";
+import { OrderTotalsRow, VarietyCostCards } from "@/components/orders/OrderTotals";
+import { orderTotals, varietyCosts } from "@/components/orders/orderDetail";
+
+/**
+ * The auditor's approval queue.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * WHAT THIS CONVERSION REMOVED
+ * ─────────────────────────────────────────────────────────────────────────
+ * The page was 966 lines against a 780-line stylesheet shared with three
+ * others. Almost none of it was specific to auditing:
+ *
+ *   the line-items table      → components/orders/OrderItemsTable
+ *   the tracking timeline     → components/orders/OrderTimelineDialog
+ *   the approve/reject flow   → components/orders/ApprovalDialogs
+ *   the totals + variety cost → components/orders/OrderTotals
+ *
+ * `Billing_Order` and `Rate_Approver_Order` are the same screen with a
+ * different status id and a different SAP call, so they take the same parts.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * THE FIXED FOOTER BAR IS GONE
+ * ─────────────────────────────────────────────────────────────────────────
+ * The totals used to sit in a bar pinned to the bottom of the viewport, whose
+ * `padding-left` was hard-coded to clear the sidebar — `calc(246px + ...)`,
+ * against a sidebar that is 230px and a content area that starts at 220. It
+ * had been ~26px out of alignment for as long as it has existed, and it could
+ * not be right for both the expanded and collapsed rail at once.
+ *
+ * They are the KPI row at the top now, which is where a reviewer wants them
+ * (what is this worth, then what is in it) and which needs no arithmetic
+ * about the sidebar at all.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * PARTY DETAIL IS ON THE PAGE, NOT BEHIND A BUTTON
+ * ─────────────────────────────────────────────────────────────────────────
+ * `PartyHeader` puts bill-to, ship-to, PO number and dispatch-from behind a
+ * modal. On a screen whose entire purpose is to check an order before it
+ * becomes a real Sales Order in SAP, those are the things being checked —
+ * so they are a section of the page. `PartyHeader` is untouched and still
+ * used by the screens where the party is context rather than the subject.
+ */
 
 const now = new Date();
 const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0];
@@ -60,7 +126,6 @@ const formatCreatedDateTime = (value?: string | null) => {
 };
 
 export default function Auditor_orders() {
-  const { t } = useUILabels();
   const location = useLocation();
   const navigate = useNavigate();
   const [showDetails, setShowDetails] = useState(false);
@@ -70,7 +135,7 @@ export default function Auditor_orders() {
   // (optional for approve, required for reject), then confirm before the API
   // call. Approve additionally pushes the order to SAP.
   const [reviewOrder, setReviewOrder] = useState<Order | null>(null);
-  const [reviewAction, setReviewAction] = useState<"approve" | "reject" | null>(null);
+  const [reviewAction, setReviewAction] = useState<ApprovalAction | null>(null);
   const [reviewReason, setReviewReason] = useState("");
   const [reviewStep, setReviewStep] = useState<"review" | "confirm">("review");
   const [showSuccess, setShowSuccess] = useState(false);
@@ -97,7 +162,6 @@ export default function Auditor_orders() {
   const [trackingLogs, setTrackingLogs] = useState<OrderLog[]>([]);
   const [trackLogsLoading, setTrackLogsLoading] = useState(false);
 
-
   const fetchOrderDetails = async (orderId: number) => {
     try {
       // Shared ["order-details", id] cache: this page fetches the same order
@@ -112,10 +176,6 @@ export default function Auditor_orders() {
     }
   };
 
-  // Declared ABOVE the effect that calls it, not below. It read the other way
-  // round for as long as the file has existed, which works at runtime — the
-  // const is assigned during render, the effect runs after — but it is a
-  // use-before-declare to any static analysis.
   useEffect(() => {
     if (location.state?.openOrderId) {
       fetchOrderDetails(location.state.openOrderId);
@@ -127,9 +187,8 @@ export default function Auditor_orders() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state?.openOrderId, location.pathname, navigate]);
 
-
   const removeHandledOrder = (orderId: number) => {
-    // Was a local `setOrders` filter. The `fetchOrders()` that follows every
+    // Was a local `setOrders` filter. The `fetchOrders()` that followed every
     // caller made it a double removal; one invalidation does both.
     void queryClient.invalidateQueries({ queryKey: ["orders", "queue", "auditor"] });
     setSelectedItems([]);
@@ -139,8 +198,8 @@ export default function Auditor_orders() {
     }
   };
 
-  // Step 1 — open the review modal for an approve or reject action.
-  const openReview = (order: Order, action: "approve" | "reject") => {
+  // Step 1 — open the review dialog for an approve or reject action.
+  const openReview = (order: Order, action: ApprovalAction) => {
     setShowDetails(false);
     setReviewOrder(order);
     setReviewAction(action);
@@ -155,25 +214,13 @@ export default function Auditor_orders() {
     setReviewStep("review");
   };
 
-  // Step 2 — after reviewing, move to the final confirmation step. Reject
-  // requires a reason; approve reason stays optional.
-  const proceedToConfirm = () => {
-    if (reviewAction === "reject" && !reviewReason.trim()) {
-      alert("Reason required");
-      return;
-    }
-    setReviewStep("confirm");
-  };
-
   /*
    * Step 3 — the write. Approve pushes the order to SAP and only then moves its
    * status; reject just moves the status.
    *
    * The hand-rolled version owned an `isCreating` flag reset in a `finally`;
    * `useMutation` owns it as `isPending`, which cannot be left stuck on by a
-   * path that returns before the reset. The old body also called
-   * `refetchOrders()` right after `removeHandledOrder`, which already
-   * invalidates this queue — two round trips for one removal.
+   * path that returns before the reset.
    *
    * The two awaits stay in ONE mutation deliberately. They are one business
    * action: an order that reached SAP but whose status never moved is the
@@ -181,7 +228,7 @@ export default function Auditor_orders() {
    * run the second without the first.
    */
   const reviewMutation = useMutation({
-    mutationFn: async (vars: { order: Order; action: "approve" | "reject"; reason: string }) => {
+    mutationFn: async (vars: { order: Order; action: ApprovalAction; reason: string }) => {
       if (vars.action === "reject") {
         await ordersService.UpdateStatus(vars.order.id, 7, vars.reason);
         return null;
@@ -209,14 +256,24 @@ export default function Auditor_orders() {
         removeHandledOrder(vars.order.id);
         setShowSuccess(true);
       } else {
-        alert("Order Rejected");
+        // Was `alert("Order Rejected")`. A browser dialog is a poor way to
+        // confirm something the list is about to show anyway, and it is the
+        // one piece of UI on the page nothing can style.
+        showToast({
+          title: "Order rejected",
+          message: `${vars.order.order_number} has been sent back.`,
+          orderNumber: vars.order.order_number,
+        });
         removeHandledOrder(vars.order.id);
       }
       closeReview();
       window.dispatchEvent(new Event("refresh-notifications"));
     },
     onError: (error) => {
-      alert("Error: " + messageFrom(error, "Unknown error"));
+      showToast({
+        title: "Could not complete the action",
+        message: messageFrom(error, "Unknown error"),
+      });
     },
   });
 
@@ -225,10 +282,10 @@ export default function Auditor_orders() {
   const submitReview = () => {
     if (!reviewOrder || !reviewAction) return;
     const reason = reviewReason.trim();
-    if (reviewAction === "reject" && !reason) {
-      alert("Reason required");
-      return;
-    }
+    // The dialog disables Continue without a reason, so this is a guard on the
+    // write rather than the user's feedback — which is why it no longer
+    // `alert()`s: by the time it can fire, nobody is looking at a form.
+    if (reviewAction === "reject" && !reason) return;
     reviewMutation.mutate({ order: reviewOrder, action: reviewAction, reason });
   };
 
@@ -260,7 +317,6 @@ export default function Auditor_orders() {
         "Item Name": item.item_name,
         Scheme: getOrderItemSchemeNames(item),
         "Scheme Qty": getOrderItemSchemeQtyText(item),
-        // "Scheme Ltrs": (item as any).scheme_ltrs || "",
         Qty: item.qty,
         Boxes: item.boxes,
         Liters: item.ltrs,
@@ -305,662 +361,374 @@ export default function Auditor_orders() {
     }
   };
 
-  const filteredOrders = orders.filter((order) => {
-    console.log("Order:", order);
-    console.log("created_at:", order.created_at);
-    let matchDate = true;
-    if (fromDate && toDate) {
-      const orderDate = new Date(order.created_at);
-      const from = new Date(`${fromDate}T00:00:00.000`);
-      const to = new Date(`${toDate}T23:59:59.999`);
+  const filteredOrders = useMemo(
+    () =>
+      orders.filter((order) => {
+        if (!fromDate || !toDate) return true;
+        const orderDate = new Date(order.created_at);
+        return (
+          orderDate >= new Date(`${fromDate}T00:00:00.000`) &&
+          orderDate <= new Date(`${toDate}T23:59:59.999`)
+        );
+      }),
+    [orders, fromDate, toDate],
+  );
 
-      matchDate = orderDate >= from && orderDate <= to;
-    }
-    return matchDate;
-  });
-  console.log("Filtered Orders:", filteredOrders);
+  const focCount = filteredOrders.filter((order) => order.is_foc).length;
+  const totalPages = Math.max(1, Math.ceil(filteredOrders.length / itemsPerPage));
+  const pageNumber = Math.min(currentPage, totalPages);
+  const paginatedOrders = filteredOrders.slice(
+    (pageNumber - 1) * itemsPerPage,
+    pageNumber * itemsPerPage,
+  );
+
+  const detailTotals = useMemo(() => orderTotals(selectedItems), [selectedItems]);
+  const detailVarieties = useMemo(() => varietyCosts(orderDetails), [orderDetails]);
 
   return (
-    <div className="ao-page">
-      {/* â"€â"€ LIST VIEW â"€â"€ */}
+    <Page>
+      {/* ── LIST VIEW ── */}
       {!showDetails && (
         <>
-          <div className="ao-page-head">
-            <span className="ao-page-accent" aria-hidden="true" />
-            <div>
-              <h1 className="ao-page-title">Pending Orders</h1>
-              <p className="ao-page-subtitle">
-                Review and action orders awaiting auditor approval.
-              </p>
-            </div>
-          </div>
-          <div className="ao-toolbar">
-            <div className="ao-filter-head">
-              <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                <path
-                  d="M3 5h14M6 10h8M9 15h2"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  strokeLinecap="round"
-                />
-              </svg>
-              <span>Filters</span>
-            </div>
-            <div className="ao-search-wrap">
-              <div className="ao-date-wrap">
-                <label className="ao-date-label">From</label>
-                <input aria-label="From"
-                  type="date"
-                  value={fromDate}
-                  onChange={(e) => {
-                    setFromDate(e.target.value);
-                    setCurrentPage(1);
-                  }}
-                  className="ao-date-input"
-                />
-              </div>
-              <div className="ao-date-wrap">
-                <label className="ao-date-label">To</label>
-                <input aria-label="To"
-                  type="date"
-                  value={toDate}
-                  onChange={(e) => {
-                    setToDate(e.target.value);
-                    setCurrentPage(1);
-                  }}
-                  className="ao-date-input"
-                />
-              </div>
-              {(fromDate || toDate) && (
-                <button
-                  type="button"
-                  className="ao-filter-clear"
-                  onClick={() => {
-                    setFromDate("");
-                    setToDate("");
-                    setCurrentPage(1);
-                  }}
-                >
-                  Clear
-                </button>
-              )}
-            </div>
-            <span className="ao-count">Total: {filteredOrders.length}</span>
-          </div>
+          <Breadcrumbs items={[{ label: "Orders" }, { label: "Auditor Queue" }]} />
+
+          <PageHeader
+            title="Auditor Queue"
+            description="Orders awaiting auditor approval before they are pushed to SAP."
+          />
+
+          <StatRow>
+            <Stat
+              icon={HiOutlineClipboardDocumentList}
+              tone="brand"
+              label="Awaiting review"
+              value={filteredOrders.length}
+              hint="matching filters"
+              loading={isOrdersLoading}
+            />
+            <Stat
+              icon={HiOutlineGift}
+              // Amber, because an FOC order is a giveaway and is the one an
+              // auditor should look at hardest. Neutral at zero: a coloured
+              // chip on "0 FOC" reads as an alert about nothing.
+              tone={focCount ? "hold" : "neutral"}
+              label="FOC orders"
+              value={focCount}
+              loading={isOrdersLoading}
+            />
+          </StatRow>
+
+          <FilterBar>
+            <FilterDate
+              label="From"
+              value={fromDate}
+              onChange={(e) => {
+                setFromDate(e.target.value);
+                setCurrentPage(1);
+              }}
+            />
+            <FilterDate
+              label="To"
+              value={toDate}
+              onChange={(e) => {
+                setToDate(e.target.value);
+                setCurrentPage(1);
+              }}
+            />
+            {(fromDate || toDate) && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setFromDate("");
+                  setToDate("");
+                  setCurrentPage(1);
+                }}
+              >
+                <HiOutlineXMark aria-hidden="true" /> Clear
+              </Button>
+            )}
+            <FilterSpacer />
+            <FilterCount>Total: {filteredOrders.length}</FilterCount>
+          </FilterBar>
 
           {isOrdersLoading ? (
-            <TableSkeleton columns={8} label="Loading orders" />
+            <TableSkeleton columns={7} label="Loading orders" />
           ) : filteredOrders.length > 0 ? (
-            <div className="ao-table-wrap">
-              <Table density="compact">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Order ID</TableHead>
-                    <TableHead>Card Name</TableHead>
-                    <TableHead>Items</TableHead>
-                    <TableHead>FOC</TableHead>
-                    <TableHead>Created At</TableHead>
-                    <TableHead>Delivery Date</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredOrders
-                    .slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
-                    .map((order) => (
-                      <TableRow key={order.id} className={order.is_foc ? "ao-foc-row" : ""}>
-                        <TableCell className="ao-cell-id">{order.order_number}</TableCell>
-                        <TableCell className="ao-cell-name">{order.card_name}</TableCell>
+            <Card className="overflow-hidden p-0">
+              <div className="overflow-x-auto">
+                <Table density="compact">
+                  <TableHeader>
+                    <TableRow className="bg-surface hover:bg-surface">
+                      <TableHead>Order ID</TableHead>
+                      <TableHead>Card Name</TableHead>
+                      <TableHead>Items</TableHead>
+                      <TableHead>FOC</TableHead>
+                      <TableHead>Created At</TableHead>
+                      <TableHead>Delivery Date</TableHead>
+                      <TableHead>Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {paginatedOrders.map((order) => (
+                      <TableRow key={order.id}>
+                        <TableCell className="whitespace-nowrap font-semibold text-brand">
+                          {order.order_number}
+                        </TableCell>
+                        <TableCell className="text-ink">{order.card_name}</TableCell>
                         <TableCell>{order.items_count ?? order.items?.length ?? 0}</TableCell>
                         <TableCell>
                           {order.is_foc ? (
-                            <span className="ao-foc-badge">FOC</span>
+                            <Badge tone="note">FOC</Badge>
                           ) : (
-                            <span className="ao-foc-empty">-</span>
+                            <span className="text-subtle">-</span>
                           )}
                         </TableCell>
                         <TableCell>{formatCreatedDateTime(order.created_at)}</TableCell>
                         <TableCell>{order.delivery_date}</TableCell>
                         <TableCell>
-                          <div className="ao-row-actions">
-                            <button
-                              className="ao-btn-icon view"
+                          <div className="flex items-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="icon"
                               onClick={() => fetchOrderDetails(order.id)}
-                              title="View Order"
+                              aria-label={`View order ${order.order_number}`}
+                              title="View order"
                             >
-                              <HiEye size={20} />
-                            </button>
-                            <button
-                              className="ao-btn-icon track"
+                              <HiOutlineEye aria-hidden="true" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
                               onClick={() => handleTrack(order)}
-                              title="Track Order"
+                              aria-label={`Track order ${order.order_number}`}
+                              title="Track order"
                             >
-                              <HiArrowPath size={20} />
-                            </button>
-                            <button
-                              className="ao-row-btn ao-row-approve"
+                              <HiOutlineArrowPath aria-hidden="true" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => downloadExcel(order)}
+                              aria-label={`Download order ${order.order_number}`}
+                              title="Download order"
+                            >
+                              <HiOutlineArrowDownTray aria-hidden="true" />
+                            </Button>
+                            {/*
+                              Approve and Reject are separated from the three
+                              icon buttons by a rule. They are the only actions
+                              on this row that write to SAP, and a row where
+                              "download" and "push to SAP" are the same size
+                              and shape is a row people mis-click.
+                            */}
+                            <span aria-hidden="true" className="mx-1 h-5 w-px bg-line" />
+                            {/*
+                              `success` / `danger`, not `primary` / `danger`.
+                              Ten rows means ten of these, and `primary` is
+                              "the one action a screen is FOR" — it cannot be
+                              ten things. The soft pair also keeps the page's
+                              only saturated blue in the navigation rail,
+                              where it answers "where am I".
+                            */}
+                            <Button
+                              size="sm"
+                              variant="success"
                               onClick={() => openReview(order, "approve")}
                             >
-                              <HiCheckCircle size={18} /> Approve
-                            </button>
-                            <button
-                              className="ao-row-btn ao-row-reject"
+                              <HiOutlineCheckCircle aria-hidden="true" /> Approve
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="danger"
                               onClick={() => openReview(order, "reject")}
                             >
-                              <HiXCircle size={18} /> Reject
-                            </button>
-                            <button
-                              className="ao-btn-icon download"
-                              onClick={() => downloadExcel(order)}
-                              title="Download Order"
-                            >
-                              <HiArrowDownTray size={20} />
-                            </button>
+                              <HiOutlineXCircle aria-hidden="true" /> Reject
+                            </Button>
                           </div>
                         </TableCell>
                       </TableRow>
                     ))}
-                </TableBody>
-              </Table>
-            </div>
+                  </TableBody>
+                </Table>
+              </div>
+            </Card>
           ) : (
-            <div className="ao-empty ao-empty-panel">
-              {ordersFailed
-                        ? "Could not load orders. Refresh to try again."
-                        : "No orders found"}
-            </div>
+            <Card>
+              <EmptyState
+                icon={HiOutlineInbox}
+                title={ordersFailed ? "Could not load orders" : "Nothing to review"}
+                hint={
+                  ordersFailed
+                    ? "Refresh the page to try again."
+                    : "No orders are waiting for auditor approval in this date range."
+                }
+              />
+            </Card>
           )}
 
           {filteredOrders.length > itemsPerPage && (
             <Pagination
-              page={currentPage}
-              totalPages={Math.ceil(filteredOrders.length / itemsPerPage)}
+              page={pageNumber}
+              totalPages={totalPages}
               onPageChange={setCurrentPage}
             />
           )}
         </>
       )}
 
-      {/* â"€â"€ DETAIL VIEW â"€â"€ */}
+      {/* ── DETAIL VIEW ── */}
       {showDetails && orderDetails && (
-        <div className="ao-detail">
-          <div className="ao-d-nav">
-            <button className="ao-d-back" onClick={() => setShowDetails(false)}>
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                <path
-                  d="M10 13L5 8l5-5"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-              Back to Orders
-            </button>
-            <div className="ao-d-actions">
-              <button
-                className="ao-d-action-btn"
-                aria-label="Track order"
-                title="Track"
-                onClick={() => handleTrack(orderDetails)}
-              >
-                <HiArrowPath /> Track
-              </button>
-              <button className="ao-d-export" onClick={() => downloadExcel(orderDetails)}>
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                  <path
-                    d="M7 1v8m0 0L4 6.5M7 9l3-2.5M2.5 12h9"
-                    stroke="currentColor"
-                    strokeWidth="1.4"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-                Export Excel
-              </button>
-              <button
-                className="ao-d-action-btn ao-d-approve"
-                onClick={() => openReview(orderDetails, "approve")}
-              >
-                <HiCheckCircle /> Approve
-              </button>
-              <button
-                className="ao-d-action-btn ao-d-reject"
-                onClick={() => openReview(orderDetails, "reject")}
-              >
-                <HiXCircle /> Reject
-              </button>
-            </div>
-          </div>
+        <>
+          {/* A button, not a link: the detail view is state on this route, so
+              navigating to /Auditor_orders would reload the page we are
+              already on instead of closing the panel. It is also the way
+              back, which is why there is no separate Back button. */}
+          <Breadcrumbs
+            items={[
+              { label: "Orders" },
+              { label: "Auditor Queue", onClick: () => setShowDetails(false) },
+              { label: orderDetails.order_number },
+            ]}
+          />
 
-          <PartyHeader order={orderDetails} />
+          <PageHeader
+            title={orderDetails.order_number}
+            description={orderDetails.card_name}
+            badges={
+              <>
+                {orderDetails.status_display ? (
+                  <Badge tone={toneForStatus(orderDetails.status_display)}>
+                    {orderDetails.status_display}
+                  </Badge>
+                ) : null}
+                {orderDetails.is_foc ? <Badge tone="note">FOC</Badge> : null}
+              </>
+            }
+            actions={
+              <>
+                {/* Tertiary actions are `ghost` — text and icon, no box.
+                    A page header with four bordered buttons is four boxes for
+                    two levels of importance. Only the decision this screen
+                    exists for keeps a filled button; everything else is
+                    available without competing for the eye. */}
+                <Button variant="ghost" onClick={() => handleTrack(orderDetails)}>
+                  <HiOutlineArrowPath aria-hidden="true" /> Track
+                </Button>
+                <Button variant="ghost" onClick={() => downloadExcel(orderDetails)}>
+                  <HiOutlineArrowDownTray aria-hidden="true" /> Export Excel
+                </Button>
+                <Button variant="danger" onClick={() => openReview(orderDetails, "reject")}>
+                  <HiOutlineXCircle aria-hidden="true" /> Reject
+                </Button>
+                <Button variant="primary" onClick={() => openReview(orderDetails, "approve")}>
+                  <HiOutlineCheckCircle aria-hidden="true" /> Approve
+                </Button>
+              </>
+            }
+          />
 
-          <div className="ao-d-items">
-            <div className="ao-d-items-head">
-              <span className="ao-d-items-title">Items</span>
-              <span className="ao-d-items-count">{selectedItems.length}</span>
-            </div>
-            <div className="ao-d-items-scroll">
-              <ItemSection items={selectedItems} />
-              <Table density="compact">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>#</TableHead>
-                    <TableHead>Item Code</TableHead>
-                    <TableHead className="app-col-item">Item Name</TableHead>
-                    <TableHead>Category</TableHead>
-                    <TableHead>Scheme</TableHead>
-                    <TableHead>Scheme Qty</TableHead>
-                    <TableHead>Qty</TableHead>
-                    <TableHead>Pcs</TableHead>
-                    <TableHead>Boxes</TableHead>
-                    <TableHead>Ltrs</TableHead>
-                    {/* <TableHead>Scheme Ltrs</TableHead> */}
-                    <TableHead>Total Ltrs</TableHead>
-                    <TableHead>{t("price_list", "Price List (Basic)")}</TableHead>
-                    <TableHead>Basic Price</TableHead>
-                    <TableHead>Tax %</TableHead>
-                    <TableHead className="text-right">Amount</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {selectedItems.length > 0 ? (
-                    selectedItems.map((item, i) => (
-                      <TableRow key={i}>
-                        <TableCell className="text-center app-cell-index">
-                          {i + 1}
-                        </TableCell>
-                        <TableCell>
-                          <span className="ao-d-item-code">{item.item_code}</span>
-                        </TableCell>
-                        <TableCell className="app-col-item app-cell-name">
-                          {item.item_name}
-                        </TableCell>
-                        <TableCell>{item.category}</TableCell>
-                        <TableCell colSpan={2}>
-                          {getOrderItemSchemes(item).length > 0 ? (
-                            <div className="order-scheme-stack" aria-label="Applied schemes">
-                              {getOrderItemSchemes(item).map((scheme, schemeIndex) => (
-                                <div
-                                  className="order-scheme-chip"
-                                  key={`${item.item_code}-scheme-${schemeIndex}`}
-                                >
-                                  <span className="order-scheme-name">{scheme.name || "-"}</span>
-                                  <span className="order-scheme-qty">Qty {scheme.qty || 0}</span>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <span className="order-scheme-empty">No scheme</span>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-center">{item.qty}</TableCell>
-                        <TableCell className="text-center">{item.pcs}</TableCell>
-                        <TableCell className="text-center">
-                          {Number(item.boxes).toFixed(2)}
-                        </TableCell>
-                        <TableCell className="text-center">{item.ltrs}</TableCell>
-                        {/* <TableCell style={{textAlign:'center'}}>{item.scheme_name ? ((item as any).scheme_ltrs || 0) : "-"}</TableCell> */}
-                        <TableCell className="text-center">
-                          {getOrderItemTotalLtrs(item).toFixed(2)}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {Number(item.price_list_basic).toFixed(2)}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {Number(item.basic_price).toFixed(2)}
-                        </TableCell>
-                        <TableCell className="text-center">
-                          {Number(item.tax_rate).toFixed(2)}
-                        </TableCell>
-                        <TableCell
-                          className="text-right app-cell-total"
-                        >
-                          {Number(item.total).toFixed(2)}
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  ) : (
-                    <TableRow>
-                      <TableCell colSpan={14} className="ao-empty">
-                        No items found
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-          </div>
+          <OrderTotalsRow totals={detailTotals} itemCount={selectedItems.length} />
 
-          <div className="ao-d-bottombar">
-            <div className="ao-d-summary">
-              <div className="ao-d-sum-row">
-                <span className="ao-d-sum-label">Total Ltrs</span>
-                <span className="ao-d-sum-val">
-                  {selectedItems.reduce((s, i) => s + getOrderItemTotalLtrs(i), 0).toFixed(2)}
-                </span>
-              </div>
-              <div className="ao-d-sum-row">
-                <span className="ao-d-sum-label">Subtotal</span>
-                <span className="ao-d-sum-val">
-                  {selectedItems.reduce((s, i) => s + Number(i.total || 0), 0).toFixed(2)}
-                </span>
-              </div>
-              <div className="ao-d-sum-row">
-                <span className="ao-d-sum-label">Tax</span>
-                <span className="ao-d-sum-val">
-                  {selectedItems
-                    .reduce((s, i) => s + (Number(i.total || 0) * Number(i.tax_rate || 0)) / 100, 0)
-                    .toFixed(2)}
-                </span>
-              </div>
-              {[
-                {
-                  label: "Commodity",
-                  value: orderDetails.vareity_cost?.commodity_price,
-                  cls: "vc-commodity",
-                },
-                { label: "Other", value: orderDetails.vareity_cost?.other_total, cls: "vc-other" },
-                {
-                  label: "Premium",
-                  value: orderDetails.vareity_cost?.premium_total,
-                  cls: "vc-premium",
-                },
-              ]
-                .filter((entry) => Number(entry.value) > 0)
-                .map((entry) => (
-                  <div className="ao-d-sum-row" key={entry.label}>
-                    <span className={`ao-d-sum-label vc-pill ${entry.cls}`}>{entry.label}</span>
-                    <span className="ao-d-sum-val">{Number(entry.value).toFixed(2)}</span>
-                  </div>
-                ))}
-              <div className="ao-d-sum-row ao-d-sum-grand">
-                <span className="ao-d-sum-label">Grand Total</span>
-                <span className="ao-d-sum-val">
-                  {(
-                    selectedItems.reduce((s, i) => s + Number(i.total || 0), 0) +
-                    selectedItems.reduce(
-                      (s, i) => s + (Number(i.total || 0) * Number(i.tax_rate || 0)) / 100,
-                      0,
-                    )
-                  ).toFixed(2)}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
+          <VarietyCostCards costs={detailVarieties} />
+
+          {/* The five facts an approver actually checks, and nothing else.
+              These were behind `PartyHeader`'s modal — one click away on the
+              screen where they are the subject rather than context.
+
+              It listed eleven at first, which is what `PartyHeader`'s modal
+              showed. Card code duplicates the party name in the header;
+              quotation number is blank until AFTER approval; created-at and
+              created-by are provenance, not something being checked; dispatch
+              point is a logistics decision made elsewhere. Eleven fields to
+              carry five is how a reference panel turns into wallpaper.
+
+              REMARK is the exception and is `hideWhenEmpty`: most orders have
+              none, and the ones that do are usually saying why a previous
+              reviewer sent it back — which is the first thing the next
+              reviewer needs. It costs nothing when absent.
+
+              A `Card` + `CardHeader`, exactly like Items below it, rather than
+              a `DetailSection`: two section headings in two styles on one page
+              is what a design system exists to stop, and a bordered section
+              inside a bordered card drew the same edge twice. */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Party &amp; delivery</CardTitle>
+            </CardHeader>
+            <DetailGrid>
+              <DetailField label="Party state" value={orderDetails.party_state} />
+              <DetailField label="Delivery date" value={orderDetails.delivery_date} />
+              <DetailField label="PO number" value={orderDetails.po_number} />
+              <DetailField label="Bill to" value={orderDetails.bill_to_address} />
+              <DetailField label="Ship to" value={orderDetails.ship_to_address} />
+              <DetailField
+                label="Remark"
+                value={orderDetails.remarks?.trim() ? orderDetails.remarks : ""}
+                span="full"
+                hideWhenEmpty
+              />
+            </DetailGrid>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Items</CardTitle>
+              <Badge tone="neutral">{selectedItems.length}</Badge>
+            </CardHeader>
+            {/* `variety={false}`: the variety-cost cards above already state
+                the split, and this table is fifteen columns wide as it is. */}
+            <OrderItemsTable items={selectedItems} variety={false} />
+          </Card>
+        </>
       )}
 
-      {/* â”€â”€ STEP 1: REVIEW MODAL â”€â”€ */}
-      <Dialog
-        open={Boolean(reviewOrder && reviewAction && reviewStep === "review")}
-        onOpenChange={(next) => {
-          if (!next) closeReview();
-        }}
-      >
-        {reviewOrder && reviewAction && reviewStep === "review" && (
-          <DialogContent
-            title="Review order"
-            variant="bare"
-            size="auto"
-            showClose={false}
-            className="ao-modal"
-          >
-            <div className="ao-modal-title">
-              {reviewAction === "approve" ? "Review & Approve" : "Review & Reject"}
-            </div>
-            <p className="ao-modal-msg">Review the order details before you continue.</p>
-            <div className="ao-review-summary">
-              <div className="ao-review-row">
-                <span>Order Number</span>
-                <strong>{reviewOrder.order_number}</strong>
-              </div>
-              <div className="ao-review-row">
-                <span>Party</span>
-                <strong>{reviewOrder.card_name}</strong>
-              </div>
-              <div className="ao-review-row">
-                <span>Items</span>
-                <strong>{reviewOrder.items_count ?? reviewOrder.items?.length ?? 0}</strong>
-              </div>
-              <div className="ao-review-row">
-                <span>Amount</span>
-                <strong>
-                  ₹
-                  {Number(reviewOrder.total_amount || 0).toLocaleString("en-IN", {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
-                </strong>
-              </div>
-              <div className="ao-review-row">
-                <span>Delivery Date</span>
-                <strong>{reviewOrder.delivery_date || "-"}</strong>
-              </div>
-            </div>
-            <textarea
-              className="ao-modal-textarea"
-              value={reviewReason}
-              onChange={(e) => setReviewReason(e.target.value)}
-              placeholder={
-                reviewAction === "approve" ? "Add a reason (optional)..." : "Type reason..."
-              }
-              rows={3}
-            />
-            <div className="ao-modal-actions">
-              <button className="ao-btn-approve" onClick={proceedToConfirm}>
-                Continue
-              </button>
-              <button className="ao-btn-cancel" onClick={closeReview}>
-                Cancel
-              </button>
-            </div>
-          </DialogContent>
-        )}
-      </Dialog>
+      <ApprovalReviewDialog
+        order={reviewStep === "review" ? reviewOrder : null}
+        action={reviewStep === "review" ? reviewAction : null}
+        reason={reviewReason}
+        onReasonChange={setReviewReason}
+        onContinue={() => setReviewStep("confirm")}
+        onCancel={closeReview}
+      />
 
-      {/* â”€â”€ STEP 2: CONFIRM MODAL â”€â”€ */}
-      <Dialog
-        open={Boolean(reviewOrder && reviewAction && reviewStep === "confirm")}
-        onOpenChange={(next) => {
-          if (!next) closeReview();
-        }}
-      >
-        {reviewOrder && reviewAction && reviewStep === "confirm" && (
-          <DialogContent
-            title="Confirm decision"
-            variant="bare"
-            size="auto"
-            showClose={false}
-            className="ao-modal"
-          >
-            <div className="ao-modal-title">
-              {reviewAction === "approve" ? "Confirm Approval" : "Confirm Rejection"}
-            </div>
-            <p className="ao-modal-msg">
-              {reviewAction === "approve"
-                ? `Push order ${reviewOrder.order_number} to SAP as a Sales Order?`
-                : `Are you sure you want to reject order ${reviewOrder.order_number}?`}
-            </p>
-            <div className="ao-modal-actions">
-              <button className="ao-btn-approve" onClick={submitReview} disabled={isCreating}>
-                {reviewAction === "approve" ? "Yes, Approve" : "Yes, Reject"}
-              </button>
-              <button
-                className="ao-btn-cancel"
-                onClick={() => setReviewStep("review")}
-                disabled={isCreating}
-              >
-                Back
-              </button>
-            </div>
-          </DialogContent>
-        )}
-      </Dialog>
+      <ApprovalConfirmDialog
+        order={reviewStep === "confirm" ? reviewOrder : null}
+        action={reviewStep === "confirm" ? reviewAction : null}
+        submitting={isCreating}
+        approveMessage={(order) =>
+          `Push order ${order.order_number} to SAP as a Sales Order?`
+        }
+        onConfirm={submitReview}
+        onBack={() => setReviewStep("review")}
+        onCancel={closeReview}
+      />
 
-      {/*
-        A busy overlay is the one modal on this page that MUST NOT close, and
-        it was the one with no focus containment at all: a plain fixed div, so
-        Tab walked straight into the page behind and a keyboard user could
-        activate the buttons that started this post while it was still running.
-        `aria-hidden="false"` on the backdrop was doing nothing about that.
+      <ApprovalBusyDialog open={isCreating} orderNumber={reviewOrder?.order_number} />
 
-        Escape and pointer-down-outside are cancelled rather than left to
-        default — everything else on the primitive (the trap, the inert
-        background, focus restored when the post finishes) is what this needs.
-        The heavier blurred backdrop is kept: it is how the screen says the page
-        is blocked.
-      */}
-      <Dialog open={isCreating}>
-        {isCreating && (
-          <DialogContent
-            title="Creating sales order"
-            variant="bare"
-            size="auto"
-            showClose={false}
-            overlayClassName="ao-loading-overlay"
-            className="ao-modal ao-modal-loading"
-            onEscapeKeyDown={(event) => event.preventDefault()}
-            onPointerDownOutside={(event) => event.preventDefault()}
-            onInteractOutside={(event) => event.preventDefault()}
-          >
-            <div role="status" aria-live="polite" aria-busy="true">
-              <div className="ao-spinner" aria-hidden="true" />
-              <div className="ao-modal-title">Creating Sales Order</div>
-              <p className="ao-loading-text">
-                Sending order {reviewOrder?.order_number ?? ""} to SAP. This may take a little
-                while.
-              </p>
-              <p className="ao-loading-hint">Please do not refresh or close this window.</p>
-            </div>
-          </DialogContent>
-        )}
-      </Dialog>
-
-      <Dialog
+      <ApprovalSuccessDialog
         open={Boolean(showSuccess && quotationResult)}
-        onOpenChange={(next) => {
-          if (!next) setShowSuccess(false);
+        result={quotationResult}
+        onClose={() => {
+          setShowSuccess(false);
+          setQuotationResult(null);
         }}
-      >
-        {showSuccess && quotationResult && (
-          <DialogContent
-            title="Quotation created"
-            variant="bare"
-            size="auto"
-            showClose={false}
-            className="ao-modal ao-modal-success"
-          >
-            <div className="ao-success-icon" aria-hidden="true" />
-            <div className="ao-modal-title">Order Completed</div>
-            <div className="ao-success-info">
-              <div className="ao-success-row">
-                <span className="ao-success-label">Sales Order No.</span>
-                <strong className="ao-success-value">{quotationResult.number}</strong>
-              </div>
-              <div className="ao-success-row">
-                <span className="ao-success-label">Order Number</span>
-                <strong className="ao-success-value">{quotationResult.order_id}</strong>
-              </div>
-              <div className="ao-success-row">
-                <span className="ao-success-label">Message</span>
-                <strong className="ao-success-value">{quotationResult.message}</strong>
-              </div>
-            </div>
-            <div className="ao-modal-actions">
-              <button
-                className="ao-btn-approve"
-                onClick={() => {
-                  setShowSuccess(false);
-                  setQuotationResult(null);
-                }}
-              >
-                OK
-              </button>
-            </div>
-          </DialogContent>
-        )}
-      </Dialog>
+      />
 
-      <Dialog
+      <OrderTimelineDialog
         open={Boolean(showTrackModal && trackingOrder)}
         onOpenChange={(next) => {
-          if (!next) setShowTrackModal(false);
+          if (!next) {
+            setShowTrackModal(false);
+            setTrackingOrder(null);
+            setTrackingLogs([]);
+          }
         }}
-      >
-        {showTrackModal && trackingOrder && (
-          <DialogContent
-            title="Order tracking"
-            variant="bare"
-            size="auto"
-            showClose={false}
-            className="ao-track-modal"
-          >
-            <div className="ao-track-header">
-              <div>
-                <div className="ao-track-title">Order Track</div>
-                <div className="ao-track-subtitle">
-                  {trackingOrder.order_number} &mdash; {trackingOrder.card_name}
-                </div>
-              </div>
-              <button
-                className="ao-track-close"
-                onClick={() => {
-                  setShowTrackModal(false);
-                  setTrackingOrder(null);
-                  setTrackingLogs([]);
-                }}
-              >
-                &times;
-              </button>
-            </div>
-
-            <div className="ao-track-body">
-              {trackLogsLoading ? (
-                <div className="ao-track-loading">
-                  <span className="order-loading-spinner" />
-                  <span>Loading logs...</span>
-                </div>
-              ) : trackingLogs.length === 0 ? (
-                <div className="ao-track-empty">No tracking logs found.</div>
-              ) : (
-                <div className="ao-track-timeline">
-                  {buildOrderTimelineLogs(trackingLogs, trackingOrder).map((log, index, arr) => {
-                    const tone = getOrderLogTone(log.status_name, log.performed_by_name);
-                    const displayRemark = getOrderLogDisplayRemark(log);
-                    return (
-                      <div key={log.id} className="ao-track-row">
-                        <div className="ao-track-left">
-                          <div className={`ao-track-dot ${tone}`}>
-                            {tone === "approved"
-                              ? "\u2713"
-                              : tone === "rejected"
-                                ? "\u2715"
-                                : "\u2022"}
-                          </div>
-                          {index !== arr.length - 1 && <div className={`ao-track-line ${tone}`} />}
-                        </div>
-                        <div className={`ao-track-card ${tone}`}>
-                          <div className="ao-track-card-head">
-                            <strong>{getOrderLogDisplayTitle(log, arr, trackingLogs)}</strong>
-                            <span>{formatCreatedDateTime(log.created_at)}</span>
-                          </div>
-                          <div className="ao-track-card-meta">
-                            By: {log.performed_by_name || "Pending"}
-                          </div>
-                          {displayRemark && (
-                            <div className="ao-track-card-remark">Remark: {displayRemark}</div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </DialogContent>
-        )}
-      </Dialog>
-    </div>
+        order={trackingOrder}
+        logs={trackingLogs}
+        loading={trackLogsLoading}
+        formatDateTime={formatCreatedDateTime}
+      />
+    </Page>
   );
 }

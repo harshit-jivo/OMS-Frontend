@@ -1,9 +1,31 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import ComplianceRules from "./Compliance_Rules";
 import { legalService, type ComplianceRule } from "../services/legalService";
+import { __resetToasts, subscribeToToasts, type ToastData } from "@/lib/toastStore";
+
+/**
+ * The page reports success through the toast store rather than an inline line
+ * that pushes the form down. `NotificationToaster` is mounted by the app shell,
+ * which this test does not render, so the store is what the assertions read.
+ */
+let toasts: ToastData[] = [];
+let unsubscribe = () => {};
+
+beforeEach(() => {
+  __resetToasts();
+  toasts = [];
+  unsubscribe = subscribeToToasts((items) => {
+    toasts = items;
+  });
+});
+
+afterEach(() => {
+  unsubscribe();
+  __resetToasts();
+});
 
 /**
  * The Compliance Rules screen.
@@ -69,8 +91,13 @@ describe("Compliance Rules", () => {
     expect(await screen.findByText("FSSAI logo and licence number")).toBeInTheDocument();
     expect(screen.getByText("FSSAI_LICENCE")).toBeInTheDocument();
     expect(screen.getByText("critical")).toBeInTheDocument();
-    // One of two rules is active.
-    expect(screen.getByRole("heading", { name: /Rules \(1 active of 2\)/ })).toBeInTheDocument();
+    // One of two rules is active. The count moved out of the card heading and
+    // into a KPI beside the total, so the two numbers are read together
+    // instead of one being parenthesised inside the other.
+    const active = screen.getByText("Active rules").closest("[data-slot='stat']");
+    expect(within(active as HTMLElement).getByText("1")).toBeInTheDocument();
+    const total = screen.getByText("Total rules").closest("[data-slot='stat']");
+    expect(within(total as HTMLElement).getByText("2")).toBeInTheDocument();
   });
 
   it("freezes the code of an existing rule", async () => {
@@ -110,7 +137,12 @@ describe("Compliance Rules", () => {
     expect(patch.rule_text).toBe("The licence number must be exactly 14 digits.");
     // The server freezes `code`; sending it would imply renaming works.
     expect(patch).not.toHaveProperty("code");
-    expect(await screen.findByText(/next label check uses this wording/i)).toBeInTheDocument();
+    // The confirmation is a toast now rather than a line that pushes the form
+    // down as it appears — `NotificationToaster` is mounted by the app shell,
+    // which this test does not render, so the store is what it asserts on.
+    await waitFor(() =>
+      expect(toasts.some((t) => /uses this wording/i.test(t.message))).toBe(true),
+    );
   });
 
   it("keeps Save disabled until something actually changes", async () => {
@@ -217,25 +249,35 @@ describe("Compliance Rules", () => {
     expect(list).toBeInTheDocument();
   });
 
+  /*
+   * These two used to drive `window.confirm`. The warning is a Dialog now —
+   * same words, same "does nothing if declined" — because a `confirm` box
+   * cannot show the rule code in the page's own type, and because the design
+   * system retired it (DESIGN_SYSTEM.md §6).
+   */
   it("warns that deleting breaks issued reports, and does nothing if declined", async () => {
     const remove = vi.spyOn(legalService, "deleteRule").mockResolvedValue();
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
     const user = await renderPage();
 
     await user.click(await screen.findByText("Barcode"));
-    await user.click(screen.getByRole("button", { name: /Delete/i }));
+    await user.click(screen.getByRole("button", { name: /^Delete$/i }));
 
-    expect(confirm.mock.calls[0][0]).toMatch(/no longer be explainable/i);
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent(/no longer be explainable/i);
+
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(remove).not.toHaveBeenCalled();
   });
 
   it("deletes when confirmed", async () => {
     const remove = vi.spyOn(legalService, "deleteRule").mockResolvedValue();
-    vi.spyOn(window, "confirm").mockReturnValue(true);
     const user = await renderPage();
 
     await user.click(await screen.findByText("Barcode"));
-    await user.click(screen.getByRole("button", { name: /Delete/i }));
+    await user.click(screen.getByRole("button", { name: /^Delete$/i }));
+
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Delete rule" }));
 
     await waitFor(() => expect(remove).toHaveBeenCalledWith(2));
     await waitFor(() =>
@@ -246,9 +288,8 @@ describe("Compliance Rules", () => {
   it("orders the list by position", async () => {
     await renderPage();
 
-    const list = await screen.findByText("FSSAI_LICENCE");
-    const rows = list.closest(".cr-list");
-    const names = within(rows as HTMLElement)
+    const list = (await screen.findByText("FSSAI_LICENCE")).closest("ul");
+    const names = within(list as HTMLElement)
       .getAllByRole("button")
       .map((button) => button.textContent ?? "")
       .filter((text) => text.includes("position"));

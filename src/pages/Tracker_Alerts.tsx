@@ -1,50 +1,40 @@
+/**
+ * Stuck-invoice alerts — every invoice sitting past its stage threshold.
+ */
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { HiExclamationTriangle, HiEye, HiArrowPath, HiEnvelope } from "react-icons/hi2";
-import trackerService from "../services/trackerService";
-import type { Invoice } from "../services/trackerService";
-import "../styles/Tracker.css";
+import {
+  HiOutlineArrowPath,
+  HiOutlineCheckCircle,
+  HiOutlineEnvelope,
+  HiOutlineExclamationTriangle,
+  HiOutlineMapPin,
+} from "react-icons/hi2";
+
 import { Badge, type BadgeTone } from "@/components/ui/badge";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { Button } from "@/components/ui/button";
+import { Card, Notice, Page, PageHeader } from "@/components/ui/page";
+import { TableSkeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
   TableCell,
+  TableEmpty,
   TableHead,
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  Dialog,
-  DialogBody,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-
-const money = (v: string | number) =>
-  Number(v || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const fmtDT = (v?: string | null) => {
-  if (!v) return "-";
-  const d = new Date(v);
-  return Number.isNaN(d.getTime())
-    ? v
-    : d.toLocaleString("en-GB", {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-};
+import { fmtDT, money } from "@/components/tracker/format";
+import InvoiceTimelineDialog from "@/components/tracker/InvoiceTimelineDialog";
+import trackerService from "../services/trackerService";
+import type { Invoice } from "../services/trackerService";
 
 export default function Tracker_Alerts() {
   const [timelineInv, setTimelineInv] = useState<Invoice | null>(null);
 
   /*
-   * Phase 3.1 — the first page moved onto TanStack Query, and a good one to
-   * start with because its old `useEffect` had every problem the library
-   * exists to solve:
+   * The old `useEffect` had every problem TanStack Query exists to solve:
    *
    *   * `setInterval(load, 60000)` kept firing while the tab was in the
    *     background — a request a minute, forever, for a screen nobody was
@@ -60,6 +50,7 @@ export default function Tracker_Alerts() {
    */
   const {
     data: alerts = [],
+    isPending,
     isFetching: loading,
     refetch: load,
   } = useQuery({
@@ -89,182 +80,140 @@ export default function Tracker_Alerts() {
   /**
    * How far past its threshold an invoice is, as a badge tone.
    *
-   * Returns a tone rather than a class name (Phase 2.2): the 7-day and 3-day
-   * thresholds are this page's judgement and stay here, but what colour "bad"
-   * is gets decided once, in components/ui/badge.tsx.
+   * Returns a tone rather than a class name: the 7-day and 3-day thresholds
+   * are this page's judgement and stay here, but what colour "bad" is gets
+   * decided once, in components/ui/badge.tsx.
    */
   const tone = (over: number): BadgeTone => (over > 7 ? "bad" : over > 3 ? "hold" : "neutral");
 
   return (
-    <div className="trk-page">
-      <div className="trk-header">
-        <div>
-          <h1>Stuck Invoice Alerts</h1>
-          <div className="trk-sub">
-            Invoices sitting past their stage threshold. Refreshes every minute.
-          </div>
-        </div>
-        <button className="trk-btn trk-btn-ghost" onClick={() => void load()}>
-          <HiArrowPath /> Refresh
-        </button>
-      </div>
+    <Page>
+      <Breadcrumbs items={[{ label: "Tracker" }, { label: "Stuck Alerts" }]} />
 
-      {/* Banner */}
-      <div
-        className={`trk-card trk-alert-banner${
-          alerts.length ? " trk-alert-banner--bad" : " trk-alert-banner--ok"
-        }`}
+      <PageHeader
+        title="Stuck Invoice Alerts"
+        description="Invoices sitting past their stage threshold. Refreshes every minute."
+        actions={
+          <Button variant="ghost" onClick={() => void load()} disabled={loading}>
+            <HiOutlineArrowPath aria-hidden="true" /> Refresh
+          </Button>
+        }
+      />
+
+      <Notice
+        tone={alerts.length ? "bad" : "ok"}
+        className="flex items-start gap-3"
       >
-        <HiExclamationTriangle
-          className={`trk-alert-icon${
-            alerts.length ? " trk-alert-icon--bad" : " trk-alert-icon--ok"
-          }`}
-        />
-        <div>
-          <div className="trk-alert-count">
-            {alerts.length} stuck invoice{alerts.length === 1 ? "" : "s"}
-          </div>
-          <div className="trk-sub">
-            {byStage.length
-              ? byStage.map(([s, n]) => `${s}: ${n}`).join("  ·  ")
-              : "All invoices are within their stage thresholds. 🎉"}
-          </div>
-        </div>
-      </div>
+        <span className="flex items-start gap-3">
+          {alerts.length ? (
+            <HiOutlineExclamationTriangle aria-hidden="true" className="mt-0.5 size-5 shrink-0" />
+          ) : (
+            <HiOutlineCheckCircle aria-hidden="true" className="mt-0.5 size-5 shrink-0" />
+          )}
+          <span>
+            <strong className="block text-[15px] font-bold">
+              {alerts.length} stuck invoice{alerts.length === 1 ? "" : "s"}
+            </strong>
+            <span className="text-[12.5px] text-subtle">
+              {byStage.length
+                ? byStage.map(([s, n]) => `${s}: ${n}`).join("  ·  ")
+                : "All invoices are within their stage thresholds."}
+            </span>
+          </span>
+        </span>
+      </Notice>
 
-      <div className="trk-card">
-        <div className="trk-table-wrap">
-          <Table density="compact">
-            <TableHeader>
-              <TableRow>
-                <TableHead>Invoice No.</TableHead>
-                <TableHead>Party</TableHead>
-                <TableHead>Value</TableHead>
-                <TableHead>Stuck At</TableHead>
-                <TableHead>Days Here</TableHead>
-                <TableHead>Threshold</TableHead>
-                <TableHead>Over By</TableHead>
-                <TableHead>Since</TableHead>
-                <TableHead>Mailed To</TableHead>
-                <TableHead></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {alerts.map((a) => (
-                <TableRow key={a.id} className="trk-row-overdue">
-                  <TableCell>{a.invoice_number}</TableCell>
-                  <TableCell>{a.party_name}</TableCell>
-                  <TableCell>₹{money(a.invoice_value)}</TableCell>
-                  <TableCell>
-                    <Badge tone="info" outlined>
-                      {a.stage_name}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>{a.days_stuck}</TableCell>
-                  <TableCell>{a.threshold_days}</TableCell>
-                  <TableCell>
-                    <Badge tone={tone(a.over_by)} outlined>
-                      +{a.over_by.toFixed(1)} d
-                    </Badge>
-                  </TableCell>
-                  <TableCell>{fmtDT(a.stage_entered_at)}</TableCell>
-                  <TableCell className="trk-cell-wrap trk-cell-wrap--220">
-                    {a.notified && a.notified.length ? (
-                      <span
-                        title={a.notified.map((n) => `${n.user} — ${fmtDT(n.sent_at)}`).join("\n")}
-                      >
-                        <Badge tone="ok" outlined className="trk-badge-gap-right-4">
-                          <HiEnvelope className="trk-icon-clock" /> {a.notified.length}
-                        </Badge>
-                        {a.notified
-                          .slice(0, 2)
-                          .map((n) => n.user)
-                          .join(", ")}
-                        {a.notified.length > 2 ? ` +${a.notified.length - 2}` : ""}
-                      </span>
-                    ) : (
-                      <Badge outlined>Not mailed</Badge>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <button
-                      className="trk-btn trk-btn-ghost trk-btn--sm"
-                      onClick={() => openTimeline(a.invoice)}
-                    >
-                      <HiEye /> Track
-                    </button>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {!loading && alerts.length === 0 && (
+      <Card className="overflow-hidden p-0">
+        {isPending ? (
+          <TableSkeleton rows={4} columns={10} />
+        ) : (
+          <div className="overflow-x-auto">
+            <Table density="compact">
+              <TableHeader>
                 <TableRow>
-                  <TableCell colSpan={10}>
-                    <div className="trk-empty">No stuck invoices. 🎉</div>
-                  </TableCell>
+                  <TableHead>Invoice No.</TableHead>
+                  <TableHead>Party</TableHead>
+                  <TableHead className="text-right">Value</TableHead>
+                  <TableHead>Stuck at</TableHead>
+                  <TableHead className="text-right">Days here</TableHead>
+                  <TableHead className="text-right">Threshold</TableHead>
+                  <TableHead>Over by</TableHead>
+                  <TableHead>Since</TableHead>
+                  <TableHead>Mailed to</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
-              )}
-              {loading && alerts.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={10}>
-                    <div className="trk-empty">Loading…</div>
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </div>
-      </div>
-
-      {/* Timeline modal */}
-      <Dialog
-        open={Boolean(timelineInv)}
-        onOpenChange={(next) => {
-          if (!next) (() => setTimelineInv(null))();
-        }}
-      >
-        {timelineInv && (
-          <DialogContent title="Invoice timeline">
-            <DialogHeader>
-              <DialogTitle>
-                {timelineInv.invoice_number} — {timelineInv.party_name}
-              </DialogTitle>
-            </DialogHeader>
-            <DialogBody>
-              <ul className="trk-timeline">
-                {(timelineInv.events || []).map((ev) => (
-                  <li key={ev.id}>
-                    <div className="tl-stage">
-                      {ev.stage_name}
-                      {ev.stage_status && (
-                        <Badge outlined className="trk-badge-gap">
-                          {ev.stage_status}
+              </TableHeader>
+              <TableBody>
+                {alerts.length === 0 ? (
+                  <TableEmpty colSpan={10}>
+                    No stuck invoices — every desk is inside its threshold.
+                  </TableEmpty>
+                ) : (
+                  alerts.map((a) => (
+                    <TableRow key={a.id}>
+                      <TableCell className="whitespace-nowrap font-medium text-ink">
+                        {a.invoice_number}
+                      </TableCell>
+                      <TableCell>{a.party_name}</TableCell>
+                      <TableCell className="whitespace-nowrap text-right tabular-nums">
+                        ₹{money(a.invoice_value)}
+                      </TableCell>
+                      <TableCell>
+                        <Badge tone="info" outlined>
+                          {a.stage_name}
                         </Badge>
-                      )}
-                      {ev.receiving_note === "LATE" && (
-                        <Badge tone="hold" outlined className="trk-badge-gap-6">
-                          Late (after 6 PM)
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">{a.days_stuck}</TableCell>
+                      <TableCell className="text-right tabular-nums">{a.threshold_days}</TableCell>
+                      <TableCell>
+                        <Badge tone={tone(a.over_by)} outlined>
+                          +{a.over_by.toFixed(1)} d
                         </Badge>
-                      )}
-                    </div>
-                    <div className="tl-meta">
-                      {ev.event_type} · in {fmtDT(ev.entered_at)}
-                      {ev.exited_at ? ` · out ${fmtDT(ev.exited_at)}` : " · (here now)"}
-                      {ev.days_spent ? ` · ${ev.days_spent} days` : ""}
-                      {ev.acted_by_name ? ` · ${ev.acted_by_name}` : ""}
-                    </div>
-                    {ev.remarks && <div className="tl-remark">“{ev.remarks}”</div>}
-                  </li>
-                ))}
-              </ul>
-            </DialogBody>
-            <DialogFooter>
-              <button className="trk-btn trk-btn-ghost" onClick={() => setTimelineInv(null)}>
-                Close
-              </button>
-            </DialogFooter>
-          </DialogContent>
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap">{fmtDT(a.stage_entered_at)}</TableCell>
+                      <TableCell className="max-w-[220px] whitespace-normal">
+                        {a.notified && a.notified.length ? (
+                          <span
+                            className="flex flex-wrap items-center gap-1.5"
+                            title={a.notified
+                              .map((n) => `${n.user} — ${fmtDT(n.sent_at)}`)
+                              .join("\n")}
+                          >
+                            <Badge tone="ok" outlined>
+                              <HiOutlineEnvelope aria-hidden="true" className="size-3" />{" "}
+                              {a.notified.length}
+                            </Badge>
+                            <span className="text-[12px] text-subtle">
+                              {a.notified
+                                .slice(0, 2)
+                                .map((n) => n.user)
+                                .join(", ")}
+                              {a.notified.length > 2 ? ` +${a.notified.length - 2}` : ""}
+                            </span>
+                          </span>
+                        ) : (
+                          <Badge outlined>Not mailed</Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className="w-px text-right">
+                        <Button
+                          variant="ghost"
+                          size="xs"
+                          onClick={() => void openTimeline(a.invoice)}
+                        >
+                          <HiOutlineMapPin aria-hidden="true" /> Track
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
         )}
-      </Dialog>
-    </div>
+      </Card>
+
+      <InvoiceTimelineDialog invoice={timelineInv} onClose={() => setTimelineInv(null)} />
+    </Page>
   );
 }

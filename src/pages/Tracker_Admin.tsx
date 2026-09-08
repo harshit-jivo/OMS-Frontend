@@ -1,19 +1,19 @@
+/**
+ * Tracker configuration — stages, dropdown values, stage access, and the
+ * tracker's own user accounts. Four tabs, one per thing an admin changes.
+ */
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { HiCheck, HiPlusCircle, HiTrash, HiPencilSquare } from "react-icons/hi2";
-import trackerService from "../services/trackerService";
-import type { AdminUser, LookupKind, LookupRow, Stage, TrackerUser } from "../services/trackerService";
-import { TRACKER_ROLE_LABELS } from "../config/pageAccess";
-import "../styles/Tracker.css";
-import { Badge } from "@/components/ui/badge";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+  HiOutlineCheck,
+  HiOutlinePencilSquare,
+  HiOutlinePlus,
+  HiOutlineTrash,
+} from "react-icons/hi2";
+
+import { Badge } from "@/components/ui/badge";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogBody,
@@ -22,10 +22,29 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Toast } from "@/components/ui/toast";
+import { Checkbox, Field, FormGrid, Input, Select } from "@/components/ui/form";
+import { Card, CardHeader, CardTitle, Page, PageHeader } from "@/components/ui/page";
+import { Tab, TabList } from "@/components/ui/tabs";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableEmpty,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { messageFrom } from "@/lib/apiError";
+import { showToast } from "@/lib/toastStore";
+import { cn } from "@/lib/utils";
+import { TRACKER_ROLE_LABELS } from "../config/pageAccess";
+import trackerService from "../services/trackerService";
+import type { AdminUser, LookupKind, LookupRow, Stage, TrackerUser } from "../services/trackerService";
 
-type Tab = "stages" | "lookups" | "access" | "users";
+type TabKey = "stages" | "lookups" | "access" | "users";
+
+/** What a tab reports back. Two arguments so a failure can name its reason. */
+type Flash = (title: string, message?: string) => void;
 
 /*
  * `singular` is spelt out rather than derived. The button and the dialog title
@@ -56,58 +75,62 @@ const EMPTY_STAGE: Partial<Stage> = {
   is_active: true,
 };
 
+const TABS: { key: TabKey; label: string }[] = [
+  { key: "stages", label: "Stages" },
+  { key: "lookups", label: "Lookups" },
+  { key: "access", label: "Stage Access" },
+  { key: "users", label: "Tracker Users" },
+];
+
+/** A ✓ or an em dash, for the boolean columns. */
+function Tick({ on }: { on: boolean }) {
+  return on ? (
+    <HiOutlineCheck aria-label="yes" className="size-4 text-ok" />
+  ) : (
+    <span aria-label="no" className="text-subtle">
+      —
+    </span>
+  );
+}
+
 export default function Tracker_Admin() {
-  const [tab, setTab] = useState<Tab>("stages");
-  const [toast, setToast] = useState("");
-  const flash = (m: string) => {
-    setToast(m);
-    setTimeout(() => setToast(""), 2800);
-  };
+  const [tab, setTab] = useState<TabKey>("stages");
+  const flash: Flash = (title, message = "") => showToast({ title, message });
 
   return (
-    <div className="trk-page">
-      <div className="trk-header">
-        <div>
-          <h1>Tracker Configuration</h1>
-          <div className="trk-sub">Manage stages, dropdown values, and who works each stage.</div>
-        </div>
-      </div>
+    <Page>
+      <Breadcrumbs items={[{ label: "Tracker" }, { label: "Tracker Admin" }]} />
 
-      <div className="trk-tabs">
-        {(
-          [
-            ["stages", "Stages"],
-            ["lookups", "Lookups"],
-            ["access", "Stage Access"],
-            ["users", "Tracker Users"],
-          ] as const
-        ).map(([t, label]) => (
-          <button
-            key={t}
-            className={"trk-tab" + (tab === t ? " active" : "")}
-            onClick={() => setTab(t as Tab)}
-          >
-            {label}
-          </button>
+      <PageHeader
+        title="Tracker Admin"
+        description="Manage stages, dropdown values, and who works each stage."
+      />
+
+      <TabList label="Configuration sections">
+        {TABS.map((t) => (
+          <Tab key={t.key} selected={tab === t.key} onClick={() => setTab(t.key)}>
+            {t.label}
+          </Tab>
         ))}
+      </TabList>
+
+      <div role="tabpanel">
+        {tab === "stages" && <StagesTab flash={flash} />}
+        {tab === "lookups" && <LookupsTab flash={flash} />}
+        {tab === "access" && <AccessTab flash={flash} />}
+        {tab === "users" && <UsersTab flash={flash} />}
       </div>
-
-      {tab === "stages" && <StagesTab flash={flash} />}
-      {tab === "lookups" && <LookupsTab flash={flash} />}
-      {tab === "access" && <AccessTab flash={flash} />}
-      {tab === "users" && <UsersTab flash={flash} />}
-
-      <Toast message={toast} />
-    </div>
+    </Page>
   );
 }
 
 // ---------------------------------------------------------------------------
 // Stages
 // ---------------------------------------------------------------------------
-function StagesTab({ flash }: { flash: (m: string) => void }) {
+function StagesTab({ flash }: { flash: Flash }) {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<Partial<Stage> | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<Stage | null>(null);
 
   /*
    * Stages are read by four places — this tab, the queue's stage tabs, the
@@ -135,226 +158,256 @@ function StagesTab({ flash }: { flash: (m: string) => void }) {
       if (editing.id) await trackerService.adminUpdateStage(editing.id, payload);
       else await trackerService.adminCreateStage(payload);
       setEditing(null);
-      flash("Stage saved");
+      flash("Stage saved", editing.name || "");
       void load();
     } catch (err) {
-      flash(messageFrom(err, "Save failed"));
+      flash("Could not save the stage", messageFrom(err, "The server refused the request."));
     }
   };
 
   const remove = async (s: Stage) => {
-    if (!confirm(`Delete stage "${s.name}"?`)) return;
     try {
       await trackerService.adminDeleteStage(s.id);
-      flash("Deleted");
+      setConfirmDelete(null);
+      flash("Stage deleted", s.name);
       void load();
     } catch (err) {
-      flash(messageFrom(err, "Delete failed"));
+      flash("Could not delete the stage", messageFrom(err, "The server refused the request."));
     }
   };
 
   return (
-    <div className="trk-card">
-      <div className="trk-block-tight">
-        <button
-          className="trk-btn trk-btn-primary"
-          onClick={() => setEditing({ ...EMPTY_STAGE, order: stages.length + 1 })}
-        >
-          <HiPlusCircle /> Add stage
-        </button>
-      </div>
-      <div className="trk-table-wrap">
-        <Table density="compact">
-          <TableHeader>
-            <TableRow>
-              <TableHead>Order</TableHead>
-              <TableHead>Name</TableHead>
-              <TableHead>Code</TableHead>
-              <TableHead>Statuses</TableHead>
-              <TableHead>Req. status</TableHead>
-              <TableHead>Can return</TableHead>
-              <TableHead>Terminal</TableHead>
-              <TableHead>Threshold (days)</TableHead>
-              <TableHead>Active</TableHead>
-              <TableHead></TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {stages.map((s) => (
-              <TableRow key={s.id}>
-                <TableCell>{s.order}</TableCell>
-                <TableCell>{s.name}</TableCell>
-                <TableCell>
-                  <code>{s.code}</code>
-                </TableCell>
-                <TableCell>{s.status_choices.length ? s.status_choices.join(", ") : "—"}</TableCell>
-                <TableCell>{s.requires_status ? "✓" : "—"}</TableCell>
-                <TableCell>{s.can_return ? "✓" : "—"}</TableCell>
-                <TableCell>{s.is_terminal ? "✓" : "—"}</TableCell>
-                <TableCell>{s.threshold_days}</TableCell>
-                <TableCell>
-                  {s.is_active ? (
-                    <Badge tone="ok" outlined>
-                      Active
-                    </Badge>
-                  ) : (
-                    <Badge outlined>Off</Badge>
-                  )}
-                </TableCell>
-                <TableCell className="trk-row-actions">
-                  <button
-                    className="trk-btn trk-btn-ghost trk-btn--sm"
-                    aria-label={`Edit stage ${s.name}`}
-                    title="Edit stage"
-                    onClick={() => setEditing({ ...s })}
-                  >
-                    <HiPencilSquare />
-                  </button>
-                  <button
-                    className="trk-btn trk-btn-danger trk-btn--sm"
-                    aria-label={`Delete stage ${s.name}`}
-                    title="Delete stage"
-                    onClick={() => remove(s)}
-                  >
-                    <HiTrash />
-                  </button>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
+    <>
+      <Card className="overflow-hidden p-0">
+        <CardHeader className="mb-0 border-b border-line px-4 py-3">
+          <CardTitle>Stages ({stages.length})</CardTitle>
+          <Button
+            size="xs"
+            variant="primary"
+            onClick={() => setEditing({ ...EMPTY_STAGE, order: stages.length + 1 })}
+          >
+            <HiOutlinePlus aria-hidden="true" /> Add stage
+          </Button>
+        </CardHeader>
 
-      <Dialog
-        open={Boolean(editing)}
-        onOpenChange={(next) => {
-          if (!next) (() => setEditing(null))();
-        }}
-      >
+        <div className="overflow-x-auto">
+          <Table density="compact">
+            <TableHeader>
+              <TableRow>
+                <TableHead className="text-right">Order</TableHead>
+                <TableHead>Name</TableHead>
+                <TableHead>Code</TableHead>
+                <TableHead>Statuses</TableHead>
+                <TableHead>Req. status</TableHead>
+                <TableHead>Can return</TableHead>
+                <TableHead>Terminal</TableHead>
+                <TableHead className="text-right">Threshold (days)</TableHead>
+                <TableHead>Active</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {stages.length === 0 ? (
+                <TableEmpty colSpan={10}>No stages configured yet.</TableEmpty>
+              ) : (
+                stages.map((s) => (
+                  <TableRow key={s.id}>
+                    <TableCell className="text-right tabular-nums">{s.order}</TableCell>
+                    <TableCell className="font-medium text-ink">{s.name}</TableCell>
+                    <TableCell>
+                      <code className="rounded-sm bg-surface px-1.5 py-0.5 font-mono text-[11.5px]">
+                        {s.code}
+                      </code>
+                    </TableCell>
+                    <TableCell>
+                      {s.status_choices.length ? s.status_choices.join(", ") : "—"}
+                    </TableCell>
+                    <TableCell>
+                      <Tick on={s.requires_status} />
+                    </TableCell>
+                    <TableCell>
+                      <Tick on={s.can_return} />
+                    </TableCell>
+                    <TableCell>
+                      <Tick on={s.is_terminal} />
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">{s.threshold_days}</TableCell>
+                    <TableCell>
+                      <Badge tone={s.is_active ? "ok" : "neutral"} outlined>
+                        {s.is_active ? "Active" : "Off"}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="w-px">
+                      <div className="flex flex-nowrap justify-end gap-0.5">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`Edit stage ${s.name}`}
+                          title="Edit stage"
+                          onClick={() => setEditing({ ...s })}
+                        >
+                          <HiOutlinePencilSquare aria-hidden="true" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="text-danger hover:bg-danger-soft hover:text-danger"
+                          aria-label={`Delete stage ${s.name}`}
+                          title="Delete stage"
+                          onClick={() => setConfirmDelete(s)}
+                        >
+                          <HiOutlineTrash aria-hidden="true" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      </Card>
+
+      <Dialog open={Boolean(editing)} onOpenChange={(next) => !next && setEditing(null)}>
         {editing && (
-          <DialogContent title="Stage">
+          <DialogContent title="Stage" size="lg">
             <DialogHeader>
               <DialogTitle>{editing.id ? "Edit stage" : "New stage"}</DialogTitle>
             </DialogHeader>
             <DialogBody>
-              <div className="trk-form-grid">
-                <div className="trk-field">
-                  <label>Name</label>
-                  <input
-                    aria-label="Name"
-                    value={editing.name || ""}
-                    onChange={(e) => setEditing({ ...editing, name: e.target.value })}
-                  />
-                </div>
-                <div className="trk-field">
-                  <label>Code (unique key)</label>
-                  <input
-                    aria-label="Code (unique key)"
-                    value={editing.code || ""}
-                    onChange={(e) => setEditing({ ...editing, code: e.target.value })}
-                  />
-                </div>
-                <div className="trk-field">
-                  <label>Order</label>
-                  <input
-                    type="number"
-                    aria-label="Order"
-                    value={editing.order ?? 1}
-                    onChange={(e) => setEditing({ ...editing, order: Number(e.target.value) })}
-                  />
-                </div>
-                <div className="trk-field">
-                  <label>Threshold days</label>
-                  <input
-                    type="number"
-                    aria-label="Threshold days"
-                    value={editing.threshold_days ?? 3}
-                    onChange={(e) =>
-                      setEditing({ ...editing, threshold_days: Number(e.target.value) })
-                    }
-                  />
-                </div>
-                <div className="trk-field trk-field--full">
-                  <label>Status choices (comma-separated, e.g. OK, HOLD, DEBIT, RETURN)</label>
-                  <input
-                    aria-label="Status choices (comma-separated, e.g. OK, HOLD, DEBIT, RETURN)"
-                    value={(editing.status_choices || []).join(", ")}
-                    onChange={(e) =>
-                      setEditing({
-                        ...editing,
-                        status_choices: e.target.value
-                          .split(",")
-                          .map((x) => x.trim().toUpperCase())
-                          .filter(Boolean),
-                      })
-                    }
-                  />
-                </div>
-                <label
-                  className="trk-field trk-field--row"
+              <FormGrid>
+                <Field label="Name">
+                  {(c) => (
+                    <Input
+                      {...c}
+                      value={editing.name || ""}
+                      onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+                    />
+                  )}
+                </Field>
+                <Field label="Code" hint="The unique key the flow refers to this stage by.">
+                  {(c) => (
+                    <Input
+                      {...c}
+                      value={editing.code || ""}
+                      onChange={(e) => setEditing({ ...editing, code: e.target.value })}
+                    />
+                  )}
+                </Field>
+                <Field label="Order">
+                  {(c) => (
+                    <Input
+                      {...c}
+                      type="number"
+                      value={editing.order ?? 1}
+                      onChange={(e) => setEditing({ ...editing, order: Number(e.target.value) })}
+                    />
+                  )}
+                </Field>
+                <Field label="Threshold days" hint="Past this, an invoice shows as stuck.">
+                  {(c) => (
+                    <Input
+                      {...c}
+                      type="number"
+                      value={editing.threshold_days ?? 3}
+                      onChange={(e) =>
+                        setEditing({ ...editing, threshold_days: Number(e.target.value) })
+                      }
+                    />
+                  )}
+                </Field>
+                <Field
+                  label="Status choices"
+                  hint="Comma-separated, e.g. OK, HOLD, DEBIT, RETURN."
+                  span="full"
                 >
-                  <input
-                    type="checkbox"
+                  {(c) => (
+                    <Input
+                      {...c}
+                      value={(editing.status_choices || []).join(", ")}
+                      onChange={(e) =>
+                        setEditing({
+                          ...editing,
+                          status_choices: e.target.value
+                            .split(",")
+                            .map((x) => x.trim().toUpperCase())
+                            .filter(Boolean),
+                        })
+                      }
+                    />
+                  )}
+                </Field>
+                <div className="col-span-full grid gap-3 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
+                  <Checkbox
+                    label="Requires status"
                     checked={!!editing.requires_status}
                     onChange={(e) => setEditing({ ...editing, requires_status: e.target.checked })}
-                  />{" "}
-                  Requires status
-                </label>
-                <label
-                  className="trk-field trk-field--row"
-                >
-                  <input
-                    type="checkbox"
+                  />
+                  <Checkbox
+                    label="Can return"
                     checked={!!editing.can_return}
                     onChange={(e) => setEditing({ ...editing, can_return: e.target.checked })}
-                  />{" "}
-                  Can return
-                </label>
-                <label
-                  className="trk-field trk-field--row"
-                >
-                  <input
-                    type="checkbox"
+                  />
+                  <Checkbox
+                    label="Terminal (payment)"
                     checked={!!editing.is_terminal}
                     onChange={(e) => setEditing({ ...editing, is_terminal: e.target.checked })}
-                  />{" "}
-                  Terminal (payment)
-                </label>
-                <label
-                  className="trk-field trk-field--row"
-                >
-                  <input
-                    type="checkbox"
+                  />
+                  <Checkbox
+                    label="Active"
                     checked={editing.is_active ?? true}
                     onChange={(e) => setEditing({ ...editing, is_active: e.target.checked })}
-                  />{" "}
-                  Active
-                </label>
-              </div>
+                  />
+                </div>
+              </FormGrid>
             </DialogBody>
             <DialogFooter>
-              <button className="trk-btn trk-btn-ghost" onClick={() => setEditing(null)}>
-                Cancel
-              </button>
-              <button className="trk-btn trk-btn-primary" onClick={save}>
+              <Button onClick={() => setEditing(null)}>Cancel</Button>
+              <Button variant="primary" onClick={() => void save()}>
                 Save
-              </button>
+              </Button>
             </DialogFooter>
           </DialogContent>
         )}
       </Dialog>
-    </div>
+
+      <Dialog
+        open={Boolean(confirmDelete)}
+        onOpenChange={(next) => !next && setConfirmDelete(null)}
+      >
+        {confirmDelete && (
+          <DialogContent title="Delete stage" size="sm">
+            <DialogHeader>
+              <DialogTitle>Delete {confirmDelete.name}?</DialogTitle>
+            </DialogHeader>
+            <DialogBody>
+              <p className="m-0 text-[13px] text-body">
+                Invoices that have passed through this stage keep their history, but nothing can be
+                routed to it again.
+              </p>
+            </DialogBody>
+            <DialogFooter>
+              <Button onClick={() => setConfirmDelete(null)}>Cancel</Button>
+              <Button variant="danger" onClick={() => void remove(confirmDelete)}>
+                <HiOutlineTrash aria-hidden="true" /> Delete stage
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        )}
+      </Dialog>
+    </>
   );
 }
 
 // ---------------------------------------------------------------------------
 // Lookups
 // ---------------------------------------------------------------------------
-function LookupsTab({ flash }: { flash: (m: string) => void }) {
+function LookupsTab({ flash }: { flash: Flash }) {
   const [kind, setKind] = useState<LookupKind>("categories");
   const [rows, setRows] = useState<LookupRow[]>([]);
   const [draft, setDraft] = useState<Partial<LookupRow>>({});
   const [showAdd, setShowAdd] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<LookupRow | null>(null);
   const isRate = kind === "gst_rates";
   const kindLabel = LOOKUP_KINDS.find((k) => k.kind === kind)?.singular || "value";
 
@@ -373,12 +426,13 @@ function LookupsTab({ flash }: { flash: (m: string) => void }) {
     trackerService
       .adminGetLookup(kind)
       .then(setRows)
-      .catch(() => flash("Failed to load"));
+      .catch(() => flash("Could not load the values"));
   // Only the fetch is left here. Clearing the draft belongs to the tab click
   // that changes `kind` (see `selectKind`) — done in the effect it reset the
   // form one render after the new tab had already drawn with the old one.
   useEffect(() => {
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind]);
 
   const selectKind = (next: LookupKind) => {
@@ -397,228 +451,264 @@ function LookupsTab({ flash }: { flash: (m: string) => void }) {
     setShowAdd(true);
   };
 
+  const canAdd = isRate ? Boolean(draft.label) && draft.rate !== "" : Boolean(draft.name);
+
   const add = async () => {
-    if (isRate ? !draft.label || draft.rate === "" : !draft.name) {
-      flash("Fill in the value first");
-      return;
-    }
     try {
       await trackerService.adminCreateLookup(kind, draft);
       setDraft({});
       setShowAdd(false);
-      flash("Added");
+      flash(`${kindLabel} added`);
       load();
     } catch (err) {
-      flash(messageFrom(err, "Add failed"));
+      flash(`Could not add the ${kindLabel.toLowerCase()}`, messageFrom(err, "The server refused the request."));
     }
   };
   const update = async (row: LookupRow) => {
     try {
       await trackerService.adminUpdateLookup(kind, row.id, row);
-      flash("Saved");
+      flash("Saved", row.name ?? row.label ?? "");
       load();
     } catch (err) {
-      flash(messageFrom(err, "Save failed"));
+      flash("Could not save", messageFrom(err, "The server refused the request."));
     }
   };
   const remove = async (row: LookupRow) => {
-    if (!confirm("Delete this value?")) return;
     try {
       await trackerService.adminDeleteLookup(kind, row.id);
-      flash("Deleted");
+      setConfirmDelete(null);
+      flash("Deleted", row.name ?? row.label ?? "");
       load();
     } catch (err) {
-      flash(messageFrom(err, "Delete failed"));
+      flash("Could not delete", messageFrom(err, "The server refused the request."));
     }
   };
   const patchRow = (id: number, patch: Partial<LookupRow>) =>
     setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
 
   return (
-    <div className="trk-card">
-      <div className="trk-header trk-header--offset">
-        <div className="trk-tabs trk-tabs--flush">
+    <div className="space-y-4 sm:space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <TabList label="Lookup kinds" className="flex-wrap">
           {LOOKUP_KINDS.map((k) => (
-            <button
+            <Tab
               key={k.kind}
-              className={"trk-tab" + (kind === k.kind ? " active" : "")}
+              variant="subtle"
+              selected={kind === k.kind}
               onClick={() => selectKind(k.kind)}
             >
               {k.label}
-            </button>
+            </Tab>
           ))}
-        </div>
-        <button className="trk-btn trk-btn-primary" onClick={openAdd}>
-          <HiPlusCircle /> Add {kindLabel}
-        </button>
+        </TabList>
+        <Button variant="primary" onClick={openAdd}>
+          <HiOutlinePlus aria-hidden="true" /> Add {kindLabel.toLowerCase()}
+        </Button>
       </div>
 
-      <Dialog
-        open={Boolean(showAdd)}
-        onOpenChange={(next) => {
-          if (!next) (() => setShowAdd(false))();
-        }}
-      >
-        {showAdd && (
-          <DialogContent title="Add entry">
-            <DialogHeader>
-              <DialogTitle>Add {kindLabel}</DialogTitle>
-            </DialogHeader>
-            <DialogBody>
-              <div className="trk-form-grid">
+      <Card className="overflow-hidden p-0" role="tabpanel">
+        <div className="overflow-x-auto">
+          <Table density="compact">
+            <TableHeader>
+              <TableRow>
                 {isRate ? (
                   <>
-                    <div className="trk-field">
-                      <label>Label</label>
-                      <input
-                        placeholder="e.g. 18%"
-                        aria-label="Label"
-                        value={draft.label || ""}
-                        onChange={(e) => setDraft({ ...draft, label: e.target.value })}
-                      />
-                    </div>
-                    <div className="trk-field">
-                      <label>Rate (%)</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        placeholder="18"
-                        aria-label="Rate (%)"
-                        value={draft.rate || ""}
-                        onChange={(e) => setDraft({ ...draft, rate: e.target.value })}
-                      />
-                    </div>
+                    <TableHead>Label</TableHead>
+                    <TableHead>Rate</TableHead>
                   </>
                 ) : (
-                  <div className="trk-field">
-                    <label>Name</label>
-                    <input
-                      placeholder="New value…"
-                      aria-label="Name"
-                      value={draft.name || ""}
-                      onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                    />
-                  </div>
+                  <TableHead>Name</TableHead>
                 )}
-                <div className="trk-field">
-                  <label>Sort order</label>
-                  <input
-                    type="number"
-                    aria-label="Sort order"
-                    value={draft.sort_order ?? rows.length}
-                    onChange={(e) => setDraft({ ...draft, sort_order: Number(e.target.value) })}
-                  />
-                </div>
-              </div>
+                <TableHead>Sort</TableHead>
+                <TableHead>Active</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.length === 0 ? (
+                <TableEmpty colSpan={isRate ? 5 : 4}>
+                  No values yet — add the first with the button above.
+                </TableEmpty>
+              ) : (
+                rows.map((r) => (
+                  <TableRow key={r.id}>
+                    {isRate ? (
+                      <>
+                        <TableCell>
+                          <Input
+                            className="h-control-sm"
+                            value={r.label}
+                            aria-label="Label"
+                            onChange={(e) => patchRow(r.id, { label: e.target.value })}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            className="h-control-sm w-24"
+                            type="number"
+                            step="0.01"
+                            value={r.rate}
+                            aria-label="Rate"
+                            onChange={(e) => patchRow(r.id, { rate: e.target.value })}
+                          />
+                        </TableCell>
+                      </>
+                    ) : (
+                      <TableCell>
+                        <Input
+                          className="h-control-sm"
+                          value={r.name}
+                          aria-label="Name"
+                          onChange={(e) => patchRow(r.id, { name: e.target.value })}
+                        />
+                      </TableCell>
+                    )}
+                    <TableCell>
+                      <Input
+                        className="h-control-sm w-20"
+                        type="number"
+                        value={r.sort_order}
+                        aria-label="Sort order"
+                        onChange={(e) => patchRow(r.id, { sort_order: Number(e.target.value) })}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <input
+                        type="checkbox"
+                        className="size-4 cursor-pointer accent-brand"
+                        checked={r.is_active}
+                        aria-label={`Active (${r.name ?? r.label})`}
+                        onChange={(e) => patchRow(r.id, { is_active: e.target.checked })}
+                      />
+                    </TableCell>
+                    <TableCell className="w-px">
+                      <div className="flex flex-nowrap justify-end gap-1">
+                        <Button
+                          variant="success"
+                          size="xs"
+                          aria-label={`Save ${r.name ?? r.label}`}
+                          title="Save"
+                          onClick={() => void update(r)}
+                        >
+                          <HiOutlineCheck aria-hidden="true" /> Save
+                        </Button>
+                        <Button
+                          variant="danger"
+                          size="xs"
+                          aria-label={`Delete ${r.name ?? r.label}`}
+                          title="Delete"
+                          onClick={() => setConfirmDelete(r)}
+                        >
+                          <HiOutlineTrash aria-hidden="true" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      </Card>
+
+      <Dialog open={showAdd} onOpenChange={(next) => !next && setShowAdd(false)}>
+        {showAdd && (
+          <DialogContent title={`Add ${kindLabel}`} size="sm">
+            <DialogHeader>
+              <DialogTitle>Add {kindLabel.toLowerCase()}</DialogTitle>
+            </DialogHeader>
+            <DialogBody>
+              <FormGrid>
+                {isRate ? (
+                  <>
+                    <Field label="Label">
+                      {(c) => (
+                        <Input
+                          {...c}
+                          placeholder="e.g. 18%"
+                          value={draft.label || ""}
+                          onChange={(e) => setDraft({ ...draft, label: e.target.value })}
+                        />
+                      )}
+                    </Field>
+                    <Field label="Rate (%)">
+                      {(c) => (
+                        <Input
+                          {...c}
+                          type="number"
+                          step="0.01"
+                          placeholder="18"
+                          value={draft.rate || ""}
+                          onChange={(e) => setDraft({ ...draft, rate: e.target.value })}
+                        />
+                      )}
+                    </Field>
+                  </>
+                ) : (
+                  <Field label="Name" span="full">
+                    {(c) => (
+                      <Input
+                        {...c}
+                        placeholder="New value…"
+                        value={draft.name || ""}
+                        onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                      />
+                    )}
+                  </Field>
+                )}
+                <Field label="Sort order">
+                  {(c) => (
+                    <Input
+                      {...c}
+                      type="number"
+                      value={draft.sort_order ?? rows.length}
+                      onChange={(e) => setDraft({ ...draft, sort_order: Number(e.target.value) })}
+                    />
+                  )}
+                </Field>
+              </FormGrid>
             </DialogBody>
             <DialogFooter>
-              <button className="trk-btn trk-btn-ghost" onClick={() => setShowAdd(false)}>
-                Cancel
-              </button>
-              <button className="trk-btn trk-btn-primary" onClick={add}>
-                <HiPlusCircle /> Add
-              </button>
+              <Button onClick={() => setShowAdd(false)}>Cancel</Button>
+              {/* Disabled with a reason, not an alert after the click. */}
+              <Button
+                variant="primary"
+                onClick={() => void add()}
+                disabled={!canAdd}
+                title={canAdd ? undefined : "Fill in the value first."}
+              >
+                <HiOutlinePlus aria-hidden="true" /> Add
+              </Button>
             </DialogFooter>
           </DialogContent>
         )}
       </Dialog>
 
-      <div className="trk-table-wrap">
-        <Table density="compact">
-          <TableHeader>
-            <TableRow>
-              {isRate ? (
-                <>
-                  <TableHead>Label</TableHead>
-                  <TableHead>Rate</TableHead>
-                </>
-              ) : (
-                <TableHead>Name</TableHead>
-              )}
-              <TableHead>Sort</TableHead>
-              <TableHead>Active</TableHead>
-              <TableHead></TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((r) => (
-              <TableRow key={r.id}>
-                {isRate ? (
-                  <>
-                    <TableCell>
-                      <input
-                        value={r.label}
-                        aria-label="Label"
-                        onChange={(e) => patchRow(r.id, { label: e.target.value })}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={r.rate}
-                        aria-label="Rate"
-                        onChange={(e) => patchRow(r.id, { rate: e.target.value })}
-                        className="trk-col-80"
-                      />
-                    </TableCell>
-                  </>
-                ) : (
-                  <TableCell>
-                    <input
-                      value={r.name}
-                      aria-label="Name"
-                      onChange={(e) => patchRow(r.id, { name: e.target.value })}
-                    />
-                  </TableCell>
-                )}
-                <TableCell>
-                  <input
-                    type="number"
-                    value={r.sort_order}
-                    aria-label="Sort order"
-                    onChange={(e) => patchRow(r.id, { sort_order: Number(e.target.value) })}
-                    className="trk-col-64"
-                  />
-                </TableCell>
-                <TableCell>
-                  <input
-                    type="checkbox"
-                    checked={r.is_active}
-                    aria-label={`Active (${r.name ?? r.label})`}
-                    onChange={(e) => patchRow(r.id, { is_active: e.target.checked })}
-                  />
-                </TableCell>
-                <TableCell className="trk-row-actions">
-                  <button
-                    className="trk-btn trk-btn-success trk-btn--sm"
-                    aria-label={`Save ${r.name ?? r.label}`}
-                    title="Save"
-                    onClick={() => update(r)}
-                  >
-                    <HiCheck />
-                  </button>
-                  <button
-                    className="trk-btn trk-btn-danger trk-btn--sm"
-                    aria-label={`Delete ${r.name ?? r.label}`}
-                    title="Delete"
-                    onClick={() => remove(r)}
-                  >
-                    <HiTrash />
-                  </button>
-                </TableCell>
-              </TableRow>
-            ))}
-            {rows.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={isRate ? 5 : 4}>
-                  <div className="trk-empty">No values yet — use “Add”.</div>
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </div>
+      <Dialog
+        open={Boolean(confirmDelete)}
+        onOpenChange={(next) => !next && setConfirmDelete(null)}
+      >
+        {confirmDelete && (
+          <DialogContent title="Delete value" size="sm">
+            <DialogHeader>
+              <DialogTitle>
+                Delete {confirmDelete.name ?? confirmDelete.label}?
+              </DialogTitle>
+            </DialogHeader>
+            <DialogBody>
+              <p className="m-0 text-[13px] text-body">
+                It disappears from the dropdowns. Invoices already using it keep the value.
+              </p>
+            </DialogBody>
+            <DialogFooter>
+              <Button onClick={() => setConfirmDelete(null)}>Cancel</Button>
+              <Button variant="danger" onClick={() => void remove(confirmDelete)}>
+                <HiOutlineTrash aria-hidden="true" /> Delete
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        )}
+      </Dialog>
     </div>
   );
 }
@@ -626,7 +716,7 @@ function LookupsTab({ flash }: { flash: (m: string) => void }) {
 // ---------------------------------------------------------------------------
 // Stage access (user <-> stage matrix)
 // ---------------------------------------------------------------------------
-function AccessTab({ flash }: { flash: (m: string) => void }) {
+function AccessTab({ flash }: { flash: Flash }) {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [search, setSearch] = useState("");
   const [dirty, setDirty] = useState<Set<number>>(new Set());
@@ -647,10 +737,11 @@ function AccessTab({ flash }: { flash: (m: string) => void }) {
     trackerService
       .adminGetUsers(q)
       .then(setUsers)
-      .catch(() => flash("Failed to load users"));
+      .catch(() => flash("Could not load the users"));
 
   useEffect(() => {
     loadUsers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const orderedStages = useMemo(() => stages, [stages]);
@@ -677,81 +768,94 @@ function AccessTab({ flash }: { flash: (m: string) => void }) {
         n.delete(u.id);
         return n;
       });
-      flash(`Saved ${u.username}`);
+      flash("Stage access saved", u.username);
     } catch (err) {
-      flash(messageFrom(err, "Save failed"));
+      flash("Could not save the access", messageFrom(err, "The server refused the request."));
     }
   };
 
   return (
-    <div className="trk-card">
-      <div className="trk-actionbar trk-actionbar--offset">
-        <input
-          placeholder="Search users…"
-          aria-label="Search users"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && loadUsers(search)}
-        />
-        <button className="trk-btn trk-btn-ghost" onClick={() => loadUsers(search)}>
-          Search
-        </button>
-        <span className="trk-sub">Tick the stages each user may see and act on.</span>
-      </div>
+    <Card className="overflow-hidden p-0">
+      <CardHeader className="mb-0 flex-wrap gap-3 border-b border-line px-4 py-3">
+        <form
+          className="flex items-center gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            loadUsers(search);
+          }}
+        >
+          <Input
+            type="search"
+            className="h-control-sm w-56"
+            placeholder="Search users…"
+            aria-label="Search users"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <Button size="sm" type="submit">
+            Search
+          </Button>
+        </form>
+        <p className="m-0 text-[12.5px] text-subtle">
+          Tick the stages each user may see and act on.
+        </p>
+      </CardHeader>
 
-      <div className="trk-table-wrap">
+      <div className="overflow-x-auto">
         <Table density="compact">
           <TableHeader>
             <TableRow>
               <TableHead>User</TableHead>
               <TableHead>Role</TableHead>
               {orderedStages.map((s) => (
-                <TableHead key={s.id} title={s.name}>
+                <TableHead key={s.id} title={s.name} className="text-center">
                   {s.name}
                 </TableHead>
               ))}
-              <TableHead></TableHead>
+              <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {users.map((u) => (
-              <TableRow key={u.id}>
-                <TableCell>
-                  <b>{u.username}</b>
-                  <div className="trk-sub">{u.name}</div>
-                </TableCell>
-                <TableCell>{u.role || "—"}</TableCell>
-                {orderedStages.map((s) => (
-                  <TableCell key={s.id} className="trk-cell-center">
-                    <input
-                      type="checkbox"
-                      checked={u.stage_ids.includes(s.id)}
-                      onChange={() => toggle(u.id, s.id)}
-                    />
+            {users.length === 0 ? (
+              <TableEmpty colSpan={orderedStages.length + 3}>
+                No users match this search.
+              </TableEmpty>
+            ) : (
+              users.map((u) => (
+                <TableRow key={u.id}>
+                  <TableCell>
+                    <span className="font-medium text-ink">{u.username}</span>
+                    <span className="mt-0.5 block text-[11.5px] text-subtle">{u.name}</span>
                   </TableCell>
-                ))}
-                <TableCell>
-                  <button
-                    className="trk-btn trk-btn-success trk-btn--sm-wide"
-                    disabled={!dirty.has(u.id)}
-                    onClick={() => saveUser(u)}
-                  >
-                    <HiCheck /> Save
-                  </button>
-                </TableCell>
-              </TableRow>
-            ))}
-            {users.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={orderedStages.length + 3}>
-                  <div className="trk-empty">No users.</div>
-                </TableCell>
-              </TableRow>
+                  <TableCell>{u.role || "—"}</TableCell>
+                  {orderedStages.map((s) => (
+                    <TableCell key={s.id} className="text-center">
+                      <input
+                        type="checkbox"
+                        className="size-4 cursor-pointer accent-brand"
+                        checked={u.stage_ids.includes(s.id)}
+                        aria-label={`${u.username} works ${s.name}`}
+                        onChange={() => toggle(u.id, s.id)}
+                      />
+                    </TableCell>
+                  ))}
+                  <TableCell className="w-px text-right">
+                    <Button
+                      variant="success"
+                      size="xs"
+                      disabled={!dirty.has(u.id)}
+                      onClick={() => void saveUser(u)}
+                    >
+                      <HiOutlineCheck aria-hidden="true" /> Save
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))
             )}
           </TableBody>
         </Table>
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -767,20 +871,22 @@ const EMPTY_NEW_USER = {
   role: "tracker_user",
 };
 
-function UsersTab({ flash }: { flash: (m: string) => void }) {
+function UsersTab({ flash }: { flash: Flash }) {
   const [users, setUsers] = useState<TrackerUser[]>([]);
   const [draft, setDraft] = useState({ ...EMPTY_NEW_USER, is_active: true });
   const [editingId, setEditingId] = useState<number | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<TrackerUser | null>(null);
 
   const load = () =>
     trackerService
       .adminListTrackerUsers()
       .then(setUsers)
-      .catch(() => flash("Failed to load users"));
+      .catch(() => flash("Could not load the users"));
   useEffect(() => {
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const resetForm = () => {
@@ -809,11 +915,10 @@ function UsersTab({ flash }: { flash: (m: string) => void }) {
     setShowModal(true);
   };
 
+  // A new user needs both; an edit keeps the existing password when blank.
+  const canSave = Boolean(editingId) || (draft.username.trim() && draft.password.trim());
+
   const save = async () => {
-    if (!editingId && (!draft.username.trim() || !draft.password.trim())) {
-      flash("Username and password are required");
-      return;
-    }
     setSaving(true);
     try {
       if (editingId) {
@@ -825,216 +930,238 @@ function UsersTab({ flash }: { flash: (m: string) => void }) {
           is_active: draft.is_active,
           ...(draft.password.trim() ? { password: draft.password } : {}),
         });
-        flash(`User "${draft.username}" updated`);
+        flash("User updated", draft.username);
       } else {
         await trackerService.adminCreateTrackerUser(draft);
-        flash(`User "${draft.username}" created`);
+        flash("User created", draft.username);
       }
       resetForm();
       load();
     } catch (err) {
-      flash(messageFrom(err, "Save failed"));
+      flash("Could not save the user", messageFrom(err, "The server refused the request."));
     } finally {
       setSaving(false);
     }
   };
 
   const remove = async (u: TrackerUser) => {
-    if (!window.confirm(`Delete tracker user "${u.username}"? This cannot be undone.`)) return;
     try {
       const res = await trackerService.adminDeleteTrackerUser(u.id);
+      setConfirmDelete(null);
       flash(
-        res.deactivated
-          ? `"${u.username}" had history — deactivated instead`
-          : `"${u.username}" deleted`,
+        res.deactivated ? "User deactivated" : "User deleted",
+        res.deactivated ? `${u.username} has history, so the account was kept but switched off.` : u.username,
       );
       if (editingId === u.id) resetForm();
       load();
     } catch (err) {
-      flash(messageFrom(err, "Delete failed"));
+      flash("Could not delete the user", messageFrom(err, "The server refused the request."));
     }
   };
 
   const roleOptions = Object.entries(TRACKER_ROLE_LABELS);
 
   return (
-    <div className="trk-card">
-      <div className="trk-header trk-header--tight">
-        <h3 className="trk-heading-flush">Tracker users ({users.length})</h3>
-        <button className="trk-btn trk-btn-primary" onClick={openCreate}>
-          <HiPlusCircle /> Add User
-        </button>
-      </div>
+    <>
+      <Card className="overflow-hidden p-0">
+        <CardHeader className="mb-0 border-b border-line px-4 py-3">
+          <CardTitle>Tracker users ({users.length})</CardTitle>
+          <Button size="xs" variant="primary" onClick={openCreate}>
+            <HiOutlinePlus aria-hidden="true" /> Add user
+          </Button>
+        </CardHeader>
 
-      <Dialog
-        open={Boolean(showModal)}
-        onOpenChange={(next) => {
-          if (!next) resetForm();
-        }}
-      >
+        <div className="overflow-x-auto">
+          <Table density="compact">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Username</TableHead>
+                <TableHead>Name</TableHead>
+                <TableHead>Role</TableHead>
+                <TableHead>Email</TableHead>
+                <TableHead>Phone</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {users.length === 0 ? (
+                <TableEmpty colSpan={7}>No tracker users yet.</TableEmpty>
+              ) : (
+                users.map((u) => (
+                  <TableRow key={u.id} className={cn(!u.is_active && "opacity-60")}>
+                    <TableCell className="font-medium text-ink">{u.username}</TableCell>
+                    <TableCell>{u.name}</TableCell>
+                    <TableCell>
+                      <Badge tone="info" outlined>
+                        {u.role_display || TRACKER_ROLE_LABELS[u.role] || u.role}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>{u.email || "—"}</TableCell>
+                    <TableCell>{u.phone || "—"}</TableCell>
+                    <TableCell>
+                      <Badge tone={u.is_active ? "ok" : "bad"} outlined>
+                        {u.is_active ? "Active" : "Inactive"}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="w-px">
+                      <div className="flex flex-nowrap justify-end gap-1">
+                        <Button variant="ghost" size="xs" onClick={() => startEdit(u)}>
+                          <HiOutlinePencilSquare aria-hidden="true" /> Edit
+                        </Button>
+                        <Button variant="danger" size="xs" onClick={() => setConfirmDelete(u)}>
+                          <HiOutlineTrash aria-hidden="true" /> Delete
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      </Card>
+
+      <Dialog open={showModal} onOpenChange={(next) => !next && resetForm()}>
         {showModal && (
-          <DialogContent title="Tracker user">
+          <DialogContent title="Tracker user" size="lg">
             <DialogHeader>
               <DialogTitle>
-                {editingId ? `Edit user "${draft.username}"` : "Add a tracker user"}
+                {editingId ? `Edit user ${draft.username}` : "Add a tracker user"}
               </DialogTitle>
             </DialogHeader>
             <DialogBody>
-              <div className="trk-form-grid">
-                <div className="trk-field">
-                  <label>Username</label>
-                  <input
-                    aria-label="Username"
-                    value={draft.username}
-                    disabled={!!editingId}
-                    onChange={(e) => setDraft({ ...draft, username: e.target.value })}
-                  />
-                </div>
-                <div className="trk-field">
-                  <label>Full name</label>
-                  <input
-                    aria-label="Full name"
-                    value={draft.name}
-                    onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                  />
-                </div>
-                <div className="trk-field">
-                  <label>{editingId ? "New password (leave blank to keep)" : "Password"}</label>
-                  <input
-                    type="password"
-                    aria-label={editingId ? "New password (leave blank to keep)" : "Password"}
-                    value={draft.password}
-                    placeholder={editingId ? "Leave blank to keep current" : ""}
-                    onChange={(e) => setDraft({ ...draft, password: e.target.value })}
-                  />
-                </div>
-                <div className="trk-field">
-                  <label>Role</label>
-                  <select
-                    aria-label="Role"
-                    value={draft.role}
-                    onChange={(e) => setDraft({ ...draft, role: e.target.value })}
-                  >
-                    {roleOptions.map(([val, label]) => (
-                      <option key={val} value={val}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="trk-field">
-                  <label>Email (optional)</label>
-                  <input
-                    aria-label="Email (optional)"
-                    value={draft.email}
-                    onChange={(e) => setDraft({ ...draft, email: e.target.value })}
-                  />
-                </div>
-                <div className="trk-field">
-                  <label>Phone (optional)</label>
-                  <input
-                    aria-label="Phone (optional)"
-                    value={draft.phone}
-                    onChange={(e) => setDraft({ ...draft, phone: e.target.value })}
-                  />
-                </div>
-                {editingId && (
-                  <div className="trk-field">
-                    <label>Status</label>
-                    <select
-                      aria-label="Status"
-                      value={draft.is_active ? "1" : "0"}
-                      onChange={(e) => setDraft({ ...draft, is_active: e.target.value === "1" })}
+              <FormGrid>
+                <Field label="Username" required={!editingId}>
+                  {(c) => (
+                    <Input
+                      {...c}
+                      value={draft.username}
+                      disabled={!!editingId}
+                      onChange={(e) => setDraft({ ...draft, username: e.target.value })}
+                    />
+                  )}
+                </Field>
+                <Field label="Full name">
+                  {(c) => (
+                    <Input
+                      {...c}
+                      value={draft.name}
+                      onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                    />
+                  )}
+                </Field>
+                <Field
+                  label={editingId ? "New password" : "Password"}
+                  required={!editingId}
+                  hint={editingId ? "Leave blank to keep the current one." : undefined}
+                >
+                  {(c) => (
+                    <Input
+                      {...c}
+                      type="password"
+                      value={draft.password}
+                      onChange={(e) => setDraft({ ...draft, password: e.target.value })}
+                    />
+                  )}
+                </Field>
+                <Field label="Role">
+                  {(c) => (
+                    <Select
+                      {...c}
+                      value={draft.role}
+                      onChange={(e) => setDraft({ ...draft, role: e.target.value })}
                     >
-                      <option value="1">Active</option>
-                      <option value="0">Inactive</option>
-                    </select>
-                  </div>
+                      {roleOptions.map(([val, label]) => (
+                        <option key={val} value={val}>
+                          {label}
+                        </option>
+                      ))}
+                    </Select>
+                  )}
+                </Field>
+                <Field label="Email" hint="Optional.">
+                  {(c) => (
+                    <Input
+                      {...c}
+                      type="email"
+                      value={draft.email}
+                      onChange={(e) => setDraft({ ...draft, email: e.target.value })}
+                    />
+                  )}
+                </Field>
+                <Field label="Phone" hint="Optional.">
+                  {(c) => (
+                    <Input
+                      {...c}
+                      value={draft.phone}
+                      onChange={(e) => setDraft({ ...draft, phone: e.target.value })}
+                    />
+                  )}
+                </Field>
+                {editingId && (
+                  <Field label="Status">
+                    {(c) => (
+                      <Select
+                        {...c}
+                        value={draft.is_active ? "1" : "0"}
+                        onChange={(e) => setDraft({ ...draft, is_active: e.target.value === "1" })}
+                      >
+                        <option value="1">Active</option>
+                        <option value="0">Inactive</option>
+                      </Select>
+                    )}
+                  </Field>
                 )}
-              </div>
+              </FormGrid>
             </DialogBody>
             <DialogFooter>
-              <button className="trk-btn trk-btn-ghost" onClick={resetForm}>
-                Cancel
-              </button>
-              <button className="trk-btn trk-btn-primary" onClick={save} disabled={saving}>
+              <Button onClick={resetForm}>Cancel</Button>
+              <Button
+                variant="primary"
+                onClick={() => void save()}
+                disabled={saving || !canSave}
+                title={canSave ? undefined : "A username and password are required."}
+              >
                 {editingId ? (
                   <>
-                    <HiCheck /> {saving ? "Saving…" : "Save changes"}
+                    <HiOutlineCheck aria-hidden="true" /> {saving ? "Saving…" : "Save changes"}
                   </>
                 ) : (
                   <>
-                    <HiPlusCircle /> {saving ? "Creating…" : "Create user"}
+                    <HiOutlinePlus aria-hidden="true" /> {saving ? "Creating…" : "Create user"}
                   </>
                 )}
-              </button>
+              </Button>
             </DialogFooter>
           </DialogContent>
         )}
       </Dialog>
 
-      <div className="trk-table-wrap">
-        <Table density="compact">
-          <TableHeader>
-            <TableRow>
-              <TableHead>Username</TableHead>
-              <TableHead>Name</TableHead>
-              <TableHead>Role</TableHead>
-              <TableHead>Email</TableHead>
-              <TableHead>Phone</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead></TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {users.map((u) => (
-              <TableRow key={u.id} className={u.is_active ? "" : "trk-row-locked"}>
-                <TableCell>{u.username}</TableCell>
-                <TableCell>{u.name}</TableCell>
-                <TableCell>
-                  <Badge tone="info" outlined>
-                    {u.role_display || TRACKER_ROLE_LABELS[u.role] || u.role}
-                  </Badge>
-                </TableCell>
-                <TableCell>{u.email || "-"}</TableCell>
-                <TableCell>{u.phone || "-"}</TableCell>
-                <TableCell>
-                  {u.is_active ? (
-                    <Badge tone="ok" outlined>
-                      Active
-                    </Badge>
-                  ) : (
-                    <Badge tone="bad" outlined>
-                      Inactive
-                    </Badge>
-                  )}
-                </TableCell>
-                <TableCell className="trk-row-actions">
-                  <button
-                    className="trk-btn trk-btn-ghost trk-btn--sm"
-                    onClick={() => startEdit(u)}
-                  >
-                    <HiPencilSquare /> Edit
-                  </button>
-                  <button
-                    className="trk-btn trk-btn-danger trk-btn--sm"
-                    onClick={() => remove(u)}
-                  >
-                    <HiTrash /> Delete
-                  </button>
-                </TableCell>
-              </TableRow>
-            ))}
-            {users.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={7}>
-                  <div className="trk-empty">No tracker users yet.</div>
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </div>
-    </div>
+      <Dialog
+        open={Boolean(confirmDelete)}
+        onOpenChange={(next) => !next && setConfirmDelete(null)}
+      >
+        {confirmDelete && (
+          <DialogContent title="Delete tracker user" size="sm">
+            <DialogHeader>
+              <DialogTitle>Delete {confirmDelete.username}?</DialogTitle>
+            </DialogHeader>
+            <DialogBody>
+              <p className="m-0 text-[13px] text-body">
+                If this user has acted on any invoice the account is deactivated instead, so the
+                history keeps its author.
+              </p>
+            </DialogBody>
+            <DialogFooter>
+              <Button onClick={() => setConfirmDelete(null)}>Cancel</Button>
+              <Button variant="danger" onClick={() => void remove(confirmDelete)}>
+                <HiOutlineTrash aria-hidden="true" /> Delete user
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        )}
+      </Dialog>
+    </>
   );
 }

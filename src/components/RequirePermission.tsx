@@ -44,7 +44,7 @@ import { useAuth } from "../auth";
 export default function RequirePermission({
   permission,
   children,
-  redirectTo = "/Dashboard",
+  redirectTo = "/Home",
   fallback = null,
 }: {
   /** An `extra_pages` grant key, or several — any one of them admits. */

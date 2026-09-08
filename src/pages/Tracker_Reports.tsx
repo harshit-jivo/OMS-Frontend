@@ -1,3 +1,6 @@
+/**
+ * Tracker reports — turnaround, bottlenecks and ageing across the flow.
+ */
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -11,24 +14,58 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { HiArrowDownTray, HiClock, HiExclamationTriangle, HiCheckCircle, HiInboxStack } from "react-icons/hi2";
+import {
+  HiOutlineArrowDownTray,
+  HiOutlineCheckCircle,
+  HiOutlineClock,
+  HiOutlineExclamationTriangle,
+  HiOutlineFunnel,
+  HiOutlineInboxStack,
+} from "react-icons/hi2";
+
+import { Badge } from "@/components/ui/badge";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { Button } from "@/components/ui/button";
+import {
+  FilterActions,
+  FilterBar,
+  FilterDate,
+  FilterSelect,
+} from "@/components/ui/filter-bar";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  EmptyState,
+  Page,
+  PageHeader,
+  Stat,
+  StatRow,
+} from "@/components/ui/page";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableEmpty,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { showToast } from "@/lib/toastStore";
 // SheetJS (422 kB) is fetched when the user asks for the export, not when
 // the report page opens — see utils/xlsxLoader.ts.
 import { loadXlsx } from "../utils/xlsxLoader";
 import trackerService from "../services/trackerService";
 import type { ReportFilters } from "../services/trackerService";
-import "../styles/Tracker.css";
-import { Badge } from "@/components/ui/badge";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 
+// Green → amber → orange → red, oldest bucket reddest.
 const AGE_COLORS = ["#10b981", "#f59e0b", "#f97316", "#ef4444"];
+
+// Chart chrome, matched to the tokens the rest of the app draws with.
+const GRID = "#eef0f3";
+const BRAND = "#2563eb";
+const BAD = "#ef4444";
 
 export default function Tracker_Reports() {
   // Draft vs applied, as on Tracker_Invoices: `applied` IS the query key, so
@@ -55,184 +92,272 @@ export default function Tracker_Reports() {
     if (!data) return;
     const XLSX = await loadXlsx();
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb,
-      XLSX.utils.json_to_sheet([data.summary]), "Summary");
-    XLSX.utils.book_append_sheet(wb,
-      XLSX.utils.json_to_sheet(data.pending_by_stage), "Pending");
-    XLSX.utils.book_append_sheet(wb,
-      XLSX.utils.json_to_sheet(data.avg_days_per_stage), "Avg Days");
-    XLSX.utils.book_append_sheet(wb,
-      XLSX.utils.json_to_sheet(data.bottleneck_by_person), "By Person");
-    XLSX.utils.book_append_sheet(wb,
-      XLSX.utils.json_to_sheet(data.bottleneck_by_vendor), "By Vendor");
-    XLSX.utils.book_append_sheet(wb,
-      XLSX.utils.json_to_sheet(data.bottleneck_by_category), "By Category");
-    XLSX.utils.book_append_sheet(wb,
-      XLSX.utils.json_to_sheet(data.ageing), "Ageing");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([data.summary]), "Summary");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data.pending_by_stage), "Pending");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data.avg_days_per_stage), "Avg Days");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data.bottleneck_by_person), "By Person");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data.bottleneck_by_vendor), "By Vendor");
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.json_to_sheet(data.bottleneck_by_category),
+      "By Category",
+    );
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data.ageing), "Ageing");
     XLSX.writeFile(wb, "tracker-report.xlsx");
+    showToast({ title: "Report exported", message: "tracker-report.xlsx" });
   };
 
   const setF = (k: keyof ReportFilters, v: string | number) =>
     setFilters((f) => ({ ...f, [k]: v || undefined }));
 
-  const kpi = (icon: React.ReactNode, label: string, value: React.ReactNode, tone: string) => (
-    <div className="trk-card trk-kpi">
-      <div className="trk-kpi-body">
-        <div className="trk-kpi-icon" style={{ color: tone }}>{icon}</div>
-        <div>
-          <div className="trk-kpi-value">{value}</div>
-          <div className="trk-sub">{label}</div>
-        </div>
-      </div>
-    </div>
-  );
-
   return (
-    <div className="trk-page">
-      <div className="trk-header">
-        <div>
-          <h1>Tracker Reports</h1>
-          <div className="trk-sub">Turnaround, bottlenecks and ageing across the invoice flow.</div>
-        </div>
-        <button className="trk-btn trk-btn-success" onClick={exportExcel} disabled={!data}>
-          <HiArrowDownTray /> Export to Excel
-        </button>
-      </div>
+    <Page>
+      <Breadcrumbs items={[{ label: "Tracker" }, { label: "Reports" }]} />
 
-      {/* Filters */}
-      <div className="trk-actionbar trk-actionbar--filters">
-        <div className="trk-field trk-field--tight">
-          <label className="trk-label-xs">From</label>
-          <input aria-label="From" type="date" value={filters.from || ""} onChange={(e) => setF("from", e.target.value)} />
-        </div>
-        <div className="trk-field trk-field--tight">
-          <label className="trk-label-xs">To</label>
-          <input aria-label="To" type="date" value={filters.to || ""} onChange={(e) => setF("to", e.target.value)} />
-        </div>
-        <div className="trk-field trk-field--tight">
-          <label className="trk-label-xs">Branch</label>
-          <select aria-label="Branch" value={filters.branch || ""} onChange={(e) => setF("branch", Number(e.target.value))}>
-            <option value="">All branches</option>
-            {lookups?.branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-          </select>
-        </div>
-        <div className="trk-field trk-field--tight">
-          <label className="trk-label-xs">Unit</label>
-          <select aria-label="Unit" value={filters.unit || ""} onChange={(e) => setF("unit", Number(e.target.value))}>
-            <option value="">All units</option>
-            {lookups?.units.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-          </select>
-        </div>
-        <div className="trk-field trk-field--tight">
-          <label className="trk-label-xs">Category</label>
-          <select aria-label="Category" value={filters.category || ""} onChange={(e) => setF("category", Number(e.target.value))}>
-            <option value="">All categories</option>
-            {lookups?.categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-        </div>
-        <button className="trk-btn trk-btn-primary" onClick={() => load()}>Apply</button>
-        <button className="trk-btn trk-btn-ghost" onClick={() => { setFilters({}); load({}); }}>Reset</button>
-      </div>
+      <PageHeader
+        title="Tracker Reports"
+        description="Turnaround, bottlenecks and ageing across the invoice flow."
+        actions={
+          <Button onClick={() => void exportExcel()} disabled={!data}>
+            <HiOutlineArrowDownTray aria-hidden="true" /> Export Excel
+          </Button>
+        }
+      />
+
+      <FilterBar>
+        <FilterDate
+          label="From"
+          value={filters.from || ""}
+          onChange={(e) => setF("from", e.target.value)}
+        />
+        <FilterDate label="To" value={filters.to || ""} onChange={(e) => setF("to", e.target.value)} />
+        <FilterSelect
+          label="Branch"
+          value={filters.branch || ""}
+          onChange={(e) => setF("branch", Number(e.target.value))}
+        >
+          <option value="">All branches</option>
+          {lookups?.branches.map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.name}
+            </option>
+          ))}
+        </FilterSelect>
+        <FilterSelect
+          label="Unit"
+          value={filters.unit || ""}
+          onChange={(e) => setF("unit", Number(e.target.value))}
+        >
+          <option value="">All units</option>
+          {lookups?.units.map((u) => (
+            <option key={u.id} value={u.id}>
+              {u.name}
+            </option>
+          ))}
+        </FilterSelect>
+        <FilterSelect
+          label="Category"
+          value={filters.category || ""}
+          onChange={(e) => setF("category", Number(e.target.value))}
+        >
+          <option value="">All categories</option>
+          {lookups?.categories.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </FilterSelect>
+        <FilterActions>
+          <Button variant="primary" onClick={() => load()}>
+            <HiOutlineFunnel aria-hidden="true" /> Apply
+          </Button>
+          <Button
+            variant="ghost"
+            onClick={() => {
+              setFilters({});
+              load({});
+            }}
+          >
+            Reset
+          </Button>
+        </FilterActions>
+      </FilterBar>
 
       {loading || !data ? (
-        <div className="trk-card"><div className="trk-empty">Loading…</div></div>
+        <>
+          <StatRow>
+            <Stat label="In progress" value="" loading />
+            <Stat label="Completed" value="" loading />
+            <Stat label="Overdue" value="" loading />
+            <Stat label="Avg cycle (days)" value="" loading />
+          </StatRow>
+          <Card>
+            <Skeleton className="h-[280px] w-full" />
+          </Card>
+        </>
       ) : (
         <>
-          {/* KPIs */}
-          <div className="trk-kpi-row">
-            {kpi(<HiInboxStack />, "In progress", data.summary.in_progress, "#4f46e5")}
-            {kpi(<HiCheckCircle />, "Completed", data.summary.completed, "#059669")}
-            {kpi(<HiExclamationTriangle />, "Overdue", data.summary.overdue, "#dc2626")}
-            {kpi(<HiClock />, "Avg cycle (days)", data.summary.avg_cycle_days, "#d97706")}
-          </div>
+          <StatRow>
+            <Stat
+              label="In progress"
+              value={data.summary.in_progress}
+              icon={HiOutlineInboxStack}
+              tone="brand"
+            />
+            <Stat
+              label="Completed"
+              value={data.summary.completed}
+              icon={HiOutlineCheckCircle}
+              tone="ok"
+            />
+            <Stat
+              label="Overdue"
+              value={data.summary.overdue}
+              icon={HiOutlineExclamationTriangle}
+              tone={data.summary.overdue ? "bad" : "neutral"}
+            />
+            <Stat
+              label="Avg cycle (days)"
+              value={data.summary.avg_cycle_days}
+              icon={HiOutlineClock}
+              tone="hold"
+            />
+          </StatRow>
 
-          {/* Avg days per stage */}
-          <div className="trk-card">
-            <h3 className="trk-heading-top">Average days per stage</h3>
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={data.avg_days_per_stage} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#eef0f3" />
-                <XAxis dataKey="stage_name" fontSize={11} interval={0} angle={-15} textAnchor="end" height={60} />
-                <YAxis fontSize={11} />
-                <Tooltip />
-                <Bar dataKey="avg_days" name="Avg days" fill="#4f46e5" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+          <Card>
+            <CardHeader>
+              <CardTitle>Average days per stage</CardTitle>
+            </CardHeader>
+            {data.avg_days_per_stage.length === 0 ? (
+              <EmptyState title="No stage timings yet" className="py-10" />
+            ) : (
+              <ResponsiveContainer width="100%" height={280}>
+                <BarChart
+                  data={data.avg_days_per_stage}
+                  margin={{ top: 8, right: 16, bottom: 8, left: 0 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke={GRID} />
+                  <XAxis
+                    dataKey="stage_name"
+                    fontSize={11}
+                    interval={0}
+                    angle={-15}
+                    textAnchor="end"
+                    height={60}
+                  />
+                  <YAxis fontSize={11} />
+                  <Tooltip />
+                  <Bar dataKey="avg_days" name="Avg days" fill={BRAND} radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </Card>
 
-          {/* Pending per stage */}
-          <div className="trk-card">
-            <h3 className="trk-heading-top">Pending invoices per stage</h3>
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={data.pending_by_stage} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#eef0f3" />
-                <XAxis dataKey="stage_name" fontSize={11} interval={0} angle={-15} textAnchor="end" height={60} />
-                <YAxis fontSize={11} allowDecimals={false} />
-                <Tooltip />
-                <Legend />
-                <Bar dataKey="count" name="Pending" fill="#6366f1" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="overdue" name="Overdue" fill="#ef4444" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+          <Card>
+            <CardHeader>
+              <CardTitle>Pending invoices per stage</CardTitle>
+            </CardHeader>
+            {data.pending_by_stage.length === 0 ? (
+              <EmptyState title="Nothing pending at any stage" className="py-10" />
+            ) : (
+              <ResponsiveContainer width="100%" height={280}>
+                <BarChart
+                  data={data.pending_by_stage}
+                  margin={{ top: 8, right: 16, bottom: 8, left: 0 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke={GRID} />
+                  <XAxis
+                    dataKey="stage_name"
+                    fontSize={11}
+                    interval={0}
+                    angle={-15}
+                    textAnchor="end"
+                    height={60}
+                  />
+                  <YAxis fontSize={11} allowDecimals={false} />
+                  <Tooltip />
+                  <Legend />
+                  <Bar dataKey="count" name="Pending" fill={BRAND} radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="overdue" name="Overdue" fill={BAD} radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </Card>
 
-          {/* Ageing */}
-          <div className="trk-card">
-            <h3 className="trk-heading-top">Ageing of open invoices</h3>
-            <ResponsiveContainer width="100%" height={240}>
-              <BarChart data={data.ageing} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#eef0f3" />
-                <XAxis dataKey="bucket" fontSize={12} />
-                <YAxis fontSize={11} allowDecimals={false} />
-                <Tooltip />
-                <Bar dataKey="count" name="Open invoices" radius={[4, 4, 0, 0]}>
-                  {data.ageing.map((_, i) => <Cell key={i} fill={AGE_COLORS[i % AGE_COLORS.length]} />)}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+          <Card>
+            <CardHeader>
+              <CardTitle>Ageing of open invoices</CardTitle>
+            </CardHeader>
+            {data.ageing.length === 0 ? (
+              <EmptyState title="No open invoices" className="py-10" />
+            ) : (
+              <ResponsiveContainer width="100%" height={240}>
+                <BarChart data={data.ageing} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={GRID} />
+                  <XAxis dataKey="bucket" fontSize={12} />
+                  <YAxis fontSize={11} allowDecimals={false} />
+                  <Tooltip />
+                  <Bar dataKey="count" name="Open invoices" radius={[4, 4, 0, 0]}>
+                    {data.ageing.map((_, i) => (
+                      <Cell key={i} fill={AGE_COLORS[i % AGE_COLORS.length]} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </Card>
 
-          {/* Bottleneck tables */}
-          <div className="trk-report-grid">
+          <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(320px,1fr))] sm:gap-6">
             <BottleneckTable title="Slowest people" rows={data.bottleneck_by_person} keyLabel="Person" />
             <BottleneckTable title="Slowest vendors" rows={data.bottleneck_by_vendor} keyLabel="Vendor" />
             <BottleneckTable title="By category" rows={data.bottleneck_by_category} keyLabel="Category" />
           </div>
         </>
       )}
-    </div>
+    </Page>
   );
 }
 
 function BottleneckTable({
-  title, rows, keyLabel,
-}: { title: string; rows: { key: string; avg_days: number; visits: number }[]; keyLabel: string }) {
+  title,
+  rows,
+  keyLabel,
+}: {
+  title: string;
+  rows: { key: string; avg_days: number; visits: number }[];
+  keyLabel: string;
+}) {
   return (
-    <div className="trk-card">
-      <h3 className="trk-heading-top">{title}</h3>
-      <div className="trk-table-wrap">
-        <Table density="compact">
-          <TableHeader>
-            <TableRow><TableHead>{keyLabel}</TableHead><TableHead>Avg days</TableHead><TableHead>Visits</TableHead></TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.slice(0, 10).map((r, i) => (
+    <Card className="overflow-hidden p-0">
+      <CardHeader className="mb-0 border-b border-line px-4 py-3">
+        <CardTitle>{title}</CardTitle>
+      </CardHeader>
+      <Table density="compact">
+        <TableHeader>
+          <TableRow>
+            <TableHead>{keyLabel}</TableHead>
+            <TableHead>Avg days</TableHead>
+            <TableHead className="text-right">Visits</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.length === 0 ? (
+            <TableEmpty colSpan={3}>No data.</TableEmpty>
+          ) : (
+            rows.slice(0, 10).map((r, i) => (
               <TableRow key={i}>
-                <TableCell>{r.key}</TableCell>
+                <TableCell className="font-medium text-ink">{r.key}</TableCell>
                 <TableCell>
                   <Badge tone={r.avg_days > 5 ? "bad" : r.avg_days > 3 ? "hold" : "ok"} outlined>
                     {r.avg_days}
                   </Badge>
                 </TableCell>
-                <TableCell>{r.visits}</TableCell>
+                <TableCell className="text-right tabular-nums">{r.visits}</TableCell>
               </TableRow>
-            ))}
-            {rows.length === 0 && (
-              <TableRow><TableCell colSpan={3}><div className="trk-empty">No data.</div></TableCell></TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </div>
-    </div>
+            ))
+          )}
+        </TableBody>
+      </Table>
+    </Card>
   );
 }

@@ -1,15 +1,34 @@
 /**
- * The "Visual Overview" panel: Top Parties list, the role-aware progress
- * card, and the order-status pie + legend. Moved verbatim out of
- * `Dashboard.tsx` (Phase 4 decomposition) — see `useDashboard` for the state
- * and derivations this reads.
+ * The "Visual Overview" panel: Top Parties, the role-aware progress card, and
+ * the order-status pie with its legend.
+ *
+ * One `Card` holding three inner panels, where it was `.db-panel` holding
+ * `.db-overview-card`s. The inner ones stay visually lighter than the outer —
+ * a bordered surface on `bg-surface` rather than another shadowed card —
+ * because three shadowed cards inside a shadowed card is four levels of
+ * elevation for two levels of meaning.
  */
-import { FiChevronDown, FiChevronUp } from "react-icons/fi";
+import { HiChevronDown, HiChevronUp } from "react-icons/hi2";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 
+import { Badge } from "@/components/ui/badge";
+import { Card, CardHeader, CardTitle } from "@/components/ui/page";
+import { cn } from "@/lib/utils";
 import { TOP_PARTY_VIEW_OPTIONS } from "../constants";
 import { fmt } from "../format";
 import type { DashboardState } from "../useDashboard";
+
+/** The inner surface the three overview cards share. */
+const panelClass = "flex min-w-0 flex-col rounded-card border border-line bg-surface p-3.5";
+
+/** "No data" said quietly, in place, at the size of the thing it replaces. */
+function NoData({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="m-0 flex flex-1 items-center justify-center py-6 text-center text-[12.5px] text-subtle">
+      {children}
+    </p>
+  );
+}
 
 export default function VisualOverviewPanel({ dashboard }: { dashboard: DashboardState }) {
   const {
@@ -39,152 +58,189 @@ export default function VisualOverviewPanel({ dashboard }: { dashboard: Dashboar
     setShowMoreStatuses,
   } = dashboard;
 
+  const progressTitle = isReviewRole
+    ? "Review Completion"
+    : role === "manager"
+      ? "Order Momentum"
+      : role === "admin"
+        ? "Order Throughput"
+        : "Handling Progress";
+
+  const progressHero = isReviewRole
+    ? fmt(overviewHandledCount)
+    : role === "manager" || role === "admin"
+      ? fmt(overviewTotalCount)
+      : `${overviewRate}%`;
+
   return (
-    <div className="db-panel db-panel--overview">
-      <div className="db-highlights-head">
-        <div>
-          <div className="db-panel-title">Visual Overview</div>
-          <div className="db-highlights-subtitle">
+    <Card>
+      <CardHeader>
+        <div className="min-w-0">
+          <CardTitle>Visual Overview</CardTitle>
+          <p className="m-0 mt-0.5 text-[12px] text-subtle">
             Quick chart summaries for {roleMeta.focus.toLowerCase()}
-          </div>
+          </p>
         </div>
-        <div className="db-highlights-actions">
-          <div className="db-highlights-badge">{showTopParties ? "3 charts" : "2 charts"}</div>
-        </div>
-      </div>
-      <div className={`db-overview-grid${showTopParties ? "" : " db-overview-grid--two"}`}>
+        <Badge tone="info">{showTopParties ? "3 charts" : "2 charts"}</Badge>
+      </CardHeader>
+
+      <div
+        className={cn(
+          "grid gap-3",
+          showTopParties ? "lg:grid-cols-3" : "lg:grid-cols-2",
+        )}
+      >
         {showTopParties && (
-          <div className="db-overview-card db-overview-card--pulse">
-            <div className="db-overview-top db-overview-top--compact">
-              <div>
-                <div className="db-highlight-label">Top Parties</div>
-                <div className="db-highlight-sub">
+          <section className={panelClass}>
+            <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+              <div className="min-w-0">
+                <h3 className="m-0 text-[13px] font-semibold text-ink">Top Parties</h3>
+                <p className="m-0 mt-0.5 text-[11.5px] leading-snug text-subtle">
                   {topParty
                     ? `${topParty.card_name} (${topParty.category || "Unknown"}) leads with ${fmt(topParty.count)} orders (${fmt(topParty.completed_count ?? 0)} completed)`
                     : "No party data available"}
-                </div>
+                </p>
               </div>
-              <div className="db-chart-controls">
-                <div className="db-segmented-control" role="tablist" aria-label="Top parties view">
-                  {TOP_PARTY_VIEW_OPTIONS.map((option) => (
+              <div
+                className="inline-flex shrink-0 items-center gap-0.5 rounded-sm border border-line bg-card p-0.5"
+                role="tablist"
+                aria-label="Top parties view"
+              >
+                {TOP_PARTY_VIEW_OPTIONS.map((option) => {
+                  const selected = topPartyView === option.value;
+                  return (
                     <button
                       key={option.label}
                       type="button"
-                      className={`db-segmented-btn${topPartyView === option.value ? " is-active" : ""}`}
+                      role="tab"
+                      aria-selected={selected}
+                      // `cn`, not a join: `bg-transparent` from the reset and
+                      // `bg-brand` from the selected state are the same
+                      // utility group, and the loser has to be dropped rather
+                      // than left to emission order.
+                      className={cn(
+                        "appearance-none border-0 bg-transparent [font-family:inherit] cursor-pointer",
+                        "rounded-[5px] px-2 py-1 text-[11.5px] font-semibold transition-colors",
+                        "focus-visible:outline-none focus-visible:shadow-focus",
+                        selected
+                          ? "bg-brand text-white"
+                          : "text-subtle hover:bg-surface hover:text-body",
+                      )}
                       onClick={() => setTopPartyView(option.value)}
                     >
                       {option.label}
                     </button>
-                  ))}
-                </div>
+                  );
+                })}
               </div>
             </div>
+
             {topParties.length === 0 ? (
-              <div className="db-no-data db-no-data--short">No party data for this period</div>
+              <NoData>No party data for this period</NoData>
             ) : (
-              <div className="db-party-list db-party-list--spacious">
+              <ol className="m-0 flex list-none flex-col gap-2 p-0">
                 {visibleTopParties.map((item, index) => (
-                  <div
+                  <li
                     key={`${item.card_code}-${item.category || "Unknown"}`}
-                    className="db-party-list-item db-party-list-item--detailed"
+                    className="flex items-start gap-2.5"
                   >
-                    <span className="db-party-list-badge">{index + 1}</span>
-                    <div className="db-party-list-details">
-                      <span className="db-party-list-name db-party-list-name--wrap">
+                    <span className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-brand-soft text-[11px] font-bold text-brand">
+                      {index + 1}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="m-0 break-words text-[12.5px] font-semibold text-ink">
                         {item.card_name}
-                      </span>
-                      <span className="db-party-list-code">
+                      </p>
+                      <p className="m-0 mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-subtle">
                         {item.card_code}
-                        <span className="db-party-category-chip">{item.category || "Unknown"}</span>
-                      </span>
+                        <Badge tone="neutral">{item.category || "Unknown"}</Badge>
+                      </p>
                     </div>
-                    <div className="db-party-figures">
-                      <span className="db-party-list-count db-party-list-count--detailed">
+                    <div className="shrink-0 text-right">
+                      <p className="m-0 text-[12.5px] font-semibold tabular-nums text-ink">
                         {fmt(item.count)} orders
-                      </span>
+                      </p>
                       {item.completed_count != null && (
-                        <div className="db-party-completed">{fmt(item.completed_count)} completed</div>
+                        <p className="m-0 text-[11px] tabular-nums text-ok">
+                          {fmt(item.completed_count)} completed
+                        </p>
                       )}
                     </div>
-                  </div>
+                  </li>
                 ))}
-              </div>
+              </ol>
             )}
-          </div>
+          </section>
         )}
 
-        <div className="db-overview-card db-overview-card--progress">
-          <div className="db-overview-top">
-            <div>
-              <div className="db-highlight-label">
-                {isReviewRole
-                  ? "Review Completion"
-                  : role === "manager"
-                    ? "Order Momentum"
-                    : role === "admin"
-                      ? "Order Throughput"
-                      : "Handling Progress"}
-              </div>
-              <div className="db-overview-hero">
-                {isReviewRole
-                  ? fmt(overviewHandledCount)
-                  : role === "manager" || role === "admin"
-                    ? fmt(overviewTotalCount)
-                    : `${overviewRate}%`}
-              </div>
-              <div className="db-highlight-sub">
-                {isReviewRole
+        <section className={panelClass}>
+          <h3 className="m-0 text-[13px] font-semibold text-ink">{progressTitle}</h3>
+          <p className="m-0 mt-1 text-3xl font-bold leading-none tracking-[-0.02em] tabular-nums text-ink">
+            {progressHero}
+          </p>
+          <p className="m-0 mt-1 text-[11.5px] leading-snug text-subtle">
+            {isReviewRole
+              ? overviewTotalCount > 0
+                ? `${fmt(overviewPendingCount)} ${role === "approver" ? "pending approval" : "pending review"} in ${selectedPeriodLabel}`
+                : `No ${role === "approver" ? "rate approval" : "audit"} data for ${selectedPeriodLabel}`
+              : role === "manager"
+                ? overviewTotalCount > 0
+                  ? `${fmt(overviewAcceptedCount)} completed or approved in ${selectedPeriodLabel}`
+                  : `No orders for ${selectedPeriodLabel}`
+                : role === "admin"
                   ? overviewTotalCount > 0
-                    ? `${fmt(overviewPendingCount)} ${role === "approver" ? "pending approval" : "pending review"} in ${selectedPeriodLabel}`
-                    : `No ${role === "approver" ? "rate approval" : "audit"} data for ${selectedPeriodLabel}`
-                  : role === "manager"
-                    ? overviewTotalCount > 0
-                      ? `${fmt(overviewAcceptedCount)} completed or approved in ${selectedPeriodLabel}`
-                      : `No orders for ${selectedPeriodLabel}`
-                    : role === "admin"
-                      ? overviewTotalCount > 0
-                        ? `${fmt(overviewHandledCount)} handled in ${selectedPeriodLabel}`
-                        : `No order activity for ${selectedPeriodLabel}`
-                      : overviewTotalCount > 0
-                        ? `${fmt(overviewPendingCount)} still waiting in billing queue for ${selectedPeriodLabel}`
-                        : `No billing activity for ${selectedPeriodLabel}`}
-              </div>
+                    ? `${fmt(overviewHandledCount)} handled in ${selectedPeriodLabel}`
+                    : `No order activity for ${selectedPeriodLabel}`
+                  : overviewTotalCount > 0
+                    ? `${fmt(overviewPendingCount)} still waiting in billing queue for ${selectedPeriodLabel}`
+                    : `No billing activity for ${selectedPeriodLabel}`}
+          </p>
+
+          <div className="mt-auto pt-4">
+            {/* A real progress bar, announced as one: the value is the point
+                and a decorative div says nothing to a screen reader. */}
+            <div
+              role="progressbar"
+              aria-valuenow={overviewRate}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-label={progressTitle}
+              className="h-1.5 w-full overflow-hidden rounded-full bg-surface-strong"
+            >
+              <div
+                className="h-full rounded-full bg-brand transition-[width] duration-300"
+                style={{ width: `${overviewRate}%` }}
+              />
             </div>
-          </div>
-          <div className="db-progress">
-            <div className="db-progress-bar">
-              <div className="db-progress-fill" style={{ width: `${overviewRate}%` }} />
-            </div>
-            <div className="db-progress-meta">
+            <div className="mt-1.5 flex items-center justify-between text-[11.5px] text-subtle">
               <span>
                 {isReviewRole
                   ? `${fmt(overviewPendingCount)} pending`
                   : role === "manager"
                     ? `${fmt(overviewAcceptedCount)} completed`
-                    : role === "admin"
-                      ? `${fmt(overviewHandledCount)} handled`
-                      : `${fmt(overviewHandledCount)} handled`}
+                    : `${fmt(overviewHandledCount)} handled`}
               </span>
-              <strong>
+              <strong className="font-semibold text-ink">
                 {isReviewRole
                   ? `${fmt(overviewHandledCount)} ${role === "approver" ? "decided" : "reviewed"}`
-                  : role === "manager" || role === "admin"
-                    ? `${fmt(overviewTotalCount)} total`
-                    : `${fmt(overviewTotalCount)} total`}
+                  : `${fmt(overviewTotalCount)} total`}
               </strong>
             </div>
           </div>
-        </div>
+        </section>
 
-        <div className="db-overview-card db-overview-card--summary">
-          <div className="db-overview-top db-overview-top--compact">
-            <div>
-              <div className="db-highlight-label">{chartCopy[role].statusTitle}</div>
-              <div className="db-highlight-sub">{chartCopy[role].statusSubtitle}</div>
-            </div>
+        <section className={cn(panelClass, "relative")}>
+          <div className="mb-1">
+            <h3 className="m-0 text-[13px] font-semibold text-ink">
+              {chartCopy[role].statusTitle}
+            </h3>
+            <p className="m-0 mt-0.5 text-[11.5px] leading-snug text-subtle">
+              {chartCopy[role].statusSubtitle}
+            </p>
           </div>
+
           {statusItems.length === 0 ? (
-            <div className="db-no-data">No data for this period</div>
+            <NoData>No data for this period</NoData>
           ) : (
             <>
               <ResponsiveContainer width="100%" height={130}>
@@ -202,7 +258,10 @@ export default function VisualOverviewPanel({ dashboard }: { dashboard: Dashboar
                       <Cell
                         key={item.status}
                         fill={getStatusColor(item)}
-                        className={`db-pie-cell${statusClickable ? " db-pie-cell--clickable" : ""}`}
+                        className={cn(
+                          "outline-none",
+                          statusClickable && "cursor-pointer",
+                        )}
                         onClick={statusClickable ? () => void openStatusOrders(item) : undefined}
                       />
                     ))}
@@ -210,46 +269,59 @@ export default function VisualOverviewPanel({ dashboard }: { dashboard: Dashboar
                   <Tooltip formatter={(value, name) => [value, name]} />
                 </PieChart>
               </ResponsiveContainer>
-              <div className="db-legend">
-                {statusDisplayItems.map((item) =>
-                  statusClickable ? (
+
+              <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1.5">
+                {statusDisplayItems.map((item) => {
+                  const content = (
+                    <>
+                      <span
+                        aria-hidden="true"
+                        className="size-2 shrink-0 rounded-full"
+                        style={{ background: getStatusColor(item) }}
+                      />
+                      <span className="text-[11.5px] text-body">{item.label}</span>
+                      <span className="text-[11.5px] font-semibold tabular-nums text-ink">
+                        {item.count}
+                      </span>
+                    </>
+                  );
+                  return statusClickable ? (
                     <button
                       key={item.status}
                       type="button"
-                      className="db-legend-item db-legend-item--clickable"
+                      className="flex appearance-none items-center gap-1.5 rounded-sm border-0 bg-transparent px-1 py-0.5 [font-family:inherit] cursor-pointer hover:bg-card focus-visible:outline-none focus-visible:shadow-focus"
                       onClick={() => void openStatusOrders(item)}
                       title={`View ${item.label} orders`}
                     >
-                      <span className="db-legend-dot" style={{ background: getStatusColor(item) }} />
-                      <span className="db-legend-label">{item.label}</span>
-                      <span className="db-legend-val">{item.count}</span>
+                      {content}
                     </button>
                   ) : (
-                    <div key={item.status} className="db-legend-item">
-                      <span className="db-legend-dot" style={{ background: getStatusColor(item) }} />
-                      <span className="db-legend-label">{item.label}</span>
-                      <span className="db-legend-val">{item.count}</span>
-                    </div>
-                  ),
-                )}
+                    <span key={item.status} className="flex items-center gap-1.5 px-1 py-0.5">
+                      {content}
+                    </span>
+                  );
+                })}
               </div>
+
               {hiddenStatusCount > 0 ? (
-                <div className="db-status-popover-wrap">
-                  <button
-                    type="button"
-                    className="db-status-popover-trigger"
-                    onClick={() => setShowMoreStatuses((current) => !current)}
-                    aria-label={`${showMoreStatuses ? "Hide" : "Show"} ${hiddenStatusCount} more statuses`}
-                    aria-expanded={showMoreStatuses}
-                  >
-                    {showMoreStatuses ? <FiChevronUp /> : <FiChevronDown />}
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  className="absolute right-2 top-2 appearance-none rounded-sm border-0 bg-transparent p-1 text-subtle [font-family:inherit] cursor-pointer hover:bg-card hover:text-ink focus-visible:outline-none focus-visible:shadow-focus"
+                  onClick={() => setShowMoreStatuses((current) => !current)}
+                  aria-label={`${showMoreStatuses ? "Hide" : "Show"} ${hiddenStatusCount} more statuses`}
+                  aria-expanded={showMoreStatuses}
+                >
+                  {showMoreStatuses ? (
+                    <HiChevronUp aria-hidden="true" className="size-4" />
+                  ) : (
+                    <HiChevronDown aria-hidden="true" className="size-4" />
+                  )}
+                </button>
               ) : null}
             </>
           )}
-        </div>
+        </section>
       </div>
-    </div>
+    </Card>
   );
 }

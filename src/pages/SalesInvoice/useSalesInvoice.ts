@@ -301,6 +301,34 @@ export const getCurrentUserId = (): number | null => Number(loadSession()?.userI
 // Every /api/hana/ endpoint requires it as a query param (OIL | BEVERAGE).
 export type InvoiceBranch = "OIL" | "BEVERAGE";
 
+/**
+ * Which invoice branches a user's assigned categories permit.
+ *
+ * The branch gate used to offer Oil and Beverage to everyone, so a user
+ * assigned only to Oil could pick Beverage and then work against a customer
+ * list, a price list and a stock position that were never theirs.
+ *
+ * MART and anything unrecognised map to NO branch, deliberately: Sales Invoice
+ * runs against Oil or Beverage only, and inventing a branch for a category the
+ * flow does not serve would be worse than asking.
+ *
+ * An EMPTY result means "these categories say nothing about the branch", which
+ * callers treat exactly like having no category at all: offer the full choice.
+ * That is the honest fallback — hiding both options would lock the user out of
+ * the page over a data gap.
+ */
+export const branchesForCategories = (categories: readonly string[]): InvoiceBranch[] => {
+  const branches = new Set<InvoiceBranch>();
+  for (const raw of categories) {
+    const name = String(raw).trim().toUpperCase();
+    if (name === "OIL") branches.add("OIL");
+    // The category master says BEVERAGES; the branch is BEVERAGE. Both are
+    // accepted so a rename on either side does not silently stop matching.
+    if (name === "BEVERAGE" || name === "BEVERAGES") branches.add("BEVERAGE");
+  }
+  return [...branches];
+};
+
 export const withBranch = (url: string, branch: string) =>
   `${url}${url.includes("?") ? "&" : "?"}branch=${encodeURIComponent(branch)}`;
 
@@ -558,8 +586,35 @@ const resolveDefaultAddress = (
 
 export function useSalesInvoice() {
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
-  // No branch selected yet → the wizard shows the branch gate and loads nothing.
-  const [branch, setBranch] = useState<InvoiceBranch | null>(null);
+
+  /*
+   * The branches this user's assigned categories permit. Read once: the
+   * session does not change under a mounted wizard, and re-reading would
+   * invite the branch to move out from under an invoice in progress.
+   *
+   * Empty = no usable category, which means the full choice (see
+   * branchesForCategories).
+   */
+  const allowedBranches = useMemo(
+    () => branchesForCategories(loadSession()?.categories ?? []),
+    [],
+  );
+
+  /*
+   * No branch selected yet → the wizard shows the branch gate and loads
+   * nothing.
+   *
+   * A user whose categories permit exactly ONE branch never sees that gate:
+   * the answer is already decided, so asking would be a question with a single
+   * option. A lazy initialiser rather than an effect — an effect would render
+   * the gate for a frame before replacing it, which reads as a flash.
+   */
+  const [branch, setBranch] = useState<InvoiceBranch | null>(() =>
+    allowedBranches.length === 1 ? allowedBranches[0] : null,
+  );
+
+  // Switching branch only makes sense when there is something to switch to.
+  const canChangeBranch = allowedBranches.length !== 1;
 
   // Keep the module-scoped mirror (used by hanaUrl in nested pickers) in sync.
   useEffect(() => {
@@ -811,7 +866,13 @@ export function useSalesInvoice() {
     changeParty();
   };
 
-  // Back to the branch gate (also clears any in-progress invoice).
+  /**
+   * Back to the branch gate (also clears any in-progress invoice).
+   *
+   * The wizard hides the Change affordance unless `canChangeBranch`, because
+   * for a single-branch user this would clear the branch only for the gate to
+   * re-answer it immediately.
+   */
   const changeBranch = () => {
     setBranch(null);
     setParties([]);
@@ -1320,6 +1381,8 @@ export function useSalesInvoice() {
     step,
     setStep,
     branch,
+    allowedBranches,
+    canChangeBranch,
     selectBranch,
     changeBranch,
     parties,

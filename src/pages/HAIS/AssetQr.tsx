@@ -1,6 +1,11 @@
 import { QRCodeCanvas } from "qrcode.react";
+import { HiOutlinePrinter } from "react-icons/hi2";
+
+import { Button } from "@/components/ui/button";
 import { API_ORIGIN } from "../../services/api";
 import { qrValueFor, type Asset } from "../../services/haisService";
+
+import { MONO } from "./assetTone";
 
 type Props = {
   asset: Asset;
@@ -50,15 +55,15 @@ export default function AssetQr({ asset, size = 128 }: Props) {
   };
 
   return (
-    <div className="hais-qr">
+    <div className="flex w-[180px] shrink-0 flex-col items-center gap-2 rounded-md border border-line bg-surface p-3 text-center">
       <QRCodeCanvas id="hais-qr-canvas" value={value} size={size} level="M" includeMargin />
-      <div className="hais-qr-caption">
-        <span className="nic-mono">{serial}</span>
-        <span className="hais-qr-hint">Scan with your phone camera to open this device</span>
-        <button className="nic-tab" type="button" onClick={print}>
-          Print QR
-        </button>
-      </div>
+      <span className={MONO}>{serial}</span>
+      <span className="text-[11px] leading-snug text-subtle">
+        Scan with your phone camera to open this device
+      </span>
+      <Button size="xs" variant="ghost" type="button" onClick={print}>
+        <HiOutlinePrinter aria-hidden="true" /> Print QR
+      </Button>
     </div>
   );
 }

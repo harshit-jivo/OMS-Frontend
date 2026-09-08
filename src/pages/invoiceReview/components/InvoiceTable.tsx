@@ -1,21 +1,31 @@
 /**
  * The main invoice list — Phase 4 split, plus Phase 5.5 row virtualization.
  *
- * Rendering is unchanged: every row, cell and action button below is the same
- * markup `InvoiceReview.tsx` used to render inline via `records.map(...)`.
- * What changed is HOW MANY of those rows are ever mounted at once.
+ * ─────────────────────────────────────────────────────────────────────────
+ * THE SCROLL CONTAINER IS `document.body`, AND THAT WAS A BUG
+ * ─────────────────────────────────────────────────────────────────────────
+ * This page has no inner vertical scrollbar — the wrapper only ever set
+ * `overflow-x: auto` (for narrow viewports) and the table grows with the page.
+ * So this used `useWindowVirtualizer`, which reads `window.scrollY`.
  *
- * ─────────────────────────────────────────────────────────────────────────
- * WHY `useWindowVirtualizer`, NOT a scrolling container
- * ─────────────────────────────────────────────────────────────────────────
- * This page has never had an inner scrollbar — `.ir-table-wrap` only ever set
- * `overflow-x: auto` (for narrow viewports), and the table grows with the
- * page, which the WHOLE document scrolls. Giving the table its own
- * `overflow-y` + fixed height to virtualize it the usual way would be a real
- * visual change (a new scrollbar nested inside the page), which is exactly
- * what this pass may not do. `useWindowVirtualizer` measures against the
- * document/window scroll position instead, so the page keeps scrolling
- * exactly as it always did — only the OFF-SCREEN rows stop being mounted.
+ * `window.scrollY` is ALWAYS 0 in this app. `index.css` sets
+ * `html, body, #root { height: 100% }` and `overflow-x: hidden` on both html
+ * and body, which makes BODY the scrolling box rather than the viewport — so
+ * the document never scrolls and neither does the window.
+ *
+ * The consequence was not subtle. Measured against a 300-row list: scrolled
+ * to the very bottom (`document.body.scrollTop` 18825), twenty-eight rows were
+ * mounted and row 300 was not in the DOM at all. Every invoice past the first
+ * screenful was unreachable — the user saw a tall blank area where the rest of
+ * the list should be.
+ *
+ * `useVirtualizer` with an explicit `getScrollElement` fixes it by measuring
+ * the box that actually scrolls. Nothing about the LAYOUT changes: still no
+ * nested scrollbar, still the same two spacer rows.
+ *
+ * If the shell's scrolling ever moves back to the window, this is the line to
+ * change — and `e2e` should keep a long-list case, because nothing shorter
+ * than ~30 rows can tell the two apart.
  *
  * ─────────────────────────────────────────────────────────────────────────
  * WHY A FIXED `estimateSize`, NOT DYNAMIC MEASUREMENT
@@ -31,24 +41,38 @@
  * The two spacer `<tr>` elements stand in for however many rows are skipped
  * above/below the rendered window, so the table's total height (and the
  * page's scrollbar) stays right even though most rows are unmounted.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * THE ACTION COLUMN
+ * ─────────────────────────────────────────────────────────────────────────
+ * Which buttons a row offers is decided by its status, and the tones are not
+ * decoration: Approve is the affirmative `success`, Reject the `danger`,
+ * "Post to SAP" the `primary` because it is the one action the APPROVED state
+ * exists for. Everything else is `ghost`, so a row of six actions does not
+ * read as six equally urgent choices. Delete stays last, so it never lands
+ * where Approve or Post used to be and gets hit by muscle memory.
  */
 import { useState } from "react";
-import { useWindowVirtualizer } from "@tanstack/react-virtual";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import {
-  HiArrowPath,
-  HiArrowUturnLeft,
-  HiBanknotes,
-  HiCheckCircle,
-  HiClock,
-  HiDocumentText,
-  HiEye,
-  HiInbox,
-  HiPaperAirplane,
-  HiPencilSquare,
-  HiTrash,
-  HiXCircle,
+  HiOutlineArrowPath,
+  HiOutlineArrowUturnLeft,
+  HiOutlineBanknotes,
+  HiOutlineCheckCircle,
+  HiOutlineClock,
+  HiOutlineDocumentText,
+  HiOutlineEye,
+  HiOutlineInbox,
+  HiOutlinePaperAirplane,
+  HiOutlinePencilSquare,
+  HiOutlineTrash,
+  HiOutlineXCircle,
 } from "react-icons/hi2";
 
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/page";
+import { TableSkeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   formatAmount,
@@ -90,16 +114,23 @@ export default function InvoiceTable({ view }: { view: UseInvoiceReviewResult })
     openCreditLimitRequest,
   } = view;
 
-  // Where the table starts in the document, so the window virtualizer can
+  // Where the table starts inside the scrolling box, so the virtualizer can
   // translate its own (list-relative) offsets into real scroll positions. A
   // ref callback rather than a measuring effect: React calls it once the div
   // is actually in the document, so `offsetTop` is read straight off the live
   // node on every render from then on — no extra render pass to converge on.
+  //
+  // `offsetTop` is measured from the offsetParent, which is `body` here: no
+  // ancestor between this div and the body is positioned, and body is the
+  // scroller. If a `position: relative` is ever added to `Page`, `Card` or
+  // `.content-area`, this becomes an offset within THAT box instead and the
+  // rows will start landing in the wrong place.
   const [wrapNode, setWrapNode] = useState<HTMLDivElement | null>(null);
   const scrollMargin = wrapNode?.offsetTop ?? 0;
 
-  const rowVirtualizer = useWindowVirtualizer({
+  const rowVirtualizer = useVirtualizer({
     count: records.length,
+    getScrollElement: () => (typeof document === "undefined" ? null : document.body),
     estimateSize: () => ESTIMATED_ROW_HEIGHT,
     overscan: 12,
     scrollMargin,
@@ -107,18 +138,19 @@ export default function InvoiceTable({ view }: { view: UseInvoiceReviewResult })
 
   if (loading) {
     return (
-      <div className="ir-empty" role="status" aria-live="polite">
-        Loading invoices…
+      <div className="p-4">
+        <TableSkeleton columns={COLUMN_COUNT} label="Loading invoices" />
       </div>
     );
   }
 
   if (records.length === 0) {
     return (
-      <div className="ir-empty">
-        <HiInbox aria-hidden="true" />
-        <span>No invoices found for this status.</span>
-      </div>
+      <EmptyState
+        icon={HiOutlineInbox}
+        title="No invoices found for this status"
+        hint="Pick another status above, or refresh if you are expecting something new."
+      />
     );
   }
 
@@ -130,16 +162,16 @@ export default function InvoiceTable({ view }: { view: UseInvoiceReviewResult })
       : 0;
 
   return (
-    <div className="ir-table-wrap" ref={setWrapNode}>
+    <div className="overflow-x-auto" ref={setWrapNode}>
       <Table>
         <TableHeader>
-          <TableRow>
+          <TableRow className="bg-surface hover:bg-surface">
             <TableHead>SO #</TableHead>
             <TableHead>Party</TableHead>
-            <TableHead className="ir-num">Amount</TableHead>
+            <TableHead className="text-right">Amount</TableHead>
             {/* <TableHead>Status</TableHead> */}
             <TableHead>Submitted</TableHead>
-            <TableHead className="ir-actions-col">Actions</TableHead>
+            <TableHead className="w-px whitespace-nowrap">Actions</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -159,165 +191,168 @@ export default function InvoiceTable({ view }: { view: UseInvoiceReviewResult })
             const canDelete = Boolean(record.can_delete);
             return (
               <TableRow key={record.id ?? virtualRow.index}>
-                <TableCell>
-                  {record.so_number || "—"}
+                <TableCell className="align-top">
+                  <span className="font-semibold text-ink">{record.so_number || "—"}</span>
                   {/* Lineage: this row is either a rework of a rejected
                       invoice, or the version that was reworked away. */}
                   {hasRef(record.supersedes) && (
-                    <span
-                      className="ir-lineage-chip"
+                    <Badge
+                      tone="note"
+                      className="ml-1.5 align-middle"
                       title={record.supersedes_rejection_reason || undefined}
                     >
-                      <HiArrowUturnLeft aria-hidden="true" />
+                      <HiOutlineArrowUturnLeft aria-hidden="true" className="size-3" />
                       Revision of #{record.supersedes}
-                    </span>
+                    </Badge>
                   )}
                   {hasRef(record.superseded_by_id) && (
-                    <span className="ir-lineage-chip ir-lineage-chip-muted">
-                      <HiArrowUturnLeft aria-hidden="true" />
+                    <Badge tone="neutral" className="ml-1.5 align-middle">
+                      <HiOutlineArrowUturnLeft aria-hidden="true" className="size-3" />
                       Replaced by #{record.superseded_by_id}
-                    </span>
+                    </Badge>
                   )}
                 </TableCell>
-                <TableCell>{record.party_name || "—"}</TableCell>
-                <TableCell className="ir-num">{formatAmount(record.total_amount)}</TableCell>
+                <TableCell className="align-top text-ink">{record.party_name || "—"}</TableCell>
+                <TableCell className="align-top text-right font-semibold tabular-nums text-ink">
+                  {formatAmount(record.total_amount)}
+                </TableCell>
                 {/* <TableCell>
-                  <span className={`ir-badge ir-badge-${status.toLowerCase()}`}>{statusLabel(status)}</span>
+                  <Badge tone={toneForStatus(status)}>{statusLabel(status)}</Badge>
                 </TableCell> */}
-                <TableCell>{formatDateTime(record.created_at)}</TableCell>
-                <TableCell className="ir-actions-col">
-                  <div className="ir-row-actions">
-                    <button
-                      type="button"
-                      className="ir-btn ir-btn-ghost ir-btn-sm"
-                      onClick={() => setSelected(record)}
-                    >
-                      <HiEye aria-hidden="true" />
-                      View
-                    </button>
-                    <button
-                      type="button"
-                      className="ir-btn ir-btn-ghost ir-btn-sm"
-                      onClick={() => openHistory(record)}
-                    >
-                      <HiClock aria-hidden="true" />
-                      History
-                    </button>
+                <TableCell className="align-top whitespace-nowrap">
+                  {formatDateTime(record.created_at)}
+                </TableCell>
+                <TableCell className="align-top">
+                  {/* `flex-nowrap`, deliberately. The Actions column is
+                      `w-px whitespace-nowrap`, which sizes it to its content —
+                      but a wrapping flex row reports its min-content as the
+                      widest single button, so the column collapsed and the six
+                      actions stacked into a six-line row. Nowrap makes the
+                      row's min-content the whole strip, which is what the
+                      column was told to size to. */}
+                  <div className="flex flex-nowrap items-center justify-end gap-1">
+                    <Button size="sm" variant="ghost" onClick={() => setSelected(record)}>
+                      <HiOutlineEye aria-hidden="true" /> View
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => openHistory(record)}>
+                      <HiOutlineClock aria-hidden="true" /> History
+                    </Button>
                     {(status === "PENDING" || status === "EDITED") &&
                       (canApproveReject ? (
                         <>
-                          <button
-                            type="button"
-                            className="ir-btn ir-btn-approve ir-btn-sm"
+                          <Button
+                            size="sm"
+                            variant="success"
                             disabled={busy}
                             onClick={() => handleAction(record, "APPROVED")}
                           >
-                            <HiCheckCircle aria-hidden="true" />
+                            <HiOutlineCheckCircle aria-hidden="true" />
                             {busy ? "…" : "Approve"}
-                          </button>
-                          <button
-                            type="button"
-                            className="ir-btn ir-btn-reject ir-btn-sm"
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="danger"
                             disabled={busy}
                             onClick={() => handleAction(record, "REJECTED")}
                           >
-                            <HiXCircle aria-hidden="true" />
+                            <HiOutlineXCircle aria-hidden="true" />
                             {busy ? "…" : "Reject"}
-                          </button>
+                          </Button>
                         </>
                       ) : (
-                        <span className="ir-pending-tag">Pending Approval</span>
+                        /* Not a disabled button: there is nothing here for
+                           this user to enable, so a greyed-out Approve would
+                           be an invitation that never becomes true. */
+                        <Badge tone="hold">Pending approval</Badge>
                       ))}
                     {status === "APPROVED" && canPostToSap && (
-                      <button
-                        type="button"
-                        className="ir-btn ir-btn-sap ir-btn-sm"
+                      <Button
+                        size="sm"
+                        variant="primary"
                         disabled={busy}
                         onClick={() => handlePostToSap(record)}
                       >
-                        <HiPaperAirplane aria-hidden="true" />
+                        <HiOutlinePaperAirplane aria-hidden="true" />
                         {busy ? "…" : "Post to SAP"}
-                      </button>
+                      </Button>
                     )}
                     {status === "POSTED_TO_SAP" &&
                       (reportRef ? (
-                        <button
-                          type="button"
-                          className="ir-btn ir-btn-report ir-btn-sm"
+                        <Button
+                          size="sm"
+                          variant="ghost"
                           onClick={() => openReport(reportRef, setActionError)}
                           title={`Open the bill print for invoice #${reportRef.docNum || reportRef.docEntry}`}
                         >
-                          <HiDocumentText aria-hidden="true" />
-                          Generate Report
-                        </button>
+                          <HiOutlineDocumentText aria-hidden="true" /> Generate Report
+                        </Button>
                       ) : (
-                        <button
-                          type="button"
-                          className="ir-btn ir-btn-report ir-btn-sm"
+                        <Button
+                          size="sm"
+                          variant="ghost"
                           disabled
                           title="No SAP document number was recorded for this invoice"
                         >
-                          <HiDocumentText aria-hidden="true" />
-                          Generate Report
-                        </button>
+                          <HiOutlineDocumentText aria-hidden="true" /> Generate Report
+                        </Button>
                       ))}
                     {(status === "ERROR" || status === "CL_RAISED") && canPostToSap && (
-                      <button
-                        type="button"
-                        className="ir-btn ir-btn-sap ir-btn-sm"
+                      <Button
+                        size="sm"
+                        variant="primary"
                         disabled={busy}
                         onClick={() => handlePostToSap(record)}
                       >
-                        <HiArrowPath aria-hidden="true" />
+                        <HiOutlineArrowPath aria-hidden="true" />
                         {busy ? "…" : "Repost to SAP"}
-                      </button>
+                      </Button>
                     )}
                     {status === "CL_RAISED" && canPostToSap && (
-                      <button
-                        type="button"
-                        className="ir-btn ir-btn-cl ir-btn-sm"
+                      <Button
+                        size="sm"
+                        variant="ghost"
                         disabled={busy}
                         onClick={() => openCreditLimitFlow(record)}
                       >
-                        <HiBanknotes aria-hidden="true" />
-                        Show Flow
-                      </button>
+                        <HiOutlineBanknotes aria-hidden="true" /> Show Flow
+                      </Button>
                     )}
                     {status === "ERROR" && canPostToSap && isCreditLimitError(record) && (
-                      <button
-                        type="button"
-                        className="ir-btn ir-btn-cl ir-btn-sm"
+                      <Button
+                        size="sm"
+                        variant="ghost"
                         disabled={busy}
                         onClick={() => openCreditLimitRequest(record)}
                       >
-                        <HiBanknotes aria-hidden="true" />
+                        <HiOutlineBanknotes aria-hidden="true" />
                         {busy ? "…" : "Raise CL"}
-                      </button>
+                      </Button>
                     )}
                     {status === "REJECTED" && canPostToSap && (
-                      <button
-                        type="button"
-                        className="ir-btn ir-btn-edit ir-btn-sm"
+                      <Button
+                        size="sm"
+                        variant="ghost"
                         disabled={busy}
                         onClick={() => handleEdit(record)}
                       >
-                        <HiPencilSquare aria-hidden="true" />
+                        <HiOutlinePencilSquare aria-hidden="true" />
                         {busy ? "…" : "Edit"}
-                      </button>
+                      </Button>
                     )}
                     {/* Last, so it never sits where Approve/Post used to be
                         and gets hit by muscle memory. */}
                     {canDelete && (
-                      <button
-                        type="button"
-                        className="ir-btn ir-btn-delete ir-btn-sm"
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-subtle hover:bg-danger-soft hover:text-danger"
                         disabled={busy}
                         onClick={() => handleDelete(record)}
                         title="Remove this entry from the review screen"
                       >
-                        <HiTrash aria-hidden="true" />
+                        <HiOutlineTrash aria-hidden="true" />
                         {busy ? "…" : "Delete"}
-                      </button>
+                      </Button>
                     )}
                   </div>
                 </TableCell>

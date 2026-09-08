@@ -2,8 +2,20 @@ import { useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { userService } from "../../services/userService";
 import { ordersService, type MartOrderPayload } from "../../services/ordersService";
-import SearchableSelect from "./SearchableSelect";
-import "../../styles/Distributor/Distributor.css";
+import { showToast } from "@/lib/toastStore";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { Button } from "@/components/ui/button";
+import { SearchSelect } from "@/components/ui/dropdown";
+import { Input } from "@/components/ui/form";
+import { Card, Notice, Page, PageHeader, Stat, StatRow } from "@/components/ui/page";
+import {
+  HiOutlineArchiveBox,
+  HiOutlineBeaker,
+  HiOutlineCube,
+  HiOutlineCurrencyRupee,
+  HiOutlinePlus,
+  HiOutlineXMark,
+} from "react-icons/hi2";
 import {
   Table,
   TableBody,
@@ -222,9 +234,6 @@ function Distributor() {
 
   const [rows, setRows] = useState<Row[]>([makeRow()]);
   const [submitting, setSubmitting] = useState(false);
-  const [submitMsg, setSubmitMsg] = useState<
-    { kind: "ok" | "err"; text: string } | null
-  >(null);
 
   // Product dropdown options (MART products), sorted by name.
   const productOptions = useMemo(
@@ -334,13 +343,17 @@ function Distributor() {
 
   const onSubmit = async () => {
     if (!party) {
-      setSubmitMsg({ kind: "err", text: "No party is assigned to your account." });
+      showToast({
+        title: "Cannot submit",
+        message: "No party is assigned to your account.",
+      });
       return;
     }
     if (!billTo || !shipTo) {
-      setSubmitMsg({
-        kind: "err",
-        text: "This party has no bill-to / ship-to address configured. Please contact an administrator.",
+      showToast({
+        title: "Cannot submit",
+        message:
+          "This party has no bill-to / ship-to address configured. Please contact an administrator.",
       });
       return;
     }
@@ -390,18 +403,18 @@ function Distributor() {
     };
 
     setSubmitting(true);
-    setSubmitMsg(null);
     try {
       const res = await ordersService.createMartOrder(payload);
-      setSubmitMsg({
-        kind: "ok",
-        text: `Order ${res?.order_number ?? ""} submitted for Mart approval.`,
+      showToast({
+        title: "Order submitted",
+        message: `${res?.order_number ?? "The order"} is with Mart approval.`,
+        orderNumber: res?.order_number ?? null,
       });
       setRows([makeRow()]); // reset the form for the next order
     } catch (e) {
       const detail =
         messageFrom(e, "Failed to submit the order. Please try again.");
-      setSubmitMsg({ kind: "err", text: detail });
+      showToast({ title: "Could not submit the order", message: detail });
     } finally {
       setSubmitting(false);
     }
@@ -410,40 +423,96 @@ function Distributor() {
   const noProducts = !loading && !error && martProducts.length === 0;
 
   return (
-    <div className="distributor-page">
-      <h2 className="distributor-title">Distributor</h2>
+    <Page>
+      <Breadcrumbs items={[{ label: "Distributor" }, { label: "Place an order" }]} />
 
-      {party && (
-        <p className="distributor-party">
-          Party: <strong>{party.card_name}</strong>{" "}
-          <span className="distributor-party-code">({party.card_code})</span>
-        </p>
-      )}
+      <PageHeader
+        title="Distributor"
+        description={
+          party
+            ? `Ordering for ${party.card_name} (${party.card_code}).`
+            : "Pick your products and quantities, then submit for approval."
+        }
+        actions={
+          <Button
+            variant="primary"
+            onClick={onSubmit}
+            disabled={totalProducts === 0 || submitting}
+          >
+            {submitting ? "Submitting…" : "Submit order"}
+          </Button>
+        }
+      />
 
-      {/* Bill To / Ship To are resolved internally for the order payload but not
-          shown to the distributor. */}
+      {error ? (
+        <Notice tone="bad" title="Could not load your products">
+          {error}
+        </Notice>
+      ) : null}
 
-      {error && <div className="distributor-error">{error}</div>}
-      {noProducts && (
-        <div className="distributor-error">
-          No MART products are assigned to your party yet.
-        </div>
-      )}
+      {noProducts ? (
+        <Notice tone="hold" title="Nothing to order">
+          No MART products are assigned to your party yet. Ask your account
+          manager to assign them before placing an order.
+        </Notice>
+      ) : null}
 
-      {!error && (
+      {!error ? (
         <>
-          <div className="distributor-table-wrap">
+          {/* The running totals, above the lines rather than under them.
+              "What am I about to commit to" is the thing being watched while
+              the quantities are typed, and a footer strip means scrolling to
+              the bottom to see it change. */}
+          <StatRow>
+            <Stat
+              icon={HiOutlineCube}
+              tone="neutral"
+              label="Products"
+              value={totalProducts}
+              loading={loading}
+            />
+            <Stat
+              icon={HiOutlineArchiveBox}
+              tone="neutral"
+              label="Boxes"
+              value={totalBoxes}
+              loading={loading}
+            />
+            <Stat
+              icon={HiOutlineBeaker}
+              tone="neutral"
+              label="Total Ltrs"
+              value={inr(totalLtrs)}
+              loading={loading}
+            />
+            <Stat
+              icon={HiOutlineCurrencyRupee}
+              tone="brand"
+              label="Total Amount"
+              value={inr(totalAmount)}
+              hint={`${inr(totalQty, 0)} qty`}
+              loading={loading}
+            />
+          </StatRow>
+
+          <Card className="overflow-visible p-0">
+            {/*
+              `overflow-visible`, NOT the usual `overflow-x-auto` wrapper: each
+              row holds a `SearchSelect` whose panel is absolutely positioned,
+              and a scroll container would clip it to the table. The table is
+              narrow enough here that nothing needs to scroll.
+            */}
             <Table density="compact">
               <TableHeader>
-                <TableRow>
-                  <TableHead className="distributor-prod-col">Product</TableHead>
-                  <TableHead className="distributor-rate-col">Basic Rate</TableHead>
-                  <TableHead className="distributor-num-col">PCS</TableHead>
-                  <TableHead className="distributor-qty-col">Boxes</TableHead>
-                  <TableHead className="distributor-num-col">Qty</TableHead>
-                  <TableHead className="distributor-num-col">Ltrs</TableHead>
-                  <TableHead className="distributor-num-col">Amount</TableHead>
-                  <TableHead className="distributor-action-col"></TableHead>
+                <TableRow className="bg-surface hover:bg-surface">
+                  <TableHead className="min-w-[260px]">Product</TableHead>
+                  <TableHead className="text-right">Basic Rate</TableHead>
+                  <TableHead className="text-right">PCS</TableHead>
+                  <TableHead className="w-[110px]">Boxes</TableHead>
+                  <TableHead className="w-[110px]">Qty</TableHead>
+                  <TableHead className="text-right">Ltrs</TableHead>
+                  <TableHead className="text-right">Amount</TableHead>
+                  <TableHead className="w-10" />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -452,31 +521,44 @@ function Distributor() {
                   const hasItem = Boolean(row.item_code);
                   return (
                     <TableRow key={row.id}>
-                      <TableCell className="distributor-prod-col">
-                        <SearchableSelect
+                      <TableCell className="min-w-[260px] align-top">
+                        {/*
+                          Was `./SearchableSelect` — 130 lines of hand-written
+                          combobox with its own outside-click listener, its own
+                          highlight cursor and an `onMouseDown` that existed
+                          only to beat its own input's blur. `ui/dropdown` is
+                          the same control (DESIGN_SYSTEM §5a), and it was the
+                          last importer of `Distributor.css`.
+                        */}
+                        <SearchSelect
+                          id={"product-" + row.id}
                           value={row.item_code}
                           options={productOptions}
-                          onChange={(code) => setProduct(row.id, code)}
+                          onChange={(code) => setProduct(row.id, String(code))}
                           disabled={loading || martProducts.length === 0}
-                          placeholder={
-                            loading ? "Loading…" : "Search product…"
-                          }
-                          ariaLabel="Product"
+                          placeholder={loading ? "Loading…" : "Search product…"}
+                          searchPlaceholder="Product name or code…"
+                          emptyText="No product matches"
+                          // The MART list runs to hundreds of items.
+                          maxShown={60}
                         />
-                        {row.error && (
-                          <div className="distributor-row-error">
+                        {/* A stale party-product assignment blocks the line.
+                            The message sits under the product it is about,
+                            not in a summary at the bottom. */}
+                        {row.error ? (
+                          <p className="mt-1 text-[11.5px] leading-snug text-danger">
                             {row.error}
-                          </div>
-                        )}
+                          </p>
+                        ) : null}
                       </TableCell>
-                      <TableCell className="distributor-rate-col">
+                      <TableCell className="text-right tabular-nums">
                         {hasItem ? rate.toFixed(2) : "—"}
                       </TableCell>
-                      <TableCell className="distributor-num-col">
+                      <TableCell className="text-right tabular-nums">
                         {hasItem ? pcs : "—"}
                       </TableCell>
-                      <TableCell className="distributor-qty-col">
-                        <input
+                      <TableCell>
+                        <Input
                           type="number"
                           min={0}
                           value={row.boxes || ""}
@@ -484,10 +566,11 @@ function Distributor() {
                           placeholder="0"
                           aria-label="Boxes"
                           disabled={!hasItem}
+                          className="h-control-sm text-right tabular-nums"
                         />
                       </TableCell>
-                      <TableCell className="distributor-qty-col">
-                        <input
+                      <TableCell>
+                        <Input
                           type="number"
                           min={0}
                           value={row.qty || ""}
@@ -495,85 +578,47 @@ function Distributor() {
                           placeholder="0"
                           aria-label="Qty"
                           disabled={!hasItem}
+                          className="h-control-sm text-right tabular-nums"
                         />
                       </TableCell>
-                      <TableCell className="distributor-num-col">
+                      <TableCell className="text-right tabular-nums">
                         {hasItem ? ltrs.toFixed(2) : "—"}
                       </TableCell>
-                      <TableCell className="distributor-num-col">
+                      <TableCell className="text-right font-semibold tabular-nums text-ink">
                         {hasItem ? amount.toFixed(2) : "—"}
                       </TableCell>
-                      <TableCell className="distributor-action-col">
-                        <button
-                          type="button"
-                          className="distributor-remove"
+                      <TableCell>
+                        <Button
+                          variant="ghost"
+                          size="icon"
                           onClick={() => removeRow(row.id)}
                           aria-label="Remove row"
+                          title="Remove row"
+                          className="text-subtle hover:bg-danger-soft hover:text-danger"
                         >
-                          Cancel
-                        </button>
+                          <HiOutlineXMark aria-hidden="true" />
+                        </Button>
                       </TableCell>
                     </TableRow>
                   );
                 })}
               </TableBody>
             </Table>
-          </div>
 
-          <div className="distributor-actions">
-            <button
-              type="button"
-              className="distributor-add"
-              onClick={addRow}
-              disabled={loading || martProducts.length === 0}
-            >
-              + Add
-            </button>
-          </div>
-
-          {/* Totals + submit */}
-          <div className="distributor-footer">
-            <div className="distributor-totals">
-              <span>
-                Total Products: <strong>{totalProducts}</strong>
-              </span>
-              <span>
-                Total Boxes: <strong>{totalBoxes}</strong>
-              </span>
-              <span>
-                Total Quantity: <strong>{inr(totalQty, 0)}</strong>
-              </span>
-              <span>
-                Total Ltrs: <strong>{inr(totalLtrs)}</strong>
-              </span>
-              <span>
-                Total Amount: <strong>{inr(totalAmount)}</strong>
-              </span>
+            <div className="border-t border-line p-2">
+              <Button
+                variant="ghost"
+                block
+                onClick={addRow}
+                disabled={loading || martProducts.length === 0}
+              >
+                <HiOutlinePlus aria-hidden="true" /> Add row
+              </Button>
             </div>
-            <button
-              type="button"
-              className="distributor-submit"
-              onClick={onSubmit}
-              disabled={totalProducts === 0 || submitting}
-            >
-              {submitting ? "Submitting…" : "Submit"}
-            </button>
-          </div>
-
-          {submitMsg && (
-            <div
-              className={
-                submitMsg.kind === "ok"
-                  ? "distributor-success"
-                  : "distributor-error"
-              }
-            >
-              {submitMsg.text}
-            </div>
-          )}
+          </Card>
         </>
-      )}
-    </div>
+      ) : null}
+    </Page>
   );
 }
 

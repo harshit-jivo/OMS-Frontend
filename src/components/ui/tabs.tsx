@@ -89,9 +89,18 @@ export function TabList({
 
 export function Tab({
   selected,
+  variant = "solid",
   className,
   ...props
-}: React.ComponentProps<"button"> & { selected: boolean }) {
+}: React.ComponentProps<"button"> & {
+  selected: boolean;
+  /**
+   * `subtle` for a SECOND strip under a first one — Tracker Queue has stage
+   * tabs above and per-stage views below, and two rows of the same filled
+   * pill read as two equal choices rather than a choice inside a choice.
+   */
+  variant?: "solid" | "subtle";
+}) {
   return (
     <button
       type="button"
@@ -101,11 +110,23 @@ export function Tab({
       // The roving tabindex: only the selected tab is in the Tab sequence.
       tabIndex={selected ? 0 : -1}
       className={cn(
+        // The form-control reset. Preflight is not imported, so a bare
+        // <button> keeps the UA's outset border and grey `buttonface`, and
+        // inside a `.tw-page` the `font: revert-layer` rule hands it the UA's
+        // FONT rather than Inter, because `font-family` is not inherited by
+        // form controls. An UNSELECTED tab sets no background of its own, so
+        // it wore the grey face; the selected one hid the bug behind
+        // `bg-brand`. `ui/button` documents the trap and this is the third
+        // component to have fallen into it — hence the test in
+        // `styles/tailwind.test.ts` that now checks every one of them.
+        "appearance-none border-0 bg-transparent [font-family:inherit] cursor-pointer",
         "inline-flex items-center gap-2 rounded-lg px-4 py-2",
         "text-[13px] font-semibold transition-colors",
         "focus-visible:outline-none focus-visible:shadow-focus",
         selected
-          ? "bg-brand text-white"
+          ? variant === "subtle"
+            ? "bg-surface-strong text-ink"
+            : "bg-brand text-white"
           : "text-subtle hover:bg-surface hover:text-body",
         className,
       )}

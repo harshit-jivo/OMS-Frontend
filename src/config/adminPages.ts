@@ -20,6 +20,11 @@ export const GRANTABLE_ADMIN_PAGES: GrantablePage[] = [
   { key: "Order_Flow_Settings", label: "Order Flow Settings", path: "/Order_Flow_Settings" },
   { key: "Product_Stock", label: "Stock", path: "/Product_Stock" },
   { key: "Reports", label: "Reports", path: "/Daily_Report" },
+  // The order/revenue analytics screen, formerly the ungated `/Dashboard`.
+  // Separate from "Reports": the tabular reports are a billing tool, this is a
+  // company-wide sales picture, and the people who need one are not
+  // automatically the people who should see the other.
+  { key: "Sales_Dashboard", label: "Sales Dashboard", path: "/Sales_Dashboard" },
   // Tracker pages are gated centrally by role (see config/pageAccess.ts),
   // not by per-user extra_pages, so they are intentionally not listed here.
   { key: "Einvoice", label: "e-Invoice (IRN)", path: "/Einvoice" },
@@ -36,6 +41,24 @@ export const GRANTABLE_ADMIN_PAGES: GrantablePage[] = [
   // grantable: the pages they gated are gone, so offering those permissions
   // would grant nothing. Any stored grant with those keys is simply ignored.
   { key: "Device_Management", label: "Device Management", path: "/Device_Management" },
+  // Staff orders — an internal order raised against an employee ID rather
+  // than a party, priced from each product's staff rate.
+  //
+  // TWO keys, not one, because they are different authorities: reading the
+  // staff catalogue to PLACE an order, and setting the rates the company
+  // sells to its own people at. The second is the one worth withholding, so
+  // it is grantable on its own.
+  //
+  // Both routes were `adminOnly` and grantable to nobody, while the endpoint
+  // behind them (`orders/staff-products/`) carried no permission class at all
+  // — admin-only pages over a write any signed-in user could make. They are
+  // gated per method now; see core/permission_registry.py.
+  { key: "Staff", label: "Staff Orders", path: "/Staff" },
+  {
+    key: "Staff_Rate_Assignment",
+    label: "Staff Rate Assignment",
+    path: "/Staff_Rate_Assignment",
+  },
 ];
 
 export const GRANTABLE_PAGE_KEYS = GRANTABLE_ADMIN_PAGES.map((page) => page.key);
@@ -56,6 +79,16 @@ export const GRANTABLE_PAGE_KEYS = GRANTABLE_ADMIN_PAGES.map((page) => page.key)
 // approving both happen on mobile; the web side only configures the workflow.
 export const PAYMENT_ACTION_PERMISSIONS: GrantablePage[] = [
   { key: "Payments_Create", label: "Payments — Create", path: "/Payments_Dashboard" },
+  // The handover gate between creation and approval: a second person checks
+  // the physical cash or cheque against the entry. Independent of Create and
+  // Approve — holding either confers nothing here, and the creator of a
+  // receipt may never verify it (separation of duties is enforced in the
+  // endpoint, not by this key).
+  //
+  // It was registered on the SERVER but missing from this list, so it could
+  // only ever be granted through Role Permissions — never to one person. The
+  // registry-parity test in `adminPages.test.ts` is what found it.
+  { key: "Payments_Verify", label: "Payments — Verify (handover)", path: "/Payments_Dashboard" },
   { key: "Payments_Approve", label: "Payments — Approve", path: "/Payments_Dashboard" },
   { key: "Deposit_Create", label: "Deposit — Create", path: "/Payments_Dashboard" },
   { key: "Deposit_Approve", label: "Deposit — Approve", path: "/Payments_Dashboard" },

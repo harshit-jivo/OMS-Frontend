@@ -1,21 +1,40 @@
+/**
+ * The Asset Register — every device, filterable, with the three row actions
+ * (handover, history, edit) and a row click that opens the full record.
+ */
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  HiArrowPath,
-  HiUserPlus,
-  HiClipboardDocumentList,
-  HiMagnifyingGlass,
-  HiPencil,
-  HiPlusCircle,
-  HiQrCode,
+  HiOutlineArrowPath,
+  HiOutlineClipboardDocumentList,
+  HiOutlineComputerDesktop,
+  HiOutlineMagnifyingGlass,
+  HiOutlinePencilSquare,
+  HiOutlinePlus,
+  HiOutlineQrCode,
+  HiOutlineUserPlus,
 } from "react-icons/hi2";
-import { StatusBadge, ErrorAlert } from "../../components/NicUI";
-import { messageFrom } from "@/lib/apiError";
-import { haisService, WORKING_STATUSES, holderLabel, type Asset } from "../../services/haisService";
-import AssetHistory from "./AssetHistory";
-import AssetActionModal from "./AssetActionModal";
-import AssetDetails from "./AssetDetails";
-import "../../styles/HAIS/HAIS.css";
+
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  FilterActions,
+  FilterBar,
+  FilterCount,
+  FilterSearch,
+  FilterSelect,
+  FilterSpacer,
+} from "@/components/ui/filter-bar";
+import { Card, CardHeader, CardTitle, EmptyState } from "@/components/ui/page";
+import { TableSkeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -24,7 +43,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { messageFrom } from "@/lib/apiError";
+import { haisService, WORKING_STATUSES, holderLabel, type Asset } from "../../services/haisService";
+
+import AssetActionModal from "./AssetActionModal";
+import AssetDetails from "./AssetDetails";
+import AssetHistory from "./AssetHistory";
+import { MONO, assetStatusTone } from "./assetTone";
 
 type Props = {
   /** Parent hook to jump into the edit form for a given asset. */
@@ -35,22 +60,10 @@ type Props = {
   onLookup?: () => void;
 };
 
-function statusTone(status?: string): "ok" | "err" | "warn" | "muted" {
-  switch ((status || "").toLowerCase()) {
-    case "working":
-      return "ok";
-    case "under repair":
-      return "warn";
-    case "not working":
-    case "scrapped":
-      return "err";
-    default:
-      return "muted";
-  }
-}
-
 /** Stable empty, so the table does not see a new array each render. */
 const NO_ASSETS: Asset[] = [];
+
+const COLUMNS = 9;
 
 export default function AssetRegister({ onEdit, onAdd, onLookup }: Props) {
   const queryClient = useQueryClient();
@@ -73,6 +86,7 @@ export default function AssetRegister({ onEdit, onAdd, onLookup }: Props) {
 
   const {
     data: rows = NO_ASSETS,
+    isPending,
     isFetching: busy,
     error: loadError,
   } = useQuery({
@@ -94,143 +108,155 @@ export default function AssetRegister({ onEdit, onAdd, onLookup }: Props) {
   };
 
   return (
-    <section className="ofs-card ofs-card--wide">
-      <div className="ofs-card-head nic-head--split">
-        <div className="nic-head-title">
-          <span className="ofs-card-mark" />
-          <h2>Asset Register</h2>
-        </div>
-        <div className="nic-actions-inline">
-          <button className="ofs-primary" onClick={() => onAdd?.()}>
-            <HiPlusCircle className="nic-icon-lead" />
-            Add Asset
-          </button>
-          <button className="nic-tab" onClick={() => onLookup?.()}>
-            <HiQrCode className="nic-icon-lead" />
-            Lookup
-          </button>
-        </div>
-      </div>
-
-      {/* Filters — search, status and both buttons on one row. */}
-      <div className="nic-filter-row--wide">
-        <label className="nic-field nic-field--grow-260">
-          <span className="nic-label">Search</span>
-          <input
-            className="nic-input"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && void load()}
-            placeholder="Asset ID, category, user, serial, company, model…"
-          />
-        </label>
-
-        <label className="nic-field nic-field--fixed-180">
-          <span className="nic-label">Status</span>
-          <select
-            className="nic-select"
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-          >
-            <option value="">All</option>
-            {WORKING_STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <button className="ofs-primary" onClick={() => void load()} disabled={busy}>
-          <HiMagnifyingGlass className="nic-icon-lead" />
-          {busy ? "Loading…" : "Search"}
-        </button>
-        <button
-          className="nic-tab"
-          onClick={() => {
-            setSearch("");
-            setStatusFilter("");
-            void load({ search: "", status: "" });
-          }}
+    <div className="space-y-4 sm:space-y-6">
+      <FilterBar>
+        <FilterSearch
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && void load()}
+          placeholder="Asset ID, category, user, serial, company, model…"
+          fieldClassName="min-w-[260px]"
+        />
+        <FilterSelect
+          label="Status"
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          fieldClassName="max-w-[180px]"
         >
-          <HiArrowPath className="nic-icon-lead" />
-          Reset
-        </button>
-      </div>
+          <option value="">All</option>
+          {WORKING_STATUSES.map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </FilterSelect>
+        <FilterActions>
+          <Button variant="primary" onClick={() => void load()} disabled={busy}>
+            <HiOutlineMagnifyingGlass aria-hidden="true" /> {busy ? "Loading…" : "Search"}
+          </Button>
+          <Button
+            variant="ghost"
+            onClick={() => {
+              setSearch("");
+              setStatusFilter("");
+              void load({ search: "", status: "" });
+            }}
+          >
+            <HiOutlineArrowPath aria-hidden="true" /> Reset
+          </Button>
+        </FilterActions>
+        <FilterSpacer />
+        {!isPending && !error ? (
+          <FilterCount>
+            {rows.length} {rows.length === 1 ? "device" : "devices"}
+          </FilterCount>
+        ) : null}
+      </FilterBar>
 
-      <ErrorAlert>{error}</ErrorAlert>
+      <Card className="overflow-hidden p-0">
+        <CardHeader className="mb-0 border-b border-line px-4 py-3">
+          <CardTitle>Asset Register</CardTitle>
+          <div className="flex gap-1.5">
+            <Button size="xs" variant="ghost" onClick={() => onLookup?.()}>
+              <HiOutlineQrCode aria-hidden="true" /> Lookup
+            </Button>
+            <Button size="xs" onClick={() => onAdd?.()}>
+              <HiOutlinePlus aria-hidden="true" /> Add asset
+            </Button>
+          </div>
+        </CardHeader>
 
-      <div className="nic-table-wrap nic-table-wrap--offset">
-        <Table density="compact">
-          <TableHeader>
-            <TableRow>
-              <TableHead>Asset ID</TableHead>
-              <TableHead>Category</TableHead>
-              <TableHead>Current User</TableHead>
-              <TableHead>Handover</TableHead>
-              <TableHead>Company</TableHead>
-              <TableHead>Model No.</TableHead>
-              <TableHead>Last Service</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="nic-num">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.length === 0 ? (
-              <TableRow>
-                <TableCell
-                  colSpan={9}
-                  className="nic-note nic-cell-empty"
-                >
-                  {busy ? "Loading…" : "No assets found."}
-                </TableCell>
-              </TableRow>
-            ) : (
-              rows.map((a) => (
-                <TableRow key={a.asset_id} className="hais-row" onClick={() => setDetailAsset(a)}>
-                  <TableCell className="nic-mono">{a.asset_id}</TableCell>
-                  <TableCell>{a.asset_type || "—"}</TableCell>
-                  <TableCell>{holderLabel(a)}</TableCell>
-                  <TableCell>{a.handover_date || "—"}</TableCell>
-                  <TableCell>{a.company || "—"}</TableCell>
-                  <TableCell>{a.model_num || "—"}</TableCell>
-                  <TableCell>{a.date_of_last_service || "—"}</TableCell>
-                  <TableCell>
-                    <StatusBadge tone={statusTone(a.working_status as string)}>
-                      {(a.working_status as string) || "—"}
-                    </StatusBadge>
-                  </TableCell>
-                  <TableCell onClick={(e) => e.stopPropagation()}>
-                    <div className="hais-actions">
-                      <button
-                        className="hais-icon-btn hais-icon-btn--handover"
-                        title="Handover to another user"
-                        onClick={() => setActionState({ asset: a, mode: "handover" })}
-                      >
-                        <HiUserPlus />
-                      </button>
-                      <button
-                        className="hais-icon-btn hais-icon-btn--history"
-                        title="View device history"
-                        onClick={() => setHistoryAsset(a)}
-                      >
-                        <HiClipboardDocumentList />
-                      </button>
-                      <button
-                        className="hais-icon-btn hais-icon-btn--edit"
-                        title="Edit / update configuration"
-                        onClick={() => onEdit?.(a.asset_id)}
-                      >
-                        <HiPencil />
-                      </button>
-                    </div>
-                  </TableCell>
+        {isPending ? (
+          <TableSkeleton rows={6} columns={COLUMNS} />
+        ) : error ? (
+          <EmptyState icon={HiOutlineComputerDesktop} title="Could not load assets" hint={error} />
+        ) : rows.length === 0 ? (
+          <EmptyState
+            icon={HiOutlineComputerDesktop}
+            title="No assets found"
+            hint={
+              applied.search || applied.status
+                ? "Nothing matches these filters."
+                : "Add the first device with the button above."
+            }
+          />
+        ) : (
+          <div className="overflow-x-auto">
+            <Table density="compact">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Asset ID</TableHead>
+                  <TableHead>Category</TableHead>
+                  <TableHead>Current user</TableHead>
+                  <TableHead>Handover</TableHead>
+                  <TableHead>Company</TableHead>
+                  <TableHead>Model No.</TableHead>
+                  <TableHead>Last service</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
+              </TableHeader>
+              <TableBody>
+                {rows.map((a) => (
+                  <TableRow
+                    key={a.asset_id}
+                    className="cursor-pointer"
+                    onClick={() => setDetailAsset(a)}
+                  >
+                    <TableCell className={`${MONO} whitespace-nowrap text-ink`}>
+                      {a.asset_id}
+                    </TableCell>
+                    <TableCell>{a.asset_type || "—"}</TableCell>
+                    <TableCell>{holderLabel(a)}</TableCell>
+                    <TableCell className="whitespace-nowrap">{a.handover_date || "—"}</TableCell>
+                    <TableCell>{a.company || "—"}</TableCell>
+                    <TableCell>{a.model_num || "—"}</TableCell>
+                    <TableCell className="whitespace-nowrap">
+                      {a.date_of_last_service || "—"}
+                    </TableCell>
+                    <TableCell>
+                      <Badge tone={assetStatusTone(a.working_status as string)} dot>
+                        {(a.working_status as string) || "—"}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="w-px" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex flex-nowrap justify-end gap-0.5">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="Handover to another user"
+                          aria-label={`Handover ${a.asset_id}`}
+                          onClick={() => setActionState({ asset: a, mode: "handover" })}
+                        >
+                          <HiOutlineUserPlus aria-hidden="true" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="View device history"
+                          aria-label={`History of ${a.asset_id}`}
+                          onClick={() => setHistoryAsset(a)}
+                        >
+                          <HiOutlineClipboardDocumentList aria-hidden="true" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="Edit / update configuration"
+                          aria-label={`Edit ${a.asset_id}`}
+                          onClick={() => onEdit?.(a.asset_id)}
+                        >
+                          <HiOutlinePencilSquare aria-hidden="true" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </Card>
 
       {/* Device history modal */}
       <Dialog
@@ -240,26 +266,20 @@ export default function AssetRegister({ onEdit, onAdd, onLookup }: Props) {
         }}
       >
         {historyAsset && (
-          <DialogContent
-            title="Device history"
-            variant="bare"
-            size="auto"
-            showClose={false}
-            className="sb-modal"
-          >
-            <div className="nic-modal-head">
-              <h3 className="nic-modal-title">
-                History — <span className="nic-mono">{historyAsset.asset_id}</span>
-                {historyAsset.asset_type ? ` (${historyAsset.asset_type})` : ""}
-              </h3>
-              <button
-                onClick={() => setHistoryAsset(null)}
-                className="nic-modal-close"
-              >
-                &times;
-              </button>
-            </div>
-            <AssetHistory history={historyAsset.history} />
+          <DialogContent title={`History — ${historyAsset.asset_id}`}>
+            <DialogHeader className="items-start">
+              <div className="min-w-0">
+                <DialogTitle>
+                  History — <span className={MONO}>{historyAsset.asset_id}</span>
+                </DialogTitle>
+                {historyAsset.asset_type ? (
+                  <DialogDescription>{historyAsset.asset_type}</DialogDescription>
+                ) : null}
+              </div>
+            </DialogHeader>
+            <DialogBody>
+              <AssetHistory history={historyAsset.history} heading={false} />
+            </DialogBody>
           </DialogContent>
         )}
       </Dialog>
@@ -296,6 +316,6 @@ export default function AssetRegister({ onEdit, onAdd, onLookup }: Props) {
           }}
         />
       )}
-    </section>
+    </div>
   );
 }

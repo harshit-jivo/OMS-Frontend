@@ -3,9 +3,37 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { ordersService } from "../services/ordersService";
 import type { Order, OrderLog } from "../services/ordersService";
 import { useCurrentUserOrders } from "../lib/orderQueries";
-import "../styles/Order_Tracking.css";
 import { Badge } from "@/components/ui/badge";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { Button } from "@/components/ui/button";
+import { DetailField, DetailGrid } from "@/components/ui/detail";
+import {
+  FilterBar,
+  FilterCount,
+  FilterSelect,
+  FilterSpacer,
+} from "@/components/ui/filter-bar";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  EmptyState,
+  Page,
+  PageHeader,
+  Stat,
+  StatRow,
+} from "@/components/ui/page";
+import { Skeleton } from "@/components/ui/skeleton";
+import { OrderTimeline } from "@/components/orders/OrderTimelineDialog";
 import { toneForStatus } from "@/components/ui/statusTone";
+import {
+  HiOutlineArrowPath,
+  HiOutlineExclamationTriangle,
+  HiOutlineFunnel,
+  HiOutlineInbox,
+  HiOutlinePencilSquare,
+  HiOutlinePresentationChartLine,
+} from "react-icons/hi2";
 import {
   Table,
   TableBody,
@@ -97,6 +125,18 @@ export default function Order_Tracking() {
       });
   }, [orders, statusFilter]);
 
+  /**
+   * A REJECTED order is the only one this page lets you edit: it has come
+   * back to its author to be corrected and resubmitted. Kept as one predicate
+   * rather than three inline `.includes("reject")` checks, which is what the
+   * page had.
+   */
+  const isRejected = (order: Pick<Order, "status_display">) =>
+    String(order.status_display || "")
+      .toLowerCase()
+      .includes("reject");
+
+  const rejectedCount = filteredOrders.filter(isRejected).length;
   const totalPages = Math.max(1, Math.ceil(filteredOrders.length / itemsPerPage));
   const paginatedOrders = useMemo(
     () => filteredOrders.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage),
@@ -651,40 +691,9 @@ export default function Order_Tracking() {
     return log.status_name;
   };
 
-  const getLogDisplayRemark = (log: OrderLog) => log.remarks;
 
-  const getLogTone = (status: string, performedBy: string | null) => {
-    const normalized = String(status || "").toLowerCase();
-    const normalizedPerformer = String(performedBy || "").toLowerCase();
-
-    const isPendingPerformer =
-      !normalizedPerformer ||
-      normalizedPerformer.includes("pending") ||
-      normalizedPerformer.includes("system");
-
-    if (normalized.includes("reject") || normalized.includes("cancel")) {
-      return "rejected";
-    }
-
-    if (isPendingPerformer) {
-      return "pending";
-    }
-
-    if (normalized.includes("rate")) {
-      return "approved";
-    }
-
-    if (
-      normalized.includes("approve") ||
-      normalized.includes("accept") ||
-      normalized.includes("bill") ||
-      normalized.includes("complete")
-    ) {
-      return "approved";
-    }
-
-    return "progress";
-  };
+  /* `getLogTone` was a byte-for-byte copy of `getOrderLogTone` — the sixth.
+     The shared one is used directly now; `OrderTimeline` calls it itself. */
 
   const getRateApprovalStatusRows = () =>
     (selectedOrder?.rate_approvals || [])
@@ -743,23 +752,44 @@ export default function Order_Tracking() {
   };
 
   return (
-    <div className="tracker-page">
-      <div className="ao-page-head">
-        <span className="ao-page-accent" aria-hidden="true" />
-        <div>
-          <h1 className="ao-page-title">Order tracker</h1>
-          <p className="ao-page-subtitle">Track History of Orders at various stages.</p>
-        </div>
-      </div>
+    <Page>
+      {!tracker ? (
+        <>
+          <Breadcrumbs items={[{ label: "Orders" }, { label: "Order Tracker" }]} />
 
-      {!tracker && (
-        <div>
-          <div className="tracker-list-head">
-            <select
+          <PageHeader
+            title="Order Tracker"
+            description="Where each of your orders has reached, and who it is waiting on."
+          />
+
+          <StatRow>
+            <Stat
+              icon={HiOutlinePresentationChartLine}
+              tone="brand"
+              label="Orders"
+              value={filteredOrders.length}
+              hint={statusFilter ? `filtered to ${statusFilter}` : "all statuses"}
+              loading={loading}
+            />
+            <Stat
+              icon={HiOutlineExclamationTriangle}
+              // Neutral at zero: a red chip on "0 rejected" reads as an alert
+              // about good news.
+              tone={rejectedCount ? "bad" : "neutral"}
+              label="Rejected"
+              value={rejectedCount}
+              hint={rejectedCount ? "can be edited and resubmitted" : undefined}
+              loading={loading}
+            />
+          </StatRow>
+
+          <FilterBar>
+            <FilterSelect
+              label="Status"
+              icon={HiOutlineFunnel}
+              fieldClassName="max-w-[280px] flex-none"
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="tracker-filter-select"
-              aria-label="Filter by order status"
             >
               <option value="">All Orders</option>
               {uniqueStatuses.map((status) => (
@@ -767,265 +797,249 @@ export default function Order_Tracking() {
                   {status}
                 </option>
               ))}
-            </select>
-            {!loading && <span className="tracker-count">Total: {filteredOrders.length}</span>}
-          </div>
+            </FilterSelect>
+            <FilterSpacer />
+            <FilterCount>Total: {filteredOrders.length}</FilterCount>
+          </FilterBar>
 
           {loading ? (
             <TableSkeleton columns={7} label="Loading orders" />
           ) : filteredOrders.length > 0 ? (
-            <div className="tracker-table-wrap">
-              <Table density="compact">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Order ID</TableHead>
-                    <TableHead>Card Name</TableHead>
-                    <TableHead>FOC</TableHead>
-                    <TableHead>Created At</TableHead>
-                    <TableHead>Delivery Date</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {paginatedOrders.map((order) => (
-                    <TableRow key={order.id} className={order.is_foc ? "tracker-foc-row" : ""}>
-                      <TableCell className="ao-cell-id">{order.order_number}</TableCell>
-                      <TableCell className="ao-cell-name">{order.card_name}</TableCell>
-                      <TableCell>
-                        {order.is_foc ? (
-                          <span className="tracker-foc-badge">FOC</span>
-                        ) : (
-                          <span className="tracker-foc-empty">-</span>
-                        )}
-                      </TableCell>
-                      <TableCell>{formatCreatedDateTime(order.created_at)}</TableCell>
-                      <TableCell>{order.delivery_date}</TableCell>
-                      <TableCell>
-                        <Badge tone={toneForStatus(order.status_display)}>
-                          {order.status_display}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <div className="ao-row-actions">
-                          <button
-                            type="button"
-                            className="tracker-btn"
-                            onClick={() => void handleTrack(order)}
-                          >
-                            Track
-                          </button>
-                          {String(order.status_display || "")
-                            .toLowerCase()
-                            .includes("reject") && (
-                            <button
-                              type="button"
-                              className="tracker-btn tracker-btn-danger"
-                              onClick={() => handleEditOrder(order)}
-                            >
-                              Edit
-                            </button>
-                          )}
-                        </div>
-                      </TableCell>
+            <Card className="overflow-hidden p-0">
+              <div className="overflow-x-auto">
+                <Table density="compact">
+                  <TableHeader>
+                    <TableRow className="bg-surface hover:bg-surface">
+                      <TableHead>Order ID</TableHead>
+                      <TableHead>Card Name</TableHead>
+                      <TableHead>FOC</TableHead>
+                      <TableHead>Created At</TableHead>
+                      <TableHead>Delivery Date</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Actions</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          ) : (
-            <div className="vo-empty tracker-empty-state">No orders found</div>
-          )}
-
-          {!loading && filteredOrders.length > itemsPerPage && (
-            <Pagination page={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
-          )}
-        </div>
-      )}
-
-      {tracker && selectedOrder && (
-        <div className="tracker-detail-card">
-          <div className="tracker-detail-top">
-            <button type="button" className="tracker-back-btn" onClick={handleBack}>
-              Back
-            </button>
-            <div className="tracker-status-row">
-              {String(selectedOrder.status_display || "")
-                .toLowerCase()
-                .includes("reject") && (
-                <button
-                  type="button"
-                  className="tracker-btn tracker-btn-danger"
-                  onClick={() => handleEditOrder(selectedOrder)}
-                >
-                  Edit Order
-                </button>
-              )}
-              <Badge tone={toneForStatus(selectedOrder.status_display)}>
-                {selectedOrder.status_display}
-              </Badge>
-              {selectedOrder.is_foc ? (
-                <span className="tracker-foc-badge tracker-foc-badge-detail">FOC ORDER</span>
-              ) : null}
-            </div>
-          </div>
-
-          <div className="tracker-summary-grid">
-            <div>
-              <p className="tracker-label">Order ID</p>
-              <h5>{selectedOrder.order_number}</h5>
-            </div>
-            <div>
-              <p className="tracker-label">Card Code</p>
-              <p>{selectedOrder.card_code}</p>
-            </div>
-            <div>
-              <p className="tracker-label">Card Name</p>
-              <p>{selectedOrder.card_name}</p>
-            </div>
-            <div>
-              <p className="tracker-label">Created At</p>
-              <p>{formatCreatedDateTime(selectedOrder.created_at)}</p>
-            </div>
-            <div>
-              <p className="tracker-label">Delivery Date</p>
-              <p>{selectedOrder.delivery_date || "-"}</p>
-            </div>
-            <div>
-              <p className="tracker-label">PO Number</p>
-              <p>{selectedOrder.po_number || "-"}</p>
-            </div>
-            {selectedOrder.remarks?.trim() ? (
-              <div>
-                <p className="tracker-label">Comment</p>
-                <p>{selectedOrder.remarks}</p>
+                  </TableHeader>
+                  <TableBody>
+                    {paginatedOrders.map((order) => (
+                      <TableRow key={order.id}>
+                        <TableCell className="whitespace-nowrap font-semibold text-brand">
+                          {order.order_number}
+                        </TableCell>
+                        <TableCell className="text-ink">{order.card_name}</TableCell>
+                        <TableCell>
+                          {order.is_foc ? (
+                            <Badge tone="note">FOC</Badge>
+                          ) : (
+                            <span className="text-subtle">-</span>
+                          )}
+                        </TableCell>
+                        <TableCell>{formatCreatedDateTime(order.created_at)}</TableCell>
+                        <TableCell>{order.delivery_date}</TableCell>
+                        <TableCell>
+                          <Badge tone={toneForStatus(order.status_display)}>
+                            {order.status_display}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => void handleTrack(order)}
+                            >
+                              <HiOutlineArrowPath aria-hidden="true" /> Track
+                            </Button>
+                            {/* Only a REJECTED order can be edited — it has
+                                come back to its author to be fixed and
+                                resubmitted. */}
+                            {isRejected(order) ? (
+                              <Button
+                                size="sm"
+                                variant="danger"
+                                onClick={() => handleEditOrder(order)}
+                              >
+                                <HiOutlinePencilSquare aria-hidden="true" /> Edit
+                              </Button>
+                            ) : null}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
               </div>
-            ) : null}
-          </div>
+            </Card>
+          ) : (
+            <Card>
+              <EmptyState
+                icon={HiOutlineInbox}
+                title="No orders found"
+                hint={
+                  statusFilter
+                    ? "Nothing matches that status. Clear the filter to see them all."
+                    : "Orders you place will appear here as they move through approval."
+                }
+              />
+            </Card>
+          )}
 
-          <div className="tracker-timeline">
-            <h5>Order Log Timeline</h5>
+          {!loading && filteredOrders.length > itemsPerPage ? (
+            <Pagination
+              page={currentPage}
+              totalPages={totalPages}
+              onPageChange={setCurrentPage}
+            />
+          ) : null}
+        </>
+      ) : null}
+
+      {tracker && selectedOrder ? (
+        <>
+          <Breadcrumbs
+            items={[
+              { label: "Orders" },
+              { label: "Order Tracker", onClick: handleBack },
+              { label: selectedOrder.order_number },
+            ]}
+          />
+
+          <PageHeader
+            title={selectedOrder.order_number}
+            description={selectedOrder.card_name}
+            badges={
+              <>
+                <Badge tone={toneForStatus(selectedOrder.status_display)}>
+                  {selectedOrder.status_display}
+                </Badge>
+                {selectedOrder.is_foc ? <Badge tone="note">FOC</Badge> : null}
+              </>
+            }
+            actions={
+              isRejected(selectedOrder) ? (
+                <Button variant="danger" onClick={() => handleEditOrder(selectedOrder)}>
+                  <HiOutlinePencilSquare aria-hidden="true" /> Edit order
+                </Button>
+              ) : null
+            }
+          />
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Order</CardTitle>
+            </CardHeader>
+            <DetailGrid>
+              <DetailField label="Card code" value={selectedOrder.card_code} />
+              <DetailField label="Created at" value={formatCreatedDateTime(selectedOrder.created_at)} />
+              <DetailField label="Delivery date" value={selectedOrder.delivery_date} />
+              <DetailField label="PO number" value={selectedOrder.po_number} />
+              <DetailField
+                label="Comment"
+                value={selectedOrder.remarks?.trim() ? selectedOrder.remarks : ""}
+                span="full"
+                hideWhenEmpty
+              />
+            </DetailGrid>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Order log</CardTitle>
+              {!logsLoading ? <Badge tone="neutral">{timelineLogs.length}</Badge> : null}
+            </CardHeader>
 
             {logsLoading ? (
-              <p className="vo-empty">Loading order logs...</p>
+              <div className="space-y-3" role="status" aria-live="polite">
+                <span className="sr-only">Loading order logs</span>
+                {[0, 1, 2].map((row) => (
+                  <Skeleton key={row} className="h-16 w-full" />
+                ))}
+              </div>
             ) : timelineLogs.length === 0 ? (
-              <p className="vo-empty">No tracking logs found for this order.</p>
+              <EmptyState
+                icon={HiOutlineArrowPath}
+                title="No tracking logs"
+                hint="Nothing has been recorded against this order yet."
+              />
             ) : (
-              timelineLogs.map((log, index) => {
-                const tone = getLogTone(log.status_name, log.performed_by_name);
-                const displayRemark = getLogDisplayRemark(log);
-                const displayTitle = getLogDisplayTitle(log);
+              /* The DRAWING is shared; the log-merging is not. This page
+                 synthesises steps the API does not send, so it passes its own
+                 `timelineLogs` straight through and supplies the richer meta
+                 line — a row per rate approver, rather than one name. */
+              <OrderTimeline
+                order={selectedOrder}
+                logs={timelineLogs}
+                buildEntries={(entries) => entries}
+                formatDateTime={formatDateTime}
+                title={(log) => getLogDisplayTitle(log)}
+                renderMeta={(log, { isLast }) => {
+                  const displayTitle = getLogDisplayTitle(log);
+                  const statusLower = (log.status_name || "").toLowerCase();
+                  const isTerminal =
+                    statusLower.includes("completed") || statusLower.includes("rejected");
+                  const isPendingLog = isLast && !isTerminal;
 
-                return (
-                  <div key={log.id} className="tracker-timeline-row">
-                    <div className="tracker-timeline-left">
-                      <div className={`tracker-dot ${tone}`}>
-                        {tone === "approved" ? "✓" : tone === "rejected" ? "✕" : "•"}
+                  if (isPendingLog) {
+                    const isRateApprovalStatus =
+                      statusLower.includes("rate") || statusLower.includes("need approval");
+                    const rateApprovalRows = isRateApprovalStatus
+                      ? getRateApprovalStatusRows()
+                      : [];
+                    const holderName = isRateApprovalStatus
+                      ? rateApprovalRows
+                          .filter((ra) => ra.status === "PENDING")
+                          .map((ra) => ra.name)
+                          .join(", ")
+                      : "";
+
+                    if (rateApprovalRows.length > 0) {
+                      return (
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                          {rateApprovalRows.map((approval) => (
+                            <span key={`${approval.name}-${approval.status}`}>
+                              {approval.name}: {formatApprovalStatus(approval.status)}
+                            </span>
+                          ))}
+                          {holderName ? <Badge tone="hold">Awaiting action</Badge> : null}
+                        </div>
+                      );
+                    }
+
+                    return holderName ? (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span>Pending with: {holderName}</span>
+                        <Badge tone="hold">Awaiting action</Badge>
                       </div>
-                      {index !== timelineLogs.length - 1 ? (
-                        <div className={`tracker-line ${tone}`} />
-                      ) : null}
-                    </div>
+                    ) : (
+                      <span>By: {log.performed_by_name || "Pending"}</span>
+                    );
+                  }
 
-                    <div className={`tracker-log-card ${tone}`}>
-                      <div className="tracker-log-head">
-                        <h6>{displayTitle}</h6>
-                        <span>{formatDateTime(log.created_at)}</span>
+                  // Several approvers can sign one rate approval, and the API
+                  // sends them as one comma-joined string.
+                  if (
+                    displayTitle === "Accepted by Rate Approver" &&
+                    String(log.performed_by_name || "").includes(",")
+                  ) {
+                    return (
+                      <div className="flex flex-wrap gap-x-3 gap-y-1">
+                        {String(log.performed_by_name || "")
+                          .split(",")
+                          .map((name) => name.trim())
+                          .filter(Boolean)
+                          .map((name) => (
+                            <span key={name}>{name}: Approved</span>
+                          ))}
                       </div>
+                    );
+                  }
 
-                      {(() => {
-                        const isLastLog = index === timelineLogs.length - 1;
-                        const statusLower = (log.status_name || "").toLowerCase();
-                        const isTerminal =
-                          statusLower.includes("completed") || statusLower.includes("rejected");
-                        const isPendingLog = isLastLog && !isTerminal;
-
-                        if (isPendingLog) {
-                          const isRateApprovalStatus =
-                            statusLower.includes("rate") || statusLower.includes("need approval");
-                          const rateApprovalRows = isRateApprovalStatus
-                            ? getRateApprovalStatusRows()
-                            : [];
-
-                          let holderName = "";
-                          if (isRateApprovalStatus) {
-                            const pendingApprovers = rateApprovalRows
-                              .filter((ra) => ra.status === "PENDING")
-                              .map((ra) => ra.name);
-                            holderName =
-                              pendingApprovers.length > 0 ? pendingApprovers.join(", ") : "";
-                          }
-
-                          if (rateApprovalRows.length > 0) {
-                            return (
-                              <div className="tracker-log-meta tracker-log-meta--approval">
-                                {rateApprovalRows.map((approval) => (
-                                  <div key={`${approval.name}-${approval.status}`}>
-                                    {approval.name}: {formatApprovalStatus(approval.status)}
-                                  </div>
-                                ))}
-                                {holderName ? (
-                                  <span
-                                    className="app-chip-amber"
-                                  >
-                                    Awaiting Action
-                                  </span>
-                                ) : null}
-                              </div>
-                            );
-                          }
-
-                          return holderName ? (
-                            <div className="tracker-log-meta tracker-log-meta--pending">
-                              <div>Pending with: {holderName}</div>
-                              <span
-                                className="app-chip-amber"
-                              >
-                                Awaiting Action
-                              </span>
-                            </div>
-                          ) : (
-                            <p className="tracker-log-meta">
-                              Performed By: {log.performed_by_name || "Pending"}
-                            </p>
-                          );
-                        }
-
-                        if (
-                          displayTitle === "Accepted by Rate Approver" &&
-                          String(log.performed_by_name || "").includes(",")
-                        ) {
-                          return (
-                            <div className="tracker-log-meta">
-                              {String(log.performed_by_name || "")
-                                .split(",")
-                                .map((name) => name.trim())
-                                .filter(Boolean)
-                                .map((name) => (
-                                  <div key={name}>{name}: Approved</div>
-                                ))}
-                            </div>
-                          );
-                        }
-
-                        return (
-                          <p className="tracker-log-meta">
-                            Performed By: {log.performed_by_name || "—"}
-                          </p>
-                        );
-                      })()}
-
-                      {displayRemark ? (
-                        <p className="tracker-log-remarks">Remark: {displayRemark}</p>
-                      ) : null}
-                    </div>
-                  </div>
-                );
-              })
+                  return <span>By: {log.performed_by_name || "—"}</span>;
+                }}
+              />
             )}
-          </div>
-        </div>
-      )}
-    </div>
+          </Card>
+        </>
+      ) : null}
+    </Page>
   );
 }

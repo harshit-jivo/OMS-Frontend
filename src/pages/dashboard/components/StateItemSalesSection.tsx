@@ -1,11 +1,19 @@
 /**
- * The admin-only "State-wise Item Sales" box: a state picker plus the top 3
- * varieties by sales value for the selected state. Moved verbatim out of
- * `Dashboard.tsx` (Phase 4 decomposition). The modal it opens into
- * ("View more") lives in `DashboardDialogs.tsx`.
+ * The admin-only "State-wise Item Sales" card: a state picker plus the top 3
+ * varieties by sales value for the selected state. The "View more" modal it
+ * opens lives in `DashboardDialogs.tsx`.
+ *
+ * The state picker is a real `tablist` now. It was a row of `<button>`s with
+ * `class="is-active"` and nothing else — selecting one replaces the list
+ * below it, which is what a tablist is, and saying so is what gets the roving
+ * tabindex and the arrow keys.
  */
-import { FiChevronDown } from "react-icons/fi";
+import { HiChevronDown } from "react-icons/hi2";
 
+import { Button } from "@/components/ui/button";
+import { Card, CardHeader, CardTitle } from "@/components/ui/page";
+import { Tab, TabList } from "@/components/ui/tabs";
+import { cn } from "@/lib/utils";
 import { PALETTE } from "../constants";
 import { fmt, fmtCompactCurrency } from "../format";
 import type { DashboardState } from "../useDashboard";
@@ -32,97 +40,125 @@ export default function StateItemSalesSection({ dashboard }: { dashboard: Dashbo
   if (role !== "admin") return null;
 
   return (
-    <div className="db-chart-box db-state-item-box">
-      <div className="db-chart-head">
-        <div>
-          <div className="db-chart-title">State-wise Item Sales</div>
-          <div className="db-chart-subtitle">
+    <Card>
+      <CardHeader className="items-start">
+        <div className="min-w-0">
+          <CardTitle>State-wise Item Sales</CardTitle>
+          <p className="m-0 mt-0.5 text-[11.5px] leading-snug text-subtle">
             Top 3 varieties by sales value in each state for {selectedPeriodLabel}
-          </div>
+          </p>
         </div>
-        <div className="db-chart-metric">
-          <span>Selected State</span>
-          <strong>{activeItemState ?? "N/A"}</strong>
-        </div>
-      </div>
-      {stateItemSales.length === 0 ? (
-        <div className="db-no-data">No state-wise item data for this period</div>
-      ) : (
-        <>
-          <div className="db-state-item-tabs" aria-label="State-wise item sales">
-            {visibleItemStates.map((item) => (
-              <button
-                key={item.state}
-                type="button"
-                className={item.state === activeItemState ? "is-active" : ""}
-                onClick={() => {
-                  setSelectedItemState(item.state);
-                  setSelectedItemVariety("ALL");
-                }}
-              >
-                {item.state}
-              </button>
-            ))}
-            {stateItemSales.length > 5 ? (
-              <button
-                type="button"
-                className="db-state-more-btn"
-                onClick={() => setShowAllItemStates((current) => !current)}
-              >
-                {showAllItemStates ? "Less" : `More +${hiddenItemStateCount}`}
-              </button>
-            ) : null}
+        <div className="flex shrink-0 items-center gap-2">
+          <div className="text-right">
+            <p className="m-0 text-[10.5px] font-semibold uppercase tracking-wider text-subtle">
+              Selected State
+            </p>
+            <p className="m-0 text-[13px] font-bold text-ink">{activeItemState ?? "N/A"}</p>
           </div>
-          <div className="db-state-item-actions">
-            <button
-              type="button"
+          {stateItemSales.length > 0 ? (
+            <Button
+              size="sm"
+              variant="ghost"
               onClick={() => {
                 setSelectedItemVariety("ALL");
                 setShowStateItems(true);
               }}
             >
-              View more <FiChevronDown />
-            </button>
+              View more <HiChevronDown aria-hidden="true" />
+            </Button>
+          ) : null}
+        </div>
+      </CardHeader>
+
+      {stateItemSales.length === 0 ? (
+        <p className="m-0 py-10 text-center text-[12.5px] text-subtle">
+          No state-wise item data for this period
+        </p>
+      ) : (
+        <>
+          <div className="-mx-1 mb-3 overflow-x-auto px-1 pb-1">
+            <TabList label="State" className="w-max">
+              {visibleItemStates.map((item) => (
+                <Tab
+                  key={item.state}
+                  selected={item.state === activeItemState}
+                  onClick={() => {
+                    setSelectedItemState(item.state);
+                    setSelectedItemVariety("ALL");
+                  }}
+                >
+                  {item.state}
+                </Tab>
+              ))}
+              {stateItemSales.length > 5 ? (
+                /* Not a `Tab`: it does not select anything, it reveals the
+                   rest of the tabs. Inside the tablist it would be announced
+                   as a state you could pick. */
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setShowAllItemStates((current) => !current)}
+                >
+                  {showAllItemStates ? "Less" : `More +${hiddenItemStateCount}`}
+                </Button>
+              ) : null}
+            </TabList>
           </div>
-          <div className="db-state-item-list">
+
+          <div className="grid gap-2.5 lg:grid-cols-3">
             {topStateVarieties.map((item, index) => (
               <button
-                className={`db-state-item-row db-state-item-row--button${item.variety === selectedItemVariety ? " is-active" : ""}`}
                 key={item.variety}
                 type="button"
+                className={cn(
+                  "appearance-none [font-family:inherit] cursor-pointer text-left",
+                  "flex items-start gap-2.5 rounded-card border bg-surface p-3 transition-colors",
+                  "focus-visible:outline-none focus-visible:shadow-focus",
+                  item.variety === selectedItemVariety
+                    ? "border-brand-line bg-brand-soft"
+                    : "border-line hover:border-line-strong",
+                )}
                 onClick={() => {
                   setSelectedItemVariety(item.variety);
                   setShowStateItems(true);
                 }}
               >
-                <span className="db-manager-rank-number">{index + 1}</span>
-                <div className="db-state-item-main">
-                  <div className="db-state-item-meta">
-                    <div>
-                      <span>{item.variety}</span>
-                      <small>Completed order lines</small>
-                    </div>
-                    <strong>{fmtCompactCurrency(item.total_sales)}</strong>
-                  </div>
-                  <div className="db-manager-rank-track">
+                <span className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-surface-strong text-[11px] font-bold text-subtle">
+                  {index + 1}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-baseline justify-between gap-2">
+                    <span className="min-w-0">
+                      <span className="block truncate text-[12.5px] font-semibold text-ink">
+                        {item.variety}
+                      </span>
+                      <span className="block text-[11px] text-subtle">
+                        Completed order lines
+                      </span>
+                    </span>
+                    <strong className="shrink-0 text-[12.5px] font-semibold tabular-nums text-ink">
+                      {fmtCompactCurrency(item.total_sales)}
+                    </strong>
+                  </span>
+                  <span className="mt-1.5 block h-1.5 w-full overflow-hidden rounded-full bg-surface-strong">
                     <span
-                      className="db-manager-rank-fill"
+                      className="block h-full rounded-full"
                       style={{
                         width: getSalesWidth(item.total_sales, activeStateMaxVarietySales),
                         background: PALETTE[index % PALETTE.length],
                       }}
                     />
-                  </div>
-                  <small className="db-state-item-foot">
-                    Amount {fmtCompactCurrency(item.total_sales)} | Qty {fmt(item.quantity)} | Items{" "}
-                    {fmt(item.count)}
-                  </small>
-                </div>
+                  </span>
+                  <span className="mt-1.5 block text-[11px] text-subtle">
+                    Amount {fmtCompactCurrency(item.total_sales)} · Qty {fmt(item.quantity)} ·
+                    Items {fmt(item.count)}
+                  </span>
+                </span>
               </button>
             ))}
           </div>
         </>
       )}
-    </div>
+    </Card>
   );
 }

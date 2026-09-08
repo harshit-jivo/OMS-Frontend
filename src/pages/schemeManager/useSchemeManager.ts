@@ -10,7 +10,7 @@
  * Already used `useQuery` for the scheme list before this split (Phase 3.1) —
  * that query, and its `applied`-filters-as-key mechanism, is preserved exactly.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { schemeService } from "@/services/schemeService";
@@ -25,7 +25,9 @@ import type {
 import { emptyBenefit, emptyScheme, emptyTrigger } from "@/services/schemeService";
 import { useMainGroups, useStates } from "@/lib/authQueries";
 import { useSapParties, useSapProducts } from "@/lib/sapQueries";
+import { showToast } from "@/lib/toastStore";
 
+import { productOptions } from "./components/productOptions";
 import { CATEGORIES, apiErrorText, isFinishedGood } from "./schemeManagerHelpers";
 import type { CatalogueItem, PartyOption } from "./types";
 
@@ -60,7 +62,30 @@ export function useSchemeManager() {
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [includeInactive, setIncludeInactive] = useState(false);
-  const [notice, setNotice] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
+  /*
+   * Feedback splits by what happens to the row.
+   *
+   * A failure is a toast: it used to be a banner on the PAGE, which the
+   * editor's scrim was covering at exactly the moment a save failed — the
+   * modal stayed open, the reason sat behind it. A success after deleting or
+   * turning off stays a banner (`Notice` tone `ok`): the scheme it is about
+   * has just left the list, so the banner is the only confirmation left.
+   */
+  const [notice, setNotice] = useState<string | null>(null);
+  const fail = (title: string, error: unknown) => {
+    console.error(title, error);
+    showToast({ title, message: apiErrorText(error, "The server refused the request.") });
+  };
+
+  /*
+   * The two destructive actions ask first. They used `window.confirm`, which
+   * the design system retired: the page renders a Dialog from `pending` and
+   * calls `confirmPending`.
+   */
+  const [pending, setPending] = useState<{ kind: "deactivate" | "delete"; scheme: Scheme } | null>(
+    null,
+  );
+  const [isConfirming, setIsConfirming] = useState(false);
 
   // Reference data for the "who gets it" pickers.
 
@@ -100,6 +125,10 @@ export function useSchemeManager() {
     });
   }, [rawProducts]);
 
+  // The same catalogue as picker rows, built once rather than per render of
+  // a modal with five pickers in it.
+  const itemOptions = useMemo(() => productOptions(products), [products]);
+
   // Item codes are what the engine matches on, but nobody reads them — every
   // list on this page shows the product name instead.
   const itemNameOf = useMemo(() => {
@@ -120,17 +149,8 @@ export function useSchemeManager() {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [checkOpen, setCheckOpen] = useState(false);
 
-  // Escape closes whichever modal is open — both cover the page.
-  useEffect(() => {
-    if (editingId === null && !checkOpen) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      if (editingId !== null) closeEditor();
-      else setCheckOpen(false);
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [editingId, checkOpen]);
+  // Escape used to be a document listener here. Both modals are `ui/dialog`
+  // now, which handles Escape (and the focus trap, and the scroll lock) itself.
 
   // -- editor -------------------------------------------------------------
 
@@ -241,70 +261,68 @@ export function useSchemeManager() {
     try {
       if (editingId) {
         await schemeService.update(editingId, draft);
-        setNotice({ tone: "ok", text: "Saved" });
+        showToast({ title: "Saved", message: draft.name });
       } else {
         const created = await schemeService.create(draft);
-        setNotice({
-          tone: "ok",
-          text: draft.assignments.length
-            ? `${created.code} created and live.`
-            : `${created.code} created — it reaches nobody until you say who gets it.`,
+        showToast({
+          title: `${created.code} created`,
+          message: draft.assignments.length
+            ? "It is live."
+            : "It reaches nobody until you say who gets it.",
+
         });
       }
       closeEditor();
       await loadSchemes();
     } catch (error) {
-      console.error("Error saving scheme:", error);
-      setNotice({ tone: "error", text: apiErrorText(error, "Could not save the scheme") });
+      fail("Could not save the scheme", error);
     } finally {
       setIsSaving(false);
     }
   };
 
-  const deactivate = async (scheme: Scheme) => {
-    if (!window.confirm(`Turn "${scheme.name}" off? It stops applying everywhere, reversibly.`))
-      return;
-    setNotice(null);
-    try {
-      const response = await schemeService.remove(scheme.id);
-      setNotice({ tone: "ok", text: response.message });
-      await loadSchemes();
-    } catch (error) {
-      console.error("Error deactivating scheme:", error);
-      setNotice({ tone: "error", text: apiErrorText(error, "Could not turn the scheme off") });
-    }
-  };
+  const deactivate = (scheme: Scheme) => setPending({ kind: "deactivate", scheme });
 
   /**
    * Hard delete, straight from the row. The API refuses it when an order line
    * already references the scheme — what was given away has to stay on record —
    * so a refusal is reported as-is and turning it off remains the way out.
    */
-  const deleteScheme = async (scheme: Scheme) => {
-    if (
-      !window.confirm(
-        `Delete "${scheme.name}" permanently? This cannot be undone. If any order has already used it, turn it off instead.`,
-      )
-    )
-      return;
+  const deleteScheme = (scheme: Scheme) => setPending({ kind: "delete", scheme });
+
+  const confirmPending = async () => {
+    if (!pending) return;
+    const { kind, scheme } = pending;
+    setIsConfirming(true);
     setNotice(null);
     try {
-      const response = await schemeService.remove(scheme.id, true);
-      if (response.success === false) {
-        setNotice({
-          tone: "error",
-          text:
-            response.message ||
-            `Cannot delete — ${response.used_by_order_lines ?? "some"} order line(s) use this. Turn it off instead.`,
-        });
-        return;
+      if (kind === "deactivate") {
+        const response = await schemeService.remove(scheme.id);
+        setNotice(response.message || `${scheme.name} is off.`);
+      } else {
+        const response = await schemeService.remove(scheme.id, true);
+        if (response.success === false) {
+          showToast({
+            title: "Cannot delete",
+            message:
+              response.message ||
+              `${response.used_by_order_lines ?? "Some"} order line(s) use this. Turn it off instead.`,
+
+          });
+          return;
+        }
+        if (expandedId === scheme.id) setExpandedId(null);
+        setNotice(response.message || `Deleted ${scheme.code}`);
       }
-      if (expandedId === scheme.id) setExpandedId(null);
-      setNotice({ tone: "ok", text: response.message || `Deleted ${scheme.code}` });
+      setPending(null);
       await loadSchemes();
     } catch (error) {
-      console.error("Error deleting scheme:", error);
-      setNotice({ tone: "error", text: apiErrorText(error, "Could not delete the scheme") });
+      fail(
+        kind === "deactivate" ? "Could not turn the scheme off" : "Could not delete the scheme",
+        error,
+      );
+    } finally {
+      setIsConfirming(false);
     }
   };
 
@@ -346,6 +364,7 @@ export function useSchemeManager() {
     mainGroups,
     parties,
     products,
+    itemOptions,
     itemNameOf,
     targetOptions,
 
@@ -354,6 +373,10 @@ export function useSchemeManager() {
     setExpandedId,
     deactivate,
     deleteScheme,
+    pending,
+    setPending,
+    confirmPending,
+    isConfirming,
 
     // vendor-check modal
     checkOpen,

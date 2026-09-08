@@ -1,15 +1,3 @@
-import { useEffect, useMemo, useState } from "react";
-import {
-  HiCheck,
-  HiCheckCircle,
-  HiExclamationCircle,
-  HiShieldCheck,
-} from "react-icons/hi2";
-import { userService } from "../services/userService";
-import "../styles/Order_Flow_Settings.css";
-import "../styles/Page_Permissions.css";
-import "../styles/Role_Permissions.css";
-
 /**
  * The Role Permissions matrix — what each role can do, visible and editable.
  *
@@ -28,6 +16,35 @@ import "../styles/Role_Permissions.css";
  * registered key implicitly (see `core.permissions.effective_keys`), so a
  * stored bundle for them would be a second copy to keep in step.
  */
+import { useEffect, useMemo, useState } from "react";
+import { HiOutlineCheckCircle, HiOutlinePlus, HiOutlineShieldCheck } from "react-icons/hi2";
+
+import { PermissionGrid, PermissionToggle } from "@/components/admin/PermissionToggle";
+import { Badge } from "@/components/ui/badge";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Field, FormActions, FormGrid, Input } from "@/components/ui/form";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  EmptyState,
+  Notice,
+  Page,
+  PageHeader,
+} from "@/components/ui/page";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tab, TabList } from "@/components/ui/tabs";
+import { showToast } from "@/lib/toastStore";
+import { userService } from "../services/userService";
 
 type RegistryModule = { name: string; keys: { key: string; label: string }[] };
 type RoleRow = {
@@ -45,8 +62,7 @@ type RoleRow = {
 const PRIVILEGED_ROLES = new Set(["admin", "tracker_admin"]);
 
 function apiMessage(e: unknown, fallback: string): string {
-  const detail = (e as { response?: { data?: { message?: string } } })?.response
-    ?.data?.message;
+  const detail = (e as { response?: { data?: { message?: string } } })?.response?.data?.message;
   return detail || fallback;
 }
 
@@ -58,38 +74,7 @@ const MODULE_TITLES: Record<string, string> = {
   tracker: "Document Tracker",
 };
 
-function ToggleRow({
-  title,
-  subtitle,
-  checked,
-  disabled,
-  onChange,
-}: {
-  title: string;
-  subtitle?: string;
-  checked: boolean;
-  disabled?: boolean;
-  onChange: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      role="checkbox"
-      aria-checked={checked}
-      className={`ofs-toggle-row${checked ? " is-checked" : ""}${disabled ? " is-disabled" : ""}`}
-      onClick={onChange}
-      disabled={disabled}
-    >
-      <span className="ofs-checkbox" aria-hidden="true">
-        {checked ? <HiCheck /> : null}
-      </span>
-      <span className="ofs-toggle-text">
-        <strong>{title}</strong>
-        {subtitle ? <small>{subtitle}</small> : null}
-      </span>
-    </button>
-  );
-}
+const isPrivileged = (role: RoleRow) => PRIVILEGED_ROLES.has(role.name.trim().toLowerCase());
 
 export default function Role_Permissions() {
   const [modules, setModules] = useState<RegistryModule[]>([]);
@@ -97,6 +82,8 @@ export default function Role_Permissions() {
   const [migrated, setMigrated] = useState(true);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [draftKeys, setDraftKeys] = useState<Set<string>>(new Set());
+  /** Which module tab is open. Empty means "the first one" — see below. */
+  const [activeModule, setActiveModule] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -109,6 +96,8 @@ export default function Role_Permissions() {
   const [creating, setCreating] = useState(false);
   const [editDisplay, setEditDisplay] = useState("");
   const [roleBusy, setRoleBusy] = useState(false);
+  /** The role a delete has been asked about. `window.confirm` before. */
+  const [confirmDelete, setConfirmDelete] = useState<RoleRow | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -139,6 +128,19 @@ export default function Role_Permissions() {
   );
   const isAdminRole = (selected?.name ?? "").trim().toLowerCase() === "admin";
 
+  /*
+   * The open module, falling back to the first. Derived rather than seeded in
+   * an effect: the registry arrives asynchronously, so an effect would have to
+   * write state on load — and this way an unknown saved name (a module the
+   * server stopped sending) degrades to the first tab instead of an empty panel.
+   */
+  const activeModuleObj =
+    modules.find((m) => m.name === activeModule) ?? modules[0] ?? null;
+  const activeModuleName = activeModuleObj?.name ?? "";
+  const activeModuleTitle = activeModuleObj
+    ? (MODULE_TITLES[activeModuleObj.name] ?? activeModuleObj.name)
+    : "";
+
   function selectRole(role: RoleRow) {
     setSelectedId(role.id);
     setDraftKeys(new Set(role.keys));
@@ -155,13 +157,15 @@ export default function Role_Permissions() {
     try {
       const res = await userService.createRole(name, newDisplay.trim() || name);
       const created: RoleRow = { ...res.data, keys: [], users: 0 };
-      setRoles((prev) =>
-        [...prev, created].sort((a, b) => a.name.localeCompare(b.name)),
-      );
+      setRoles((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
       setNewOpen(false);
       setNewName("");
       setNewDisplay("");
       selectRole(created);
+      showToast({
+        title: "Role created",
+        message: created.display_name + " has no permissions yet — tick what it should grant.",
+      });
     } catch (e) {
       setError(apiMessage(e, "Could not create the role."));
     } finally {
@@ -175,9 +179,7 @@ export default function Role_Permissions() {
     setError("");
     try {
       const res = await userService.updateRole(selected.id, patch);
-      setRoles((prev) =>
-        prev.map((r) => (r.id === selected.id ? { ...r, ...res.data } : r)),
-      );
+      setRoles((prev) => prev.map((r) => (r.id === selected.id ? { ...r, ...res.data } : r)));
       setSavedMsg(res.message);
     } catch (e) {
       setError(apiMessage(e, "Could not update the role."));
@@ -187,19 +189,19 @@ export default function Role_Permissions() {
   }
 
   async function deleteRole() {
-    if (!selected || roleBusy) return;
-    if (!window.confirm(`Delete the role "${selected.display_name}"? Its permission bundle is deleted with it.`)) {
-      return;
-    }
+    const role = confirmDelete;
+    if (!role || roleBusy) return;
     setRoleBusy(true);
     setError("");
     try {
-      const res = await userService.deleteRole(selected.id);
-      setRoles((prev) => prev.filter((r) => r.id !== selected.id));
+      const res = await userService.deleteRole(role.id);
+      setRoles((prev) => prev.filter((r) => r.id !== role.id));
       setSelectedId(null);
-      setSavedMsg(res.message);
+      setConfirmDelete(null);
+      showToast({ title: "Role deleted", message: res.message });
     } catch (e) {
       setError(apiMessage(e, "Could not delete the role."));
+      setConfirmDelete(null);
     } finally {
       setRoleBusy(false);
     }
@@ -231,261 +233,342 @@ export default function Role_Permissions() {
       const keys = Array.from(draftKeys);
       const res = await userService.updateRolePermissions(selected.id, keys);
       if (res.success) {
-        setRoles((prev) =>
-          prev.map((r) => (r.id === selected.id ? { ...r, keys } : r)),
+        setRoles((prev) => prev.map((r) => (r.id === selected.id ? { ...r, keys } : r)));
+        setSavedMsg(
+          "Saved — holders of " + selected.display_name + " are updated on their next request.",
         );
-        setSavedMsg(`Saved — holders of ${selected.display_name} are updated on their next request.`);
       } else {
         setError(res.message || "Save failed.");
       }
     } catch (e: unknown) {
-      const detail = (e as { response?: { data?: { message?: string } } })
-        ?.response?.data?.message;
-      setError(detail || "Save failed.");
+      setError(apiMessage(e, "Save failed."));
     } finally {
       setSaving(false);
     }
   }
 
-  if (loading) {
-    return (
-      <div className="ofs-page">
-        <div className="ofs-loading">
-          <span className="ofs-spinner" />
-        </div>
-      </div>
-    );
-  }
+  /** Why Delete is unavailable, or undefined when it is available. */
+  const deleteBlockedBecause = (role: RoleRow) =>
+    isPrivileged(role)
+      ? "Privileged roles cannot be deleted."
+      : role.users > 0
+        ? role.users +
+          " user" +
+          (role.users === 1 ? "" : "s") +
+          " still hold this role — reassign them first."
+        : undefined;
 
   return (
-    <div className="ofs-page">
-      <div className="ofs-header">
-        <div>
-          <span className="ofs-kicker">Access Control</span>
-          <h1>
-            <HiShieldCheck aria-hidden="true" /> Role Permissions
-          </h1>
-          <p>
-            What each role can do. A permission ticked here is held by every
-            user with that role — as primary or extra — on top of any personal
-            grants from the Permissions page.
-          </p>
-        </div>
-      </div>
+    <Page>
+      <Breadcrumbs items={[{ label: "Administration" }, { label: "Role Permissions" }]} />
+
+      <PageHeader
+        eyebrow="Access control"
+        title="Role Permissions"
+        description="What each role can do. A permission ticked here is held by every user with that role — as primary or extra — on top of any personal grants from the Permissions page."
+      />
 
       {!migrated && (
-        <div className="ofs-alert">
-          <HiExclamationCircle aria-hidden="true" />
-          Role permission storage is not migrated on this server yet — bundles
-          show as empty and saving is disabled until{" "}
-          <code>manage.py migrate users</code> has run.
-        </div>
+        <Notice tone="hold" title="Role permission storage is not migrated">
+          Bundles show as empty and saving is disabled until <code>manage.py migrate users</code>{" "}
+          has run on this server.
+        </Notice>
       )}
-      {error && (
-        <div className="ofs-alert">
-          <HiExclamationCircle aria-hidden="true" /> {error}
-        </div>
-      )}
+      {error && <Notice tone="bad">{error}</Notice>}
 
-      <div className="ofs-grid">
-        <section className="ofs-card">
-          <div className="ofs-card-head">
-            <span className="ofs-card-mark" />
-            <h2>Roles</h2>
-            <button
-              type="button"
-              className="ofs-refresh rp-new-btn"
-              onClick={() => setNewOpen((v) => !v)}
-            >
-              {newOpen ? "Cancel" : "+ New role"}
-            </button>
-          </div>
+      <div className="grid gap-4 lg:grid-cols-[minmax(260px,340px)_minmax(0,1fr)] lg:items-start">
+        {/* ── The roles ── */}
+        <Card className="lg:sticky lg:top-4">
+          <CardHeader>
+            <CardTitle>Roles</CardTitle>
+            <Button size="xs" onClick={() => setNewOpen((v) => !v)}>
+              {newOpen ? "Cancel" : <HiOutlinePlus aria-hidden="true" />}
+              {newOpen ? null : "New role"}
+            </Button>
+          </CardHeader>
 
           {newOpen && (
-            <div className="rp-new-form">
-              <input
-                type="text"
-                placeholder="name (e.g. dispatch_clerk) — permanent"
-                value={newName}
-                maxLength={50}
-                onChange={(e) => setNewName(e.target.value)}
-              />
-              <input
-                type="text"
-                placeholder="Display name (e.g. Dispatch Clerk)"
-                value={newDisplay}
-                maxLength={100}
-                onChange={(e) => setNewDisplay(e.target.value)}
-              />
-              <button
-                type="button"
-                className="ofs-refresh"
+            <div className="mb-3 space-y-2.5 rounded-sm border border-line bg-surface p-3">
+              <Field
+                label="Name"
+                required
+                hint="How code and reports refer to the role. Permanent — it cannot be changed later."
+              >
+                {(control) => (
+                  <Input
+                    {...control}
+                    value={newName}
+                    maxLength={50}
+                    placeholder="dispatch_clerk"
+                    onChange={(e) => setNewName(e.target.value)}
+                  />
+                )}
+              </Field>
+              <Field label="Display name" hint="What people see. This one can be changed.">
+                {(control) => (
+                  <Input
+                    {...control}
+                    value={newDisplay}
+                    maxLength={100}
+                    placeholder="Dispatch Clerk"
+                    onChange={(e) => setNewDisplay(e.target.value)}
+                  />
+                )}
+              </Field>
+              <Button
+                variant="primary"
+                className="w-full"
                 disabled={!newName.trim() || creating}
                 onClick={() => void createRole()}
               >
                 {creating ? "Creating…" : "Create role"}
-              </button>
-              <p className="pp-hint">
-                The name is how code and reports refer to the role and cannot
-                be changed later; the display name can.
-              </p>
+              </Button>
             </div>
           )}
 
-          <div className="rp-role-list">
-            {roles.map((role) => (
-              <button
-                key={role.id}
-                type="button"
-                className={`rp-role-row${role.id === selectedId ? " is-selected" : ""}`}
-                onClick={() => selectRole(role)}
-              >
-                <span className="rp-role-name">
-                  {role.display_name}
-                  {!role.is_active && <small> (inactive)</small>}
-                </span>
-                <span className="rp-role-meta">
-                  {role.users} user{role.users === 1 ? "" : "s"} ·{" "}
-                  {role.name.trim().toLowerCase() === "admin"
-                    ? "all permissions"
-                    : `${role.keys.length} permission${role.keys.length === 1 ? "" : "s"}`}
-                </span>
-              </button>
-            ))}
-          </div>
-        </section>
-
-        <section className="ofs-card">
-          <div className="ofs-card-head">
-            <span className="ofs-card-mark" />
-            <h2>
-              {selected
-                ? `Permissions — ${selected.display_name}`
-                : "Select a role"}
-            </h2>
-          </div>
-
-          {!selected && (
-            <p className="pp-hint">
-              Pick a role on the left to see and edit what it grants.
-            </p>
-          )}
-
-          {selected && isAdminRole && (
-            <div className="ofs-alert">
-              <HiCheckCircle aria-hidden="true" />
-              Administrators hold every permission implicitly. There is nothing
-              to tick — and nothing that can be unticked.
+          {loading ? (
+            <div className="space-y-2">
+              <Skeleton className="h-12 w-full" />
+              <Skeleton className="h-12 w-full" />
+              <Skeleton className="h-12 w-full" />
             </div>
+          ) : roles.length === 0 ? (
+            <EmptyState icon={HiOutlineShieldCheck} title="No roles defined" />
+          ) : (
+            <ul className="m-0 max-h-[440px] list-none space-y-1 overflow-y-auto p-0">
+              {roles.map((role) => {
+                const isSelected = role.id === selectedId;
+                return (
+                  <li key={role.id}>
+                    <button
+                      type="button"
+                      /* A selectable list row, so the DESIGN_SYSTEM §1.1 reset
+                         is copied rather than using `ui/button`. */
+                      className={
+                        "flex w-full cursor-pointer appearance-none flex-col gap-0.5 rounded-sm border border-solid px-3 py-2 text-left [font-family:inherit] text-[13px] transition-colors " +
+                        (isSelected
+                          ? "border-brand-line bg-brand-soft"
+                          : "border-transparent bg-transparent hover:bg-surface")
+                      }
+                      aria-current={isSelected ? "true" : undefined}
+                      onClick={() => selectRole(role)}
+                    >
+                      <span className="flex items-center gap-1.5 font-semibold text-ink">
+                        {role.display_name}
+                        {!role.is_active && <Badge tone="neutral">Inactive</Badge>}
+                      </span>
+                      <span className="text-[11.5px] text-subtle">
+                        {role.users} user{role.users === 1 ? "" : "s"} ·{" "}
+                        {role.name.trim().toLowerCase() === "admin"
+                          ? "all permissions"
+                          : role.keys.length +
+                            " permission" +
+                            (role.keys.length === 1 ? "" : "s")}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
           )}
+        </Card>
 
-          {selected && (
-            <div className="rp-details">
-              <div className="rp-details-row">
-                <label htmlFor="rp-display-name">Display name</label>
-                <input
-                  id="rp-display-name"
-                  type="text"
-                  value={editDisplay}
-                  maxLength={100}
-                  disabled={roleBusy}
-                  onChange={(e) => setEditDisplay(e.target.value)}
-                />
-                <button
-                  type="button"
-                  className="ofs-refresh"
-                  disabled={
-                    roleBusy ||
-                    !editDisplay.trim() ||
-                    editDisplay.trim() === selected.display_name
-                  }
-                  onClick={() => void saveRoleDetails({ display_name: editDisplay.trim() })}
-                >
-                  Rename
-                </button>
-              </div>
-              <div className="rp-details-row">
-                <span className="rp-details-name">
-                  name: <code>{selected.name}</code> (permanent) ·{" "}
-                  {selected.users} user{selected.users === 1 ? "" : "s"}
-                </span>
-                <button
-                  type="button"
-                  className="ofs-refresh"
-                  disabled={roleBusy || PRIVILEGED_ROLES.has(selected.name.trim().toLowerCase())}
-                  title={
-                    PRIVILEGED_ROLES.has(selected.name.trim().toLowerCase())
-                      ? "Privileged roles cannot be deactivated."
-                      : selected.is_active
-                        ? "Deactivate: holders keep the role but its permission bundle stops granting."
-                        : "Reactivate the role."
-                  }
-                  onClick={() => void saveRoleDetails({ is_active: !selected.is_active })}
-                >
-                  {selected.is_active ? "Deactivate" : "Activate"}
-                </button>
-                <button
-                  type="button"
-                  className="ofs-refresh rp-danger"
-                  disabled={
-                    roleBusy ||
-                    selected.users > 0 ||
-                    PRIVILEGED_ROLES.has(selected.name.trim().toLowerCase())
-                  }
-                  title={
-                    PRIVILEGED_ROLES.has(selected.name.trim().toLowerCase())
-                      ? "Privileged roles cannot be deleted."
-                      : selected.users > 0
-                        ? `${selected.users} user${selected.users === 1 ? "" : "s"} still hold this role — reassign them first.`
-                        : "Delete this role and its permission bundle."
-                  }
-                  onClick={() => void deleteRole()}
-                >
-                  Delete
-                </button>
-              </div>
-            </div>
-          )}
-
-          {selected && !isAdminRole && (
+        {/* ── The selected role ── */}
+        <div className="space-y-4">
+          {!selected ? (
+            <Card>
+              <EmptyState
+                icon={HiOutlineShieldCheck}
+                title="Select a role"
+                hint="Pick a role on the left to see and edit what it grants."
+              />
+            </Card>
+          ) : (
             <>
-              {modules.map((module) => (
-                <div key={module.name} className="rp-module">
-                  <h3 className="rp-module-title">
-                    {MODULE_TITLES[module.name] ?? module.name}
-                  </h3>
-                  {module.keys.map(({ key, label }) => (
-                    <ToggleRow
-                      key={key}
-                      title={label}
-                      subtitle={key}
-                      checked={draftKeys.has(key)}
-                      disabled={!migrated || saving}
-                      onChange={() => toggleKey(key)}
-                    />
-                  ))}
-                </div>
-              ))}
-
-              <div className="rp-actions">
-                <button
-                  type="button"
-                  className="ofs-refresh"
-                  disabled={!dirty || !migrated || saving}
-                  onClick={() => void save()}
-                >
-                  {saving ? "Saving…" : dirty ? "Save changes" : "Saved"}
-                </button>
-                {savedMsg && (
-                  <span className="rp-saved">
-                    <HiCheckCircle aria-hidden="true" /> {savedMsg}
+              <Card>
+                <CardHeader>
+                  <CardTitle>{selected.display_name}</CardTitle>
+                  <span className="text-[12px] text-subtle">
+                    <code className="rounded bg-surface-strong px-1 py-px font-mono text-[11.5px]">
+                      {selected.name}
+                    </code>{" "}
+                    · permanent · {selected.users} user{selected.users === 1 ? "" : "s"}
                   </span>
-                )}
-              </div>
+                </CardHeader>
+
+                <FormGrid>
+                  <Field label="Display name" hint="What people see. Renaming is safe.">
+                    {(control) => (
+                      <Input
+                        {...control}
+                        value={editDisplay}
+                        maxLength={100}
+                        disabled={roleBusy}
+                        onChange={(e) => setEditDisplay(e.target.value)}
+                      />
+                    )}
+                  </Field>
+                </FormGrid>
+
+                <FormActions>
+                  <Button
+                    variant="danger"
+                    className="mr-auto"
+                    disabled={roleBusy || Boolean(deleteBlockedBecause(selected))}
+                    title={deleteBlockedBecause(selected)}
+                    onClick={() => setConfirmDelete(selected)}
+                  >
+                    Delete
+                  </Button>
+                  <Button
+                    disabled={roleBusy || isPrivileged(selected)}
+                    title={
+                      isPrivileged(selected)
+                        ? "Privileged roles cannot be deactivated."
+                        : selected.is_active
+                          ? "Deactivate: holders keep the role but its permission bundle stops granting."
+                          : "Reactivate the role."
+                    }
+                    onClick={() => void saveRoleDetails({ is_active: !selected.is_active })}
+                  >
+                    {selected.is_active ? "Deactivate" : "Activate"}
+                  </Button>
+                  <Button
+                    variant="primary"
+                    disabled={
+                      roleBusy ||
+                      !editDisplay.trim() ||
+                      editDisplay.trim() === selected.display_name
+                    }
+                    onClick={() => void saveRoleDetails({ display_name: editDisplay.trim() })}
+                  >
+                    Rename
+                  </Button>
+                </FormActions>
+              </Card>
+
+              {isAdminRole ? (
+                <Notice tone="info" title="Administrators hold every permission">
+                  There is nothing to tick here — and nothing that can be unticked.
+                </Notice>
+              ) : (
+                <>
+                  {/*
+                   * One module at a time, rather than every module stacked into
+                   * one long scroll. The count on each tab is what makes that
+                   * safe: switching tabs would otherwise hide how much is
+                   * granted elsewhere, and this screen's whole job is showing
+                   * exactly that.
+                   */}
+                  <TabList label="Permission modules">
+                    {modules.map((module) => {
+                      const granted = module.keys.filter(({ key }) =>
+                        draftKeys.has(key),
+                      ).length;
+                      return (
+                        <Tab
+                          key={module.name}
+                          selected={module.name === activeModuleName}
+                          onClick={() => setActiveModule(module.name)}
+                        >
+                          {MODULE_TITLES[module.name] ?? module.name}
+                          <span
+                            className={
+                              "ml-1.5 rounded-full px-1.5 py-px text-[11px] font-bold " +
+                              (module.name === activeModuleName
+                                ? "bg-white/20"
+                                : granted > 0
+                                  ? "bg-brand-soft text-brand"
+                                  : "bg-surface-strong text-subtle")
+                            }
+                          >
+                            {granted}/{module.keys.length}
+                          </span>
+                        </Tab>
+                      );
+                    })}
+                  </TabList>
+
+                  <Card role="tabpanel" aria-label={activeModuleTitle}>
+                    {activeModuleObj ? (
+                      <PermissionGrid>
+                        {activeModuleObj.keys.map(({ key, label }) => (
+                          <PermissionToggle
+                            key={key}
+                            title={label}
+                            subtitle={key}
+                            checked={draftKeys.has(key)}
+                            disabled={!migrated || saving}
+                            onChange={() => toggleKey(key)}
+                          />
+                        ))}
+                      </PermissionGrid>
+                    ) : (
+                      <EmptyState
+                        icon={HiOutlineShieldCheck}
+                        title="No permissions registered"
+                        hint="The server's permission registry returned nothing to grant."
+                      />
+                    )}
+                  </Card>
+
+                  <div className="flex flex-wrap items-center justify-end gap-3">
+                    {/* The total across every module, so the figure the save
+                        writes is visible without visiting each tab. */}
+                    <span className="mr-auto text-[12px] text-subtle">
+                      {draftKeys.size} permission{draftKeys.size === 1 ? "" : "s"} granted in
+                      total
+                    </span>
+                    {savedMsg && (
+                      <span className="inline-flex items-center gap-1.5 text-[12px] text-ok">
+                        <HiOutlineCheckCircle aria-hidden="true" /> {savedMsg}
+                      </span>
+                    )}
+                    <Button
+                      variant="primary"
+                      disabled={!dirty || !migrated || saving}
+                      title={!migrated ? "Saving is disabled until the migration has run." : undefined}
+                      onClick={() => void save()}
+                    >
+                      {saving ? "Saving…" : dirty ? "Save changes" : "Saved"}
+                    </Button>
+                  </div>
+                </>
+              )}
             </>
           )}
-        </section>
+        </div>
       </div>
-    </div>
+
+      <Dialog
+        open={Boolean(confirmDelete)}
+        onOpenChange={(next) => {
+          if (!next && !roleBusy) setConfirmDelete(null);
+        }}
+      >
+        {confirmDelete && (
+          <DialogContent title="Delete role" size="sm">
+            <DialogHeader>
+              <DialogTitle>Delete {confirmDelete.display_name}?</DialogTitle>
+            </DialogHeader>
+            <DialogBody>
+              <Notice tone="hold">
+                The role and its permission bundle are deleted together. Anything that refers to{" "}
+                <code className="font-mono">{confirmDelete.name}</code> by name — reports, saved
+                filters — stops matching, and the name cannot be reused to bring it back.
+              </Notice>
+            </DialogBody>
+            <DialogFooter>
+              <Button onClick={() => setConfirmDelete(null)} disabled={roleBusy}>
+                Cancel
+              </Button>
+              <Button variant="danger" onClick={() => void deleteRole()} disabled={roleBusy}>
+                {roleBusy ? "Deleting…" : "Delete role"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        )}
+      </Dialog>
+    </Page>
   );
 }

@@ -1,20 +1,40 @@
 /**
- * The Scheme Manager page: a header, a toolbar, the scheme list, and the two
- * modals (editor, vendor check) that sit on top of it.
+ * The Scheme Manager page: a header, a filter bar, the scheme list, and the
+ * three dialogs (editor, vendor check, the destructive confirm) on top of it.
  *
- * Everything else moved out in Phase 4 — the state, data-fetching and
- * handlers into `useSchemeManager`, the list row markup (now virtualized)
- * into `schemeManager/components/SchemeList`, the 4-step editor into
- * `SchemeEditorModal`, and the vendor-check panel into `VendorCheck`. What is
- * left here is composition: the page chrome that belongs to none of them.
+ * Everything else lives elsewhere — the state, data-fetching and handlers in
+ * `useSchemeManager`, the list in `schemeManager/components/SchemeList`, the
+ * 4-step editor in `SchemeEditorModal`, and the vendor-check panel in
+ * `VendorCheck`. What is left here is composition.
  */
+import { HiOutlineMagnifyingGlass, HiOutlinePlus } from "react-icons/hi2";
+
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  FilterBar,
+  FilterCheckbox,
+  FilterCount,
+  FilterSearch,
+  FilterSelect,
+  FilterSpacer,
+} from "@/components/ui/filter-bar";
+import { Notice, Page, PageHeader } from "@/components/ui/page";
+
 import SchemeEditorModal from "./schemeManager/components/SchemeEditorModal";
 import SchemeList from "./schemeManager/components/SchemeList";
-import { SearchIcon } from "./schemeManager/components/icons";
 import VendorCheck from "./schemeManager/components/VendorCheck";
 import { CATEGORIES } from "./schemeManager/schemeManagerHelpers";
 import { useSchemeManager } from "./schemeManager/useSchemeManager";
-import "../styles/Scheme_Manager.css";
 
 export default function Scheme_Manager() {
   const sm = useSchemeManager();
@@ -31,64 +51,67 @@ export default function Scheme_Manager() {
     loadSchemes,
     notice,
     setNotice,
-    products,
+    itemOptions,
     itemNameOf,
     expandedId,
     setExpandedId,
     deactivate,
     deleteScheme,
+    pending,
+    setPending,
+    confirmPending,
+    isConfirming,
     checkOpen,
     setCheckOpen,
-    editingId,
     openNew,
   } = sm;
 
   return (
-    <div className="sch-page app-page">
-      {/* ---- header -------------------------------------------------- */}
-      <header className="sch-head">
-        <h1>Schemes</h1>
-        <div className="sch-head-actions">
-          <button type="button" className="sch-btn" onClick={() => setCheckOpen(true)}>
-            Check a vendor
-          </button>
-          <button type="button" className="sch-btn-primary" onClick={openNew}>
-            + New scheme
-          </button>
-        </div>
-      </header>
+    <Page>
+      <Breadcrumbs items={[{ label: "Schemes" }, { label: "Schemes" }]} />
 
-      {notice && (
-        <div className={`sch-notice ${notice.tone}`}>
-          <span>{notice.text}</span>
-          <button type="button" onClick={() => setNotice(null)} aria-label="Dismiss">
-            ×
-          </button>
-        </div>
-      )}
+      <PageHeader
+        title="Schemes"
+        description="An offer: what a vendor has to buy, and what they get free."
+        actions={
+          <>
+            <Button variant="ghost" onClick={() => setCheckOpen(true)}>
+              <HiOutlineMagnifyingGlass aria-hidden="true" /> Check a vendor
+            </Button>
+            <Button variant="primary" onClick={openNew}>
+              <HiOutlinePlus aria-hidden="true" /> New scheme
+            </Button>
+          </>
+        }
+      />
 
-      {/* ---- toolbar ------------------------------------------------- */}
-      <div className="sch-toolbar">
-        <div className="sch-search">
-          <SearchIcon />
-          <input
-            type="text"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            onKeyDown={(event) => event.key === "Enter" && loadSchemes()}
-            onBlur={() => loadSchemes()}
-            placeholder="Search schemes..."
-            aria-label="Search schemes"
-          />
-        </div>
-        <select
-          className="sch-select sch-toolbar-select"
+      {notice ? (
+        <Notice tone="ok" className="flex items-center justify-between gap-3">
+          {notice}
+          <Button variant="link" size="inline" onClick={() => setNotice(null)}>
+            Dismiss
+          </Button>
+        </Notice>
+      ) : null}
+
+      <FilterBar>
+        <FilterSearch
+          label="Search"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          onKeyDown={(event) => event.key === "Enter" && void loadSchemes()}
+          onBlur={() => void loadSchemes()}
+          placeholder="Name or code"
+          fieldClassName="min-w-[220px]"
+        />
+        <FilterSelect
+          label="Category"
           value={categoryFilter}
           onChange={(event) => {
             setCategoryFilter(event.target.value);
             void loadSchemes({ category: event.target.value });
           }}
-          aria-label="Filter by category"
+          fieldClassName="max-w-[200px]"
         >
           <option value="">All categories</option>
           {CATEGORIES.map((c) => (
@@ -96,21 +119,23 @@ export default function Scheme_Manager() {
               {c}
             </option>
           ))}
-        </select>
-        <label className="sch-check">
-          <input
-            type="checkbox"
-            checked={includeInactive}
-            onChange={(event) => {
-              setIncludeInactive(event.target.checked);
-              void loadSchemes({ includeInactive: event.target.checked });
-            }}
-          />
-          Show turned-off
-        </label>
-      </div>
+        </FilterSelect>
+        <FilterCheckbox
+          label="Show turned-off"
+          checked={includeInactive}
+          onChange={(event) => {
+            setIncludeInactive(event.target.checked);
+            void loadSchemes({ includeInactive: event.target.checked });
+          }}
+        />
+        <FilterSpacer />
+        {!isLoading && !loadError ? (
+          <FilterCount>
+            {schemes.length} {schemes.length === 1 ? "scheme" : "schemes"}
+          </FilterCount>
+        ) : null}
+      </FilterBar>
 
-      {/* ---- list ---------------------------------------------------- */}
       <SchemeList
         schemes={schemes}
         isLoading={isLoading}
@@ -125,34 +150,67 @@ export default function Scheme_Manager() {
         loadSchemes={() => void loadSchemes()}
       />
 
-      {/* ---- editor modal -------------------------------------------- */}
-      {editingId !== null && <SchemeEditorModal sm={sm} />}
+      <SchemeEditorModal sm={sm} />
 
-      {/* ---- vendor check modal -------------------------------------- */}
-      {checkOpen && (
-        <>
-          <div className="sch-scrim" onClick={() => setCheckOpen(false)} />
-          <div className="sch-modal" role="dialog" aria-modal="true" aria-labelledby="sch-vendor-check-title">
-            <div className="sch-modal-head">
-              <div>
-                <h2 id="sch-vendor-check-title">Check a vendor</h2>
-                <p>What reaches them, and what a line would actually give. Nothing is saved.</p>
-              </div>
-              <button
-                type="button"
-                className="sch-x"
-                onClick={() => setCheckOpen(false)}
-                aria-label="Close"
+      <Dialog open={checkOpen} onOpenChange={setCheckOpen}>
+        <DialogContent title="Check a vendor" size="lg">
+          <DialogHeader className="items-start">
+            <div className="min-w-0">
+              <DialogTitle>Check a vendor</DialogTitle>
+              <DialogDescription>
+                What reaches them, and what a line would actually give. Nothing is saved.
+              </DialogDescription>
+            </div>
+          </DialogHeader>
+          <DialogBody>
+            <VendorCheck itemOptions={itemOptions} itemNameOf={itemNameOf} />
+          </DialogBody>
+        </DialogContent>
+      </Dialog>
+
+      {/* The destructive confirm. Was `window.confirm`. */}
+      <Dialog
+        open={pending !== null}
+        onOpenChange={(next) => {
+          if (!next && !isConfirming) setPending(null);
+        }}
+      >
+        {pending ? (
+          <DialogContent
+            title={pending.kind === "delete" ? "Delete scheme" : "Turn scheme off"}
+            size="sm"
+          >
+            <DialogHeader>
+              <DialogTitle>
+                {pending.kind === "delete" ? "Delete" : "Turn off"} {pending.scheme.name}?
+              </DialogTitle>
+            </DialogHeader>
+            <DialogBody>
+              <p className="m-0 text-[13px] text-body">
+                {pending.kind === "delete"
+                  ? "This cannot be undone. If any order has already used it, the server will refuse — turn it off instead."
+                  : "It stops applying everywhere. You can turn it back on from the editor."}
+              </p>
+            </DialogBody>
+            <DialogFooter>
+              <Button onClick={() => setPending(null)} disabled={isConfirming}>
+                Cancel
+              </Button>
+              <Button
+                variant={pending.kind === "delete" ? "danger" : "primary"}
+                onClick={() => void confirmPending()}
+                disabled={isConfirming}
               >
-                ×
-              </button>
-            </div>
-            <div className="sch-modal-body">
-              <VendorCheck products={products} itemNameOf={itemNameOf} />
-            </div>
-          </div>
-        </>
-      )}
-    </div>
+                {isConfirming
+                  ? "Working…"
+                  : pending.kind === "delete"
+                    ? "Delete scheme"
+                    : "Turn off"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        ) : null}
+      </Dialog>
+    </Page>
   );
 }

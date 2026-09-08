@@ -72,9 +72,11 @@ describe("Approval console Modal", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("closes from the header X, which is still the page's own button", async () => {
-    // The close control stays inside .apv-modal-head where that stylesheet
-    // positions it, so the primitive's own corner button is switched off.
+  it("closes from the header X, and offers exactly one of them", async () => {
+    // The console used to draw its own close button inside `.apv-modal-head`
+    // and switch the primitive's off. It uses the primitive's now — this
+    // asserts there is still exactly ONE, because the failure mode of that
+    // swap is two X's stacked in the same corner.
     const user = userEvent.setup();
     const onClose = vi.fn();
     render(<Harness onClose={onClose} />);
@@ -118,12 +120,41 @@ describe("Approval console Modal", () => {
     expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
   });
 
-  it("keeps `wide` as a class on the panel, so the stylesheet still sizes it", () => {
-    const { container } = render(
-      <Modal title="Wide one" onClose={() => {}} wide>
-        <p>body</p>
-      </Modal>,
-    );
-    expect(container.ownerDocument.querySelector(".apv-modal.is-wide")).not.toBeNull();
+  /*
+   * `wide` used to be the class `.apv-modal.is-wide` for `Approval_Admin.css`
+   * to size. That stylesheet is gone, so it maps onto the dialog primitive's
+   * own `lg` size instead. The width IS the behaviour here, so asserting on
+   * the class is the exception the testing conventions allow — and the two
+   * renders are compared against each other rather than against a literal, so
+   * retuning the scale does not break this.
+   */
+  it("makes a `wide` modal wider than a default one", () => {
+    const widths = (wide: boolean) => {
+      const { unmount } = render(
+        <Modal title="Sized" onClose={() => {}} wide={wide}>
+          <p>body</p>
+        </Modal>,
+      );
+      const panel = screen.getByRole("dialog").className;
+      unmount();
+      return panel;
+    };
+
+    const normal = widths(false);
+    const wide = widths(true);
+    expect(wide).not.toEqual(normal);
+    expect(wide).toContain("max-w-[820px]");
+    expect(normal).toContain("max-w-[640px]");
+  });
+
+  /*
+   * The half of trap 1.3 that a dialog has to carry itself: it is portaled to
+   * `body`, outside the `<Page>` whose `.tw-page` reverts `index.css`'s
+   * unlayered `button, input { font: inherit }` — so without this every
+   * control in every console modal renders at the 18px root size.
+   */
+  it("carries the converted-page reset, so its controls are not 18px", () => {
+    render(<Harness />);
+    expect(screen.getByRole("dialog").className).toContain("tw-page");
   });
 });

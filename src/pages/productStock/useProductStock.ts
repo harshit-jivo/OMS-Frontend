@@ -8,7 +8,7 @@
  * `Product_Stock.tsx` and `components/*` just destructure the pieces they
  * render.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { startExcelExport, exportDateStamp } from "../../utils/excelExport";
@@ -19,7 +19,6 @@ import {
   ITEMS_PER_PAGE,
   NO_PARTIES,
   NO_PRODUCTS,
-  STOCK_OPTIONS,
   getDemandByItemFromOrders,
   getItemCodeFromStockKey,
   getLeftOverStock,
@@ -73,7 +72,13 @@ export function useProductStock() {
   });
   const [selectedPartyCodes, setSelectedPartyCodes] = useState<string[]>([]);
   const [partySearch, setPartySearch] = useState("");
-  const [partyDropdownOpen, setPartyDropdownOpen] = useState(false);
+  /*
+   * The party picker is a DIALOG now, not a popover — clicking a party in it
+   * does not set a value, it opens that party's open sales orders. A row that
+   * looks like a checkbox but opens a modal is the kind of control that has to
+   * be explained, so it is a list of parties in a dialog that says so.
+   */
+  const [partyPickerOpen, setPartyPickerOpen] = useState(false);
   const [partyOrdersLoading, setPartyOrdersLoading] = useState(false);
   const [partyOrderProducts, setPartyOrderProducts] = useState<Record<string, PartyDemand>>({});
   const [selectedSalesOrders, setSelectedSalesOrders] = useState<Record<string, SapSalesOrder>>({});
@@ -85,53 +90,22 @@ export function useProductStock() {
   const [productOrderError, setProductOrderError] = useState("");
   const [searchText, setSearchText] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
-  const [categoryDropdownOpen, setCategoryDropdownOpen] = useState(false);
   const [typeFilter, setTypeFilter] = useState("all");
-  const [typeDropdownOpen, setTypeDropdownOpen] = useState(false);
   const [warehouseFilters, setWarehouseFilters] = useState<string[]>([]);
-  const [warehouseSearch, setWarehouseSearch] = useState("");
-  const [warehouseDropdownOpen, setWarehouseDropdownOpen] = useState(false);
   const [stockFilters, setStockFilters] = useState<StockStatus[]>([]);
-  const [stockDropdownOpen, setStockDropdownOpen] = useState(false);
   const [expandedDemandKey, setExpandedDemandKey] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
-  const partyDropdownRef = useRef<HTMLDivElement>(null);
-  const categoryDropdownRef = useRef<HTMLDivElement>(null);
-  const typeDropdownRef = useRef<HTMLDivElement>(null);
-  const warehouseDropdownRef = useRef<HTMLDivElement>(null);
-  const stockDropdownRef = useRef<HTMLDivElement>(null);
 
   const fetchProducts = () =>
     queryClient.invalidateQueries({ queryKey: ["sap", "product-stock"] });
 
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (partyDropdownRef.current && !partyDropdownRef.current.contains(event.target as Node)) {
-        setPartyDropdownOpen(false);
-      }
-      if (
-        categoryDropdownRef.current &&
-        !categoryDropdownRef.current.contains(event.target as Node)
-      ) {
-        setCategoryDropdownOpen(false);
-      }
-      if (typeDropdownRef.current && !typeDropdownRef.current.contains(event.target as Node)) {
-        setTypeDropdownOpen(false);
-      }
-      if (
-        warehouseDropdownRef.current &&
-        !warehouseDropdownRef.current.contains(event.target as Node)
-      ) {
-        setWarehouseDropdownOpen(false);
-      }
-      if (stockDropdownRef.current && !stockDropdownRef.current.contains(event.target as Node)) {
-        setStockDropdownOpen(false);
-      }
-    };
-
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+  /*
+   * The five `…DropdownOpen` flags, their five refs and the one
+   * `document.addEventListener("mousedown")` that closed all of them are gone.
+   * Category and Type are native selects, Warehouse and Stock are
+   * `FilterMultiSelect` (which owns its own open state, Escape and
+   * outside-click — DESIGN_SYSTEM §5a), and Party is a dialog.
+   */
 
   const fetchOpenParties = () =>
     queryClient.invalidateQueries({ queryKey: ["sap", "open-parties"] });
@@ -236,27 +210,6 @@ export function useProductStock() {
     return Array.from(new Set(values)).sort();
   }, [products]);
 
-  const filteredWarehouses = useMemo(() => {
-    const search = normalizeText(warehouseSearch);
-    const matchingWarehouses = search
-      ? warehouses.filter((warehouseCode) => normalizeText(warehouseCode).includes(search))
-      : warehouses;
-
-    return [...matchingWarehouses].sort((first, second) => {
-      const firstSelected = warehouseFilters.includes(first) ? 0 : 1;
-      const secondSelected = warehouseFilters.includes(second) ? 0 : 1;
-      if (firstSelected !== secondSelected) return firstSelected - secondSelected;
-      return first.localeCompare(second);
-    });
-  }, [warehouseFilters, warehouseSearch, warehouses]);
-
-  const warehouseFilterLabel = useMemo(() => {
-    if (warehouseFilters.length === 0 || warehouseFilters.length === warehouses.length)
-      return "All Warehouses";
-    if (warehouseFilters.length === 1) return warehouseFilters[0];
-    return `${warehouseFilters.length} Warehouses Selected`;
-  }, [warehouseFilters, warehouses.length]);
-
   const filteredOpenParties = useMemo(() => {
     const search = normalizeText(partySearch);
     if (!search) return openParties;
@@ -302,7 +255,7 @@ export function useProductStock() {
   };
 
   const openPartyOrderModal = async (party: Party) => {
-    setPartyDropdownOpen(false);
+    setPartyPickerOpen(false);
     setPartySearch("");
     setOrderSearch("");
     setOrderModal({ party, orders: [], loading: true, error: "" });
@@ -492,27 +445,6 @@ export function useProductStock() {
       (order) => String(order.CardCode || "").trim() === partyCode,
     ).length;
   }, [orderModal, selectedSalesOrders]);
-
-  const stockFilterLabel = useMemo(() => {
-    if (stockFilters.length === 0 || stockFilters.length === STOCK_OPTIONS.length)
-      return "All Stock";
-    if (stockFilters.length === 1) {
-      return STOCK_OPTIONS.find((option) => option.value === stockFilters[0])?.label || "All Stock";
-    }
-    return `${stockFilters.length} Statuses Selected`;
-  }, [stockFilters]);
-
-  const categoryFilterLabel = useMemo(() => {
-    if (categoryFilter === "all") return "All Categories";
-    return (
-      categories.find((category) => normalizeText(category) === categoryFilter) || "All Categories"
-    );
-  }, [categories, categoryFilter]);
-
-  const typeFilterLabel = useMemo(() => {
-    if (typeFilter === "all") return "All Types";
-    return types.find((type) => normalizeText(type) === typeFilter) || "All Types";
-  }, [types, typeFilter]);
 
   const toggleStockFilter = (status: StockStatus) => {
     setStockFilters((current) =>
@@ -830,8 +762,8 @@ export function useProductStock() {
     setSelectedPartyCodes,
     partySearch,
     setPartySearch,
-    partyDropdownOpen,
-    setPartyDropdownOpen,
+    partyPickerOpen,
+    setPartyPickerOpen,
     partyOrdersLoading,
     partyOrderProducts,
     setSelectedSalesOrders,
@@ -839,7 +771,6 @@ export function useProductStock() {
     filteredOpenParties,
     selectedParties,
     partyFilterLabel,
-    partyDropdownRef,
     handlePartyClick,
 
     // Order modal
@@ -872,35 +803,16 @@ export function useProductStock() {
     setSearchText,
     categoryFilter,
     setCategoryFilter,
-    categoryDropdownOpen,
-    setCategoryDropdownOpen,
-    categoryDropdownRef,
     categories,
-    categoryFilterLabel,
     typeFilter,
     setTypeFilter,
-    typeDropdownOpen,
-    setTypeDropdownOpen,
-    typeDropdownRef,
     types,
-    typeFilterLabel,
     warehouseFilters,
     setWarehouseFilters,
-    warehouseSearch,
-    setWarehouseSearch,
-    warehouseDropdownOpen,
-    setWarehouseDropdownOpen,
-    warehouseDropdownRef,
     warehouses,
-    filteredWarehouses,
-    warehouseFilterLabel,
     toggleWarehouseFilter,
     stockFilters,
     setStockFilters,
-    stockDropdownOpen,
-    setStockDropdownOpen,
-    stockDropdownRef,
-    stockFilterLabel,
     toggleStockFilter,
 
     // Table

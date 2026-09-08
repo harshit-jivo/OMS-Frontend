@@ -10,12 +10,27 @@
  *
  * This file keeps its exact path so nothing that imports it (routes, tests)
  * needs to change.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * THE STATUS FILTERS ARE A TABLIST NOW
+ * ─────────────────────────────────────────────────────────────────────────
+ * They were `<button aria-pressed>` inside a `<nav>` — which describes seven
+ * independent toggles, when in fact exactly one is ever active and choosing
+ * one replaces the table below. That is a tablist, and saying so is not
+ * decoration: `ui/tabs` brings the roving tabindex (one Tab press gets past
+ * the strip instead of seven) and Left/Right/Home/End, neither of which the
+ * buttons had.
  */
-import { HiArrowPath } from "react-icons/hi2";
+import { HiOutlineArrowPath } from "react-icons/hi2";
 
 import { useAction } from "../auth/actions";
 import MissionControlLoader from "../components/MissionControlLoader";
-import "../styles/InvoiceReview.css";
+import { Badge } from "@/components/ui/badge";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { Button } from "@/components/ui/button";
+import { Card, Notice, Page, PageHeader } from "@/components/ui/page";
+import { Tab, TabList } from "@/components/ui/tabs";
+import ConfirmActionDialog from "./invoiceReview/components/ConfirmActionDialog";
 import CreditLimitFlowDialog from "./invoiceReview/components/CreditLimitFlowDialog";
 import CreditLimitRequestDialog from "./invoiceReview/components/CreditLimitRequestDialog";
 import InvoiceDetailDialog from "./invoiceReview/components/InvoiceDetailDialog";
@@ -58,50 +73,76 @@ export default function InvoiceReview() {
   } = view;
 
   return (
-    <div className="ir-page">
-      <header className="ir-header">
-        <div>
-          <h1>Invoice Review</h1>
-          {/* <p>Review submitted sales invoices and approve or reject them before they post to SAP HANA.</p> */}
-        </div>
-        <button
-          type="button"
-          className="ir-btn ir-btn-ghost"
-          onClick={loadInvoices}
-          disabled={loading}
-        >
-          <HiArrowPath className={loading ? "ir-spin" : ""} aria-hidden="true" />
-          Refresh
-        </button>
-      </header>
+    <Page>
+      <Breadcrumbs items={[{ label: "Invoices" }, { label: "Invoice Review" }]} />
 
-      <nav className="ir-filters" aria-label="Filter invoices by status">
-        {visibleFilters.map((filter) => {
-          const count = counts[filter.key] ?? 0;
-          const isActive = statusFilter === filter.key;
-          return (
-            <button
-              key={filter.key}
-              type="button"
-              className={`ir-filter${isActive ? " is-active" : ""}`}
-              aria-pressed={isActive}
-              onClick={() => setStatusFilter(filter.key)}
-            >
-              {filter.label}
-              {count > 0 && <span className="ir-filter-badge">{count > 99 ? "99+" : count}</span>}
-            </button>
-          );
-        })}
-      </nav>
+      <PageHeader
+        title="Invoice Review"
+        description="Submitted sales invoices, approved or rejected here before they post to SAP."
+        actions={
+          <Button variant="ghost" onClick={loadInvoices} disabled={loading}>
+            <HiOutlineArrowPath
+              aria-hidden="true"
+              className={loading ? "motion-safe:animate-spin" : undefined}
+            />
+            Refresh
+          </Button>
+        }
+      />
 
-      {actionMessage && <div className="ir-banner ir-banner-success">{actionMessage}</div>}
-      {actionError && <div className="ir-banner ir-banner-error">{actionError}</div>}
-      {error && <div className="ir-banner ir-banner-error">{error}</div>}
+      <div className="-mx-1 overflow-x-auto px-1 pb-1">
+        <TabList label="Filter invoices by status" className="w-max">
+          {visibleFilters.map((filter) => {
+            const count = counts[filter.key] ?? 0;
+            const selected = statusFilter === filter.key;
+            return (
+              <Tab
+                key={filter.key}
+                id={`ir-tab-${filter.key}`}
+                aria-controls="ir-invoice-panel"
+                selected={selected}
+                onClick={() => setStatusFilter(filter.key)}
+              >
+                {filter.label}
+                {count > 0 ? (
+                  /* On the selected tab the count sits on a brand fill, where
+                     a `neutral` badge's pale grey would vanish. */
+                  <Badge
+                    tone={selected ? "neutral" : "info"}
+                    className={selected ? "bg-white/20 text-white" : undefined}
+                  >
+                    {count > 99 ? "99+" : count}
+                  </Badge>
+                ) : null}
+              </Tab>
+            );
+          })}
+        </TabList>
+      </div>
 
-      <section className="ir-card">
+      {/* Outcomes of the last action, and the load failure. `Notice` carries
+          `role="status"`, so a screen reader hears the result of a decision it
+          could not otherwise know had landed. */}
+      {actionMessage ? <Notice tone="ok">{actionMessage}</Notice> : null}
+      {actionError ? <Notice tone="bad">{actionError}</Notice> : null}
+      {error ? (
+        <Notice tone="bad" title="Could not load invoices">
+          {error}
+        </Notice>
+      ) : null}
+
+      <Card
+        id="ir-invoice-panel"
+        role="tabpanel"
+        aria-labelledby={`ir-tab-${statusFilter}`}
+        className="overflow-hidden p-0"
+      >
         <InvoiceTable view={view} />
-      </section>
+      </Card>
 
+      {/* The one question every verb asks. Was five `window.confirm`s and a
+          `window.prompt` for the rejection reason. */}
+      <ConfirmActionDialog view={view} />
       <InvoiceDetailDialog view={view} />
       <InvoiceHistoryDialog view={view} />
 
@@ -122,6 +163,6 @@ export default function InvoiceReview() {
         }
         onOpenReport={openLoaderReport}
       />
-    </div>
+    </Page>
   );
 }

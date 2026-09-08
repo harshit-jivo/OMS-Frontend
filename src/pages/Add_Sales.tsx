@@ -6,13 +6,32 @@
  * `useSalesOrderForm`, the two mutually exclusive forms into `OrderWizard` and
  * `LegacyOrderForm`. What is left here is the part that belongs to neither: the
  * heading, the edit-load spinner, and the two dialogs that follow a save.
+ *
+ * `FOC.tsx` is `<Add_Sales focMode />` and nothing else, so this file is both
+ * order-entry screens.
+ *
+ * `Add_Sales.css` is gone. Both forms are on the design system now — see the
+ * conversion notes at the top of `OrderWizard` and `LegacyOrderForm` for what
+ * changed in each and, more importantly, for what deliberately did not.
  */
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { Button } from "@/components/ui/button";
+import { DetailFields } from "@/components/ui/detail";
+import { Card, Page, PageHeader } from "@/components/ui/page";
+import { Skeleton } from "@/components/ui/skeleton";
+import { HiOutlineCheckCircle } from "react-icons/hi2";
 
 import LegacyOrderForm from "./salesOrder/LegacyOrderForm";
 import OrderWizard from "./salesOrder/OrderWizard";
 import { useSalesOrderForm, type AddSalesProps } from "./salesOrder/useSalesOrderForm";
-import "../styles/Add_Sales.css";
 
 export default function Add_Sales({ focMode = false }: AddSalesProps) {
   const form = useSalesOrderForm({ focMode });
@@ -32,153 +51,136 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
     handleSuccessClose,
   } = form;
 
+  /** One screen, five titles — edit / duplicate / new, each FOC or not. */
+  const title = isEditMode
+    ? isFocOrder
+      ? "Edit FOC Order"
+      : "Edit Sales Order"
+    : isDuplicateMode
+      ? isFocOrder
+        ? "Duplicate FOC Order"
+        : "Duplicate Sales Order"
+      : isFocMode
+        ? "FOC Order"
+        : "Add Sales Order";
+
+  const description = isEditMode
+    ? "Change the lines and resubmit. The order re-enters approval from the start."
+    : isDuplicateMode
+      ? "A new order, prefilled from an existing one. Nothing is changed on the original."
+      : isFocMode
+        ? "A free-of-charge order. It goes through the same approvals as a sale."
+        : "Pick a party, add the lines, and send it for approval.";
+
   return (
-    <div className="sl-page app-page">
-      <div className="bo-page-head">
-        <span className="bo-page-accent" aria-hidden="true" />
-        <div>
-          <h1 className="bo-page-title">
-            {" "}
-            {isEditMode
-              ? isFocOrder
-                ? "Edit FOC Order"
-                : "Edit Sales Order"
-              : isDuplicateMode
-                ? isFocOrder
-                  ? "Duplicate FOC Order"
-                  : "Duplicate Sales Order"
-                : isFocMode
-                  ? "FOC Order"
-                  : "Add Sales Order"}
-          </h1>
-          <p className="bo-page-subtitle">Add / Edit Sales Orders.</p>
-        </div>
-      </div>
-      {/* <div className="sl-header app-page-head">
-          <div>
-            <h1 className="sl-title app-page-title">
-              {isEditMode
-                ? isFocOrder
-                  ? "Edit FOC Order"
-                  : "Edit Sales Order"
-                : isDuplicateMode
-                  ? isFocOrder
-                    ? "Duplicate FOC Order"
-                    : "Duplicate Sales Order"
-                  : isFocMode
-                    ? "FOC Order"
-                    : "Add Sales Order"}
-            </h1>
-          </div>
-        </div> */}
+    <Page>
+      <Breadcrumbs
+        items={[{ label: "Orders" }, { label: isFocMode ? "FOC" : "Add Sales" }]}
+      />
+
+      <PageHeader title={title} description={description} />
 
       {isEditMode && isLoadingEditOrder ? (
-        <div className="sl-loading-overlay" role="status" aria-live="polite">
-          <div className="sl-spinner" aria-hidden="true" />
-          <span className="sl-loading-text">Loading order details…</span>
-        </div>
+        <Card className="space-y-3" role="status" aria-live="polite">
+          <span className="sr-only">Loading order details</span>
+          <Skeleton className="h-6 w-48" />
+          <Skeleton className="h-control w-full" />
+          <Skeleton className="h-control w-full" />
+          <Skeleton className="h-40 w-full" />
+        </Card>
       ) : useWizard ? (
         <OrderWizard form={form} />
       ) : (
         <LegacyOrderForm form={form} />
       )}
 
+      {/* ── Confirm ── */}
       <Dialog
         open={Boolean(showSaveConfirm)}
         onOpenChange={(next) => {
-          if (!next) setShowSaveConfirm(false);
+          if (!next && !isSaving) setShowSaveConfirm(false);
         }}
       >
-        {showSaveConfirm && (
+        {showSaveConfirm ? (
           <DialogContent
-            title="Confirm save"
-            variant="bare"
-            size="auto"
-            showClose={false}
-            className="sl-modal"
+            title={isEditMode ? "Confirm update" : "Confirm save"}
+            size="sm"
+            className="max-w-[440px]"
           >
-            <div id="sl-save-confirm-title" className="sl-modal-title">
-              {isEditMode
-                ? "Confirm Update"
-                : isDuplicateMode
-                  ? "Confirm New Order"
-                  : isFocMode
-                    ? "Confirm FOC Order"
-                    : "Confirm Save"}
-            </div>
-            <p className="sl-modal-text">
-              {isEditMode
-                ? "Are you sure you want to update this order?"
-                : isDuplicateMode
-                  ? "Are you sure you want to create a new order based on this one?"
-                  : isFocMode
-                    ? "Are you sure you want to create this FOC order?"
-                    : "Are you sure you want to save this order?"}
-            </p>
-            <div className="sl-modal-actions">
-              <button
-                type="button"
-                className="sl-modal-btn sl-modal-btn-secondary"
-                onClick={() => setShowSaveConfirm(false)}
-                disabled={isSaving}
-              >
+            <DialogBody className="text-center">
+              <h3 className="text-[16px] font-bold text-ink">
+                {isEditMode
+                  ? "Update this order?"
+                  : isDuplicateMode
+                    ? "Create a new order from this one?"
+                    : isFocMode
+                      ? "Create this FOC order?"
+                      : "Save this order?"}
+              </h3>
+              <p className="mt-1.5 text-[13px] text-subtle">
+                {isEditMode
+                  ? "It re-enters approval from the start."
+                  : "It will be sent for approval straight away."}
+              </p>
+            </DialogBody>
+            <DialogFooter className="justify-center">
+              <Button onClick={() => setShowSaveConfirm(false)} disabled={isSaving}>
                 Cancel
-              </button>
-              <button
-                type="button"
-                className="sl-modal-btn sl-modal-btn-primary"
-                onClick={submitOrder}
-                disabled={isSaving}
-              >
+              </Button>
+              <Button variant="primary" onClick={submitOrder} disabled={isSaving}>
                 {isSaving
                   ? isEditMode
-                    ? "Updating..."
-                    : "Creating..."
+                    ? "Updating…"
+                    : "Creating…"
                   : isEditMode
-                    ? "Yes, Update"
+                    ? "Yes, update"
                     : isFocMode
-                      ? "Yes, Create FOC"
-                      : "Yes, Create New"}
-              </button>
-            </div>
+                      ? "Yes, create FOC"
+                      : "Yes, create"}
+              </Button>
+            </DialogFooter>
           </DialogContent>
-        )}
+        ) : null}
       </Dialog>
 
+      {/* ── Saved ── */}
       <Dialog
         open={Boolean(saveSuccess)}
         onOpenChange={(next) => {
           if (!next) setSaveSuccess(null);
         }}
       >
-        {saveSuccess && (
-          <DialogContent
-            title="Saved"
-            variant="bare"
-            size="auto"
-            showClose={false}
-            className="sl-modal sl-success-modal"
-          >
-            <div className="sl-success-mark" aria-hidden="true" />
-            <div className="sl-modal-title">{saveSuccess.message}</div>
-            <div className="sl-success-details">
-              <div className="sl-success-row">
-                <span>Order ID</span>
-                <strong>{saveSuccess.orderId}</strong>
-              </div>
-              <div className="sl-success-row">
-                <span>Received Next By</span>
-                <strong>{saveSuccess.nextStage}</strong>
-              </div>
-            </div>
-            <div className="sl-modal-actions">
-              <button type="button" className="sl-modal-btn" onClick={handleSuccessClose}>
-                OK
-              </button>
-            </div>
+        {saveSuccess ? (
+          <DialogContent title="Order saved" size="sm" className="max-w-[440px]">
+            <DialogHeader className="justify-center">
+              <DialogTitle className="flex items-center gap-2">
+                <span
+                  aria-hidden="true"
+                  className="flex size-7 items-center justify-center rounded-full bg-ok-soft text-ok"
+                >
+                  <HiOutlineCheckCircle className="size-4" />
+                </span>
+                {saveSuccess.message}
+              </DialogTitle>
+            </DialogHeader>
+            <DialogBody>
+              {/* Which desk it landed on matters more than the fact it saved:
+                  it is the answer to "who do I chase". */}
+              <DetailFields
+                items={[
+                  ["Order ID", saveSuccess.orderId],
+                  ["Received next by", saveSuccess.nextStage],
+                ]}
+              />
+            </DialogBody>
+            <DialogFooter className="justify-center">
+              <Button variant="primary" onClick={handleSuccessClose}>
+                Done
+              </Button>
+            </DialogFooter>
           </DialogContent>
-        )}
+        ) : null}
       </Dialog>
-    </div>
+    </Page>
   );
 }

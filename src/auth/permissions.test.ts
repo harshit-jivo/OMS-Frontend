@@ -38,6 +38,7 @@ function session(overrides: Partial<Session> = {}): Session {
     companyName: "",
     mainGroupId: "",
     mainGroupName: "",
+    categories: [],
     ...overrides,
   };
 }

@@ -63,7 +63,15 @@ describe("tokens match the design already in the stylesheets", () => {
     ["--color-line", "#dbe4ee"],         // index.css --border
     ["--color-line-strong", "#cbd5e1"],  // 8 blocks
     ["--color-surface", "#f8fafc"],      // index.css --code-bg, 13 blocks
-    ["--color-canvas", "#f4f7fb"],       // index.css --bg
+    // Phase 2 DIVERGES here, deliberately, and this is the record of it.
+    // Phase 1's rule was that a token must describe the design that already
+    // exists — `--color-canvas` mirrored `index.css --bg` (#f4f7fb). That
+    // value is so close to white that a white card on it is visible only by
+    // its border, and the converted pages read as one flat sheet.
+    //
+    // It is applied by `.content-area:has([data-slot="page"])`, so it reaches
+    // converted pages ONLY; the 100+ unconverted ones keep the shell's white.
+    ["--color-canvas", "#f4f5f6"],       // neutral grey; was index.css --bg
     ["--color-brand", "#2563eb"],        // index.css --accent
     ["--color-danger", "#dc2626"],       // 6 blocks
     ["--color-danger-soft", "#fef2f2"],
@@ -72,6 +80,14 @@ describe("tokens match the design already in the stylesheets", () => {
     ["--radius-sm", "8px"],
     ["--radius-md", "12px"],
     ["--radius-lg", "16px"],
+    // Deliberately NOT --radius-lg: Sidebar.css redefines that one
+    // globally to 12px. See the note beside the token.
+    ["--radius-card", "14px"],
+    // The navigation rail — the app's one dark surface, and the only tokens
+    // here that were NOT read out of an existing stylesheet. #172554 is the
+    // brand hue driven to near-black, deliberately blue rather than a neutral
+    // slate; the note beside it records what a white rail looked like.
+    ["--color-rail", "#172554"],
   ];
 
   it.each(EXPECTED)("%s is %s", (name, value) => {
@@ -149,6 +165,172 @@ describe("the cascade traps that cost a day each", () => {
     // silently disagreeing by 12.5% with the 50 stylesheets it is replacing —
     // enough to move a table row and not enough to look like a bug.
     expect(tokenValue("--spacing")).toMatch(/px$/);
+  });
+});
+
+describe("every hand-rolled <button> carries the form-control reset", () => {
+  it("has no bare <button> in a shared component", () => {
+    // Preflight is not imported, so a `<button>` that does not reset itself
+    // keeps the UA's outset border, its grey `buttonface`, and — inside a
+    // `.tw-page`, where `font: revert-layer` applies — the UA's FONT rather
+    // than Inter, because `font-family` is not inherited by form controls.
+    //
+    // `ui/button` exists to make that impossible and documents the trap at
+    // length. Three components fell into it anyway: `breadcrumbs` (a crumb
+    // that looked like a pressed 1997 toolbar button), `dialog` (the corner
+    // close button, in all 44 dialogs) and `tabs` (an unselected tab, where
+    // the selected one hid the bug behind its own `bg-brand`).
+    //
+    // Reading the source rather than rendering, because the point is to catch
+    // the NEXT one — a component nobody has written a test for yet.
+    //
+    // Checked per FILE rather than per opening tag. Matching the tag itself is
+    // the obvious way and it does not work: `<button[\s\S]*?>` stops at the
+    // FIRST `>`, which in this codebase is usually the one inside
+    // `onClick={() => ...}` — so the className never enters the match and the
+    // check silently passes on everything. The coarser question, "this file
+    // renders a <button>, does it mention the reset?", is the invariant that
+    // actually matters and cannot be truncated.
+    const files = globSync("src/components/{ui,orders,layout}/*.tsx", {
+      cwd: process.cwd(),
+    }).filter((f) => !/\.(test|stories)\.tsx$/.test(f));
+    expect(files.length, "the glob should find the shared components").toBeGreaterThan(10);
+
+    const offenders = files.filter((file) => {
+      const source = readFileSync(resolve(process.cwd(), file), "utf-8")
+        // Several of these files DISCUSS `<button>` at length in prose.
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*\/\/.*$/gm, "")
+        .replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+
+      return /<button[\s>]/.test(source) && !source.includes("appearance-none");
+    });
+
+    expect(offenders).toEqual([]);
+  });
+
+  it("fails when a reset is removed, which is what makes it useful", () => {
+    // A source-scanning test can pass by matching nothing — this file already
+    // carries one comment about exactly that — so the scan is exercised
+    // against strings rather than trusted. The first version of the check
+    // above passed happily with the reset deleted from `ui/tabs`, and these
+    // four lines are what would have said so.
+    const scan = (source: string) =>
+      /<button[\s>]/.test(source) && !source.includes("appearance-none");
+
+    expect(scan(`<button type="button" className="px-2">x</button>`)).toBe(true);
+    expect(scan(`<button className="appearance-none px-2" />`)).toBe(false);
+    // The arrow function is what defeated the tag-matching version.
+    expect(scan(`<button onClick={() => go(1)} className="appearance-none" />`)).toBe(
+      false,
+    );
+  });
+});
+
+describe("the dialog open animation", () => {
+  it("animates scale and opacity only — never transform or translate", () => {
+    // `ui/dialog` centres its panel with `-translate-x-1/2 -translate-y-1/2`,
+    // and Tailwind v4 compiles those to the INDEPENDENT `translate` property
+    // rather than to `transform`. The two compose, so a keyframe that also
+    // says `transform: translate(-50%,-50%)` displaces the panel by
+    // -100%/-100% for as long as the animation runs, then snaps it back the
+    // instant `transform` reverts to `none`.
+    //
+    // Measured on a 400x200 stand-in: 200px left and 100px up from centre —
+    // exactly half its own size — for the whole 0.16s. All 44 dialogs did it,
+    // and it reads as a hard flicker rather than a pop.
+    //
+    // The visual suite could not catch it: it runs with `reducedMotion:
+    // "reduce"`, so `motion-safe:` never fires and the animation never plays.
+    const start = code.indexOf("@keyframes dialog-pop");
+    expect(start, "dialog-pop should exist").toBeGreaterThan(-1);
+    // The at-rule's own braces, matched by counting rather than by regex —
+    // the body contains nested `{ … }` blocks per keyframe stop.
+    let depth = 0;
+    let end = start;
+    for (let i = code.indexOf("{", start); i < code.length; i += 1) {
+      if (code[i] === "{") depth += 1;
+      if (code[i] === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          end = i;
+          break;
+        }
+      }
+    }
+    const body = code.slice(code.indexOf("{", start) + 1, end);
+    expect(body, "must not restate the centring").not.toMatch(/transform\s*:/);
+    expect(body, "must not fight the centring utility").not.toMatch(
+      /(^|[\s;{])translate\s*:/,
+    );
+    // And it should still actually animate something.
+    expect(body).toMatch(/(^|[\s;{])scale\s*:/);
+    expect(body).toMatch(/(^|[\s;{])opacity\s*:/);
+  });
+});
+
+describe("the shell's drawer breakpoint", () => {
+  const sidebarCss = readFileSync(
+    resolve(process.cwd(), "src/components/Sidebar.css"),
+    "utf-8",
+  ).replace(/\/\*[\s\S]*?\*\//g, "");
+
+  it("is declared once, as a named variant", () => {
+    // Two files decide what happens below it: Sidebar.css moves the rail
+    // off-canvas, AppHeader.tsx swaps the collapse toggle for a hamburger.
+    // Naming the query once is what stops them disagreeing.
+    expect(code).toMatch(/@custom-variant\s+rail-drawer\s*\(@media\s*\(width\s*<=\s*1024px\)\)/);
+  });
+
+  it("is the SAME width the rail's own CSS uses", () => {
+    // The bug this exists to prevent: Tailwind's `max-[1024px]` compiles to
+    // `@media not all and (width >= 1024px)` — strictly LESS than 1024 —
+    // while `max-width: 1024px` includes it. At exactly 1024px the rail was
+    // off-canvas and the button that opens it was hidden: an app with no
+    // navigation at all, one pixel wide, invisible in review. It was found by
+    // reading the compiled CSS, which is not a thing anyone does twice.
+    expect(sidebarCss).toMatch(/@media\s*\(max-width:\s*1024px\)/);
+  });
+
+  it("is not sidestepped by a raw arbitrary breakpoint in the shell", () => {
+    // `max-[1024px]:` is the obvious thing to write and it is the wrong thing.
+    //
+    // Comment-stripped: both files EXPLAIN why they do not use it, and a
+    // check that reads prose as code fails on its own documentation.
+    for (const file of ["AppHeader.tsx", "AppSidebar.tsx"]) {
+      const source = readFileSync(
+        resolve(process.cwd(), `src/components/layout/${file}`),
+        "utf-8",
+      )
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*\/\/.*$/gm, "");
+      expect(source, `${file} should use rail-drawer:`).not.toMatch(/max-\[1024px\]:/);
+    }
+  });
+});
+
+describe("the shell's stylesheet sets position, not appearance", () => {
+  const sidebarCss = readFileSync(
+    resolve(process.cwd(), "src/components/Sidebar.css"),
+    "utf-8",
+  ).replace(/\/\*[\s\S]*?\*\//g, "");
+
+  it("leaves the header and rail unpainted", () => {
+    // Every rule in Sidebar.css is unlayered, so it beats every Tailwind
+    // utility regardless of specificity. A `background` or `padding` left on
+    // `.header` or `.sidebar` would silently win over the classes in
+    // components/layout/ — the class would sit in the DOM doing nothing,
+    // which is this codebase's most expensive recurring bug.
+    const blocks = [...sidebarCss.matchAll(/(^|\})\s*(\.header|\.sidebar)\s*\{([^}]*)\}/gm)];
+    expect(blocks.length, "the positioning rules should still be here").toBeGreaterThan(0);
+
+    for (const [, , selector, body] of blocks) {
+      for (const property of ["background", "padding", "border", "box-shadow", "font"]) {
+        expect(body, `${selector} must not set ${property}`).not.toMatch(
+          new RegExp(`(^|;)\\s*${property}[-a-z]*\\s*:`),
+        );
+      }
+    }
   });
 });
 

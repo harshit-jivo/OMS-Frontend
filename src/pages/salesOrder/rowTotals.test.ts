@@ -12,7 +12,12 @@ import { describe, expect, it } from "vitest";
 import type { PartyProduct } from "@/services/ordersService";
 
 import { createEmptyRow, type SalesRow } from "../salesOrderRow";
-import { applyFocPricingToRow, computeLandingPrice, recalculateRowTotals } from "./rowTotals";
+import {
+  FOC_TOKEN_BASIC_PRICE,
+  applyFocPricingToRow,
+  computeLandingPrice,
+  recalculateRowTotals,
+} from "./rowTotals";
 
 /** A 12-piece carton of 1-litre bottles at 107 a piece, 5% tax. */
 const PRODUCT = {
@@ -128,16 +133,47 @@ describe("recalculateRowTotals", () => {
 });
 
 describe("applyFocPricingToRow", () => {
-  it("still charges for the goods — the known FOC defect", () => {
-    // Documented, not endorsed. `basicPrice` survives and the amount is
-    // computed from it, so a free-of-cost order can carry a line worth 6,420
-    // while its price list says 0. Asserted here so that fixing it is a
-    // deliberate change with a failing test to prove it landed, rather than
-    // something a refactor quietly alters.
+  it("supplies the token rate when the line has no price of its own", () => {
+    // An FOC line ships free, but a zero rate reaches SAP as either a
+    // zero-value invoice (which generates no IRN) or — worse — falls through
+    // to the price list and bills the customer in full. 0.001 is the rate the
+    // billing team has always keyed by hand.
+    const result = applyFocPricingToRow(row({ qty: "60", basicPrice: "" }));
+
+    expect(result.basicPrice).toBe(FOC_TOKEN_BASIC_PRICE);
+    expect(result.priceListBasic).toBe("0");
+    expect(result.amount).toBe("0.06");
+  });
+
+  it("treats an explicit zero the same as a blank", () => {
+    const result = applyFocPricingToRow(row({ qty: "10", basicPrice: "0" }));
+
+    expect(result.basicPrice).toBe(FOC_TOKEN_BASIC_PRICE);
+    expect(result.amount).toBe("0.01");
+  });
+
+  it("keeps a rate somebody actually typed", () => {
+    // FOC lines are occasionally billed at a nominal rate the billing team
+    // chooses. Overwriting a non-zero rate with the token would silently undo
+    // that decision, so only a blank or a zero falls back.
+    const result = applyFocPricingToRow(row({ qty: "60", basicPrice: "107" }));
+
+    expect(result.basicPrice).toBe("107");
+    expect(result.amount).toBe("6420.00");
+  });
+
+  it("STILL charges for goods priced before the order was marked FOC", () => {
+    // The defect this file has documented all along, and it is NOT closed by
+    // the token rate. On a FOC order the form now seeds 0.001 at
+    // product-select time, and the backend substitutes the token whenever
+    // `basic_price <= 0` — but an order PRICED FIRST and marked FOC afterwards
+    // keeps its 107, on both sides, and invoices at 6,420.
+    //
+    // Kept as an assertion rather than a comment so that closing it is a
+    // deliberate change with a failing test to prove it landed.
     const result = applyFocPricingToRow(row({ qty: "60", basicPrice: "107" }));
 
     expect(result.priceListBasic).toBe("0");
-    expect(result.basicPrice).toBe("107");
-    expect(result.amount).toBe("6420.00");
+    expect(Number(result.amount)).toBeGreaterThan(0.06);
   });
 });

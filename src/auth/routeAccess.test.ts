@@ -35,6 +35,7 @@ function session(overrides: Partial<Session> = {}): Session {
     companyName: "",
     mainGroupId: "",
     mainGroupName: "",
+    categories: [],
     ...overrides,
   };
 }
@@ -98,11 +99,23 @@ describe("coverage", () => {
 
 describe("the sidebar and the router agree", () => {
   function sidebarLinks(): string[] {
-    // Comment-stripped for the same reason as the router scan: a link inside a
-    // `{/* ... *\/}` block is not a link, and requiring a rule for where it
-    // points keeps a dead entry alive in the table.
-    return [...codeOf("src/components/Sidebar.tsx").matchAll(/to="(\/[^"]*)"/g)]
-      .map((m) => m[1]);
+    // Reads the DATA now, not the markup.
+    //
+    // This used to scan `Sidebar.tsx` for `to="/..."`, which is what a link
+    // looks like in JSX. The links became a table — `{ to: "/Add_Sales", ... }`
+    // — and the regex went on matching cleanly, finding the two hand-written
+    // <Link>s left in the shell and nothing else. A source-parsing test can
+    // pass by matching almost nothing, which is what the count check below
+    // exists to catch; it caught this.
+    //
+    // Comment-stripped for the same reason as the router scan: a path inside a
+    // comment is not a link, and requiring a rule for it keeps a dead entry
+    // alive in the table.
+    return [
+      ...codeOf("src/components/layout/navigation.ts").matchAll(
+        /\bto:\s*"(\/[^"]*)"/g,
+      ),
+    ].map((m) => m[1]);
   }
 
   it("every sidebar link points at a route with an access rule", () => {
@@ -214,11 +227,29 @@ describe("the table itself", () => {
     expect(canOpen(null, "/hais/device/:code")).toBe(true);
   });
 
-  it("keeps the Dashboard open to any signed-in user", () => {
-    // It is the redirect target for every denied route. Gating it would put a
-    // denied user into a redirect loop.
-    expect(canOpen(session({ role: "nobody", roles: ["nobody"] }), "/Dashboard")).toBe(true);
-    expect(canOpen(null, "/Dashboard")).toBe(false);
+  it("keeps Home open to any signed-in user", () => {
+    // It is the landing page and the redirect target for every denied route.
+    // Gating it would put a denied user into a redirect loop.
+    expect(canOpen(session({ role: "nobody", roles: ["nobody"] }), "/Home")).toBe(true);
+    expect(canOpen(null, "/Home")).toBe(false);
+  });
+
+  it("gates the Sales Dashboard on its key, with no role fallback", () => {
+    // The whole point of the /Home split. A role list here would re-admit
+    // every desk unconditionally and make the grant decorative; existing
+    // users keep the page through the role BUNDLE seeded by users/0034,
+    // which an admin can then edit — which a hardcoded fallback would not
+    // let them do.
+    expect(canOpen(session({ role: "billing", roles: ["billing"] }), "/Sales_Dashboard")).toBe(
+      false,
+    );
+    expect(
+      canOpen(
+        session({ role: "billing", roles: ["billing"], grants: ["Sales_Dashboard"] }),
+        "/Sales_Dashboard",
+      ),
+    ).toBe(true);
+    expect(canOpen(admin, "/Sales_Dashboard")).toBe(true);
   });
 
   it("no guarded route has a URL parameter", () => {

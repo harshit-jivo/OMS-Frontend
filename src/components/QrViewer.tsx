@@ -1,4 +1,10 @@
-import { HiPrinter, HiArrowDownTray, HiArrowsPointingOut } from "react-icons/hi2";
+import {
+  HiOutlineArrowDownTray,
+  HiOutlineArrowsPointingOut,
+  HiOutlinePrinter,
+} from "react-icons/hi2";
+
+import { Button } from "@/components/ui/button";
 
 type QrViewerProps = {
   /** Image source — a data: URI (from /qr/) or the qr.png URL. */
@@ -15,6 +21,13 @@ type QrViewerProps = {
 /**
  * Displays a NIC signed QR with Print / Download / Open actions.
  * Print opens a clean popup sized for a label and calls window.print().
+ *
+ * Converted late and for a reason: it wore `nic-qr-box` / `nic-qr-actions` /
+ * `ofs-primary`, all defined in `Einvoice.css` — which stopped being imported
+ * anywhere the moment HAIS converted, its last two callers. So the three
+ * e-Invoice QR panels were rendering an unstyled box with UA-chrome buttons,
+ * and nothing pointed at this file to say so. The `styles/` grep after a
+ * module conversion has to include the SHARED components that module fed.
  */
 export default function QrViewer({ src, caption, irn, ackNo, ackDt, docNo, downloadName }: QrViewerProps) {
   const printQr = () => {
@@ -62,19 +75,27 @@ export default function QrViewer({ src, caption, irn, ackNo, ackDt, docNo, downl
   };
 
   return (
-    <div className="nic-qr-box">
-      <img src={src} alt={caption || "Signed QR code"} />
-      {caption ? <span className="nic-note">{caption}</span> : null}
-      <div className="nic-qr-actions">
-        <button type="button" className="ofs-primary" onClick={printQr}>
-          <HiPrinter className="nic-icon-lead" />Print
-        </button>
-        <button type="button" className="ofs-secondary" onClick={download}>
-          <HiArrowDownTray className="nic-icon-lead" />Download
-        </button>
-        <button type="button" className="ofs-secondary" onClick={() => window.open(src, "_blank")}>
-          <HiArrowsPointingOut className="nic-icon-lead" />Open
-        </button>
+    <div className="flex w-fit flex-col items-center gap-3 rounded-card border border-line bg-surface p-4 text-center">
+      {/* `pixelated`: a signed QR scaled with smoothing is a QR that will not
+          scan. Same reason the print popup sets it. */}
+      <img
+        src={src}
+        alt={caption || "Signed QR code"}
+        className="size-[220px] rounded-sm bg-white p-2 [image-rendering:pixelated]"
+      />
+      {caption ? (
+        <span className="max-w-[240px] text-[12px] leading-snug text-subtle">{caption}</span>
+      ) : null}
+      <div className="flex flex-wrap justify-center gap-1.5">
+        <Button type="button" size="sm" variant="primary" onClick={printQr}>
+          <HiOutlinePrinter aria-hidden="true" /> Print
+        </Button>
+        <Button type="button" size="sm" onClick={download}>
+          <HiOutlineArrowDownTray aria-hidden="true" /> Download
+        </Button>
+        <Button type="button" size="sm" onClick={() => window.open(src, "_blank")}>
+          <HiOutlineArrowsPointingOut aria-hidden="true" /> Open
+        </Button>
       </div>
     </div>
   );

@@ -62,19 +62,13 @@ const REPORT = {
 /** The page's arrangement: the label beside its report. */
 function Harness({ source }: { source: string }) {
   return (
-    <div className="lc-page">
-      <div className="lc-split">
-        <section className="lc-pane lc-pane-image" aria-label="Uploaded label">
-          <img
-            className="lc-label-image"
-            src="/media/labels/jivo-canola-1l.png"
-            alt="Label: jivo-canola-1l.pdf"
-          />
-        </section>
-        <section className="lc-pane lc-pane-report" aria-label="Compliance report">
-          <MarkdownReport source={source} />
-        </section>
-      </div>
+    <div className="grid grid-cols-1 items-start gap-2.5">
+      <section aria-label="Uploaded label">
+        <img src="/media/labels/jivo-canola-1l.png" alt="Label: jivo-canola-1l.pdf" />
+      </section>
+      <section aria-label="Compliance report">
+        <MarkdownReport source={source} />
+      </section>
     </div>
   );
 }
@@ -139,13 +133,14 @@ describe("MarkdownReport", () => {
     expect(screen.getAllByText("FAIL")).toHaveLength(1);
   });
 
-  it("colours the pills through the page's status classes", () => {
-    // The exact class matters: it is what carries --ok / --bad from
-    // Label_Checker.css, and a rename here silently drops the colour.
+  it("tags each pill with the verdict it carries", () => {
+    // `data-status`, not a class name: the pill is four utilities now, and a
+    // test that greps the class string would break on any restyle while
+    // saying nothing about whether the verdict reached the DOM.
     render(<MarkdownReport source={buildReportMarkdown(REPORT, "x.pdf")} />);
 
-    expect(screen.getByText("FAIL").className).toContain("lc-md-status-fail");
-    expect(screen.getAllByText("PASS")[0].className).toContain("lc-md-status-pass");
+    expect(screen.getByText("FAIL")).toHaveAttribute("data-status", "FAIL");
+    expect(screen.getAllByText("PASS")[0]).toHaveAttribute("data-status", "PASS");
   });
 
   it("marks the failing row so it is scannable down the page", () => {
@@ -153,7 +148,7 @@ describe("MarkdownReport", () => {
       <MarkdownReport source={buildReportMarkdown(REPORT, "x.pdf")} />,
     );
 
-    expect(container.querySelectorAll(".lc-md-item.is-fail")).toHaveLength(1);
+    expect(container.querySelectorAll('li[data-status="FAIL"]')).toHaveLength(1);
   });
 
   it("renders rule names in bold, not as literal asterisks", () => {
@@ -183,8 +178,10 @@ describe("MarkdownReport", () => {
     );
 
     // One list per section (Failed, Passed) — not one list per item.
-    expect(container.querySelectorAll(".lc-md-list")).toHaveLength(2);
-    expect(container.querySelectorAll(".lc-md-item")).toHaveLength(3);
+    // Element selectors rather than class names: the grouping is what is
+    // being tested, and it survives a restyle.
+    expect(container.querySelectorAll("ul")).toHaveLength(2);
+    expect(container.querySelectorAll("li")).toHaveLength(3);
   });
 
   it("renders markup in a remark as text, never as HTML", () => {
@@ -202,6 +199,6 @@ describe("MarkdownReport", () => {
   it("renders nothing but an empty container for empty source", () => {
     const { container } = render(<MarkdownReport source="" />);
 
-    expect(container.querySelector(".lc-md")).toBeEmptyDOMElement();
+    expect(container.firstElementChild).toBeEmptyDOMElement();
   });
 });

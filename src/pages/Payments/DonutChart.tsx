@@ -1,8 +1,3 @@
-import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
-
-import { compactMoney, money, SLICE_COLORS } from "./dashboardFormat";
-import type { ChartSlice } from "../../services/paymentsDashboardService";
-
 /**
  * The donut behind each analytics card.
  *
@@ -13,6 +8,10 @@ import type { ChartSlice } from "../../services/paymentsDashboardService";
  * legend re-bases them when a slice is switched off, and the arc tooltip has to
  * agree with the legend beside it.
  */
+import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
+
+import { compactMoney, money, SLICE_COLORS } from "./dashboardFormat";
+import type { ChartSlice } from "../../services/paymentsDashboardService";
 
 interface Props {
   slices: ChartSlice[];
@@ -31,12 +30,10 @@ function SliceTooltip({ active, payload }: TipProps) {
   if (!active || !payload?.length) return null;
   const slice = payload[0].payload;
   return (
-    <div className="pdash-tooltip">
-      <div className="pdash-tooltip-label">{slice.label}</div>
-      <div className="pdash-tooltip-value">{money(slice.amount)}</div>
-      <div className="pdash-tooltip-pct">
-        {slice._percent.toFixed(1)}% of total
-      </div>
+    <div className="rounded-sm border border-line bg-card px-2.5 py-1.5 shadow-card">
+      <div className="text-[12px] font-semibold text-ink">{slice.label}</div>
+      <div className="text-[13px] font-bold tabular-nums text-ink">{money(slice.amount)}</div>
+      <div className="text-[11px] text-subtle">{slice._percent.toFixed(1)}% of total</div>
     </div>
   );
 }
@@ -60,7 +57,7 @@ export default function DonutChart({ slices, total, centerLabel }: Props) {
   };
 
   return (
-    <div className="pdash-donut">
+    <div className="relative w-[200px] shrink-0">
       <ResponsiveContainer width="100%" height={200}>
         <PieChart>
           {/* innerRadius is wider than the usual 60%: the centre carries an
@@ -86,16 +83,23 @@ export default function DonutChart({ slices, total, centerLabel }: Props) {
         </PieChart>
       </ResponsiveContainer>
 
-      {/* Centred over the hole. `pointer-events: none` in CSS so it never
-          steals the hover from the arcs underneath.
+      {/* Centred over the hole. `pointer-events-none` so it never steals the
+          hover from the arcs underneath.
 
-          Abbreviated, and width-capped in CSS to the hole itself: the full
-          figure is several times wider than the gap and would sit on top of
-          the arcs. `title` keeps the exact amount one hover away, and the
-          legend beside the chart always shows it in full. */}
-      <div className="pdash-donut-center" title={money(total)}>
-        <span className="pdash-donut-total">{compactMoney(total)}</span>
-        <span className="pdash-donut-label">{centerLabel}</span>
+          Abbreviated, and width-capped to the hole itself: the full figure is
+          several times wider than the gap and would sit on top of the arcs.
+          `title` keeps the exact amount one hover away, and the legend beside
+          the chart always shows it in full. */}
+      <div
+        className="pointer-events-none absolute inset-0 flex max-w-[120px] flex-col items-center justify-center gap-0.5 justify-self-center text-center [inset-inline:auto] left-1/2 -translate-x-1/2"
+        title={money(total)}
+      >
+        <span className="truncate text-[16px] font-bold leading-tight tabular-nums text-ink">
+          {compactMoney(total)}
+        </span>
+        <span className="text-[10.5px] uppercase leading-tight tracking-wide text-subtle">
+          {centerLabel}
+        </span>
       </div>
     </div>
   );

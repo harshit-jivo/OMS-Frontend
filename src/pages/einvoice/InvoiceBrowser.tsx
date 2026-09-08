@@ -6,6 +6,9 @@ import type { InvoiceListItem } from "../../services/einvoiceService";
 import { NicField, StatusBadge, ErrorAlert, SuccessAlert, CompanyDbSelect } from "../../components/NicUI";
 import { messageFrom } from "@/lib/apiError";
 import QrViewer from "../../components/QrViewer";
+import { Button } from "@/components/ui/button";
+import { Input, Select } from "@/components/ui/form";
+import { Card, CardHeader, CardTitle, Notice } from "@/components/ui/page";
 import {
   Table,
   TableBody,
@@ -102,36 +105,35 @@ export default function InvoiceBrowser() {
   };
 
   return (
-    <section className="ofs-card ofs-card--wide">
-      <div className="ofs-card-head">
-        <span className="ofs-card-mark" />
-        <h2>Invoices — Generate IRN</h2>
-      </div>
-      <p className="nic-note">
+    <Card>
+      <CardHeader>
+        <CardTitle>Invoices — Generate IRN</CardTitle>
+      </CardHeader>
+      <p className="text-[12.5px] leading-relaxed text-subtle">
         Shows only invoices that don't yet have an IRN (checked in SAP <code>@UTL_MDEXTH</code>,
         <code> OMS_IRN_LOG</code>, and OMS) — the ones you still need to generate. Invoices that
         already have an IRN are hidden.
       </p>
 
-      <div className="nic-form-grid nic-form-grid--spaced">
+      <div className="grid gap-x-5 gap-y-4 grid-cols-[repeat(auto-fit,minmax(220px,1fr))] mt-3">
         <NicField label="Company DB">
           <CompanyDbSelect value={companyDb} onChange={setCompanyDb} />
         </NicField>
         <NicField label="Search" hint="DocNum or customer name">
-          <input className="nic-input" value={search} onChange={(e) => setSearch(e.target.value)}
+          <Input value={search} onChange={(e) => setSearch(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && void load()} placeholder="626070166 or SAKSHI" />
         </NicField>
         <NicField label="Rows">
-          <select className="nic-select" value={limit} onChange={(e) => setLimit(e.target.value)}>
+          <Select value={limit} onChange={(e) => setLimit(e.target.value)}>
             {["25", "50", "100"].map((n) => <option key={n} value={n}>{n}</option>)}
-          </select>
+          </Select>
         </NicField>
       </div>
-      <div className="nic-actions-row">
-        <button className="ofs-primary" onClick={() => void load()} disabled={loading}>
-          <HiMagnifyingGlass className="nic-icon-lead" />
+      <div className="mt-4 flex flex-wrap items-center gap-2.5">
+        <Button variant="primary" onClick={() => void load()} disabled={loading}>
+          <HiMagnifyingGlass aria-hidden="true" />
           {loading ? "Loading…" : "Load Invoices"}
-        </button>
+        </Button>
       </div>
 
       {/* The load failure is rendered BEFORE the empty state below. It used to
@@ -140,23 +142,23 @@ export default function InvoiceBrowser() {
       <ErrorAlert>{error || (loadError ? messageFrom(loadError, "Request failed") : "")}</ErrorAlert>
       <SuccessAlert>{notice}</SuccessAlert>
       {warning ? (
-        <div className="nic-alert nic-alert--err nic-alert--strong">
-          <span>{warning}</span>
-        </div>
+        <Notice tone="bad" className="mt-2.5 font-semibold">
+          {warning}
+        </Notice>
       ) : null}
 
       {qrIrn ? (
-        <div className="nic-result">
+        <div className="mt-5 space-y-4">
           <QrViewer src={einvoiceService.qrImageUrl(qrIrn)} irn={qrIrn}
             caption={`Signed QR for IRN ${qrIrn.slice(0, 12)}…`} />
-          <div className="nic-actions-row">
-            <button className="ofs-secondary" onClick={() => setQrIrn(null)}>Close QR</button>
+          <div className="mt-4 flex flex-wrap items-center gap-2.5">
+            <Button onClick={() => setQrIrn(null)}>Close QR</Button>
           </div>
         </div>
       ) : null}
 
       {rows.length ? (
-        <div className="nic-table-wrap">
+        <div className="overflow-x-auto rounded-card border border-line">
           <Table density="compact">
             <TableHeader>
               <TableRow>
@@ -168,30 +170,30 @@ export default function InvoiceBrowser() {
               {rows.map((r) => (
                 <TableRow key={r.docentry}>
                   <TableCell>{r.docentry}</TableCell>
-                  <TableCell className="nic-mono">{r.docnum}</TableCell>
+                  <TableCell className="font-mono text-[12px]">{r.docnum}</TableCell>
                   <TableCell>{r.cardname}</TableCell>
-                  <TableCell className="nic-nowrap">{(r.docdate || "").slice(0, 10)}</TableCell>
-                  <TableCell className="nic-num">{Number(r.doctotal).toLocaleString("en-IN")}</TableCell>
+                  <TableCell className="whitespace-nowrap">{(r.docdate || "").slice(0, 10)}</TableCell>
+                  <TableCell className="text-right">{Number(r.doctotal).toLocaleString("en-IN")}</TableCell>
                   <TableCell>
                     {statusBadge(r)}
-                    {r.last_error ? <div className="nic-note nic-note--stacked">{r.last_error}</div> : null}
+                    {r.last_error ? <div className="text-[12.5px] leading-relaxed text-subtle mt-1">{r.last_error}</div> : null}
                   </TableCell>
-                  <TableCell className="nic-nowrap">
+                  <TableCell className="whitespace-nowrap">
                     {r.irn && r.irn_source === "OMS" ? (
                       // QR is renderable only for OMS-generated IRNs (signed QR stored in OMS DB)
-                      <button className="ofs-secondary nic-btn-xs"
+                      <Button size="sm"
                         onClick={() => setQrIrn(r.irn!)}>
                         View QR
-                      </button>
+                      </Button>
                     ) : r.irn ? (
                       // Already has an IRN in SAP (@UTL_MDEXTH) / OMS_IRN_LOG — nothing to generate.
-                      <span className="nic-note" title={r.irn}>Generated in {sourceLabel(r.irn_source)}</span>
+                      <span className="text-[12.5px] leading-relaxed text-subtle" title={r.irn}>Generated in {sourceLabel(r.irn_source)}</span>
                     ) : (
-                      <button className="ofs-primary nic-btn-xs nic-btn-xs--wide"
+                      <Button size="sm" variant="primary"
                         onClick={() => void generate(r.docentry)} disabled={busyDoc === r.docentry}>
-                        <HiBolt className="nic-icon-inline" />
+                        <HiBolt aria-hidden="true" />
                         {busyDoc === r.docentry ? "Generating…" : "Generate IRN"}
-                      </button>
+                      </Button>
                     )}
                   </TableCell>
                 </TableRow>
@@ -200,12 +202,12 @@ export default function InvoiceBrowser() {
           </Table>
         </div>
       ) : !loading ? (
-        <p className="nic-note">
+        <p className="text-[12.5px] leading-relaxed text-subtle">
           {loadError
             ? "Could not load invoices."
             : "No pending invoices — every recent invoice already has an IRN. Use Search to find a specific one."}
         </p>
       ) : null}
-    </section>
+    </Card>
   );
 }

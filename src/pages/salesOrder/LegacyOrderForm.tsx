@@ -11,9 +11,36 @@
  * participate in constraint validation — four of them on `type="hidden"`
  * inputs, where the HTML spec bars them from doing anything at all.
  * `validateBeforeSave` is what actually guards those fields.
+ *
+ * ── On the conversion ─────────────────────────────────────────────────────
+ * Same rule as the wizard: a restyle, not a redesign. Every field, every
+ * column and every gate is where it was.
+ *
+ * Two things did change, and both were bugs:
+ *
+ * · THE TABLE'S INPUTS HAD NO STYLING AT ALL. `.sl-table td input`,
+ *   `.sl-size-input` and `.sl-compact-number-input` are all COMMENTED OUT in
+ *   `Add_Sales.css` — so every quantity and price cell in this table was
+ *   rendering at the browser default, in a form where nothing else was.
+ *   They are `Input` now, which is also how they pick up the readonly
+ *   treatment that tells a derived cell apart from one you can type in.
+ * · THE ACTION ROW WAS THREE FILLED BUTTONS — blue Save, orange Draft, RED
+ *   Clear, all solid, all the same weight. A destructive Clear shouting as
+ *   loudly as Save is how an order gets cleared by someone aiming for the
+ *   button beside it. Save is `primary`, Draft is `secondary`, Clear is
+ *   `danger` — which is an outline until you hover it. See the note on the
+ *   `danger` variant in `ui/button`.
+ *
+ * What did NOT change: the party / bill / ship / dispatch / company dropdowns
+ * still carry their own state and refs from `useSalesOrderForm`, which is
+ * shared with `OrderWizard` — see the note there.
  */
 import { Fragment } from "react";
+import { HiChevronDown, HiMinus, HiOutlineTrash, HiPlus } from "react-icons/hi2";
 
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Field, Input, Select, Textarea } from "@/components/ui/form";
 import {
   Table,
   TableBody,
@@ -22,12 +49,37 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 
 import FieldError from "./FieldError";
 import ProblemSummary from "./ProblemSummary";
 import WarehouseField from "./WarehouseField";
 import { type RowDropdownOption, type SalesOrderForm } from "./useSalesOrderForm";
 import { type SalesRow } from "../salesOrderRow";
+
+/** The white card the two field grids sit on. */
+const PANEL = "rounded-md border border-line bg-card p-4.5 shadow-card";
+
+/** A dropdown panel, shared by the five header pickers. */
+const MENU =
+  "absolute left-0 right-0 top-[calc(100%+6px)] z-[1301] overflow-hidden rounded-md border border-brand-line bg-card shadow-panel";
+
+/** One option inside that panel. */
+const OPTION =
+  "flex w-full cursor-pointer appearance-none flex-col items-start gap-0.5 rounded-lg border-0 bg-transparent px-2.5 py-2.5 text-left [font-family:inherit] transition-colors hover:bg-surface";
+
+/** The trigger button the five header pickers share. */
+const TRIGGER = cn(
+  "flex h-control w-full cursor-pointer appearance-none items-center justify-between gap-2",
+  "rounded-sm border border-line-strong bg-card px-3 text-[13px] text-ink",
+  "[font-family:inherit] shadow-[0_1px_2px_rgba(15,23,42,0.04)]",
+  "transition-colors hover:border-brand hover:shadow-focus",
+  "focus-visible:border-brand focus-visible:outline-none focus-visible:shadow-focus",
+);
+
+/** The blue pill over each half of the form. */
+const SECTION =
+  "mb-3.5 inline-flex rounded-md bg-brand-soft px-2.5 py-1.5 text-[12px] font-semibold uppercase tracking-[0.04em] text-brand";
 
 export default function LegacyOrderForm({ form }: { form: SalesOrderForm }) {
   const {
@@ -113,6 +165,84 @@ export default function LegacyOrderForm({ form }: { form: SalesOrderForm }) {
     selectedCompanyLabel,
   } = form;
 
+  /**
+   * The props every option in every picker carries.
+   *
+   * `role="option"` + `aria-selected`, not just a class: these were anonymous
+   * `<button>`s, so a screen reader heard "button" with no sense of belonging
+   * to a set, and a test had nothing to hold but a class name.
+   */
+  const optionProps = (selected: boolean) => ({
+    role: "option" as const,
+    "aria-selected": selected,
+    className: cn(
+      OPTION,
+      selected && "bg-surface shadow-[inset_3px_0_0_var(--color-line-strong)]",
+    ),
+  });
+
+  const emptyOption = (text: string) => (
+    <div className="px-3 py-3.5 text-[13px] text-subtle">{text}</div>
+  );
+
+  /**
+   * One of the five header pickers: a trigger, then a panel that optionally
+   * opens with a search box in it.
+   */
+  const renderPicker = (config: {
+    refEl: React.RefObject<HTMLDivElement | null>;
+    open: boolean;
+    toggle: () => void;
+    label: string;
+    selectedLabel: string;
+    placeholder: string;
+    controlId?: string;
+    search?: { value: string; onChange: (value: string) => void; placeholder: string };
+    children: React.ReactNode;
+    /** A hidden mirror the <form> submits; four of these carry `required`. */
+    hidden?: React.ReactNode;
+  }) => (
+    <div className={cn("relative", config.open ? "z-[1300]" : "z-[1]")} ref={config.refEl}>
+      <button
+        type="button"
+        id={config.controlId}
+        className={TRIGGER}
+        aria-haspopup="listbox"
+        aria-expanded={config.open}
+        aria-label={config.label}
+        onClick={config.toggle}
+      >
+        <span className="min-w-0 truncate text-left">
+          {config.selectedLabel || config.placeholder}
+        </span>
+        <HiChevronDown aria-hidden="true" className="flex-none text-subtle" />
+      </button>
+      {config.open && (
+        <div className={MENU}>
+          {config.search && (
+            <div className="border-b border-line p-2.5">
+              <Input
+                type="text"
+                placeholder={config.search.placeholder}
+                aria-label={config.search.placeholder.replace(/\.\.\.$/, "")}
+                value={config.search.value}
+                onChange={(e) => config.search!.onChange(e.target.value)}
+              />
+            </div>
+          )}
+          <div
+            role="listbox"
+            aria-label={config.label}
+            className="max-h-60 overflow-y-auto p-1.5"
+          >
+            {config.children}
+          </div>
+        </div>
+      )}
+      {config.hidden}
+    </div>
+  );
+
   const renderRowDropdown = (
     rowIndex: number,
     name: keyof SalesRow,
@@ -130,344 +260,401 @@ export default function LegacyOrderForm({ form }: { form: SalesOrderForm }) {
     const isOpen = openRowDropdown === dropdownId;
 
     return (
-      <div className={`sl-row-dropdown${isOpen ? " open" : ""}`}>
+      <div className={cn("relative", isOpen ? "z-[2500]" : "z-[1]")}>
         <button
           type="button"
-          className="sl-row-dropdown-trigger"
+          className={cn(
+            "flex min-h-control-sm w-full cursor-pointer appearance-none items-center justify-between gap-1.5",
+            "rounded-sm border border-line-strong bg-card px-2 py-1.5 text-[13px] text-ink",
+            "[font-family:inherit] shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-colors",
+            "hover:border-brand hover:shadow-focus",
+            "focus-visible:border-brand focus-visible:outline-none focus-visible:shadow-focus",
+            "disabled:cursor-not-allowed disabled:border-line disabled:bg-surface-strong",
+            "disabled:text-subtle disabled:shadow-none",
+          )}
           disabled={disabled}
+          aria-haspopup="listbox"
+          aria-expanded={isOpen}
+          aria-label={String(name)}
           onClick={() =>
             setOpenRowDropdown((current) => (current === dropdownId ? null : dropdownId))
           }
         >
-          <span>{selected?.label || "--select--"}</span>
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-            <path
-              d="M3 4.5L6 7.5L9 4.5"
-              stroke="#64748b"
-              strokeWidth="1.4"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
+          <span className="min-w-0 truncate text-left">{selected?.label || "--select--"}</span>
+          <HiChevronDown aria-hidden="true" className="flex-none text-subtle" />
         </button>
         {isOpen && (
-          <div className="sl-row-dropdown-menu">
-            <button
-              type="button"
-              className={`sl-row-dropdown-option${!value ? " is-selected" : ""}`}
-              onClick={() => handleRowSelect(rowIndex, String(name), "")}
-            >
-              --select--
-            </button>
-            {options
-              .filter((option) => option.value !== "")
-              .map((option) => (
+          <div className="absolute left-0 top-[calc(100%+5px)] z-[2501] max-h-[250px] w-[max(100%,220px)] overflow-auto rounded-md border border-brand-line bg-card p-1.5 shadow-panel">
+            {[{ value: "", label: "--select--" }, ...options.filter((o) => o.value !== "")].map(
+              (option) => (
                 <button
                   type="button"
                   key={`${dropdownId}-${option.value}`}
-                  className={`sl-row-dropdown-option${option.value === value ? " is-selected" : ""}`}
+                  className={cn(
+                    "flex min-h-[34px] w-full cursor-pointer appearance-none items-center justify-start",
+                    "break-words rounded-lg border-0 bg-transparent px-2.5 py-2 text-left",
+                    "text-[12px] font-bold leading-tight text-ink [font-family:inherit]",
+                    "transition-colors hover:bg-surface",
+                    option.value === value &&
+                      "bg-surface shadow-[inset_3px_0_0_var(--color-line-strong)]",
+                  )}
                   onClick={() => handleRowSelect(rowIndex, String(name), option.value)}
                 >
                   {option.label}
                 </button>
-              ))}
+              ),
+            )}
           </div>
         )}
       </div>
     );
   };
 
-  // ---------------------------------------------------------------------------
-  // Wizard (standard create flow only) — reuses every handler above.
-  // ---------------------------------------------------------------------------
-  return (
-    <form className="sl-form" onSubmit={handleSubmit}>
-      {/* Party Name */}
-      <div className="sl-section-label">Order Details</div>
-      <div className="sl-grid sl-order-grid">
-        <div className="sl-field">
-          <label className="sl-label">Party Name</label>
-          <div
-            className={`sl-party-dropdown${partyDropdownOpen ? " open" : ""}`}
-            ref={partyDropdownRef}
-          >
-            <button
-              type="button"
-              className="sl-party-trigger"
-              onClick={() => setPartyDropdownOpen((prev) => !prev)}
-            >
-              <span>{selectedPartyLabel || "--select--"}</span>
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                <path
-                  d="M3 4.5L6 7.5L9 4.5"
-                  stroke="#64748b"
-                  strokeWidth="1.4"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </button>
-            {partyDropdownOpen && (
-              <div className="sl-party-menu">
-                <div className="sl-party-search-wrap">
-                  <input
-                    type="text"
-                    className="sl-party-search"
-                    placeholder="Search party..." aria-label="Search party"
-                    value={partySearch}
-                    onChange={(e) => setPartySearch(e.target.value)}
-                  />
-                </div>
-                <div className="sl-party-options">
-                  {filteredParties.length > 0 ? (
-                    filteredParties.map((party) => (
-                      <button
-                        type="button"
-                        key={`${party.value}-${party.category || ""}`}
-                        className={`sl-party-option${
-                          party.value === formData.parties &&
-                          String(party.category || "").toUpperCase() ===
-                            selectedPartyCategory.toUpperCase()
-                            ? " is-selected"
-                            : ""
-                        }`}
-                        onClick={() => handlePartySelect(party.value, party.category || "")}
-                      >
-                        <span className="sl-party-option-label">{party.label}</span>
-                        <span className="sl-party-option-code">
-                          {[party.value, party.category].filter(Boolean).join(" | ")}
-                        </span>
-                      </button>
-                    ))
-                  ) : (
-                    <div className="sl-party-empty">No parties found</div>
-                  )}
-                </div>
-              </div>
-            )}
+  /** The scheme panel, spanning the whole table under the row it belongs to. */
+  const renderSchemePanel = (row: SalesRow, index: number) => {
+    // On this form a confirmed row can still be edited in edit mode, which is
+    // the one place its disabled rule differs from the wizard's.
+    const locked = row.confirmed && !isEditMode;
+    return (
+      <div
+        className={cn(
+          "overflow-hidden rounded-sm border bg-card shadow-card",
+          row.isScheme ? "border-line-strong" : "border-line",
+        )}
+      >
+        <div className="flex flex-col items-stretch justify-between gap-3.5 border-b border-line bg-surface p-3.5 sm:flex-row sm:items-center">
+          <div>
+            <div className="text-[10px] font-extrabold uppercase tracking-[0.08em] text-subtle">
+              Optional promotion
+            </div>
+            <div className="mt-0.5 text-[13px] font-bold text-ink">Add scheme to this item</div>
           </div>
+          {/* A real checkbox in a label — the switch had no accessible name. */}
+          <label className="flex h-[34px] min-w-[132px] cursor-pointer items-center justify-between gap-2 rounded-full border border-line-strong bg-card px-2.5">
+            <span className="text-[11px] font-extrabold text-ink-soft">
+              {row.isScheme ? "Enabled" : "Disabled"}
+            </span>
+            <span className="relative inline-block h-5 w-9 shrink-0">
+              <input
+                type="checkbox"
+                className="peer absolute inset-0 z-10 m-0 size-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
+                checked={row.isScheme}
+                onChange={(e) => handleRowSchemeToggle(index, e.target.checked)}
+                disabled={locked}
+                aria-label="Add scheme to this item"
+              />
+              <span
+                aria-hidden="true"
+                className="absolute inset-0 rounded-full bg-line-strong transition-colors peer-checked:bg-[#0f766e] peer-focus-visible:shadow-focus"
+              />
+              <span
+                aria-hidden="true"
+                className="absolute left-[3px] top-[3px] size-4 rounded-full bg-white shadow-[0_1px_2px_rgba(15,23,42,0.2)] transition-transform peer-checked:translate-x-[18px]"
+              />
+            </span>
+          </label>
         </div>
 
-        {/* Dispatch */}
-        <div className="sl-field">
-          <label className="sl-label">Dispatch From</label>
-          <div
-            className={`sl-party-dropdown${dispatchDropdownOpen ? " open" : ""}`}
-            ref={dispatchDropdownRef}
-          >
-            <button
-              type="button"
-              className="sl-party-trigger"
-              onClick={() => setDispatchDropdownOpen((prev) => !prev)}
-            >
-              <span>{selectedDispatchLabel || "--select--"}</span>
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                <path
-                  d="M3 4.5L6 7.5L9 4.5"
-                  stroke="#64748b"
-                  strokeWidth="1.4"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </button>
-            {dispatchDropdownOpen && (
-              <div className="sl-party-menu">
-                <div className="sl-party-options">
+        {row.isScheme && (
+          <div className="grid items-start gap-3 p-3.5 lg:grid-cols-[minmax(0,560px)_160px]">
+            <div className="flex min-w-0 flex-col gap-2">
+              <div className="grid grid-cols-[1fr_80px_48px] items-center gap-2 px-0.5 text-[11px] font-extrabold uppercase tracking-[0.04em] text-subtle sm:grid-cols-[minmax(220px,360px)_90px_56px]">
+                <span>Scheme</span>
+                <span>Qty</span>
+                <span>Action</span>
+              </div>
+              {(row.schemes.length ? row.schemes : [{ scheme: "", schemeQty: "" }]).map(
+                (schemeRow, schemeIndex) => (
+                  <div
+                    className="grid grid-cols-[1fr_80px_48px] items-center gap-2 rounded-sm border border-line bg-surface p-2 sm:grid-cols-[minmax(220px,360px)_90px_56px]"
+                    key={`${index}-${schemeIndex}`}
+                  >
+                    <Select
+                      aria-label="Scheme"
+                      value={schemeRow.scheme}
+                      onChange={(e) =>
+                        handleSchemeChange(index, schemeIndex, "scheme", e.target.value)
+                      }
+                      disabled={locked || !(schemeOptions[row.uid] || []).length}
+                    >
+                      <option value="">Select Scheme...</option>
+                      {(schemeOptions[row.uid] || []).map((scheme) => (
+                        <option key={scheme.scheme_id} value={scheme.scheme_id}>
+                          {scheme.scheme_name}
+                        </option>
+                      ))}
+                    </Select>
+                    <Input
+                      type="text"
+                      aria-label="Scheme quantity"
+                      value={schemeRow.schemeQty}
+                      placeholder="0"
+                      onChange={(e) =>
+                        handleSchemeChange(index, schemeIndex, "schemeQty", e.target.value)
+                      }
+                      disabled={locked}
+                    />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleRemoveScheme(index, schemeIndex)}
+                      disabled={locked}
+                      aria-label="Remove scheme"
+                      title="Remove scheme"
+                    >
+                      <HiMinus aria-hidden="true" />
+                    </Button>
+                  </div>
+                ),
+              )}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="self-start"
+                onClick={() => handleAddScheme(index)}
+                disabled={locked}
+              >
+                <HiPlus aria-hidden="true" /> Add Scheme
+              </Button>
+            </div>
+
+            <div className="flex flex-col gap-1.5 rounded-sm border border-line bg-surface p-3">
+              <span className="text-[11px] font-extrabold text-ink-soft">Total Ltrs</span>
+              <Input
+                type="text"
+                name="totalLtrs"
+                aria-label="Total Ltrs"
+                className="bg-white font-extrabold text-ink"
+                value={
+                  row.schemes.length
+                    ? (
+                        Number(row.ltrs) +
+                        row.schemes.reduce((sum, scheme) => sum + Number(scheme.schemeQty || 0), 0)
+                      ).toFixed(2)
+                    : Number(row.ltrs).toFixed(2)
+                }
+                readOnly
+              />
+              <small className="text-[11px] leading-snug text-subtle">
+                Base ltrs plus selected scheme quantity
+              </small>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  /** A number cell in the items table. `readOnly` marks a derived value. */
+  const cellInput = (props: React.ComponentProps<typeof Input>) => (
+    <Input
+      {...props}
+      className={cn("h-control-sm px-2 text-center text-[13px]", props.className)}
+    />
+  );
+
+  return (
+    <form onSubmit={handleSubmit} className="w-full">
+      <div className={SECTION}>Order Details</div>
+      {/* `z-20` over the summary grid's `z-1`: an open party menu has to paint
+          over the table below it, and the table establishes its own context. */}
+      <div className={cn(PANEL, "relative z-20 mb-4 grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3")}>
+        <Field label="Party Name">
+          {(control) =>
+            renderPicker({
+              refEl: partyDropdownRef,
+              open: partyDropdownOpen,
+              toggle: () => setPartyDropdownOpen((prev) => !prev),
+              label: "Party Name",
+              selectedLabel: selectedPartyLabel,
+              placeholder: "--select--",
+              controlId: control.id,
+              search: {
+                value: partySearch,
+                onChange: setPartySearch,
+                placeholder: "Search party...",
+              },
+              children:
+                filteredParties.length > 0 ? (
+                  filteredParties.map((party) => (
+                    <button
+                      type="button"
+                      key={`${party.value}-${party.category || ""}`}
+                      {...optionProps(
+                        party.value === formData.parties &&
+                          String(party.category || "").toUpperCase() ===
+                            selectedPartyCategory.toUpperCase(),
+                      )}
+                      onClick={() => handlePartySelect(party.value, party.category || "")}
+                    >
+                      <span className="text-[13px] font-medium text-ink">{party.label}</span>
+                      <span className="text-[11px] text-subtle">
+                        {[party.value, party.category].filter(Boolean).join(" | ")}
+                      </span>
+                    </button>
+                  ))
+                ) : (
+                  emptyOption("No parties found")
+                ),
+            })
+          }
+        </Field>
+
+        <Field label="Dispatch From">
+          {(control) =>
+            renderPicker({
+              refEl: dispatchDropdownRef,
+              open: dispatchDropdownOpen,
+              toggle: () => setDispatchDropdownOpen((prev) => !prev),
+              label: "Dispatch From",
+              selectedLabel: selectedDispatchLabel,
+              placeholder: "--select--",
+              controlId: control.id,
+              hidden: (
+                <input type="hidden" name="dispatch" value={formData.dispatch} required />
+              ),
+              children: (
+                <>
                   <button
                     type="button"
-                    className={`sl-party-option${!formData.dispatch ? " is-selected" : ""}`}
+                    {...optionProps(!formData.dispatch)}
                     onClick={() => handleDispatchSelect("")}
                   >
-                    <span className="sl-party-option-label">--select--</span>
+                    <span className="text-[13px] font-medium text-ink">--select--</span>
                   </button>
-                  {branch.length > 0 ? (
-                    branch.map((d) => (
-                      <button
-                        type="button"
-                        key={d.bpl_id}
-                        className={`sl-party-option${
-                          String(d.bpl_id) === formData.dispatch ? " is-selected" : ""
-                        }`}
-                        onClick={() => handleDispatchSelect(String(d.bpl_id))}
-                      >
-                        <span className="sl-party-option-label">{d.bpl_name}</span>
-                      </button>
-                    ))
-                  ) : (
-                    <div className="sl-party-empty">No dispatch locations found</div>
-                  )}
-                </div>
-              </div>
-            )}
-            <input type="hidden" name="dispatch" value={formData.dispatch} required />
-          </div>
-        </div>
+                  {branch.length > 0
+                    ? branch.map((d) => (
+                        <button
+                          type="button"
+                          key={d.bpl_id}
+                          {...optionProps(String(d.bpl_id) === formData.dispatch)}
+                          onClick={() => handleDispatchSelect(String(d.bpl_id))}
+                        >
+                          <span className="text-[13px] font-medium text-ink">{d.bpl_name}</span>
+                        </button>
+                      ))
+                    : emptyOption("No dispatch locations found")}
+                </>
+              ),
+            })
+          }
+        </Field>
 
-        {/* Date */}
-        <div className="sl-field">
-          <label className="sl-label">Date</label>
-          <div className="sl-input-wrap">
-            <input type="date" name="date" value={formData.date} readOnly />
-            <div className="sl-focus-line" />
-          </div>
-        </div>
+        <Field label="Date">
+          {(control) => (
+            <Input {...control} type="date" name="date" value={formData.date} readOnly />
+          )}
+        </Field>
 
-        {/* Bill To */}
-        <div className="sl-field">
-          <label className="sl-label">Bill To Address</label>
-          <div
-            className={`sl-party-dropdown${billDropdownOpen ? " open" : ""}`}
-            ref={billDropdownRef}
-          >
-            <button
-              type="button"
-              className="sl-party-trigger"
-              onClick={() => setBillDropdownOpen((prev) => !prev)}
-            >
-              <span>{selectedBillAddressLabel || "--select--"}</span>
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                <path
-                  d="M3 4.5L6 7.5L9 4.5"
-                  stroke="#64748b"
-                  strokeWidth="1.4"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </button>
-            {billDropdownOpen && (
-              <div className="sl-party-menu">
-                <div className="sl-party-search-wrap">
-                  <input
-                    type="text"
-                    className="sl-party-search"
-                    placeholder="Search bill to..." aria-label="Search bill to"
-                    value={billSearch}
-                    onChange={(e) => setBillSearch(e.target.value)}
-                  />
-                </div>
-                <div className="sl-party-options">
-                  {filteredBillAddresses.length > 0 ? (
+        <Field label="Bill To Address">
+          {(control) => (
+            <>
+              {renderPicker({
+                refEl: billDropdownRef,
+                open: billDropdownOpen,
+                toggle: () => setBillDropdownOpen((prev) => !prev),
+                label: "Bill To Address",
+                selectedLabel: selectedBillAddressLabel,
+                placeholder: "--select--",
+                controlId: control.id,
+                search: {
+                  value: billSearch,
+                  onChange: setBillSearch,
+                  placeholder: "Search bill to...",
+                },
+                children:
+                  filteredBillAddresses.length > 0 ? (
                     filteredBillAddresses.map((b) => (
                       <button
                         type="button"
                         key={b.id}
-                        className={`sl-party-option${
-                          String(b.id) === formData.billAddress ? " is-selected" : ""
-                        }`}
+                        {...optionProps(String(b.id) === formData.billAddress)}
                         onClick={() => handleBillAddressSelect(String(b.id))}
                       >
-                        <span className="sl-party-option-label">
+                        <span className="text-[13px] font-medium text-ink">
                           {b.address_name || b.full_address || b.address_id}
                         </span>
                       </button>
                     ))
                   ) : (
-                    <div className="sl-party-empty">No addresses found</div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-          <input type="hidden" name="billAddress" value={formData.billAddress} required />
-        </div>
+                    emptyOption("No addresses found")
+                  ),
+              })}
+              <input type="hidden" name="billAddress" value={formData.billAddress} required />
+            </>
+          )}
+        </Field>
 
-        {/* Ship To */}
-        <div className="sl-field">
-          <label className="sl-label">Ship To Address</label>
-          <div
-            className={`sl-party-dropdown${shipDropdownOpen ? " open" : ""}`}
-            ref={shipDropdownRef}
-          >
-            <button
-              type="button"
-              className="sl-party-trigger"
-              onClick={() => setShipDropdownOpen((prev) => !prev)}
-            >
-              <span>{selectedShipAddressLabel || "--select--"}</span>
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                <path
-                  d="M3 4.5L6 7.5L9 4.5"
-                  stroke="#64748b"
-                  strokeWidth="1.4"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </button>
-            {shipDropdownOpen && (
-              <div className="sl-party-menu">
-                <div className="sl-party-search-wrap">
-                  <input
-                    type="text"
-                    className="sl-party-search"
-                    placeholder="Search ship to..." aria-label="Search ship to"
-                    value={shipSearch}
-                    onChange={(e) => setShipSearch(e.target.value)}
-                  />
-                </div>
-                <div className="sl-party-options">
-                  {filteredShipAddresses.length > 0 ? (
+        <Field label="Ship To Address">
+          {(control) => (
+            <>
+              {renderPicker({
+                refEl: shipDropdownRef,
+                open: shipDropdownOpen,
+                toggle: () => setShipDropdownOpen((prev) => !prev),
+                label: "Ship To Address",
+                selectedLabel: selectedShipAddressLabel,
+                placeholder: "--select--",
+                controlId: control.id,
+                search: {
+                  value: shipSearch,
+                  onChange: setShipSearch,
+                  placeholder: "Search ship to...",
+                },
+                children:
+                  filteredShipAddresses.length > 0 ? (
                     filteredShipAddresses.map((s) => (
                       <button
                         type="button"
                         key={s.id}
-                        className={`sl-party-option${
-                          String(s.id) === formData.shipAddress ? " is-selected" : ""
-                        }`}
+                        {...optionProps(String(s.id) === formData.shipAddress)}
                         onClick={() => handleShipAddressSelect(String(s.id))}
                       >
-                        <span className="sl-party-option-label">
+                        <span className="text-[13px] font-medium text-ink">
                           {s.address_name || s.full_address || s.address_id}
                         </span>
                       </button>
                     ))
                   ) : (
-                    <div className="sl-party-empty">No addresses found</div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-          <input type="hidden" name="shipAddress" value={formData.shipAddress} required />
-        </div>
+                    emptyOption("No addresses found")
+                  ),
+              })}
+              <input type="hidden" name="shipAddress" value={formData.shipAddress} required />
+            </>
+          )}
+        </Field>
 
-        {/* Delivery Date */}
-        <div className="sl-field">
-          <label className="sl-label" htmlFor="Deliverydate">
-            Delivery Date
-          </label>
-          <div className="sl-input-wrap">
-            <input
+        <Field label="Delivery Date">
+          {(control) => (
+            <Input
+              {...control}
               type="date"
               name="Deliverydate"
               value={formData.Deliverydate}
               onChange={handleChange}
               required
             />
-            <div className="sl-focus-line" />
-          </div>
-        </div>
+          )}
+        </Field>
       </div>
 
-      <div className="sl-table-wrap">
+      <div className="relative z-[1] mt-2.5 overflow-x-auto rounded-md border border-line bg-card shadow-card">
         <Table density="compact">
           <colgroup>
-            <col className="sl-col-category" />
-            <col className="sl-col-brand" />
-            <col className="sl-col-variety" />
-            <col className="sl-col-type" />
-            <col className="sl-col-item" />
-            <col className="sl-col-pcs" />
-            <col className="sl-col-boxes" />
-            <col className="sl-col-qty" />
-            <col className="sl-col-ltrs" />
-            <col className="sl-col-price-list-basic" />
-            <col className="sl-col-basic-price" />
-            <col className="sl-col-tax" />
-            <col className="sl-col-amount" />
-            <col className="sl-col-actions" />
+            <col className="w-[90px]" />
+            <col className="w-[90px]" />
+            <col className="w-[104px]" />
+            <col className="w-[76px]" />
+            <col className="w-[160px]" />
+            <col className="w-[64px]" />
+            <col className="w-[88px]" />
+            <col className="w-[88px]" />
+            <col className="w-[96px]" />
+            <col className="w-[104px]" />
+            <col className="w-[104px]" />
+            <col className="w-[62px]" />
+            <col className="w-[104px]" />
+            <col className="w-[130px]" />
           </colgroup>
           <TableHeader>
             <TableRow>
@@ -588,272 +775,121 @@ export default function LegacyOrderForm({ form }: { form: SalesOrderForm }) {
                     )}
                   </TableCell>
 
-                  <TableCell className="sl-pcs-cell">
-                    <input
-                      className="sl-compact-number-input"
-                      type="number"
-                      value={row.pcs ? Number(row.pcs).toFixed(1) : ""}
-                      readOnly
-                    />
-                  </TableCell>
-
-                  <TableCell className="sl-boxes-cell">
-                    <input
-                      type="number"
-                      name="boxes"
-                      className="sl-size-input"
-                      value={row.boxes}
-                      onChange={(e) => handleRowChange(index, e)}
-                      disabled={row.confirmed && !isEditMode}
-                      required
-                    />
-                  </TableCell>
-
-                  <TableCell className="sl-qty-cell">
-                    <input
-                      type="number"
-                      name="qty"
-                      className="sl-size-input"
-                      value={row.qty}
-                      onChange={(e) => handleRowChange(index, e)}
-                      disabled={row.confirmed && !isEditMode}
-                      required
-                    />
-                  </TableCell>
-
-                  <TableCell className="sl-ltrs-cell">
-                    <input
-                      className="sl-compact-number-input"
-                      type="number"
-                      value={row.ltrs}
-                      readOnly
-                    />
-                  </TableCell>
-
-                  <TableCell className="sl-price-list-basic-cell">
-                    <input
-                      className="sl-compact-number-input"
-                      type="number"
-                      value={row.priceListBasic}
-                      readOnly
-                    />
+                  <TableCell>
+                    {cellInput({
+                      type: "number",
+                      "aria-label": "Pcs",
+                      value: row.pcs ? Number(row.pcs).toFixed(1) : "",
+                      readOnly: true,
+                    })}
                   </TableCell>
 
                   <TableCell>
-                    <input
-                      type="number"
-                      name="basicPrice"
-                      value={row.basicPrice}
-                      onChange={(e) => handleRowChange(index, e)}
-                      disabled={row.confirmed && !isEditMode}
-                    />
+                    {cellInput({
+                      type: "number",
+                      name: "boxes",
+                      "aria-label": "Boxes",
+                      value: row.boxes,
+                      onChange: (e) => handleRowChange(index, e),
+                      disabled: row.confirmed && !isEditMode,
+                      required: true,
+                    })}
                   </TableCell>
 
                   <TableCell>
-                    <input type="text" value={Number(row.tax).toFixed(2)} readOnly />
+                    {cellInput({
+                      type: "number",
+                      name: "qty",
+                      "aria-label": "Qty",
+                      value: row.qty,
+                      onChange: (e) => handleRowChange(index, e),
+                      disabled: row.confirmed && !isEditMode,
+                      required: true,
+                    })}
                   </TableCell>
 
                   <TableCell>
-                    <input type="number" value={row.amount} readOnly />
+                    {cellInput({
+                      type: "number",
+                      "aria-label": "Ltrs",
+                      value: row.ltrs,
+                      readOnly: true,
+                    })}
                   </TableCell>
 
-                  <TableCell className="sl-row-actions">
-                    {!row.confirmed ? (
-                      <>
-                        <button
-                          type="button"
-                          className="sl-confirm-item-btn"
-                          onClick={() => handleConfirmRow(index)}
-                        >
-                          Confirm
-                        </button>
-                        {/* Why this row would not confirm, in the row. */}
-                        <FieldError message={confirmProblems[row.uid]} />
-                      </>
-                    ) : (
-                      <>
-                        <span className="sl-row-confirmed-badge">Confirmed</span>
-                        <button
-                          type="button"
-                          className="sl-edit-item-btn"
-                          onClick={() => handleEditRow(index)}
-                        >
-                          Edit
-                        </button>
-                      </>
-                    )}
-                    <button
-                      type="button"
-                      className="sl-delete-btn"
-                      onClick={() => handleDeleteRow(index)}
-                      aria-label={`Delete item ${index + 1}`}
-                      title="Delete item"
-                    >
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 6h18" />
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M8 6V4.5A1.5 1.5 0 019.5 3h5A1.5 1.5 0 0116 4.5V6"
-                        />
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M19 6l-1 13a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"
-                        />
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M10 11v6M14 11v6" />
-                      </svg>
-                    </button>
+                  <TableCell>
+                    {cellInput({
+                      type: "number",
+                      "aria-label": "Price List",
+                      value: row.priceListBasic,
+                      readOnly: true,
+                    })}
+                  </TableCell>
+
+                  <TableCell>
+                    {cellInput({
+                      type: "number",
+                      name: "basicPrice",
+                      "aria-label": "Basic Price",
+                      value: row.basicPrice,
+                      onChange: (e) => handleRowChange(index, e),
+                      disabled: row.confirmed && !isEditMode,
+                    })}
+                  </TableCell>
+
+                  <TableCell>
+                    {cellInput({
+                      type: "text",
+                      "aria-label": "Tax %",
+                      value: Number(row.tax).toFixed(2),
+                      readOnly: true,
+                    })}
+                  </TableCell>
+
+                  <TableCell>
+                    {cellInput({
+                      type: "number",
+                      "aria-label": "Amount",
+                      value: row.amount,
+                      readOnly: true,
+                    })}
+                  </TableCell>
+
+                  <TableCell>
+                    <div className="flex items-center justify-center gap-2">
+                      {!row.confirmed ? (
+                        <div className="min-w-0">
+                          <Button variant="success" size="sm" onClick={() => handleConfirmRow(index)}>
+                            Confirm
+                          </Button>
+                          {/* Why this row would not confirm, in the row. */}
+                          <FieldError message={confirmProblems[row.uid]} />
+                        </div>
+                      ) : (
+                        <>
+                          <Badge tone="ok">Confirmed</Badge>
+                          <Button size="sm" onClick={() => handleEditRow(index)}>
+                            Edit
+                          </Button>
+                        </>
+                      )}
+                      <Button
+                        variant="danger"
+                        size="icon"
+                        onClick={() => handleDeleteRow(index)}
+                        aria-label={`Delete item ${index + 1}`}
+                        title="Delete item"
+                      >
+                        <HiOutlineTrash aria-hidden="true" />
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
 
                 {row.item && !isFocOrder && !isSchemePanelHidden(row) && (
-                  <TableRow key={`scheme-${index}`} className="sl-scheme-row-wrap">
-                    <TableCell colSpan={14}>
-                      <div className={`sl-scheme-panel${row.isScheme ? " is-active" : ""}`}>
-                        <div className="sl-scheme-panel-head">
-                          <div>
-                            <div className="sl-scheme-eyebrow">Optional promotion</div>
-                            <div className="sl-scheme-title">Add scheme to this item</div>
-                          </div>
-                          <div className="sl-scheme-toggle-compact">
-                            <span className="sl-scheme-toggle-label">
-                              {row.isScheme ? "Enabled" : "Disabled"}
-                            </span>
-                            <label className="sl-switch">
-                              <input
-                                type="checkbox"
-                                checked={row.isScheme}
-                                onChange={(e) => handleRowSchemeToggle(index, e.target.checked)}
-                                disabled={row.confirmed && !isEditMode}
-                              />
-                              <span className="sl-switch-slider" />
-                            </label>
-                          </div>
-                        </div>
-
-                        {row.isScheme && (
-                          <div className="sl-scheme-panel-body">
-                            <div className="sl-scheme-dropdown-field">
-                              <div className="sl-scheme-table-head">
-                                <span>Scheme</span>
-                                <span>Qty</span>
-                                <span>Action</span>
-                              </div>
-                              {(row.schemes.length
-                                ? row.schemes
-                                : [{ scheme: "", schemeQty: "" }]
-                              ).map((schemeRow, schemeIndex) => (
-                                <div
-                                  className="sl-scheme-table-row"
-                                  key={`${index}-${schemeIndex}`}
-                                >
-                                  <select
-                                    value={schemeRow.scheme}
-                                    onChange={(e) =>
-                                      handleSchemeChange(
-                                        index,
-                                        schemeIndex,
-                                        "scheme",
-                                        e.target.value,
-                                      )
-                                    }
-                                    disabled={
-                                      (row.confirmed && !isEditMode) ||
-                                      !(schemeOptions[row.uid] || []).length
-                                    }
-                                  >
-                                    <option value="">Select Scheme...</option>
-                                    {(schemeOptions[row.uid] || []).map((scheme) => (
-                                      <option key={scheme.scheme_id} value={scheme.scheme_id}>
-                                        {scheme.scheme_name}
-                                      </option>
-                                    ))}
-                                  </select>
-                                  <input
-                                    type="text"
-                                    value={schemeRow.schemeQty}
-                                    placeholder="0"
-                                    onChange={(e) =>
-                                      handleSchemeChange(
-                                        index,
-                                        schemeIndex,
-                                        "schemeQty",
-                                        e.target.value,
-                                      )
-                                    }
-                                    disabled={row.confirmed && !isEditMode}
-                                  />
-                                  <button
-                                    type="button"
-                                    className="sl-remove-scheme-btn"
-                                    onClick={() => handleRemoveScheme(index, schemeIndex)}
-                                    disabled={row.confirmed && !isEditMode}
-                                    aria-label="Remove scheme"
-                                    title="Remove scheme"
-                                  >
-                                    <svg
-                                      viewBox="0 0 24 24"
-                                      fill="none"
-                                      stroke="currentColor"
-                                      strokeWidth="2"
-                                    >
-                                      <path strokeLinecap="round" d="M5 12h14" />
-                                    </svg>
-                                  </button>
-                                </div>
-                              ))}
-                              <button
-                                type="button"
-                                className="sl-add-scheme-btn"
-                                onClick={() => handleAddScheme(index)}
-                                disabled={row.confirmed && !isEditMode}
-                              >
-                                <svg
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="2"
-                                >
-                                  <path strokeLinecap="round" d="M12 5v14M5 12h14" />
-                                </svg>
-                                Add Scheme
-                              </button>
-                            </div>
-
-                            <div className="sl-scheme-total-card">
-                              <span className="sl-scheme-field-label">Total Ltrs</span>
-                              <input
-                                type="text"
-                                name="totalLtrs"
-                                value={
-                                  row.schemes.length
-                                    ? (
-                                        Number(row.ltrs) +
-                                        row.schemes.reduce(
-                                          (sum, scheme) => sum + Number(scheme.schemeQty || 0),
-                                          0,
-                                        )
-                                      ).toFixed(2)
-                                    : Number(row.ltrs).toFixed(2)
-                                }
-                                readOnly
-                              />
-                              <small>Base ltrs plus selected scheme quantity</small>
-                            </div>
-                          </div>
-                        )}
-
-                        {/* <div className="sl-scheme-qty-field">
-                            <label className="sl-scheme-field-label">Scheme Ltrs</label>
-                            <input
-                              type="text"
-                              name="schemeLtrs"
-                              value={row.isScheme && row.schemeLtrs ? Number(row.schemeLtrs).toFixed(2) : ""}
-                              readOnly
-                            />
-                          </div> */}
-                      </div>
+                  <TableRow key={`scheme-${index}`}>
+                    <TableCell colSpan={14} className="bg-surface p-3">
+                      {renderSchemePanel(row, index)}
                     </TableCell>
                   </TableRow>
                 )}
@@ -863,23 +899,19 @@ export default function LegacyOrderForm({ form }: { form: SalesOrderForm }) {
         </Table>
       </div>
       {canAddMoreItems && (
-        <button type="button" className="sl-add-row" onClick={handleAddRow}>
-          <span>+ Add Item</span>
-        </button>
+        <Button variant="primary" className="mb-5 mt-2.5" onClick={handleAddRow}>
+          + Add Item
+        </Button>
       )}
 
-      <div className="sl-section-label">Summary</div>
-      <div className="sl-grid sl-summary-grid">
+      <div className={SECTION}>Summary</div>
+      <div className={cn(PANEL, "relative z-[1] mb-4 grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3")}>
         {canEditPoNumber && (
-          <div className="sl-field">
-            <label className="sl-label" htmlFor="poNumber">
-              {poField.label}
-              {poField.required && <span className="sl-req-mark"> *</span>}
-            </label>
-            <div className="sl-input-wrap">
-              <input
+          <Field label={poField.label} required={poField.required}>
+            {(control) => (
+              <Input
+                {...control}
                 type="text"
-                id="poNumber"
                 name="poNumber"
                 value={formData.poNumber}
                 onChange={handleChange}
@@ -887,144 +919,104 @@ export default function LegacyOrderForm({ form }: { form: SalesOrderForm }) {
                 // Live on this path: the legacy branch is inside the <form>.
                 required={poField.required}
               />
-              <div className="sl-focus-line" />
-            </div>
-          </div>
+            )}
+          </Field>
         )}
 
         {isMartOrder && <WarehouseField form={form} />}
 
-        <div className="sl-field">
-          <label className="sl-label">Company</label>
-          <div
-            className={`sl-party-dropdown${companyDropdownOpen ? " open" : ""}`}
-            ref={companyDropdownRef}
-          >
-            <button
-              type="button"
-              className="sl-party-trigger"
-              onClick={() => setCompanyDropdownOpen((prev) => !prev)}
-            >
-              <span>{selectedCompanyLabel || "Select Company"}</span>
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                <path
-                  d="M3 4.5L6 7.5L9 4.5"
-                  stroke="#64748b"
-                  strokeWidth="1.4"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </button>
-            {companyDropdownOpen && (
-              <div className="sl-party-menu">
-                <div className="sl-party-options">
+        <Field label="Company">
+          {(control) =>
+            renderPicker({
+              refEl: companyDropdownRef,
+              open: companyDropdownOpen,
+              toggle: () => setCompanyDropdownOpen((prev) => !prev),
+              label: "Company",
+              selectedLabel: selectedCompanyLabel,
+              placeholder: "Select Company",
+              controlId: control.id,
+              hidden: <input type="hidden" name="company" value={formData.company} required />,
+              children: (
+                <>
                   <button
                     type="button"
-                    className={`sl-party-option${!formData.company ? " is-selected" : ""}`}
+                    {...optionProps(!formData.company)}
                     onClick={() => handleCompanySelect("")}
                   >
-                    <span className="sl-party-option-label">Select Company</span>
+                    <span className="text-[13px] font-medium text-ink">Select Company</span>
                   </button>
-                  {company.length > 0 ? (
-                    company.map((item) => (
-                      <button
-                        type="button"
-                        key={item.id}
-                        className={`sl-party-option${
-                          String(item.id) === formData.company ? " is-selected" : ""
-                        }`}
-                        onClick={() => handleCompanySelect(String(item.id))}
-                      >
-                        <span className="sl-party-option-label">{item.name}</span>
-                      </button>
-                    ))
-                  ) : (
-                    <div className="sl-party-empty">No companies found</div>
-                  )}
-                </div>
-              </div>
-            )}
-            <input type="hidden" name="company" value={formData.company} required />
-          </div>
-        </div>
+                  {company.length > 0
+                    ? company.map((item) => (
+                        <button
+                          type="button"
+                          key={item.id}
+                          {...optionProps(String(item.id) === formData.company)}
+                          onClick={() => handleCompanySelect(String(item.id))}
+                        >
+                          <span className="text-[13px] font-medium text-ink">{item.name}</span>
+                        </button>
+                      ))
+                    : emptyOption("No companies found")}
+                </>
+              ),
+            })
+          }
+        </Field>
 
-        <div className="sl-field">
-          <label className="sl-label">Total</label>
-          <div className="sl-input-wrap">
-            <input type="text" value={totalAmount.toFixed(2)} readOnly />
-            <div className="sl-focus-line" />
-          </div>
-        </div>
-        <div className="sl-field">
-          <label className="sl-label">Tax</label>
-          <div className="sl-input-wrap">
-            <input type="text" value={taxAmount} readOnly />
-            <div className="sl-focus-line" />
-          </div>
-        </div>
+        <Field label="Total">
+          {(control) => <Input {...control} type="text" value={totalAmount.toFixed(2)} readOnly />}
+        </Field>
+        <Field label="Tax">
+          {(control) => <Input {...control} type="text" value={taxAmount} readOnly />}
+        </Field>
+        <Field label="Grand Total">
+          {(control) => (
+            <Input {...control} type="text" name="gtotal" value={grandTotal.toFixed(1)} readOnly />
+          )}
+        </Field>
 
-        <div className="sl-field">
-          <label className="sl-label">Grand Total</label>
-          <div className="sl-input-wrap">
-            <input type="text" name="gtotal" value={grandTotal.toFixed(1)} readOnly />
-            <div className="sl-focus-line" />
-          </div>
-        </div>
-
-        <div className="sl-field sl-full">
-          <label className="sl-label" htmlFor="comment">
-            Comment
-          </label>
-          <div className="sl-input-wrap sl-input-wrap-textarea">
-            <textarea
-              id="comment"
+        <Field label="Comment" span="full">
+          {(control) => (
+            <Textarea
+              {...control}
               name="comment"
               rows={2}
               placeholder="Add a note..."
               value={formData.comment}
               onChange={(e) => setFormData((prev) => ({ ...prev, comment: e.target.value }))}
             />
-            <div className="sl-focus-line" />
-          </div>
-        </div>
+          )}
+        </Field>
       </div>
 
       {/* This form has no step gates at all, so before step 7 its only answer
           to a bad order was a modal dialog. */}
       <ProblemSummary problems={problems} />
 
-      <div className="sl-actions">
-        <button
+      <div className="mt-4 flex flex-wrap gap-2.5">
+        <Button
           type="submit"
-          className="sl-btn-save"
+          variant="primary"
           disabled={
             isSaving || confirmedRows.length === 0 || rows.some((row) => !row.confirmed && row.item)
           }
         >
-          <span>
-            {isEditMode
-              ? "Update Order"
-              : isDuplicateMode
-                ? "Create as New"
-                : isFocMode
-                  ? "Create FOC Order"
-                  : "Save Order"}
-          </span>
-        </button>
+          {isEditMode
+            ? "Update Order"
+            : isDuplicateMode
+              ? "Create as New"
+              : isFocMode
+                ? "Create FOC Order"
+                : "Save Order"}
+        </Button>
         {(!isEditMode || editOrderIsDraft) && (
-          <button
-            type="button"
-            className="sl-btn-draft"
-            onClick={handleSaveDraft}
-            disabled={isSaving || isSavingDraft}
-          >
-            <span>{isSavingDraft ? "Saving Draft..." : "Save as Draft"}</span>
-          </button>
+          <Button onClick={handleSaveDraft} disabled={isSaving || isSavingDraft}>
+            {isSavingDraft ? "Saving Draft..." : "Save as Draft"}
+          </Button>
         )}
-        <button type="button" className="sl-btn-clear" onClick={handleClearForm}>
-          <span>{isLoadingFromOrder ? "Cancel" : "Clear"}</span>
-        </button>
+        <Button variant="danger" onClick={handleClearForm}>
+          {isLoadingFromOrder ? "Cancel" : "Clear"}
+        </Button>
       </div>
     </form>
   );

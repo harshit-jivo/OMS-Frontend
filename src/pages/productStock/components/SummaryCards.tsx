@@ -1,48 +1,62 @@
 /**
- * The `.ps-summary` KPI card row — total products, stock, order-required
- * quantity (and its litre equivalent once sales orders are selected),
- * shortage count and low/out count.
+ * The KPI row — total products, stock, order-required quantity (and its litre
+ * equivalent once sales orders are selected), shortage count and low/out count.
  */
+import {
+  HiOutlineArchiveBox,
+  HiOutlineCube,
+  HiOutlineExclamationTriangle,
+  HiOutlineScale,
+  HiOutlineShoppingCart,
+} from "react-icons/hi2";
+
+import { Stat, StatRow } from "@/components/ui/page";
 import { formatQuantity, formatRoundedQuantity } from "../productStockUtils";
 import type { ProductStockState } from "../useProductStock";
 
 export default function SummaryCards({ ps }: { ps: ProductStockState }) {
   const { selectedPartyCodes, summary, selectedSalesOrders } = ps;
+  const partyScoped = selectedPartyCodes.length > 0;
 
   return (
-    <section className="ps-summary">
-      <div className="ps-card ps-card-products">
-        <span>{selectedPartyCodes.length > 0 ? "Selected Party Items" : "Total Products"}</span>
-        <strong>{summary.totalProducts}</strong>
-        {selectedPartyCodes.length > 0 && (
-          <small>
-            {selectedPartyCodes.length} {selectedPartyCodes.length === 1 ? "party" : "parties"}{" "}
-            selected
-          </small>
-        )}
-      </div>
-      <div className="ps-card ps-card-stock">
-        <span>Total Stock</span>
-        <strong>{formatQuantity(summary.totalStock)}</strong>
-      </div>
-      <div className="ps-card ps-card-required">
-        <span>Order Required Qty</span>
-        <strong>{formatQuantity(summary.pendingRequired)}</strong>
-      </div>
+    <StatRow>
+      <Stat
+        label={partyScoped ? "Selected party items" : "Total products"}
+        value={summary.totalProducts}
+        hint={
+          partyScoped
+            ? selectedPartyCodes.length +
+              (selectedPartyCodes.length === 1 ? " party" : " parties") +
+              " selected"
+            : undefined
+        }
+        icon={HiOutlineCube}
+      />
+      <Stat label="Total stock" value={formatQuantity(summary.totalStock)} icon={HiOutlineArchiveBox} />
+      <Stat
+        label="Order required qty"
+        value={formatQuantity(summary.pendingRequired)}
+        icon={HiOutlineShoppingCart}
+      />
       {Object.keys(selectedSalesOrders).length > 0 && (
-        <div className="ps-card ps-card-required">
-          <span>Order Required Qty Ltrs</span>
-          <strong>{formatRoundedQuantity(summary.pendingRequiredLtrs)}</strong>
-        </div>
+        <Stat
+          label="Order required qty (L)"
+          value={formatRoundedQuantity(summary.pendingRequiredLtrs)}
+          icon={HiOutlineScale}
+        />
       )}
-      <div className="ps-card ps-card-danger">
-        <span>Shortage</span>
-        <strong>{summary.shortage}</strong>
-      </div>
-      <div className="ps-card ps-card-warning">
-        <span>Low / Out</span>
-        <strong>{summary.low + summary.out}</strong>
-      </div>
-    </section>
+      <Stat
+        label="Shortage"
+        value={summary.shortage}
+        icon={HiOutlineExclamationTriangle}
+        tone={summary.shortage > 0 ? "bad" : "neutral"}
+      />
+      <Stat
+        label="Low / out"
+        value={summary.low + summary.out}
+        icon={HiOutlineExclamationTriangle}
+        tone={summary.low + summary.out > 0 ? "hold" : "neutral"}
+      />
+    </StatRow>
   );
 }

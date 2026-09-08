@@ -1,24 +1,34 @@
+/**
+ * Approvers — who, by name, may decide each level of a workflow.
+ */
+import { useState } from "react";
 import {
-  HiArrowPath,
-  HiEye,
-  HiEyeSlash,
-  HiPencilSquare,
-  HiPlusCircle,
-  HiTrash,
+  HiOutlineArrowPath,
+  HiOutlineEye,
+  HiOutlineEyeSlash,
+  HiOutlinePencilSquare,
+  HiOutlinePlusCircle,
+  HiOutlineTrash,
 } from "react-icons/hi2";
 
 import {
   COMPANY_OPTIONS,
   type ApprovalWorkflow,
+  type LevelApprover,
 } from "../../../../services/approvalService";
 import {
   ActivePill,
+  ConfirmDialog,
   EmptyState,
   ErrorState,
   Modal,
   SearchSelect,
 } from "../../ApprovalUI";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Checkbox, Field, FormGrid, Select } from "@/components/ui/form";
+import { Card, CardHeader, CardTitle, Notice } from "@/components/ui/page";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -30,6 +40,15 @@ import {
 import { formatDateTime } from "../../approvalFormat";
 import type { Flash } from "../types";
 import { useApproversTab } from "../useApproversTab";
+
+/** A read-only value inside a form, where a field would imply it is editable. */
+function ReadOnlyValue({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="m-0 rounded-sm border border-line bg-surface px-3 py-2 text-[13px] text-body">
+      {children}
+    </p>
+  );
+}
 
 export default function ApproversTab({
   workflows,
@@ -64,58 +83,77 @@ export default function ApproversTab({
     remove,
   } = useApproversTab(workflows, selectedId, flash);
 
+  /*
+   * Removing an approver used to happen on the click, with no question asked.
+   * It is the one action here that can leave a level with nobody able to
+   * decide it — which does not fail loudly, it just silently strands the next
+   * document that reaches that level. So it asks first, and says whether the
+   * level has a role to fall back on.
+   */
+  const [confirmRemove, setConfirmRemove] = useState<{
+    approver: LevelApprover;
+    levelName: string;
+    roleName: string | null;
+    othersLeft: number;
+  } | null>(null);
+
   if (workflows.length === 0) {
     return (
-      <div className="apv-card">
-        <EmptyState
-          title="No workflows yet"
-          hint="Create a workflow before assigning approvers."
-        />
-      </div>
+      <Card>
+        <EmptyState title="No workflows yet" hint="Create a workflow before assigning approvers." />
+      </Card>
     );
   }
 
   return (
-    <div className="apv-card">
-      <div className="apv-toolbar">
-        <div className="apv-field apv-field-wf">
-          <label htmlFor="ap-workflow">Workflow</label>
-          <select
-            id="ap-workflow"
-            className="apv-select"
-            value={activeId ?? ""}
-            onChange={(e) => onSelect(Number(e.target.value))}
-          >
-            {workflows.map((w) => (
-              <option key={w.id} value={w.id}>
-                {w.name} ({w.code})
-              </option>
-            ))}
-          </select>
+    <div className="space-y-4">
+      <Card>
+        <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+          <Field label="Workflow" className="max-w-[320px] flex-1">
+            {(control) => (
+              <Select
+                {...control}
+                value={activeId ?? ""}
+                onChange={(e) => onSelect(Number(e.target.value))}
+              >
+                {workflows.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.name} ({w.code})
+                  </option>
+                ))}
+              </Select>
+            )}
+          </Field>
+          <Button onClick={levels.reload}>
+            <HiOutlineArrowPath aria-hidden="true" /> Refresh
+          </Button>
         </div>
-        <div className="apv-spacer" />
-        <button type="button" className="apv-btn" onClick={levels.reload}>
-          <HiArrowPath /> Refresh
-        </button>
-      </div>
 
-      <div className="apv-notice apv-notice-info">
-        <span>
-          A level can be satisfied two ways: by <strong>role</strong> (anyone
-          holding the level's role) or by a <strong>named approver</strong> listed
-          here. Named approvers are additive — they do not replace the role.
-        </span>
-      </div>
+        <Notice tone="info">
+          A level can be satisfied two ways: by <strong className="font-semibold">role</strong>{" "}
+          (anyone holding the level&apos;s role) or by a{" "}
+          <strong className="font-semibold">named approver</strong> listed here. Named approvers
+          are additive — they do not replace the role.
+        </Notice>
+      </Card>
 
-      {levels.loading && <div className="apv-loading">Loading…</div>}
+      {levels.loading && (
+        <Card>
+          <Skeleton className="h-24 w-full" />
+        </Card>
+      )}
       {!levels.loading && levels.error && (
-        <ErrorState message={levels.error} onRetry={levels.reload} />
+        <Card>
+          <ErrorState message={levels.error} onRetry={levels.reload} />
+        </Card>
       )}
       {!levels.loading && !levels.error && ordered.length === 0 && (
-        <EmptyState
-          title="No levels defined"
-          hint={`Add levels to "${workflow?.name ?? "this workflow"}" first.`}
-        />
+        <Card>
+          <EmptyState
+            title="No levels defined"
+            hint={'Add levels to "' + (workflow?.name ?? "this workflow") + '" first.'}
+          />
+        </Card>
       )}
 
       {!levels.loading &&
@@ -123,36 +161,32 @@ export default function ApproversTab({
         ordered.map((level) => {
           const list = level.approvers;
           return (
-            <div key={level.id} className="apv-level-group">
-              <div className="apv-card-head">
-                <h3>
-                  Level {level.sequence} — {level.name}{" "}
-                  <Badge tone="neutral">
-                    Role: {level.role_name || "any"}
-                  </Badge>
-                </h3>
+            <Card key={level.id} className="overflow-hidden p-0">
+              <CardHeader className="mb-0 border-b border-line px-4 py-3">
+                <CardTitle>
+                  <span className="flex flex-wrap items-center gap-2">
+                    Level {level.sequence} — {level.name}
+                    <Badge tone="neutral">Role: {level.role_name || "any"}</Badge>
+                  </span>
+                </CardTitle>
                 {canEdit && (
-                  <button
-                    type="button"
-                    className="apv-btn apv-btn-sm"
-                    onClick={() => setAdding(level)}
-                  >
-                    <HiPlusCircle /> Assign user
-                  </button>
+                  <Button size="xs" onClick={() => setAdding(level)}>
+                    <HiOutlinePlusCircle aria-hidden="true" /> Assign user
+                  </Button>
                 )}
-              </div>
+              </CardHeader>
 
               {list.length === 0 ? (
-                <div className="apv-notice apv-notice-warn apv-notice-tight">
-                  <span>
-                    No named approvers.{" "}
-                    {level.role_name
-                      ? `Only users with the "${level.role_name}" role can approve this level.`
-                      : "This level has no role either — nobody can approve it."}
-                  </span>
-                </div>
+                <Notice tone="hold" className="m-4">
+                  No named approvers.{" "}
+                  {level.role_name
+                    ? 'Only users with the "' +
+                      level.role_name +
+                      '" role can approve this level.'
+                    : "This level has no role either — nobody can approve it."}
+                </Notice>
               ) : (
-                <div className="apv-table-wrap">
+                <div className="overflow-x-auto">
                   <Table density="compact">
                     <TableHeader>
                       <TableRow>
@@ -161,66 +195,74 @@ export default function ApproversTab({
                         <TableHead>Company scope</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead>Assigned</TableHead>
-                        <TableHead />
+                        <TableHead className="text-right" aria-label="Actions" />
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {list.map((a) => (
                         <TableRow key={a.id}>
-                          <TableCell>{a.user_name || "—"}</TableCell>
-                          <TableCell>
-                            <code>{a.username}</code>
+                          <TableCell className="font-semibold text-ink">
+                            {a.user_name || "—"}
                           </TableCell>
                           <TableCell>
-                            {a.company || (
-                              <Badge tone="info">All</Badge>
-                            )}
+                            <code className="font-mono text-[12px]">{a.username}</code>
+                          </TableCell>
+                          <TableCell>
+                            {a.company || <Badge tone="info">All</Badge>}
                           </TableCell>
                           <TableCell>
                             <ActivePill active={a.is_active} />
                           </TableCell>
-                          <TableCell>{formatDateTime(a.assigned_at)}</TableCell>
+                          <TableCell className="whitespace-nowrap text-subtle">
+                            {formatDateTime(a.assigned_at)}
+                          </TableCell>
                           <TableCell>
-                            <div className="apv-row-actions">
-                              {canEdit && (
-                                <>
-                                  <button
-                                    type="button"
-                                    className="apv-btn apv-btn-icon"
-                                    title={a.is_active ? "Deactivate" : "Activate"}
-                                    aria-label={
-                                      a.is_active
-                                        ? `Deactivate ${a.user_name || a.username}`
-                                        : `Activate ${a.user_name || a.username}`
-                                    }
-                                    disabled={busy}
-                                    onClick={() => toggle(a.id, a.is_active)}
-                                  >
-                                    {a.is_active ? <HiEye /> : <HiEyeSlash />}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="apv-btn apv-btn-icon"
-                                    title="Edit"
-                                    aria-label={`Edit ${a.user_name || a.username}`}
-                                    disabled={busy}
-                                    onClick={() => setEditingApprover({ ...a })}
-                                  >
-                                    <HiPencilSquare />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="apv-btn apv-btn-icon apv-btn-danger"
-                                    title="Remove"
-                                    aria-label={`Remove ${a.user_name || a.username}`}
-                                    disabled={busy}
-                                    onClick={() => remove(a.id)}
-                                  >
-                                    <HiTrash />
-                                  </button>
-                                </>
-                              )}
-                            </div>
+                            {canEdit && (
+                              <span className="flex justify-end gap-1">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  title={a.is_active ? "Deactivate" : "Activate"}
+                                  aria-label={
+                                    (a.is_active ? "Deactivate " : "Activate ") +
+                                    (a.user_name || a.username)
+                                  }
+                                  disabled={busy}
+                                  onClick={() => toggle(a.id, a.is_active)}
+                                >
+                                  {a.is_active ? <HiOutlineEye /> : <HiOutlineEyeSlash />}
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  title="Edit"
+                                  aria-label={"Edit " + (a.user_name || a.username)}
+                                  disabled={busy}
+                                  onClick={() => setEditingApprover({ ...a })}
+                                >
+                                  <HiOutlinePencilSquare />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  title="Remove"
+                                  aria-label={"Remove " + (a.user_name || a.username)}
+                                  disabled={busy}
+                                  onClick={() =>
+                                    setConfirmRemove({
+                                      approver: a,
+                                      levelName: level.name,
+                                      roleName: level.role_name,
+                                      othersLeft: list.filter(
+                                        (o) => o.id !== a.id && o.is_active,
+                                      ).length,
+                                    })
+                                  }
+                                >
+                                  <HiOutlineTrash />
+                                </Button>
+                              </span>
+                            )}
                           </TableCell>
                         </TableRow>
                       ))}
@@ -228,137 +270,157 @@ export default function ApproversTab({
                   </Table>
                 </div>
               )}
-            </div>
+            </Card>
           );
         })}
 
       {adding && (
         <Modal
-          title={`Assign approver — Level ${adding.sequence}`}
+          title={"Assign approver — Level " + adding.sequence}
           onClose={() => setAdding(null)}
           footer={
             <>
-              <button
-                type="button"
-                className="apv-btn"
-                onClick={() => setAdding(null)}
-                disabled={busy}
-              >
+              <Button onClick={() => setAdding(null)} disabled={busy}>
                 Cancel
-              </button>
-              <button
-                type="button"
-                className="apv-btn apv-btn-primary"
+              </Button>
+              <Button
+                variant="primary"
                 onClick={add}
                 disabled={busy || pickUser === ""}
+                title={pickUser === "" ? "Choose a user first." : undefined}
               >
                 {busy ? "Assigning…" : "Assign"}
-              </button>
+              </Button>
             </>
           }
         >
-          <div className="apv-form-grid">
-            <div className="apv-field is-full">
-              <label htmlFor="ap-user">User</label>
-              <SearchSelect
-                id="ap-user"
-                options={userOptions}
-                value={pickUser}
-                onChange={(v) => setPickUser(v === "" ? "" : Number(v))}
-                placeholder="Select a user…"
-                searchPlaceholder="Type a name or username…"
-                emptyText="No users match that search"
-                loading={users.loading}
-              />
-              <span className="apv-hint">
-                {users.data.length} user{users.data.length === 1 ? "" : "s"}{" "}
-                available. Already-assigned users are hidden.
-              </span>
-              {users.error && (
-                <span className="apv-err-text">
-                  Could not load users — {users.error}
-                </span>
+          <FormGrid>
+            <Field
+              label="User"
+              required
+              className="sm:col-span-2"
+              hint={
+                users.data.length +
+                " user" +
+                (users.data.length === 1 ? "" : "s") +
+                " available. Already-assigned users are hidden."
+              }
+              error={users.error ? "Could not load users — " + users.error : undefined}
+            >
+              {(control) => (
+                <SearchSelect
+                  {...control}
+                  options={userOptions}
+                  value={pickUser}
+                  onChange={(v) => setPickUser(v === "" ? "" : Number(v))}
+                  placeholder="Select a user…"
+                  searchPlaceholder="Type a name or username…"
+                  emptyText="No users match that search"
+                  loading={users.loading}
+                />
               )}
-            </div>
+            </Field>
 
-            <div className="apv-field is-full">
-              <label>Company scope</label>
-              <div className="apv-readonly-value">
-                {workflow?.company
-                  ? COMPANY_OPTIONS.find((o) => o.value === workflow.company)
-                      ?.label ?? workflow.company
-                  : "All companies"}
-              </div>
-              <span className="apv-hint">
-                Inherited from the workflow — change it there to change it here.
-              </span>
-            </div>
-          </div>
+            <Field
+              label="Company scope"
+              className="sm:col-span-2"
+              hint="Inherited from the workflow — change it there to change it here."
+            >
+              {() => (
+                <ReadOnlyValue>
+                  {workflow?.company
+                    ? (COMPANY_OPTIONS.find((o) => o.value === workflow.company)?.label ??
+                      workflow.company)
+                    : "All companies"}
+                </ReadOnlyValue>
+              )}
+            </Field>
+          </FormGrid>
         </Modal>
       )}
 
       {editingApprover && (
         <Modal
-          title={`Edit approver — ${editingApprover.user_name || editingApprover.username}`}
+          title={"Edit approver — " + (editingApprover.user_name || editingApprover.username)}
           onClose={() => setEditingApprover(null)}
           footer={
             <>
-              <button
-                type="button"
-                className="apv-btn"
-                onClick={() => setEditingApprover(null)}
-                disabled={busy}
-              >
+              <Button onClick={() => setEditingApprover(null)} disabled={busy}>
                 Cancel
-              </button>
-              <button
-                type="button"
-                className="apv-btn apv-btn-primary"
-                onClick={saveApprover}
-                disabled={busy}
-              >
+              </Button>
+              <Button variant="primary" onClick={saveApprover} disabled={busy}>
                 {busy ? "Saving…" : "Save"}
-              </button>
+              </Button>
             </>
           }
         >
-          <div className="apv-form-grid">
-            <div className="apv-field is-full">
-              <label>User</label>
-              <div className="apv-readonly-value">
-                {editingApprover.user_name || editingApprover.username}{" "}
-                <code>{editingApprover.username}</code>
-              </div>
-              <span className="apv-hint">
-                To assign a different user, remove this grant and add a new one.
-              </span>
-            </div>
+          <FormGrid>
+            <Field
+              label="User"
+              className="sm:col-span-2"
+              hint="To assign a different user, remove this grant and add a new one."
+            >
+              {() => (
+                <ReadOnlyValue>
+                  {editingApprover.user_name || editingApprover.username}{" "}
+                  <code className="font-mono text-[12px] text-subtle">
+                    {editingApprover.username}
+                  </code>
+                </ReadOnlyValue>
+              )}
+            </Field>
 
-            <div className="apv-field is-full">
-              <label>Company scope</label>
-              <div className="apv-readonly-value">
-                {editingApprover.company || "All companies"}
-              </div>
-              <span className="apv-hint">Inherited from the workflow.</span>
-            </div>
+            <Field
+              label="Company scope"
+              className="sm:col-span-2"
+              hint="Inherited from the workflow."
+            >
+              {() => <ReadOnlyValue>{editingApprover.company || "All companies"}</ReadOnlyValue>}
+            </Field>
 
-            <div className="apv-field is-full">
-              <label className="apv-check">
-                <input
-                  type="checkbox"
-                  checked={editingApprover.is_active}
-                  onChange={(e) =>
-                    setEditingApprover({
-                      ...editingApprover,
-                      is_active: e.target.checked,
-                    })
-                  }
-                />
-                Active — an inactive approver cannot decide at this level
-              </label>
+            <div className="sm:col-span-2">
+              <Checkbox
+                label="Active"
+                hint="An inactive approver cannot decide at this level."
+                checked={editingApprover.is_active}
+                onChange={(e) =>
+                  setEditingApprover({ ...editingApprover, is_active: e.target.checked })
+                }
+              />
             </div>
-          </div>
+          </FormGrid>
         </Modal>
+      )}
+
+      {confirmRemove && (
+        <ConfirmDialog
+          title="Remove approver"
+          message={
+            "Remove " +
+            (confirmRemove.approver.user_name || confirmRemove.approver.username) +
+            " from " +
+            confirmRemove.levelName +
+            "? " +
+            (confirmRemove.othersLeft > 0
+              ? confirmRemove.othersLeft +
+                " other named approver" +
+                (confirmRemove.othersLeft === 1 ? "" : "s") +
+                " can still decide this level."
+              : confirmRemove.roleName
+                ? 'Nobody is named on this level afterwards — only users with the "' +
+                  confirmRemove.roleName +
+                  '" role could approve it.'
+                : "This level has no role and would then have NOBODY able to approve it. Any document reaching it would stop there.")
+          }
+          confirmLabel="Remove approver"
+          danger
+          busy={busy}
+          onConfirm={() => {
+            remove(confirmRemove.approver.id);
+            setConfirmRemove(null);
+          }}
+          onCancel={() => setConfirmRemove(null)}
+        />
       )}
     </div>
   );

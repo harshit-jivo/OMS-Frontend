@@ -3,6 +3,9 @@ import { HiXCircle } from "react-icons/hi2";
 import { einvoiceService } from "../../services/einvoiceService";
 import { NicField, KeyValues, JsonView, ErrorAlert, SuccessAlert } from "../../components/NicUI";
 import { messageFrom } from "@/lib/apiError";
+import { Button } from "@/components/ui/button";
+import { Input, Select } from "@/components/ui/form";
+import { Card, CardHeader, CardTitle } from "@/components/ui/page";
 
 const REASONS = [
   { code: "1", label: "1 — Duplicate" },
@@ -44,53 +47,52 @@ export default function CancelIrn() {
   };
 
   return (
-    <section className="ofs-card ofs-card--wide">
-      <div className="ofs-card-head">
-        <span className="ofs-card-mark" />
-        <h2>Cancel IRN</h2>
-      </div>
-      <p className="nic-note">
+    <Card>
+      <CardHeader>
+        <CardTitle>Cancel IRN</CardTitle>
+      </CardHeader>
+      <p className="text-[12.5px] leading-relaxed text-subtle">
         An IRN can be cancelled within <strong>24 hours</strong> of generation and only if no active
         e-Way Bill exists against it. The stored record is marked <code>CANCELLED</code>.
       </p>
 
-      <div className="nic-form-grid" style={{ marginTop: 14 }}>
+      <div className="mt-3.5 grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-x-5 gap-y-4">
         <NicField label="IRN" full hint="The 64-character IRN hash">
-          <input className="nic-input nic-mono" value={irn} onChange={(e) => setIrn(e.target.value)}
+          <Input className="font-mono" value={irn} onChange={(e) => setIrn(e.target.value)}
             placeholder="e.g. 35dc2001edd8a0b07abb1126…" />
         </NicField>
         <NicField label="Reason">
-          <select className="nic-select" value={reason} onChange={(e) => setReason(e.target.value)}>
+          <Select value={reason} onChange={(e) => setReason(e.target.value)}>
             {REASONS.map((r) => <option key={r.code} value={r.code}>{r.label}</option>)}
-          </select>
+          </Select>
         </NicField>
         <NicField label="Remarks" hint="Why it is being cancelled">
-          <input className="nic-input" value={remarks} onChange={(e) => setRemarks(e.target.value)}
+          <Input value={remarks} onChange={(e) => setRemarks(e.target.value)}
             placeholder="Data entry mistake" />
         </NicField>
       </div>
 
-      <div className="nic-actions-row">
-        <button className="ofs-primary" onClick={() => void submit()} disabled={busy}>
-          <HiXCircle className="nic-icon-lead" />
+      <div className="mt-4 flex flex-wrap items-center gap-2.5">
+        <Button variant="primary" onClick={() => void submit()} disabled={busy}>
+          <HiXCircle aria-hidden="true" />
           {busy ? "Cancelling…" : "Cancel IRN"}
-        </button>
+        </Button>
       </div>
 
       <ErrorAlert>{error}</ErrorAlert>
       {result ? (
-        <div className="nic-result">
+        <div className="mt-5 space-y-4">
           <SuccessAlert>IRN cancelled.</SuccessAlert>
           <KeyValues
             items={[
-              ["IRN", <span className="nic-mono">{String(result.Irn ?? irn)}</span>],
+              ["IRN", <span className="font-mono text-[12px]">{String(result.Irn ?? irn)}</span>],
               ["Cancel Date", String(result.CancelDate ?? "")],
             ]}
           />
           <JsonView data={result} title="Full NIC response" />
         </div>
       ) : null}
-    </section>
+    </Card>
   );
 }
 

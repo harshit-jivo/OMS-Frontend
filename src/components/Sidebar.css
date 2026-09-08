@@ -1,13 +1,48 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
 /*
- * A duplicate of the universal reset that also sat in styles/Login.css. Both
- * have moved to styles/tailwind.css, inside `@layer base` — see the note there.
- * Short version: unlayered CSS beats every cascade layer, so `* { padding: 0 }`
- * silently zeroed every Tailwind padding and margin utility app-wide.
+ * ═════════════════════════════════════════════════════════════════════════
+ * THE SHELL'S GEOMETRY. NOT ITS APPEARANCE.
+ * ═════════════════════════════════════════════════════════════════════════
  *
- * Deleted rather than moved, because the copy in tailwind.css is identical and
- * this file is loaded on every protected page anyway.
+ * The header, the rail and their two dialogs were converted to Tailwind in
+ * Phase 2 — see components/layout/. What is left in this file is the part
+ * that could not sensibly move with them:
+ *
+ *   .header          fixed, full width, 58px (60 below 768px), z-index
+ *   .sidebar         fixed under it, 230px / 72px collapsed, off-canvas
+ *                    below 1024px with `.open` sliding it back
+ *   .content-area    the offsets that clear both
+ *   .overlay         the drawer scrim
+ *
+ * TWO REASONS, and the second is the one that bites.
+ *
+ * 1. `.content-area`'s margins are load-bearing for pages that have not been
+ *    converted. `Auditor_Order.css` and `Billing_Order.css` pin a fixed footer
+ *    bar with `padding-left: calc(246px + ...)` and
+ *    `.content-area.sidebar-collapsed .ao-d-bottombar { ... 88px ... }`.
+ *    Moving these numbers is a change to five order screens, not to the shell,
+ *    and it is not this step's change to make. (Those two stylesheets say 246
+ *    and 88 where the shell says 220 and 70, so they are already ~26px out —
+ *    worth fixing WITH those pages, not before them.)
+ *
+ * 2. Every rule in this file is UNLAYERED, and unlayered CSS beats every
+ *    cascade layer regardless of specificity — so it beats every Tailwind
+ *    utility. A property declared here cannot be overridden from a component;
+ *    the class would sit in the DOM doing nothing. That is why the colour,
+ *    padding, radius, font and shadow declarations are GONE from `.header`
+ *    and `.sidebar` rather than merely being overridden: leaving them would
+ *    have silently won.
+ *
+ * The rule of thumb, then: this file may set position, size and z-index. It
+ * may not set colour, padding, radius, weight or shadow. If a shell style
+ * needs changing, it changes in components/layout/.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * The universal reset that used to be at the top of this file has moved to
+ * styles/tailwind.css, inside `@layer base` — see the note there. Short
+ * version: unlayered `* { padding: 0 }` silently zeroed every Tailwind
+ * padding and margin utility app-wide.
  */
 
 html, body {
@@ -22,136 +57,18 @@ html, body {
   background: transparent;
 }
 
+/* ── The fixed top bar. Appearance: components/layout/AppHeader.tsx ──────── */
 .header {
   position: fixed;
   top: 0; left: 0;
   width: 100%; height: 58px;
-  background: rgba(255,255,255,.92);
-  border-bottom: 1px solid rgba(226,232,240,.95);
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0 1.3rem 0 1.1rem;
-  /* backdrop-filter: blur(10px); */
-  box-shadow: 0 6px 20px rgba(15,23,42,.05);
   z-index: 1000;
 }
 
-.logo-area {
-  display: flex;
-  align-items: center;
-  gap: .7rem;
-}
-
-.logo-mark {
-  width: 34px;
-  height: 34px;
-  padding: 0;
-  border-radius: 12px;
-  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  color: #1e293b;
-  border: 1px solid #bfdbfe;
-  box-shadow: 0 8px 18px rgba(37,99,235,.12);
-}
-
-.logo-mark-img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-
-.logo-text {
-  font-family: 'Inter', sans-serif;
-  font-size: .9rem; font-weight: 800;
-  letter-spacing: .28em; text-transform: uppercase;
-  color: #0f172a;
-  opacity: .8;
-}
-
-.header-right {
-  position: relative;
-  display: flex; align-items: center;
-}
-
-.header-profile {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: .18rem;
-  padding: 0;
-  line-height: 1;
-  /* Were inline on the <Link>. The three flex properties there duplicated the
-     three above exactly; these two did not exist here at all. */
-  margin-right: 16px;
-  text-decoration: none;
-}
-
-.header-profile-name {
-  font-family: 'Inter', sans-serif;
-  /* .88rem / #334155 until now — and never once rendered. The inline style on
-     this element set .9rem / #0f172a and an inline style beats any rule here,
-     so those were the dead values and these are what the header has always
-     actually shown. Changed to keep the render identical, not to restyle it. */
-  font-size: .9rem;
-  font-weight: 600;
-  letter-spacing: -.02em;
-  color: #0f172a;
-  line-height: 1.1;
-}
-
-.header-profile-role {
-  font-family: 'Inter', sans-serif;
-  /* Same story as `.header-profile-name`: .58rem / #0f766e were overridden by
-     the inline .75rem / #64748b on every render. The uppercase, the tracking
-     and the weight below were never overridden and are unchanged. */
-  font-size: .75rem;
-  font-weight: 700;
-  letter-spacing: .18em;
-  text-transform: uppercase;
-  color: #64748b;
-  opacity: .92;
-}
-
-.menu-btn {
-  display: none;
-  background: #ffffff; border: 1px solid #e2e8f0;
-  color: #0f172a;
-  cursor: pointer; padding: 6px;
-  line-height: 1;
-  border-radius: 10px;
-}
-.menu-btn svg { width: 18px; height: 18px; }
-
-.sidebar-collapse-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 34px;
-  padding: 0;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  background: #ffffff;
-  color: #334155;
-  cursor: pointer;
-  transition: background .2s, border-color .2s, transform .2s;
-}
-
-.sidebar-collapse-btn:hover {
-  background: #f8fafc;
-  border-color: #bfdbfe;
-  transform: translateY(-1px);
-}
-
-.sidebar-collapse-btn svg {
-  width: 18px;
-  height: 18px;
-}
-
+/* ── The rail. Appearance: components/layout/AppSidebar.tsx ──────────────── */
 .sidebar {
   position: fixed;
   top: 58px; left: 0;
@@ -160,170 +77,53 @@ html, body {
      sidebar always spans header-to-bottom correctly, including when
      the UI is scaled with `zoom` on large screens. */
   bottom: 0;
-  background: linear-gradient(180deg, #172033 0%, #111827 100%);
-  border-right: 1px solid rgba(59,130,246,.14);
-  border-radius: 0;
-  padding: 1rem 0.75rem 0.8rem;
   overflow-y: auto;
-  transition: left .28s ease, transform .28s ease, opacity .2s ease;
+  transition: left .28s ease, width .18s ease;
   z-index: 999;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-start;
-  box-shadow: 12px 0 30px rgba(15,23,42,.08);
 }
 
 .sidebar.collapsed {
   width: 72px;
-  padding: 1rem .55rem .8rem;
-  transform: none;
-  opacity: 1;
-  pointer-events: auto;
   overflow-x: hidden;
-  white-space: nowrap;
 }
 
-.sidebar ul { list-style: none; }
-.sidebar > ul > li { margin: 1px 0; }
-
-.sidebar a,
-.dropdown-toggle {
-  display: flex;
-  align-items: center;
-  gap: .65rem;
-  padding: .72rem .85rem;
-  font-size: .76rem; font-weight: 500;
-  letter-spacing: .04em;
-  color: rgba(226,232,240,.86);
-  text-decoration: none;
-  cursor: pointer;
-  border-left: none;
-  border-radius: 14px;
-  transition: color .2s, background .2s, transform .2s;
-  position: relative;
+/*
+ * HOVER TO PEEK
+ *
+ * A collapsed rail widens back to its full 230px while the pointer is inside
+ * it, and drops back when the pointer leaves. It OVERLAYS the page rather
+ * than pushing it: `.content-area`'s margin is deliberately untouched, so
+ * nothing reflows and the line you were reading does not slide out from under
+ * the cursor. That is also why the rail already sits at `z-index: 999`.
+ *
+ * `@media (hover: hover)` because a touch device synthesises a hover that
+ * never ends — the rail would open on the first tap and stay open with no way
+ * to dismiss it. `min-width: 1025px` mirrors the drawer breakpoint below:
+ * under it the rail is off-canvas and width is not what is hiding it.
+ *
+ * The `.peek` class is set by `AppSidebar` from real pointer and focus events
+ * — focus too, so a keyboard user tabbing into a collapsed rail gets the same
+ * expansion a mouse user does. This rule supplies only the width, because
+ * width is this file's to own (see the header note); the shadow that makes it
+ * read as floating is the component's.
+ */
+@media (hover: hover) and (min-width: 1025px) {
+  .sidebar.collapsed.peek {
+    width: 230px;
+  }
 }
 
-.sidebar.collapsed a,
-.sidebar.collapsed .dropdown-toggle,
-.sidebar.collapsed .sb-logout {
-  justify-content: center;
-  gap: 0;
-  padding-left: 0;
-  padding-right: 0;
-  font-size: 0;
-  letter-spacing: 0;
-}
-
-.sidebar.collapsed .sb-nav-icon {
-  width: 22px;
-  height: 22px;
-  flex-basis: 22px;
-}
-
-.sidebar.collapsed .sb-nav-icon svg {
-  width: 22px;
-  height: 22px;
-}
-
-.sb-nav-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  flex: 0 0 18px;
-  color: rgba(147, 197, 253, .92);
-}
-
-.sb-nav-icon svg {
-  width: 18px;
-  height: 18px;
-  stroke-width: 1.9;
-}
-
-.sidebar a:hover,
-.dropdown-toggle:hover {
-  color: #ffffff;
-  background: rgba(255,255,255,.06);
-  transform: translateX(2px);
-}
-
-.sidebar a:hover .sb-nav-icon,
-.dropdown-toggle:hover .sb-nav-icon,
-.sidebar li.active > a .sb-nav-icon {
-  color: #ffffff;
-}
-
-.sidebar li.active > a {
-  color: #ffffff;
-  background: linear-gradient(90deg, rgba(37,99,235,.32) 0%, rgba(37,99,235,.12) 100%);
-  font-weight: 600;
-  box-shadow: inset 0 0 0 1px rgba(96,165,250,.18);
-}
-
-.sb-chevron {
-  margin-left: auto;
-  width: 14px;
-  height: 14px;
-  color: rgba(255,255,255,.35);
-  transition: transform .2s;
-}
-.sb-chevron.open { transform: rotate(180deg); }
-
-.sidebar.collapsed .sb-chevron {
-  display: none;
-}
-
-.dropdown-list {
-  list-style: none;
-  border-left: 1px solid rgba(96,165,250,.18);
-  margin: 4px 0 2px 1rem;
-  padding-left: .55rem;
-}
-.dropdown-list li { margin: 1px 0; }
-.dropdown-list li a {
-  font-size: .68rem;
-  padding: .54rem .72rem;
-  gap: .55rem;
-  color: rgba(226,232,240,.75);
-  border-left: none;
-}
-
-.sidebar.collapsed .dropdown-list {
-  margin: 4px 0 2px;
-  padding-left: 0;
-  border-left: 0;
-}
-
-.dropdown-list .sb-nav-icon {
-  width: 15px;
-  height: 15px;
-  flex-basis: 15px;
-  color: rgba(147, 197, 253, .72);
-}
-
-.dropdown-list .sb-nav-icon svg {
-  width: 15px;
-  height: 15px;
-}
-.dropdown-list li a:hover {
-  color: #ffffff;
-  background: rgba(255,255,255,.05);
-  border-left: none;
-}
-
-.sb-rule {
-  height: 1px;
-  background: rgba(255,255,255,.08);
-  margin: 1rem 1.2rem;
+/* Reduced motion: the rail still opens, it just stops sliding. */
+@media (prefers-reduced-motion: reduce) {
+  .sidebar {
+    transition: none;
+  }
 }
 
 .content-area {
   margin-left: 220px;
   padding-top: 75px;
-  /* margin-bottom: 2rem; */
   box-sizing: border-box;
-  /* padding: 1.25rem 1.25rem 3rem 0; */
   min-height: calc(100vh - 58px);
   background: white;
   transition: margin-left .28s ease, padding .28s ease;
@@ -342,100 +142,12 @@ html, body {
   z-index: 998;
 }
 
-.sb-logout-wrap {
-  padding-top: .9rem;
-  margin-top: auto;
-  border-top: 1px solid rgba(255,255,255,.06);
-}
-
-.sb-logout {
-  display: flex;
-  align-items: center;
-  gap: .65rem;
-  width: 100%;
-  padding: .78rem .85rem;
-  font-size: .8rem;
-  font-weight: 500;
-  letter-spacing: .04em;
-  color: rgba(248,250,252,.86);
-  background: none;
-  border: none;
-  border-radius: 14px;
-  cursor: pointer;
-  transition: color .2s, background .2s, transform .2s;
-}
-
-.sb-logout:hover {
-  color: #ffffff;
-  background: rgba(239,68,68,.1);
-  transform: translateX(2px);
-}
-
-.sb-modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(15,23,42,.4);
-  z-index: 2000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.sb-modal {
-  background: white;
-  border-radius: 12px;
-  padding: 32px 28px 24px;
-  width: 320px;
-  text-align: center;
-  box-shadow: 0 20px 60px rgba(0,0,0,.2);
-}
-
-.sb-modal-icon {
-  width: 48px;
-  height: 48px;
-  background: #fef2f2;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0 auto 16px;
-  color: #ef4444;
-}
-
-.sb-modal-icon svg {
-  width: 22px;
-  height: 22px;
-}
-
-.sb-modal-title {
-  font-size: 16px;
-  font-weight: 700;
-  color: #1e293b;
-  margin: 0 0 8px;
-}
-
-.sb-modal-msg {
-  font-size: 13px;
-  color: #64748b;
-  margin: 0 0 24px;
-}
-
-.sb-modal-actions {
-  display: flex;
-  gap: 10px;
-}
-
 @media (max-width: 1024px) {
-  .menu-btn { display: flex; align-items: center; justify-content: center; }
-  .sidebar-collapse-btn { display: none; }
   .sidebar {
     left: -240px;
     width: 230px;
-    transform: none;
-    opacity: 1;
-    pointer-events: auto;
   }
-  .sidebar.collapsed { left: -240px; transform: none; opacity: 1; pointer-events: auto; }
+  .sidebar.collapsed { left: -240px; }
   .sidebar.open { left: 0; }
   .content-area {
     margin-left: 0;
@@ -445,59 +157,17 @@ html, body {
   .content-area.sidebar-collapsed { margin-left: 0; }
 }
 
-.sb-modal-cancel {
-  flex: 1;
-  padding: 10px;
-  border: 1.5px solid #e2e8f0;
-  border-radius: 8px;
-  background: white;
-  font-size: 13px;
-  font-weight: 600;
-  color: #475569;
-  cursor: pointer;
-  transition: .15s;
-}
-
-.sb-modal-cancel:hover {
-  background: #f8fafc;
-  border-color: #cbd5e1;
-}
-
-.sb-modal-confirm {
-  flex: 1;
-  padding: 10px;
-  border: none;
-  border-radius: 8px;
-  background: #ef4444;
-  font-size: 13px;
-  font-weight: 600;
-  color: white;
-  cursor: pointer;
-  transition: .15s;
-}
-
-.sb-modal-confirm:hover {
-  background: #dc2626;
-}
-
-
 @media (max-width: 768px) {
-  .menu-btn { display: flex; align-items: center; justify-content: center; }
-  .sidebar-collapse-btn { display: none; }
   .header {
     height: 60px;
-    padding: 0 1rem;
   }
   .sidebar {
     left: -240px;
     top: 60px;
     width: 230px;
     height: calc(100vh - 60px);
-    transform: none;
-    opacity: 1;
-    pointer-events: auto;
   }
-  .sidebar.collapsed { left: -240px; transform: none; opacity: 1; pointer-events: auto; }
+  .sidebar.collapsed { left: -240px; }
   .sidebar.open { left: 0; }
   .content-area {
     margin-left: 0;
@@ -513,41 +183,33 @@ html, body {
 }
 
 @media (max-width: 480px) {
-  /*
-   * Dead before this conversion and deliberately kept dead.
-   *
-   * An inline style beats a media query too, so the .9rem / .75rem that used
-   * to sit on these two elements won at EVERY viewport — these rules have
-   * never applied. Now that the values live in the base classes, uncommenting
-   * these would genuinely shrink the header profile below 480px for the first
-   * time. That may well be what was intended, but it is a visual change at a
-   * breakpoint no baseline watches (the suite runs at 1440x900), so it is a
-   * decision to take deliberately rather than a side effect of moving a style
-   * off an element.
-   *
-  .header-profile-name {
-    font-size: .78rem;
-  }
-  .header-profile-role {
-    font-size: .52rem;
-  }
-  */
   .sidebar {
     width: 100%;
     left: -100%;
   }
   .sidebar.collapsed { left: -100%; }
   .sidebar.open { left: 0; }
-  .header {
-    padding: 0 .85rem;
-  }
   .content-area {
     margin-bottom: 1.25rem;
     padding: .85rem .85rem 2.25rem;
   }
 }
 
-/* Global CSS variables */
+/* ══════════════════════════════════════════════════════════════════════════
+   Global variables and helpers — NOT the shell, and deliberately left alone
+   ══════════════════════════════════════════════════════════════════════════
+
+   `--radius-lg: 12px` is a bug: it is an app-wide token declared by a
+   component stylesheet, and because this file loads after index.css (which
+   says 16px) it WINS. Roughly fifteen unconverted stylesheets write
+   `var(--radius-lg, 16px)` and have silently been getting 12.
+
+   It stays. Correcting it here would restyle those fifteen pages in a change
+   about the sidebar, which is exactly the kind of invisible blast radius this
+   migration is meant to avoid — they get it back one at a time as they
+   convert. New components use `--radius-card`, which cannot be hijacked
+   because this file has never heard of it. See styles/tailwind.css.
+   ══════════════════════════════════════════════════════════════════════════ */
 
 :root {
   --primary-blue: #2563eb;
@@ -590,272 +252,4 @@ body {
   border: 1px solid rgba(226, 232, 240, 0.95);
   box-shadow: 0 6px 20px rgba(15, 23, 42, 0.05);
   padding: 24px;
-}
-
-/* Sidebar group label — introduced with the System group (Device/Version
-   Management). Non-interactive; purely a visual divider in the flat nav list. */
-.sidebar ul li.sidebar-section {
-  padding: 14px 16px 4px;
-  font-size: 0.65rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: #94a3b8;
-  pointer-events: none;
-}
-.sidebar.collapsed ul li.sidebar-section {
-  display: none;
-}
-
-/* ==========================================================================
-   Notifications — the bell and its dialog
-   ==========================================================================
-   Gated on `["auditor","billing","manager"].includes(normalizedRole) ||
-   isRateApprover`, so none of this rendered for the suite's `admin` session
-   until `asRole` (e2e/harness.ts) existed. 26 inline styles lived here.
-   ========================================================================== */
-
-.header-bell-btn {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 8px;
-  margin-right: 12px;
-  background: none;
-  border: none;
-  color: #475569;
-  cursor: pointer;
-}
-
-.sb-bell-icon {
-  width: 24px;
-  height: 24px;
-}
-
-.sb-bell-badge {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background-color: #ef4444;
-  color: #fff;
-  font-size: 10px;
-  font-weight: bold;
-}
-
-/*
- * Two classes — `0,2,0` — and not a change to `.sb-modal-title` itself.
- *
- * That class is on two elements: this <h3> and the Logout modal's
- * (Sidebar.tsx:1228). The inline style being replaced here overrode its
- * font-size, colour and margin for THIS one only, so folding the values into
- * `.sb-modal-title` would have restyled the Logout title as a side effect.
- * `font-weight: 700` was never overridden and still comes from the base class.
- */
-.sb-modal-title.sb-notif-title {
-  margin: 0;
-  font-size: 1.25rem;
-  color: #0f172a;
-}
-
-.sb-notif-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 14px;
-}
-
-.sb-notif-head-actions {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.sb-notif-markall {
-  padding: 0;
-  background: none;
-  border: none;
-  color: #3b82f6;
-  font-size: 0.85rem;
-  font-weight: 500;
-  cursor: pointer;
-}
-
-.sb-notif-close {
-  padding: 0;
-  background: none;
-  border: none;
-  color: #64748b;
-  font-size: 24px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.sb-notif-filters {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 14px;
-}
-
-.sb-notif-chip {
-  padding: 6px 14px;
-  border: 1px solid #e2e8f0;
-  border-radius: 999px;
-  background: #fff;
-  color: #475569;
-  font-size: 0.8rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.sb-notif-chip.is-active {
-  border-color: #2563eb;
-  background: #2563eb;
-  color: #fff;
-}
-
-.sb-notif-settings {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  margin-bottom: 12px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-}
-
-.sb-notif-dot {
-  flex-shrink: 0;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #94a3b8;
-}
-
-.sb-notif-dot.is-on {
-  background: #22c55e;
-}
-
-/* The text column beside a dot or an icon: takes the space, and `min-width: 0`
-   so a long message can ellipsis instead of forcing the row wider. */
-.sb-notif-grow {
-  flex: 1;
-  min-width: 0;
-}
-
-.sb-notif-settings-title {
-  margin: 0;
-  font-size: 0.82rem;
-  font-weight: 600;
-  color: #0f172a;
-}
-
-.sb-notif-hint {
-  margin: 2px 0 0;
-  font-size: 0.72rem;
-  line-height: 1.4;
-  color: #64748b;
-}
-
-.sb-notif-enable {
-  flex-shrink: 0;
-  padding: 7px 12px;
-  border: none;
-  border-radius: 8px;
-  background: #2563eb;
-  color: #fff;
-  font-size: 0.78rem;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.sb-notif-list {
-  max-height: 60vh;
-  overflow-y: auto;
-  padding-right: 4px;
-}
-
-.sb-notif-empty {
-  margin: 0;
-  padding: 30px 0;
-  color: #64748b;
-  text-align: center;
-}
-
-.sb-notif-group {
-  margin-bottom: 8px;
-}
-
-.sb-notif-group-label {
-  margin: 8px 4px;
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: #94a3b8;
-}
-
-.sb-notif-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 14px;
-  margin-bottom: 10px;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  background-color: #f8fafc;
-  cursor: pointer;
-}
-
-.sb-notif-item.is-unread {
-  border-color: #bae6fd;
-  background-color: #f0f9ff;
-}
-
-.sb-notif-item-dot {
-  flex-shrink: 0;
-  width: 8px;
-  height: 8px;
-  margin-top: 6px;
-  border-radius: 50%;
-  background: #2563eb;
-}
-
-.sb-notif-message {
-  margin: 0 0 8px 0;
-  font-size: 0.9rem;
-  line-height: 1.5;
-  color: #0f172a;
-}
-
-.sb-notif-time {
-  font-size: 0.75rem;
-  color: #64748b;
-}
-
-.sb-notif-more {
-  width: 100%;
-  margin-top: 6px;
-  padding: 10px;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  background: #f8fafc;
-  color: #2563eb;
-  font-size: 0.85rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-/* `disabled` is the attribute the button already carries, so the cursor does
-   not need a second source of truth in JS. */
-.sb-notif-more:disabled,
-.sb-notif-enable:disabled {
-  cursor: default;
 }

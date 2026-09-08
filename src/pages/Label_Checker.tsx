@@ -2,14 +2,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { saveAs } from "file-saver";
 import {
-  HiArrowDownTray,
-  HiArrowPath,
-  HiArrowUpTray,
-  HiCheckCircle,
-  HiClipboardDocument,
-  HiExclamationTriangle,
-  HiInformationCircle,
-  HiShieldCheck,
+  HiOutlineArrowDownTray,
+  HiOutlineArrowPath,
+  HiOutlineArrowUpTray,
+  HiOutlineBeaker,
+  HiOutlineCheckCircle,
+  HiOutlineClipboardDocument,
+  HiOutlineExclamationTriangle,
+  HiOutlineInformationCircle,
+  HiOutlineShieldCheck,
 } from "react-icons/hi2";
 import { apiFetch, apiUpload, resolveApiUrl } from "./SalesInvoice/useSalesInvoice";
 import { API_ORIGIN } from "../services/apiPaths";
@@ -23,7 +24,17 @@ import {
   type LabelReport,
 } from "../components/legal/labelReport";
 import { Tab, TabList } from "@/components/ui/tabs";
-import "../styles/Label_Checker.css";
+import { Badge } from "@/components/ui/badge";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { Button } from "@/components/ui/button";
+import {
+  FilterActions,
+  FilterBar,
+  FilterSelect,
+  FilterSpacer,
+} from "@/components/ui/filter-bar";
+import { Card, Notice, Page, PageHeader } from "@/components/ui/page";
+import { cn } from "@/lib/utils";
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Label Checker (Legal)
@@ -274,29 +285,39 @@ export default function LabelChecker() {
       ref={inputRef}
       type="file"
       accept={ACCEPTED}
-      className="lc-file-input"
+      className="sr-only"
       onChange={(event) => pickFile(event.target.files?.[0] ?? null)}
     />
   );
 
   if (!file) {
     return (
-      <div className="lc-page app-page">
+      <Page>
         {fileInput}
-        <div className="lc-empty">
-          <span className="lc-empty-badge">
-            <HiShieldCheck aria-hidden="true" /> AI document review
-          </span>
-          <h1 className="lc-empty-title">Label compliance checker</h1>
-          <p className="lc-empty-lead">
-            Upload a label and it is checked against your compliance rules — the
-            printed text is read first, then reviewed, then the two are compared.
-          </p>
+        <Breadcrumbs items={[{ label: "Legal" }, { label: "Label Checker" }]} />
 
+        <PageHeader
+          title="Label Checker"
+          description="Upload a label and it is checked against your compliance rules — the printed text is read first, then reviewed, then the two are compared."
+        />
+
+        {error ? (
+          <Notice tone="bad" title="Could not use that file">
+            {error}
+          </Notice>
+        ) : null}
+
+        <Card>
+          {/*
+            The drop zone. A `div` with a button role rather than a real
+            `<button>`, because a button cannot legally contain the block
+            content this needs — but it therefore has to carry the keyboard
+            handling itself, which is what the `onKeyDown` below is for.
+          */}
           <div
-            className={`lc-drop${dragging ? " is-dragging" : ""}`}
             role="button"
             tabIndex={0}
+            aria-label="Choose a label file to check"
             onClick={browse}
             onKeyDown={(event) => {
               if (event.key === "Enter" || event.key === " ") {
@@ -310,127 +331,206 @@ export default function LabelChecker() {
             }}
             onDragLeave={() => setDragging(false)}
             onDrop={onDrop}
+            className={cn(
+              "flex cursor-pointer flex-col items-center gap-3 rounded-md px-6 py-14 text-center",
+              "border-2 border-dashed transition-colors",
+              "focus-visible:outline-none focus-visible:shadow-focus",
+              dragging
+                ? "border-brand bg-brand-soft"
+                : "border-line-strong bg-surface hover:border-brand hover:bg-brand-soft/40",
+            )}
           >
-            <span className="lc-drop-icon" aria-hidden="true">
-              <HiArrowUpTray />
+            <span
+              aria-hidden="true"
+              className="flex size-12 items-center justify-center rounded-full bg-brand-soft text-brand"
+            >
+              <HiOutlineArrowUpTray className="size-6" />
             </span>
-            <p className="lc-drop-title">Drop your label here, or click to browse</p>
-            <p className="lc-drop-hint">PDF, PNG, JPEG or WebP · up to 20 MB</p>
-          </div>
-
-          {error ? (
-            <p className="lc-error" role="alert">
-              <HiExclamationTriangle aria-hidden="true" />
-              {error}
+            <p className="text-[15px] font-semibold text-ink">
+              Drop your label here, or click to browse
             </p>
-          ) : null}
-        </div>
-      </div>
+            <p className="text-[12.5px] text-subtle">
+              PDF, PNG, JPEG or WebP · up to 20 MB
+            </p>
+          </div>
+        </Card>
+      </Page>
     );
   }
 
   /* ── Working view ─────────────────────────────────────────────────────── */
 
   return (
-    <div className="lc-page app-page">
+    <Page>
       {fileInput}
+      <Breadcrumbs
+        items={[
+          { label: "Legal" },
+          { label: "Label Checker", onClick: reset },
+          { label: fileLabel },
+        ]}
+      />
 
-      <div className="lc-topbar">
-        <div className="lc-file">
-          <span className="lc-file-name" title={fileLabel}>
-            {fileLabel}
-          </span>
-          <span className="lc-file-meta">
-            {file ? formatBytes(file.size) : null}
-            {report?.rule_count ? ` · ${report.rule_count} rules` : null}
-          </span>
-        </div>
+      <PageHeader
+        title={fileLabel}
+        description={
+          [
+            file ? formatBytes(file.size) : null,
+            report?.rule_count ? `${report.rule_count} rules` : null,
+          ]
+            .filter(Boolean)
+            .join(" · ") || undefined
+        }
+        badges={
+          status === "done" && report ? (
+            <Badge tone={summary.compliant ? "ok" : "bad"}>
+              {summary.compliant ? "Compliant" : `${summary.failed} failed`}
+            </Badge>
+          ) : null
+        }
+        actions={
+          <>
+            <Button variant="ghost" onClick={browse} disabled={isAnalysing}>
+              Replace
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => void analyse()}
+              disabled={isAnalysing}
+            >
+              {isAnalysing ? (
+                <>
+                  <span
+                    aria-hidden="true"
+                    className="size-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white"
+                  />
+                  Checking…
+                </>
+              ) : status === "done" ? (
+                <>
+                  <HiOutlineArrowPath aria-hidden="true" /> Check again
+                </>
+              ) : (
+                <>
+                  <HiOutlineShieldCheck aria-hidden="true" /> Check label
+                </>
+              )}
+            </Button>
+          </>
+        }
+      />
 
-        <div className="lc-actions">
-          <label className="lc-select-label" htmlFor="lc-item">
-            Compare nutrition against
-          </label>
-          <select
-            id="lc-item"
-            className="lc-select"
-            value={itemId}
-            disabled={isAnalysing || itemsLoading}
-            onChange={(event) => setItemId(event.target.value)}
-          >
-            <option value="">
-              {itemsLoading
-                ? "Loading items…"
-                : itemsError
-                  ? "Items unavailable"
-                  : "No item (skip nutrition check)"}
+      {/* The nutrition comparison is a SETTING for the check, not an action,
+          so it sits in the filter bar rather than among the buttons. */}
+      <FilterBar>
+        <FilterSelect
+          label="Compare nutrition against"
+          icon={HiOutlineBeaker}
+          fieldClassName="max-w-[340px] flex-none"
+          value={itemId}
+          disabled={isAnalysing || itemsLoading}
+          onChange={(event) => setItemId(event.target.value)}
+        >
+          <option value="">
+            {itemsLoading
+              ? "Loading items…"
+              : itemsError
+                ? "Items unavailable"
+                : "No item (skip nutrition check)"}
+          </option>
+          {items.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.item_name}
             </option>
-            {items.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.item_name}
-              </option>
-            ))}
-          </select>
+          ))}
+        </FilterSelect>
 
-          <button
-            type="button"
-            className="lc-btn lc-btn-ghost"
-            onClick={browse}
-            disabled={isAnalysing}
-          >
-            Replace
-          </button>
-          <button
-            type="button"
-            className="lc-btn lc-btn-primary"
-            onClick={() => void analyse()}
-            disabled={isAnalysing}
-          >
-            {isAnalysing ? (
-              <>
-                <span className="lc-spinner" aria-hidden="true" /> Checking…
-              </>
-            ) : status === "done" ? (
-              <>
-                <HiArrowPath aria-hidden="true" /> Check again
-              </>
-            ) : (
-              <>
-                <HiShieldCheck aria-hidden="true" /> Check label
-              </>
-            )}
-          </button>
-        </div>
-      </div>
+        {status === "done" && report ? (
+          <>
+            <FilterSpacer />
+            <FilterActions>
+              <Button variant="ghost" onClick={() => void copyReport()}>
+                <HiOutlineClipboardDocument aria-hidden="true" />
+                {copied ? "Copied" : "Copy report"}
+              </Button>
+              <Button variant="ghost" onClick={downloadReport}>
+                <HiOutlineArrowDownTray aria-hidden="true" /> Download
+              </Button>
+              <Button variant="ghost" onClick={reset}>
+                New label
+              </Button>
+            </FilterActions>
+          </>
+        ) : null}
+      </FilterBar>
 
       {error ? (
-        <p className="lc-error lc-error-bar" role="alert">
-          <HiExclamationTriangle aria-hidden="true" />
+        <Notice tone="bad" title="The check did not finish">
           {error}
-        </p>
+        </Notice>
       ) : null}
 
-      <div className="lc-split">
-        {/* The label. Sticky on wide screens so a finding and the artwork it
-            refers to are on screen together. */}
-        <section className="lc-pane lc-pane-image" aria-label="Uploaded label">
+      {/*
+        THE VIEWER, converted last and deliberately.
+
+        These two panes position highlight boxes over artwork from OCR
+        coordinates, so it was a geometry change rather than a restyle — a
+        percentage that lands one card-padding out is a WRONG answer, not an
+        ugly one. Three things are load-bearing and none of them is a colour:
+
+        · the split collapses to one column under 900px, and the image pane
+          stops being sticky when it does — stacked, a sticky pane sits on top
+          of the report it belongs beside;
+        · the panes are hand-built rather than `Card`, because `Card` bakes in
+          `card-hover shimmer-hover`: the lift would move the artwork under a
+          cursor aiming at a 12px box, and the shimmer would sweep a highlight
+          across the label itself;
+        · printing flattens the split and drops the pane chrome, because a
+          printed report is the artifact that leaves the building.
+      */}
+      <div className="grid grid-cols-1 items-start gap-2.5 min-[900px]:grid-cols-[minmax(280px,0.85fr)_minmax(360px,1.15fr)] print:grid-cols-1">
+        <section
+          aria-label="Uploaded label"
+          className={cn(
+            "rounded-xl border-[0.5px] border-line bg-card p-4",
+            // The label follows the reader down the checklist. `top` clears
+            // the app header; the max-height keeps a tall artwork from pushing
+            // its own scrollbar off the bottom of the viewport.
+            "max-h-[420px] overflow-auto",
+            "min-[900px]:sticky min-[900px]:top-3 min-[900px]:max-h-[calc(100svh-96px)]",
+            "print:static print:max-h-none print:overflow-visible print:border-0 print:p-0",
+          )}
+        >
           {imageSrc ? (
             <>
               {/* A legend, not decoration: the boxes are the page's main
                   claim, and a reviewer should not have to infer what the two
                   colours mean or why some declarations carry no box. */}
               {status === "done" && findings.length > 0 && (
-                <div className="lc-legend">
-                  <span className="lc-legend-key is-fail">
-                    <i aria-hidden="true" /> {summary.failed} failed
+                <div className="mb-2.5 flex flex-wrap items-center gap-3 text-[13px] text-body">
+                  <span className="inline-flex items-center gap-1.5">
+                    {/* The swatches are the literal overlay colours — see the
+                        note in LabelImage.tsx. A legend in a different red
+                        from the boxes it explains is not a legend. */}
+                    <i
+                      aria-hidden="true"
+                      className="size-[11px] rounded-[3px] border border-[#dc2626] bg-[rgba(220,38,38,0.14)]"
+                    />{" "}
+                    {summary.failed} failed
                   </span>
-                  <span className="lc-legend-key is-pass">
-                    <i aria-hidden="true" /> {locatedPasses} passed
+                  <span className="inline-flex items-center gap-1.5">
+                    <i
+                      aria-hidden="true"
+                      className="size-[11px] rounded-[3px] border border-[rgba(22,163,74,0.55)] bg-[rgba(22,163,74,0.07)]"
+                    />{" "}
+                    {locatedPasses} passed
                   </span>
-                  <label className="lc-legend-toggle">
+                  <label className="ml-auto inline-flex cursor-pointer select-none items-center gap-1.5 print:hidden">
                     <input
                       type="checkbox"
                       checked={showPasses}
                       onChange={(event) => setShowPasses(event.target.checked)}
+                      className="size-[13px] m-0 accent-brand"
                     />
                     Show passed
                   </label>
@@ -449,9 +549,9 @@ export default function LabelChecker() {
               />
             </>
           ) : (
-            <div className="lc-image-placeholder">
-              <HiInformationCircle aria-hidden="true" />
-              <p>
+            <div className="flex flex-col items-center gap-2 rounded-[9px] bg-surface px-4 py-10 text-center text-[14px] leading-relaxed text-body">
+              <HiOutlineInformationCircle aria-hidden="true" className="text-[18px]" />
+              <p className="m-0">
                 A PDF cannot be shown until it is rendered. Choose Check label
                 and page 1 appears here alongside the findings.
               </p>
@@ -460,27 +560,47 @@ export default function LabelChecker() {
         </section>
 
         {/* The report. */}
-        <section className="lc-pane lc-pane-report" aria-label="Compliance report">
+        <section
+          aria-label="Compliance report"
+          className="rounded-xl border-[0.5px] border-line bg-card p-4 print:border-0 print:p-0"
+        >
           {status === "analysing" ? (
-            <div className="lc-state" role="status" aria-live="polite">
-              <span className="lc-spinner lc-spinner-lg" aria-hidden="true" />
-              <p className="lc-state-text">{ANALYSING_STEPS[stepIndex]}</p>
+            <div
+              className="flex flex-col items-center gap-2 px-5 py-14 text-center"
+              role="status"
+              aria-live="polite"
+            >
+              <span
+                aria-hidden="true"
+                className="size-[30px] rounded-full border-[3px] border-line-strong border-t-brand motion-safe:animate-spin"
+              />
+              <p className="m-0 max-w-[340px] text-[14.5px] leading-relaxed text-body">
+                {ANALYSING_STEPS[stepIndex]}
+              </p>
             </div>
           ) : status === "done" && report ? (
             <>
-              <div className={`lc-verdict${summary.compliant ? " is-ok" : " is-bad"}`}>
-                {summary.compliant ? (
-                  <HiCheckCircle aria-hidden="true" />
-                ) : (
-                  <HiExclamationTriangle aria-hidden="true" />
+              <div
+                className={cn(
+                  "mb-2.5 flex items-start gap-2.5 rounded-[10px] border-[0.5px] p-3 text-[14.5px]",
+                  summary.compliant
+                    ? "border-ok-soft bg-ok-soft text-ok"
+                    : "border-danger-line bg-danger-soft text-[#b91c1c]",
+                  "[&>svg]:mt-px [&>svg]:size-[18px] [&>svg]:flex-none",
                 )}
-                <div>
-                  <strong>
+              >
+                {summary.compliant ? (
+                  <HiOutlineCheckCircle aria-hidden="true" />
+                ) : (
+                  <HiOutlineExclamationTriangle aria-hidden="true" />
+                )}
+                <div className="flex flex-col gap-0.5">
+                  <strong className="font-medium">
                     {summary.compliant
                       ? "Compliant — every rule passed"
                       : `${summary.failed} of ${summary.total} rules failed`}
                   </strong>
-                  <span>
+                  <span className="text-[13px] text-body">
                     {summary.passed} passed · {summary.failed} failed
                     {report.ocr_available === false
                       ? " · OCR unavailable, AI review only"
@@ -489,32 +609,26 @@ export default function LabelChecker() {
                 </div>
               </div>
 
-              <div className="lc-report-actions">
-                <button type="button" className="lc-btn lc-btn-ghost" onClick={() => void copyReport()}>
-                  <HiClipboardDocument aria-hidden="true" />
+              {/* Duplicated from the filter bar on purpose: on a long report
+                  the toolbar has scrolled away by the time you have read
+                  enough to want a copy. Hidden in print — a printed page with
+                  a "Download report" button on it is noise. */}
+              <div className="mb-3.5 flex flex-wrap gap-2 border-b-[0.5px] border-line pb-3.5 print:hidden">
+                <Button onClick={() => void copyReport()}>
+                  <HiOutlineClipboardDocument aria-hidden="true" />
                   {copied ? "Copied" : "Copy report"}
-                </button>
-                <button type="button" className="lc-btn lc-btn-ghost" onClick={downloadReport}>
-                  <HiArrowDownTray aria-hidden="true" /> Download report
-                </button>
-                <button type="button" className="lc-btn lc-btn-ghost" onClick={reset}>
-                  New label
-                </button>
+                </Button>
+                <Button onClick={downloadReport}>
+                  <HiOutlineArrowDownTray aria-hidden="true" /> Download report
+                </Button>
+                <Button onClick={reset}>New label</Button>
               </div>
 
-              <TabList className="lc-tabs" label="Report view">
-                <Tab
-                  selected={view === "report"}
-                  className={`lc-tab${view === "report" ? " is-active" : ""}`}
-                  onClick={() => setView("report")}
-                >
+              <TabList className="mb-3 print:hidden" label="Report view">
+                <Tab selected={view === "report"} onClick={() => setView("report")}>
                   Report
                 </Tab>
-                <Tab
-                  selected={view === "text"}
-                  className={`lc-tab${view === "text" ? " is-active" : ""}`}
-                  onClick={() => setView("text")}
-                >
+                <Tab selected={view === "text"} onClick={() => setView("text")}>
                   Plain text
                 </Tab>
               </TabList>
@@ -534,10 +648,10 @@ export default function LabelChecker() {
               )}
             </>
           ) : (
-            <div className="lc-state">
-              <HiShieldCheck className="lc-state-icon" aria-hidden="true" />
-              <h2 className="lc-state-title">Ready to check</h2>
-              <p className="lc-state-text">
+            <div className="flex flex-col items-center gap-2 px-5 py-14 text-center">
+              <HiOutlineShieldCheck className="size-[26px] text-subtle" aria-hidden="true" />
+              <h2 className="m-0 text-[17px] font-medium text-ink">Ready to check</h2>
+              <p className="m-0 max-w-[340px] text-[14.5px] leading-relaxed text-body">
                 Pick the item to compare nutrition against if you need that, then
                 choose Check label.
               </p>
@@ -545,6 +659,6 @@ export default function LabelChecker() {
           )}
         </section>
       </div>
-    </div>
+    </Page>
   );
 }

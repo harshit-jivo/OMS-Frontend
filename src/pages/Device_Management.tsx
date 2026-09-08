@@ -1,43 +1,3 @@
-import { useEffect, useMemo, useState } from "react";
-import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  Bar,
-  BarChart,
-  Cell,
-  Legend,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
-import {
-  deviceAdminService,
-  type CountRow,
-  type DeviceFilters,
-  type DeviceRow,
-  type MobilePlatform,
-  type PlatformAdoption,
-  type VersionPolicy,
-  type VersionPolicyStat,
-} from "../services/deviceAdminService";
-import { HiXMark } from "react-icons/hi2";
-import StatusBadge from "../components/StatusBadge";
-import relativeTime from "../utils/relativeTime";
-import "../styles/Device_Management.css";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-// The devices service exports a `Pagination` TYPE, so the component is
-// aliased rather than renaming a shared API type for one call site.
-import { Pagination as Pager } from "@/components/ui/pagination";
-
 /**
  * Device Management — the single System screen: live device activity and fleet
  * version analytics.
@@ -55,11 +15,99 @@ import { Pagination as Pager } from "@/components/ui/pagination";
  * ?status= filter can never disagree — and a skewed browser clock cannot change
  * what a badge says.
  */
+import { useMemo, useState } from "react";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  Bar,
+  BarChart,
+  Cell,
+  Legend,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+import {
+  HiOutlineArrowPath,
+  HiOutlineChevronUpDown,
+  HiOutlineDevicePhoneMobile,
+} from "react-icons/hi2";
+
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { Button } from "@/components/ui/button";
+import {
+  DetailFields,
+  DetailSection,
+} from "@/components/ui/detail";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  FilterActions,
+  FilterBar,
+  FilterCount,
+  FilterSearch,
+  FilterSelect,
+} from "@/components/ui/filter-bar";
+import { Field, Input } from "@/components/ui/form";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  EmptyState,
+  Notice,
+  Page,
+  PageHeader,
+  SectionHeading,
+  Stat,
+  StatRow,
+} from "@/components/ui/page";
+import { Badge } from "@/components/ui/badge";
+import { TableSkeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+// The devices service exports a `Pagination` TYPE, so the component is
+// aliased rather than renaming a shared API type for one call site.
+import { Pagination as Pager } from "@/components/ui/pagination";
+import { showToast } from "@/lib/toastStore";
+import {
+  deviceAdminService,
+  type CountRow,
+  type DeviceFilters,
+  type DeviceRow,
+  type MobilePlatform,
+  type PlatformAdoption,
+  type VersionPolicy,
+  type VersionPolicyStat,
+} from "../services/deviceAdminService";
+import StatusBadge from "../components/StatusBadge";
+import relativeTime from "../utils/relativeTime";
 
 // The app's established categorical chart palette (see Dashboard.tsx). Reused
 // rather than redefined so every chart in the product reads as one system.
 // Hues are assigned by fixed index and never cycled.
-const PALETTE = ["#0f766e", "#2563eb", "#f59e0b", "#dc2626", "#7c3aed", "#0891b2", "#4f46e5", "#ea580c"];
+const PALETTE = [
+  "#0f766e",
+  "#2563eb",
+  "#f59e0b",
+  "#dc2626",
+  "#7c3aed",
+  "#0891b2",
+  "#4f46e5",
+  "#ea580c",
+];
 const MAX_SLICES = 8; // a 9th category folds into "Other" — never a new hue
 
 // Activity status keeps the colours this page already uses for it: the table's
@@ -80,7 +128,7 @@ const EMPTY_FILTERS: DeviceFilters = {
 };
 
 const formatDateTime = (value?: string | null): string => {
-  if (!value) return "-";
+  if (!value) return "—";
   try {
     return new Date(value).toLocaleString(undefined, {
       day: "2-digit",
@@ -94,6 +142,8 @@ const formatDateTime = (value?: string | null): string => {
   }
 };
 
+const dash = (value: unknown) => (value === null || value === undefined || value === "" ? "—" : String(value));
+
 /** Collapse a long tail into "Other" so hues are never generated/cycled. */
 const topSlices = (rows: CountRow[], key: string) => {
   const named = (rows || []).map((row) => ({
@@ -106,64 +156,6 @@ const topSlices = (rows: CountRow[], key: string) => {
   head.push({ name: "Other", count: tail.reduce((sum, item) => sum + item.count, 0) });
   return head;
 };
-
-type CardTone = "warn" | "ok" | "online" | "idle" | "offline";
-
-/**
- * A summary tile. With `onClick` it becomes a filter toggle (the status tiles);
- * without one it is a plain read-out and is rendered as a div, so only the
- * genuinely interactive tiles are focusable.
- */
-function Card({
-  label,
-  value,
-  tone,
-  active,
-  onClick,
-}: {
-  label: string;
-  value: number | string;
-  tone?: CardTone;
-  active?: boolean;
-  onClick?: () => void;
-}) {
-  const className = `dm-card ${tone ? `dm-card-${tone}` : ""} ${
-    onClick ? "dm-card-btn" : ""
-  } ${active ? "dm-card-on" : ""}`;
-
-  const body = (
-    <>
-      <span className="dm-card-value">{value}</span>
-      <span className="dm-card-label">{label}</span>
-    </>
-  );
-
-  if (!onClick) return <div className={className}>{body}</div>;
-
-  return (
-    <button
-      type="button"
-      className={className}
-      onClick={onClick}
-      aria-pressed={!!active}
-      title={active ? `Showing ${label} only — click to clear` : `Show ${label} only`}
-    >
-      {body}
-    </button>
-  );
-}
-
-function ChartBox({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
-  return (
-    <div className="dm-chart">
-      <div className="dm-chart-head">
-        <h3>{title}</h3>
-        {subtitle && <p>{subtitle}</p>}
-      </div>
-      <div className="dm-chart-body">{children}</div>
-    </div>
-  );
-}
 
 /**
  * Outside slice label: "<name> <pct>%".
@@ -202,7 +194,7 @@ const renderSliceLabel = ({
       textAnchor={x > (cx ?? 0) ? "start" : "end"}
       dominantBaseline="central"
     >
-      {`${name} ${Math.round((percent ?? 0) * 100)}%`}
+      {name + " " + Math.round((percent ?? 0) * 100) + "%"}
     </text>
   );
 };
@@ -216,7 +208,7 @@ function DistributionPie({
   /** Fixed hue per slice. Defaults to the categorical order. */
   colors?: string[];
 }) {
-  if (!data.length) return <p className="dm-empty-sm">No data</p>;
+  if (!data.length) return <p className="m-0 py-8 text-center text-[12px] text-subtle">No data</p>;
   const total = data.reduce((sum, item) => sum + item.count, 0);
   return (
     <ResponsiveContainer width="100%" height={260}>
@@ -247,7 +239,7 @@ function DistributionPie({
         <Tooltip
           formatter={(value) => {
             const count = Number(value) || 0;
-            return total ? `${count} (${Math.round((count / total) * 100)}%)` : String(count);
+            return total ? count + " (" + Math.round((count / total) * 100) + "%)" : String(count);
           }}
         />
         <Legend iconType="circle" wrapperStyle={{ fontSize: "0.75rem" }} />
@@ -256,7 +248,13 @@ function DistributionPie({
   );
 }
 
-/** One sortable column header. Sorting is server-side (allow-listed fields). */
+/**
+ * One sortable column header. Sorting is server-side (allow-listed fields).
+ *
+ * The button carries the DESIGN_SYSTEM §1.1 reset because preflight is not
+ * imported — without it this was a grey 1997 toolbar button inside the header
+ * row.
+ */
 function SortHeader({
   label,
   field,
@@ -268,31 +266,41 @@ function SortHeader({
   ordering: string;
   onSort: (field: string) => void;
 }) {
-  const direction = ordering === field ? "asc" : ordering === `-${field}` ? "desc" : null;
+  const direction = ordering === field ? "asc" : ordering === "-" + field ? "desc" : null;
   return (
-    <th
-      className={`dm-th-sort ${direction ? "dm-th-active" : ""}`}
-      onClick={() => onSort(field)}
+    <TableHead
       aria-sort={direction === "asc" ? "ascending" : direction === "desc" ? "descending" : "none"}
-      title={`Sort by ${label}`}
+      className="p-0"
     >
-      <span className="dm-th-inner">
+      <button
+        type="button"
+        onClick={() => onSort(field)}
+        className={
+          "flex w-full cursor-pointer appearance-none items-center gap-1 border-0 bg-transparent px-3 py-2 text-left [font-family:inherit] text-inherit hover:text-ink " +
+          (direction ? "text-ink" : "")
+        }
+        title={"Sort by " + label}
+      >
         {label}
-        <span className="dm-sort-icon" aria-hidden="true">
-          {direction === "asc" ? "▲" : direction === "desc" ? "▼" : "↕"}
+        <span aria-hidden="true" className={direction ? "text-brand" : "text-subtle"}>
+          {direction === "asc" ? "▲" : direction === "desc" ? "▼" : <HiOutlineChevronUpDown />}
         </span>
-      </span>
-    </th>
+      </button>
+    </TableHead>
   );
 }
 
 /** Per-row Update Status pill: latest = green, old = red, unknown = neutral. */
 function UpdateBadge({ status }: { status: DeviceRow["update_status"] }) {
-  if (status === "latest") return <span className="dm-upd dm-upd-latest">Latest</span>;
-  if (status === "old") return <span className="dm-upd dm-upd-old">Old</span>;
+  if (status === "latest") return <Badge tone="ok">Latest</Badge>;
+  if (status === "old") return <Badge tone="bad">Old</Badge>;
   // "unknown" — no policy for this platform (or it is the web). A dash reads as
   // "not applicable" rather than implying the device is up to date or not.
-  return <span className="dm-upd dm-upd-unknown" title="No version policy for this platform">—</span>;
+  return (
+    <span className="text-subtle" title="No version policy for this platform">
+      —
+    </span>
+  );
 }
 
 const MOBILE_PLATFORMS: { key: MobilePlatform; label: string }[] = [
@@ -318,22 +326,28 @@ function PolicyForm({
   );
   const [storeUrl, setStoreUrl] = useState(initial?.store_url ?? "");
   const [saving, setSaving] = useState(false);
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [error, setError] = useState("");
 
-  // Re-sync when the parent reloads policies (e.g. after saving the other one).
-  useEffect(() => {
+  /*
+   * Re-seed when the parent reloads policies (e.g. after saving the other
+   * platform). Keyed on the policy's identity rather than run in an effect:
+   * an effect here was a `set-state-in-effect` on three fields at once, and it
+   * also landed a render late.
+   */
+  const [seededFrom, setSeededFrom] = useState(initial);
+  if (initial !== seededFrom) {
+    setSeededFrom(initial);
     setVersion(initial?.required_version ?? "");
     setBuild(initial?.required_build != null ? String(initial.required_build) : "");
     setStoreUrl(initial?.store_url ?? "");
-  }, [initial]);
+  }
+
+  const buildNum = Number(build);
+  const valid = Boolean(version.trim()) && Number.isInteger(buildNum) && buildNum >= 1;
 
   const save = async () => {
-    setMsg(null);
-    const buildNum = Number(build);
-    if (!version.trim() || !Number.isInteger(buildNum) || buildNum < 1) {
-      setMsg({ ok: false, text: "Enter a version and a whole build number (≥ 1)." });
-      return;
-    }
+    if (!valid) return;
+    setError("");
     setSaving(true);
     try {
       await deviceAdminService.saveVersionPolicy({
@@ -342,60 +356,78 @@ function PolicyForm({
         required_build: buildNum,
         store_url: storeUrl.trim(),
       });
-      setMsg({ ok: true, text: "Saved." });
+      showToast({
+        title: label + " policy saved",
+        message:
+          "Devices below build " + buildNum + " are now asked to update to " + version.trim() + ".",
+      });
       onSaved();
     } catch (err) {
       // Surface the server's field error (e.g. an invalid store URL) rather
       // than a generic failure.
-      const data = (err as { response?: { data?: { errors?: Record<string, string[]>; message?: string } } })
-        ?.response?.data;
+      const data = (
+        err as { response?: { data?: { errors?: Record<string, string[]>; message?: string } } }
+      )?.response?.data;
       const firstError = data?.errors ? Object.values(data.errors)[0]?.[0] : undefined;
-      setMsg({ ok: false, text: firstError || data?.message || "Could not save. Please try again." });
+      setError(firstError || data?.message || "Could not save. Please try again.");
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <div className="dm-policy">
-      <h3>{label}</h3>
-      <label className="dm-policy-field">
-        <span>Required Version</span>
-        <input
-          className="dm-input"
-          value={version}
-          onChange={(e) => setVersion(e.target.value)}
-          placeholder="e.g. 1.0.5"
-        />
-      </label>
-      <label className="dm-policy-field">
-        <span>Required Build</span>
-        <input
-          className="dm-input"
-          value={build}
-          onChange={(e) => setBuild(e.target.value)}
-          inputMode="numeric"
-          placeholder="e.g. 5"
-        />
-      </label>
-      <label className="dm-policy-field">
-        <span>Store URL</span>
-        <input
-          className="dm-input"
-          value={storeUrl}
-          onChange={(e) => setStoreUrl(e.target.value)}
-          placeholder="https://play.google.com/store/apps/…"
-        />
-      </label>
-      <div className="dm-policy-actions">
-        <button type="button" className="dm-btn dm-btn-primary" onClick={save} disabled={saving}>
-          {saving ? "Saving…" : "Save"}
-        </button>
-        {msg && (
-          <span className={msg.ok ? "dm-policy-ok" : "dm-policy-err"}>{msg.text}</span>
+    <Card>
+      <CardHeader>
+        <CardTitle>{label}</CardTitle>
+        {initial?.required_build != null && (
+          <Badge tone="info">Build {initial.required_build}</Badge>
         )}
+      </CardHeader>
+      <div className="space-y-3">
+        <Field label="Required version">
+          {(control) => (
+            <Input
+              {...control}
+              value={version}
+              onChange={(e) => setVersion(e.target.value)}
+              placeholder="e.g. 1.0.5"
+            />
+          )}
+        </Field>
+        <Field label="Required build" hint="A whole number, 1 or higher.">
+          {(control) => (
+            <Input
+              {...control}
+              value={build}
+              onChange={(e) => setBuild(e.target.value)}
+              inputMode="numeric"
+              placeholder="e.g. 5"
+            />
+          )}
+        </Field>
+        <Field label="Store URL" hint="Where an out-of-date device is sent to update.">
+          {(control) => (
+            <Input
+              {...control}
+              value={storeUrl}
+              onChange={(e) => setStoreUrl(e.target.value)}
+              placeholder="https://play.google.com/store/apps/…"
+            />
+          )}
+        </Field>
+        {error && <Notice tone="bad">{error}</Notice>}
+        <Button
+          variant="primary"
+          onClick={() => void save()}
+          disabled={saving || !valid}
+          // Validation disables the confirm and says why, rather than failing
+          // after the press — DESIGN_SYSTEM §6.
+          title={valid ? undefined : "Enter a version and a whole build number of 1 or more."}
+        >
+          {saving ? "Saving…" : "Save policy"}
+        </Button>
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -413,7 +445,7 @@ function AdoptionChart({
   const data = useMemo(
     () =>
       (adoption?.builds ?? []).map((b) => ({
-        name: `Build ${b.build_number}`,
+        name: "Build " + b.build_number,
         users: b.users,
         devices: b.devices,
         isRequired: adoption?.required_build === b.build_number,
@@ -426,20 +458,28 @@ function AdoptionChart({
   // platform has no required build set — old/latest is undefined without one.
   const hasPolicy = stat?.required_build != null;
   const footer = (
-    <div className="dm-adopt-foot">
+    <div className="mt-3 flex flex-wrap gap-4 border-t border-line pt-2.5 text-[12px] text-subtle">
       {hasPolicy ? (
         <>
-          <span className="dm-adopt-stat">
-            <span className="dm-adopt-dot dm-adopt-dot-latest" aria-hidden="true" />
-            <b>{stat?.latest ?? 0}</b> latest
+          <span className="inline-flex items-center gap-1.5">
+            <span
+              className="size-2 rounded-full"
+              style={{ background: ACTIVE_COLOR }}
+              aria-hidden="true"
+            />
+            <b className="font-semibold text-ink">{stat?.latest ?? 0}</b> latest
           </span>
-          <span className="dm-adopt-stat">
-            <span className="dm-adopt-dot dm-adopt-dot-old" aria-hidden="true" />
-            <b>{stat?.old ?? 0}</b> old
+          <span className="inline-flex items-center gap-1.5">
+            <span
+              className="size-2 rounded-full"
+              style={{ background: INACTIVE_COLOR }}
+              aria-hidden="true"
+            />
+            <b className="font-semibold text-ink">{stat?.old ?? 0}</b> old
           </span>
         </>
       ) : (
-        <span className="dm-adopt-nopolicy">No version policy set — set a required build to classify devices.</span>
+        <span>No version policy set — set a required build to classify devices.</span>
       )}
     </div>
   );
@@ -447,7 +487,7 @@ function AdoptionChart({
   if (!data.length) {
     return (
       <>
-        <p className="dm-empty-sm">No devices yet</p>
+        <p className="m-0 py-8 text-center text-[12px] text-subtle">No devices yet</p>
         {footer}
       </>
     );
@@ -458,15 +498,24 @@ function AdoptionChart({
       <ResponsiveContainer width="100%" height={Math.max(120, data.length * 34 + 20)}>
         <BarChart data={data} layout="vertical" margin={{ top: 4, right: 40, bottom: 4, left: 8 }}>
           <XAxis type="number" allowDecimals={false} hide />
-          <YAxis type="category" dataKey="name" width={78} tick={{ fontSize: 12, fill: "#475569" }} />
+          <YAxis
+            type="category"
+            dataKey="name"
+            width={78}
+            tick={{ fontSize: 12, fill: "#475569" }}
+          />
           <Tooltip
             formatter={(value, _n, item) => [
-              `${value} users · ${(item?.payload as { devices: number }).devices} devices`,
+              value + " users · " + (item?.payload as { devices: number }).devices + " devices",
               "",
             ]}
             labelStyle={{ fontWeight: 600 }}
           />
-          <Bar dataKey="users" radius={[0, 4, 4, 0]} label={{ position: "right", fontSize: 11, fill: "#475569" }}>
+          <Bar
+            dataKey="users"
+            radius={[0, 4, 4, 0]}
+            label={{ position: "right", fontSize: 11, fill: "#475569" }}
+          >
             {data.map((row) => (
               <Cell
                 key={row.name}
@@ -517,14 +566,7 @@ export default function Device_Management() {
    * false` keys off window FOCUS, so that tab now stops until it is focused.
    */
   const deviceQuery = useQuery({
-    queryKey: [
-      "devices",
-      filters.search,
-      filters.build_number,
-      filters.status,
-      ordering,
-      page,
-    ],
+    queryKey: ["devices", filters.search, filters.build_number, filters.status, ordering, page],
     queryFn: async () => {
       const [list, stats] = await Promise.all([
         deviceAdminService.listDevices({ ...filters, ordering, page, page_size: PAGE_SIZE }),
@@ -547,24 +589,13 @@ export default function Device_Management() {
   const lastRefreshed = deviceQuery.dataUpdatedAt ? new Date(deviceQuery.dataUpdatedAt) : null;
   // A failed background refresh must not blank a table someone is reading —
   // TanStack keeps the last good data, so this is only a message.
-  const error = deviceQuery.isError ? "Could not refresh devices. Showing the last known data." : "";
+  const failed = deviceQuery.isError;
 
   const load = () => queryClient.invalidateQueries({ queryKey: ["devices"] });
 
   // After saving a policy, refresh the policy forms AND the analytics/table so
   // the new latest/old counts and Update Status column reflect it at once.
   const onPolicySaved = () => void queryClient.invalidateQueries({ queryKey: ["devices"] });
-
-  // Escape closes the detail drawer — the expected way out of a panel, and the
-  // only one available without moving the mouse to the corner.
-  useEffect(() => {
-    if (!selected) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setSelected(null);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [selected]);
 
   /**
    * One search box covering name, version and build.
@@ -580,7 +611,7 @@ export default function Device_Management() {
     const term = searchInput.trim();
     const isBuild = /^\d+$/.test(term);
     setFilters((current) => ({
-      // Keep any status the tiles have set — searching within "Online" should
+      // Keep any status the filter has set — searching within "Online" should
       // stay within Online.
       status: current.status,
       search: isBuild ? "" : term,
@@ -589,31 +620,14 @@ export default function Device_Management() {
     setPage(1);
   };
 
-  /**
-   * Clear the box AND the applied search in one click.
-   *
-   * Sets the filters directly rather than calling runSearch(): the state update
-   * above is async, so runSearch() would still read the old term. The status
-   * filter is preserved, exactly as a normal search does.
-   */
-  const clearSearch = () => {
-    setSearchInput("");
-    setFilters((current) => ({ status: current.status, search: "", build_number: "" }));
-    setPage(1);
-  };
-
-  /** Status tiles are a toggle: clicking the active one clears the filter. */
-  const toggleStatus = (status: string) => {
-    setFilters((current) => ({
-      ...current,
-      status: current.status === status ? "" : status,
-    }));
+  const setStatus = (status: string) => {
+    setFilters((current) => ({ ...current, status }));
     setPage(1);
   };
 
   const toggleSort = (field: string) => {
     // First click on a new column sorts ascending; clicking the active one flips.
-    setOrdering((current) => (current === field ? `-${field}` : field));
+    setOrdering((current) => (current === field ? "-" + field : field));
     setPage(1);
   };
 
@@ -632,293 +646,383 @@ export default function Device_Management() {
   }, [cards]);
 
   return (
-    <div className="dm-page">
-      <header className="dm-head">
-        <div>
-          <h1>Device Management</h1>
-          <p>
-            Live device activity and version adoption.
-            {rules
-              ? ` Online = active within ${rules.online_within_minutes} min · Idle = within ${rules.idle_within_minutes} min · Inactive = quiet for ${rules.inactive_after_days}+ days.`
-              : ""}
-          </p>
-        </div>
-        <div className="dm-head-side">
-          <div className="dm-refresh">
-            <span className="dm-refresh-info">
+    <Page>
+      <Breadcrumbs items={[{ label: "Administration" }, { label: "Device Management" }]} />
+
+      <PageHeader
+        eyebrow="System"
+        title="Device Management"
+        description={
+          "Live device activity and version adoption." +
+          (rules
+            ? " Online = active within " +
+              rules.online_within_minutes +
+              " min · Idle = within " +
+              rules.idle_within_minutes +
+              " min · Inactive = quiet for " +
+              rules.inactive_after_days +
+              "+ days."
+            : "")
+        }
+        actions={
+          <>
+            <span className="self-center text-[12px] text-subtle">
               {refreshing
                 ? "Refreshing…"
                 : lastRefreshed
-                  ? `Updated ${relativeTime(lastRefreshed.toISOString())}`
+                  ? "Updated " + relativeTime(lastRefreshed.toISOString())
                   : ""}
             </span>
-            <button type="button" className="dm-btn" onClick={() => load()} disabled={refreshing}>
+            <Button variant="ghost" onClick={() => void load()} disabled={refreshing}>
+              <HiOutlineArrowPath
+                className={refreshing ? "animate-spin" : ""}
+                aria-hidden="true"
+              />
               Refresh
-            </button>
-          </div>
-        </div>
-      </header>
+            </Button>
+          </>
+        }
+      />
 
-      {/* ---- summary cards ----
-          Live status first (clicking one filters the table), then the fleet
-          totals. Both read the same analytics payload as the table below. */}
-      {cards && (
-        <section className="dm-cards">
-          <Card
-            label="Online"
-            value={statusCounts?.online ?? "–"}
-            tone="online"
-            active={filters.status === "online"}
-            onClick={() => toggleStatus("online")}
-          />
-          <Card
-            label="Idle"
-            value={statusCounts?.idle ?? "–"}
-            tone="idle"
-            active={filters.status === "idle"}
-            onClick={() => toggleStatus("idle")}
-          />
-          <Card
-            label="Offline"
-            value={statusCounts?.offline ?? "–"}
-            tone="offline"
-            active={filters.status === "offline"}
-            onClick={() => toggleStatus("offline")}
-          />
-          <Card label="Total Devices" value={cards.total_devices} />
-          {/* Active/Inactive/Mobile/Web and the four Latest/Old tiles were
-              removed: the latest-vs-old counts now live in the footer of each
-              Version Adoption chart, next to the bars they summarise. */}
-        </section>
+      {failed && (
+        <Notice tone="bad" title="Could not refresh">
+          Showing the last known data. The figures below may be out of date.
+        </Notice>
       )}
 
-      {/* ---- charts ---- */}
+      {cards && (
+        <StatRow>
+          <Stat label="Online" value={statusCounts?.online ?? "—"} tone="ok" />
+          <Stat label="Idle" value={statusCounts?.idle ?? "—"} tone="hold" />
+          <Stat label="Offline" value={statusCounts?.offline ?? "—"} tone="bad" />
+          <Stat label="Total devices" value={cards.total_devices} icon={HiOutlineDevicePhoneMobile} />
+        </StatRow>
+      )}
+
       {charts && (
-        <section className="dm-charts">
-          <ChartBox title="Active vs Inactive Users" subtitle="Share of all registered devices by activity status">
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Card>
+            <CardHeader className="mb-1 flex-col items-start gap-0">
+              <CardTitle>Active vs inactive users</CardTitle>
+              <p className="m-0 text-[12px] text-subtle">
+                Share of all registered devices by activity status
+              </p>
+            </CardHeader>
             <DistributionPie data={activityData} colors={[ACTIVE_COLOR, INACTIVE_COLOR]} />
-          </ChartBox>
+          </Card>
 
-          <ChartBox title="App Type Distribution">
+          <Card>
+            <CardHeader className="mb-1 flex-col items-start gap-0">
+              <CardTitle>App type distribution</CardTitle>
+            </CardHeader>
             <DistributionPie data={topSlices(charts.app_type_distribution, "app_type")} />
-          </ChartBox>
+          </Card>
 
-          <ChartBox title="Android Version Adoption" subtitle="Users per build — the required build is green">
+          <Card>
+            <CardHeader className="mb-1 flex-col items-start gap-0">
+              <CardTitle>Android version adoption</CardTitle>
+              <p className="m-0 text-[12px] text-subtle">
+                Users per build — the required build is green
+              </p>
+            </CardHeader>
             <AdoptionChart
               adoption={charts.version_adoption?.ANDROID}
               stat={cards?.version_policy?.ANDROID}
             />
-          </ChartBox>
+          </Card>
 
-          <ChartBox title="iOS Version Adoption" subtitle="Users per build — the required build is green">
+          <Card>
+            <CardHeader className="mb-1 flex-col items-start gap-0">
+              <CardTitle>iOS version adoption</CardTitle>
+              <p className="m-0 text-[12px] text-subtle">
+                Users per build — the required build is green
+              </p>
+            </CardHeader>
             <AdoptionChart
               adoption={charts.version_adoption?.IOS}
               stat={cards?.version_policy?.IOS}
             />
-          </ChartBox>
-        </section>
+          </Card>
+        </div>
       )}
 
       {/* ---- Mobile Version Policy ----
           Only Android and iOS are ever gated. Saving here sets the minimum
           acceptable build; out-of-date mobile clients get an update screen. The
           web is never validated and is deliberately absent. */}
-      <div className="dm-section-head">
-        <h2>Mobile Version Policy</h2>
-        <p>
-          The required build for each mobile platform. Devices below it are asked
-          to update. The web is never version-checked.
+      <section className="space-y-3">
+        <SectionHeading>Mobile version policy</SectionHeading>
+        <p className="m-0 text-[12px] text-subtle">
+          The required build for each mobile platform. Devices below it are asked to update. The
+          web is never version-checked.
         </p>
-      </div>
-      <section className="dm-policies">
-        {MOBILE_PLATFORMS.map(({ key, label }) => (
-          <PolicyForm
-            key={key}
-            platform={key}
-            label={label}
-            initial={policies?.[key] ?? null}
-            onSaved={onPolicySaved}
-          />
-        ))}
+        <div className="grid gap-4 sm:grid-cols-2">
+          {MOBILE_PLATFORMS.map(({ key, label }) => (
+            <PolicyForm
+              key={key}
+              platform={key}
+              label={label}
+              initial={policies?.[key] ?? null}
+              onSaved={onPolicySaved}
+            />
+          ))}
+        </div>
       </section>
 
-      {/* ---- devices (absorbed the former /Device_Activity page) ----
-          Headed explicitly so the search box states what it searches. */}
-      <div className="dm-section-head">
-        <h2>Devices</h2>
-        <p>Every registered device and its live status. Search by name, version or build.</p>
-      </div>
+      {/* ---- devices (absorbed the former /Device_Activity page) ---- */}
+      <section className="space-y-3">
+        <SectionHeading>Devices</SectionHeading>
 
-      <form
-        className="dm-filters"
-        onSubmit={(event) => {
-          event.preventDefault();
-          runSearch();
-        }}
-      >
-        {/* The clear button sits inside the field, so it reads as part of the
-            input rather than as a second action next to Search. */}
-        <div className="dm-search-wrap">
-          <input
-            className="dm-input dm-search"
-            placeholder="Search by name, version or build…"
+        <FilterBar>
+          <FilterSearch
             value={searchInput}
             onChange={(event) => setSearchInput(event.target.value)}
-            aria-label="Search devices by name, version or build"
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                runSearch();
+              }
+            }}
+            placeholder="Name, version or build…"
+            fieldClassName="min-w-[260px]"
           />
-          {searchInput && (
-            <button
-              type="button"
-              className="dm-search-clear"
-              onClick={clearSearch}
-              aria-label="Clear search"
-              title="Clear search"
-            >
-              <HiXMark />
-            </button>
-          )}
-        </div>
-        <button type="submit" className="dm-btn dm-btn-primary">Search</button>
-      </form>
-
-      {/* ---- table ---- */}
-      <div className="dm-toolbar">
-        <span className="dm-count">
-          {pagination ? `${pagination.total} device${pagination.total === 1 ? "" : "s"}` : "…"}
-          {/* Name the active status filter — the tile highlight is the only
-              other cue, and it is off-screen once the table is scrolled to. */}
-          {filters.status ? ` · ${filters.status}` : ""}
-        </span>
-      </div>
-
-      {error && <p className="dm-error">{error}</p>}
-
-      <div className="dm-table-wrap">
-        <Table density="compact">
-          <TableHeader>
-            <TableRow>
-              {/* Sortable columns are exactly the API's allow-listed ordering
-                  fields. Status is derived from last_active rather than stored,
-                  so it is not one of them — it stays a plain header rather than
-                  offering a sort that would silently do nothing. Relative sorts
-                  by last_active, the timestamp it renders. */}
-              <TableHead>Status</TableHead>
-              <SortHeader label="Name" field="user__name" ordering={ordering} onSort={toggleSort} />
-              <SortHeader label="App Type" field="app_type" ordering={ordering} onSort={toggleSort} />
-              <SortHeader label="Version" field="app_version" ordering={ordering} onSort={toggleSort} />
-              <SortHeader label="Build" field="build_number" ordering={ordering} onSort={toggleSort} />
-              {/* Derived from the version policy, server-side. Not sortable: it's
-                  computed, not a stored column the API can order by. */}
-              <TableHead>Update</TableHead>
-              <SortHeader label="Relative" field="last_active" ordering={ordering} onSort={toggleSort} />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {loading ? (
-              <TableRow><TableCell colSpan={7} className="dm-empty">Loading devices…</TableCell></TableRow>
-            ) : rows.length === 0 ? (
-              <TableRow><TableCell colSpan={7} className="dm-empty">No devices match this search</TableCell></TableRow>
-            ) : (
-              rows.map((row) => (
-                <TableRow key={row.id} onClick={() => setSelected(row)} className="dm-row" title="View device details">
-                  {/* The server-derived four-state status, matching what the
-                      Online/Idle/Offline tiles count — not the binary
-                      is_active registration flag, which would contradict them. */}
-                  <TableCell><StatusBadge status={row.status} /></TableCell>
-                  <TableCell>{row.user_name || "-"}</TableCell>
-                  <TableCell>{row.app_type}</TableCell>
-                  <TableCell>{row.app_version}</TableCell>
-                  <TableCell className="dm-num">{row.build_number}</TableCell>
-                  <TableCell><UpdateBadge status={row.update_status} /></TableCell>
-                  <TableCell className="dm-rel" title={formatDateTime(row.last_active)}>
-                    {relativeTime(row.last_active)}
-                  </TableCell>
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
-
-      {pagination && pagination.total_pages > 1 && (
-        <Pager
-          page={pagination.page}
-          totalPages={pagination.total_pages}
-          onPageChange={setPage}
-        />
-      )}
-
-      {/* ---- device detail (right-side drawer) ---- */}
-      {selected && (
-        <div className="dm-drawer-backdrop" onClick={() => setSelected(null)}>
-          <aside
-            className="dm-drawer"
-            onClick={(event) => event.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
-            aria-label="Device details"
+          {/*
+           * The status filter used to be hidden inside the KPI tiles — each was
+           * secretly a toggle button. The counts are still above; the FILTER is
+           * here, where the page's other filters are and where it can be found
+           * without discovering that a read-out is pressable.
+           */}
+          <FilterSelect
+            label="Status"
+            value={filters.status ?? ""}
+            onChange={(event) => setStatus(event.target.value)}
+            fieldClassName="max-w-[170px]"
           >
-            <div className="dm-drawer-head">
-              <div>
-                <h2>Device Details</h2>
-                {/* The same derived status the row's badge shows. */}
-                <StatusBadge status={selected.status} />
-              </div>
-              <button
-                type="button"
-                className="dm-icon-btn"
-                onClick={() => setSelected(null)}
-                aria-label="Close device details"
-                title="Close"
-              >
-                <HiXMark />
-              </button>
+            <option value="">All statuses</option>
+            <option value="online">Online</option>
+            <option value="idle">Idle</option>
+            <option value="offline">Offline</option>
+            <option value="inactive">Inactive</option>
+          </FilterSelect>
+          <FilterCount>
+            {pagination ? pagination.total + " device" + (pagination.total === 1 ? "" : "s") : "…"}
+          </FilterCount>
+          <FilterActions>
+            <Button onClick={runSearch}>Search</Button>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setSearchInput("");
+                setFilters(EMPTY_FILTERS);
+                setPage(1);
+              }}
+              disabled={
+                !searchInput && !filters.search && !filters.build_number && !filters.status
+              }
+            >
+              Clear
+            </Button>
+          </FilterActions>
+        </FilterBar>
+
+        <Card className="overflow-hidden p-0">
+          {loading ? (
+            <TableSkeleton columns={7} label="Loading devices" />
+          ) : rows.length === 0 ? (
+            <EmptyState
+              icon={HiOutlineDevicePhoneMobile}
+              title="No devices match this search"
+              hint="Clear the filters to see the whole fleet."
+            />
+          ) : (
+            <div className="overflow-x-auto">
+              <Table density="compact">
+                <TableHeader>
+                  <TableRow>
+                    {/* Sortable columns are exactly the API's allow-listed
+                        ordering fields. Status is derived from last_active
+                        rather than stored, so it is not one of them — it stays
+                        a plain header rather than offering a sort that would
+                        silently do nothing. Relative sorts by last_active, the
+                        timestamp it renders. */}
+                    <TableHead>Status</TableHead>
+                    <SortHeader
+                      label="Name"
+                      field="user__name"
+                      ordering={ordering}
+                      onSort={toggleSort}
+                    />
+                    <SortHeader
+                      label="App Type"
+                      field="app_type"
+                      ordering={ordering}
+                      onSort={toggleSort}
+                    />
+                    <SortHeader
+                      label="Version"
+                      field="app_version"
+                      ordering={ordering}
+                      onSort={toggleSort}
+                    />
+                    <SortHeader
+                      label="Build"
+                      field="build_number"
+                      ordering={ordering}
+                      onSort={toggleSort}
+                    />
+                    {/* Derived from the version policy, server-side. Not
+                        sortable: it's computed, not a stored column. */}
+                    <TableHead>Update</TableHead>
+                    <SortHeader
+                      label="Last seen"
+                      field="last_active"
+                      ordering={ordering}
+                      onSort={toggleSort}
+                    />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {rows.map((row) => (
+                    <TableRow
+                      key={row.id}
+                      onClick={() => setSelected(row)}
+                      className="cursor-pointer"
+                      title="View device details"
+                    >
+                      {/* The server-derived four-state status, matching what
+                          the Online/Idle/Offline tiles count — not the binary
+                          is_active registration flag, which would contradict
+                          them. */}
+                      <TableCell>
+                        <StatusBadge status={row.status} />
+                      </TableCell>
+                      <TableCell className="font-semibold text-ink">
+                        {dash(row.user_name)}
+                      </TableCell>
+                      <TableCell>{row.app_type}</TableCell>
+                      <TableCell>{row.app_version}</TableCell>
+                      <TableCell className="tabular-nums">{row.build_number}</TableCell>
+                      <TableCell>
+                        <UpdateBadge status={row.update_status} />
+                      </TableCell>
+                      <TableCell
+                        className="whitespace-nowrap text-subtle"
+                        title={formatDateTime(row.last_active)}
+                      >
+                        {relativeTime(row.last_active)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </div>
-            <div className="dm-drawer-body">
-              <h4>User</h4>
-              <dl className="dm-dl">
-                <dt>Name</dt><dd>{selected.user_name || "-"}</dd>
-                <dt>Username</dt><dd>{selected.username}</dd>
-                <dt>Email</dt><dd>{selected.email || "-"}</dd>
-                <dt>Role</dt><dd>{selected.role || "-"}</dd>
-              </dl>
-              <h4>Application</h4>
-              <dl className="dm-dl">
-                <dt>Platform</dt><dd>{selected.platform}</dd>
-                <dt>App Type</dt><dd>{selected.app_type}</dd>
-                <dt>Version</dt><dd>{selected.app_version}</dd>
-                <dt>Build Number</dt><dd>{selected.build_number}</dd>
-              </dl>
-              <h4>Device</h4>
-              <dl className="dm-dl">
-                <dt>Device ID</dt><dd className="dm-mono">{selected.device_id}</dd>
-                <dt>Device Name</dt><dd>{selected.device_name || "-"}</dd>
-                <dt>Manufacturer</dt><dd>{selected.manufacturer || "-"}</dd>
-                <dt>Model</dt><dd>{selected.device_model || "-"}</dd>
-                <dt>Browser</dt><dd>{selected.browser_name ? `${selected.browser_name} ${selected.browser_version}` : "-"}</dd>
-                <dt>Operating System</dt><dd>{selected.os_name ? `${selected.os_name} ${selected.os_version}` : "-"}</dd>
-                <dt>Language</dt><dd>{selected.language || "-"}</dd>
-                <dt>Timezone</dt><dd>{selected.timezone || "-"}</dd>
-              </dl>
-              <h4>Activity</h4>
-              <dl className="dm-dl">
-                <dt>First Login</dt><dd>{formatDateTime(selected.first_login)}</dd>
-                <dt>Last Login</dt><dd>{formatDateTime(selected.last_login)}</dd>
-                <dt>Last Active</dt><dd>{formatDateTime(selected.last_active)}</dd>
-                <dt>Last Seen</dt><dd>{relativeTime(selected.last_active)}</dd>
-                {/* "Status" here used to read is_active as Active/Inactive,
-                    which contradicted the row badge: is_active is the
-                    registration flag, not the live activity status. Both are
-                    now named for what they actually are. */}
-                <dt>Current Status</dt><dd><StatusBadge status={selected.status} /></dd>
-                <dt>Registration</dt><dd>{selected.is_active ? "Active" : "Deactivated"}</dd>
-                <dt>Created</dt><dd>{formatDateTime(selected.created_at)}</dd>
-                <dt>Updated</dt><dd>{formatDateTime(selected.updated_at)}</dd>
-              </dl>
-            </div>
-          </aside>
-        </div>
-      )}
-    </div>
+          )}
+
+          {pagination && pagination.total_pages > 1 && (
+            <Pager
+              page={pagination.page}
+              totalPages={pagination.total_pages}
+              onPageChange={setPage}
+              className="border-t border-line px-4 py-3"
+            />
+          )}
+        </Card>
+      </section>
+
+      {/* ---- device detail ----
+          Was a hand-rolled right-side drawer with its own backdrop, its own
+          stopPropagation and its own window keydown listener for Escape.
+          `ui/dialog` brings all three, plus the focus trap it never had. */}
+      <Dialog
+        open={Boolean(selected)}
+        onOpenChange={(next) => {
+          if (!next) setSelected(null);
+        }}
+      >
+        {selected && (
+          <DialogContent title="Device details" size="lg">
+            <DialogHeader>
+              <DialogTitle>
+                <span className="flex flex-wrap items-center gap-2">
+                  {dash(selected.user_name)}
+                  <StatusBadge status={selected.status} />
+                </span>
+              </DialogTitle>
+            </DialogHeader>
+            <DialogBody className="space-y-4">
+              <DetailSection title="User">
+                <DetailFields
+                  items={[
+                    ["Name", dash(selected.user_name)],
+                    ["Username", selected.username],
+                    ["Email", dash(selected.email)],
+                    ["Role", dash(selected.role)],
+                  ]}
+                />
+              </DetailSection>
+
+              <DetailSection title="Application">
+                <DetailFields
+                  items={[
+                    ["Platform", selected.platform],
+                    ["App type", selected.app_type],
+                    ["Version", selected.app_version],
+                    ["Build number", selected.build_number],
+                    ["Update status", <UpdateBadge key="u" status={selected.update_status} />],
+                  ]}
+                />
+              </DetailSection>
+
+              <DetailSection title="Device">
+                <DetailFields
+                  items={[
+                    [
+                      "Device ID",
+                      <span key="id" className="font-mono text-[12px]">
+                        {selected.device_id}
+                      </span>,
+                    ],
+                    ["Device name", dash(selected.device_name)],
+                    ["Manufacturer", dash(selected.manufacturer)],
+                    ["Model", dash(selected.device_model)],
+                    [
+                      "Browser",
+                      selected.browser_name
+                        ? selected.browser_name + " " + selected.browser_version
+                        : "—",
+                    ],
+                    [
+                      "Operating system",
+                      selected.os_name ? selected.os_name + " " + selected.os_version : "—",
+                    ],
+                    ["Language", dash(selected.language)],
+                    ["Timezone", dash(selected.timezone)],
+                  ]}
+                />
+              </DetailSection>
+
+              <DetailSection title="Activity">
+                <DetailFields
+                  items={[
+                    ["First login", formatDateTime(selected.first_login)],
+                    ["Last login", formatDateTime(selected.last_login)],
+                    ["Last active", formatDateTime(selected.last_active)],
+                    ["Last seen", relativeTime(selected.last_active)],
+                    /* "Status" here used to read is_active as
+                       Active/Inactive, which contradicted the row badge:
+                       is_active is the registration flag, not the live
+                       activity status. Both are now named for what they are. */
+                    ["Current status", <StatusBadge key="s" status={selected.status} />],
+                    ["Registration", selected.is_active ? "Active" : "Deactivated"],
+                    ["Created", formatDateTime(selected.created_at)],
+                    ["Updated", formatDateTime(selected.updated_at)],
+                  ]}
+                />
+              </DetailSection>
+            </DialogBody>
+          </DialogContent>
+        )}
+      </Dialog>
+    </Page>
   );
 }

@@ -1,67 +1,51 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  HiArrowUturnLeft,
-  HiArrowRight,
-  HiArrowDownTray,
-  HiClock,
-  HiBanknotes,
-  HiEye,
-  HiMapPin,
-  HiMagnifyingGlass,
+  HiOutlineArrowDownTray,
+  HiOutlineArrowPath,
+  HiOutlineArrowRight,
+  HiOutlineArrowUturnLeft,
+  HiOutlineBanknotes,
+  HiOutlineClock,
+  HiOutlineEye,
+  HiOutlineMapPin,
+  HiOutlinePauseCircle,
 } from "react-icons/hi2";
 import { saveAs } from "file-saver";
+
+import { Badge, type BadgeTone } from "@/components/ui/badge";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { Button } from "@/components/ui/button";
+import { FilterBar, FilterCheckbox, FilterCount, FilterSearch, FilterSpacer } from "@/components/ui/filter-bar";
+import { Input, Select } from "@/components/ui/form";
+import { Card, EmptyState, Notice, Page, PageHeader } from "@/components/ui/page";
+import { TableSkeleton } from "@/components/ui/skeleton";
+import { Tab, TabList } from "@/components/ui/tabs";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableEmpty,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { decisionTone, fmtDT, fmtDate, money } from "@/components/tracker/format";
+import InvoiceDetailDialog from "@/components/tracker/InvoiceDetailDialog";
+import InvoiceTimelineDialog from "@/components/tracker/InvoiceTimelineDialog";
+import PaymentDialog, { type PaymentSubmit } from "@/components/tracker/PaymentDialog";
+import { messageFrom } from "@/lib/apiError";
+import { showToast } from "@/lib/toastStore";
+import { cn } from "@/lib/utils";
 import trackerService from "../services/trackerService";
 import { exportDateStamp } from "../utils/excelExport";
 import type {
   QueueStage,
   Invoice,
   JsapStatus,
-  PaymentDetail,
   Stage,
   StageDecision,
 } from "../services/trackerService";
-import "../styles/Tracker.css";
-import { Badge, type BadgeTone } from "@/components/ui/badge";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  Dialog,
-  DialogBody,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Toast } from "@/components/ui/toast";
-import { messageFrom } from "@/lib/apiError";
-
-const money = (v: string | number) =>
-  Number(v || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const fmtDate = (v?: string | null) => {
-  if (!v) return "-";
-  const d = new Date(v);
-  return Number.isNaN(d.getTime()) ? v : d.toLocaleDateString("en-GB");
-};
-const fmtDT = (v?: string | null) => {
-  if (!v) return "-";
-  const d = new Date(v);
-  return Number.isNaN(d.getTime())
-    ? v
-    : d.toLocaleString("en-GB", {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-};
 
 // Omni search: match a query against every meaningful invoice field.
 const invMatch = (i: Invoice, q: string) =>
@@ -89,8 +73,16 @@ const invMatch = (i: Invoice, q: string) =>
  * why the invoice can't be linked to a JSAP decision, which is exactly what the
  * handler needs to see.
  */
+const CELL_NOTE = "mt-0.5 text-[11px] leading-snug text-subtle";
+
+/** The bulk-action strip above the table: selection, inputs, one verb. */
+const ACTION_BAR =
+  "flex flex-wrap items-center gap-3 rounded-card border border-line bg-card px-4 py-3 shadow-card";
+const SELECTED_COUNT = "text-[13px] font-semibold text-ink";
+const BAR_NOTE = "text-[12px] text-subtle";
+
 function JsapCell({ status }: { status?: JsapStatus | null }) {
-  if (status === undefined) return <span className="trk-sub">checking…</span>;
+  if (status === undefined) return <span className="text-[12px] text-subtle">checking…</span>;
   if (status === null) return <Badge outlined>unavailable</Badge>;
 
   if (!status.available) {
@@ -109,11 +101,7 @@ function JsapCell({ status }: { status?: JsapStatus | null }) {
                     ? "Rejected here"
                     : "Unavailable"}
         </Badge>
-        {status.detail && (
-          <div className="trk-sub trk-sub--xs">
-            {status.detail}
-          </div>
-        )}
+        {status.detail && <div className={CELL_NOTE}>{status.detail}</div>}
       </>
     );
   }
@@ -124,16 +112,8 @@ function JsapCell({ status }: { status?: JsapStatus | null }) {
       <Badge tone={tone} outlined>
         {status.label}
       </Badge>
-      {status.description && (
-        <div className="trk-sub trk-sub--xs trk-sub--wrap">
-          {status.description}
-        </div>
-      )}
-      {status.doc_entry != null && (
-        <div className="trk-sub trk-sub--xxs">
-          draft {status.doc_entry}
-        </div>
-      )}
+      {status.description && <div className={CELL_NOTE}>{status.description}</div>}
+      {status.doc_entry != null && <div className={CELL_NOTE}>draft {status.doc_entry}</div>}
     </>
   );
 }
@@ -185,17 +165,6 @@ const RETURN_STATUSES = new Set(["RETURN", "REJECTED"]);
 const statusLabel = (s: string) => s.replace(/_/g, " ");
 const REASON_STATUSES = new Set(["RETURN", "REJECTED", "HOLD", "DEBIT"]);
 
-// The payment form now captures only the three inputs; every amount, the open
-// balance and the status are derived (mirrored from the server maths).
-const EMPTY_PAYMENT: Partial<PaymentDetail> = {
-  discount_pct: "",
-  tds_pct: "",
-  paid_amount: "",
-  hold_added_back: false,
-};
-
-const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
-
 export default function Tracker_Queue() {
   const queryClient = useQueryClient();
   const [activeStage, setActiveStage] = useState<string>("");
@@ -204,7 +173,6 @@ export default function Tracker_Queue() {
   const [statusPick, setStatusPick] = useState("");
   const [holdType, setHoldType] = useState(""); // FULL | PARTIAL
   const [amount, setAmount] = useState(""); // hold / debit amount
-  const [toast, setToast] = useState("");
   const [subTab, setSubTab] = useState<
     | "current"
     | "returned"
@@ -233,16 +201,9 @@ export default function Tracker_Queue() {
   const [timelineInv, setTimelineInv] = useState<Invoice | null>(null);
   const [detailInv, setDetailInv] = useState<Invoice | null>(null);
   const [payInv, setPayInv] = useState<Invoice | null>(null);
-  const [payForm, setPayForm] = useState<Partial<PaymentDetail>>({ ...EMPTY_PAYMENT });
-  // Whether the user has manually typed a paid amount. Until then, the paid
-  // field auto-follows the net payable (so it always shows amount-after-deductions).
-  const [paidEdited, setPaidEdited] = useState(false);
   const [savingPay, setSavingPay] = useState(false);
 
-  const flash = (m: string) => {
-    setToast(m);
-    setTimeout(() => setToast(""), 2600);
-  };
+  const flash = (title: string, message = "") => showToast({ title, message });
 
   /*
    * Phase 3.1. The old version polled `load()` every 30 seconds from a
@@ -373,7 +334,7 @@ export default function Tracker_Queue() {
     try {
       setDecisionRows(await trackerService.getStageDecisions(activeStage, decision, showResolved));
     } catch {
-      flash("Failed to load the decision log");
+      flash("Could not load the decision log");
     } finally {
       setLoadingDecisions(false);
     }
@@ -428,13 +389,14 @@ export default function Tracker_Queue() {
       const res = await trackerService.syncJsap();
       const n = (res.advanced?.length ?? 0) + (res.returned?.length ?? 0);
       flash(
+        n === 0 ? "No change from JSAP" : "JSAP decisions applied",
         n === 0
-          ? `No change — ${res.waiting?.length ?? 0} still awaiting a JSAP decision`
-          : `${res.advanced?.length ?? 0} approved, ${res.returned?.length ?? 0} returned`,
+          ? `${res.waiting?.length ?? 0} still awaiting a JSAP decision.`
+          : `${res.advanced?.length ?? 0} approved, ${res.returned?.length ?? 0} returned.`,
       );
       void load();
     } catch (err) {
-      flash(messageFrom(err, "Could not reach JSAP"));
+      flash("Could not reach JSAP", messageFrom(err, "The request failed."));
     } finally {
       setSyncingJsap(false);
     }
@@ -464,8 +426,8 @@ export default function Tracker_Queue() {
     try {
       const res = await trackerService.bulkAction({ ids: [...selected], ...payload });
       flash(
-        `${res.processed_count} processed` +
-          (res.errors.length ? `, ${res.errors.length} failed: ${res.errors[0]?.error}` : ""),
+        `${res.processed_count} processed`,
+        res.errors.length ? `${res.errors.length} failed: ${res.errors[0]?.error}` : "",
       );
       setRemarks("");
       setStatusPick("");
@@ -475,7 +437,7 @@ export default function Tracker_Queue() {
       void load();
       if (isDecisionTab) loadDecisions(); // the log the action just changed
     } catch (err) {
-      flash(messageFrom(err, "Action failed"));
+      flash("Action failed", messageFrom(err, "The server refused the request."));
     }
   };
 
@@ -578,231 +540,175 @@ export default function Tracker_Queue() {
 
   const openPayment = async (inv: Invoice) => {
     try {
-      const full = await trackerService.getInvoice(inv.id);
-      setPayInv(full);
-      const blankZero = (v?: string) => (!v || Number(v) === 0 ? "" : v);
-      if (
-        full.payment &&
-        (Number(full.payment.paid_amount) > 0 ||
-          Number(full.payment.discount_pct) > 0 ||
-          Number(full.payment.tds_pct) > 0)
-      ) {
-        // Editing an existing (e.g. partial) payment — restore the inputs and
-        // treat the paid amount as user-set so it isn't auto-overwritten.
-        setPayForm({
-          discount_pct: blankZero(full.payment.discount_pct),
-          tds_pct: blankZero(full.payment.tds_pct),
-          hold_added_back: full.payment.hold_added_back,
-          paid_amount: full.payment.paid_amount,
-        });
-        setPaidEdited(true);
-      } else {
-        setPayForm({ ...EMPTY_PAYMENT });
-        setPaidEdited(false); // paid auto-follows net payable until edited
-      }
+      // The full record, because the payment form needs the existing payment,
+      // the debit and the hold — none of which the queue row carries.
+      setPayInv(await trackerService.getInvoice(inv.id));
     } catch {
-      flash("Failed to load payment");
+      flash("Could not load the payment");
     }
   };
 
-  const savePayment = async (calc: { netPayable: number; paid: number; isPaid: boolean }) => {
+  const savePayment = async (payment: PaymentSubmit) => {
     if (!payInv) return;
-    if (calc.paid > calc.netPayable + 0.005) {
-      flash("Paid amount cannot exceed the net payable");
-      return;
-    }
     setSavingPay(true);
     try {
       await trackerService.updatePayment(payInv.id, {
-        discount_pct: payForm.discount_pct || "0",
-        tds_pct: payForm.tds_pct || "0",
-        hold_added_back: !!payForm.hold_added_back,
-        paid_amount: String(round2(calc.paid)),
+        discount_pct: payment.discount_pct,
+        tds_pct: payment.tds_pct,
+        hold_added_back: payment.hold_added_back,
+        paid_amount: payment.paid_amount,
       });
-      flash(calc.isPaid ? "Payment complete — invoice closed" : "Partial payment saved");
+      flash(
+        payment.isPaid ? "Payment complete" : "Partial payment saved",
+        payment.isPaid ? `${payInv.invoice_number} is closed.` : "The balance stays open.",
+      );
       setPayInv(null);
       void load();
     } catch (err) {
-      flash(messageFrom(err, "Payment save failed"));
+      flash("Could not save the payment", messageFrom(err, "The server refused the request."));
     } finally {
       setSavingPay(false);
     }
   };
 
-  if (!lookups) return <div className="trk-page">Loading…</div>;
+  if (!lookups) {
+    return (
+      <Page>
+        <Card>
+          <TableSkeleton rows={6} columns={8} />
+        </Card>
+      </Page>
+    );
+  }
+
+  /** The sub-tabs this stage offers, in order, each with its count. */
+  const subTabs: { key: typeof subTab; label: string; count?: number }[] = [
+    { key: "current", label: "Current", count: currentRows.length },
+    { key: "returned", label: "Returned", count: returnedRows.length },
+    ...(isTerminal ? [{ key: "partial" as const, label: "Partial", count: partialRows.length }] : []),
+    ...(isSapApproval || isJsap || rejectedRows.length > 0
+      ? [{ key: "rejected" as const, label: "Awaiting Remarks", count: rejectedRows.length }]
+      : []),
+    ...(isEntry ? [{ key: "advanced" as const, label: "Advanced" }] : []),
+    // Decision log — what this desk decided. OK, DEBIT and partial HOLDs have
+    // already advanced, so these read the event history, not the live queue.
+    ...(decisionChoices.includes("HOLD") ? [{ key: "hold" as const, label: "Hold" }] : []),
+    ...(decisionChoices.includes("OK") ? [{ key: "ok" as const, label: "OK" }] : []),
+    ...(decisionChoices.includes("DEBIT") ? [{ key: "debit" as const, label: "Debit" }] : []),
+    ...(decisionChoices.includes("APPROVED") ? [{ key: "approved" as const, label: "Approved" }] : []),
+    ...(decisionChoices.includes("REJECTED")
+      ? [{ key: "rejected_log" as const, label: "Rejected" }]
+      : []),
+    ...(decisionChoices.includes("RETURN") ? [{ key: "sent_back" as const, label: "Sent Back" }] : []),
+  ];
+
+  /** What the decision-log banner explains, per tab. */
+  const logBlurb =
+    subTab === "hold"
+      ? "Every hold recorded at this desk. A full hold keeps the invoice here; a partial hold advances it with the amount withheld."
+      : subTab === "debit"
+        ? "Every debit recorded at this desk, with the amount debited. Debits accumulate on the invoice."
+        : subTab === "approved"
+          ? "Every invoice this desk approved and passed on."
+          : SENT_BACK_TABS.has(subTab)
+            ? `Invoices this desk ${subTab === "rejected_log" ? "rejected" : "sent back"}, with the reason. Once one comes back to this desk it is no longer outstanding and drops off this list.`
+            : "Every invoice this desk passed as OK.";
+
+  const decisionColumns = 10 + (canReleaseHolds ? 1 : 0) + (AMOUNT_TABS.has(subTab) ? 1 : 0);
+  const queueColumns =
+    8 +
+    (readOnly ? 0 : 1) +
+    (subTab === "returned" ? 2 : 0) +
+    (isJsap && subTab !== "advanced" ? 1 : 0);
 
   return (
-    <div className="trk-page">
-      <div className="trk-header">
-        <div>
-          <h1>My Stage Queue</h1>
-          <div className="trk-sub">Invoices waiting at your desk. Act in one click, in bulk.</div>
-        </div>
-        <div className="trk-search">
-          <HiMagnifyingGlass className="trk-search-icon" />
-          <input
-            className="trk-search-input"
-            placeholder="Search invoice no., party, GSTIN, category…"
-            aria-label="Search invoice no., party, GSTIN, category"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-      </div>
+    <Page>
+      <Breadcrumbs items={[{ label: "Tracker" }, { label: "My Stage Queue" }]} />
+
+      <PageHeader
+        title="My Stage Queue"
+        description="Invoices waiting at your desk. Act in one click, in bulk."
+      />
 
       {stagesInQueue.length === 0 ? (
-        <div className="trk-card">
-          <div className="trk-empty">Nothing pending at your desk. 🎉</div>
-        </div>
+        <Card>
+          <EmptyState
+            title="Nothing pending at your desk"
+            hint="Invoices appear here when they reach a stage you handle."
+          />
+        </Card>
       ) : (
         <>
-          <div className="trk-tabs">
+          <TabList label="Your stages">
             {stagesInQueue.map((s) => (
-              <button
+              <Tab
                 key={s.code}
-                className={"trk-tab" + (s.code === activeStage ? " active" : "")}
+                selected={s.code === activeStage}
                 onClick={() => setActiveStage(s.code)}
               >
                 {s.name}
-                <span className="trk-tab-count">{s.count}</span>
-              </button>
+                <Badge tone={s.code === activeStage ? "info" : "neutral"}>{s.count}</Badge>
+              </Tab>
             ))}
-          </div>
+          </TabList>
 
-          {/* Sub-tabs: Current / Returned (all stages) + Advanced (entry only) */}
-          <div className="trk-tabs trk-tabs--sub">
-            <button
-              className={"trk-tab" + (subTab === "current" ? " active" : "")}
-              onClick={() => setSubTab("current")}
-            >
-              Current<span className="trk-tab-count">{currentRows.length}</span>
-            </button>
-            <button
-              className={"trk-tab" + (subTab === "returned" ? " active" : "")}
-              onClick={() => setSubTab("returned")}
-            >
-              Returned<span className="trk-tab-count">{returnedRows.length}</span>
-            </button>
-            {isTerminal && (
-              <button
-                className={"trk-tab" + (subTab === "partial" ? " active" : "")}
-                onClick={() => setSubTab("partial")}
+          <TabList label="Queue views" className="flex-wrap">
+            {subTabs.map((t) => (
+              <Tab
+                key={t.key}
+                variant="subtle"
+                selected={subTab === t.key}
+                onClick={() => setSubTab(t.key)}
               >
-                Partial<span className="trk-tab-count">{partialRows.length}</span>
-              </button>
-            )}
-            {/* Live: rejected here but the reason is still owed. Distinct from
-                the Rejected *log* below, which is what was actually sent back. */}
-            {(isSapApproval || isJsap || rejectedRows.length > 0) && (
-              <button
-                className={"trk-tab" + (subTab === "rejected" ? " active" : "")}
-                onClick={() => setSubTab("rejected")}
-              >
-                Awaiting Remarks<span className="trk-tab-count">{rejectedRows.length}</span>
-              </button>
-            )}
-            {isEntry && (
-              <button
-                className={"trk-tab" + (subTab === "advanced" ? " active" : "")}
-                onClick={() => setSubTab("advanced")}
-              >
-                Advanced
-                {subTab === "advanced" && (
-                  <span className="trk-tab-count">{advancedRows.length}</span>
-                )}
-              </button>
-            )}
-            {/* Decision log — what this desk decided. OK, DEBIT and partial
-                HOLDs have already advanced, so these read the event history
-                rather than the live queue. */}
-            {decisionChoices.includes("HOLD") && (
-              <button
-                className={"trk-tab" + (subTab === "hold" ? " active" : "")}
-                onClick={() => setSubTab("hold")}
-              >
-                Hold{subTab === "hold" && <span className="trk-tab-count">{decRows.length}</span>}
-              </button>
-            )}
-            {decisionChoices.includes("OK") && (
-              <button
-                className={"trk-tab" + (subTab === "ok" ? " active" : "")}
-                onClick={() => setSubTab("ok")}
-              >
-                OK{subTab === "ok" && <span className="trk-tab-count">{decRows.length}</span>}
-              </button>
-            )}
-            {decisionChoices.includes("DEBIT") && (
-              <button
-                className={"trk-tab" + (subTab === "debit" ? " active" : "")}
-                onClick={() => setSubTab("debit")}
-              >
-                Debit{subTab === "debit" && <span className="trk-tab-count">{decRows.length}</span>}
-              </button>
-            )}
-            {/* Verdict logs: what this desk approved, and what it sent back
-                and has not seen since. */}
-            {decisionChoices.includes("APPROVED") && (
-              <button
-                className={"trk-tab" + (subTab === "approved" ? " active" : "")}
-                onClick={() => setSubTab("approved")}
-              >
-                Approved
-                {subTab === "approved" && <span className="trk-tab-count">{decRows.length}</span>}
-              </button>
-            )}
-            {decisionChoices.includes("REJECTED") && (
-              <button
-                className={"trk-tab" + (subTab === "rejected_log" ? " active" : "")}
-                onClick={() => setSubTab("rejected_log")}
-              >
-                Rejected
-                {subTab === "rejected_log" && (
-                  <span className="trk-tab-count">{decRows.length}</span>
-                )}
-              </button>
-            )}
-            {decisionChoices.includes("RETURN") && (
-              <button
-                className={"trk-tab" + (subTab === "sent_back" ? " active" : "")}
-                onClick={() => setSubTab("sent_back")}
-              >
-                Sent Back
-                {subTab === "sent_back" && <span className="trk-tab-count">{decRows.length}</span>}
-              </button>
-            )}
-            {/* Exports exactly what this tab shows, search filter included. */}
-            <button
-              className="trk-btn trk-btn-success trk-btn--push"
-              onClick={onExport}
-              disabled={exporting || !exportIds.length}
-              title={`Export the ${tabLabel} tab in the invoice-register layout`}
-            >
-              <HiArrowDownTray /> {exporting ? "Exporting…" : "Export Excel"}
-              {exportIds.length > 0 && <span className="trk-tab-count">{exportIds.length}</span>}
-            </button>
-          </div>
+                {t.label}
+                {t.count !== undefined ? (
+                  <Badge tone={subTab === t.key ? "info" : "neutral"}>{t.count}</Badge>
+                ) : subTab === t.key ? (
+                  <Badge tone="info">{isDecisionTab ? decRows.length : advancedRows.length}</Badge>
+                ) : null}
+              </Tab>
+            ))}
+          </TabList>
 
-          {/* Rejected tab: supply the reason now to send these back to the previous stage */}
+          <FilterBar>
+            <FilterSearch
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Invoice no., party, GSTIN, category…"
+              fieldClassName="min-w-[280px]"
+            />
+            {SENT_BACK_TABS.has(subTab) && (
+              <FilterCheckbox
+                label="Also show ones that came back"
+                checked={showResolved}
+                onChange={(e) => setShowResolved(e.target.checked)}
+              />
+            )}
+            <FilterSpacer />
+            <FilterCount>
+              {exportIds.length} in {tabLabel}
+            </FilterCount>
+            <Button onClick={() => void onExport()} disabled={exporting || !exportIds.length}>
+              <HiOutlineArrowDownTray aria-hidden="true" />{" "}
+              {exporting ? "Exporting…" : "Export Excel"}
+            </Button>
+          </FilterBar>
+
+          {/* Rejected tab: supply the reason now to send these back. */}
           {subTab === "rejected" && (
-            <div
-              className="trk-actionbar trk-actionbar--reject"
-            >
-              <span className="trk-count">{selected.size} selected</span>
-              <input
-                className="trk-remarks"
+            <div className={ACTION_BAR}>
+              <span className={SELECTED_COUNT}>{selected.size} selected</span>
+              <Input
+                className="min-w-[240px] flex-1"
                 placeholder="Rejection remarks (required to return)"
                 aria-label="Rejection remarks (required to return)"
                 value={remarks}
                 onChange={(e) => setRemarks(e.target.value)}
               />
-              <button
-                className="trk-btn trk-btn-warn"
-                onClick={onReturnRejected}
-                disabled={selected.size === 0}
-              >
-                <HiArrowUturnLeft /> Return with remarks
-              </button>
-              <span className="trk-sub trk-sub--xs">
+              <Button variant="danger" onClick={onReturnRejected} disabled={selected.size === 0}>
+                <HiOutlineArrowUturnLeft aria-hidden="true" /> Return with remarks
+              </Button>
+              <span className={BAR_NOTE}>
                 Rejected without a reason — add remarks to send back to the previous stage.
               </span>
             </div>
@@ -812,31 +718,28 @@ export default function Tracker_Queue() {
               still works, so a handler can also approve/reject by hand — for an
               invoice JSAP never received, or to override what it says. */}
           {!readOnly && subTab !== "rejected" && isJsap && (
-            <div
-              className="trk-actionbar trk-actionbar--jsap"
-            >
-              <button
-                className="trk-btn trk-btn-primary"
-                onClick={onSyncJsap}
-                disabled={syncingJsap}
-              >
-                {syncingJsap ? "Checking JSAP…" : "↻ Refresh from JSAP"}
-              </button>
-              <span className="trk-sub trk-sub--xs">
-                Approved in JSAP → advances automatically. Rejected → goes back to SAP Approval with
-                JSAP's reason. Nothing is sent to JSAP from here — use the controls below to decide
-                manually instead.
+            <div className={ACTION_BAR}>
+              <Button variant="primary" onClick={() => void onSyncJsap()} disabled={syncingJsap}>
+                <HiOutlineArrowPath aria-hidden="true" />{" "}
+                {syncingJsap ? "Checking JSAP…" : "Refresh from JSAP"}
+              </Button>
+              <span className={BAR_NOTE}>
+                Approved in JSAP advances automatically; rejected goes back to SAP Approval with
+                JSAP&rsquo;s reason. Nothing is sent to JSAP from here — decide manually below
+                instead.
               </span>
             </div>
           )}
 
-          {/* Action bar (adapts to the active stage's rules) — hidden in read-only history + rejected tab */}
+          {/* Action bar (adapts to the active stage's rules) — hidden in the
+              read-only history and rejected tabs. */}
           {!readOnly && subTab !== "rejected" && stageCfg && !stageCfg.is_terminal && (
-            <div className="trk-actionbar">
-              <span className="trk-count">{selected.size} selected</span>
+            <div className={ACTION_BAR}>
+              <span className={SELECTED_COUNT}>{selected.size} selected</span>
               {stageCfg.requires_status ? (
                 <>
-                  <select
+                  <Select
+                    className="w-44"
                     value={statusPick}
                     aria-label="Status"
                     onChange={(e) => {
@@ -846,33 +749,37 @@ export default function Tracker_Queue() {
                     }}
                   >
                     <option value="">Status…</option>
-                    {stageCfg.status_choices.map((s) => (
-                      <option key={s} value={s}>
-                        {statusLabel(s)}
+                    {stageCfg.status_choices.map((st) => (
+                      <option key={st} value={st}>
+                        {statusLabel(st)}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                   {statusPick === "HOLD" && (
-                    <select value={holdType} aria-label="Hold type" onChange={(e) => setHoldType(e.target.value)}>
+                    <Select
+                      className="w-56"
+                      value={holdType}
+                      aria-label="Hold type"
+                      onChange={(e) => setHoldType(e.target.value)}
+                    >
                       <option value="">Hold type…</option>
                       <option value="FULL">Full hold (stays here)</option>
                       <option value="PARTIAL">Partial hold (advances)</option>
-                    </select>
+                    </Select>
                   )}
-                  {(statusPick === "DEBIT" ||
-                    (statusPick === "HOLD" && holdType === "PARTIAL")) && (
-                    <input
+                  {(statusPick === "DEBIT" || (statusPick === "HOLD" && holdType === "PARTIAL")) && (
+                    <Input
                       type="number"
                       step="0.01"
-                      className="trk-amount-input"
+                      className="w-40"
                       placeholder={statusPick === "DEBIT" ? "Debit amount" : "Hold amount"}
                       aria-label={statusPick === "DEBIT" ? "Debit amount" : "Hold amount"}
                       value={amount}
                       onChange={(e) => setAmount(e.target.value)}
                     />
                   )}
-                  <input
-                    className="trk-remarks"
+                  <Input
+                    className="min-w-[220px] flex-1"
                     placeholder={
                       statusPick === "REJECTED"
                         ? "Remarks (optional — blank parks it in Rejected)"
@@ -884,268 +791,221 @@ export default function Tracker_Queue() {
                     value={remarks}
                     onChange={(e) => setRemarks(e.target.value)}
                   />
-                  <button
-                    className="trk-btn trk-btn-primary"
-                    onClick={onApplyStatus}
-                    disabled={selected.size === 0}
-                  >
+                  <Button variant="primary" onClick={onApplyStatus} disabled={selected.size === 0}>
                     {statusPick === "REJECTED" ? (
                       <>
-                        <HiArrowUturnLeft /> {remarks.trim() ? "Reject & return" : "Reject"}
+                        <HiOutlineArrowUturnLeft aria-hidden="true" />{" "}
+                        {remarks.trim() ? "Reject & return" : "Reject"}
                       </>
                     ) : RETURN_STATUSES.has(statusPick) ? (
                       <>
-                        <HiArrowUturnLeft /> Return
+                        <HiOutlineArrowUturnLeft aria-hidden="true" /> Return
                       </>
                     ) : statusPick === "HOLD" && holdType === "FULL" ? (
-                      <>⏸ Hold</>
+                      <>
+                        <HiOutlinePauseCircle aria-hidden="true" /> Hold
+                      </>
                     ) : (
                       <>
-                        <HiArrowRight /> Apply
+                        <HiOutlineArrowRight aria-hidden="true" /> Apply
                       </>
                     )}
-                  </button>
+                  </Button>
                   {statusPick === "HOLD" && holdType === "PARTIAL" && (
-                    <span className="trk-sub trk-sub--xs">
-                      Amount required (except RM-PM)
-                    </span>
+                    <span className={BAR_NOTE}>Amount required (except RM-PM).</span>
                   )}
                 </>
               ) : (
                 <>
-                  <input
-                    className="trk-remarks"
+                  <Input
+                    className="min-w-[220px] flex-1"
                     placeholder="Remarks (optional for advance)"
                     aria-label="Remarks (optional for advance)"
                     value={remarks}
                     onChange={(e) => setRemarks(e.target.value)}
                   />
-                  <button
-                    className="trk-btn trk-btn-success"
-                    onClick={onAdvance}
-                    disabled={selected.size === 0}
-                  >
-                    <HiArrowRight /> Advance
-                  </button>
+                  <Button variant="primary" onClick={onAdvance} disabled={selected.size === 0}>
+                    <HiOutlineArrowRight aria-hidden="true" /> Advance
+                  </Button>
                   {stageCfg.can_return && (
-                    <button
-                      className="trk-btn trk-btn-warn"
-                      onClick={onReturn}
-                      disabled={selected.size === 0}
-                    >
-                      <HiArrowUturnLeft /> Return
-                    </button>
+                    <Button variant="danger" onClick={onReturn} disabled={selected.size === 0}>
+                      <HiOutlineArrowUturnLeft aria-hidden="true" /> Return
+                    </Button>
                   )}
                 </>
               )}
             </div>
           )}
+
           {!readOnly && stageCfg?.is_terminal && (
-            <div className="trk-actionbar">
-              <HiBanknotes /> Capture payment per invoice using the <b>Payment</b> button.
-            </div>
+            <Notice tone="info">
+              Capture payment per invoice using the <strong>Payment</strong> button on each row.
+            </Notice>
           )}
+
           {subTab === "returned" && returnedRows.length > 0 && (
-            <div
-              className="trk-actionbar trk-actionbar--warn"
-            >
-              <HiArrowUturnLeft color="#b45309" /> These invoices were <b>sent back to your desk</b>{" "}
-              for rework — see the reason in each row.
-            </div>
+            <Notice tone="hold">
+              These invoices were <strong>sent back to your desk</strong> for rework — the reason is
+              in each row.
+            </Notice>
           )}
 
           {/* Decision-log banner: these tabs are history, not a worklist. */}
           {isDecisionTab && (
-            <div className="trk-actionbar trk-actionbar--log">
-              <span className="trk-sub trk-sub--xs">
-                {subTab === "hold"
-                  ? "Every hold recorded at this desk. A full hold keeps the invoice here; a partial hold advances it with the amount withheld."
-                  : subTab === "debit"
-                    ? "Every debit recorded at this desk, with the amount debited. Debits accumulate on the invoice."
-                    : subTab === "approved"
-                      ? "Every invoice this desk approved and passed on."
-                      : SENT_BACK_TABS.has(subTab)
-                        ? `Invoices this desk ${subTab === "rejected_log" ? "rejected" : "sent back"}, with the reason. Once one comes back to this desk it is no longer outstanding and drops off this list.`
-                        : "Every invoice this desk passed as OK."}{" "}
-                Read-only log — the invoice may have moved on since.
-              </span>
-              {subTab === "hold" && heldHere.length > 0 && (
-                <span className="trk-sub trk-sub--xs trk-sub--warn">
+            <Notice tone="info">
+              {logBlurb} Read-only log — the invoice may have moved on since.
+              {subTab === "hold" && heldHere.length > 0 ? (
+                <strong className="ml-1 font-semibold text-hold">
                   {heldHere.length} still held here — tick them below to release.
-                </span>
-              )}
-              {SENT_BACK_TABS.has(subTab) && (
-                <label className="trk-checkbox-inline">
-                  <input
-                    type="checkbox"
-                    checked={showResolved}
-                    onChange={(e) => setShowResolved(e.target.checked)}
-                  />
-                  Also show ones that came back
-                </label>
-              )}
-            </div>
+                </strong>
+              ) : null}
+            </Notice>
           )}
 
           {/* Hold tab: release a full hold — it is still parked at this desk,
               so it can be dispositioned straight from the log. */}
           {canReleaseHolds && (
-            <div
-              className="trk-actionbar trk-actionbar--warn"
-            >
-              <span className="trk-count">{selected.size} selected</span>
-              <input
-                className="trk-remarks"
+            <div className={ACTION_BAR}>
+              <span className={SELECTED_COUNT}>{selected.size} selected</span>
+              <Input
+                className="min-w-[220px] flex-1"
                 placeholder="Remarks (optional)"
+                aria-label="Remarks (optional)"
                 value={remarks}
                 onChange={(e) => setRemarks(e.target.value)}
               />
-              <button
-                className="trk-btn trk-btn-success"
-                onClick={() => onReleaseHold("OK")}
-                disabled={!selected.size}
-              >
-                <HiArrowRight /> Release as OK
+              <Button variant="primary" onClick={() => onReleaseHold("OK")} disabled={!selected.size}>
+                <HiOutlineArrowRight aria-hidden="true" /> Release as OK
                 {stageCfg && !stageCfg.is_terminal && " → next stage"}
-              </button>
-              <span className="trk-sub trk-sub--xs">
-                Clears the hold and advances the invoice — same as dispositioning it from the
-                Current tab.
+              </Button>
+              <span className={BAR_NOTE}>
+                Clears the hold and advances the invoice — the same as dispositioning it from
+                Current.
               </span>
             </div>
           )}
 
-          {/* Table */}
-          <div className="trk-card">
-            <div className="trk-table-wrap">
+          <Card className="overflow-hidden p-0" role="tabpanel">
+            <div className="overflow-x-auto">
               {isDecisionTab ? (
-                <Table density="compact">
-                  <TableHeader>
-                    <TableRow>
-                      {canReleaseHolds && (
-                        <TableHead>
-                          <input
-                            type="checkbox"
-                            checked={allHeldSelected}
-                            aria-label="Select all held invoices"
-                            onChange={(e) =>
-                              setSelected(
-                                e.target.checked
-                                  ? new Set(heldHere.map((d) => d.invoice_id))
-                                  : new Set(),
-                              )
-                            }
-                          />
-                        </TableHead>
-                      )}
-                      <TableHead>Invoice No.</TableHead>
-                      <TableHead>Party</TableHead>
-                      <TableHead>Inv. Date</TableHead>
-                      <TableHead>Value</TableHead>
-                      <TableHead>Decision</TableHead>
-                      {AMOUNT_TABS.has(subTab) && <TableHead>Amount</TableHead>}
-                      <TableHead>Remarks</TableHead>
-                      <TableHead>By</TableHead>
-                      <TableHead>Decided</TableHead>
-                      <TableHead>Now At</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {decRows.map((d) => (
-                      <TableRow key={d.event_id}>
-                        {canReleaseHolds && (
-                          <TableCell>
-                            {d.is_still_here && d.hold_type === "FULL" && (
-                              <input
-                                type="checkbox"
-                                checked={selected.has(d.invoice_id)}
-                                aria-label={`Select invoice ${d.invoice_number}`}
-                                onChange={() => toggle(d.invoice_id)}
-                              />
-                            )}
-                          </TableCell>
-                        )}
-                        <TableCell>{d.invoice_number}</TableCell>
-                        <TableCell>{d.party_name}</TableCell>
-                        <TableCell>{fmtDate(d.invoice_date)}</TableCell>
-                        <TableCell>₹{money(d.net_invoice_value ?? d.invoice_value)}</TableCell>
-                        <TableCell>
-                          <Badge
-                            outlined
-                            tone={
-                              d.decision === "OK" || d.decision === "APPROVED"
-                                ? "ok"
-                                : d.decision === "DEBIT" || d.decision === "REJECTED"
-                                  ? "bad"
-                                  : "hold"
-                            }
-                          >
-                            {d.decision}
-                            {d.hold_type ? ` · ${d.hold_type}` : ""}
-                          </Badge>
-                          {d.awaiting_remarks && (
-                            <div className="trk-sub trk-sub--xs">
-                              reason still owed
-                            </div>
-                          )}
-                          {d.came_back && SENT_BACK_TABS.has(subTab) && (
-                            <div className="trk-sub trk-sub--xs trk-sub--ok">
-                              came back since
-                            </div>
-                          )}
-                        </TableCell>
-                        {AMOUNT_TABS.has(subTab) && (
-                          <TableCell>
-                            {d.amount ? `₹${money(d.amount)}` : "—"}
-                            {d.decision === "HOLD" && d.hold_type === "FULL" && (
-                              <div className="trk-sub trk-sub--xs">
-                                full value
-                              </div>
-                            )}
-                          </TableCell>
-                        )}
-                        <TableCell className="trk-cell-wrap">
-                          {d.remarks || "—"}
-                        </TableCell>
-                        <TableCell>{d.acted_by_name || "—"}</TableCell>
-                        <TableCell>{fmtDT(d.decided_at)}</TableCell>
-                        <TableCell>
-                          <Badge outlined tone={d.is_still_here ? "hold" : "info"}>
-                            {d.invoice_status === "COMPLETED" ? "Completed" : d.current_stage_name}
-                          </Badge>
-                          {d.is_still_here && (
-                            <div className="trk-sub trk-sub--xs">
-                              still here
-                            </div>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    {decRows.length === 0 && (
+                loadingDecisions && decRows.length === 0 ? (
+                  <TableSkeleton rows={5} columns={decisionColumns} />
+                ) : (
+                  <Table density="compact">
+                    <TableHeader>
                       <TableRow>
-                        <TableCell colSpan={11}>
-                          <div className="trk-empty">
-                            {loadingDecisions
-                              ? "Loading…"
-                              : SENT_BACK_TABS.has(subTab)
-                                ? showResolved
-                                  ? "This desk has not sent anything back."
-                                  : "Nothing outstanding — anything sent back has since come back here."
-                                : `No ${DECISION_TABS[subTab].toLowerCase()} decisions recorded at this stage.`}
-                          </div>
-                        </TableCell>
+                        {canReleaseHolds && (
+                          <TableHead className="w-10">
+                            <input
+                              type="checkbox"
+                              className="size-4 cursor-pointer accent-brand"
+                              checked={allHeldSelected}
+                              aria-label="Select all held invoices"
+                              onChange={(e) =>
+                                setSelected(
+                                  e.target.checked
+                                    ? new Set(heldHere.map((d) => d.invoice_id))
+                                    : new Set(),
+                                )
+                              }
+                            />
+                          </TableHead>
+                        )}
+                        <TableHead>Invoice No.</TableHead>
+                        <TableHead>Party</TableHead>
+                        <TableHead>Inv. date</TableHead>
+                        <TableHead className="text-right">Value</TableHead>
+                        <TableHead>Decision</TableHead>
+                        {AMOUNT_TABS.has(subTab) && <TableHead className="text-right">Amount</TableHead>}
+                        <TableHead>Remarks</TableHead>
+                        <TableHead>By</TableHead>
+                        <TableHead>Decided</TableHead>
+                        <TableHead>Now at</TableHead>
                       </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
+                    </TableHeader>
+                    <TableBody>
+                      {decRows.length === 0 ? (
+                        <TableEmpty colSpan={decisionColumns}>
+                          {SENT_BACK_TABS.has(subTab)
+                            ? showResolved
+                              ? "This desk has not sent anything back."
+                              : "Nothing outstanding — anything sent back has since come back here."
+                            : `No ${DECISION_TABS[subTab].toLowerCase()} decisions recorded at this stage.`}
+                        </TableEmpty>
+                      ) : (
+                        decRows.map((d) => (
+                          <TableRow key={d.event_id}>
+                            {canReleaseHolds && (
+                              <TableCell>
+                                {d.is_still_here && d.hold_type === "FULL" && (
+                                  <input
+                                    type="checkbox"
+                                    className="size-4 cursor-pointer accent-brand"
+                                    checked={selected.has(d.invoice_id)}
+                                    aria-label={`Select invoice ${d.invoice_number}`}
+                                    onChange={() => toggle(d.invoice_id)}
+                                  />
+                                )}
+                              </TableCell>
+                            )}
+                            <TableCell className="whitespace-nowrap font-medium text-ink">
+                              {d.invoice_number}
+                            </TableCell>
+                            <TableCell>{d.party_name}</TableCell>
+                            <TableCell className="whitespace-nowrap">
+                              {fmtDate(d.invoice_date)}
+                            </TableCell>
+                            <TableCell className="whitespace-nowrap text-right tabular-nums">
+                              ₹{money(d.net_invoice_value ?? d.invoice_value)}
+                            </TableCell>
+                            <TableCell>
+                              <Badge outlined tone={decisionTone(d.decision)}>
+                                {d.decision}
+                                {d.hold_type ? ` · ${d.hold_type}` : ""}
+                              </Badge>
+                              {d.awaiting_remarks && (
+                                <div className={CELL_NOTE}>reason still owed</div>
+                              )}
+                              {d.came_back && SENT_BACK_TABS.has(subTab) && (
+                                <div className={cn(CELL_NOTE, "text-ok")}>came back since</div>
+                              )}
+                            </TableCell>
+                            {AMOUNT_TABS.has(subTab) && (
+                              <TableCell className="whitespace-nowrap text-right tabular-nums">
+                                {d.amount ? `₹${money(d.amount)}` : "—"}
+                                {d.decision === "HOLD" && d.hold_type === "FULL" && (
+                                  <div className={CELL_NOTE}>full value</div>
+                                )}
+                              </TableCell>
+                            )}
+                            <TableCell className="max-w-[240px] whitespace-normal">
+                              {d.remarks || "—"}
+                            </TableCell>
+                            <TableCell>{d.acted_by_name || "—"}</TableCell>
+                            <TableCell className="whitespace-nowrap">{fmtDT(d.decided_at)}</TableCell>
+                            <TableCell>
+                              <Badge outlined tone={d.is_still_here ? "hold" : "info"}>
+                                {d.invoice_status === "COMPLETED"
+                                  ? "Completed"
+                                  : d.current_stage_name}
+                              </Badge>
+                              {d.is_still_here && <div className={CELL_NOTE}>still here</div>}
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                )
               ) : (
                 <Table density="compact">
                   <TableHeader>
                     <TableRow>
                       {!readOnly && (
-                        <TableHead>
+                        <TableHead className="w-10">
                           <input
                             type="checkbox"
+                            className="size-4 cursor-pointer accent-brand"
                             checked={allSelected}
                             aria-label="Select all invoices"
                             onChange={(e) =>
@@ -1158,574 +1018,179 @@ export default function Tracker_Queue() {
                       )}
                       <TableHead>Invoice No.</TableHead>
                       <TableHead>Party</TableHead>
-                      <TableHead>Inv. Date</TableHead>
-                      <TableHead>Value</TableHead>
+                      <TableHead>Inv. date</TableHead>
+                      <TableHead className="text-right">Value</TableHead>
                       <TableHead>Category</TableHead>
-                      <TableHead>Unit / Branch</TableHead>
+                      <TableHead>Unit / branch</TableHead>
                       {subTab === "returned" && (
                         <>
-                          <TableHead>Sent Back By</TableHead>
+                          <TableHead>Sent back by</TableHead>
                           <TableHead>Reason</TableHead>
                         </>
                       )}
-                      {isJsap && subTab !== "advanced" && <TableHead>JSAP Status</TableHead>}
+                      {isJsap && subTab !== "advanced" && <TableHead>JSAP status</TableHead>}
                       {subTab === "advanced" ? (
                         <>
-                          <TableHead>Now At</TableHead>
-                          <TableHead>Advanced On</TableHead>
+                          <TableHead>Now at</TableHead>
+                          <TableHead>Advanced on</TableHead>
                         </>
                       ) : (
                         <>
-                          <TableHead>Days Here</TableHead>
+                          <TableHead>Days here</TableHead>
                           <TableHead>Entered</TableHead>
                         </>
                       )}
-                      <TableHead></TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {rows.map((inv) => (
-                      <TableRow
-                        key={inv.id}
-                        className={inv.is_overdue && !readOnly ? "trk-row-overdue" : ""}
-                      >
-                        {!readOnly && (
-                          <TableCell>
-                            <input
-                              type="checkbox"
-                              checked={selected.has(inv.id)}
-                              aria-label={`Select invoice ${inv.invoice_number}`}
-                              onChange={() => toggle(inv.id)}
-                            />
+                    {rows.length === 0 ? (
+                      <TableEmpty colSpan={queueColumns}>
+                        {subTab === "returned"
+                          ? "No returned invoices at this stage."
+                          : subTab === "advanced"
+                            ? "Nothing advanced from here yet."
+                            : subTab === "rejected"
+                              ? "No rejected invoices awaiting remarks."
+                              : subTab === "partial"
+                                ? "No partially-paid invoices."
+                                : "No invoices at this stage."}
+                      </TableEmpty>
+                    ) : (
+                      rows.map((inv) => (
+                        <TableRow key={inv.id}>
+                          {!readOnly && (
+                            <TableCell>
+                              <input
+                                type="checkbox"
+                                className="size-4 cursor-pointer accent-brand"
+                                checked={selected.has(inv.id)}
+                                aria-label={`Select invoice ${inv.invoice_number}`}
+                                onChange={() => toggle(inv.id)}
+                              />
+                            </TableCell>
+                          )}
+                          <TableCell className="whitespace-nowrap font-medium text-ink">
+                            {inv.invoice_number}
                           </TableCell>
-                        )}
-                        <TableCell>{inv.invoice_number}</TableCell>
-                        <TableCell>{inv.party_name}</TableCell>
-                        <TableCell>{fmtDate(inv.invoice_date)}</TableCell>
-                        <TableCell>
-                          ₹{money(inv.net_invoice_value ?? inv.invoice_value)}
-                          {Number(inv.debit_amount) > 0 && (
-                            <div className="trk-sub trk-sub--xs trk-sub--warn">
-                              −₹{money(inv.debit_amount)} debit
-                            </div>
-                          )}
-                          {inv.is_partially_paid && (
-                            <div className="trk-sub trk-sub--xs trk-sub--warn">
-                              bal ₹{money(inv.open_balance || 0)}
-                            </div>
-                          )}
-                        </TableCell>
-                        <TableCell>{inv.category_name}</TableCell>
-                        <TableCell>
-                          {inv.unit_name} / {inv.branch_name}
-                        </TableCell>
-                        {subTab === "returned" && (
-                          <>
-                            <TableCell>
-                              {inv.returned_from || "-"}
-                              {inv.returned_by ? ` (${inv.returned_by})` : ""}
-                            </TableCell>
-                            <TableCell className="trk-cell-wrap">
-                              <Badge tone="hold" outlined className="trk-badge-wrap">
-                                {inv.return_reason || "—"}
-                              </Badge>
-                            </TableCell>
-                          </>
-                        )}
-                        {isJsap && subTab !== "advanced" && (
-                          <TableCell className="trk-cell-wrap trk-cell-wrap--240">
-                            <JsapCell status={jsapStatuses[inv.id]} />
+                          <TableCell>{inv.party_name}</TableCell>
+                          <TableCell className="whitespace-nowrap">
+                            {fmtDate(inv.invoice_date)}
                           </TableCell>
-                        )}
-                        {subTab === "advanced" ? (
-                          <>
-                            <TableCell>
-                              <Badge tone="info" outlined>
-                                {inv.current_stage_name}
-                              </Badge>
-                            </TableCell>
-                            <TableCell>{fmtDT(inv.advanced_at)}</TableCell>
-                          </>
-                        ) : (
-                          <>
-                            <TableCell>
-                              <Badge outlined tone={inv.is_overdue ? "bad" : "neutral"}>
-                                <HiClock className="trk-icon-clock" /> {inv.days_at_stage}
-                                {inv.is_overdue ? " ⚠" : ""}
-                              </Badge>
-                            </TableCell>
-                            <TableCell>{fmtDT(inv.current_stage_entered_at)}</TableCell>
-                          </>
-                        )}
-                        <TableCell className="trk-cell-actions">
-                          <button
-                            className="trk-btn trk-btn-ghost trk-btn--sm"
-                            title="View full invoice details"
-                            onClick={() => setDetailInv(inv)}
-                          >
-                            <HiEye /> View
-                          </button>
-                          <button
-                            className="trk-btn trk-btn-ghost trk-btn--sm"
-                            title="View stage-by-stage timeline"
-                            onClick={() => openTimeline(inv.id)}
-                          >
-                            <HiMapPin /> Track
-                          </button>
-                          {!readOnly && stageCfg?.is_terminal && (
-                            <button
-                              className="trk-btn trk-btn-primary trk-btn--sm"
-                              onClick={() => openPayment(inv)}
-                            >
-                              <HiBanknotes /> Payment
-                            </button>
+                          <TableCell className="whitespace-nowrap text-right tabular-nums">
+                            ₹{money(inv.net_invoice_value ?? inv.invoice_value)}
+                            {Number(inv.debit_amount) > 0 && (
+                              <div className={cn(CELL_NOTE, "text-hold")}>
+                                −₹{money(inv.debit_amount)} debit
+                              </div>
+                            )}
+                            {inv.is_partially_paid && (
+                              <div className={cn(CELL_NOTE, "text-hold")}>
+                                bal ₹{money(inv.open_balance || 0)}
+                              </div>
+                            )}
+                          </TableCell>
+                          <TableCell>{inv.category_name}</TableCell>
+                          <TableCell className="whitespace-nowrap">
+                            {inv.unit_name} / {inv.branch_name}
+                          </TableCell>
+                          {subTab === "returned" && (
+                            <>
+                              <TableCell className="whitespace-nowrap">
+                                {inv.returned_from || "—"}
+                                {inv.returned_by ? ` (${inv.returned_by})` : ""}
+                              </TableCell>
+                              <TableCell className="max-w-[240px] whitespace-normal">
+                                <Badge tone="hold" outlined className="whitespace-normal">
+                                  {inv.return_reason || "—"}
+                                </Badge>
+                              </TableCell>
+                            </>
                           )}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    {rows.length === 0 && (
-                      <TableRow>
-                        <TableCell colSpan={12}>
-                          <div className="trk-empty">
-                            {subTab === "returned"
-                              ? "No returned invoices at this stage."
-                              : subTab === "advanced"
-                                ? "Nothing advanced from here yet."
-                                : subTab === "rejected"
-                                  ? "No rejected invoices awaiting remarks."
-                                  : subTab === "partial"
-                                    ? "No partially-paid invoices."
-                                    : "No invoices at this stage."}
-                          </div>
-                        </TableCell>
-                      </TableRow>
+                          {isJsap && subTab !== "advanced" && (
+                            <TableCell className="max-w-[240px] whitespace-normal">
+                              <JsapCell status={jsapStatuses[inv.id]} />
+                            </TableCell>
+                          )}
+                          {subTab === "advanced" ? (
+                            <>
+                              <TableCell>
+                                <Badge tone="info" outlined>
+                                  {inv.current_stage_name}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="whitespace-nowrap">
+                                {fmtDT(inv.advanced_at)}
+                              </TableCell>
+                            </>
+                          ) : (
+                            <>
+                              <TableCell>
+                                <Badge outlined tone={inv.is_overdue ? "bad" : "neutral"}>
+                                  <HiOutlineClock aria-hidden="true" className="size-3" />{" "}
+                                  {inv.days_at_stage}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="whitespace-nowrap">
+                                {fmtDT(inv.current_stage_entered_at)}
+                              </TableCell>
+                            </>
+                          )}
+                          <TableCell className="w-px">
+                            <div className="flex flex-nowrap justify-end gap-1">
+                              <Button
+                                variant="ghost"
+                                size="xs"
+                                title="View full invoice details"
+                                onClick={() => setDetailInv(inv)}
+                              >
+                                <HiOutlineEye aria-hidden="true" /> View
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="xs"
+                                title="View the stage-by-stage timeline"
+                                onClick={() => void openTimeline(inv.id)}
+                              >
+                                <HiOutlineMapPin aria-hidden="true" /> Track
+                              </Button>
+                              {!readOnly && stageCfg?.is_terminal && (
+                                <Button size="xs" onClick={() => void openPayment(inv)}>
+                                  <HiOutlineBanknotes aria-hidden="true" /> Payment
+                                </Button>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))
                     )}
                   </TableBody>
                 </Table>
               )}
             </div>
-          </div>
+          </Card>
         </>
       )}
 
-      {/* Invoice details modal (read-only, any stage user can view) */}
-      <Dialog
-        open={Boolean(detailInv)}
-        onOpenChange={(next) => {
-          if (!next) (() => setDetailInv(null))();
+      <InvoiceDetailDialog
+        invoice={detailInv}
+        onClose={() => setDetailInv(null)}
+        onTimeline={(inv) => {
+          setDetailInv(null);
+          void openTimeline(inv.id);
         }}
-      >
-        {detailInv && (
-          <DialogContent title="Invoice detail">
-            <DialogHeader>
-              <DialogTitle>
-                {detailInv.invoice_number} — {detailInv.party_name}
-              </DialogTitle>
-              <Badge tone="info" outlined className="trk-badge-gap">
-                {detailInv.current_stage_name}
-              </Badge>
-            </DialogHeader>
-            <DialogBody>
-              {[
-                {
-                  title: "Invoice",
-                  fields: [
-                    ["Invoice No.", detailInv.invoice_number],
-                    ["Invoice Date", fmtDate(detailInv.invoice_date)],
-                    ["Mode", detailInv.mode_name],
-                    ["Status", detailInv.status === "COMPLETED" ? "Completed" : "In Progress"],
-                  ],
-                },
-                {
-                  title: "Party",
-                  fields: [
-                    ["Party Name", detailInv.party_name],
-                    ["Party Code", detailInv.party_code || "-"],
-                    ["Party GSTIN", detailInv.party_gstin || "-"],
-                  ],
-                },
-                {
-                  title: "Amounts",
-                  fields: [
-                    ["Taxable Value", `₹${money(detailInv.taxable_value)}`],
-                    ["GST Type", detailInv.gst_type_name],
-                    ["GST Rate", detailInv.gst_rate_label],
-                    ["GST Amount", `₹${money(detailInv.gst_amount)}`],
-                    ["Additional Charge", detailInv.additional_charge_type_display || "-"],
-                    ["Additional Amount", `₹${money(detailInv.additional_charge_amount)}`],
-                    ["Invoice Value", `₹${money(detailInv.invoice_value)}`],
-                    ...(Number(detailInv.debit_amount) > 0
-                      ? [
-                          ["Debit (Pre-Audit)", `− ₹${money(detailInv.debit_amount)}`] as [
-                            string,
-                            string,
-                          ],
-                          ["Net Value", `₹${money(detailInv.net_invoice_value)}`] as [
-                            string,
-                            string,
-                          ],
-                        ]
-                      : []),
-                    ...(Number(detailInv.hold_amount) > 0
-                      ? [["Hold Amount", `₹${money(detailInv.hold_amount)}`] as [string, string]]
-                      : []),
-                  ],
-                },
-                {
-                  title: "Classification",
-                  fields: [
-                    ["Category", detailInv.category_name],
-                    ["Unit", detailInv.unit_name],
-                    ["Branch", detailInv.branch_name],
-                  ],
-                },
-                {
-                  title: "Workflow",
-                  fields: [
-                    ["Current Stage", detailInv.current_stage_name],
-                    ["Entered Stage", fmtDT(detailInv.current_stage_entered_at)],
-                    [
-                      "Days at Stage",
-                      detailInv.days_at_stage + (detailInv.is_overdue ? " ⚠ overdue" : ""),
-                    ],
-                    ...(detailInv.arrived_via_return
-                      ? [
-                          [
-                            "Returned By",
-                            `${detailInv.returned_from || "-"}${detailInv.returned_by ? ` (${detailInv.returned_by})` : ""}`,
-                          ] as [string, string],
-                          ["Return Reason", detailInv.return_reason || "-"] as [string, string],
-                        ]
-                      : []),
-                  ],
-                },
-                {
-                  title: "Audit",
-                  fields: [
-                    ["Created By", detailInv.created_by_name],
-                    ["Created On", fmtDT(detailInv.created_at)],
-                    ["Last Updated", fmtDT(detailInv.updated_at)],
-                  ],
-                },
-              ].map((section) => (
-                <div key={section.title} className="trk-detail-section">
-                  <div className="trk-sub trk-sub--group">
-                    {section.title}
-                  </div>
-                  <div className="trk-form-grid">
-                    {section.fields.map(([label, value]) => (
-                      <div className="trk-field" key={label}>
-                        <label>{label}</label>
-                        <div className="trk-detail-value">
-                          {value ?? "-"}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </DialogBody>
-            <DialogFooter>
-              <button
-                className="trk-btn trk-btn-ghost"
-                onClick={() => {
-                  setDetailInv(null);
-                  openTimeline(detailInv.id);
-                }}
-              >
-                <HiMapPin /> View Timeline
-              </button>
-              <button className="trk-btn trk-btn-primary" onClick={() => setDetailInv(null)}>
-                Close
-              </button>
-            </DialogFooter>
-          </DialogContent>
-        )}
-      </Dialog>
+      />
 
-      {/* Timeline modal */}
-      <Dialog
-        open={Boolean(timelineInv)}
-        onOpenChange={(next) => {
-          if (!next) (() => setTimelineInv(null))();
-        }}
-      >
-        {timelineInv && (
-          <DialogContent title="Invoice timeline">
-            <DialogHeader>
-              <DialogTitle>
-                {timelineInv.invoice_number} — {timelineInv.party_name}
-              </DialogTitle>
-            </DialogHeader>
-            <DialogBody>
-              <ul className="trk-timeline">
-                {(timelineInv.events || []).map((ev) => (
-                  <li key={ev.id}>
-                    <div className="tl-stage">
-                      {ev.stage_name}
-                      {ev.stage_status && (
-                        <Badge outlined className="trk-badge-gap">
-                          {ev.stage_status}
-                          {ev.hold_type ? ` · ${ev.hold_type}` : ""}
-                        </Badge>
-                      )}
-                      {ev.amount && (
-                        <Badge tone="hold" outlined className="trk-badge-gap-6">
-                          ₹{money(ev.amount)}
-                        </Badge>
-                      )}
-                      {ev.receiving_note === "LATE" && (
-                        <Badge tone="hold" outlined className="trk-badge-gap-6">
-                          Late (after 6 PM)
-                        </Badge>
-                      )}
-                    </div>
-                    <div className="tl-meta">
-                      {ev.event_type} · in {fmtDT(ev.entered_at)}
-                      {ev.exited_at ? ` · out ${fmtDT(ev.exited_at)}` : " · (here now)"}
-                      {ev.days_spent ? ` · ${ev.days_spent} days` : ""}
-                      {ev.acted_by_name ? ` · ${ev.acted_by_name}` : ""}
-                    </div>
-                    {ev.remarks && <div className="tl-remark">“{ev.remarks}”</div>}
-                  </li>
-                ))}
-              </ul>
-            </DialogBody>
-            <DialogFooter>
-              <button className="trk-btn trk-btn-ghost" onClick={() => setTimelineInv(null)}>
-                Close
-              </button>
-            </DialogFooter>
-          </DialogContent>
-        )}
-      </Dialog>
+      <InvoiceTimelineDialog invoice={timelineInv} onClose={() => setTimelineInv(null)} />
 
-      {/* Payment modal */}
-      {payInv &&
-        (() => {
-          const invoiceValue = round2(Number(payInv.invoice_value || 0));
-          const debit = round2(Number(payInv.debit_amount || 0));
-          const netInvoice = round2(Number(payInv.net_invoice_value ?? invoiceValue));
-          const hold = round2(Number(payInv.hold_amount || 0));
-          const holdBack = !!payForm.hold_added_back;
-          // Payable base drops the held amount unless the handler releases it.
-          const payableBase = Math.max(0, holdBack ? netInvoice : round2(netInvoice - hold));
-          const taxable = round2(Number(payInv.taxable_value || 0));
-          const dpct = Number(payForm.discount_pct || 0);
-          const tpct = Number(payForm.tds_pct || 0);
-          // Discount is on the full net invoice value (incl. the held portion).
-          const discountAmt = round2((netInvoice * dpct) / 100);
-          const tdsAmt = round2((taxable * tpct) / 100);
-          const netPayable = Math.max(0, round2(payableBase - discountAmt - tdsAmt)); // cap this round
-          const totalOwed = Math.max(0, round2(netInvoice - discountAmt - tdsAmt)); // incl. hold
-          // Paid auto-follows net payable until the user types a value.
-          const paid = paidEdited ? Number(payForm.paid_amount || 0) : netPayable;
-          // Open balance is against the full obligation — an un-released hold stays open.
-          const openBalance = round2(totalOwed - paid);
-          const over = paid > netPayable + 0.005;
-          const isPaid = !over && openBalance <= 0.005;
-          return (
-            <Dialog
-              open
-              onOpenChange={(next) => {
-                if (!next) setPayInv(null);
-              }}
-            >
-              <DialogContent title="Payment">
-                <DialogHeader>
-                  <DialogTitle>Payment — {payInv.invoice_number}</DialogTitle>
-                  <span className="trk-sub trk-sub--indent">
-                    {payInv.party_name}
-                  </span>
-                </DialogHeader>
-                <DialogBody>
-                  <div className="trk-form-grid">
-                    <div className="trk-field">
-                      <label>Invoice Value{debit > 0 ? " (after debit)" : ""}</label>
-                      <input
-                        readOnly
-                        className="trk-ro"
-                        aria-label={`Invoice Value${debit > 0 ? " (after debit)" : ""}`}
-                        value={`₹ ${money(netInvoice)}`}
-                      />
-                      {debit > 0 && (
-                        <span className="trk-sub trk-sub--xs trk-sub--warn">
-                          ₹{money(invoiceValue)} − ₹{money(debit)} debit
-                        </span>
-                      )}
-                    </div>
-                    <div className="trk-field">
-                      <label>Taxable Value</label>
-                      <input
-                        readOnly
-                        className="trk-ro"
-                        aria-label="Taxable Value"
-                        value={`₹ ${money(taxable)}`}
-                      />
-                    </div>
-
-                    {hold > 0 && (
-                      <>
-                        <div className="trk-field">
-                          <label>Hold Amount</label>
-                          <input
-                            readOnly
-                            className="trk-ro trk-ro--warn"
-                            aria-label="Hold Amount"
-                            value={`₹ ${money(hold)}`}
-                          />
-                          <span className="trk-sub trk-sub--xs">
-                            {holdBack
-                              ? "released — added back to the payable"
-                              : `withheld — payable value ₹${money(round2(netInvoice - hold))}`}
-                          </span>
-                        </div>
-                        <div className="trk-field trk-field--end">
-                          <label className="trk-checkbox-row">
-                            <input
-                              type="checkbox"
-                              checked={holdBack}
-                              onChange={(e) =>
-                                setPayForm((f) => ({ ...f, hold_added_back: e.target.checked }))
-                              }
-                            />
-                            Add hold amount back to the invoice
-                          </label>
-                        </div>
-                      </>
-                    )}
-
-                    <div className="trk-field">
-                      <label>Discount %</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        max="100"
-                        placeholder="0"
-                        aria-label="Discount %"
-                        value={payForm.discount_pct ?? ""}
-                        onChange={(e) =>
-                          setPayForm((f) => ({ ...f, discount_pct: e.target.value }))
-                        }
-                      />
-                      <span className="trk-sub trk-sub--xs">
-                        on invoice value (after debit{hold > 0 ? ", incl. held" : ""})
-                      </span>
-                    </div>
-                    <div className="trk-field">
-                      <label>Discount Amount</label>
-                      <input
-                        readOnly
-                        className="trk-ro"
-                        aria-label="Discount Amount"
-                        value={`₹ ${money(discountAmt)}`}
-                      />
-                    </div>
-
-                    <div className="trk-field">
-                      <label>TDS %</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        max="100"
-                        placeholder="0"
-                        aria-label="TDS %"
-                        value={payForm.tds_pct ?? ""}
-                        onChange={(e) => setPayForm((f) => ({ ...f, tds_pct: e.target.value }))}
-                      />
-                      <span className="trk-sub trk-sub--xs">
-                        on taxable value
-                      </span>
-                    </div>
-                    <div className="trk-field">
-                      <label>TDS Amount</label>
-                      <input
-                        readOnly
-                        className="trk-ro"
-                        aria-label="TDS Amount"
-                        value={`₹ ${money(tdsAmt)}`}
-                      />
-                    </div>
-
-                    <div className="trk-field">
-                      <label>Net Payable</label>
-                      <input
-                        readOnly
-                        className="trk-net"
-                        aria-label="Net Payable"
-                        value={`₹ ${money(netPayable)}`}
-                      />
-                    </div>
-                    <div className="trk-field">
-                      <label>Paid Amount</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        max={netPayable}
-                        aria-label="Paid Amount"
-                        value={paidEdited ? (payForm.paid_amount ?? "") : netPayable.toFixed(2)}
-                        onChange={(e) => {
-                          setPaidEdited(true);
-                          setPayForm((f) => ({ ...f, paid_amount: e.target.value }));
-                        }}
-                      />
-                      {over && (
-                        <span className="trk-err trk-err--xs">
-                          Cannot exceed net payable (₹{money(netPayable)})
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="trk-field">
-                      <label>Open Balance</label>
-                      <input
-                        readOnly
-                        className={`trk-balance${openBalance > 0.005 ? " trk-balance--open" : ""}`}
-                        aria-label="Open Balance"
-                        value={`₹ ${money(openBalance)}`}
-                      />
-                      {hold > 0 && !holdBack && (
-                        <span className="trk-sub trk-sub--xs trk-sub--warn">
-                          includes ₹{money(hold)} held back — release it to close the invoice
-                        </span>
-                      )}
-                    </div>
-                    <div className="trk-field">
-                      <label>Status</label>
-                      <input
-                        readOnly
-                        className="trk-ro"
-                        aria-label="Status"
-                        value={isPaid ? "PAID — completes on save" : "OPEN — stays for balance"}
-                      />
-                    </div>
-                  </div>
-                </DialogBody>
-                <DialogFooter>
-                  <button className="trk-btn trk-btn-ghost" onClick={() => setPayInv(null)}>
-                    Cancel
-                  </button>
-                  <button
-                    className="trk-btn trk-btn-primary"
-                    disabled={savingPay || over}
-                    onClick={() => savePayment({ netPayable, paid, isPaid })}
-                  >
-                    {savingPay
-                      ? "Saving…"
-                      : isPaid
-                        ? "Pay in full & close"
-                        : "Save partial payment"}
-                  </button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
-          );
-        })()}
-
-      <Toast message={toast} />
-    </div>
+      {payInv && (
+        <PaymentDialog
+          invoice={payInv}
+          saving={savingPay}
+          onClose={() => setPayInv(null)}
+          onSave={(payment) => void savePayment(payment)}
+        />
+      )}
+    </Page>
   );
 }

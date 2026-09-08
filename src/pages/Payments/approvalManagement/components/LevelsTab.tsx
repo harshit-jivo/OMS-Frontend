@@ -1,13 +1,20 @@
+/**
+ * Levels — the approval ladder a document climbs, per workflow.
+ */
 import {
-  HiChevronDown,
-  HiChevronUp,
-  HiPencilSquare,
-  HiPlusCircle,
+  HiOutlineChevronDown,
+  HiOutlineChevronUp,
+  HiOutlinePencilSquare,
+  HiOutlinePlusCircle,
 } from "react-icons/hi2";
 
 import type { ApprovalWorkflow } from "../../../../services/approvalService";
 import { ConfirmDialog, EmptyState, ErrorState, Modal } from "../../ApprovalUI";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Checkbox, Field, FormGrid, Input, Select } from "@/components/ui/form";
+import { Card, Notice } from "@/components/ui/page";
+import { Skeleton } from "@/components/ui/skeleton";
 import type { Flash } from "../types";
 import { useLevelsTab } from "../useLevelsTab";
 import PreviewCard from "./PreviewCard";
@@ -46,68 +53,66 @@ export default function LevelsTab({
 
   if (workflows.length === 0) {
     return (
-      <div className="apv-card">
+      <Card>
         <EmptyState
           title="No workflows yet"
           hint="Create a workflow on the Workflows tab before adding levels."
         />
-      </div>
+      </Card>
     );
   }
 
   return (
-    <>
-      <div className="apv-card">
-        <div className="apv-toolbar">
-          <div className="apv-field apv-field-wf">
-            <label htmlFor="lv-workflow">Workflow</label>
-            <select
-              id="lv-workflow"
-              className="apv-select"
-              value={activeId ?? ""}
-              onChange={(e) => onSelect(Number(e.target.value))}
-            >
-              {workflows.map((w) => (
-                <option key={w.id} value={w.id}>
-                  {w.name} ({w.code})
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="apv-spacer" />
+    <div className="space-y-4">
+      <Card>
+        <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+          <Field label="Workflow" className="max-w-[320px] flex-1">
+            {(control) => (
+              <Select
+                {...control}
+                value={activeId ?? ""}
+                onChange={(e) => onSelect(Number(e.target.value))}
+              >
+                {workflows.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.name} ({w.code})
+                  </option>
+                ))}
+              </Select>
+            )}
+          </Field>
 
           {canEdit && activeId && (
-            <button
-              type="button"
-              className="apv-btn apv-btn-primary"
+            <Button
+              variant="primary"
               onClick={() =>
                 setEditing({
                   name: "",
-                  sequence: ordered.length
-                    ? Math.max(...ordered.map((l) => l.sequence)) + 1
-                    : 1,
+                  sequence: ordered.length ? Math.max(...ordered.map((l) => l.sequence)) + 1 : 1,
                   role: null,
                   min_approvals: 1,
                   is_active: true,
                 })
               }
             >
-              <HiPlusCircle /> Add level
-            </button>
+              <HiOutlinePlusCircle aria-hidden="true" /> Add level
+            </Button>
           )}
         </div>
 
         {workflow && !workflow.is_active && (
-          <div className="apv-notice apv-notice-warn">
-            <span>
-              This workflow is inactive — documents will not route through it
-              until it is activated.
-            </span>
-          </div>
+          <Notice tone="hold" className="mb-3">
+            This workflow is inactive — documents will not route through it until it is
+            activated.
+          </Notice>
         )}
 
-        {levels.loading && <div className="apv-loading">Loading levels…</div>}
+        {levels.loading && (
+          <div className="space-y-2" aria-label="Loading levels">
+            <Skeleton className="h-14 w-full" />
+            <Skeleton className="h-14 w-full" />
+          </div>
+        )}
         {!levels.loading && levels.error && (
           <ErrorState message={levels.error} onRetry={levels.reload} />
         )}
@@ -119,92 +124,89 @@ export default function LevelsTab({
         )}
 
         {!levels.loading && !levels.error && ordered.length > 0 && (
-          <div className="apv-ladder">
-            {ordered.map((level, index) => (
-              <div
-                key={level.id}
-                className={`apv-rung${level.is_active ? "" : " is-inactive"}`}
-              >
-                {/* The LADDER POSITION, not the stored sequence — documents
-                    advance by position, so showing the raw column would
-                    mislead whenever the numbering has gaps. */}
-                <div className="apv-rung-seq">{index + 1}</div>
+          <ol className="m-0 list-none space-y-1.5 p-0">
+            {ordered.map((level, index) => {
+              const named = level.approvers.filter((a) => a.is_active).length;
+              return (
+                <li
+                  key={level.id}
+                  className={
+                    "flex flex-wrap items-center gap-3 rounded-sm border border-line p-2.5 " +
+                    (level.is_active ? "bg-surface" : "bg-surface-strong opacity-70")
+                  }
+                >
+                  {/* The LADDER POSITION, not the stored sequence — documents
+                      advance by position, so showing the raw column would
+                      mislead whenever the numbering has gaps. */}
+                  <span className="grid size-6 shrink-0 place-items-center rounded-full bg-brand-soft text-[11px] font-bold text-brand">
+                    {index + 1}
+                  </span>
 
-                <div className="apv-rung-main">
-                  <div className="apv-rung-name">
-                    {level.name}{" "}
-                    {!level.is_active && (
-                      <Badge tone="neutral">Disabled</Badge>
-                    )}
-                  </div>
-                  <div className="apv-rung-meta">
-                    Role: {level.role_name || <em>any</em>} ·{" "}
-                    {level.approvers.filter((a) => a.is_active).length} named
-                    approver
-                    {level.approvers.filter((a) => a.is_active).length === 1
-                      ? ""
-                      : "s"}
-                  </div>
-                </div>
+                  <span className="min-w-[160px] flex-1">
+                    <span className="flex flex-wrap items-center gap-1.5 text-[13px] font-semibold text-ink">
+                      {level.name}
+                      {!level.is_active && <Badge tone="neutral">Disabled</Badge>}
+                    </span>
+                    <span className="block text-[11.5px] text-subtle">
+                      Role: {level.role_name || <em>any</em>} · {named} named approver
+                      {named === 1 ? "" : "s"}
+                    </span>
+                  </span>
 
-                {canEdit && (
-                  <div className="apv-rung-actions">
-                    <button
-                      type="button"
-                      className="apv-btn apv-btn-icon"
-                      aria-label="Move up"
-                      disabled={busy || index === 0}
-                      onClick={() => move(index, -1)}
-                    >
-                      <HiChevronUp />
-                    </button>
-                    <button
-                      type="button"
-                      className="apv-btn apv-btn-icon"
-                      aria-label="Move down"
-                      disabled={busy || index === ordered.length - 1}
-                      onClick={() => move(index, 1)}
-                    >
-                      <HiChevronDown />
-                    </button>
-                    <button
-                      type="button"
-                      className="apv-btn apv-btn-sm"
-                      disabled={busy}
-                      onClick={() => toggleActive(level)}
-                    >
-                      {level.is_active ? "Disable" : "Enable"}
-                    </button>
-                    <button
-                      type="button"
-                      className="apv-btn apv-btn-icon"
-                      aria-label="Edit"
-                      onClick={() =>
-                        setEditing({
-                          id: level.id,
-                          name: level.name,
-                          sequence: level.sequence,
-                          role: level.role,
-                          min_approvals: level.min_approvals,
-                          is_active: level.is_active,
-                        })
-                      }
-                    >
-                      <HiPencilSquare />
-                    </button>
-                    {/* Delete removed deliberately — see the Workflows tab.
-                        Deleting a level renumbers the ladder under documents
-                        already waiting on it: six payment approvals were
-                        stranded exactly this way, matched to a position that
-                        no longer existed and shown to nobody. Untick Active
-                        to retire a level safely. */}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
+                  {canEdit && (
+                    <span className="flex shrink-0 items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={"Move " + level.name + " up"}
+                        disabled={busy || index === 0}
+                        onClick={() => move(index, -1)}
+                      >
+                        <HiOutlineChevronUp />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={"Move " + level.name + " down"}
+                        disabled={busy || index === ordered.length - 1}
+                        onClick={() => move(index, 1)}
+                      >
+                        <HiOutlineChevronDown />
+                      </Button>
+                      <Button size="sm" disabled={busy} onClick={() => toggleActive(level)}>
+                        {level.is_active ? "Disable" : "Enable"}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={"Edit " + level.name}
+                        onClick={() =>
+                          setEditing({
+                            id: level.id,
+                            name: level.name,
+                            sequence: level.sequence,
+                            role: level.role,
+                            min_approvals: level.min_approvals,
+                            is_active: level.is_active,
+                          })
+                        }
+                      >
+                        <HiOutlinePencilSquare />
+                      </Button>
+                      {/* Delete removed deliberately — see the Workflows tab.
+                          Deleting a level renumbers the ladder under documents
+                          already waiting on it: six payment approvals were
+                          stranded exactly this way, matched to a position that
+                          no longer existed and shown to nobody. Untick Active
+                          to retire a level safely. */}
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
         )}
-      </div>
+      </Card>
 
       {activeId && <PreviewCard workflowId={activeId} company={workflow?.company ?? ""} />}
 
@@ -214,91 +216,90 @@ export default function LevelsTab({
           onClose={() => setEditing(null)}
           footer={
             <>
-              <button
-                type="button"
-                className="apv-btn"
-                onClick={() => setEditing(null)}
-                disabled={busy}
-              >
+              <Button onClick={() => setEditing(null)} disabled={busy}>
                 Cancel
-              </button>
-              <button
-                type="button"
-                className="apv-btn apv-btn-primary"
+              </Button>
+              <Button
+                variant="primary"
                 onClick={save}
                 disabled={busy || !editing.name?.trim()}
+                title={editing.name?.trim() ? undefined : "Give the level a name first."}
               >
                 {busy ? "Saving…" : "Save level"}
-              </button>
+              </Button>
             </>
           }
         >
-          <div className="apv-form-grid">
-            <div className="apv-field">
-              <label htmlFor="lvl-name">Level name</label>
-              <input
-                id="lvl-name"
-                className="apv-input"
-                value={editing.name ?? ""}
-                onChange={(e) => setEditing({ ...editing, name: e.target.value })}
-                placeholder="Accountant review"
-              />
-            </div>
+          <FormGrid>
+            <Field label="Level name" required className="sm:col-span-2">
+              {(control) => (
+                <Input
+                  {...control}
+                  value={editing.name ?? ""}
+                  onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+                  placeholder="Accountant review"
+                  autoFocus
+                />
+              )}
+            </Field>
 
             {/* Sequence is NOT asked for: the server appends each new level to
                 the end of the ladder, and reordering is done with the up/down
                 arrows on the list. Typing a number here only invited a clash
                 with the (workflow, sequence) unique constraint. */}
 
-            <div className="apv-field">
-              <label htmlFor="lvl-role">Role</label>
-              <select
-                id="lvl-role"
-                className="apv-select"
-                value={editing.role ?? ""}
-                onChange={(e) =>
-                  setEditing({
-                    ...editing,
-                    role: e.target.value ? Number(e.target.value) : null,
-                  })
-                }
-              >
-                <option value="">No role — named approvers only</option>
-                {roles.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.name}
-                  </option>
-                ))}
-              </select>
-              <span className="apv-hint">
-                Anyone with this role may approve this level.
-              </span>
-            </div>
+            <Field
+              label="Role"
+              className="sm:col-span-2"
+              hint="Anyone with this role may approve this level."
+            >
+              {(control) => (
+                <Select
+                  {...control}
+                  value={editing.role ?? ""}
+                  onChange={(e) =>
+                    setEditing({
+                      ...editing,
+                      role: e.target.value ? Number(e.target.value) : null,
+                    })
+                  }
+                >
+                  <option value="">No role — named approvers only</option>
+                  {roles.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </Field>
 
             {/* "Minimum approvals" is always 1 — one approver clears a stage —
                 and "Escalate after" is gone entirely: nothing auto-approves on
                 a timer, which is the behaviour that field implied. */}
 
-            <div className="apv-field is-full">
-              <label className="apv-check">
-                <input
-                  type="checkbox"
-                  checked={editing.is_active ?? true}
-                  onChange={(e) =>
-                    setEditing({ ...editing, is_active: e.target.checked })
-                  }
-                />
-                Active
-              </label>
+            <div className="sm:col-span-2">
+              <Checkbox
+                label="Active"
+                hint="An inactive level is skipped when a document climbs the ladder."
+                checked={editing.is_active ?? true}
+                onChange={(e) => setEditing({ ...editing, is_active: e.target.checked })}
+              />
             </div>
-          </div>
+          </FormGrid>
         </Modal>
       )}
 
       {deleting && (
         <ConfirmDialog
           title="Delete level"
-          message={`Delete level ${deleting.sequence} "${deleting.name}"? Any documents currently waiting at this level will need attention.`}
+          message={
+            'Delete level ' +
+            deleting.sequence +
+            ' "' +
+            deleting.name +
+            '"? Any documents currently waiting at this level will need attention.'
+          }
           confirmLabel="Delete"
           danger
           busy={busy}
@@ -306,6 +307,6 @@ export default function LevelsTab({
           onCancel={() => setDeleting(null)}
         />
       )}
-    </>
+    </div>
   );
 }

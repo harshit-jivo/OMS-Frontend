@@ -1,13 +1,31 @@
+/**
+ * Handover / Update-Configuration — the two things that change a device's
+ * history without editing the record itself.
+ */
 import { useState } from "react";
-import DateInput from "../../components/DateInput";
-import { NicField, ErrorAlert } from "../../components/NicUI";
+
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Checkbox, Field, FormGrid, Input, Select } from "@/components/ui/form";
+import { Notice, SectionHeading } from "@/components/ui/page";
 import { messageFrom } from "@/lib/apiError";
+import DateInput from "../../components/DateInput";
 import {
   haisService,
   configSummary,
   type Asset,
   type ConfigFields,
 } from "../../services/haisService";
+
+import { MONO } from "./assetTone";
 import { useHaisOptions } from "./useHaisOptions";
 
 type Mode = "handover" | "config";
@@ -90,121 +108,153 @@ export default function AssetActionModal({ asset, mode, onClose, onDone }: Props
     }
   };
 
-  const ConfigInputs = (
-    <div className="nic-form-grid">
-      <NicField label="Processor">
-        <input className="nic-input" value={config.processor ?? ""} onChange={(e) => setCfg("processor")(e.target.value)} />
-      </NicField>
-      <NicField label="Memory (RAM)">
-        <input className="nic-input" value={config.memory ?? ""} onChange={(e) => setCfg("memory")(e.target.value)} placeholder="e.g. 16 GB" />
-      </NicField>
-      <NicField label="Operating System">
-        <input className="nic-input" value={config.operating_system ?? ""} onChange={(e) => setCfg("operating_system")(e.target.value)} />
-      </NicField>
-      <NicField label="Storage Type">
-        <select className="nic-select" value={config.storage_type ?? ""} onChange={(e) => setCfg("storage_type")(e.target.value)}>
-          <option value="">— Select —</option>
-          {storageTypes.map((s) => (
-            <option key={s.id} value={s.name}>{s.name}</option>
-          ))}
-        </select>
-      </NicField>
-      <NicField label="Storage">
-        <input className="nic-input" value={config.storage ?? ""} onChange={(e) => setCfg("storage")(e.target.value)} placeholder="e.g. 512 GB" />
-      </NicField>
-    </div>
+  const configInputs = (
+    <FormGrid>
+      <Field label="Processor">
+        {(c) => (
+          <Input {...c} value={config.processor ?? ""} onChange={(e) => setCfg("processor")(e.target.value)} />
+        )}
+      </Field>
+      <Field label="Memory (RAM)">
+        {(c) => (
+          <Input {...c} value={config.memory ?? ""} onChange={(e) => setCfg("memory")(e.target.value)} placeholder="e.g. 16 GB" />
+        )}
+      </Field>
+      <Field label="Operating system">
+        {(c) => (
+          <Input {...c} value={config.operating_system ?? ""} onChange={(e) => setCfg("operating_system")(e.target.value)} />
+        )}
+      </Field>
+      <Field label="Storage type">
+        {(c) => (
+          <Select {...c} value={config.storage_type ?? ""} onChange={(e) => setCfg("storage_type")(e.target.value)}>
+            <option value="">— Select —</option>
+            {storageTypes.map((s) => (
+              <option key={s.id} value={s.name}>
+                {s.name}
+              </option>
+            ))}
+          </Select>
+        )}
+      </Field>
+      <Field label="Storage">
+        {(c) => (
+          <Input {...c} value={config.storage ?? ""} onChange={(e) => setCfg("storage")(e.target.value)} placeholder="e.g. 512 GB" />
+        )}
+      </Field>
+    </FormGrid>
   );
 
+  const title = isHandover ? "Handover" : "Update configuration";
+
   return (
-    <div
-      className="sb-modal-overlay hais-action-overlay"
-      onClick={onClose}
-    >
-      <div
-        className="sb-modal hais-action-modal"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="nic-modal-head nic-modal-head--tight-6">
-          <h3 className="nic-modal-title">
-            {isHandover ? "Handover" : "Update Configuration"} — <span className="nic-mono">{asset.asset_id}</span>
-          </h3>
-          <button onClick={onClose} className="nic-modal-close">
-            &times;
-          </button>
-        </div>
+    <Dialog open onOpenChange={(next) => !next && !busy && onClose()}>
+      <DialogContent title={`${title} — ${asset.asset_id}`} size="lg">
+        <DialogHeader className="items-start">
+          <div className="min-w-0">
+            <DialogTitle>
+              {title} — <span className={MONO}>{asset.asset_id}</span>
+            </DialogTitle>
+            <DialogDescription>
+              Currently with{" "}
+              <strong className="font-semibold text-ink">
+                {asset.current_user_name || asset.current_user_id || "—"}
+              </strong>
+              {" · "}Config: {configSummary(asset) || "—"}
+            </DialogDescription>
+          </div>
+        </DialogHeader>
 
-        <p className="nic-note nic-note--flush">
-          Currently with: <strong>{asset.current_user_name || asset.current_user_id || "—"}</strong>
-          {" · "}Config: {configSummary(asset) || "—"}
-        </p>
+        <DialogBody className="space-y-5">
+          {isHandover ? (
+            <>
+              <section className="space-y-3">
+                <SectionHeading>New holder</SectionHeading>
+                <FormGrid>
+                  <Field label="New user name" required>
+                    {(c) => (
+                      <Input {...c} value={toUserName} onChange={(e) => setToUserName(e.target.value.toUpperCase())} placeholder="e.g. PRIYA NAIR" />
+                    )}
+                  </Field>
+                  <Field label="New user ID (Emp ID)" hint="Auto-prefixed with JWPL">
+                    {(c) => (
+                      <Input {...c} className={MONO} value={toUserId} onChange={(e) => setEmpId(e.target.value)} placeholder="JWPL0001" />
+                    )}
+                  </Field>
+                  <Field label="Department">
+                    {(c) => (
+                      <Select {...c} value={department} onChange={(e) => setDepartment(e.target.value)}>
+                        <option value="">— Select —</option>
+                        {departments.map((d) => (
+                          <option key={d.id} value={d.name}>
+                            {d.name}
+                          </option>
+                        ))}
+                      </Select>
+                    )}
+                  </Field>
+                  <Field label="Location">
+                    {(c) => <Input {...c} value={location} onChange={(e) => setLocation(e.target.value)} />}
+                  </Field>
+                  <Field label="Handover date">
+                    {() => <DateInput value={date} onChange={setDate} />}
+                  </Field>
+                  <Field label="Reason" span="full">
+                    {(c) => (
+                      <Input {...c} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Previous user left / role change" />
+                    )}
+                  </Field>
+                </FormGrid>
+              </section>
 
-        {isHandover ? (
-          <>
-            <h4 className="nic-subsection-title">New Holder</h4>
-            <div className="nic-form-grid">
-              <NicField label="New User Name *">
-                <input className="nic-input" value={toUserName} onChange={(e) => setToUserName(e.target.value.toUpperCase())} placeholder="e.g. PRIYA NAIR" />
-              </NicField>
-              <NicField label="New User ID (Emp ID)" hint="Auto-prefixed with JWPL">
-                <input className="nic-input nic-mono" value={toUserId} onChange={(e) => setEmpId(e.target.value)} placeholder="JWPL0001" />
-              </NicField>
-              <NicField label="Department">
-                <select className="nic-select" value={department} onChange={(e) => setDepartment(e.target.value)}>
-                  <option value="">— Select —</option>
-                  {departments.map((d) => (
-                    <option key={d.id} value={d.name}>{d.name}</option>
-                  ))}
-                </select>
-              </NicField>
-              <NicField label="Location">
-                <input className="nic-input" value={location} onChange={(e) => setLocation(e.target.value)} />
-              </NicField>
-              <NicField label="Handover Date">
-                <DateInput value={date} onChange={setDate} />
-              </NicField>
-              <NicField label="Reason" full>
-                <input className="nic-input" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Previous user left / role change" />
-              </NicField>
-            </div>
+              <Checkbox
+                label="Also change configuration for the new user"
+                hint="e.g. the hardware team increases RAM at handover."
+                checked={alsoUpgrade}
+                onChange={(e) => setAlsoUpgrade(e.target.checked)}
+              />
+              {alsoUpgrade && (
+                <section className="space-y-3">
+                  <SectionHeading>New configuration</SectionHeading>
+                  {configInputs}
+                </section>
+              )}
+            </>
+          ) : (
+            <>
+              <Notice tone="info">
+                Use this when only the hardware changed (no new user). The before → after
+                change is saved in the device history.
+              </Notice>
+              <section className="space-y-3">
+                <SectionHeading>New configuration</SectionHeading>
+                {configInputs}
+              </section>
+              <FormGrid>
+                <Field label="Change / service date">
+                  {() => <DateInput value={date} onChange={setDate} />}
+                </Field>
+                <Field label="Reason / note" required span="full">
+                  {(c) => (
+                    <Input {...c} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. RAM upgraded on user request" />
+                  )}
+                </Field>
+              </FormGrid>
+            </>
+          )}
 
-            <label className="hais-upgrade-check">
-              <input type="checkbox" checked={alsoUpgrade} onChange={(e) => setAlsoUpgrade(e.target.checked)} />
-              <span>Also change configuration for the new user (e.g. hardware team increases RAM)</span>
-            </label>
-            {alsoUpgrade && (
-              <>
-                <h4 className="nic-subsection-title">New Configuration</h4>
-                {ConfigInputs}
-              </>
-            )}
-          </>
-        ) : (
-          <>
-            <p className="nic-note nic-note--flush">
-              Use this when only the hardware changed (no new user). The before → after change is saved in the device history.
-            </p>
-            <h4 className="nic-subsection-title">New Configuration</h4>
-            {ConfigInputs}
-            <div className="nic-form-grid">
-              <NicField label="Change / Service Date">
-                <DateInput value={date} onChange={setDate} />
-              </NicField>
-              <NicField label="Reason / Note *" full>
-                <input className="nic-input" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. RAM upgraded on user request" />
-              </NicField>
-            </div>
-          </>
-        )}
+          {error && <Notice tone="bad">{error}</Notice>}
+        </DialogBody>
 
-        <ErrorAlert>{error}</ErrorAlert>
-
-        <div className="nic-actions-row nic-actions-row--top12">
-          <button className="ofs-primary" onClick={() => void submit()} disabled={busy}>
-            {busy ? "Saving…" : isHandover ? "Confirm Handover" : "Save Change"}
-          </button>
-          <button className="nic-tab" onClick={onClose} disabled={busy}>Cancel</button>
-        </div>
-      </div>
-    </div>
+        <DialogFooter>
+          <Button onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={() => void submit()} disabled={busy}>
+            {busy ? "Saving…" : isHandover ? "Confirm handover" : "Save change"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

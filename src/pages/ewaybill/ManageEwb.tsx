@@ -4,6 +4,10 @@ import { ewaybillService } from "../../services/ewaybillService";
 import { NicField, JsonView, ErrorAlert, SuccessAlert } from "../../components/NicUI";
 import { messageFrom } from "@/lib/apiError";
 import DateInput from "../../components/DateInput";
+import { Button } from "@/components/ui/button";
+import { Input, Select, Textarea } from "@/components/ui/form";
+import { Card, CardHeader, CardTitle } from "@/components/ui/page";
+import { Tab, TabList } from "@/components/ui/tabs";
 
 type Mode = "cancel" | "close" | "reject" | "transporter" | "partb" | "extend";
 const MODES: [Mode, string][] = [
@@ -51,45 +55,47 @@ export default function ManageEwb() {
   };
 
   return (
-    <section className="ofs-card ofs-card--wide">
-      <div className="ofs-card-head">
-        <span className="ofs-card-mark" />
-        <h2>Manage e-Way Bill</h2>
-      </div>
+    <Card>
+      <CardHeader>
+        <CardTitle>Manage e-Way Bill</CardTitle>
+      </CardHeader>
 
-      <div className="nic-tabs nic-tabs--mb16">
+      <TabList label="Action" className="mb-4">
         {MODES.map(([m, label]) => (
-          <button key={m} className={`nic-tab ${mode === m ? "nic-tab-active" : ""}`}
-            onClick={() => { setMode(m); setResult(null); setError(""); }}>
+          <Tab
+            key={m}
+            selected={mode === m}
+            onClick={() => { setMode(m); setResult(null); setError(""); }}
+          >
             {label}
-          </button>
+          </Tab>
         ))}
-      </div>
+      </TabList>
 
       {mode === "partb" || mode === "extend" ? (
         <>
-          <p className="nic-note">
+          <p className="text-[12.5px] leading-relaxed text-subtle">
             {mode === "partb"
               ? "VEHEWB — update Part B (vehicle/place/mode). Provide the NIC payload."
               : "EXTENDVALIDITY — extend an EWB nearing expiry. Provide the NIC payload."}
           </p>
-          <div className="nic-form-grid nic-form-grid--spaced">
+          <div className="grid gap-x-5 gap-y-4 grid-cols-[repeat(auto-fit,minmax(220px,1fr))] mt-3">
             <NicField label="Payload (JSON)" full>
-              <textarea className="nic-textarea" value={json} onChange={(e) => setJson(e.target.value)} />
+              <Textarea value={json} onChange={(e) => setJson(e.target.value)} />
             </NicField>
           </div>
         </>
       ) : (
-        <div className="nic-form-grid">
+        <div className="grid gap-x-5 gap-y-4 grid-cols-[repeat(auto-fit,minmax(220px,1fr))]">
           <NicField label="EWB Number">
-            <input className="nic-input nic-mono" value={ewbNo} inputMode="numeric"
+            <Input className="font-mono" value={ewbNo} inputMode="numeric"
               onChange={(e) => setEwbNo(e.target.value)} placeholder="391010809803" />
           </NicField>
           {mode === "cancel" ? (
             <NicField label="Reason">
-              <select className="nic-select" value={reason} onChange={(e) => setReason(e.target.value)}>
+              <Select value={reason} onChange={(e) => setReason(e.target.value)}>
                 {CANCEL_REASONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-              </select>
+              </Select>
             </NicField>
           ) : null}
           {mode === "close" ? (
@@ -99,33 +105,33 @@ export default function ManageEwb() {
           ) : null}
           {mode === "transporter" ? (
             <NicField label="Transporter ID" hint="15-char GSTIN / Transporter ID">
-              <input className="nic-input nic-mono" value={transporterId}
+              <Input className="font-mono" value={transporterId}
                 onChange={(e) => setTransporterId(e.target.value)} placeholder="06AAA…" />
             </NicField>
           ) : null}
           {mode === "cancel" || mode === "close" ? (
             <NicField label="Remarks">
-              <input className="nic-input" value={remarks} onChange={(e) => setRemarks(e.target.value)}
+              <Input value={remarks} onChange={(e) => setRemarks(e.target.value)}
                 placeholder={mode === "close" ? "Delivered" : "Reason remarks"} />
             </NicField>
           ) : null}
         </div>
       )}
 
-      <div className="nic-actions-row">
-        <button className="ofs-primary" onClick={() => void run()} disabled={busy}>
-          <HiBolt className="nic-icon-lead" />
+      <div className="mt-4 flex flex-wrap items-center gap-2.5">
+        <Button variant="primary" onClick={() => void run()} disabled={busy}>
+          <HiBolt aria-hidden="true" />
           {busy ? "Working…" : "Submit"}
-        </button>
+        </Button>
       </div>
 
       <ErrorAlert>{error}</ErrorAlert>
       {result ? (
-        <div className="nic-result">
+        <div className="mt-5 space-y-4">
           <SuccessAlert>Done.</SuccessAlert>
           <JsonView data={result} title="NIC response" open />
         </div>
       ) : null}
-    </section>
+    </Card>
   );
 }

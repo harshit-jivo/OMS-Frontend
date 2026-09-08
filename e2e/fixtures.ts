@@ -1897,6 +1897,159 @@ export const FIXTURES: Array<[pattern: RegExp, body: Body]> = [
     },
   ],
 
+  /*
+   * The register, the by-serial lookup and the three dropdown masters. The
+   * register had NO fixture, so `hais-register.png` was a picture of the empty
+   * state and the row actions, the details popup and the status badges had
+   * never been drawn. Three devices: one working and assigned, one under
+   * repair, one scrapped and unassigned — every `assetStatusTone()` branch
+   * bar "neutral", and both holder states.
+   *
+   * `HAIS-001` above stays first: the matcher is first-wins, and the bare
+   * `/hais/assets/` below would otherwise swallow the single-asset GET.
+   */
+  [
+    /\/hais\/assets\/by-serial\//,
+    {
+      asset_id: "HAIS-001",
+      asset_type_name: "Laptop",
+      company: "Dell",
+      model_num: "Latitude 5440",
+      serial_num: "DL5440X92KK",
+      warranty_ends: "2027-03-01",
+      processor: "Intel i5-1335U",
+      memory: "16 GB",
+      operating_system: "Windows 11 Pro",
+      storage: "512 GB SSD",
+      current_user_id: "EMP2210",
+      current_user_name: "Priya Nair",
+      department_name: "Accounts",
+      current_location: "2nd floor",
+      handover_date: "2026-05-10",
+      working_status: "Working",
+      logs: [
+        {
+          event_date: "10/05/2026",
+          action: "Assigned",
+          to_user_id: "EMP2210",
+          to_user_name: "Priya Nair",
+          department_name: "Accounts",
+          location: "2nd floor",
+        },
+      ],
+    },
+  ],
+  [
+    /\/hais\/assets\/(\?|$)/,
+    {
+      results: [
+        {
+          asset_id: "HAIS-001",
+          asset_type_name: "Laptop",
+          company: "Dell",
+          model_num: "Latitude 5440",
+          serial_num: "DL5440X92KK",
+          warranty_ends: "2027-03-01",
+          processor: "Intel i5-1335U",
+          memory: "16 GB",
+          operating_system: "Windows 11 Pro",
+          storage: "512 GB SSD",
+          current_user_id: "EMP2210",
+          current_user_name: "Priya Nair",
+          department_name: "Accounts",
+          current_location: "2nd floor",
+          handover_date: "2026-05-10",
+          date_of_last_service: "2026-04-01",
+          working_status: "Working",
+          logs: [],
+        },
+        {
+          asset_id: "HAIS-002",
+          asset_type_name: "Monitor",
+          company: "LG",
+          model_num: "24MK600",
+          serial_num: "LG24MK-77120",
+          warranty_ends: "2026-07-20",
+          current_user_id: "EMP1187",
+          current_user_name: "Amit Kumar",
+          department_name: "Sales",
+          current_location: "1st floor",
+          handover_date: "2025-02-14",
+          date_of_last_service: "2026-05-30",
+          working_status: "Under Repair",
+          logs: [],
+        },
+        {
+          asset_id: "HAIS-003",
+          asset_type_name: "Laptop",
+          company: "HP",
+          model_num: "ProBook 440 G8",
+          serial_num: "HP440-Q1X55",
+          warranty_ends: "2025-01-10",
+          current_location: "Store room",
+          date_of_last_service: "2024-11-05",
+          working_status: "Scrapped",
+          logs: [],
+        },
+      ],
+    },
+  ],
+  [
+    /\/hais\/asset-types\//,
+    [
+      { id: 1, name: "LAPTOP" },
+      { id: 2, name: "MONITOR" },
+      { id: 3, name: "KEYBOARD" },
+    ],
+  ],
+  [
+    /\/hais\/departments\//,
+    [
+      { id: 1, name: "ACCOUNTS" },
+      { id: 2, name: "SALES" },
+      { id: 3, name: "IT" },
+    ],
+  ],
+  [
+    /\/hais\/storage-types\//,
+    [
+      { id: 1, name: "SSD" },
+      { id: 2, name: "HDD" },
+    ],
+  ],
+
+  /*
+   * AP Invoice Entry's browse panel. No `/service-layer/ap/*` fixture existed,
+   * so the panel had never rendered in a test — and the unguarded
+   * `data.grpos` behind it crashed the page rather than showing an empty
+   * list (fixed in services/apInvoiceService.ts).
+   */
+  [
+    /\/service-layer\/ap\/open-grpos\//,
+    {
+      grpos: [
+        {
+          doc_entry: 5501,
+          doc_num: 2026086654,
+          card_code: "VEND0012",
+          card_name: "Computech Solutions",
+          doc_total: 148500,
+          currency: "INR",
+          num_at_card: "CS/2026/118",
+        },
+        {
+          doc_entry: 5502,
+          doc_num: 2026086701,
+          card_code: "VEND0044",
+          card_name: "Northern Packaging",
+          doc_total: 92250.5,
+          currency: "INR",
+          num_at_card: "",
+        },
+      ],
+    },
+  ],
+
   // ---- Notifications ------------------------------------------------------
   // The bell polls these on every page, so a wrong shape breaks EVERY
   // screenshot rather than one.
