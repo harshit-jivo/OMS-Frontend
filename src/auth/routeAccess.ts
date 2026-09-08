@@ -88,8 +88,12 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
     public: true,
     note:
       "Opened by scanning a device QR sticker, by someone who may not have an " +
-      "account. Renders without the sidebar. The endpoint behind it returns " +
-      "only the asset's public fields.",
+      "account. Renders without the sidebar. Anonymously it calls " +
+      "/hais/public/device/, which is unauthenticated and returns only the " +
+      "device, its holder and a contact address; signed in it calls the full " +
+      "endpoint instead. This note used to claim the narrowing already " +
+      "happened — it did not, and the page told anonymous scanners to go and " +
+      "log in.",
   },
 
   // --- Any signed-in user -------------------------------------------------

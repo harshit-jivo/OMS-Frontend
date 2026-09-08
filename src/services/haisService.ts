@@ -343,6 +343,30 @@ export const haisService = {
     return assetFromApi(data);
   },
 
+  /**
+   * The same device, for a scanner with NO session.
+   *
+   * A QR sticker is read by whatever phone is to hand, usually by somebody who
+   * has no OMS account — so this endpoint is unauthenticated and returns a
+   * narrowed payload: the device, its holder and a way to reach them, and
+   * nothing else. See `PublicAssetSerializer` on the server for what is held
+   * back and why.
+   *
+   * It goes through `assetFromApi` like its authenticated sibling because the
+   * public payload uses the same `*_name` keys. The withheld fields simply
+   * arrive undefined, which is what lets one component render both views —
+   * `DetailFields hideWhenEmpty` drops the rows that are not there.
+   *
+   * SERIAL ONLY. The server will not resolve an Asset ID on this path, because
+   * Asset IDs are sequential and would let anyone walk the register.
+   */
+  getPublicBySerial: async (code: string): Promise<Asset> => {
+    const { data } = await api.get("/hais/public/device/", {
+      params: { code: code.trim() },
+    });
+    return assetFromApi(data);
+  },
+
   /* --- create --- (Asset ID + QR are generated server-side) */
   create: async (payload: Asset): Promise<Asset> => {
     const body = await assetToApi(payload);

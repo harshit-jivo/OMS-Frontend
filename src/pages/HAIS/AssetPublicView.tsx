@@ -1,8 +1,24 @@
 /**
- * Standalone device page opened by scanning a device's QR. The QR encodes a URL
- * pointing here; opening it runs the API (getBySerial) and shows the device's
- * latest details — current holder, previous holder / Unassigned, config, history.
- * Needs an OMS session (the API is authenticated); if there is none, it says so.
+ * Standalone device page opened by scanning a device's QR sticker.
+ *
+ * IT WORKS WITHOUT AN ACCOUNT, and that is the whole point. The sticker is
+ * read by whatever phone is to hand — usually somebody who found the laptop in
+ * a meeting room and has no OMS login and never will. It used to call the
+ * authenticated endpoint and tell that person to go and log in, which made the
+ * QR useful only to the team that already had the register open.
+ *
+ * TWO VIEWS, ONE PAGE
+ * -------------------
+ * Signed in  → the full record: previous holder, employee IDs, purchase
+ *              details and the complete handover history.
+ * Anonymous  → the device, who has it, and how to reach them. Nothing else.
+ *
+ * The narrowing is enforced on the SERVER (`PublicAssetSerializer`), not here:
+ * a field this component chose not to render would still have been in the
+ * response for anyone reading the network tab. What this file does is pick
+ * which endpoint to ask. Because the withheld fields arrive undefined,
+ * `DetailFields hideWhenEmpty` drops their rows on its own and one set of
+ * markup serves both.
  *
  * It renders OUTSIDE the app shell (no sidebar, no header): the person
  * opening it is holding a phone at a sticker, so it is one column with the
@@ -16,6 +32,7 @@ import { DetailFields } from "@/components/ui/detail";
 import { Card, Notice, SectionHeading } from "@/components/ui/page";
 import { Skeleton } from "@/components/ui/skeleton";
 import { messageFrom } from "@/lib/apiError";
+import { loadSession } from "@/auth";
 import { haisService, configSummary, holderLabel, type Asset } from "../../services/haisService";
 
 import AssetHistory from "./AssetHistory";
@@ -27,17 +44,25 @@ export default function AssetPublicView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  /* Read once, at mount. A session cannot appear while somebody stands at a
+     sticker, and re-reading it would mean re-fetching the device. */
+  const [signedIn] = useState(() => Boolean(loadSession()));
+
   useEffect(() => {
     let alive = true;
-    haisService
-      .getBySerial(code)
+    // The authenticated endpoint returns strictly more, so a signed-in scanner
+    // — the IT admin doing an audit — gets the full record from the same URL.
+    const fetchDevice = signedIn
+      ? haisService.getBySerial(code)
+      : haisService.getPublicBySerial(code);
+    fetchDevice
       .then((a) => alive && setAsset(a))
       .catch((err) => alive && setError(messageFrom(err, "Request failed")))
       .finally(() => alive && setLoading(false));
     return () => {
       alive = false;
     };
-  }, [code]);
+  }, [code, signedIn]);
 
   // `font-sans`: the app shell sets Inter on `.app-page`, and this route
   // renders outside it.
@@ -58,11 +83,11 @@ export default function AssetPublicView() {
           <>
             <Notice tone="bad">{error}</Notice>
             <p className={NOTE}>
-              You may need to{" "}
-              <Link to="/" className="font-medium text-brand hover:underline">
-                log in to OMS
-              </Link>{" "}
-              to view this device, then scan again.
+              {/* No longer "you need to log in": an anonymous scan is expected
+                  to work, so a failure here means the code did not match a
+                  device — not that the reader lacks an account. */}
+              Check that the whole code was scanned. If this sticker is damaged,
+              the device can be found in OMS by its serial number.
             </p>
           </>
         ) : asset ? (
@@ -107,8 +132,23 @@ export default function AssetPublicView() {
               />
             </section>
 
-            {/* Full lifecycle — who had it, when, and why. */}
-            <AssetHistory history={asset.history} />
+            {/* Full lifecycle — who had it, when, and why. Signed-in only:
+                it is a movement record of named staff, so the public endpoint
+                does not return it and there is nothing to draw. */}
+            {asset.history?.length ? <AssetHistory history={asset.history} /> : null}
+
+            {!signedIn && (
+              <p className={NOTE}>
+                Found this device?{" "}
+                {asset.email_id
+                  ? "Contact the person above, or your IT team."
+                  : "Contact your IT team."}{" "}
+                <Link to="/" className="font-medium text-brand hover:underline">
+                  Sign in
+                </Link>{" "}
+                for the full record.
+              </p>
+            )}
           </>
         ) : null}
       </Card>
