@@ -85,11 +85,19 @@ export const PAYMENT_ACTION_PERMISSIONS: GrantablePage[] = [
   // receipt may never verify it (separation of duties is enforced in the
   // endpoint, not by this key).
   //
+  { key: "Payments_Approve", label: "Payments — Approve", path: "/Payments_Dashboard" },
+  // The handover check: a second person confirms the physical cash or cheque
+  // against the entry before it may enter the approval chain. Independent of
+  // Create and Approve — holding either confers nothing here — and the server
+  // separately forbids verifying a receipt you raised yourself, so this grant
+  // is only ever useful to someone other than the creator.
+  //
   // It was registered on the SERVER but missing from this list, so it could
   // only ever be granted through Role Permissions — never to one person. The
-  // registry-parity test in `adminPages.test.ts` is what found it.
-  { key: "Payments_Verify", label: "Payments — Verify (handover)", path: "/Payments_Dashboard" },
-  { key: "Payments_Approve", label: "Payments — Approve", path: "/Payments_Dashboard" },
+  // registry-parity test in `adminPages.test.ts` is what found it, and the
+  // duplicate-key test is what caught this line being added twice when two
+  // branches fixed it independently.
+  { key: "Payments_Verify", label: "Payments — Verify", path: "/Payments_Dashboard" },
   { key: "Deposit_Create", label: "Deposit — Create", path: "/Payments_Dashboard" },
   { key: "Deposit_Approve", label: "Deposit — Approve", path: "/Payments_Dashboard" },
   // Unlike the four above, this one DOES open a page — the analytics dashboard

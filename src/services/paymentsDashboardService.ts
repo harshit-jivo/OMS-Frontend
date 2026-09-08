@@ -249,10 +249,9 @@ const paymentsDashboardService = {
   /**
    * Companies for the filter.
    *
-   * Deliberately NOT `approvalService.listCompanyMappings()`, which is behind
-   * IsApprovalAdmin — a non-admin opening the dashboard would get a 403 and an
-   * empty dropdown. This endpoint is IsAuthenticated and already scoped to the
-   * companies the caller may transact in.
+   * `/payments/companies/` is IsAuthenticated and already scoped to the
+   * companies the caller may transact in. It reads the canonical company list
+   * on the server, so a company added or renamed there needs no release here.
    */
   listCompanies: async (): Promise<DashboardCompany[]> => {
     const res = await api.get("/payments/companies/");
