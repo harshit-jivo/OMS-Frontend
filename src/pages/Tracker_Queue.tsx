@@ -542,8 +542,16 @@ export default function Tracker_Queue() {
   // column. A decision log can list an invoice twice; the register is one row
   // per invoice, so the ids are de-duplicated server-side.
   const tabLabel = TAB_LABELS[subTab] ?? subTab.charAt(0).toUpperCase() + subTab.slice(1);
+  // On a split tab (Hold / Debit) export exactly what is on screen: the rows
+  // still on this desk, plus the moved-on half ONLY while it is expanded.
+  // Exporting every decision row meant the invoices that had already advanced
+  // came down again in every sheet, so each export repeated work the desk had
+  // finished — the register is meant to be what is still in hand.
+  const visibleDecRows = isSplitTab
+    ? [...activeDecRows, ...(showMovedOn ? movedOnDecRows : [])]
+    : decRows;
   const exportIds = isDecisionTab
-    ? [...new Set(decRows.map((d) => d.invoice_id))]
+    ? [...new Set(visibleDecRows.map((d) => d.invoice_id))]
     : rows.map((i) => i.id);
 
   const onExport = async () => {
