@@ -21,7 +21,8 @@
  * with `Array.isArray(...) ? data : []` and three did not. They all do now —
  * the coercion is in the query, so a page cannot forget it.
  */
-import { useQuery } from "@tanstack/react-query";
+import { useMemo } from "react";
+import { useQueries, useQuery } from "@tanstack/react-query";
 
 import { sapService } from "../services/sapService";
 import type { Address, Branch, Log, Party, Product } from "../services/sapService";
@@ -103,24 +104,68 @@ export const useSapLogs = () => useSapList<Log>("logs", sapService.getLogs);
  * query reports `isPending: true` forever — it has no data and never will —
  * so a spinner bound to it would show permanently on a form nobody has touched.
  */
+/** The endpoint has answered under both names. Picking one and hoping is how
+ *  the dropdown silently empties; both are accepted, once, here. */
+const pickVarieties = (data: { sub_groups?: unknown; varieties?: unknown }): string[] =>
+  Array.isArray(data?.sub_groups)
+    ? (data.sub_groups as string[])
+    : Array.isArray(data?.varieties)
+      ? (data.varieties as string[])
+      : EMPTY;
+
 export function useProductVarieties(category: string) {
   const enabled = Boolean(category);
   const query = useQuery({
     queryKey: ["sap", "product-varieties", category],
     queryFn: () => sapService.getProductVarieties(category),
     enabled,
-    // The endpoint has answered under both names. Picking one and hoping is how
-    // the dropdown silently empties; both are accepted, once, here.
-    select: (data): string[] =>
-      Array.isArray(data?.sub_groups)
-        ? data.sub_groups
-        : Array.isArray(data?.varieties)
-          ? data.varieties
-          : EMPTY,
+    select: pickVarieties,
   });
   return {
     varieties: query.data ?? EMPTY,
     isLoading: enabled && query.isPending,
     isError: query.isError,
+  };
+}
+
+/**
+ * Sub groups across SEVERAL categories, for a user who holds more than one.
+ *
+ * A user can be assigned both OIL and BEVERAGES, and their sub groups are then
+ * the union of both catalogues — asking only about the first would hide every
+ * beverage sub group from an oil-and-beverages account.
+ *
+ * `useQueries` rather than a loop of `useProductVarieties`, because the number
+ * of categories changes as the admin ticks boxes and a hook cannot be called
+ * conditionally. The query keys are identical to the single-category hook's, so
+ * a category already fetched by either one is served from the same cache entry.
+ *
+ * Sorted and de-duplicated: two categories can share a sub group name, and the
+ * picker must not offer it twice.
+ */
+export function useProductVarietiesMulti(categories: string[]) {
+  const wanted = categories.filter(Boolean);
+  const results = useQueries({
+    queries: wanted.map((category) => ({
+      queryKey: ["sap", "product-varieties", category],
+      queryFn: () => sapService.getProductVarieties(category),
+      select: pickVarieties,
+    })),
+  });
+
+  const varieties = useMemo(() => {
+    const seen = new Set<string>();
+    for (const result of results) {
+      for (const variety of result.data ?? []) seen.add(variety);
+    }
+    return seen.size ? [...seen].sort((a, b) => a.localeCompare(b)) : EMPTY;
+    // `results` is a fresh array each render; its DATA is what matters here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [results.map((r) => r.dataUpdatedAt).join("|")]);
+
+  return {
+    varieties,
+    isLoading: wanted.length > 0 && results.some((r) => r.isPending),
+    isError: results.some((r) => r.isError),
   };
 }
