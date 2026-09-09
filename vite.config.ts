@@ -1,8 +1,10 @@
 import { defineConfig, loadEnv } from 'vite'
 import type { Connect, ViteDevServer, PreviewServer } from 'vite'
 import react from '@vitejs/plugin-react'
-import basicSsl from '@vitejs/plugin-basic-ssl'
+import tailwindcss from '@tailwindcss/vite'
 import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import type { ServerResponse } from 'node:http'
 
 // ---------------------------------------------------------------------------
 // Single source of truth for the web app's version.
@@ -81,7 +83,7 @@ const resolveBuildNumber = (
 const serviceWorkerNoCache = () => {
   const middleware = (
     req: Connect.IncomingMessage,
-    res: any,
+    res: ServerResponse,
     next: Connect.NextFunction,
   ) => {
     if (req.url && req.url.split('?')[0] === '/service-worker.js') {
@@ -99,6 +101,35 @@ const serviceWorkerNoCache = () => {
     },
   }
 }
+
+// ---------------------------------------------------------------------------
+// Which of OUR modules belong in the `shared` chunk (see build.rolldownOptions).
+//
+// `src/services/` as a whole is deliberately NOT the rule. That directory mixes
+// two unlike things: the axios instance every request goes through, and one
+// wrapper per feature — ordersService, schemeService, haisService and ten more.
+// Matching the whole directory put 107 kB in front of the login form, and
+// haisService is of no interest to anyone who never opens HAIS. Naming the core
+// keeps the feature wrappers where they belong: in the chunk of whichever page
+// imports them, which Vite already splits out on its own when several do.
+//
+// The test for membership is one question, checked against the imports rather
+// than guessed: does BOTH the shell and at least one page import it?
+//   * webDeviceService — Sidebar, main.tsx, Login AND Profile. In.
+//   * webPushClient, notificationBus — the sidebar's notification code only.
+//     Out: a shell-only module in here re-hashes every page chunk when it
+//     changes, for pages that never imported it. notificationBus was in this
+//     list on the assumption it was cross-cutting; the imports say otherwise.
+// ---------------------------------------------------------------------------
+const SERVICE_CORE =
+  /[\\/]src[\\/]services[\\/](api|apiPaths|requestId|uiConfig|webDeviceService)\.ts$/
+
+const sharedAppModule = (id: string): boolean =>
+  // auth, config, lib and the ui primitives are shared by definition: the shell
+  // and the pages both import them, which is exactly what pinned all 34 page
+  // chunks to the entry chunk's hash.
+  /[\\/]src[\\/](auth|config|lib|components[\\/]ui)[\\/]/.test(id) ||
+  SERVICE_CORE.test(id)
 
 // https://vite.dev/config/
 export default defineConfig(({ mode, command }) => {
@@ -132,14 +163,158 @@ export default defineConfig(({ mode, command }) => {
       __APP_VERSION__: JSON.stringify(version),
       __APP_BUILD_NUMBER__: JSON.stringify(buildNumber),
     },
-    // basicSsl only affects the dev server (serves over self-signed HTTPS) so a
-    // phone on the LAN can use the camera, which browsers block on plain HTTP.
-    // It is not added for `build`, so production output is unchanged.
+    // Dev server runs over plain HTTP so it matches the http:// API origin and
+    // there is no mixed-content blocking (an HTTPS page calling an http:// API
+    // is refused by the browser, which broke login). Trade-off: a phone on the
+    // LAN cannot use the browser camera over HTTP — re-enable basicSsl() below
+    // only if that is needed. Not added for `build`, so production is unchanged.
     plugins: [
       react(),
+      tailwindcss(),
       serviceWorkerNoCache(),
-      ...(command === 'serve' ? [basicSsl()] : []),
     ],
+    // `@/` -> src. Declared in components.json, so every component pasted
+    // from the shadcn registry imports `@/lib/utils` and resolves without
+    // hand-editing. Mirrored in tsconfig.app.json and vitest.config.ts.
+    resolve: {
+      alias: {
+        '@': fileURLToPath(new URL('./src', import.meta.url)),
+      },
+    },
+    build: {
+      rolldownOptions: {
+        output: {
+          /*
+           * Phase 5.4 — split the libraries out of the entry chunk.
+           *
+           * ───────────────────────────────────────────────────────────────
+           * THE PROBLEM THIS SOLVES IS CACHING, NOT SIZE
+           * ───────────────────────────────────────────────────────────────
+           * Phase 5.1 made every page lazy, which fixed the first-load size.
+           * What it did not fix is that the entry chunk still mixed two
+           * things with completely different lifetimes:
+           *
+           *   react-dom + react-router + radix + query   ~330 kB, changes
+           *     only when a dependency is upgraded — a few times a year.
+           *   App.tsx, Sidebar, Login, auth, services     ~55 kB, changes
+           *     with almost every deploy.
+           *
+           * One chunk means one hash, so a one-line Sidebar edit invalidated
+           * all 385 kB and every returning user re-downloaded React. Splitting
+           * on that seam means a normal deploy busts only the small half.
+           *
+           * ───────────────────────────────────────────────────────────────
+           * WHY THE GROUPS ARE NAMED PACKAGES AND NOT `/node_modules/`
+           * ───────────────────────────────────────────────────────────────
+           * The obvious rule — one `vendor` group testing /node_modules/ —
+           * is actively harmful here. It would pull exceljs (930 kB), xlsx
+           * (425 kB), html5-qrcode (370 kB) and recharts (303 kB) into a
+           * single chunk, and because the entry needs React from that same
+           * chunk, EVERY user would download all four before the login form
+           * rendered. Those four are already isolated behind dynamic imports
+           * and must stay that way, so each group below names only libraries
+           * the app shell genuinely loads on startup.
+           *
+           * react-icons is deliberately absent for the same reason: Sidebar
+           * imports the `hi2` set, and grouping all of react-icons would drag
+           * `fa`, `md` and `bs` — used only by lazy pages — onto the critical
+           * path. Vite already splits those per icon set.
+           *
+           * `[\\/]` rather than `/` in every test: these run against absolute
+           * module ids, which are backslashed on Windows.
+           */
+          codeSplitting: {
+            groups: [
+              {
+                // React itself. Largest single thing on the critical path and
+                // the least likely to change; worth its own hash alone.
+                name: 'react',
+                test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/,
+                priority: 30,
+              },
+              {
+                name: 'router',
+                test: /node_modules[\\/]react-router(-dom)?[\\/]/,
+                priority: 20,
+              },
+              {
+                // Radix and the scroll/focus helpers it pulls in. Eager because
+                // the notification permission modal is part of the shell, and
+                // shared by all 48 converted dialogs besides.
+                name: 'overlay',
+                test: /node_modules[\\/](@radix-ui[\\/]|react-remove-scroll|react-remove-scroll-bar|aria-hidden|use-sidecar|use-callback-ref|get-nonce|detect-node-es)/,
+                priority: 20,
+              },
+              {
+                /*
+                 * Only the two icon sets the SHELL itself imports. Sidebar
+                 * uses 32 icons from `hi2` and the dialog primitive uses one
+                 * from `lu`, so both are on the critical path already — but
+                 * they were sitting inside the entry chunk, where a Sidebar
+                 * edit re-hashed 67 kB of unchanged SVG paths along with it.
+                 *
+                 * NOT `react-icons` wholesale. `fi` is imported only by the
+                 * Dashboard, and a blanket rule would put any future set —
+                 * including a large one added to a single lazy page — in front
+                 * of the login form for every user.
+                 */
+                name: 'icons',
+                test: /node_modules[\\/]react-icons[\\/](hi2|lu)[\\/]/,
+                priority: 20,
+              },
+              {
+                // cn(): clsx + tailwind-merge + cva. Every primitive calls it,
+                // so it loads eagerly; on its own it was three separate
+                // requests for 27 kB that never changes.
+                name: 'styleutils',
+                test: /node_modules[\\/](clsx|tailwind-merge|class-variance-authority)[\\/]/,
+                priority: 20,
+              },
+              {
+                /*
+                 * The app's own shared infrastructure — the axios instance,
+                 * the session, the permission tables, `cn()`.
+                 *
+                 * This group exists because of a measured cascade, not a
+                 * theory. Every lazy page chunk imports these modules, and
+                 * they were living in the ENTRY chunk because the shell
+                 * imports them too. That made the entry a dependency of all
+                 * 34 page chunks, so changing one string in Sidebar.tsx
+                 * rewrote the entry's hash, rewrote the `from "./index-xxx.js"`
+                 * specifier inside all 34, and re-hashed every one of them —
+                 * a routine deploy invalidated the whole app's cache no matter
+                 * how small the change.
+                 *
+                 * Pulling them into their own chunk cuts the edge: pages now
+                 * import `shared-<hash>.js`, which changes only when the shared
+                 * code itself changes. Verified by rebuilding after a one-line
+                 * Sidebar edit and diffing the emitted filenames.
+                 *
+                 * `components/ui` is in here for the same reason and not for
+                 * tidiness: the shell's logout confirmation uses `Dialog`, so
+                 * dialog.tsx sat in the entry too and kept 26 of the 34 page
+                 * chunks pinned to it even after the services moved out. The
+                 * other seven primitives come along because they are 0.7-2.2 kB
+                 * each and were costing every page a separate request.
+                 *
+                 * `pages/` is NOT in the test. Those are what lazy loading is
+                 * for, and a page in here would be downloaded by everyone.
+                 */
+                name: 'shared',
+                test: sharedAppModule,
+                priority: 10,
+              },
+              {
+                // TanStack Query + axios: the data layer, shared by every page.
+                name: 'data',
+                test: /node_modules[\\/](@tanstack[\\/]|axios[\\/])/,
+                priority: 20,
+              },
+            ],
+          },
+        },
+      },
+    },
     server: {
       // Listen on all interfaces so the phone can reach it by the PC's LAN IP.
       host: true,

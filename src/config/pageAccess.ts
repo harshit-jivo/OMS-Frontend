@@ -11,21 +11,26 @@ export const TRACKER_PAGES: Record<string, { path: string; label: string }> = {
   Tracker_Alerts: { path: "/Tracker_Alerts", label: "Stuck Alerts" },
   Tracker_Reports: { path: "/Tracker_Reports", label: "Tracker Reports" },
   Tracker_Admin: { path: "/Tracker_Admin", label: "Tracker Config" },
+  Ap_Invoice_Entry: { path: "/Ap_Invoice_Entry", label: "AP Invoice Entry" },
 };
 
-// The three tracker sub-roles -> the pages each one sees.
+// The four tracker sub-roles -> the pages each one sees.
 // Stuck Alerts and All Invoices are admin-only.
 export const TRACKER_ROLE_PAGES: Record<string, string[]> = {
-  tracker_admin: ["Tracker_Entry", "Tracker_Queue", "Tracker_Invoices", "Tracker_Alerts", "Tracker_Reports", "Tracker_Admin"],
+  tracker_admin: ["Tracker_Entry", "Tracker_Queue", "Tracker_Invoices", "Tracker_Alerts", "Tracker_Reports", "Tracker_Admin", "Ap_Invoice_Entry"],
   tracker_entry: ["Tracker_Entry", "Tracker_Queue"],
   tracker_user: ["Tracker_Queue"],
+  // AP data entry is a distinct job from document tracking: these users post
+  // vendor invoices into SAP and have no reason to see the tracker queues.
+  tracker_ap: ["Ap_Invoice_Entry"],
 };
 
-// Display labels for the three sub-roles (for the user-management dropdown).
+// Display labels for the sub-roles (for the user-management dropdown).
 export const TRACKER_ROLE_LABELS: Record<string, string> = {
   tracker_admin: "Tracker Admin",
   tracker_entry: "Invoice Entry",
   tracker_user: "Tracker User",
+  tracker_ap: "Tracker AP Entry",
 };
 
 const ALL_TRACKER_PAGES = Object.keys(TRACKER_PAGES);
@@ -47,7 +52,9 @@ export function trackerPagesFor(role?: string | null, isAdmin = false): Set<stri
 }
 
 // Where a tracker user lands after login, by priority of what they can access.
-const LANDING_ORDER = ["Tracker_Queue", "Tracker_Entry", "Tracker_Reports", "Tracker_Alerts", "Tracker_Admin"];
+// Ap_Invoice_Entry must be listed: it is the ONLY page a tracker_ap user can
+// see, so leaving it out would land them on a page they have no access to.
+const LANDING_ORDER = ["Tracker_Queue", "Tracker_Entry", "Ap_Invoice_Entry", "Tracker_Reports", "Tracker_Alerts", "Tracker_Admin"];
 
 export function trackerLandingPath(pages: Set<string>): string | null {
   for (const key of LANDING_ORDER) {
@@ -60,6 +67,7 @@ export function trackerLandingPath(pages: Set<string>): string | null {
  * The landing path for ANY role, after a fresh login or a restored session:
  *   • tracker sub-roles -> their highest-priority tracker page
  *   • legal reviewers   -> their own workspace
+ *   • HAIS role         -> the Hardware Assets page
  *   • Distributor role  -> the Distributor page
  *   • Mart Approval role -> the Mart Approval queue
  *   • everyone else     -> the Dashboard
@@ -74,7 +82,8 @@ export function landingPathFor(role?: string | null): string {
     return trackerLandingPath(trackerPagesFor(role)) || TRACKER_PAGES.Tracker_Queue.path;
   }
   if (normalizeRole(role) === "legal") return "/Label_Checker";
+  if (normalizeRole(role) === "hais") return "/HAIS";
   if (normalizeRole(role) === "distributor") return "/Distributor";
   if (normalizeRole(role) === "mart_approval") return "/Mart_Approval";
-  return "/Dashboard";
+  return "/Home";
 }

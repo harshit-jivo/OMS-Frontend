@@ -1,0 +1,74 @@
+/*
+ * ErrorBoundary — Phase 6.3. Eight inline objects, no stylesheet.
+ *
+ * This one is worth stating plainly: the boundary renders when the app has
+ * already failed, so its styles must not depend on anything that might have
+ * failed with it. A stylesheet is still safe — CSS is loaded with the bundle,
+ * not by the page that crashed — but the file deliberately keeps its own
+ * `font-family` rather than inheriting an app shell that may not have mounted.
+ *
+ * Verified by `error-boundary.png`, the screenshot behind "does not take the
+ * app with it".
+ */
+
+.eb-screen {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 24px;
+  text-align: center;
+  font-family: system-ui, sans-serif;
+  color: #0f172a;
+}
+
+.eb-icon {
+  font-size: 48px;
+}
+
+.eb-title {
+  margin: 0;
+  font-size: 1.4rem;
+}
+
+.eb-text {
+  margin: 0;
+  max-width: 480px;
+  color: #5b6878;
+}
+
+.eb-message {
+  max-width: 560px;
+  overflow-x: auto;
+  background: #f1f5f9;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  color: #dc2626;
+}
+
+.eb-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.eb-btn {
+  padding: 10px 20px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.eb-btn--reload {
+  border: none;
+  background: #0f766e;
+  color: #fff;
+}
+
+.eb-btn--home {
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #0f172a;
+}

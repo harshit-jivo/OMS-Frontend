@@ -1,11 +1,54 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { HiArchiveBox, HiArrowPath, HiArrowRight, HiChevronLeft, HiDocumentText, HiPhoto, HiTrash, HiXMark } from "react-icons/hi2";
+import {
+  HiOutlineArchiveBox,
+  HiOutlineArrowPath,
+  HiOutlineArrowRight,
+  HiOutlineBeaker,
+  HiOutlineDocumentText,
+  HiOutlinePhoto,
+  HiOutlinePlus,
+  HiOutlineSparkles,
+  HiOutlineTrash,
+  HiOutlineUsers,
+} from "react-icons/hi2";
+
+import { Badge } from "@/components/ui/badge";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { FilterBar, FilterCount, FilterSearch } from "@/components/ui/filter-bar";
+import { Field, Input } from "@/components/ui/form";
+import {
+  Card,
+  EmptyState,
+  Notice,
+  Page,
+  PageHeader,
+  SectionHeading,
+} from "@/components/ui/page";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 import DraftStep, { BranchBadge } from "./DraftStep";
 import OrdersStep from "./OrdersStep";
 import { apiFetch, hanaUrl, useSalesInvoice, type SalesInvoiceState } from "./useSalesInvoice";
 import { formatMoney, type SelectedLine } from "./salesInvoice.utils";
-import "../../styles/Sales_Invoice.css";
 
 type PartyPickerModalProps = {
   state: SalesInvoiceState;
@@ -162,30 +205,89 @@ const getChainValue = (chain?: string | null) => {
   return text || nullChainValue;
 };
 
-const formatChainName = (chainValue: string) => chainValue === nullChainValue ? "No Chain" : chainValue;
+const formatChainName = (chainValue: string) =>
+  chainValue === nullChainValue ? "No Chain" : chainValue;
 
 const getPartyOpenOrders = (party: { OpenOrders?: number; Num_of_Open_SalesOrder?: number }) =>
   Number(party.OpenOrders ?? party.Num_of_Open_SalesOrder ?? 0);
 
 const getItemTotalQty = (item: FinishedGoodItem) => {
-  const qty = Number(item.TotalQty ?? item.AvailableQty ?? item.AvailableQuantity ?? item.Quantity ?? item.OnHand ?? item.InStock ?? 0);
+  const qty = Number(
+    item.TotalQty ??
+      item.AvailableQty ??
+      item.AvailableQuantity ??
+      item.Quantity ??
+      item.OnHand ??
+      item.InStock ??
+      0,
+  );
   return Number.isFinite(qty) ? qty : 0;
 };
 
 const stateFilterOrder = [
-  "PB", "HR", "DL", "UP", "AP", "GJ", "MH", "WB", "JK", "TE", "KT", "RJ", "GO", "AS", "HP", "UK",
-  "BH", "MP", "TN", "CT", "DB", "MN",
+  "PB",
+  "HR",
+  "DL",
+  "UP",
+  "AP",
+  "GJ",
+  "MH",
+  "WB",
+  "JK",
+  "TE",
+  "KT",
+  "RJ",
+  "GO",
+  "AS",
+  "HP",
+  "UK",
+  "BH",
+  "MP",
+  "TN",
+  "CT",
+  "DB",
+  "MN",
 ];
 
 const chainFilterOrder = [
-  "DISTRIBUTOR", "D MART", "SUPER STOCKIST", "RETAILER", nullChainValue, "WALMART", "INDIVIDUALS",
-  "BIG BASKET", "GT", "SINGLE SHOPS", "RELIANCE FRESH", "ARY SHOPS", "GURUDWARA", "METRO CASH & CARRY",
-  "ABRL", "RAJ MANDIR", "AMAZON", "BULK", "STAFF",
+  "DISTRIBUTOR",
+  "D MART",
+  "SUPER STOCKIST",
+  "RETAILER",
+  nullChainValue,
+  "WALMART",
+  "INDIVIDUALS",
+  "BIG BASKET",
+  "GT",
+  "SINGLE SHOPS",
+  "RELIANCE FRESH",
+  "ARY SHOPS",
+  "GURUDWARA",
+  "METRO CASH & CARRY",
+  "ABRL",
+  "RAJ MANDIR",
+  "AMAZON",
+  "BULK",
+  "STAFF",
 ];
 
 const mainGroupFilterOrder = [
-  "GT", "MT", "ROI", "E-COMMERCE", "BRANCH", "CSD", "CORPORATE", "HORECA", "STAFF", "REFERENCE",
-  "SANGAT", "CALL CENTER", "BULK OIL", "EXPORT", "EVENTS & EXHIBITIONS", "PURCHASE OIL",
+  "GT",
+  "MT",
+  "ROI",
+  "E-COMMERCE",
+  "BRANCH",
+  "CSD",
+  "CORPORATE",
+  "HORECA",
+  "STAFF",
+  "REFERENCE",
+  "SANGAT",
+  "CALL CENTER",
+  "BULK OIL",
+  "EXPORT",
+  "EVENTS & EXHIBITIONS",
+  "PURCHASE OIL",
 ];
 
 const sortByFilterOrder = (order: string[]) => (optionA: string, optionB: string) => {
@@ -201,13 +303,18 @@ const sortByFilterOrder = (order: string[]) => (optionA: string, optionB: string
 
 function PartyPickerModal({ state, onClose, onSelect }: PartyPickerModalProps) {
   const [selectedState, setSelectedState] = useState("");
-  const [selectedMainGroup, setSelectedMainGroup] = useState("");
-  const [selectedChain, setSelectedChain] = useState("");
+  // The raw chip choices. What the rest of the component reads is the DERIVED
+  // `selectedMainGroup` / `selectedChain` below, which drop a choice that is no
+  // longer among its options — the job the two clamp effects used to do a
+  // render late.
+  const [mainGroupChoice, setMainGroupChoice] = useState("");
+  const [chainChoice, setChainChoice] = useState("");
   const [partyQuery, setPartyQuery] = useState("");
   const [filterModal, setFilterModal] = useState<"state" | "mainGroup" | "chain" | null>(null);
   const stateOptions = useMemo(() => {
-    return [...new Set(state.parties.map((party) => String(party.State1 || "").trim()).filter(Boolean))]
-      .sort(sortByFilterOrder(stateFilterOrder));
+    return [
+      ...new Set(state.parties.map((party) => String(party.State1 || "").trim()).filter(Boolean)),
+    ].sort(sortByFilterOrder(stateFilterOrder));
   }, [state.parties]);
   const mainGroupOptions = useMemo(() => {
     const groups = state.parties
@@ -216,6 +323,7 @@ function PartyPickerModal({ state, onClose, onSelect }: PartyPickerModalProps) {
       .filter(Boolean);
     return [...new Set(groups)].sort(sortByFilterOrder(mainGroupFilterOrder));
   }, [selectedState, state.parties]);
+  const selectedMainGroup = mainGroupOptions.includes(mainGroupChoice) ? mainGroupChoice : "";
   const chainOptions = useMemo(() => {
     const chains = state.parties
       .filter((party) => !selectedState || party.State1 === selectedState)
@@ -226,27 +334,42 @@ function PartyPickerModal({ state, onClose, onSelect }: PartyPickerModalProps) {
     );
     return uniqueChains.sort(sortByFilterOrder(chainFilterOrder));
   }, [selectedMainGroup, selectedState, state.parties]);
+  const selectedChain = chainOptions.includes(chainChoice) ? chainChoice : "";
   const filteredParties = useMemo(() => {
     const normalizedQuery = partyQuery.trim().toLowerCase();
     return state.parties.filter((party) => {
       const stateMatches = !selectedState || party.State1 === selectedState;
       const mainGroupMatches = !selectedMainGroup || party.U_Main_Group === selectedMainGroup;
       const chainMatches = !selectedChain || getChainValue(party.U_Chain) === selectedChain;
-      const queryMatches = !normalizedQuery
-        || [party.CardName, party.CardCode, formatStateName(party.State1), party.U_Main_Group, party.U_Chain]
+      const queryMatches =
+        !normalizedQuery ||
+        [
+          party.CardName,
+          party.CardCode,
+          formatStateName(party.State1),
+          party.U_Main_Group,
+          party.U_Chain,
+        ]
           .filter(Boolean)
           .some((value) => String(value).toLowerCase().includes(normalizedQuery));
       return stateMatches && mainGroupMatches && chainMatches && queryMatches;
     });
   }, [partyQuery, selectedChain, selectedMainGroup, selectedState, state.parties]);
 
+  /* Replaced by the two derived consts above. These cleared a filter one render
+     AFTER its option list stopped containing it, so the list below rendered once
+     against a filter that no longer applied.
+
   useEffect(() => {
-    setSelectedMainGroup((current) => (current && !mainGroupOptions.includes(current) ? "" : current));
+    setMainGroupChoice((current) =>
+      current && !mainGroupOptions.includes(current) ? "" : current,
+    );
   }, [mainGroupOptions]);
 
   useEffect(() => {
-    setSelectedChain((current) => (current && !chainOptions.includes(current) ? "" : current));
+    setChainChoice((current) => (current && !chainOptions.includes(current) ? "" : current));
   }, [chainOptions]);
+  */
 
   const visibleStates = useMemo(() => {
     const selectedFirstStates = selectedState
@@ -271,234 +394,301 @@ function PartyPickerModal({ state, onClose, onSelect }: PartyPickerModalProps) {
   const hiddenChainCount = Math.max(chainOptions.length - visibleChains.length, 0);
   const clearPartyFilters = () => {
     setSelectedState("");
-    setSelectedMainGroup("");
-    setSelectedChain("");
+    setMainGroupChoice("");
+    setChainChoice("");
   };
-  const modalOptions = filterModal === "state" ? stateOptions : filterModal === "mainGroup" ? mainGroupOptions : chainOptions;
-  const modalTitle = filterModal === "state" ? "Select State" : filterModal === "mainGroup" ? "Select Main Group" : "Select Chain";
-  const modalAllLabel = filterModal === "state" ? "All states" : filterModal === "mainGroup" ? "All main groups" : "All chains";
-  const isModalAllActive = filterModal === "state" ? !selectedState : filterModal === "mainGroup" ? !selectedMainGroup : !selectedChain;
-  const isModalOptionActive = (option: string) => (
-    filterModal === "state" ? selectedState === option : filterModal === "mainGroup" ? selectedMainGroup === option : selectedChain === option
-  );
+  const modalOptions =
+    filterModal === "state"
+      ? stateOptions
+      : filterModal === "mainGroup"
+        ? mainGroupOptions
+        : chainOptions;
+  const modalTitle =
+    filterModal === "state"
+      ? "Select State"
+      : filterModal === "mainGroup"
+        ? "Select Main Group"
+        : "Select Chain";
+  const modalAllLabel =
+    filterModal === "state"
+      ? "All states"
+      : filterModal === "mainGroup"
+        ? "All main groups"
+        : "All chains";
+  const isModalAllActive =
+    filterModal === "state"
+      ? !selectedState
+      : filterModal === "mainGroup"
+        ? !selectedMainGroup
+        : !selectedChain;
+  const isModalOptionActive = (option: string) =>
+    filterModal === "state"
+      ? selectedState === option
+      : filterModal === "mainGroup"
+        ? selectedMainGroup === option
+        : selectedChain === option;
   const selectModalOption = (option: string) => {
     if (filterModal === "state") setSelectedState(option);
-    else if (filterModal === "mainGroup") setSelectedMainGroup(option);
-    else setSelectedChain(option);
+    else if (filterModal === "mainGroup") setMainGroupChoice(option);
+    else setChainChoice(option);
     setFilterModal(null);
   };
   const clearModalOption = () => {
     if (filterModal === "state") setSelectedState("");
-    else if (filterModal === "mainGroup") setSelectedMainGroup("");
-    else setSelectedChain("");
+    else if (filterModal === "mainGroup") setMainGroupChoice("");
+    else setChainChoice("");
     setFilterModal(null);
   };
-  const formatModalOption = (option: string) => (
-    filterModal === "state" ? formatStateName(option) : filterModal === "mainGroup" ? option : formatChainName(option)
-  );
+  const formatModalOption = (option: string) =>
+    filterModal === "state"
+      ? formatStateName(option)
+      : filterModal === "mainGroup"
+        ? option
+        : formatChainName(option);
+
+  /**
+   * One filter chip. Three groups use it (state, main group, chain), so it is
+   * declared once here rather than repeated with a template-string class.
+   */
+  const chip = (active: boolean) =>
+    cn(
+      "cursor-pointer appearance-none rounded-full border px-2.5 py-1 text-[12px] [font-family:inherit] transition-colors",
+      active
+        ? "border-brand-line bg-brand text-white"
+        : "border-line bg-card text-body hover:border-line-strong hover:bg-surface",
+    );
 
   return (
-    <div className="si-modal-backdrop" role="presentation" onClick={onClose}>
-      <section
-        className="si-party-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Select party"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <header className="si-so-modal-head">
-          <div>
-            <h2>Select party</h2>
-          </div>
-          <button
-            className="si-modal-icon-btn si-modal-icon-close"
-            type="button"
-            aria-label="Close"
-            title="Close"
-            onClick={onClose}
-          >
-            <HiXMark aria-hidden="true" />
-          </button>
-        </header>
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+    >
+      <DialogContent title="Select party" size="xl">
+        <DialogHeader>
+          <DialogTitle>Select party</DialogTitle>
+        </DialogHeader>
 
-        <div className="si-party-modal-body">
-          <aside className="si-party-filter-panel">
-            <span className="si-party-filter-label">State</span>
-            <div className="si-party-state-filters" aria-label="State filters">
-              <button
-                className={`si-state-chip${!selectedState ? " is-active" : ""}`}
-                type="button"
-                onClick={() => setSelectedState("")}
-              >
-                All states
-              </button>
-              {visibleStates.map((vendorState) => (
+        <DialogBody className="grid gap-4 sm:grid-cols-[minmax(0,240px)_minmax(0,1fr)]">
+          {/* -- Filters -- */}
+          <aside className="space-y-3">
+            <div className="space-y-1.5">
+              <SectionHeading>State</SectionHeading>
+              <div className="flex flex-wrap gap-1.5" aria-label="State filters">
                 <button
-                  className={`si-state-chip${selectedState === vendorState ? " is-active" : ""}`}
                   type="button"
-                  key={vendorState}
-                  onClick={() => setSelectedState(vendorState)}
+                  className={chip(!selectedState)}
+                  onClick={() => setSelectedState("")}
                 >
-                  {formatStateName(vendorState)}
+                  All states
                 </button>
-              ))}
-              {hiddenStateCount > 0 && (
-                <button className="si-state-chip si-state-chip-more" type="button" onClick={() => setFilterModal("state")}>
-                  More +{hiddenStateCount}
-                </button>
-              )}
+                {visibleStates.map((vendorState) => (
+                  <button
+                    type="button"
+                    key={vendorState}
+                    className={chip(selectedState === vendorState)}
+                    onClick={() => setSelectedState(vendorState)}
+                  >
+                    {formatStateName(vendorState)}
+                  </button>
+                ))}
+                {hiddenStateCount > 0 && (
+                  <button
+                    type="button"
+                    className={chip(false)}
+                    onClick={() => setFilterModal("state")}
+                  >
+                    More +{hiddenStateCount}
+                  </button>
+                )}
+              </div>
             </div>
 
-            <span className="si-party-filter-label">Main Group</span>
-            <div className="si-party-state-filters" aria-label="Main group filters">
-              <button
-                className={`si-state-chip${!selectedMainGroup ? " is-active" : ""}`}
-                type="button"
-                onClick={() => setSelectedMainGroup("")}
-              >
-                All main groups
-              </button>
-              {visibleMainGroups.map((mainGroup) => (
+            <div className="space-y-1.5">
+              <SectionHeading>Main group</SectionHeading>
+              <div className="flex flex-wrap gap-1.5" aria-label="Main group filters">
                 <button
-                  className={`si-state-chip${selectedMainGroup === mainGroup ? " is-active" : ""}`}
                   type="button"
-                  key={mainGroup}
-                  onClick={() => setSelectedMainGroup(mainGroup)}
+                  className={chip(!selectedMainGroup)}
+                  onClick={() => setMainGroupChoice("")}
                 >
-                  {mainGroup}
+                  All main groups
                 </button>
-              ))}
-              {hiddenMainGroupCount > 0 && (
-                <button className="si-state-chip si-state-chip-more" type="button" onClick={() => setFilterModal("mainGroup")}>
-                  More +{hiddenMainGroupCount}
-                </button>
-              )}
+                {visibleMainGroups.map((mainGroup) => (
+                  <button
+                    type="button"
+                    key={mainGroup}
+                    className={chip(selectedMainGroup === mainGroup)}
+                    onClick={() => setMainGroupChoice(mainGroup)}
+                  >
+                    {mainGroup}
+                  </button>
+                ))}
+                {hiddenMainGroupCount > 0 && (
+                  <button
+                    type="button"
+                    className={chip(false)}
+                    onClick={() => setFilterModal("mainGroup")}
+                  >
+                    More +{hiddenMainGroupCount}
+                  </button>
+                )}
+              </div>
             </div>
 
-            <span className="si-party-filter-label">Chain</span>
-            <div className="si-party-state-filters" aria-label="Chain filters">
-              <button
-                className={`si-state-chip${!selectedChain ? " is-active" : ""}`}
-                type="button"
-                onClick={() => setSelectedChain("")}
-              >
-                All chains
-              </button>
-              {visibleChains.map((chain) => (
+            <div className="space-y-1.5">
+              <SectionHeading>Chain</SectionHeading>
+              <div className="flex flex-wrap gap-1.5" aria-label="Chain filters">
                 <button
-                  className={`si-state-chip${selectedChain === chain ? " is-active" : ""}`}
                   type="button"
-                  key={chain}
-                  onClick={() => setSelectedChain(chain)}
+                  className={chip(!selectedChain)}
+                  onClick={() => setChainChoice("")}
                 >
-                  {formatChainName(chain)}
+                  All chains
                 </button>
-              ))}
-              {hiddenChainCount > 0 && (
-                <button className="si-state-chip si-state-chip-more" type="button" onClick={() => setFilterModal("chain")}>
-                  More +{hiddenChainCount}
-                </button>
-              )}
+                {visibleChains.map((chain) => (
+                  <button
+                    type="button"
+                    key={chain}
+                    className={chip(selectedChain === chain)}
+                    onClick={() => setChainChoice(chain)}
+                  >
+                    {formatChainName(chain)}
+                  </button>
+                ))}
+                {hiddenChainCount > 0 && (
+                  <button
+                    type="button"
+                    className={chip(false)}
+                    onClick={() => setFilterModal("chain")}
+                  >
+                    More +{hiddenChainCount}
+                  </button>
+                )}
+              </div>
             </div>
 
             {(selectedState || selectedMainGroup || selectedChain) && (
-              <button className="si-btn si-btn-outline si-party-clear-filters" type="button" onClick={clearPartyFilters}>
+              <Button size="sm" onClick={clearPartyFilters}>
                 Clear filters
-              </button>
+              </Button>
             )}
           </aside>
 
-          <section className="si-party-results-panel">
-            <input
-              className="si-search-input si-party-search-input"
-              value={partyQuery}
-              onChange={(event) => setPartyQuery(event.target.value)}
-              placeholder="Search party, code, state, main group or chain"
-              autoFocus
-            />
-            {state.partyError && <div className="si-inline-error">{state.partyError}</div>}
+          {/* -- Results -- */}
+          <section className="space-y-2">
+            <FilterBar className="border-0 bg-transparent p-0">
+              <FilterSearch
+                value={partyQuery}
+                onChange={(event) => setPartyQuery(event.target.value)}
+                placeholder="Party, code, state, main group or chain..."
+                fieldClassName="min-w-[240px]"
+                autoFocus
+              />
+              <FilterCount>
+                {filteredParties.length} part{filteredParties.length === 1 ? "y" : "ies"}
+              </FilterCount>
+            </FilterBar>
 
-            <div className="si-party-modal-results">
+            {state.partyError && <Notice tone="bad">{state.partyError}</Notice>}
+
             {state.loadingParties ? (
-              <div className="si-loader">Loading customers...</div>
+              <div className="space-y-1.5">
+                <Skeleton className="h-10 w-full" />
+                <Skeleton className="h-10 w-full" />
+                <Skeleton className="h-10 w-full" />
+              </div>
             ) : filteredParties.length === 0 ? (
-              <div className="si-empty">No customers found.</div>
+              <EmptyState
+                icon={HiOutlineUsers}
+                title="No customers match"
+                hint="Clear a filter, or search the card code on its own."
+              />
             ) : (
-              filteredParties.map((party) => (
-                <button
-                  className="si-party-row"
-                  key={`${party.CardCode}-${party.State1 || ""}-${party.U_Main_Group || ""}-${party.U_Chain || ""}`}
-                  type="button"
-                  onClick={() => {
-                    state.selectParty(party);
-                    onSelect();
-                  }}
-                >
-                  <span>
-                    <strong>{party.CardName}</strong>
-                  </span>
-                  <small className="si-party-so-count">
-                    {getPartyOpenOrders(party).toLocaleString("en-IN")} open SO
-                  </small>
-                </button>
-              ))
+              <ul className="m-0 max-h-[420px] list-none divide-y divide-line overflow-y-auto rounded-sm border border-line p-0">
+                {filteredParties.map((party) => (
+                  <li
+                    key={
+                      party.CardCode +
+                      "-" +
+                      (party.State1 || "") +
+                      "-" +
+                      (party.U_Main_Group || "") +
+                      "-" +
+                      (party.U_Chain || "")
+                    }
+                  >
+                    <button
+                      type="button"
+                      className="flex w-full cursor-pointer appearance-none items-center justify-between gap-3 border-0 bg-transparent px-3 py-2 text-left [font-family:inherit] text-[13px] transition-colors hover:bg-surface"
+                      onClick={() => {
+                        state.selectParty(party);
+                        onSelect();
+                      }}
+                    >
+                      <span className="min-w-0 flex-1 truncate font-semibold text-ink">
+                        {party.CardName}
+                      </span>
+                      <Badge tone="info">
+                        {getPartyOpenOrders(party).toLocaleString("en-IN")} open SO
+                      </Badge>
+                    </button>
+                  </li>
+                ))}
+              </ul>
             )}
-            </div>
           </section>
-        </div>
+        </DialogBody>
+      </DialogContent>
 
+      {/*
+        The "More +N" overflow, as a SECOND dialog rather than a nested
+        backdrop inside the first. Radix stacks them and keeps focus in the
+        topmost, which the hand-rolled version could not do -- it relied on
+        stopPropagation to stop the outer modal closing behind it.
+      */}
+      <Dialog
+        open={Boolean(filterModal)}
+        onOpenChange={(next) => {
+          if (!next) setFilterModal(null);
+        }}
+      >
         {filterModal && (
-          <div
-            className="si-nested-modal-backdrop"
-            role="presentation"
-            onClick={(event) => {
-              event.stopPropagation();
-              setFilterModal(null);
-            }}
-          >
-            <section
-              className="si-filter-options-modal"
-              role="dialog"
-              aria-modal="true"
-              aria-label={`${modalTitle} filter`}
-              onClick={(event) => event.stopPropagation()}
-            >
-              <header className="si-filter-options-head">
-                <h3>{modalTitle}</h3>
+          <DialogContent title={modalTitle} size="md">
+            <DialogHeader>
+              <DialogTitle>{modalTitle}</DialogTitle>
+            </DialogHeader>
+            <DialogBody>
+              <div className="flex flex-wrap gap-1.5">
                 <button
-                  className="si-modal-icon-btn si-modal-icon-close"
                   type="button"
-                  aria-label="Close"
-                  title="Close"
-                  onClick={() => setFilterModal(null)}
-                >
-                  <HiXMark aria-hidden="true" />
-                </button>
-              </header>
-              <div className="si-filter-options-grid">
-                <button
-                  className={`si-state-chip${isModalAllActive ? " is-active" : ""}`}
-                  type="button"
+                  className={chip(isModalAllActive)}
                   onClick={clearModalOption}
                 >
                   {modalAllLabel}
                 </button>
                 {modalOptions.map((option) => (
                   <button
-                    className={`si-state-chip${isModalOptionActive(option) ? " is-active" : ""}`}
                     type="button"
                     key={option}
+                    className={chip(isModalOptionActive(option))}
                     onClick={() => selectModalOption(option)}
                   >
                     {formatModalOption(option)}
                   </button>
                 ))}
               </div>
-            </section>
-          </div>
+            </DialogBody>
+            <DialogFooter>
+              <Button variant="primary" onClick={() => setFilterModal(null)}>
+                Done
+              </Button>
+            </DialogFooter>
+          </DialogContent>
         )}
-      </section>
-    </div>
+      </Dialog>
+    </Dialog>
   );
 }
 
@@ -515,7 +705,7 @@ type SkeletonInvoiceProps = {
   onRemoveItemRow: (rowId: number) => void;
   itemDraftError: string;
   onReset: () => void;
-  onChangeBranch: () => void;
+  onChangeBranch?: () => void;
 };
 
 function InvoiceSourceChoice({
@@ -533,39 +723,50 @@ function InvoiceSourceChoice({
 }) {
   const salesOrderMeta = loadingOrders
     ? "Loading open sales orders..."
-    : ordersError || `${openSalesOrderCount} open sales ${openSalesOrderCount === 1 ? "order" : "orders"}`;
+    : ordersError ||
+      `${openSalesOrderCount} open sales ${openSalesOrderCount === 1 ? "order" : "orders"}`;
 
   return (
-    <section className="si-source-choice" aria-label="Invoice source">
-      <div className="si-source-choice-grid">
-        <button className="si-source-card si-source-card-items" type="button" onClick={onChooseItems}>
-          <HiArchiveBox className="si-source-card-watermark" aria-hidden="true" />
-          <span className="si-source-card-icon" aria-hidden="true">
-            <HiArchiveBox />
+    <section aria-label="Invoice source" className="grid gap-4 sm:grid-cols-2">
+      {[
+        {
+          icon: HiOutlineArchiveBox,
+          title: "Individual items",
+          meta: null as string | null,
+          copy: "Pick finished goods directly for this party.",
+          onClick: onChooseItems,
+        },
+        {
+          icon: HiOutlineDocumentText,
+          title: "Sales order",
+          meta: salesOrderMeta,
+          copy: "Invoice against this party's open sales orders.",
+          onClick: onChooseSalesOrder,
+        },
+      ].map(({ icon: Icon, title, meta, copy, onClick }) => (
+        <button
+          key={title}
+          type="button"
+          /* A big choice card, so it carries the DESIGN_SYSTEM 1.1 reset
+             rather than being a `ui/button`. */
+          className="group flex cursor-pointer appearance-none flex-col items-start gap-2 rounded-card border border-line bg-card p-5 text-left [font-family:inherit] shadow-card transition-colors hover:border-brand-line hover:bg-brand-soft"
+          onClick={onClick}
+        >
+          <span
+            aria-hidden="true"
+            className="flex size-10 items-center justify-center rounded-full bg-brand-soft text-[20px] text-brand"
+          >
+            <Icon />
           </span>
-          <strong>Individual Items</strong>
-          <span className="si-source-card-copy">Select items directly for this party.</span>
-          <em>
+          <strong className="text-[15px] font-semibold text-ink">{title}</strong>
+          {meta && <span className="text-[12px] text-subtle">{meta}</span>}
+          <span className="text-[13px] text-body">{copy}</span>
+          <span className="mt-1 inline-flex items-center gap-1 text-[12px] font-semibold text-brand">
             Continue
-            <HiArrowRight aria-hidden="true" />
-          </em>
-        </button>
-        <button className="si-source-card si-source-card-orders" type="button" onClick={onChooseSalesOrder}>
-          <HiDocumentText className="si-source-card-watermark" aria-hidden="true" />
-          <span className="si-source-card-icon" aria-hidden="true">
-            <HiDocumentText />
+            <HiOutlineArrowRight aria-hidden="true" />
           </span>
-          <strong>
-            Sales Order
-            <small>{salesOrderMeta}</small>
-          </strong>
-          <span className="si-source-card-copy">Pick open sales orders and continue the existing invoice flow.</span>
-          <em>
-            Continue
-            <HiArrowRight aria-hidden="true" />
-          </em>
         </button>
-      </div>
+      ))}
     </section>
   );
 }
@@ -586,107 +787,167 @@ function ItemInvoiceLines({
   draftError: string;
 }) {
   return (
-    <div className="si-item-lines-panel">
-      <header className="si-item-source-head">
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <span className="si-eyebrow">Individual Items</span>
-          <h2>Invoice Lines</h2>
-          <p>Select finished goods directly for this invoice.</p>
+          <SectionHeading>Individual items</SectionHeading>
+          <p className="m-0 mt-0.5 text-[12px] text-subtle">
+            Select finished goods directly for this invoice.
+          </p>
         </div>
-        <div className="si-item-source-actions">
-          <button className="si-item-add-btn" type="button" onClick={onAddRow}>
-            Add Items
-          </button>
-        </div>
-      </header>
-      {draftError && <div className="si-inline-error">{draftError}</div>}
-      <div className="si-invoice-line-grid si-individual-item-card-grid">
-        {rows.map((row) => {
-          const batchQty = row.batch?.batches.reduce((sum, batch) => sum + batch.quantity, 0) || 0;
-          const invoiceQty = toFiniteQuantity(row.invoiceQty);
-          const batchWarehouse = row.batch?.warehouseCode || "-";
-          const availableQty = row.batch ? row.batch.warehouseQuantity : row.item ? getItemTotalQty(row.item) : 0;
-          const batchQtyMismatch = Boolean(row.item) && Math.abs(batchQty - invoiceQty) >= 0.0001;
+        <Button onClick={onAddRow}>
+          <HiOutlinePlus aria-hidden="true" />
+          Add item
+        </Button>
+      </div>
 
-          return (
-            <article className="si-invoice-line-card" key={row.id}>
-              <div className="si-invoice-item-visual">
-                <span />
-                <button
-                  className="si-invoice-line-remove"
-                  type="button"
-                  onClick={() => onRemoveRow(row.id)}
-                  aria-label={`Remove ${row.item?.ItemName || "item row"}`}
-                >
-                  <HiTrash aria-hidden="true" />
-                </button>
-              </div>
-              <div className="si-invoice-item-copy">
-                <strong>{row.item?.ItemName || "Select an item"}</strong>
-                <button className="si-item-card-select-btn" type="button" onClick={() => onOpenItemPicker(row.id)}>
-                  {row.item?.ItemCode || "Click to Select Item"}
-                </button>
-                <dl>
+      {draftError && <Notice tone="bad">{draftError}</Notice>}
+
+      {rows.length === 0 ? (
+        <Card>
+          <EmptyState
+            icon={HiOutlineArchiveBox}
+            title="No items yet"
+            hint="Add a row, then choose the finished good it invoices."
+            action={
+              <Button variant="primary" onClick={onAddRow}>
+                <HiOutlinePlus aria-hidden="true" />
+                Add item
+              </Button>
+            }
+          />
+        </Card>
+      ) : (
+        <ul className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-3 p-0">
+          {rows.map((row) => {
+            const batchQty =
+              row.batch?.batches.reduce((sum, batch) => sum + batch.quantity, 0) || 0;
+            const invoiceQty = toFiniteQuantity(row.invoiceQty);
+            const batchWarehouse = row.batch?.warehouseCode || "-";
+            const availableQty = row.batch
+              ? row.batch.warehouseQuantity
+              : row.item
+                ? getItemTotalQty(row.item)
+                : 0;
+            const batchQtyMismatch =
+              Boolean(row.item) && Math.abs(batchQty - invoiceQty) >= 0.0001;
+
+            return (
+              <li
+                className={cn(
+                  "flex flex-col gap-2 rounded-card border bg-card p-3",
+                  batchQtyMismatch ? "border-bad/40" : "border-line",
+                )}
+                key={row.id}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <strong className="text-[13px] font-semibold text-ink">
+                    {row.item?.ItemName || "Select an item"}
+                  </strong>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => onRemoveRow(row.id)}
+                    aria-label={"Remove " + (row.item?.ItemName || "item row")}
+                  >
+                    <HiOutlineTrash />
+                  </Button>
+                </div>
+
+                <Button size="sm" className="justify-start" onClick={() => onOpenItemPicker(row.id)}>
+                  {row.item?.ItemCode || "Choose an item"}
+                </Button>
+
+                <dl className="m-0 flex items-end justify-between gap-3">
                   <div>
-                    <dt>Quantity</dt>
-                    <dd>
-                      <input value={row.item ? row.invoiceQty : ""} placeholder="Qty" readOnly />
+                    <dt className="text-[11px] uppercase tracking-wide text-subtle">Quantity</dt>
+                    <dd className="m-0 text-[13px] tabular-nums text-ink">
+                      {row.item ? row.invoiceQty : "-"}
                     </dd>
                   </div>
-                  <div>
-                    <dt>Unit Price</dt>
-                    <dd>{row.item ? formatMoney(pickItemNumber(row.item, ["Price", "UnitPrice", "PriceBefDi"], 0)) : "-"}</dd>
+                  <div className="text-right">
+                    <dt className="text-[11px] uppercase tracking-wide text-subtle">Unit price</dt>
+                    <dd className="m-0 text-[13px] tabular-nums text-ink">
+                      {row.item
+                        ? formatMoney(
+                            pickItemNumber(row.item, ["Price", "UnitPrice", "PriceBefDi"], 0),
+                          )
+                        : "-"}
+                    </dd>
                   </div>
                 </dl>
+
                 <button
-                  className={`si-batch-select-btn${batchQtyMismatch ? " has-error" : ""}`}
                   type="button"
                   disabled={!row.item}
+                  className={cn(
+                    "w-full cursor-pointer appearance-none rounded-sm border px-2.5 py-2 text-left [font-family:inherit] text-[12px] transition-colors disabled:cursor-not-allowed disabled:opacity-60",
+                    batchQtyMismatch
+                      ? "border-bad/40 bg-bad-soft text-bad"
+                      : "border-line bg-surface text-body hover:border-line-strong",
+                  )}
                   onClick={() => onOpenBatchPicker(row.id)}
                 >
-                  {row.batch ? (
-                    <span>
-                      Warehouse: {batchWarehouse} | Available Qty: {availableQty.toLocaleString("en-IN")}
-                    </span>
-                  ) : (
-                    <span>
-                      {row.item
-                        ? `Warehouse: ${batchWarehouse} | Available Qty: ${availableQty.toLocaleString("en-IN")}`
-                        : "Select item first"}
-                    </span>
-                  )}
+                  <span className="block">
+                    {row.item
+                      ? "Warehouse " +
+                        batchWarehouse +
+                        " - available " +
+                        availableQty.toLocaleString("en-IN")
+                      : "Select an item first"}
+                  </span>
                   {batchQtyMismatch && (
-                    <strong className="si-batch-select-warning">
+                    <strong className="mt-0.5 block font-semibold">
                       Batch quantity does not match invoice quantity.
                     </strong>
                   )}
                 </button>
-              </div>
-            </article>
-          );
-        })}
-      </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 }
 
-function InvoicePageHeader({ onOpenSkuGallery, onReload }: { onOpenSkuGallery: () => void; onReload: () => void }) {
+/**
+ * The page chrome.
+ *
+ * The wizard below it is converted too now — branch gate, party picker, source
+ * choice, item lines, open-orders list, both batch pickers and the draft. The
+ * step ORDER and every interaction are unchanged: this was a restyle, not a
+ * redesign, because people have muscle memory for this form.
+ */
+function InvoicePageHeader({
+  onOpenSkuGallery,
+  onReload,
+}: {
+  onOpenSkuGallery: () => void;
+  onReload: () => void;
+}) {
   return (
-    <header className="si-page-head">
-      <div>
-        <span className="si-eyebrow">SAP Billing</span>
-        <h1>Sales Invoice</h1>
-      </div>
-      <div className="si-page-head-actions">
-        <button className="si-header-action-btn si-header-action-btn-secondary" type="button" onClick={onReload}>
-          <HiArrowPath aria-hidden="true" />
-        </button>
-        <button className="si-header-action-btn" type="button" onClick={onOpenSkuGallery}>
-          <HiPhoto aria-hidden="true" />
-          SKU Gallery
-        </button>
-      </div>
-    </header>
+    <PageHeader
+      eyebrow="SAP Billing"
+      title="Sales Invoice"
+      description="Pick a branch and a customer, then build the invoice from open sales orders or from individual items."
+      actions={
+        <>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Reload"
+            title="Reload"
+            onClick={onReload}
+          >
+            <HiOutlineArrowPath aria-hidden="true" />
+          </Button>
+          <Button onClick={onOpenSkuGallery}>
+            <HiOutlinePhoto aria-hidden="true" /> SKU Gallery
+          </Button>
+        </>
+      }
+    />
   );
 }
 
@@ -701,18 +962,32 @@ function InvoiceDocumentStrip({ state }: { state: SalesInvoiceState }) {
   };
 
   return (
-    <label className="si-draft-summary-date">
-      <span>Posting Date</span>
-      <input
+    <label className="flex flex-col gap-1">
+      <span className="text-[12px] font-medium text-body">
+        Posting date
+        <span className="ml-1.5 text-[11px] font-normal text-subtle">
+          {postingDateEditable ? "editing" : "double-click to edit"}
+        </span>
+      </span>
+      <Input
         type="date"
         value={state.form.postingDate}
         readOnly={!postingDateEditable}
-        className={postingDateEditable ? "si-date-editable" : ""}
+        className={cn(
+          "max-w-[190px]",
+          !postingDateEditable && "cursor-default bg-surface-strong",
+        )}
         onDoubleClick={(event) => {
+          // Captured now: React nulls `currentTarget` once the handler returns.
+          const input = event.currentTarget;
           setPostingDateEditable(true);
           window.requestAnimationFrame(() => {
-            event.currentTarget.focus();
-            event.currentTarget.showPicker?.();
+            input.focus();
+            try {
+              input.showPicker?.();
+            } catch {
+              /* needs a mutable input + user gesture; ignore if it cannot open */
+            }
           });
         }}
         onBlur={() => setPostingDateEditable(false)}
@@ -750,9 +1025,9 @@ function ItemPickerModal({
       setLoading(true);
       setError("");
       try {
-        const data = await apiFetch<FinishedGoodItem[] | { data?: FinishedGoodItem[]; results?: FinishedGoodItem[] }>(
-          hanaUrl("/api/hana/fg-items/"),
-        );
+        const data = await apiFetch<
+          FinishedGoodItem[] | { data?: FinishedGoodItem[]; results?: FinishedGoodItem[] }
+        >(hanaUrl("/api/hana/fg-items/"));
         const nextItems = Array.isArray(data) ? data : data.data || data.results || [];
         if (active) setItems(nextItems);
       } catch (err) {
@@ -769,11 +1044,16 @@ function ItemPickerModal({
     };
   }, []);
 
-  const getFilterOptions = (field: keyof FinishedGoodItem, filters: Partial<Record<keyof FinishedGoodItem, string>>) =>
+  const getFilterOptions = (
+    field: keyof FinishedGoodItem,
+    filters: Partial<Record<keyof FinishedGoodItem, string>>,
+  ) =>
     Object.entries(
       items
         .filter((item) =>
-          Object.entries(filters).every(([key, value]) => !value || String(item[key as keyof FinishedGoodItem] || "") === value),
+          Object.entries(filters).every(
+            ([key, value]) => !value || String(item[key as keyof FinishedGoodItem] || "") === value,
+          ),
         )
         .reduce<Record<string, number>>((counts, item) => {
           const value = String(item[field] || "").trim();
@@ -782,7 +1062,9 @@ function ItemPickerModal({
           return counts;
         }, {}),
     )
-      .sort(([optionA, countA], [optionB, countB]) => countB - countA || optionA.localeCompare(optionB))
+      .sort(
+        ([optionA, countA], [optionB, countB]) => countB - countA || optionA.localeCompare(optionB),
+      )
       .map(([option]) => option);
 
   const brandOptions = getFilterOptions("U_Brand", {
@@ -825,12 +1107,13 @@ function ItemPickerModal({
   const normalizedQuery = query.trim().toLowerCase();
   const filteredItems = items.filter((item) => {
     const filterMatches =
-      (!selectedBrand || item.U_Brand === selectedBrand)
-      && (!selectedSubGroup || item.U_Sub_Group === selectedSubGroup)
-      && (!selectedVariety || item.U_Variety === selectedVariety)
-      && (!selectedPackSize || item.U_SKU === selectedPackSize);
-    const queryMatches = !normalizedQuery
-      || [item.ItemCode, item.ItemName, item.U_Brand, item.U_Variety, item.U_Sub_Group, item.U_SKU]
+      (!selectedBrand || item.U_Brand === selectedBrand) &&
+      (!selectedSubGroup || item.U_Sub_Group === selectedSubGroup) &&
+      (!selectedVariety || item.U_Variety === selectedVariety) &&
+      (!selectedPackSize || item.U_SKU === selectedPackSize);
+    const queryMatches =
+      !normalizedQuery ||
+      [item.ItemCode, item.ItemName, item.U_Brand, item.U_Variety, item.U_Sub_Group, item.U_SKU]
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(normalizedQuery));
     return filterMatches && queryMatches;
@@ -843,13 +1126,16 @@ function ItemPickerModal({
     setSelectedPackSize("");
   };
 
-  const itemFilterConfig: Record<ItemFilterModal, {
-    allLabel: string;
-    options: string[];
-    selectedValue: string;
-    setSelectedValue: (value: string) => void;
-    title: string;
-  }> = {
+  const itemFilterConfig: Record<
+    ItemFilterModal,
+    {
+      allLabel: string;
+      options: string[];
+      selectedValue: string;
+      setSelectedValue: (value: string) => void;
+      title: string;
+    }
+  > = {
     brand: {
       allLabel: "All brands",
       options: brandOptions,
@@ -889,6 +1175,15 @@ function ItemPickerModal({
     setFilterModal(null);
   };
 
+  /** One filter chip, shared by the four groups and the overflow dialog. */
+  const chip = (active: boolean) =>
+    cn(
+      "cursor-pointer appearance-none rounded-full border px-2.5 py-1 text-[12px] [font-family:inherit] transition-colors",
+      active
+        ? "border-brand-line bg-brand text-white"
+        : "border-line bg-card text-body hover:border-line-strong hover:bg-surface",
+    );
+
   const renderFilterChips = (
     filterKey: ItemFilterModal,
     label: string,
@@ -901,76 +1196,65 @@ function ItemPickerModal({
     const hiddenCount = Math.max(options.length - visibleOptions.length, 0);
 
     return (
-      <div className="si-party-state-filters" aria-label={`${label} filters`}>
-        <span className="si-item-filter-label">{label}</span>
-        <button
-          className={`si-state-chip${!selectedValue ? " is-active" : ""}`}
-          type="button"
-          onClick={() => setSelectedValue("")}
-        >
-          {allLabel}
-        </button>
-        {visibleOptions.map((option) => (
+      <div className="space-y-1.5" aria-label={label + " filters"}>
+        <SectionHeading>{label}</SectionHeading>
+        <div className="flex flex-wrap gap-1.5">
           <button
-            className={`si-state-chip${selectedValue === option ? " is-active" : ""}`}
             type="button"
-            key={option}
-            onClick={() => setSelectedValue(option)}
+            className={chip(!selectedValue)}
+            onClick={() => setSelectedValue("")}
           >
-            {option}
+            {allLabel}
           </button>
-        ))}
-        {hiddenCount > 0 && (
-          <button className="si-state-chip si-state-chip-more" type="button" onClick={() => setFilterModal(filterKey)}>
-            More +{hiddenCount}
-          </button>
-        )}
+          {visibleOptions.map((option) => (
+            <button
+              type="button"
+              key={option}
+              className={chip(selectedValue === option)}
+              onClick={() => setSelectedValue(option)}
+            >
+              {option}
+            </button>
+          ))}
+          {hiddenCount > 0 && (
+            <button
+              type="button"
+              className={chip(false)}
+              onClick={() => setFilterModal(filterKey)}
+            >
+              More +{hiddenCount}
+            </button>
+          )}
+        </div>
       </div>
     );
   };
 
   return (
-    <div className="si-modal-backdrop" role="presentation" onClick={onClose}>
-      <section
-        className="si-so-modal si-item-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Select finished good item"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <header className="si-so-modal-head">
-          <div>
-            <span className="si-eyebrow">Finished Goods</span>
-            <h2>Select Item</h2>
-            <p>{loading ? "Loading items..." : `${filteredItems.length} items`}</p>
-          </div>
-          <div className="si-modal-head-actions">
-            <button
-              className="si-modal-icon-btn si-modal-icon-back"
-              type="button"
-              aria-label="Back"
-              title="Back"
-              onClick={onBack}
-            >
-              <HiChevronLeft aria-hidden="true" />
-            </button>
-            <button
-              className="si-modal-icon-btn si-modal-icon-close"
-              type="button"
-              aria-label="Close"
-              title="Close"
-              onClick={onClose}
-            >
-              <HiXMark aria-hidden="true" />
-            </button>
-          </div>
-        </header>
-        <div className="si-item-picker-body">
-          <aside className="si-item-filter-panel">
-            {renderFilterChips("brand", "Brand", "All brands", brandOptions, selectedBrand, setSelectedBrand)}
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+    >
+      <DialogContent title="Finished goods" size="xl">
+        <DialogHeader>
+          <DialogTitle>Finished goods</DialogTitle>
+        </DialogHeader>
+
+        <DialogBody className="grid gap-4 sm:grid-cols-[minmax(0,240px)_minmax(0,1fr)]">
+          <aside className="space-y-3">
+            {renderFilterChips(
+              "brand",
+              "Brand",
+              "All brands",
+              brandOptions,
+              selectedBrand,
+              setSelectedBrand,
+            )}
             {renderFilterChips(
               "subGroup",
-              "Sub Group",
+              "Sub group",
               "All sub groups",
               subGroupOptions,
               selectedSubGroup,
@@ -986,107 +1270,120 @@ function ItemPickerModal({
             )}
             {renderFilterChips(
               "packSize",
-              "Pack Size",
+              "Pack size",
               "All pack sizes",
               packSizeOptions,
               selectedPackSize,
               setSelectedPackSize,
             )}
             {(selectedBrand || selectedSubGroup || selectedVariety || selectedPackSize) && (
-              <button className="si-btn si-btn-outline" type="button" onClick={clearItemFilters}>
+              <Button size="sm" onClick={clearItemFilters}>
                 Clear filters
-              </button>
+              </Button>
             )}
           </aside>
 
-          <section className="si-item-results-panel">
-            <input
-              className="si-search-input si-item-search-input"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search item name, code, brand, variety, group or SKU"
-              autoFocus
-            />
-            {error && <div className="si-inline-error">{error}</div>}
+          <section className="space-y-2">
+            <FilterBar className="border-0 bg-transparent p-0">
+              <FilterSearch
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Item name, code, brand, variety, group or SKU..."
+                fieldClassName="min-w-[240px]"
+                autoFocus
+              />
+              <FilterCount>
+                {filteredItems.length} item{filteredItems.length === 1 ? "" : "s"}
+              </FilterCount>
+            </FilterBar>
+
+            {error && <Notice tone="bad">{error}</Notice>}
+
             {loading ? (
-              <div className="si-loader">Loading finished goods...</div>
-            ) : filteredItems.length === 0 ? (
-              <div className="si-empty">No items found.</div>
-            ) : (
-              <div className="si-item-picker-results" aria-label="Finished goods">
-                {filteredItems.map((item) => (
-                  <button
-                    className="si-item-picker-row"
-                    key={item.ItemCode}
-                    type="button"
-                    disabled={selectingItemCode === item.ItemCode}
-                    onClick={() => onSelect(item)}
-                  >
-                    <strong>{item.ItemName}</strong>
-                    <small className="si-item-qty-count">
-                      {selectingItemCode === item.ItemCode
-                        ? "Fetching price..."
-                        : `Qty: ${getItemTotalQty(item).toLocaleString("en-IN")}`}
-                    </small>
-                  </button>
-                ))}
+              <div className="space-y-1.5">
+                <Skeleton className="h-10 w-full" />
+                <Skeleton className="h-10 w-full" />
+                <Skeleton className="h-10 w-full" />
               </div>
+            ) : filteredItems.length === 0 ? (
+              <EmptyState
+                icon={HiOutlineArchiveBox}
+                title="No items match"
+                hint="Clear a filter, or search the item code on its own."
+              />
+            ) : (
+              <ul className="m-0 max-h-[420px] list-none divide-y divide-line overflow-y-auto rounded-sm border border-line p-0">
+                {filteredItems.map((item) => (
+                  <li key={item.ItemCode}>
+                    <button
+                      type="button"
+                      disabled={selectingItemCode === item.ItemCode}
+                      className="flex w-full cursor-pointer appearance-none items-center justify-between gap-3 border-0 bg-transparent px-3 py-2 text-left [font-family:inherit] text-[13px] transition-colors hover:bg-surface disabled:cursor-wait disabled:opacity-60"
+                      onClick={() => onSelect(item)}
+                    >
+                      <span className="min-w-0 flex-1 truncate font-semibold text-ink">
+                        {item.ItemName}
+                      </span>
+                      <span className="shrink-0 text-[11.5px] tabular-nums text-subtle">
+                        {selectingItemCode === item.ItemCode
+                          ? "Fetching price..."
+                          : "Qty " + getItemTotalQty(item).toLocaleString("en-IN")}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
             )}
           </section>
-        </div>
+        </DialogBody>
 
+        <DialogFooter>
+          <Button onClick={onBack}>Back</Button>
+        </DialogFooter>
+      </DialogContent>
+
+      {/* The "More +N" overflow, stacked as a second dialog. */}
+      <Dialog
+        open={Boolean(activeFilterConfig)}
+        onOpenChange={(next) => {
+          if (!next) setFilterModal(null);
+        }}
+      >
         {activeFilterConfig && (
-          <div
-            className="si-nested-modal-backdrop"
-            role="presentation"
-            onClick={(event) => {
-              event.stopPropagation();
-              setFilterModal(null);
-            }}
-          >
-            <section
-              className="si-filter-options-modal"
-              role="dialog"
-              aria-modal="true"
-              aria-label={`${activeFilterConfig.title} filter`}
-              onClick={(event) => event.stopPropagation()}
-            >
-              <header className="si-filter-options-head">
-                <h3>{activeFilterConfig.title}</h3>
+          <DialogContent title={activeFilterConfig.title} size="md">
+            <DialogHeader>
+              <DialogTitle>{activeFilterConfig.title}</DialogTitle>
+            </DialogHeader>
+            <DialogBody>
+              <div className="flex flex-wrap gap-1.5">
                 <button
-                  className="si-modal-icon-btn si-modal-icon-close"
                   type="button"
-                  aria-label="Close"
-                  title="Close"
-                  onClick={() => setFilterModal(null)}
-                >
-                  <HiXMark aria-hidden="true" />
-                </button>
-              </header>
-              <div className="si-filter-options-grid">
-                <button
-                  className={`si-state-chip${!activeFilterConfig.selectedValue ? " is-active" : ""}`}
-                  type="button"
+                  className={chip(!activeFilterConfig.selectedValue)}
                   onClick={clearItemFilterModalOption}
                 >
                   {activeFilterConfig.allLabel}
                 </button>
                 {activeFilterConfig.options.map((option) => (
                   <button
-                    className={`si-state-chip${activeFilterConfig.selectedValue === option ? " is-active" : ""}`}
                     type="button"
                     key={option}
+                    className={chip(activeFilterConfig.selectedValue === option)}
                     onClick={() => selectItemFilterModalOption(option)}
                   >
                     {option}
                   </button>
                 ))}
               </div>
-            </section>
-          </div>
+            </DialogBody>
+            <DialogFooter>
+              <Button variant="primary" onClick={() => setFilterModal(null)}>
+                Done
+              </Button>
+            </DialogFooter>
+          </DialogContent>
         )}
-      </section>
-    </div>
+      </Dialog>
+    </Dialog>
   );
 }
 
@@ -1138,7 +1435,11 @@ const pickItemNumber = (item: FinishedGoodItem, keys: string[], fallback = 0) =>
   return fallback;
 };
 
-const pickRecordNumber = (source: Record<string, unknown>, keys: string[], fallback: number | null = null) => {
+const pickRecordNumber = (
+  source: Record<string, unknown>,
+  keys: string[],
+  fallback: number | null = null,
+) => {
   for (const key of keys) {
     const parsed = Number(source[key]);
     if (Number.isFinite(parsed)) return parsed;
@@ -1161,7 +1462,8 @@ const unwrapItemPriceRecord = (data: ItemPriceApiResponse): ItemPriceRecord | nu
   if (wrappedData && typeof wrappedData === "object") return wrappedData as ItemPriceRecord;
   const wrappedResults = data.results;
   if (Array.isArray(wrappedResults)) return wrappedResults[0] || null;
-  if (wrappedResults && typeof wrappedResults === "object") return wrappedResults as ItemPriceRecord;
+  if (wrappedResults && typeof wrappedResults === "object")
+    return wrappedResults as ItemPriceRecord;
   return data as ItemPriceRecord;
 };
 
@@ -1176,7 +1478,11 @@ const mergeItemPrice = (item: FinishedGoodItem, priceRecord: ItemPriceRecord | n
   );
   const taxCode = pickRecordText(source, ["TaxCode", "VatGroup", "Tax_Code"]);
   const taxPercent = pickRecordNumber(source, ["VatPrcnt", "TaxPercent", "Tax_Percent"]);
-  const discountPercent = pickRecordNumber(source, ["DiscPrcnt", "DiscountPercent", "Discount_Percent"]);
+  const discountPercent = pickRecordNumber(source, [
+    "DiscPrcnt",
+    "DiscountPercent",
+    "Discount_Percent",
+  ]);
 
   return {
     ...item,
@@ -1203,7 +1509,10 @@ const getBatchDateTokens = (value?: string | null) => {
 
   const tokens = new Set([text.toLowerCase().replace(/[^a-z0-9]/g, "")]);
   const dateOnly = text.split("T")[0]?.split(" ")[0] || text;
-  const parts = dateOnly.split(/[/-]/).map((part) => part.trim()).filter(Boolean);
+  const parts = dateOnly
+    .split(/[/-]/)
+    .map((part) => part.trim())
+    .filter(Boolean);
 
   if (parts.length === 3) {
     const [first, second, third] = parts;
@@ -1222,10 +1531,13 @@ const getBatchDateTokens = (value?: string | null) => {
 
 const isBatchDateValue = (value: string, batch: BatchDetail) => {
   const candidateTokens = getBatchDateTokens(value);
-  const dateTokens = [batch.ExpDate, batch.PrdDate, batch.InDate].reduce<Set<string>>((tokens, dateValue) => {
-    getBatchDateTokens(dateValue).forEach((token) => tokens.add(token));
-    return tokens;
-  }, new Set());
+  const dateTokens = [batch.ExpDate, batch.PrdDate, batch.InDate].reduce<Set<string>>(
+    (tokens, dateValue) => {
+      getBatchDateTokens(dateValue).forEach((token) => tokens.add(token));
+      return tokens;
+    },
+    new Set(),
+  );
 
   return [...candidateTokens].some((token) => token && dateTokens.has(token));
 };
@@ -1269,16 +1581,21 @@ const getItemRowsValidationError = (rows: ItemInvoiceRow[]) => {
   const selectedRows = rows.filter((row) => row.item);
   if (selectedRows.length === 0) return "Select at least one item.";
 
-  const rowWithoutBatch = selectedRows.find((row) => !row.batch?.warehouseCode || row.batch.batches.length === 0);
-  if (rowWithoutBatch) return `Choose batches for ${rowWithoutBatch.item?.ItemName || "every selected item"}.`;
+  const rowWithoutBatch = selectedRows.find(
+    (row) => !row.batch?.warehouseCode || row.batch.batches.length === 0,
+  );
+  if (rowWithoutBatch)
+    return `Choose batches for ${rowWithoutBatch.item?.ItemName || "every selected item"}.`;
 
   const mismatchedRow = selectedRows.find((row) => {
     const invoiceQty = toFiniteQuantity(row.invoiceQty);
-    const batchQty = row.batch?.batches.reduce((sum, allocation) => sum + allocation.quantity, 0) || 0;
+    const batchQty =
+      row.batch?.batches.reduce((sum, allocation) => sum + allocation.quantity, 0) || 0;
     const displayedBatchQty = row.batch?.warehouseQuantity || batchQty;
     return displayedBatchQty + 0.0001 < invoiceQty || batchQty + 0.0001 < invoiceQty;
   });
-  if (mismatchedRow) return `Batch quantity must be at least invoice quantity for ${mismatchedRow.item?.ItemName || "each item"}.`;
+  if (mismatchedRow)
+    return `Batch quantity must be at least invoice quantity for ${mismatchedRow.item?.ItemName || "each item"}.`;
 
   return "";
 };
@@ -1291,7 +1608,11 @@ const itemRowsToSelectedLines = (rows: ItemInvoiceRow[]): SelectedLine[] =>
     .map((row) => {
       const invoiceQty = toFiniteQuantity(row.invoiceQty);
       const price = pickItemNumber(row.item, ["Price", "UnitPrice", "U_Price", "PriceBefDi"], 0);
-      const priceBeforeDiscount = pickItemNumber(row.item, ["PriceBefDi", "PriceBeforeDiscount", "Price"], price);
+      const priceBeforeDiscount = pickItemNumber(
+        row.item,
+        ["PriceBefDi", "PriceBeforeDiscount", "Price"],
+        price,
+      );
       const taxCode = pickItemText(row.item, ["TaxCode", "VatGroup", "Tax_Code"]);
       const openQty = Math.max(row.batch.warehouseQuantity || invoiceQty, invoiceQty);
 
@@ -1316,11 +1637,16 @@ const itemRowsToSelectedLines = (rows: ItemInvoiceRow[]): SelectedLine[] =>
             const batchNumber = getBatchNumber(batch);
             return {
               ...(batchNumber ? { BatchNumber: batchNumber } : {}),
-              ...(systemSerialNumber !== undefined ? { SystemSerialNumber: systemSerialNumber } : {}),
+              ...(systemSerialNumber !== undefined
+                ? { SystemSerialNumber: systemSerialNumber }
+                : {}),
               Quantity: quantity,
             };
           })
-          .filter((batch) => (batch.BatchNumber || batch.SystemSerialNumber !== undefined) && batch.Quantity > 0),
+          .filter(
+            (batch) =>
+              (batch.BatchNumber || batch.SystemSerialNumber !== undefined) && batch.Quantity > 0,
+          ),
       };
     });
 
@@ -1371,7 +1697,9 @@ function BatchPickerModal({
         if (!active) return;
         setWarehouses(nextWarehouses);
         setSelectedWhsCode((current) =>
-          current && nextWarehouses.some((warehouse) => warehouse.WhsCode === current) ? current : "",
+          current && nextWarehouses.some((warehouse) => warehouse.WhsCode === current)
+            ? current
+            : "",
         );
       } catch (err) {
         console.error(err);
@@ -1403,7 +1731,9 @@ function BatchPickerModal({
       setError("");
       try {
         const data = await apiFetch<BatchDetail[]>(
-          hanaUrl(`/api/hana/batch-details/?item_code=${encodeURIComponent(item.ItemCode)}&whs_code=${encodeURIComponent(selectedWhsCode)}`),
+          hanaUrl(
+            `/api/hana/batch-details/?item_code=${encodeURIComponent(item.ItemCode)}&whs_code=${encodeURIComponent(selectedWhsCode)}`,
+          ),
         );
         if (active) setBatches(Array.isArray(data) ? data : []);
       } catch (err) {
@@ -1423,17 +1753,20 @@ function BatchPickerModal({
     };
   }, [item.ItemCode, selectedWhsCode]);
 
-  const selectedWarehouse = warehouses.find((warehouse) => warehouse.WhsCode === selectedWhsCode) || null;
+  const selectedWarehouse =
+    warehouses.find((warehouse) => warehouse.WhsCode === selectedWhsCode) || null;
   const selectedWarehouseQuantity = Number(selectedWarehouse?.["SUM(Quantity)"] || 0);
   const unitPrice = pickItemNumber(item, ["Price", "UnitPrice", "PriceBefDi"], 0);
   const allocations = allocateFefoBatches(batches, invoiceQty);
   const allocatedQty = allocations.reduce((sum, allocation) => sum + allocation.quantity, 0);
   const displayedBatchQty = selectedWarehouseQuantity || allocatedQty;
   const batchAllocationMatches = allocatedQty + 0.0001 >= invoiceQty;
-  const quantityMatches = selectedWarehouseQuantity > 0
-    && selectedWarehouseQuantity + 0.0001 >= invoiceQty
-    && batchAllocationMatches;
-  const cannotCreateDraft = !quantityMatches || !canCreateDraft || creatingDraft || loadingBatches || loadingWarehouses;
+  const quantityMatches =
+    selectedWarehouseQuantity > 0 &&
+    selectedWarehouseQuantity + 0.0001 >= invoiceQty &&
+    batchAllocationMatches;
+  const cannotCreateDraft =
+    !quantityMatches || !canCreateDraft || creatingDraft || loadingBatches || loadingWarehouses;
   const batchSignature = `${selectedWhsCode}|${invoiceQty}|${allocations
     .map((allocation) => `${allocation.batch.BatchNum}:${allocation.quantity}`)
     .join("|")}`;
@@ -1450,150 +1783,174 @@ function BatchPickerModal({
   }, [batchSignature, batches.length, loadingBatches, selectedWarehouseQuantity, selectedWhsCode]);
 
   return (
-    <div className="si-modal-backdrop" role="presentation" onClick={onClose}>
-      <section
-        className="si-so-modal si-batch-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Choose item batch"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <header className="si-so-modal-head">
-          <div>
-            <span className="si-eyebrow">Batch Selection</span>
-            <h2>{item.ItemCode}</h2>
-            <p>{item.ItemName}</p>
-          </div>
-          <div className="si-modal-head-actions">
-            <button
-              className="si-modal-icon-btn si-modal-icon-back"
-              type="button"
-              aria-label="Back"
-              title="Back"
-              onClick={onBack}
-            >
-              <HiChevronLeft aria-hidden="true" />
-            </button>
-            <button
-              className="si-modal-icon-btn si-modal-icon-close"
-              type="button"
-              aria-label="Close"
-              title="Close"
-              onClick={onClose}
-            >
-              <HiXMark aria-hidden="true" />
-            </button>
-          </div>
-        </header>
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+    >
+      <DialogContent title="Batch selection" size="lg">
+        <DialogHeader>
+          <DialogTitle>
+            <span className="flex flex-col">
+              <span className="font-mono text-[12px] font-normal text-subtle">
+                {item.ItemCode}
+              </span>
+              {item.ItemName}
+            </span>
+          </DialogTitle>
+        </DialogHeader>
 
-        <div className="si-batch-picker-body">
-          <aside className="si-batch-warehouse-panel">
-            <div className="si-batch-panel-title">
-              <span>Warehouse Stock</span>
-              <strong>{loadingWarehouses ? "Loading..." : `${warehouses.length} warehouses`}</strong>
+        <DialogBody className="grid gap-4 sm:grid-cols-[minmax(0,200px)_minmax(0,1fr)]">
+          <aside className="space-y-2">
+            <div className="flex items-baseline justify-between gap-2">
+              <SectionHeading>Warehouse stock</SectionHeading>
+              <span className="text-[11.5px] text-subtle">
+                {loadingWarehouses ? "..." : warehouses.length + " warehouses"}
+              </span>
             </div>
+
             {loadingWarehouses ? (
-              <div className="si-loader">Loading warehouse quantities...</div>
+              <div className="space-y-1.5">
+                <Skeleton className="h-10 w-full" />
+                <Skeleton className="h-10 w-full" />
+              </div>
             ) : warehouses.length === 0 ? (
-              <div className="si-empty">No warehouse stock found.</div>
+              <p className="m-0 rounded-sm border border-line bg-surface px-3 py-4 text-center text-[12px] text-subtle">
+                No warehouse stock found.
+              </p>
             ) : (
-              <div className="si-batch-warehouse-list">
+              <ul className="m-0 max-h-[300px] list-none space-y-1.5 overflow-y-auto p-0">
                 {warehouses.map((warehouse) => {
                   const quantity = Number(warehouse["SUM(Quantity)"] || 0);
+                  const active = selectedWhsCode === warehouse.WhsCode;
                   return (
-                    <button
-                      className={`si-warehouse-option${selectedWhsCode === warehouse.WhsCode ? " is-active" : ""}`}
-                      type="button"
-                      key={warehouse.WhsCode}
-                      onClick={() => setSelectedWhsCode(warehouse.WhsCode)}
-                    >
-                      <span>{warehouse.WhsCode}</span>
-                      <strong>{quantity.toLocaleString("en-IN")}</strong>
-                    </button>
+                    <li key={warehouse.WhsCode}>
+                      <button
+                        type="button"
+                        className={cn(
+                          "flex w-full cursor-pointer appearance-none items-center justify-between gap-2 rounded-sm border p-2.5 text-left [font-family:inherit] text-[13px] transition-colors",
+                          active
+                            ? "border-brand-line bg-brand-soft"
+                            : "border-line bg-card hover:bg-surface",
+                        )}
+                        aria-current={active ? "true" : undefined}
+                        onClick={() => setSelectedWhsCode(warehouse.WhsCode)}
+                      >
+                        <span className="font-semibold text-ink">{warehouse.WhsCode}</span>
+                        <span className="tabular-nums text-body">
+                          {quantity.toLocaleString("en-IN")}
+                        </span>
+                      </button>
+                    </li>
                   );
                 })}
-              </div>
+              </ul>
             )}
           </aside>
 
-          <section className="si-batch-list-panel">
-            <div className="si-batch-panel-title">
-              <span>Batches</span>
-              <strong>{selectedWhsCode || "Select warehouse"}</strong>
-            </div>
-            <label className="si-batch-quantity-field">
-              <span>Invoice Quantity</span>
-              <input
-                type="number"
-                min="1"
-                value={invoiceQty}
-                onChange={(event) => onQuantityChange(toFiniteQuantity(event.target.value))}
-              />
-            </label>
-            <div className="si-batch-price-field">
-              <span>Unit Price</span>
-              <strong>{formatMoney(unitPrice)}</strong>
-            </div>
-            <div className={`si-batch-match-status${quantityMatches ? " is-match" : " has-error"}`}>
-              <span>
-                Invoice Qty: {invoiceQty.toLocaleString("en-IN")} | Batch Qty: {displayedBatchQty.toLocaleString("en-IN")}
+          <section className="space-y-3">
+            <div className="flex items-baseline justify-between gap-2">
+              <SectionHeading>Batches</SectionHeading>
+              <span className="text-[11.5px] text-subtle">
+                {selectedWhsCode || "Select a warehouse"}
               </span>
             </div>
-            {error && <div className="si-inline-error">{error}</div>}
-            {draftError && <div className="si-inline-error">{draftError}</div>}
+
+            <div className="flex flex-wrap items-end gap-4">
+              <Field label="Invoice quantity">
+                {(control) => (
+                  <Input
+                    {...control}
+                    type="number"
+                    min="1"
+                    value={invoiceQty}
+                    className="w-32 text-right tabular-nums"
+                    onChange={(event) => onQuantityChange(toFiniteQuantity(event.target.value))}
+                  />
+                )}
+              </Field>
+              <span>
+                <span className="block text-[11px] uppercase tracking-wide text-subtle">
+                  Unit price
+                </span>
+                <strong className="text-[15px] font-bold tabular-nums text-ink">
+                  {formatMoney(unitPrice)}
+                </strong>
+              </span>
+            </div>
+
+            {/* SAP rejects a batch-managed line whose batch quantity does not
+                equal its invoice quantity, so this is the gate on Create Draft. */}
+            <Notice tone={quantityMatches ? "ok" : "bad"}>
+              <span className="tabular-nums">
+                Invoice qty {invoiceQty.toLocaleString("en-IN")} - batch qty{" "}
+                {displayedBatchQty.toLocaleString("en-IN")}
+              </span>
+            </Notice>
+
+            {error && <Notice tone="bad">{error}</Notice>}
+            {draftError && <Notice tone="bad">{draftError}</Notice>}
+
             {!selectedWhsCode ? (
-              <div className="si-empty">Select a warehouse to view batches.</div>
+              <p className="m-0 rounded-sm border border-line bg-surface px-3 py-4 text-center text-[12px] text-subtle">
+                Select a warehouse to view batches.
+              </p>
             ) : loadingBatches ? (
-              <div className="si-loader">Loading batches...</div>
+              <Skeleton className="h-24 w-full" aria-label="Loading batches" />
             ) : batches.length === 0 ? (
-              <div className="si-empty">No batches found for this warehouse.</div>
+              <p className="m-0 rounded-sm border border-line bg-surface px-3 py-4 text-center text-[12px] text-subtle">
+                No batches found for this warehouse.
+              </p>
             ) : (
-              <div className="si-table-wrap">
-                <table className="si-lines-table si-batch-table">
-                  <thead>
-                    <tr>
-                      <th>Expiration Date</th>
-                      <th>Batch Qty</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {batches.map((batch) => {
-                      return (
-                        <tr
-                          key={`${batch.BatchNum}-${batch.BaseEntry || ""}-${batch.InDate || ""}`}
-                        >
-                          <td>{formatBatchDate(batch.ExpDate)}</td>
-                          <td>{Number(batch.Quantity || 0).toLocaleString("en-IN")}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+              <div className="max-h-[240px] overflow-auto rounded-sm border border-line">
+                <Table density="compact">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Expiration date</TableHead>
+                      <TableHead className="text-right">Batch qty</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {batches.map((batch) => (
+                      <TableRow
+                        key={
+                          batch.BatchNum +
+                          "-" +
+                          (batch.BaseEntry || "") +
+                          "-" +
+                          (batch.InDate || "")
+                        }
+                      >
+                        <TableCell>{formatBatchDate(batch.ExpDate)}</TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {Number(batch.Quantity || 0).toLocaleString("en-IN")}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
               </div>
             )}
           </section>
-        </div>
-        <footer className={`si-order-selection-bar si-batch-draft-bar${draftError ? " has-error" : ""}`}>
-          <div>
-            <strong>{item.ItemName}</strong>
-            <span>
-              Warehouse: {selectedWhsCode || "-"} - Invoice Qty: {invoiceQty.toLocaleString("en-IN")} - Batch Qty:{" "}
-              {displayedBatchQty.toLocaleString("en-IN")}
-            </span>
-            {draftError && <span className="si-order-selection-error">{draftError}</span>}
-          </div>
-          <button
-            className="si-btn si-btn-primary si-order-selection-next"
-            type="button"
+        </DialogBody>
+
+        <DialogFooter>
+          <Button className="mr-auto" onClick={onBack}>
+            Back
+          </Button>
+          <Button
+            variant="primary"
             disabled={cannotCreateDraft}
+            title={quantityMatches ? undefined : "Batch quantity must match the invoice quantity."}
             onClick={onCreateDraft}
           >
-            {creatingDraft ? "Creating..." : "Create Draft"}
-            <HiArrowRight aria-hidden="true" />
-          </button>
-        </footer>
-      </section>
-    </div>
+            {creatingDraft ? "Creating..." : "Create draft"}
+            <HiOutlineArrowRight aria-hidden="true" />
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -1612,77 +1969,72 @@ function SkeletonInvoice({
   onReset,
   onChangeBranch,
 }: SkeletonInvoiceProps) {
-  const partyLabel = state.selectedParty
-    ? state.selectedParty.CardName
-    : "Select Party";
+  const partyLabel = state.selectedParty ? state.selectedParty.CardName : "Select Party";
 
   return (
-    <div className="si-draft-stage">
-      <section className="si-card si-draft-party-card si-draft-summary-card si-skeleton-party-card">
-        <div className="si-draft-party-name-cell">
+    <div className="space-y-4">
+      <Card className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
           <BranchBadge branch={state.branch} onChange={onChangeBranch} />
-          <span>Party Name</span>
+          <p className="m-0 mt-1.5 text-[11px] uppercase tracking-wide text-subtle">Party</p>
           {state.selectedParty ? (
-            <strong>{partyLabel}</strong>
+            <strong className="block text-[16px] font-semibold text-ink">{partyLabel}</strong>
           ) : (
-            <button className="si-draft-party-select-btn" type="button" onClick={onOpenParty}>
+            <Button variant="primary" className="mt-1" onClick={onOpenParty}>
               {partyLabel}
-            </button>
+            </Button>
           )}
-          <div className="si-draft-summary-actions">
+          <div className="mt-2 flex flex-wrap gap-2">
             {state.selectedParty && sourceMode === "sales-order" && (
-              <button className="si-btn si-btn-primary" type="button" onClick={onOpenOrders}>
-                Select Open SO ({state.salesOrders.length})
-              </button>
+              <Button size="xs" variant="primary" onClick={onOpenOrders}>
+                Select open SO ({state.salesOrders.length})
+              </Button>
             )}
             {state.selectedParty && sourceMode === "items" && (
-              <button className="si-btn si-btn-primary" type="button" onClick={onOpenItems}>
-                Add Items
-              </button>
+              <Button size="xs" variant="primary" onClick={onOpenItems}>
+                Add items
+              </Button>
             )}
             {state.selectedParty && (
-              <button className="si-draft-change-party-btn" type="button" onClick={onReset}>
-                Change Party
-              </button>
+              <Button size="xs" onClick={onReset}>
+                Change party
+              </Button>
             )}
           </div>
         </div>
         <InvoiceDocumentStrip state={state} />
-      </section>
+      </Card>
 
-      <section className="si-card si-tabs-card si-skeleton-lines">
-        {sourceMode !== "items" && (
-          <div className="si-table-wrap">
-            <table className="si-lines-table">
-              <thead>
-                <tr>
-                  <th>Item Code</th>
-                  <th>Description</th>
-                  <th>Quantity</th>
-                  <th>Unit Price</th>
-                  <th>Tax Code</th>
-                  <th>Line Total</th>
-                </tr>
-              </thead>
-            </table>
-          </div>
-        )}
-        {!state.selectedParty && <div className="si-empty">Select a party to begin.</div>}
-        {state.selectedParty && !sourceMode && <div className="si-empty">Choose invoice source from the modal window.</div>}
-        {state.selectedParty && sourceMode === "sales-order" && (
-          <div className="si-empty">Select open sales orders to fill invoice lines.</div>
-        )}
-        {state.selectedParty && sourceMode === "items" && (
-          <ItemInvoiceLines
-            rows={itemRows}
-            onOpenItemPicker={onOpenItemPicker}
-            onOpenBatchPicker={onOpenBatchPicker}
-            onAddRow={onAddItemRow}
-            onRemoveRow={onRemoveItemRow}
-            draftError={itemDraftError}
+      {sourceMode === "items" && state.selectedParty ? (
+        <ItemInvoiceLines
+          rows={itemRows}
+          onOpenItemPicker={onOpenItemPicker}
+          onOpenBatchPicker={onOpenBatchPicker}
+          onAddRow={onAddItemRow}
+          onRemoveRow={onRemoveItemRow}
+          draftError={itemDraftError}
+        />
+      ) : (
+        <Card>
+          <EmptyState
+            icon={HiOutlineDocumentText}
+            title={
+              !state.selectedParty
+                ? "Select a party to begin"
+                : !sourceMode
+                  ? "Choose what to invoice against"
+                  : "No lines yet"
+            }
+            hint={
+              !state.selectedParty
+                ? "Everything below loads for the customer you pick."
+                : !sourceMode
+                  ? "Invoice against open sales orders, or against individual items."
+                  : "Pick open sales orders to fill the invoice lines."
+            }
           />
-        )}
-      </section>
+        </Card>
+      )}
     </div>
   );
 }
@@ -1696,13 +2048,21 @@ export default function SalesInvoiceWizard() {
   const [itemPickerRowId, setItemPickerRowId] = useState<number | null>(null);
   const [batchPickerRowId, setBatchPickerRowId] = useState<number | null>(null);
   const [sourceMode, setSourceMode] = useState<InvoiceSourceMode | null>(null);
-  const [itemRows, setItemRows] = useState<ItemInvoiceRow[]>([{ id: 1, type: "Item", item: null, invoiceQty: 1, batch: null }]);
+  const [itemRows, setItemRows] = useState<ItemInvoiceRow[]>([
+    { id: 1, type: "Item", item: null, invoiceQty: 1, batch: null },
+  ]);
   const [itemDraftError, setItemDraftError] = useState("");
+  const [confirmChangeBranch, setConfirmChangeBranch] = useState(false);
   const [creatingItemDraft, setCreatingItemDraft] = useState(false);
   const [pricingItemCode, setPricingItemCode] = useState("");
 
   useEffect(() => {
-    if (sourceMode === "sales-order" && state.selectedParty && state.step === 2 && !state.customerDetails) {
+    if (
+      sourceMode === "sales-order" &&
+      state.selectedParty &&
+      state.step === 2 &&
+      !state.customerDetails
+    ) {
       setOrdersModalOpen(true);
     }
   }, [sourceMode, state.customerDetails, state.selectedParty, state.step]);
@@ -1778,13 +2138,38 @@ export default function SalesInvoiceWizard() {
     if (openParty) setPartyModalOpen(true);
   };
 
-  // Return to the branch gate — clears the current invoice first.
-  const handleChangeBranch = () => {
-    if (window.confirm("Switching branch clears the current invoice. Continue?")) {
-      resetInvoiceFlow(false);
-      state.changeBranch();
-    }
+  /*
+   * Return to the branch gate — clears the current invoice first.
+   *
+   * Offered only when the user's categories permit more than one branch;
+   * otherwise the gate would immediately re-answer itself and the Change
+   * control would look broken.
+   */
+  const handleChangeBranch = state.canChangeBranch
+    ? () => setConfirmChangeBranch(true)
+    : undefined;
+
+  const confirmBranchChange = () => {
+    setConfirmChangeBranch(false);
+    resetInvoiceFlow(false);
+    state.changeBranch();
   };
+
+  /*
+   * The gate's options, narrowed to what this user's categories permit.
+   *
+   * No usable category (none assigned, or only MART) leaves the list at both,
+   * which is the original behaviour and the only safe answer when we cannot
+   * narrow it. Exactly one never reaches here — the hook pre-selects it and
+   * the gate does not render.
+   */
+  const branchOptions = [
+    { key: "OIL" as const, label: "Oil", icon: HiOutlineBeaker },
+    { key: "BEVERAGE" as const, label: "Beverage", icon: HiOutlineSparkles },
+  ].filter(
+    ({ key }) =>
+      state.allowedBranches.length === 0 || state.allowedBranches.includes(key),
+  );
 
   const createDraftFromSelectedOrders = async () => {
     const ok = await state.proceedToDraft();
@@ -1809,7 +2194,9 @@ export default function SalesInvoiceWizard() {
     setItemDraftError("");
     setItemRows((current) => {
       const nextRows = current.filter((row) => row.id !== rowId);
-      return nextRows.length > 0 ? nextRows : [{ id: 1, type: "Item", item: null, invoiceQty: 1, batch: null }];
+      return nextRows.length > 0
+        ? nextRows
+        : [{ id: 1, type: "Item", item: null, invoiceQty: 1, batch: null }];
     });
     setItemPickerRowId((current) => (current === rowId ? null : current));
     setBatchPickerRowId((current) => (current === rowId ? null : current));
@@ -1824,7 +2211,9 @@ export default function SalesInvoiceWizard() {
   const fetchItemWithCustomerPrice = async (item: FinishedGoodItem) => {
     const priceList = toFiniteQuantity(state.selectedParty?.ListNum, 1);
     const data = await apiFetch<ItemPriceApiResponse>(
-      hanaUrl(`/api/hana/item-price/?item_code=${encodeURIComponent(item.ItemCode)}&price_list=${encodeURIComponent(String(priceList))}`),
+      hanaUrl(
+        `/api/hana/item-price/?item_code=${encodeURIComponent(item.ItemCode)}&price_list=${encodeURIComponent(String(priceList))}`,
+      ),
     );
     return mergeItemPrice(item, unwrapItemPriceRecord(data));
   };
@@ -1847,9 +2236,15 @@ export default function SalesInvoiceWizard() {
 
     setItemRows((current) => {
       const existingRow = current.find((row) => row.id === rowId);
-      if (!existingRow) return [...current, { id: rowId, type: "Item", item: pricedItem, invoiceQty: 1, batch: null }];
+      if (!existingRow)
+        return [
+          ...current,
+          { id: rowId, type: "Item", item: pricedItem, invoiceQty: 1, batch: null },
+        ];
       return current.map((row) =>
-        row.id === rowId ? { ...row, item: pricedItem, invoiceQty: row.invoiceQty || 1, batch: null } : row,
+        row.id === rowId
+          ? { ...row, item: pricedItem, invoiceQty: row.invoiceQty || 1, batch: null }
+          : row,
       );
     });
     setPricingItemCode("");
@@ -1860,7 +2255,9 @@ export default function SalesInvoiceWizard() {
   const selectBatchForRow = (batch: SelectedBatch) => {
     if (batchPickerRowId === null) return;
     setItemDraftError("");
-    setItemRows((current) => current.map((row) => (row.id === batchPickerRowId ? { ...row, batch } : row)));
+    setItemRows((current) =>
+      current.map((row) => (row.id === batchPickerRowId ? { ...row, batch } : row)),
+    );
   };
 
   const itemRowsValidationError = getItemRowsValidationError(itemRows);
@@ -1895,7 +2292,15 @@ export default function SalesInvoiceWizard() {
   const openSalesOrderCount = state.salesOrders.length;
 
   return (
-    <div className="si-page">
+    /*
+     * The whole wizard is on the design system now — the branch gate, the
+     * party picker, the source choice, the item lines, the open-orders list,
+     * the batch pickers and the draft. `Sales_Invoice.css` has no importer
+     * left.
+     */
+    <Page>
+      <Breadcrumbs items={[{ label: "Invoices" }, { label: "Sales Invoice" }]} />
+
       <InvoicePageHeader
         onReload={() => window.location.reload()}
         onOpenSkuGallery={() => navigate("/Sales_Invoice/SKU_Images")}
@@ -1903,25 +2308,74 @@ export default function SalesInvoiceWizard() {
 
       {/* Branch gate — everything downstream (customers, orders, prices,
           stock) is branch-specific, so nothing loads until one is chosen. */}
-      {!state.branch && (
-        <div className="si-modal-backdrop si-branch-backdrop" role="presentation">
-          <section className="si-branch-modal" role="dialog" aria-modal="true" aria-label="Select branch">
-            <span className="si-eyebrow">Sales Invoice</span>
-            <h2>Select a branch</h2>
-            <p>Customers, orders, prices and stock load for the branch you pick.</p>
-            <div className="si-branch-options">
-              <button type="button" className="si-branch-option" onClick={() => state.selectBranch("OIL")}>
-                <span className="si-branch-emoji" aria-hidden="true">🛢️</span>
-                <strong>Oil</strong>
-              </button>
-              <button type="button" className="si-branch-option" onClick={() => state.selectBranch("BEVERAGE")}>
-                <span className="si-branch-emoji" aria-hidden="true">🥤</span>
-                <strong>Beverage</strong>
-              </button>
-            </div>
-          </section>
-        </div>
-      )}
+      {/* Branch gate - everything downstream (customers, orders, prices,
+          stock) is branch-specific, so nothing loads until one is chosen.
+          Not dismissible: there is no usable state behind it. */}
+      <Dialog open={!state.branch}>
+        {!state.branch && (
+          <DialogContent
+            title="Select a branch"
+            size="sm"
+            showClose={false}
+            onEscapeKeyDown={(event) => event.preventDefault()}
+            onPointerDownOutside={(event) => event.preventDefault()}
+            onInteractOutside={(event) => event.preventDefault()}
+          >
+            <DialogHeader className="items-start">
+              <div className="min-w-0">
+                <DialogTitle>Select a branch</DialogTitle>
+                <DialogDescription>
+                  Customers, orders, prices and stock all load for the branch you pick.
+                </DialogDescription>
+              </div>
+            </DialogHeader>
+            <DialogBody>
+              <div className="grid grid-cols-2 gap-3">
+                {branchOptions.map(({ key, label, icon: Icon }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    className="flex cursor-pointer appearance-none flex-col items-center gap-2 rounded-card border border-line bg-card p-5 [font-family:inherit] transition-colors hover:border-brand-line hover:bg-brand-soft"
+                    onClick={() => state.selectBranch(key)}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className="flex size-10 items-center justify-center rounded-full bg-brand-soft text-[20px] text-brand"
+                    >
+                      <Icon />
+                    </span>
+                    <strong className="text-[14px] font-semibold text-ink">{label}</strong>
+                  </button>
+                ))}
+              </div>
+            </DialogBody>
+          </DialogContent>
+        )}
+      </Dialog>
+
+      {/* Switching branch throws away the invoice in progress, so it asks
+          first. This was a window.confirm. */}
+      <Dialog open={confirmChangeBranch} onOpenChange={setConfirmChangeBranch}>
+        {confirmChangeBranch && (
+          <DialogContent title="Change branch" size="sm">
+            <DialogHeader className="items-start">
+              <div className="min-w-0">
+                <DialogTitle>Change branch?</DialogTitle>
+                <DialogDescription>
+                  The current invoice is cleared — the party, the selected orders and
+                  any lines you have added.
+                </DialogDescription>
+              </div>
+            </DialogHeader>
+            <DialogFooter>
+              <Button onClick={() => setConfirmChangeBranch(false)}>Keep working</Button>
+              <Button variant="danger" onClick={confirmBranchChange}>
+                Clear and change branch
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        )}
+      </Dialog>
 
       {!showDraft && (
         <SkeletonInvoice
@@ -1963,101 +2417,79 @@ export default function SalesInvoiceWizard() {
         />
       )}
 
-      {showSourceModal && (
-        <div className="si-modal-backdrop" role="presentation" onClick={closeSourceModal}>
-          <section
-            className="si-source-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Choose invoice source"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <header className="si-so-modal-head">
-              <div>
-                <span className="si-eyebrow">Invoice Against</span>
-                <h2>{state.selectedParty?.CardName}</h2>
-                <p>{state.selectedParty?.CardCode}</p>
-              </div>
-              <div className="si-modal-head-actions">
-                <button
-                  className="si-modal-icon-btn si-modal-icon-back"
-                  type="button"
-                  aria-label="Back"
-                  title="Back"
-                  onClick={backToPartyModal}
-                >
-                  <HiChevronLeft aria-hidden="true" />
-                </button>
-                <button
-                  className="si-modal-icon-btn si-modal-icon-close"
-                  type="button"
-                  aria-label="Close"
-                  title="Close"
-                  onClick={closeSourceModal}
-                >
-                  <HiXMark aria-hidden="true" />
-                </button>
-              </div>
-            </header>
-            <InvoiceSourceChoice
-              openSalesOrderCount={openSalesOrderCount}
-              loadingOrders={state.loadingOrders}
-              ordersError={state.ordersError}
-              onChooseSalesOrder={openOrdersModal}
-              onChooseItems={chooseItems}
-            />
-          </section>
-        </div>
-      )}
+      <Dialog
+        open={Boolean(showSourceModal)}
+        onOpenChange={(next) => {
+          if (!next) setSourceModalOpen(false);
+        }}
+      >
+        {showSourceModal && (
+          <DialogContent title="Invoice against" size="lg">
+            <DialogHeader>
+              <DialogTitle>
+                <span className="flex flex-col">
+                  <span className="text-[11px] font-normal uppercase tracking-wide text-subtle">
+                    Invoice against
+                  </span>
+                  {state.selectedParty?.CardName}
+                  <span className="font-mono text-[12px] font-normal text-subtle">
+                    {state.selectedParty?.CardCode}
+                  </span>
+                </span>
+              </DialogTitle>
+            </DialogHeader>
+            <DialogBody>
+              <InvoiceSourceChoice
+                openSalesOrderCount={openSalesOrderCount}
+                loadingOrders={state.loadingOrders}
+                ordersError={state.ordersError}
+                onChooseSalesOrder={openOrdersModal}
+                onChooseItems={chooseItems}
+              />
+            </DialogBody>
+            <DialogFooter>
+              <Button onClick={backToPartyModal}>Back to parties</Button>
+            </DialogFooter>
+          </DialogContent>
+        )}
+      </Dialog>
 
-      {showOrdersModal && (
-        <div className="si-modal-backdrop" role="presentation" onClick={closeOrdersModal}>
-          <section
-            className="si-so-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Select open sales orders"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <header className="si-so-modal-head">
-              <div>
-                <span className="si-eyebrow">Open Sales Orders</span>
-                <h2>{state.selectedParty?.CardName}</h2>
-                <p>
-                  {state.selectedParty?.CardCode} - {openSalesOrderCount} open sales{" "}
-                  {openSalesOrderCount === 1 ? "order" : "orders"}
-                </p>
-              </div>
-              <div className="si-modal-head-actions">
-                <button
-                  className="si-modal-icon-btn si-modal-icon-back"
-                  type="button"
-                  aria-label="Back"
-                  title="Back"
-                  onClick={backToPartyModal}
-                >
-                  <HiChevronLeft aria-hidden="true" />
-                </button>
-                <button
-                  className="si-modal-icon-btn si-modal-icon-close"
-                  type="button"
-                  aria-label="Close"
-                  title="Close"
-                  onClick={closeOrdersModal}
-                >
-                  <HiXMark aria-hidden="true" />
-                </button>
-              </div>
-            </header>
-            <OrdersStep
-              state={state}
-              continueLabel="Create Draft"
-              continueLoadingLabel="Creating draft..."
-              onContinue={createDraftFromSelectedOrders}
-            />
-          </section>
-        </div>
-      )}
+      <Dialog
+        open={Boolean(showOrdersModal)}
+        onOpenChange={(next) => {
+          if (!next) setOrdersModalOpen(false);
+        }}
+      >
+        {showOrdersModal && (
+          <DialogContent title="Open sales orders" size="xl">
+            <DialogHeader>
+              <DialogTitle>
+                <span className="flex flex-col">
+                  <span className="text-[11px] font-normal uppercase tracking-wide text-subtle">
+                    Open sales orders
+                  </span>
+                  {state.selectedParty?.CardName}
+                  <span className="font-mono text-[12px] font-normal text-subtle">
+                    {state.selectedParty?.CardCode} - {openSalesOrderCount} open{" "}
+                    {openSalesOrderCount === 1 ? "order" : "orders"}
+                  </span>
+                </span>
+              </DialogTitle>
+            </DialogHeader>
+            <DialogBody>
+              <OrdersStep
+                state={state}
+                continueLabel="Create draft"
+                continueLoadingLabel="Creating draft..."
+                onContinue={createDraftFromSelectedOrders}
+              />
+            </DialogBody>
+            <DialogFooter>
+              <Button onClick={backToPartyModal}>Back to parties</Button>
+            </DialogFooter>
+          </DialogContent>
+        )}
+      </Dialog>
 
       {showItemPickerModal && (
         <ItemPickerModal
@@ -2084,7 +2516,9 @@ export default function SalesInvoiceWizard() {
             setItemDraftError("");
             setItemRows((current) =>
               current.map((row) =>
-                row.id === batchPickerRow.id ? { ...row, invoiceQty: nextQuantity, batch: null } : row,
+                row.id === batchPickerRow.id
+                  ? { ...row, invoiceQty: nextQuantity, batch: null }
+                  : row,
               ),
             );
           }}
@@ -2094,6 +2528,6 @@ export default function SalesInvoiceWizard() {
           draftError={itemDraftError || state.draftError}
         />
       )}
-    </div>
+    </Page>
   );
 }

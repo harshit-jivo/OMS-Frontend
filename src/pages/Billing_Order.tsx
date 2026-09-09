@@ -1,33 +1,91 @@
-﻿import { useState, useEffect } from "react";
-import { getOrderItemSchemeNames, getOrderItemSchemes, getOrderItemSchemeQtyText, getOrderItemTotalLtrs, ordersService } from "../services/ordersService";
-import type { Order, OrderItem } from "../services/ordersService";
-import { exportToExcel } from "../utils/excelExport";
-import "../styles/Billing_Order.css";
-import { useNavigate, useLocation } from "react-router-dom";
-import { sortOrders } from "../utils/orderHistory";
-import { useUILabels } from "../services/uiConfig";
-import ItemSection from "../components/order-items/ItemSection";
-import PartyHeader from "../components/order-items/PartyHeader";
+import { useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  HiCheckCircle,   // Approve
-  HiXCircle,       // Reject
-  HiEye,           // View
-  HiArrowDownTray,  // Download
-  // HiEllipsisVertical  
-  HiPencilSquare,
+  HiOutlineArrowDownTray,
+  HiOutlineBanknotes,
+  HiOutlineCheckCircle,
+  HiOutlineEye,
+  HiOutlineGift,
+  HiOutlineInbox,
+  HiOutlinePencilSquare,
+  HiOutlineXCircle,
+  HiOutlineXMark,
 } from "react-icons/hi2";
 
+import {
+  getOrderItemSchemeNames,
+  getOrderItemSchemeQtyText,
+  getOrderItemTotalLtrs,
+  ordersService,
+} from "../services/ordersService";
+import type { Order, OrderItem } from "../services/ordersService";
+import { exportToExcel } from "../utils/excelExport";
+import { useOrderQueue, useOrderDetailsFetcher } from "../lib/approvalQueries";
+import { messageFrom } from "@/lib/apiError";
+import { showToast } from "@/lib/toastStore";
+import { Badge } from "@/components/ui/badge";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { Button } from "@/components/ui/button";
+import { DetailField, DetailGrid } from "@/components/ui/detail";
+import {
+  FilterBar,
+  FilterCount,
+  FilterDate,
+  FilterSpacer,
+} from "@/components/ui/filter-bar";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  EmptyState,
+  Page,
+  PageHeader,
+  Stat,
+  StatRow,
+} from "@/components/ui/page";
+import { Pagination } from "@/components/ui/pagination";
+import { TableSkeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { toneForStatus } from "@/components/ui/statusTone";
+import {
+  ApprovalBusyDialog,
+  ApprovalConfirmDialog,
+  ApprovalReviewDialog,
+  ApprovalSuccessDialog,
+  type ApprovalAction,
+} from "@/components/orders/ApprovalDialogs";
+import { OrderItemsTable } from "@/components/orders/OrderItemsTable";
+import { OrderTotalsRow, VarietyCostCards } from "@/components/orders/OrderTotals";
+import { orderTotals, varietyCosts } from "@/components/orders/orderDetail";
+
+/**
+ * The billing queue.
+ *
+ * The third of the three approval screens, and the same shape as the other
+ * two — see `Auditor_Order` for what the conversion removed and why the
+ * totals moved out of a fixed footer bar.
+ *
+ * TWO THINGS ARE ITS OWN
+ * ----------------------
+ * It can EDIT an order (billing is the last stop where a line can still be
+ * corrected, so the row carries a pencil that hands off to `Add_Sales` in
+ * edit mode), and it filters rejected orders out of its own queue twice —
+ * once in `useOrderQueue` and again in the date filter. That belt-and-braces
+ * is deliberate: a billing-rejected order reappearing in the billing queue is
+ * a loop, and the two filters run at different times.
+ */
+
 const now = new Date();
-
-// First day of current month
-const firstDay = new Date(now.getFullYear(), now.getMonth(), 1)
-  .toISOString()
-  .split("T")[0];
-
-// Last day of current month
-const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 1)
-  .toISOString()
-  .split("T")[0];
+const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0];
+const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString().split("T")[0];
 
 const formatCreatedDateTime = (value?: string | null) => {
   if (!value) return "-";
@@ -48,74 +106,70 @@ const isRejectedBillingOrder = (order: Order) => {
 
   return statusCode === "BILLING_REJECTED" || statusText.includes("reject");
 };
-  
-export default function Billing_orders() {
-  const { t } = useUILabels();
 
+export default function Billing_orders() {
   const navigate = useNavigate();
   const location = useLocation();
-  const [orders, setOrders] = useState<Order[]>([]);
   const [showDetails, setShowDetails] = useState(false);
   const [orderDetails, setOrderDetails] = useState<Order | null>(null);
   const [selectedItems, setSelectedItems] = useState<OrderItem[]>([]);
-  // const [activeOrderId, setActiveOrderId] = useState<number | null>(null);
-  // Two-step approve/reject flow: the user first reviews the order summary and
-  // enters an (optional for approve, required for reject) reason, then confirms
-  // the action on a second step before the API is called.
+  // Two-step approve/reject flow: review the order summary and enter a reason
+  // (optional for approve, required for reject), then confirm before the API
+  // call.
   const [reviewOrder, setReviewOrder] = useState<Order | null>(null);
-  const [reviewAction, setReviewAction] = useState<"approve" | "reject" | null>(null);
+  const [reviewAction, setReviewAction] = useState<ApprovalAction | null>(null);
   const [reviewReason, setReviewReason] = useState("");
   const [reviewStep, setReviewStep] = useState<"review" | "confirm">("review");
   const [fromDate, setFromDate] = useState(firstDay);
   const [toDate, setToDate] = useState(lastDay);
-  const [isOrdersLoading, setIsOrdersLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const fetchOrderDetails_ = useOrderDetailsFetcher();
+  // No `refetchOrders` here: the only caller was the redundant refetch that
+  // followed `removeHandledOrder`'s invalidation, and this page's failure state
+  // is a message rather than a retry button.
+  const { orders, isOrdersLoading, ordersFailed } = useOrderQueue(
+    ["orders", "queue", "billing"],
+    () => ordersService.getOrders(undefined, true) as Promise<Order[]>,
+    (order) => !isRejectedBillingOrder(order),
+  );
 
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
 
   const [showAcceptSuccess, setShowAcceptSuccess] = useState(false);
-  const [acceptSuccessInfo, setAcceptSuccessInfo] = useState<{ orderId: string; message: string; nextStatus: string } | null>(null);
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [acceptSuccessInfo, setAcceptSuccessInfo] = useState<{
+    number: string;
+    order_id: string;
+    message: string;
+  } | null>(null);
 
-  useEffect(() => {
-    fetchOrders();
-  }, []);
-
-  const fetchOrders = async () => {
-    setIsOrdersLoading(true);
+  const fetchOrderDetails = async (orderId: number) => {
     try {
-      const data: Order[] = await ordersService.getOrders(undefined, true);
-      const activeOrders = (data || []).filter((order) => !isRejectedBillingOrder(order));
-      setOrders(sortOrders(activeOrders));
+      // Shared ["order-details", id] cache: this page fetches the same order
+      // twice — once to open the panel, again inside the Excel export.
+      const data = await fetchOrderDetails_(orderId);
+
+      setOrderDetails(data);
+      setSelectedItems(data.items || []);
+      setShowDetails(true);
     } catch (error) {
-      console.log("Error fetching orders:", error);
-    } finally {
-      setIsOrdersLoading(false);
+      console.log("Error fetching order details:", error);
     }
   };
-  console.log("All Orders:", orders);
 
   useEffect(() => {
     if (location.state?.openOrderId) {
       fetchOrderDetails(location.state.openOrderId);
       navigate(location.pathname, { replace: true, state: {} });
     }
+    // `fetchOrderDetails` is re-created every render and opens the detail
+    // panel; listing it would re-open the panel on every render. This effect is
+    // a one-shot handoff from a navigation, keyed on the incoming id.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state?.openOrderId, location.pathname, navigate]);
 
-   const fetchOrderDetails = async (orderId: number) => {
-  try {
-    const data = await ordersService.getOrderDetails(orderId);
-
-    setOrderDetails(data);
-    setSelectedItems(data.items || []);
-    setShowDetails(true);
-  } catch (error) {
-    console.log("Error fetching order details:", error);
-  }
-};
-
   const removeHandledOrder = (orderId: number) => {
-    setOrders((current) => current.filter((order) => order.id !== orderId));
+    void queryClient.invalidateQueries({ queryKey: ["orders", "queue", "billing"] });
     setSelectedItems([]);
     if (orderDetails?.id === orderId) {
       setOrderDetails(null);
@@ -123,8 +177,7 @@ export default function Billing_orders() {
     }
   };
 
-  // Step 1 — open the review modal for an approve or reject action.
-  const openReview = (order: Order, action: "approve" | "reject") => {
+  const openReview = (order: Order, action: ApprovalAction) => {
     setShowDetails(false);
     setReviewOrder(order);
     setReviewAction(action);
@@ -139,88 +192,60 @@ export default function Billing_orders() {
     setReviewStep("review");
   };
 
-  // Step 2 — after reviewing, move to the final confirmation step. Reject
-  // requires a reason; approve reason stays optional.
-  const proceedToConfirm = () => {
-    if (reviewAction === "reject" && !reviewReason.trim()) {
-      alert("Reason required");
-      return;
-    }
-    setReviewStep("confirm");
-  };
-
-  // Step 3 — user confirmed: call the API for the chosen action.
-  const submitReview = async () => {
-    if (!reviewOrder || !reviewAction) return;
-    const order = reviewOrder;
-    const reason = reviewReason.trim();
-    if (reviewAction === "reject" && !reason) {
-      alert("Reason required");
-      return;
-    }
-    setIsProcessing(true);
-    try {
-      if (reviewAction === "approve") {
-        const response = await ordersService.UpdateStatus(order.id, 10, reason || undefined);
+  /*
+   * The write.
+   *
+   * `useMutation` owns the in-flight flag as `isPending`, which cannot be left
+   * stuck on by a path that returns without reaching a `finally`. The old body
+   * also called `refetchOrders()` right after `removeHandledOrder`, which
+   * already invalidates this queue — two round trips for one removal.
+   */
+  const reviewMutation = useMutation({
+    mutationFn: async (vars: { order: Order; action: ApprovalAction; reason: string }) => {
+      if (vars.action === "approve") {
+        return await ordersService.UpdateStatus(vars.order.id, 10, vars.reason || undefined);
+      }
+      await ordersService.UpdateStatus(vars.order.id, 8, vars.reason);
+      return null;
+    },
+    onSuccess: (response, vars) => {
+      if (vars.action === "approve") {
         setAcceptSuccessInfo({
-          orderId: order.order_number,
-          message: response.message || "Order accepted successfully",
-          nextStatus: response.status || "-",
+          number: response?.status || "-",
+          order_id: vars.order.order_number,
+          message: response?.message || "Order accepted successfully",
         });
-        removeHandledOrder(order.id);
+        removeHandledOrder(vars.order.id);
         setShowAcceptSuccess(true);
       } else {
-        await ordersService.UpdateStatus(order.id, 8, reason);
-        alert("Order Rejected");
-        removeHandledOrder(order.id);
+        showToast({
+          title: "Order rejected",
+          message: `${vars.order.order_number} has been sent back.`,
+          orderNumber: vars.order.order_number,
+        });
+        removeHandledOrder(vars.order.id);
       }
       closeReview();
-      fetchOrders();
-      window.dispatchEvent(new Event('refresh-notifications'));
-    } catch (error: any) {
-      alert("Error: " + (error?.response?.data?.message || "Unknown error"));
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  // const pendingApproval = async (orderId: number) => {
-  //   try {
-  //     await ordersService.UpdateStatus(orderId, 5);
-  //     alert("Status Updated");
-  //     setActiveOrderId(null);
-  //     fetchOrders();
-  //   } catch (error: any) {
-  //     alert("Error: " + (error?.response?.data?.message || "Unknown error"));
-  //   }
-  // };
-
-  // const needApproval = async (orderId: number) => {
-  //   try {
-  //     await ordersService.UpdateStatus(orderId, 4);
-  //     alert("Status Updated");
-  //     setActiveOrderId(null);
-  //     fetchOrders();
-  //   } catch (error: any) {
-  //     alert("Error: " + (error?.response?.data?.message || "Unknown error"));
-  //   }
-  // };
-
-  const filteredOrders = orders.filter((order) => {
-    let matchDate = true;
-
-    if (fromDate && toDate) {
-      const orderDate = new Date(order.created_at);
-      const from = new Date(`${fromDate}T00:00:00.000`);
-      const to = new Date(`${toDate}T23:59:59.999`);
-
-
-      matchDate = orderDate >= from && orderDate <= to;
-    }
-
-    return matchDate && !isRejectedBillingOrder(order);
+      window.dispatchEvent(new Event("refresh-notifications"));
+    },
+    onError: (error) => {
+      showToast({
+        title: "Could not complete the action",
+        message: messageFrom(error, "Unknown error"),
+      });
+    },
   });
-  console.log("Filtered Orders:", filteredOrders);
+
+  const isProcessing = reviewMutation.isPending;
+
+  const submitReview = () => {
+    if (!reviewOrder || !reviewAction) return;
+    const reason = reviewReason.trim();
+    // The dialog disables Continue without a reason, so this is a guard on the
+    // write rather than the user's feedback.
+    if (reviewAction === "reject" && !reason) return;
+    reviewMutation.mutate({ order: reviewOrder, action: reviewAction, reason });
+  };
 
   const downloadExcel = async (order: Order) => {
     // The list API does not include line items; fetch full details on demand.
@@ -233,26 +258,24 @@ export default function Billing_orders() {
       }
     }
 
-    // Raw values only — exportToExcel infers the Excel type per column, so dates
-    // stay dates and money stays numeric and summable.
     let excelData: Record<string, unknown>[] = [];
+
     if (full.items && full.items.length > 0) {
       excelData = full.items.map((item: OrderItem) => ({
         "Order Number": full.order_number,
         "Card Code": full.card_code,
         "Card Name": full.card_name,
         "Delivery Date": full.delivery_date,
-        "Status": full.status_display,
+        Status: full.status_display,
         "Bill To": full.bill_to_address,
         "Ship To": full.ship_to_address,
         "Item Code": item.item_code,
         "Item Name": item.item_name,
-        "Scheme": getOrderItemSchemeNames(item),
+        Scheme: getOrderItemSchemeNames(item),
         "Scheme Qty": getOrderItemSchemeQtyText(item),
-        // "Scheme Ltrs": (item as any).scheme_ltrs || "",
-        "Qty": item.qty,
-        "Boxes": item.boxes,
-        "Liters": item.ltrs,
+        Qty: item.qty,
+        Boxes: item.boxes,
+        Liters: item.ltrs,
         "Total Ltrs": getOrderItemTotalLtrs(item),
         "Price List (Basic)": item.price_list_basic,
         "Basic Price": item.basic_price,
@@ -264,7 +287,7 @@ export default function Billing_orders() {
         "Card Code": full.card_code,
         "Card Name": full.card_name,
         "Delivery Date": full.delivery_date,
-        "Status": full.status_display,
+        Status: full.status_display,
         "Bill To": full.bill_to_address,
         "Ship To": full.ship_to_address,
         "Price List (Basic)": "",
@@ -278,6 +301,7 @@ export default function Billing_orders() {
     });
   };
 
+  /** Billing is the last stop where a line can still be corrected. */
   const handleEditOrder = (order: Order) => {
     navigate("/Add_Sales", {
       state: {
@@ -289,351 +313,330 @@ export default function Billing_orders() {
     });
   };
 
-  return (
-    <div className="bo-page">
+  const filteredOrders = useMemo(
+    () =>
+      orders.filter((order) => {
+        if (isRejectedBillingOrder(order)) return false;
+        if (!fromDate || !toDate) return true;
+        const orderDate = new Date(order.created_at);
+        return (
+          orderDate >= new Date(`${fromDate}T00:00:00.000`) &&
+          orderDate <= new Date(`${toDate}T23:59:59.999`)
+        );
+      }),
+    [orders, fromDate, toDate],
+  );
 
-      {/* â”€â”€ LIST VIEW â”€â”€ */}
+  const focCount = filteredOrders.filter((order) => order.is_foc).length;
+  const totalPages = Math.max(1, Math.ceil(filteredOrders.length / itemsPerPage));
+  const pageNumber = Math.min(currentPage, totalPages);
+  const paginatedOrders = filteredOrders.slice(
+    (pageNumber - 1) * itemsPerPage,
+    pageNumber * itemsPerPage,
+  );
+
+  const detailTotals = useMemo(() => orderTotals(selectedItems), [selectedItems]);
+  const detailVarieties = useMemo(() => varietyCosts(orderDetails), [orderDetails]);
+
+  return (
+    <Page>
+      {/* ── LIST VIEW ── */}
       {!showDetails && (
         <>
-          <div className="bo-page-head">
-            <span className="bo-page-accent" aria-hidden="true" />
-            <div>
-              <h1 className="bo-page-title">Pending Orders</h1>
-              <p className="bo-page-subtitle">Review and action orders awaiting billing.</p>
-            </div>
-          </div>
-          <div className="bo-toolbar">
-            <div className="bo-filter-head">
-              <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                <path d="M3 5h14M6 10h8M9 15h2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-              </svg>
-              <span>Filters</span>
-            </div>
-            <div className="bo-search-wrap">
-              <div className="bo-date-wrap">
-                <label className="bo-date-label">From</label>
-                <input type="date" value={fromDate} onChange={(e) => { setFromDate(e.target.value); setCurrentPage(1); }} className="bo-date-input" />
-              </div>
-              <div className="bo-date-wrap">
-                <label className="bo-date-label">To</label>
-                <input type="date" value={toDate} onChange={(e) => { setToDate(e.target.value); setCurrentPage(1); }} className="bo-date-input" />
-              </div>
-              {(fromDate || toDate) && (
-                <button type="button" className="bo-filter-clear" onClick={() => { setFromDate(""); setToDate(""); setCurrentPage(1); }}>Clear</button>
-              )}
-            </div>
-            <span className="bo-count">Total: {filteredOrders.length}</span>
-          </div>
+          <Breadcrumbs items={[{ label: "Orders" }, { label: "Billing Queue" }]} />
 
-          <div className="bo-table-wrap">
-            <table className="bo-table">
-              <thead>
-                <tr>
-                  <th>Order ID</th>
-                  <th>Card Name</th>
-                  <th>Items</th>
-                  <th>FOC</th>
-                  <th>Created At</th>
-                  <th>Delivery Date</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {isOrdersLoading ? (
-                  <tr>
-                    <td colSpan={7}>
-                      <div className="order-loading-state">
-                        <span className="order-loading-spinner" />
-                        <span>Loading orders...</span>
-                      </div>
-                    </td>
-                  </tr>
-                ) : filteredOrders.length > 0 ? (
-                  filteredOrders.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((order) => (
-                    <tr key={order.id} className={order.is_foc ? "bo-foc-row" : ""}>
-                      <td className="ao-cell-id">{order.order_number}</td>
-                      <td className="ao-cell-name">{order.card_name}</td>
-                      <td>{order.items_count ?? order.items?.length ?? 0}</td>
-                      <td>
-                        {order.is_foc ? (
-                          <span className="bo-foc-badge">FOC</span>
-                        ) : (
-                          <span className="bo-foc-empty">-</span>
-                        )}
-                      </td>
-                      <td>{formatCreatedDateTime(order.created_at)}</td>
-                      <td>{order.delivery_date}</td>
-                      <td>
-                        <div className="ao-row-actions">
-                          <button
-                            className="ao-btn-icon view"
-                            onClick={() => fetchOrderDetails(order.id)}
-                            title="View Order"
-                          >
-                            <HiEye size={20} />
-                          </button>
-                          <button
-                            className="ao-row-btn ao-row-approve"
-                            onClick={() => openReview(order, "approve")}
-                          >
-                            <HiCheckCircle size={18} /> Approve
-                          </button>
-                          <button
-                            className="ao-row-btn ao-row-reject"
-                            onClick={() => openReview(order, "reject")}
-                          >
-                            <HiXCircle size={18} /> Reject
-                          </button>
-                          <button
-                            className="ao-btn-icon edit"
-                            onClick={() => handleEditOrder(order)}
-                            title="Edit Order"
-                          >
-                            <HiPencilSquare size={20} />
-                          </button>
-                          <button
-                            className="ao-btn-icon download"
-                            onClick={() => downloadExcel(order)}
-                            title="Download Order"
-                          >
-                            <HiArrowDownTray size={20} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={7} className="bo-empty">No orders found</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+          <PageHeader
+            title="Billing Queue"
+            description="Orders awaiting billing. Lines can still be corrected from here."
+          />
+
+          <StatRow>
+            <Stat
+              icon={HiOutlineBanknotes}
+              tone="brand"
+              label="Awaiting billing"
+              value={filteredOrders.length}
+              hint="matching filters"
+              loading={isOrdersLoading}
+            />
+            <Stat
+              icon={HiOutlineGift}
+              tone={focCount ? "hold" : "neutral"}
+              label="FOC orders"
+              value={focCount}
+              loading={isOrdersLoading}
+            />
+          </StatRow>
+
+          <FilterBar>
+            <FilterDate
+              label="From"
+              value={fromDate}
+              onChange={(e) => {
+                setFromDate(e.target.value);
+                setCurrentPage(1);
+              }}
+            />
+            <FilterDate
+              label="To"
+              value={toDate}
+              onChange={(e) => {
+                setToDate(e.target.value);
+                setCurrentPage(1);
+              }}
+            />
+            {(fromDate || toDate) && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setFromDate("");
+                  setToDate("");
+                  setCurrentPage(1);
+                }}
+              >
+                <HiOutlineXMark aria-hidden="true" /> Clear
+              </Button>
+            )}
+            <FilterSpacer />
+            <FilterCount>Total: {filteredOrders.length}</FilterCount>
+          </FilterBar>
+
+          {isOrdersLoading ? (
+            <TableSkeleton columns={7} label="Loading orders" />
+          ) : filteredOrders.length > 0 ? (
+            <Card className="overflow-hidden p-0">
+              <div className="overflow-x-auto">
+                <Table density="compact">
+                  <TableHeader>
+                    <TableRow className="bg-surface hover:bg-surface">
+                      <TableHead>Order ID</TableHead>
+                      <TableHead>Card Name</TableHead>
+                      <TableHead>Items</TableHead>
+                      <TableHead>FOC</TableHead>
+                      <TableHead>Created At</TableHead>
+                      <TableHead>Delivery Date</TableHead>
+                      <TableHead>Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {paginatedOrders.map((order) => (
+                      <TableRow key={order.id}>
+                        <TableCell className="whitespace-nowrap font-semibold text-brand">
+                          {order.order_number}
+                        </TableCell>
+                        <TableCell className="text-ink">{order.card_name}</TableCell>
+                        <TableCell>{order.items_count ?? order.items?.length ?? 0}</TableCell>
+                        <TableCell>
+                          {order.is_foc ? (
+                            <Badge tone="note">FOC</Badge>
+                          ) : (
+                            <span className="text-subtle">-</span>
+                          )}
+                        </TableCell>
+                        <TableCell>{formatCreatedDateTime(order.created_at)}</TableCell>
+                        <TableCell>{order.delivery_date}</TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => fetchOrderDetails(order.id)}
+                              aria-label={`View order ${order.order_number}`}
+                              title="View order"
+                            >
+                              <HiOutlineEye aria-hidden="true" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleEditOrder(order)}
+                              aria-label={`Edit order ${order.order_number}`}
+                              title="Edit order"
+                            >
+                              <HiOutlinePencilSquare aria-hidden="true" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => downloadExcel(order)}
+                              aria-label={`Download order ${order.order_number}`}
+                              title="Download order"
+                            >
+                              <HiOutlineArrowDownTray aria-hidden="true" />
+                            </Button>
+                            <span aria-hidden="true" className="mx-1 h-5 w-px bg-line" />
+                            <Button
+                              size="sm"
+                              variant="success"
+                              onClick={() => openReview(order, "approve")}
+                            >
+                              <HiOutlineCheckCircle aria-hidden="true" /> Approve
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="danger"
+                              onClick={() => openReview(order, "reject")}
+                            >
+                              <HiOutlineXCircle aria-hidden="true" /> Reject
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </Card>
+          ) : (
+            <Card>
+              <EmptyState
+                icon={HiOutlineInbox}
+                title={ordersFailed ? "Could not load orders" : "Nothing to bill"}
+                hint={
+                  ordersFailed
+                    ? "Refresh the page to try again."
+                    : "No orders are waiting for billing in this date range."
+                }
+              />
+            </Card>
+          )}
 
           {filteredOrders.length > itemsPerPage && (
-            <div className="bo-pagination">
-              <button className="bo-pg-btn" disabled={currentPage === 1} onClick={() => setCurrentPage((p) => p - 1)}>Prev</button>
-              <span className="bo-pg-info">{currentPage} / {Math.ceil(filteredOrders.length / itemsPerPage)}</span>
-              <button className="bo-pg-btn" disabled={currentPage === Math.ceil(filteredOrders.length / itemsPerPage)} onClick={() => setCurrentPage((p) => p + 1)}>Next</button>
-            </div>
+            <Pagination
+              page={pageNumber}
+              totalPages={totalPages}
+              onPageChange={setCurrentPage}
+            />
           )}
         </>
       )}
 
-      {/* â”€â”€ DETAIL VIEW â”€â”€ */}
+      {/* ── DETAIL VIEW ── */}
       {showDetails && orderDetails && (
-        <div className="bo-detail">
-          <div className="bo-d-nav">
-            <button className="bo-d-back" onClick={() => setShowDetails(false)}>
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M10 13L5 8l5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
-              Back to Orders
-            </button>
-            <div className="bo-d-actions">
-              <button className="bo-d-export" onClick={() => downloadExcel(orderDetails)}>
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1v8m0 0L4 6.5M7 9l3-2.5M2.5 12h9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                Export Excel
-              </button>
-              <button
-                className="bo-d-action-btn bo-d-approve"
-                onClick={() => openReview(orderDetails, "approve")}
-              >
-                <HiCheckCircle /> Approve
-              </button>
-              <button
-                className="bo-d-action-btn bo-d-reject"
-                onClick={() => openReview(orderDetails, "reject")}
-              >
-                <HiXCircle /> Reject
-              </button>
-            </div>
-          </div>
+        <>
+          <Breadcrumbs
+            items={[
+              { label: "Orders" },
+              { label: "Billing Queue", onClick: () => setShowDetails(false) },
+              { label: orderDetails.order_number },
+            ]}
+          />
 
-          <PartyHeader order={orderDetails} />
+          <PageHeader
+            title={orderDetails.order_number}
+            description={orderDetails.card_name}
+            badges={
+              <>
+                {orderDetails.status_display ? (
+                  <Badge tone={toneForStatus(orderDetails.status_display)}>
+                    {orderDetails.status_display}
+                  </Badge>
+                ) : null}
+                {orderDetails.is_foc ? <Badge tone="note">FOC</Badge> : null}
+              </>
+            }
+            actions={
+              <>
+                {/* Tertiary actions are `ghost` — text and icon, no box.
+                    A page header with four bordered buttons is four boxes for
+                    two levels of importance. Only the decision this screen
+                    exists for keeps a filled button; everything else is
+                    available without competing for the eye. */}
+                <Button variant="ghost" onClick={() => handleEditOrder(orderDetails)}>
+                  <HiOutlinePencilSquare aria-hidden="true" /> Edit
+                </Button>
+                <Button variant="ghost" onClick={() => downloadExcel(orderDetails)}>
+                  <HiOutlineArrowDownTray aria-hidden="true" /> Export Excel
+                </Button>
+                <Button
+                  variant="danger"
+                  disabled={isProcessing}
+                  onClick={() => openReview(orderDetails, "reject")}
+                >
+                  <HiOutlineXCircle aria-hidden="true" /> Reject
+                </Button>
+                <Button
+                  variant="primary"
+                  disabled={isProcessing}
+                  onClick={() => openReview(orderDetails, "approve")}
+                >
+                  <HiOutlineCheckCircle aria-hidden="true" /> Approve
+                </Button>
+              </>
+            }
+          />
 
-          <div className="bo-d-items">
-            <div className="bo-d-items-head">
-              <span className="bo-d-items-title">Items</span>
-              <span className="bo-d-items-count">{selectedItems.length}</span>
-            </div>
-            <div className="bo-d-items-scroll">
-              <ItemSection items={selectedItems} />
-              <table className="bo-d-tbl">
-                <thead><tr><th>#</th><th>Item Code</th>
-                  <th style={{ minWidth: '250px' }}>Item Name</th>
-                  <th>Category</th><th>Scheme</th><th>Scheme Qty</th>
-                  <th>Qty</th><th>Pcs</th><th>Boxes</th><th>Ltrs</th>
-                  {/* <th>Scheme Ltrs</th> */}
-                  <th>Total Ltrs</th><th>{t("price_list", "Price List (Basic)")}</th><th>Basic Price</th><th>Tax %</th><th style={{ textAlign: 'right' }}>Amount</th></tr></thead>
-                <tbody>
-                  {selectedItems.length > 0 ? selectedItems.map((item, i) => (
-                    <tr key={i}>
-                      <td style={{ textAlign: 'center', color: '#94a3b8' }}>{i + 1}</td>
-                      <td><span className="bo-d-item-code">{item.item_code}</span></td>
-                      <td style={{ fontWeight: 500, color: '#0f172a', minWidth: '250px' }}>{item.item_name}</td>
-                      <td>{item.category}</td>
-                      <td colSpan={2}>{getOrderItemSchemes(item).length > 0 ? <div className="order-scheme-stack" aria-label="Applied schemes">{getOrderItemSchemes(item).map((scheme, schemeIndex) => <div className="order-scheme-chip" key={`${item.item_code}-scheme-${schemeIndex}`}><span className="order-scheme-name">{scheme.name || "-"}</span><span className="order-scheme-qty">Qty {scheme.qty || 0}</span></div>)}</div> : <span className="order-scheme-empty">No scheme</span>}</td>
-                      <td style={{ textAlign: 'center' }}>{item.qty}</td>
-                      <td style={{ textAlign: 'center' }}>{item.pcs}</td>
-                      <td style={{ textAlign: 'center' }}>{Number(item.boxes).toFixed(2)}</td>
-                      <td style={{ textAlign: 'center' }}>{item.ltrs}</td>
-                      {/* <td style={{textAlign:'center'}}>{item.scheme_name ? ((item as any).scheme_ltrs || 0) : "-"}</td> */}
-                      <td style={{ textAlign: 'center' }}>{getOrderItemTotalLtrs(item).toFixed(2)}</td>
-                      <td style={{ textAlign: 'right' }}>{Number(item.price_list_basic).toFixed(2)}</td>
-                      <td style={{ textAlign: 'right' }}>{Number(item.basic_price).toFixed(2)}</td>
-                      <td style={{ textAlign: 'center' }}>{Number(item.tax_rate).toFixed(2)}</td>
-                      <td style={{ textAlign: 'right', fontWeight: 600, color: '#0f172a' }}>{Number(item.total).toFixed(2)}</td>
-                    </tr>
-                  )) : (<tr><td colSpan={14} className="bo-empty">No items found</td></tr>)}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          <OrderTotalsRow totals={detailTotals} itemCount={selectedItems.length} />
 
-          <div className="bo-d-bottombar">
-          <div className="bo-d-summary">
-            <div className="bo-d-sum-row"><span className="bo-d-sum-label">Total Ltrs</span><span className="bo-d-sum-val">{selectedItems.reduce((s, i) => s + getOrderItemTotalLtrs(i), 0).toFixed(2)}</span></div>
-            <div className="bo-d-sum-row"><span className="bo-d-sum-label">Subtotal</span><span className="bo-d-sum-val">{selectedItems.reduce((s, i) => s + Number(i.total || 0), 0).toFixed(2)}</span></div>
-            <div className="bo-d-sum-row"><span className="bo-d-sum-label">Tax</span><span className="bo-d-sum-val">{selectedItems.reduce((s, i) => s + (Number(i.total || 0) * Number(i.tax_rate || 0) / 100), 0).toFixed(2)}</span></div>
-            {[
-              { label: "Commodity", value: orderDetails.vareity_cost?.commodity_price, cls: "vc-commodity" },
-              { label: "Other", value: orderDetails.vareity_cost?.other_total, cls: "vc-other" },
-              { label: "Premium", value: orderDetails.vareity_cost?.premium_total, cls: "vc-premium" },
-            ]
-              .filter((entry) => Number(entry.value) > 0)
-              .map((entry) => (
-                <div className="bo-d-sum-row" key={entry.label}><span className={`bo-d-sum-label vc-pill ${entry.cls}`}>{entry.label}</span><span className="bo-d-sum-val">{Number(entry.value).toFixed(2)}</span></div>
-              ))}
-            <div className="bo-d-sum-row bo-d-sum-grand"><span className="bo-d-sum-label">Grand Total</span><span className="bo-d-sum-val">{(selectedItems.reduce((s, i) => s + Number(i.total || 0), 0) + selectedItems.reduce((s, i) => s + (Number(i.total || 0) * Number(i.tax_rate || 0) / 100), 0)).toFixed(2)}</span></div>
-          </div>
-          </div>
-        </div>
+          <VarietyCostCards costs={detailVarieties} />
+
+          {/* The five facts an approver checks. See `Auditor_Order` for why
+              the other six that `PartyHeader`'s modal showed are not here. */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Party &amp; delivery</CardTitle>
+            </CardHeader>
+            <DetailGrid>
+              <DetailField label="Party state" value={orderDetails.party_state} />
+              <DetailField label="Delivery date" value={orderDetails.delivery_date} />
+              <DetailField label="PO number" value={orderDetails.po_number} />
+              <DetailField label="Bill to" value={orderDetails.bill_to_address} />
+              <DetailField label="Ship to" value={orderDetails.ship_to_address} />
+              <DetailField
+                label="Remark"
+                value={orderDetails.remarks?.trim() ? orderDetails.remarks : ""}
+                span="full"
+                hideWhenEmpty
+              />
+            </DetailGrid>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Items</CardTitle>
+              <Badge tone="neutral">{selectedItems.length}</Badge>
+            </CardHeader>
+            <OrderItemsTable items={selectedItems} variety={false} />
+          </Card>
+        </>
       )}
 
-      {/* â”€â”€ STEP 1: REVIEW MODAL â”€â”€ */}
-      {reviewOrder && reviewAction && reviewStep === "review" && (
-        <div className="bo-modal-overlay">
-          <div className="bo-modal">
-            <div className="bo-modal-title">
-              {reviewAction === "approve" ? "Review & Approve" : "Review & Reject"}
-            </div>
-            <p className="bo-modal-msg">Review the order details before you continue.</p>
-            <div className="bo-review-summary">
-              <div className="bo-review-row">
-                <span>Order Number</span>
-                <strong>{reviewOrder.order_number}</strong>
-              </div>
-              <div className="bo-review-row">
-                <span>Party</span>
-                <strong>{reviewOrder.card_name}</strong>
-              </div>
-              <div className="bo-review-row">
-                <span>Items</span>
-                <strong>{reviewOrder.items_count ?? reviewOrder.items?.length ?? 0}</strong>
-              </div>
-              <div className="bo-review-row">
-                <span>Amount</span>
-                <strong>
-                  ₹{Number(reviewOrder.total_amount || 0).toLocaleString("en-IN", {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
-                </strong>
-              </div>
-              <div className="bo-review-row">
-                <span>Delivery Date</span>
-                <strong>{reviewOrder.delivery_date || "-"}</strong>
-              </div>
-            </div>
-            <textarea
-              className="bo-modal-textarea"
-              value={reviewReason}
-              onChange={(e) => setReviewReason(e.target.value)}
-              placeholder={reviewAction === "approve" ? "Add a reason (optional)..." : "Type reason..."}
-              rows={3}
-            />
-            <div className="bo-modal-actions">
-              <button className="bo-btn-approve" onClick={proceedToConfirm}>Continue</button>
-              <button className="bo-btn-cancel" onClick={closeReview}>Cancel</button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ApprovalReviewDialog
+        order={reviewStep === "review" ? reviewOrder : null}
+        action={reviewStep === "review" ? reviewAction : null}
+        reason={reviewReason}
+        onReasonChange={setReviewReason}
+        onContinue={() => setReviewStep("confirm")}
+        onCancel={closeReview}
+      />
 
-      {/* â”€â”€ STEP 2: CONFIRM MODAL â”€â”€ */}
-      {reviewOrder && reviewAction && reviewStep === "confirm" && (
-        <div className="bo-modal-overlay">
-          <div className="bo-modal">
-            <div className="bo-modal-title">
-              {reviewAction === "approve" ? "Confirm Approval" : "Confirm Rejection"}
-            </div>
-            <p className="bo-modal-msg">
-              Are you sure you want to {reviewAction} order {reviewOrder.order_number}?
-            </p>
-            <div className="bo-modal-actions">
-              <button className="bo-btn-approve" onClick={submitReview} disabled={isProcessing}>
-                {reviewAction === "approve" ? "Yes, Approve" : "Yes, Reject"}
-              </button>
-              <button
-                className="bo-btn-cancel"
-                onClick={() => setReviewStep("review")}
-                disabled={isProcessing}
-              >
-                Back
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ApprovalConfirmDialog
+        order={reviewStep === "confirm" ? reviewOrder : null}
+        action={reviewStep === "confirm" ? reviewAction : null}
+        submitting={isProcessing}
+        approveMessage={(order) => `Accept ${order.order_number} for billing?`}
+        onConfirm={submitReview}
+        onBack={() => setReviewStep("review")}
+        onCancel={closeReview}
+      />
 
-      {/* â”€â”€ LOADING OVERLAY â”€â”€ */}
-      {isProcessing && (
-        <div className="bo-modal-overlay">
-          <div className="bo-modal bo-modal-loading">
-            <div className="bo-spinner" />
-            <p className="bo-loading-text">Processing order...</p>
-          </div>
-        </div>
-      )}
+      <ApprovalBusyDialog
+        open={isProcessing}
+        orderNumber={reviewOrder?.order_number}
+        heading="Updating order"
+        message="Recording the decision."
+      />
 
-      {showAcceptSuccess && acceptSuccessInfo && (
-        <div className="bo-modal-overlay">
-          <div className="bo-modal bo-modal-success">
-            <div className="bo-success-icon" aria-hidden="true" />
-            <div className="bo-modal-title">
-              {acceptSuccessInfo.nextStatus.toLowerCase().includes("completed") ? "Order Completed" : "Order Accepted"}
-            </div>
-            <div className="bo-success-info">
-              <div className="bo-success-row">
-                <span className="bo-success-label">Order Number</span>
-                <strong className="bo-success-value">{acceptSuccessInfo.orderId}</strong>
-              </div>
-              <div className="bo-success-row">
-                <span className="bo-success-label">Message</span>
-                <strong className="bo-success-value">{acceptSuccessInfo.message}</strong>
-              </div>
-              <div className="bo-success-row">
-                <span className="bo-success-label">Current Status</span>
-                <strong className="bo-success-value">{acceptSuccessInfo.nextStatus}</strong>
-              </div>
-            </div>
-            <div className="bo-modal-actions">
-              <button
-                className="bo-btn-approve"
-                onClick={() => {
-                  setShowAcceptSuccess(false);
-                  setAcceptSuccessInfo(null);
-                }}
-              >
-                OK
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-    </div>
+      <ApprovalSuccessDialog
+        open={Boolean(showAcceptSuccess && acceptSuccessInfo)}
+        result={acceptSuccessInfo}
+        numberLabel="Next status"
+        onClose={() => {
+          setShowAcceptSuccess(false);
+          setAcceptSuccessInfo(null);
+        }}
+      />
+    </Page>
   );
 }
-
-

@@ -1,0 +1,776 @@
+/*
+ * Tailwind, added ALONGSIDE the existing 35,000 lines of CSS — Phase 1.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * PREFLIGHT IS DELIBERATELY NOT IMPORTED. Read this before changing it.
+ * ─────────────────────────────────────────────────────────────────────────
+ *
+ * `@import "tailwindcss"` pulls in three things: the theme, PREFLIGHT, and the
+ * utilities. Preflight is a reset — it strips margins from headings, removes
+ * list markers from `ul`, unstyles `button`, and sets `border-collapse` on
+ * tables. Fifty-four stylesheets written over several years assume browser
+ * defaults for every one of those.
+ *
+ * Importing it would restyle all 108 pages at once, in one commit, with no way
+ * to tell an intended change from a regression. So the layers are imported
+ * individually and preflight is left out. Phase 1's stated exit condition is
+ * "nothing looks different", and this is the line that delivers it.
+ *
+ * When a page is migrated off its stylesheet, preflight can be enabled for that
+ * page's subtree with a scoped copy — not switched on globally.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * A CASCADE NOTE THAT WILL SURPRISE SOMEONE
+ * ─────────────────────────────────────────────────────────────────────────
+ *
+ * Every existing stylesheet is UNLAYERED. In the CSS cascade, unlayered styles
+ * beat layered ones regardless of specificity — so a page's own CSS wins over a
+ * Tailwind utility, not the other way round. That is the safe direction for
+ * this phase (nothing can be accidentally restyled), but it means adding
+ * `class="p-4"` to an element whose stylesheet already sets padding will appear
+ * to do nothing. The fix is to remove the competing rule, not to reach for
+ * `!important`.
+ */
+/*
+ * ─────────────────────────────────────────────────────────────────────────
+ * DARK MODE IS CLASS-DRIVEN, AND NOTHING SETS THE CLASS YET
+ * ─────────────────────────────────────────────────────────────────────────
+ * Tailwind's default `dark:` variant follows `prefers-color-scheme`. Left at
+ * that default, every `dark:` utility written from here on would activate for
+ * any user whose OS is set to dark — and 47 of the 50 legacy stylesheets
+ * hardcode white backgrounds, so those users would get dark cards on white
+ * pages across the 100+ screens not yet converted.
+ *
+ * Redefining the variant to a `.dark` ancestor makes `dark:` inert until
+ * something adds that class, which nothing does. New components can therefore
+ * be written dark-ready today at no visual cost, and the toggle can be turned
+ * on in one line once enough pages are converted to survive it. This is how
+ * EXIM does it (`src/index.css`), so the two apps stay compatible.
+ */
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * ─────────────────────────────────────────────────────────────────────────
+ * `rail-drawer:` — the shell's one breakpoint, spelled the same in both files
+ * ─────────────────────────────────────────────────────────────────────────
+ * Below this width the navigation rail is an off-canvas drawer: the header
+ * swaps its collapse toggle for a hamburger, and `.content-area` drops the
+ * margin that clears the rail. Two files have to agree on where that happens
+ * — `components/Sidebar.css` (which still owns the rail's position) and
+ * `components/layout/AppHeader.tsx` (which owns the toggles).
+ *
+ * Tailwind's own `max-[1024px]` will NOT do it. It compiles to
+ * `@media not all and (width >= 1024px)` — STRICTLY less than 1024 — while
+ * the CSS rule beside it is `max-width: 1024px`, which includes it. At
+ * exactly 1024px the rail is therefore off-canvas while the button that
+ * opens it is still hidden, and the app has no navigation at all. One pixel
+ * wide, invisible in review, and found only because the compiled CSS was
+ * read.
+ *
+ * Declaring the query once removes the chance of the two drifting again.
+ */
+@custom-variant rail-drawer (@media (width <= 1024px));
+
+@layer theme, base, components, utilities;
+
+@import "tailwindcss/theme.css" layer(theme);
+/* @import "tailwindcss/preflight.css" layer(base);  <- see above */
+@import "tailwindcss/utilities.css" layer(utilities);
+
+/*
+ * ─────────────────────────────────────────────────────────────────────────
+ * The app's own reset — moved here from styles/Login.css
+ * ─────────────────────────────────────────────────────────────────────────
+ *
+ * This is NOT Tailwind's preflight (still deliberately not imported, see
+ * above). It is the one universal rule this codebase has always had. It was
+ * written at the top of Login.css, which is imported eagerly because Login is
+ * the only non-lazy route — so a rule named after one page has been resetting
+ * all 108 for years. Every stylesheet since was written expecting it.
+ *
+ * WHY IT IS IN A LAYER NOW
+ * ------------------------
+ * Unlayered CSS beats every cascade layer regardless of specificity. Left
+ * unlayered, `* { padding: 0 }` outranks `.py-4` — so a Tailwind padding or
+ * margin utility resolved to zero ANYWHERE in the app. The class was in the
+ * DOM, it matched a real rule in a loaded stylesheet, and it did nothing.
+ * That cost most of a day on the first table conversion, and it would have
+ * cost it again on every page in Phase 2.
+ *
+ * Nothing else changes. Against the 50 unlayered stylesheets the reset is
+ * still the weakest thing in the cascade: it was already losing to every one
+ * of them on specificity (`*` is 0,0,0 — any class selector beats it), and a
+ * layered rule loses to unlayered CSS outright. The only rules it now yields
+ * to are Tailwind's utilities, which is the entire point.
+ */
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+}
+
+/*
+ * ─────────────────────────────────────────────────────────────────────────
+ * THE CONVERTED-PAGE RESET — put `tw-page` on the root of a migrated page
+ * ─────────────────────────────────────────────────────────────────────────
+ *
+ * The note above says a page's own CSS beats a utility because it is
+ * unlayered. `index.css` is unlayered too, and it styles bare ELEMENTS:
+ *
+ *     h1                        font-size: 56px; margin: 32px 0
+ *     h2                        font-size: 24px; margin: 0 0 8px
+ *     input, select, button     font: inherit        <- and so 18px, from :root
+ *
+ * A page that still has its own stylesheet never notices: `.asg-form-title`
+ * is a class (0,1,0) and beats a bare `h1` (0,0,1). Delete that stylesheet in
+ * favour of `text-[24px]`, though, and the utility is LAYERED — so `h1` wins
+ * outright and the heading renders at 56px. Nothing errors; the class is in
+ * the DOM and does nothing. That is the trap this file already warns about,
+ * one step further on, and it is the thing that actually bites when a page is
+ * converted rather than merely decorated.
+ *
+ * `!important` on every heading and input would work and would be miserable.
+ * Removing the element rules from `index.css` would work and would restyle the
+ * ~100 pages that still rely on them.
+ *
+ * `revert-layer` is the third option and the right one. These declarations sit
+ * UNLAYERED — deliberately, so they can outrank `index.css` — and each one
+ * rolls the property back to whatever the cascade layers below say, which is
+ * where Tailwind's utilities live. Inside `.tw-page`, `text-[24px]` wins; the
+ * element defaults still apply everywhere else, so an unconverted page is
+ * bit-for-bit unaffected. The `:is()` keeps specificity at (0,1,1) — one class
+ * above the rules being displaced, and below any real page stylesheet.
+ *
+ * Set an explicit size on headings and controls inside a `.tw-page`: what they
+ * revert to is the UA default, not the app's.
+ */
+.tw-page :is(h1, h2, h3, h4, h5, h6) {
+  font: revert-layer;
+  margin: revert-layer;
+  color: revert-layer;
+  letter-spacing: revert-layer;
+}
+
+.tw-page :is(input, select, button, textarea) {
+  font: revert-layer;
+}
+
+/*
+ * AND `<p>`, which this reset forgot.
+ *
+ * `index.css` carries an unlayered `p { margin: 0 }`. Unlayered beats every
+ * cascade layer, so `mb-4` on a paragraph inside a converted page computed to
+ * 0px and the utility sat in the DOM doing nothing — 166 of them across 42
+ * files, every one written by someone who expected a gap and got none.
+ *
+ * Same mechanism as the headings above: `.tw-page p` is (0,1,1) and beats the
+ * bare `p` (0,0,1), and `revert-layer` then hands the decision back down to
+ * the utilities layer. Only `margin`, because that is the only thing that
+ * rule sets.
+ */
+.tw-page p {
+  margin: revert-layer;
+}
+
+/*
+ * The design that already exists, written down.
+ *
+ * Every value here was read out of the current stylesheets — `src/index.css`
+ * for the global set, and the 88 byte-identical declaration blocks catalogued
+ * in docs/codebase/DUPLICATION.md for the rest. Nothing is a Tailwind default
+ * and nothing is new: `bg-surface` must produce the same `#f8fafc` that
+ * eight stylesheets already hardcode, or the tokens are a second design rather
+ * than a description of the first.
+ *
+ * This is the step that makes later phases safe. A shadcn component themed
+ * from these renders in the app's own colours instead of shadcn's.
+ */
+@theme {
+  /* ---- Type ------------------------------------------------------------ */
+  --font-sans: "Inter", "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Consolas, monospace;
+
+  /* ---- Neutrals -------------------------------------------------------- */
+  /* --text-h in index.css: the strongest heading colour. */
+  --color-ink: #0f172a;
+  /* Recurs in 8 duplicated blocks as the strong body colour. */
+  --color-ink-soft: #1e293b;
+  /* --text in index.css. */
+  --color-body: #475569;
+  /* 5 blocks: the muted label colour. See the note under Brand for the name. */
+  --color-subtle: #64748b;
+  /* --border in index.css. */
+  --color-line: #dbe4ee;
+  /* 8 blocks pair this border with the surface below. */
+  --color-line-strong: #cbd5e1;
+  /* --code-bg, and the subtle panel fill in 13 blocks. */
+  --color-surface: #f8fafc;
+  /* --bg in index.css: the page behind the panels. */
+  /* A flat, neutral light grey — ERPNext's canvas, near enough.
+     Two earlier attempts are worth recording so they are not retried:
+     #f4f7fb (the original) is so close to white that a white card on it is
+     visible only by its border, and a two-stop gradient read as decoration
+     rather than as restraint. Neutral rather than blue-tinted, so the only
+     colour on a page comes from its data. */
+  --color-canvas: #f4f5f6;
+
+  /* ---- Brand ----------------------------------------------------------- */
+  /*
+   * Named `brand`, not `accent`, on purpose. shadcn's semantic set uses
+   * `--color-accent` for a SUBTLE surface, not the primary colour — and both
+   * live in Tailwind's one colour namespace, so calling this `accent` would
+   * silently overwrite shadcn's and turn every `bg-accent` blue. Same reason
+   * the muted colour below is `subtle`.
+   */
+  /* --accent in index.css; also the focus ring in 6 duplicated blocks. */
+  --color-brand: #2563eb;
+  --color-brand-soft: rgba(37, 99, 235, 0.1);
+  --color-brand-line: rgba(37, 99, 235, 0.28);
+
+  /* ---- The navigation rail --------------------------------------------- */
+  /*
+   * The one dark surface in the app, and the only tokens here that were not
+   * read out of an existing stylesheet.
+   *
+   * The rail was tried white first, on the reasoning that white chrome around
+   * a grey canvas draws the boundary once and lets the data carry the colour.
+   * It read as washed out: a 230px column of white beside a white header and
+   * a near-white canvas has nothing to separate it, and the app lost the one
+   * place it was ever obviously JIVO's.
+   *
+   * So it is dark and it is BLUE — `#172554` is the brand hue driven down to
+   * near-black, not a neutral slate — with the brand itself, unmuted, as the
+   * fill on the item you are on. That is the accent doing the work: one
+   * saturated shape in the whole frame, and it is always the answer to "where
+   * am I".
+   *
+   * Deliberately not the gradient it replaces. A flat surface, a hairline
+   * edge; the old rail spent a 180deg gradient, a blue-tinted border and a
+   * 30px shadow saying the same thing.
+   */
+  --color-rail: #172554;
+  /* Hover, and the collapsed section dividers. White at low alpha rather than
+     a mixed hex, so both survive a change to the surface above. */
+  --color-rail-hover: rgba(255, 255, 255, 0.07);
+  --color-rail-line: rgba(255, 255, 255, 0.09);
+  /* Resting label. Not pure white: 40 nav items at full contrast is a wall,
+     and the active one has nothing left to be brighter than. */
+  --color-rail-text: rgba(226, 232, 240, 0.82);
+  /* Section captions and resting icons. */
+  --color-rail-muted: rgba(148, 163, 184, 0.9);
+
+  /* ---- Semantic -------------------------------------------------------- */
+  /* The danger trio, byte-identical across 6 stylesheets. */
+  --color-danger: #dc2626;
+  --color-danger-soft: #fef2f2;
+  --color-danger-line: #fecaca;
+  /* The warning/attention set, from 5 blocks. */
+  --color-warning: #f97316;
+  --color-warning-strong: #fb923c;
+  --color-warning-soft: #fff7ed;
+
+  /* ---- Status palette -------------------------------------------------- */
+  /*
+   * The badge colours, counted out of the existing stylesheets: #f1f5f9 (99
+   * uses), #dcfce7 (30), #166534 (25), #991b1b (22), #fee2e2 (21), #fef3c7
+   * (13), #92400e (10), #ede9fe (5).
+   *
+   * Deliberately SEPARATE from the `--color-danger` / `--color-warning` sets
+   * above, and not folded into them: those are the 50-weight tints the app
+   * uses for panels and alert strips (#fef2f2, #fff7ed), and badges use the
+   * 100-weight ones (#fee2e2, #fef3c7). Merging them would change every alert
+   * strip in the app in order to fix a badge.
+   *
+   * `note` is violet. It is not decoration: View_Orders already distinguishes
+   * "pending approval" (amber — waiting on someone) from "needs approval"
+   * (violet — waiting on YOU) on the same screen. Collapsing them would throw
+   * away a distinction the design makes on purpose.
+   */
+  --color-ok: #166534;
+  --color-ok-soft: #dcfce7;
+  --color-hold: #92400e;
+  --color-hold-soft: #fef3c7;
+  --color-bad: #991b1b;
+  --color-bad-soft: #fee2e2;
+  --color-note: #5b21b6;
+  --color-note-soft: #ede9fe;
+  /* The neutral chip fill, and the most-used colour in the whole codebase. */
+  --color-surface-strong: #f1f5f9;
+
+  /* ---- Shape ----------------------------------------------------------- */
+  /* --radius-sm / md / lg in index.css. */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  /*
+   * The card radius for Phase 2 components — and it is NOT `--radius-lg`,
+   * for a reason worth recording.
+   *
+   * `components/Sidebar.css` declares a global `:root { --radius-lg: 12px }`.
+   * A component stylesheet redefining an app-wide design token is a bug, and
+   * because it loads after index.css it WINS: every page stylesheet writing
+   * `var(--radius-lg, 16px)` has silently been getting 12px. Pointing the new
+   * cards at `--radius-lg` therefore did nothing at all — the corners stayed
+   * exactly where they were.
+   *
+   * Fixing Sidebar.css would change the radius on ~15 unconverted pages at
+   * once, which is not this phase's change to make. A distinct name cannot be
+   * hijacked by a stylesheet that has never heard of it.
+   */
+  --radius-card: 14px;
+
+  /* ---- Spacing --------------------------------------------------------- */
+  /*
+   * Tailwind's default is `0.25rem`, and in this app a rem is NOT 16px:
+   * `index.css` sets `:root { font: 18px/145% var(--sans) }`, so the root is
+   * 18px and `p-4` came out as 18px rather than 16px. Every one of the 50
+   * existing stylesheets is written in px on a 4px grid, so the rem-based
+   * scale silently disagreed with the design it is meant to reproduce by
+   * 12.5% — enough to shift a table row 6px and not enough to look like a bug.
+   *
+   * Pinned to px so `p-4` is 16px here, the same 16px the CSS it replaces
+   * means. Font sizes are deliberately left in rem: those SHOULD track the
+   * root, because a reader who enlarges text expects text to enlarge.
+   */
+  --spacing: 4px;
+
+  /* ---- Sizing ---------------------------------------------------------- */
+  /* --input-h and --btn-h are both 40px; kept as one token because they are
+     one decision, and 5 blocks set a 36px compact variant beside them. */
+  --spacing-control: 40px;
+  --spacing-control-sm: 36px;
+  /*
+   * The CHROME height — filter toolbars and page-header actions.
+   *
+   * Not read out of an existing stylesheet; it is a Phase 2 decision. The two
+   * sizes above are form heights: a control you fill in, sized so a button
+   * beside an input lines up with it. The things AROUND a form are not that.
+   * A page header has no inputs, and a filter bar is glanced at rather than
+   * filled in — at 36px a row of five filters was taller than the KPI cards
+   * above it and read as the most important object on the screen.
+   *
+   * One token so the two cannot drift: a Clear button 4px taller than the
+   * date field beside it is the kind of thing nobody reports and everybody
+   * sees. A test pins that the filter bar normalises its buttons to it.
+   */
+  --spacing-control-xs: 32px;
+
+  /* ---- Elevation ------------------------------------------------------- */
+  /* --shadow in index.css, verbatim. */
+  --shadow-panel: 0 16px 36px rgba(15, 23, 42, 0.06), 0 4px 12px rgba(15, 23, 42, 0.03);
+  /* Card elevation, EXIM-style: present enough to lift a card off the canvas,
+     light enough that a grid of six does not look like six slabs.
+     `--shadow-panel` is the old page-header treatment and is far too heavy for
+     a card, which is why no card ever used it. */
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.06);
+  --shadow-card-hover: 0 2px 4px rgba(15, 23, 42, 0.05), 0 4px 10px rgba(15, 23, 42, 0.08);
+  /* The focus ring 6 stylesheets draw around a focused control. */
+  --shadow-focus: 0 0 0 3px rgba(37, 99, 235, 0.12);
+
+  /* ---- Motion ---------------------------------------------------------- */
+  /*
+   * Three animations for the long-wait screens — the SAP invoice post, which
+   * blocks the user for the better part of a minute and has nothing real to
+   * report while it does.
+   *
+   * They live here rather than in a page stylesheet because they are the only
+   * thing `MissionControlLoader.css` had that utilities could not express, and
+   * because a second screen with a long wait should reach for the same three
+   * rather than invent them again.
+   *
+   * ALWAYS write them as `motion-safe:animate-halo` at the call site. These are
+   * pure decoration — none of them carries information the static state does
+   * not — so the OS preference has to be honoured, and the `motion-safe:`
+   * variant is how, since a bare `animate-*` utility is not gated.
+   */
+  --animate-halo: oms-halo 2s ease-out infinite;
+  --animate-emoji: oms-swap-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) both,
+    oms-bob 2.4s ease-in-out 0.45s infinite;
+  --animate-sweep: oms-sweep 1.5s ease-in-out infinite;
+}
+
+/*
+ * ─────────────────────────────────────────────────────────────────────────
+ * shadcn/ui theme — plan item 1.4
+ * ─────────────────────────────────────────────────────────────────────────
+ *
+ * shadcn components are written against a fixed set of semantic utilities
+ * (`bg-background`, `text-muted-foreground`, `border-border`, `ring-ring`).
+ * Those have to resolve to SOMETHING, and left at shadcn's defaults every
+ * component landing in Phase 2 arrives in shadcn's palette — a second design
+ * beside the app's, which is what "visual parity first" exists to prevent. So
+ * they are pointed at the tokens above, read out of the app's own stylesheets.
+ *
+ * WHY THE `--sh-` PREFIX
+ * ---------------------
+ * shadcn's convention is to declare these as `--background`, `--accent`,
+ * `--muted`, `--border` on `:root`. Following that convention here would be a
+ * bug: this codebase ALREADY defines and uses several of those names.
+ *
+ *     --accent   defined in index.css + 2 stylesheets, referenced 40 times
+ *     --muted    defined in 2 stylesheets, referenced 17 times
+ *     --border   defined in index.css
+ *
+ * Both sets would sit unlayered on `:root`, so the later import simply wins —
+ * and since `index.css` is imported after this file, `--accent` would resolve
+ * to the app's blue rather than the subtle surface shadcn means by it. Every
+ * `bg-accent` in Phase 2 would come out blue-on-blue, and the cause would be
+ * three files away from the symptom.
+ *
+ * Prefixing sidesteps the collision entirely. Nothing is lost: shadcn
+ * components reference the UTILITY (`bg-accent`), not the raw property, and
+ * `@theme inline` below is what connects the two. A component pasted from the
+ * shadcn registry works unmodified.
+ */
+:root {
+  --sh-background: #ffffff;
+  --sh-foreground: var(--color-ink);
+
+  --sh-card: #ffffff;
+  --sh-card-foreground: var(--color-ink);
+  --sh-popover: #ffffff;
+  --sh-popover-foreground: var(--color-ink);
+
+  --sh-primary: var(--color-brand);
+  --sh-primary-foreground: #ffffff;
+
+  --sh-secondary: var(--color-surface);
+  --sh-secondary-foreground: var(--color-ink-soft);
+
+  --sh-muted: var(--color-surface);
+  --sh-muted-foreground: var(--color-subtle);
+
+  --sh-accent: var(--color-surface);
+  --sh-accent-foreground: var(--color-ink-soft);
+
+  --sh-destructive: var(--color-danger);
+  --sh-destructive-foreground: #ffffff;
+
+  --sh-border: var(--color-line);
+  --sh-input: var(--color-line-strong);
+  --sh-ring: var(--color-brand);
+}
+
+/*
+ * `@theme inline` maps those onto Tailwind's colour namespace WITHOUT freezing
+ * their values — `inline` makes the generated utility emit `var(--sh-...)`
+ * rather than the colour it resolves to today. That is what lets a subtree
+ * override one property and have every utility follow it, which is how shadcn
+ * expects theming to work.
+ */
+@theme inline {
+  --color-background: var(--sh-background);
+  --color-foreground: var(--sh-foreground);
+  --color-card: var(--sh-card);
+  --color-card-foreground: var(--sh-card-foreground);
+  --color-popover: var(--sh-popover);
+  --color-popover-foreground: var(--sh-popover-foreground);
+  --color-primary: var(--sh-primary);
+  --color-primary-foreground: var(--sh-primary-foreground);
+  --color-secondary: var(--sh-secondary);
+  --color-secondary-foreground: var(--sh-secondary-foreground);
+  --color-muted: var(--sh-muted);
+  --color-muted-foreground: var(--sh-muted-foreground);
+  --color-accent: var(--sh-accent);
+  --color-accent-foreground: var(--sh-accent-foreground);
+  --color-destructive: var(--sh-destructive);
+  --color-destructive-foreground: var(--sh-destructive-foreground);
+  --color-border: var(--sh-border);
+  --color-input: var(--sh-input);
+  --color-ring: var(--sh-ring);
+}
+
+/*
+ * Keyframes for the Phase 1 proving ground (components/PageLoading.tsx).
+ *
+ * Tailwind can express the animation shorthand but not the keyframes
+ * themselves, so they live here rather than in an injected `<style>` tag — the
+ * previous approach, which re-inserted the same rule into the document on
+ * every render of the component.
+ *
+ * The hold at 40% is what makes a fast route load show nothing at all.
+ */
+@keyframes oms-page-loading-fade {
+  0%, 40% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+/*
+ * The dialog's open animation. Written as a keyframe here rather than reached
+ * for via `animate-in` / `zoom-in-95`, because those utilities come from the
+ * `tailwindcss-animate` plugin and this project does not have it — they would
+ * compile to nothing and read, in the source, as if they worked.
+ *
+ * It reproduces `trk-pop` from Tracker.css, which is the pop the 13 tracker
+ * modals already used.
+ */
+/*
+ * ─────────────────────────────────────────────────────────────────────────
+ * THE DIALOG OPENS FROM THE CORNER — AND WHY IT DID
+ * ─────────────────────────────────────────────────────────────────────────
+ * This keyframe used to say `transform: translate(-50%, -50%) scale(0.96)`,
+ * restating the centring so the scale would not clobber it. That is correct
+ * advice for Tailwind v3 and WRONG here.
+ *
+ * `ui/dialog` centres the panel with `left-1/2 top-1/2 -translate-x-1/2
+ * -translate-y-1/2`, and Tailwind v4 compiles those last two to the
+ * INDEPENDENT `translate` property, not to `transform`:
+ *
+ *     translate: -50% -50%;          <- from the utility
+ *     transform: translate(-50%,-50%) scale(.96);   <- from the keyframe
+ *
+ * Both apply, and they compose. For the 0.16s the animation runs the panel is
+ * displaced by -100%/-100% instead of -50%/-50% — it opens from up and to the
+ * left of centre and SNAPS into place the instant the animation ends and
+ * `transform` reverts to `none`. Every one of the 44 dialogs in the app did
+ * this; it reads as a hard flicker rather than as a pop.
+ *
+ * The fix is to animate only what the animation is for. `scale` is another
+ * independent transform property, so it composes with `translate` instead of
+ * replacing it — the panel stays centred throughout and there is nothing left
+ * to snap back. `transform` is not mentioned at all, which also means a dialog
+ * that grows its own transform utility later cannot be clobbered by this.
+ */
+@keyframes dialog-pop {
+  from { opacity: 0; scale: 0.96; }
+  to   { opacity: 1; scale: 1; }
+}
+
+/*
+ * The skeleton shimmer. A keyframe rather than `animate-pulse`, because
+ * Tailwind's own pulse goes to opacity 0.5 and back — on `--color-surface-strong`
+ * over a white card that is nearly invisible. This moves the background
+ * lightness instead, so the bar reads as loading on the surfaces these tables
+ * actually sit on.
+ */
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.55; }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Interaction utilities — ported from EXIM (`src/index.css`).
+ *
+ * These four classes carry most of what makes that app feel finished rather
+ * than austere, and none of them is a colour: a page fades in, a card lifts
+ * and catches a highlight under the cursor, a button gives under the press.
+ * They are cheap, they are reusable, and they are the difference between
+ * "clean" and "unfinished".
+ *
+ * In `@layer components`, so a page's own utilities still win. Nothing in the
+ * 50 legacy stylesheets declares these names, so there is no conflict to lose.
+ * ────────────────────────────────────────────────────────────────────────── */
+@layer components {
+  /* Page entrance. EXIM puts `animate-page` on every page wrapper. */
+  .animate-page {
+    animation: oms-fade-slide-up 0.4s ease-out;
+  }
+
+  /* Card lift. The shadow is the elevation token one step up, so a hovered
+     card and a resting one are recognisably the same object. */
+  /* The card lifts under the cursor.
+     ─────────────────────────────────────────────────────────────────────────
+     `top`, NOT `transform`, AND THAT IS LOAD BEARING.
+
+     A transform creates a STACKING CONTEXT. `ui/page`'s Card carries
+     `card-hover` on every instance, so hovering a card that contained an open
+     dropdown trapped the panel's `z-30` inside that card — and the NEXT card,
+     a later sibling, painted straight over it. Moving the mouse in and out
+     toggled the transform, so the panel flipped above and below the card
+     below it: it read as flickering.
+
+     `position: relative` with `z-index: auto` creates no stacking context, so
+     offsetting `top` moves the card by the same 2px and leaves the panel
+     free to paint above everything after it. The card is already positioned
+     (see `.shimmer-hover`); it is restated here so the two utilities stay
+     independently correct. */
+  .card-hover {
+    position: relative;
+    top: 0;
+    transition:
+      top 0.2s ease,
+      box-shadow 0.2s ease;
+  }
+
+  .card-hover:hover {
+    top: -2px;
+    box-shadow: var(--shadow-card-hover);
+  }
+
+  /* A light sweep across the card under the cursor. Subtle by design: at 0.06
+     alpha it registers as sheen rather than as an animation playing.
+     ─────────────────────────────────────────────────────────────────────────
+     NO `overflow: hidden`, AND THAT IS LOAD BEARING.
+
+     This rule used to clip the sweep with `overflow: hidden` on the card and
+     slide the ::after across with `translateX`. `ui/page`'s Card carries
+     `shimmer-hover` on EVERY card, so that one declaration made every card in
+     the app a clipping box — and any dropdown panel opened inside one was cut
+     off at the card's edge. A `SearchSelect` near the bottom of a card simply
+     had no visible list. It looked like the picker was broken; it was the
+     decoration two files away.
+
+     The sweep is animated with `background-position` instead. The ::after
+     never leaves its own box, so nothing needs clipping and the effect is
+     unchanged. `border-radius: inherit` keeps it off the rounded corners,
+     which is the other thing `overflow: hidden` was doing. */
+  .shimmer-hover {
+    position: relative;
+  }
+
+  .shimmer-hover::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.06),
+      transparent
+    );
+    background-size: 200% 100%;
+    background-position: 150% 0;
+    background-repeat: no-repeat;
+    pointer-events: none;
+  }
+
+  .shimmer-hover:hover::after {
+    animation: oms-shimmer 0.8s ease-out;
+  }
+
+  /* The button gives under the press. */
+  .btn-press:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+}
+
+@keyframes oms-fade-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/*
+ * The expanding halo behind the invoice-post hero. Two of them, the second on
+ * a 1s delay, so the pulse never fully stops.
+ *
+ * `scale`, not `transform: scale()` — the independent property composes with
+ * whatever `translate` the element carries instead of replacing it (see the
+ * note on `dialog-pop` above).
+ */
+@keyframes oms-halo {
+  from { scale: 0.7; opacity: 0.9; }
+  to   { scale: 1.5; opacity: 0; }
+}
+
+/* The hero glyph arrives, then breathes. One token, two animations: the swap
+   plays once on mount and the bob takes over when it finishes. */
+@keyframes oms-swap-in {
+  from { opacity: 0; scale: 0.6; rotate: -12deg; }
+  to   { opacity: 1; scale: 1; rotate: 0deg; }
+}
+
+@keyframes oms-bob {
+  0%, 100% { translate: 0 0; }
+  50%      { translate: 0 -5px; }
+}
+
+/* A highlight sweeping across a progress fill that is parked, waiting for a
+   server. The bar cannot move; this is what says the wait is not a hang. */
+@keyframes oms-sweep {
+  from { translate: -100% 0; }
+  to   { translate: 100% 0; }
+}
+
+@keyframes oms-shimmer {
+  from {
+    background-position: 150% 0;
+  }
+  to {
+    background-position: -50% 0;
+  }
+}
+
+/*
+ * Motion is decoration here — every one of these communicates nothing that the
+ * static state does not. EXIM ships them unconditionally; honouring the OS
+ * preference costs four lines.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .animate-page,
+  .shimmer-hover:hover::after {
+    animation: none;
+  }
+
+  .card-hover:hover {
+    top: 0;
+  }
+
+  .btn-press:active:not(:disabled) {
+    transform: none;
+  }
+}
+
+
+/*
+ * The app shell's content area, behind a converted page.
+ *
+ * `components/Sidebar.css` gives `.content-area` `background: white` and
+ * `padding-top: 75px` to clear the fixed navbar. Legacy pages are
+ * `background: transparent` (see UIConsistency.css) and therefore render on
+ * that white — so the shell, not the page, has always owned the page
+ * background.
+ *
+ * A converted page painting its own canvas broke that contract: the 75px of
+ * shell padding above it stayed white, and the result was a white band across
+ * the top of every converted screen.
+ *
+ * So the shell paints instead, and only where a converted page is present.
+ * `:has()` keeps this scoped to exactly those pages — the 100+ unconverted
+ * ones keep their white, and nothing about them changes.
+ *
+ * Deliberately UNLAYERED: `.content-area { background: white }` in Sidebar.css
+ * is unlayered too, and unlayered CSS beats every cascade layer regardless of
+ * specificity. A layered rule here would lose.
+ */
+.content-area:has([data-slot="page"]) {
+  background: var(--color-canvas);
+}
+
+/*
+ * ...and so do the surfaces BEHIND it.
+ *
+ * `.content-area` painting the canvas is only true where `.content-area`
+ * actually is. Three things leave a strip it does not cover, and all three
+ * showed as a band of white under a grey page:
+ *
+ *   * `index.css` scales the UI on wide screens (`body { zoom: 1.12 }` at
+ *     >=1920px). The shell is laid out in unzoomed CSS pixels and painted
+ *     1.12x larger, so its box and the document's scroll height disagree by
+ *     ~12% — measured at 1920: content-area 1008px inside a 900px document.
+ *   * A page taller than the viewport scrolls past the fixed shell.
+ *   * Rubber-band overscroll shows whatever is behind the body.
+ *
+ * `Sidebar.css` sets `body { background: white }` and `index.css` gives `html`
+ * a near-white gradient, so that strip was white against a grey page.
+ *
+ * Scoped with `:has()` for the same reason as the rule above: the 100+
+ * unconverted pages are white by design and must stay white. Specificity is
+ * (0,2,1) — `:has()` takes its argument's — so this beats `body` (0,0,1)
+ * regardless of which stylesheet the bundler emits last, which matters because
+ * both rules are unlayered.
+ */
+html:has(.content-area [data-slot="page"]),
+body:has(.content-area [data-slot="page"]) {
+  background: var(--color-canvas);
+}

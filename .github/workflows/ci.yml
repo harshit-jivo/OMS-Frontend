@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Matches the version this project is developed against. Vite 7 with
+          # the rolldown bundler is the constraint — it needs a recent Node, so
+          # dropping to an older LTS here is not a free "safer" choice.
+          node-version: '24'
+          cache: npm
+
+      - name: Install dependencies
+        # `npm ci` installs exactly what package-lock.json pins and fails if the
+        # lockfile and package.json disagree — which `npm install` would
+        # silently paper over by rewriting the lockfile.
+        run: npm ci
+
+      - name: Type-check and build
+        # `npm run build` is `tsc -b && vite build`. The `-b` matters: this repo
+        # uses TypeScript project references, and the root tsconfig.json is
+        # `{"files": [], "references": [...]}`. So the obvious-looking
+        # `npx tsc --noEmit` checks NOTHING and exits 0 — it reported success on
+        # a tree with five real type errors. Only `tsc -b`, or pointing tsc at
+        # tsconfig.app.json directly, actually reads the source.
+        run: npm run build
+
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Not a gate yet. `npm run lint` currently reports 114 errors and 28
+    # warnings, nearly all `@typescript-eslint/no-explicit-any`, so blocking on
+    # it would wedge every pull request on a pre-existing backlog rather than on
+    # anything the author changed.
+    #
+    # It runs anyway so the number is visible and can be watched down. Delete
+    # `continue-on-error` once it reaches zero — after that, this job stops new
+    # violations from being added, which is the whole point.
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run lint

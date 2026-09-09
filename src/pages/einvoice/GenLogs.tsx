@@ -1,40 +1,63 @@
-import { useEffect, useState, useCallback, Fragment } from "react";
+import { useState, Fragment } from "react";
 import { HiArrowPath } from "react-icons/hi2";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { einvoiceService } from "../../services/einvoiceService";
-import type { GenerationLog, GenerationLogsResponse } from "../../services/einvoiceService";
-import { StatusBadge, ValidationList, JsonView, ErrorAlert, apiErrorMessage } from "../../components/NicUI";
+import type { GenerationLog } from "../../services/einvoiceService";
+import { StatusBadge, ValidationList, JsonView, ErrorAlert } from "../../components/NicUI";
+import { messageFrom } from "@/lib/apiError";
+import { Button } from "@/components/ui/button";
+import { Card, CardHeader, CardTitle } from "@/components/ui/page";
+import { Tab, TabList } from "@/components/ui/tabs";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 const FILTERS = ["", "FAILED", "SUCCESS", "SKIPPED"] as const;
 
 export default function GenLogs() {
-  const [data, setData] = useState<GenerationLogsResponse | null>(null);
+  const queryClient = useQueryClient();
   const [filter, setFilter] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
   const [expanded, setExpanded] = useState<number | null>(null);
   const [retrying, setRetrying] = useState<number | null>(null);
+  /* Only a failed RETRY lands here now. The load error is the query's own, so
+     the two no longer overwrite each other — previously a retry failure was
+     wiped by the reload that followed it, and a load failure was wiped by the
+     next retry. */
+  const [retryError, setRetryError] = useState("");
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError("");
-    try {
-      setData(await einvoiceService.getLogs({ outcome: filter || undefined, limit: 200 }));
-    } catch (err) {
-      setError(apiErrorMessage(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [filter]);
+  /*
+   * `filter` is the query key, not a dependency of a hand-rolled refetch. The
+   * old `useCallback`/`useEffect` pair rebuilt the fetcher on every tab click
+   * and threw the previous outcome's rows away, so moving All → Failed → All
+   * downloaded the same list twice. Four tabs, four cache entries.
+   */
+  const {
+    data,
+    isPending: loading,
+    error: loadError,
+  } = useQuery({
+    queryKey: ["einvoice", "logs", filter],
+    queryFn: () => einvoiceService.getLogs({ outcome: filter || undefined, limit: 200 }),
+  });
 
-  useEffect(() => { void load(); }, [load]);
+  const error = retryError || (loadError ? messageFrom(loadError, "Request failed") : "");
 
   const retry = async (log: GenerationLog) => {
     setRetrying(log.id);
+    setRetryError("");
     try {
       await einvoiceService.retryGeneration(log.docentry, log.company_db || undefined);
-      await load();
+      // Every tab, not just the one on screen: a retry that succeeds moves the
+      // row from FAILED to SUCCESS, so the Failed tab and the All tab are both
+      // wrong afterwards. `load()` only ever refreshed the visible one.
+      await queryClient.invalidateQueries({ queryKey: ["einvoice", "logs"] });
     } catch (err) {
-      setError(apiErrorMessage(err));
+      setRetryError(messageFrom(err, "Request failed"));
     } finally {
       setRetrying(null);
     }
@@ -43,107 +66,110 @@ export default function GenLogs() {
   const tone = (o: string) => (o === "SUCCESS" ? "ok" : o === "FAILED" ? "err" : "muted");
 
   return (
-    <section className="ofs-card ofs-card--wide">
-      <div className="ofs-card-head" style={{ justifyContent: "space-between" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span className="ofs-card-mark" />
-          <h2>Auto-Generation Logs</h2>
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2.5">
+          <CardTitle>Auto-Generation Logs</CardTitle>
         </div>
-        <button className="ofs-refresh" onClick={() => void load()}>Refresh</button>
-      </div>
-      <p className="nic-note">
+        <Button
+          variant="ghost"
+          onClick={() => void queryClient.invalidateQueries({ queryKey: ["einvoice", "logs"] })}
+        >
+          Refresh
+        </Button>
+      </CardHeader>
+      <p className="text-[12.5px] leading-relaxed text-subtle">
         Every automatic IRN attempt (from invoice creation, the polling job, or a manual retry).
         Failures show the exact NIC error / validation cause.
       </p>
 
       {data ? (
-        <div style={{ display: "flex", gap: 8, margin: "12px 0", flexWrap: "wrap" }}>
+        <div className="my-3 flex flex-wrap gap-2">
           <StatusBadge tone="ok">{data.totals.SUCCESS} success</StatusBadge>
           <StatusBadge tone="err">{data.totals.FAILED} failed</StatusBadge>
           <StatusBadge tone="muted">{data.totals.SKIPPED} skipped</StatusBadge>
         </div>
       ) : null}
 
-      <div className="nic-tabs" style={{ margin: "0 0 14px" }}>
+      <TabList label="Filter logs by outcome">
         {FILTERS.map((f) => (
-          <button key={f || "all"} className={`nic-tab ${filter === f ? "nic-tab-active" : ""}`}
-            onClick={() => setFilter(f)}>
+          <Tab key={f || "all"} selected={filter === f} onClick={() => setFilter(f)}>
             {f || "All"}
-          </button>
+          </Tab>
         ))}
-      </div>
+      </TabList>
 
       <ErrorAlert>{error}</ErrorAlert>
 
       {loading ? (
-        <div className="ofs-loading"><span className="ofs-spinner" /><span>Loading logs…</span></div>
+        <div className="flex items-center gap-2 text-[13px] text-subtle" role="status"><span className="size-4 animate-spin rounded-full border-2 border-line border-t-brand" aria-hidden="true" /><span>Loading logs…</span></div>
       ) : !data?.results.length ? (
-        <p className="nic-note">No log entries yet.</p>
+        <p className="text-[12.5px] leading-relaxed text-subtle">No log entries yet.</p>
       ) : (
-        <div className="nic-table-wrap">
-          <table className="nic-table">
-            <thead>
-              <tr>
-                <th>When</th><th>DocEntry</th><th>Doc No</th><th>Trigger</th>
-                <th>Attempt</th><th>Outcome</th><th>Cause / IRN</th><th></th>
-              </tr>
-            </thead>
-            <tbody>
+        <div className="overflow-x-auto rounded-card border border-line">
+          <Table density="compact">
+            <TableHeader>
+              <TableRow className="bg-surface hover:bg-surface">
+                <TableHead>When</TableHead><TableHead>DocEntry</TableHead><TableHead>Doc No</TableHead><TableHead>Trigger</TableHead>
+                <TableHead>Attempt</TableHead><TableHead>Outcome</TableHead><TableHead>Cause / IRN</TableHead><TableHead></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {data.results.map((log) => (
                 <Fragment key={log.id}>
-                  <tr>
-                    <td style={{ whiteSpace: "nowrap" }}>{new Date(log.created_at).toLocaleString()}</td>
-                    <td>{log.docentry}</td>
-                    <td>{log.doc_no || "—"}</td>
-                    <td>{log.trigger}</td>
-                    <td>{log.attempt_no}</td>
-                    <td><StatusBadge tone={tone(log.outcome)}>{log.outcome}</StatusBadge></td>
-                    <td>
+                  <TableRow>
+                    <TableCell className="whitespace-nowrap">{new Date(log.created_at).toLocaleString()}</TableCell>
+                    <TableCell>{log.docentry}</TableCell>
+                    <TableCell className="whitespace-nowrap">{log.doc_no || "—"}</TableCell>
+                    <TableCell>{log.trigger}</TableCell>
+                    <TableCell>{log.attempt_no}</TableCell>
+                    <TableCell><StatusBadge tone={tone(log.outcome)}>{log.outcome}</StatusBadge></TableCell>
+                    <TableCell>
                       {log.irn ? (
-                        <span className="nic-mono" title={log.irn}>{log.irn.slice(0, 18)}…</span>
+                        <span className="font-mono text-[12px]" title={log.irn}>{log.irn.slice(0, 18)}…</span>
                       ) : null}
                       {log.outcome === "SUCCESS" && log.error_message ? (
-                        <div className="nic-note" style={{ marginTop: log.irn ? 4 : 0, color: "#dc2626", fontWeight: 600 }}>
+                        <div className={`text-[12.5px] font-semibold leading-relaxed text-danger${log.irn ? " mt-1" : ""}`}>
                           {log.error_message}
                         </div>
                       ) : null}
                       {log.outcome !== "SUCCESS" && (log.error_code || log.error_message) ? (
-                        <div className="nic-note" style={{ marginTop: log.irn ? 4 : 0 }}>
-                          {log.error_code ? <code style={{ marginRight: 6 }}>{log.error_code}</code> : null}
+                        <div className={`text-[12.5px] leading-relaxed text-subtle${log.irn ? " mt-1" : ""}`}>
+                          {log.error_code ? <code className="mr-1.5 font-mono text-[12px]">{log.error_code}</code> : null}
                           {log.error_message}
                         </div>
                       ) : null}
-                    </td>
-                    <td style={{ whiteSpace: "nowrap" }}>
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap">
                       {log.validation_errors?.length ? (
-                        <button className="ofs-secondary" style={{ minHeight: 30, padding: "0 10px", fontSize: 11 }}
+                        <Button size="sm"
                           onClick={() => setExpanded(expanded === log.id ? null : log.id)}>
                           Details
-                        </button>
+                        </Button>
                       ) : null}
                       {log.outcome !== "SUCCESS" && !log.irn ? (
-                        <button className="ofs-primary" style={{ minHeight: 30, padding: "0 10px", fontSize: 11, marginLeft: 6 }}
+                        <Button size="sm" variant="primary"
                           onClick={() => void retry(log)} disabled={retrying === log.id}>
-                          <HiArrowPath style={{ verticalAlign: "-2px", marginRight: 4 }} />
+                          <HiArrowPath aria-hidden="true" />
                           {retrying === log.id ? "…" : "Retry"}
-                        </button>
+                        </Button>
                       ) : null}
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                   {expanded === log.id && log.validation_errors?.length ? (
-                    <tr>
-                      <td colSpan={8}>
+                    <TableRow>
+                      <TableCell colSpan={8}>
                         <ValidationList errors={log.validation_errors} />
                         <JsonView data={log} title="Full log entry" />
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   ) : null}
                 </Fragment>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       )}
-    </section>
+    </Card>
   );
 }

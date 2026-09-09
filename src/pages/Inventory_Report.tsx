@@ -1,15 +1,47 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Navigate } from "react-router-dom";
+/**
+ * Inventory Report — warehouse-wise stock of every finished good in SAP.
+ *
+ * The data path is untouched: one fetch per branch, every warehouse, and the
+ * narrowing is client-side so ticking a warehouse costs no round trip. What
+ * changed is the chrome — the hand-rolled segmented control, the warehouse
+ * picker with its own outside-click effect, and the stat boxes are now the
+ * shared primitives.
+ */
+import { Fragment, useMemo, useState } from "react";
 import {
-  HiArrowDownTray,
-  HiArrowPath,
-  HiChevronDown,
-  HiMagnifyingGlass,
+  HiOutlineArchiveBox,
+  HiOutlineArrowDownTray,
+  HiOutlineArrowPath,
+  HiOutlineBuildingStorefront,
+  HiOutlineCube,
+  HiOutlineMagnifyingGlass,
+  HiOutlineTag,
 } from "react-icons/hi2";
+
 import { sapService } from "../services/sapService";
-import type { InventoryReport as InventoryReportData } from "../services/sapService";
 import { startExcelExport, exportDateStamp } from "../utils/excelExport";
-import "../styles/Inventory_Report.css";
+import { useQuery } from "@tanstack/react-query";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { Button } from "@/components/ui/button";
+import {
+  FilterActions,
+  FilterBar,
+  FilterMultiSelect,
+  FilterSearch,
+  FilterSegmented,
+  FilterSelect,
+} from "@/components/ui/filter-bar";
+import { Card, EmptyState, Notice, Page, PageHeader, Stat, StatRow } from "@/components/ui/page";
+import { TableSkeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 
 // Oil and beverage are separate SAP company databases; stock lives in whichever
 // one the item belongs to, so the branch travels with every request.
@@ -30,74 +62,44 @@ const formatQty = (value: number): string =>
   value.toLocaleString("en-IN", { maximumFractionDigits: 2 });
 
 export default function Inventory_Report() {
-  const role = (localStorage.getItem("role") || "").toLowerCase();
-
   const [branch, setBranch] = useState<Branch>("OIL");
-  const [report, setReport] = useState<InventoryReportData | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [subGroup, setSubGroup] = useState("ALL");
-  // Warehouse codes to show as columns. Empty means "not chosen yet", which is
-  // read as every warehouse — so a warehouse added in SAP appears on its own.
-  const [selectedWhs, setSelectedWhs] = useState<string[]>([]);
-  const [whsMenuOpen, setWhsMenuOpen] = useState(false);
-  const whsPickerRef = useRef<HTMLDivElement | null>(null);
+  /*
+   * Warehouse columns. `null` means "the user has not chosen", which shows all
+   * of them — so a warehouse added in SAP appears on its own. It has to be a
+   * sentinel the user cannot produce: an empty array is a real choice (Clear),
+   * and the two used to collide.
+   */
+  const [selectedWhs, setSelectedWhs] = useState<string[] | null>(null);
 
-  const loadReport = useCallback(async (target: Branch) => {
-    setLoading(true);
-    setError("");
-    try {
-      // Every warehouse is fetched once; narrowing the columns afterwards is
-      // pure client-side work, so ticking a warehouse costs no round trip.
-      const data = await sapService.getInventoryReport(target);
-      setReport(data);
-      setSelectedWhs(data.warehouses.map((w) => w.code));
-    } catch (err) {
-      console.error("Inventory report failed:", err);
-      setReport(null);
-      setError(
-        "Could not load inventory from SAP. Please try again in a moment.",
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const {
+    data: report = null,
+    isPending: loading,
+    isError,
+    refetch,
+  } = useQuery({
+    queryKey: ["inventory-report", branch],
+    queryFn: () => sapService.getInventoryReport(branch),
+  });
 
-  useEffect(() => {
-    if (role !== "billing") return;
-    void loadReport(branch);
-  }, [branch, loadReport, role]);
+  const error = isError ? "Could not load inventory from SAP. Please try again in a moment." : "";
 
-  // Close the warehouse dropdown on an outside click, the way a native select
-  // would — otherwise it stays open over the table.
-  useEffect(() => {
-    if (!whsMenuOpen) return;
-    const onPointerDown = (event: MouseEvent) => {
-      if (!whsPickerRef.current?.contains(event.target as Node)) {
-        setWhsMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", onPointerDown);
-    return () => document.removeEventListener("mousedown", onPointerDown);
-  }, [whsMenuOpen]);
+  const allWhsCodes = useMemo(() => (report?.warehouses ?? []).map((w) => w.code), [report]);
+  /** What is actually shown: the user's choice, or every warehouse if none. */
+  const activeWhs = selectedWhs ?? allWhsCodes;
 
   const warehouses = useMemo(
-    () =>
-      (report?.warehouses ?? []).filter((w) => selectedWhs.includes(w.code)),
-    [report, selectedWhs],
+    () => (report?.warehouses ?? []).filter((w) => activeWhs.includes(w.code)),
+    [report, activeWhs],
   );
 
-  const subGroups = useMemo(
-    () => (report?.groups ?? []).map((g) => g.sub_group),
-    [report],
-  );
+  const subGroups = useMemo(() => (report?.groups ?? []).map((g) => g.sub_group), [report]);
 
   /**
    * The visible report: rows filtered by search/variety, and every total
-   * recomputed across the *selected* warehouses only. Recomputing rather than
-   * using the API's totals is the point — a total that still counted hidden
-   * warehouses would not add up to the columns on screen.
+   * recomputed across the *selected* warehouses only — a total that still
+   * counted hidden warehouses would not add up to the columns on screen.
    */
   const view = useMemo(() => {
     if (!report) return null;
@@ -155,18 +157,6 @@ export default function Inventory_Report() {
       itemCount: groups.reduce((sum, group) => sum + group.items.length, 0),
     };
   }, [report, search, subGroup, warehouses]);
-
-  const toggleWarehouse = (code: string) => {
-    setSelectedWhs((current) =>
-      current.includes(code)
-        ? current.filter((c) => c !== code)
-        : // Keep the API's ordering (busiest warehouse first) no matter the
-          // order the boxes were ticked in.
-          (report?.warehouses ?? [])
-            .map((w) => w.code)
-            .filter((c) => current.includes(c) || c === code),
-    );
-  };
 
   const handleExport = () => {
     if (!view || view.groups.length === 0) return;
@@ -237,265 +227,198 @@ export default function Inventory_Report() {
     });
   };
 
-  // Page is restricted to the billing role; anyone else is bounced to the
-  // dashboard (mirrors how the sidebar hides the link).
-  if (role !== "billing") {
-    return <Navigate to="/Dashboard" replace />;
-  }
-
   const columnCount = warehouses.length + 4;
-  const allSelected =
-    !!report && selectedWhs.length === report.warehouses.length;
+  const numCell = "text-right tabular-nums";
 
   return (
-    <div className="invt-page">
-      <div className="invt-header">
-        <div>
-          <h1 className="invt-title">Inventory Report</h1>
-          <p className="invt-subtitle">
-            Warehouse-wise stock of every finished good in SAP, grouped by
-            variety. Download it as Excel for sharing or further working.
-          </p>
-        </div>
-      </div>
+    <Page>
+      <Breadcrumbs items={[{ label: "Reports" }, { label: "Inventory Report" }]} />
 
-      <div className="invt-controls">
-        <div className="invt-field">
-          <span className="invt-label" id="invt-branch-label">
-            Company
-          </span>
-          <div
-            className="invt-segmented"
-            role="radiogroup"
-            aria-labelledby="invt-branch-label"
-          >
-            {BRANCHES.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                role="radio"
-                aria-checked={branch === option.value}
-                className={`invt-segment${
-                  branch === option.value ? " invt-segment-active" : ""
-                }`}
-                onClick={() => setBranch(option.value)}
-              >
-                {option.label}
-              </button>
-            ))}
+      <PageHeader
+        title="Inventory Report"
+        description="Warehouse-wise stock of every finished good in SAP, grouped by variety."
+        actions={
+          <>
+            <Button variant="ghost" onClick={() => void refetch()} disabled={loading}>
+              <HiOutlineArrowPath
+                aria-hidden="true"
+                className={loading ? "motion-safe:animate-spin" : undefined}
+              />
+              Refresh
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleExport}
+              disabled={loading || !view || view.groups.length === 0}
+            >
+              <HiOutlineArrowDownTray aria-hidden="true" /> Download Excel
+            </Button>
+          </>
+        }
+      />
+
+      <FilterBar>
+        <FilterSegmented
+          label="Company"
+          value={branch}
+          options={BRANCHES}
+          onChange={(next) => {
+            setBranch(next);
+            // The other branch has different warehouses, so a choice made
+            // here means nothing there.
+            setSelectedWhs(null);
+          }}
+        />
+        <FilterSelect
+          label="Variety"
+          value={subGroup}
+          onChange={(e) => setSubGroup(e.target.value)}
+          fieldClassName="max-w-[220px]"
+        >
+          <option value="ALL">All varieties</option>
+          {subGroups.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </FilterSelect>
+        <FilterMultiSelect
+          label="Warehouses"
+          value={activeWhs}
+          // Kept in the API's ordering (busiest warehouse first) no matter the
+          // order the boxes were ticked in.
+          onChange={(next) => setSelectedWhs(allWhsCodes.filter((code) => next.includes(code)))}
+          options={(report?.warehouses ?? []).map((w) => ({
+            value: w.code,
+            label: <span title={w.name}>{w.code}</span>,
+            meta: formatQty(report?.totals[w.code] ?? 0),
+          }))}
+          placeholder="No warehouses"
+          disabled={!report}
+          fieldClassName="max-w-[240px]"
+        />
+        <FilterSearch
+          placeholder="Item code or name"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          autoComplete="off"
+          fieldClassName="min-w-[220px]"
+        />
+        <FilterActions>
+          {view && !loading ? (
+            <span className="pb-1.5 text-[11.5px] text-subtle">
+              {view.itemCount} item{view.itemCount === 1 ? "" : "s"}
+            </span>
+          ) : null}
+        </FilterActions>
+      </FilterBar>
+
+      {error ? (
+        <Notice tone="bad" title="Could not load inventory">
+          {error}
+        </Notice>
+      ) : null}
+
+      <StatRow>
+        <Stat icon={HiOutlineCube} tone="brand" label="Items in stock" value={view?.itemCount ?? 0} loading={loading} />
+        <Stat icon={HiOutlineTag} tone="neutral" label="Varieties" value={view?.groups.length ?? 0} loading={loading} />
+        <Stat icon={HiOutlineBuildingStorefront} tone="neutral" label="Warehouses" value={warehouses.length} loading={loading} />
+        <Stat icon={HiOutlineArchiveBox} tone="brand" label="Total stock" value={view ? formatQty(view.grandTotal) : "0"} loading={loading} />
+      </StatRow>
+
+      <Card className="overflow-hidden p-0">
+        {loading ? (
+          <div className="p-4">
+            <TableSkeleton columns={6} label="Fetching stock from SAP" />
           </div>
-        </div>
-
-        <div className="invt-field">
-          <label className="invt-label" htmlFor="invt-variety">
-            Variety
-          </label>
-          <select
-            id="invt-variety"
-            className="invt-select"
-            value={subGroup}
-            onChange={(e) => setSubGroup(e.target.value)}
-          >
-            <option value="ALL">All varieties</option>
-            {subGroups.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="invt-field invt-whs-picker" ref={whsPickerRef}>
-          <span className="invt-label">Warehouses</span>
-          <button
-            type="button"
-            className="invt-whs-toggle"
-            onClick={() => setWhsMenuOpen((open) => !open)}
-            aria-expanded={whsMenuOpen}
-          >
-            {allSelected
-              ? `All warehouses (${selectedWhs.length})`
-              : `${selectedWhs.length} selected`}
-            <HiChevronDown aria-hidden="true" />
-          </button>
-          {whsMenuOpen && (
-            <div className="invt-whs-menu">
-              <div className="invt-whs-menu-head">
-                <button
-                  type="button"
-                  className="invt-link-btn"
-                  onClick={() =>
-                    setSelectedWhs((report?.warehouses ?? []).map((w) => w.code))
-                  }
-                >
-                  Select all
-                </button>
-                <button
-                  type="button"
-                  className="invt-link-btn"
-                  onClick={() => setSelectedWhs([])}
-                >
-                  Clear
-                </button>
-              </div>
-              {(report?.warehouses ?? []).map((w) => (
-                <label key={w.code} className="invt-whs-option">
-                  <input
-                    type="checkbox"
-                    checked={selectedWhs.includes(w.code)}
-                    onChange={() => toggleWarehouse(w.code)}
-                  />
-                  <span title={w.name}>{w.code}</span>
-                  <span className="invt-whs-option-qty">
-                    {formatQty(report?.totals[w.code] ?? 0)}
-                  </span>
-                </label>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="invt-field invt-field-grow">
-          <label className="invt-label" htmlFor="invt-search">
-            Search
-          </label>
-          <input
-            id="invt-search"
-            className="invt-input"
-            type="search"
-            placeholder="Item code or name"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            autoComplete="off"
+        ) : !view || view.groups.length === 0 ? (
+          <EmptyState
+            icon={HiOutlineMagnifyingGlass}
+            title={report ? "No stock matches the current filters" : "No inventory loaded"}
+            hint={report ? "Widen the search, or tick more warehouses." : undefined}
           />
-        </div>
-
-        <div className="invt-actions">
-          <button
-            type="button"
-            className="invt-btn invt-btn-ghost"
-            onClick={() => void loadReport(branch)}
-            disabled={loading}
-          >
-            <HiArrowPath aria-hidden="true" />
-            {loading ? "Loading…" : "Refresh"}
-          </button>
-          <button
-            type="button"
-            className="invt-btn invt-btn-primary"
-            onClick={handleExport}
-            disabled={loading || !view || view.groups.length === 0}
-          >
-            <HiArrowDownTray aria-hidden="true" />
-            Download Excel
-          </button>
-        </div>
-      </div>
-
-      {error && <p className="invt-error">{error}</p>}
-
-      {view && !loading && (
-        <div className="invt-summary">
-          <div className="invt-stat">
-            <div className="invt-stat-label">Items in stock</div>
-            <div className="invt-stat-value">{view.itemCount}</div>
-          </div>
-          <div className="invt-stat">
-            <div className="invt-stat-label">Varieties</div>
-            <div className="invt-stat-value">{view.groups.length}</div>
-          </div>
-          <div className="invt-stat">
-            <div className="invt-stat-label">Warehouses</div>
-            <div className="invt-stat-value">{warehouses.length}</div>
-          </div>
-          <div className="invt-stat">
-            <div className="invt-stat-label">Total stock</div>
-            <div className="invt-stat-value">{formatQty(view.grandTotal)}</div>
-          </div>
-        </div>
-      )}
-
-      {loading ? (
-        <div className="invt-state">Fetching stock from SAP…</div>
-      ) : !view || view.groups.length === 0 ? (
-        <div className="invt-state">
-          <HiMagnifyingGlass aria-hidden="true" />
-          <p>
-            {report
-              ? "No stock matches the current filters."
-              : "No inventory loaded."}
-          </p>
-        </div>
-      ) : (
-        <div className="invt-table-card">
-          <table className="invt-table">
-            <thead>
-              <tr>
-                <th className="invt-col-text">ItemCode</th>
-                <th className="invt-col-text">Item Name</th>
-                <th className="invt-col-text">SKU</th>
-                {warehouses.map((w) => (
-                  <th key={w.code} title={w.name}>
-                    {w.code}
-                  </th>
-                ))}
-                <th>Grand Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {view.groups.map((group) => (
-                <Fragment key={group.sub_group}>
-                  <tr className="invt-row-group">
-                    <td colSpan={columnCount}>{group.sub_group}</td>
-                  </tr>
-                  {group.items.map((item) => (
-                    <tr className="invt-row-item" key={item.item_code}>
-                      <td>{item.item_code}</td>
-                      <td className="invt-item-name">{item.item_name}</td>
-                      <td>{item.sku}</td>
-                      {warehouses.map((w) => (
-                        <td
-                          key={w.code}
-                          className={`invt-num${
-                            item.stock[w.code] ? "" : " invt-zero"
-                          }`}
-                        >
-                          {item.stock[w.code]
-                            ? formatQty(item.stock[w.code])
-                            : "—"}
-                        </td>
-                      ))}
-                      <td className="invt-num">{formatQty(item.total)}</td>
-                    </tr>
+        ) : (
+          <div className="overflow-x-auto">
+            <Table density="compact">
+              <TableHeader>
+                <TableRow className="bg-surface hover:bg-surface">
+                  <TableHead>ItemCode</TableHead>
+                  <TableHead className="min-w-[240px]">Item Name</TableHead>
+                  <TableHead>SKU</TableHead>
+                  {warehouses.map((w) => (
+                    <TableHead key={w.code} title={w.name} className="text-right">
+                      {w.code}
+                    </TableHead>
                   ))}
-                  <tr className="invt-row-subtotal">
-                    <td />
-                    <td>{group.sub_group} Total</td>
-                    <td />
-                    {warehouses.map((w) => (
-                      <td key={w.code} className="invt-num">
-                        {formatQty(group.totals[w.code])}
-                      </td>
+                  <TableHead className="text-right">Grand Total</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {view.groups.map((group) => (
+                  <Fragment key={group.sub_group}>
+                    {/* The variety band: a heading drawn as a row, so it
+                        scrolls with the columns it labels. */}
+                    <TableRow className="bg-brand-soft/40 hover:bg-brand-soft/40">
+                      <TableCell
+                        colSpan={columnCount}
+                        className="text-[11px] font-semibold uppercase tracking-wider text-brand"
+                      >
+                        {group.sub_group}
+                      </TableCell>
+                    </TableRow>
+                    {group.items.map((item) => (
+                      <TableRow key={item.item_code}>
+                        <TableCell className="whitespace-nowrap font-mono text-[12px]">
+                          {item.item_code}
+                        </TableCell>
+                        <TableCell className="text-ink">{item.item_name}</TableCell>
+                        <TableCell className="whitespace-nowrap">{item.sku}</TableCell>
+                        {warehouses.map((w) => (
+                          <TableCell
+                            key={w.code}
+                            className={cn(numCell, !item.stock[w.code] && "text-subtle")}
+                          >
+                            {item.stock[w.code] ? formatQty(item.stock[w.code]) : "—"}
+                          </TableCell>
+                        ))}
+                        <TableCell className={cn(numCell, "font-semibold text-ink")}>
+                          {formatQty(item.total)}
+                        </TableCell>
+                      </TableRow>
                     ))}
-                    <td className="invt-num">{formatQty(group.total)}</td>
-                  </tr>
-                </Fragment>
-              ))}
-              <tr className="invt-row-total">
-                <td />
-                <td>GRAND TOTAL</td>
-                <td />
-                {warehouses.map((w) => (
-                  <td key={w.code} className="invt-num">
-                    {formatQty(view.totals[w.code])}
-                  </td>
+                    <TableRow className="bg-surface font-semibold hover:bg-surface">
+                      <TableCell />
+                      <TableCell className="text-ink">{group.sub_group} Total</TableCell>
+                      <TableCell />
+                      {warehouses.map((w) => (
+                        <TableCell key={w.code} className={cn(numCell, "text-ink")}>
+                          {formatQty(group.totals[w.code])}
+                        </TableCell>
+                      ))}
+                      <TableCell className={cn(numCell, "text-ink")}>
+                        {formatQty(group.total)}
+                      </TableCell>
+                    </TableRow>
+                  </Fragment>
                 ))}
-                <td className="invt-num">{formatQty(view.grandTotal)}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
+                <TableRow className="border-t-2 border-line-strong bg-surface-strong font-bold hover:bg-surface-strong">
+                  <TableCell />
+                  <TableCell className="text-ink">GRAND TOTAL</TableCell>
+                  <TableCell />
+                  {warehouses.map((w) => (
+                    <TableCell key={w.code} className={cn(numCell, "text-ink")}>
+                      {formatQty(view.totals[w.code])}
+                    </TableCell>
+                  ))}
+                  <TableCell className={cn(numCell, "text-brand")}>
+                    {formatQty(view.grandTotal)}
+                  </TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </Card>
+    </Page>
   );
 }

@@ -4,9 +4,13 @@ import { einvoiceService } from "../../services/einvoiceService";
 import type { FromInvoicePreview, GenerateResponse, IrnResult } from "../../services/einvoiceService";
 import {
   NicField, KeyValues, JsonView, ValidationList, ErrorAlert, SuccessAlert,
-  StatusBadge, apiErrorMessage, CompanyDbSelect,
+  StatusBadge, CompanyDbSelect,
 } from "../../components/NicUI";
+import { messageFrom } from "@/lib/apiError";
 import QrViewer from "../../components/QrViewer";
+import { Button } from "@/components/ui/button";
+import { Input, Select } from "@/components/ui/form";
+import { Card, CardHeader, CardTitle, Notice } from "@/components/ui/page";
 
 export default function GenerateIrn() {
   const [docentry, setDocentry] = useState("");
@@ -34,7 +38,7 @@ export default function GenerateIrn() {
     try {
       setPreview(await einvoiceService.previewFromInvoice(docentry.trim(), companyDb.trim() || undefined, idType));
     } catch (err) {
-      setError(apiErrorMessage(err));
+      setError(messageFrom(err, "Request failed"));
     } finally {
       setBusy("");
     }
@@ -57,9 +61,9 @@ export default function GenerateIrn() {
       const e = err as { response?: { data?: GenerateResponse } };
       if (e.response?.data) {
         setGenResp(e.response.data);
-        setError(e.response.data.error || apiErrorMessage(err));
+        setError(e.response.data.error || messageFrom(err, "Request failed"));
       } else {
-        setError(apiErrorMessage(err));
+        setError(messageFrom(err, "Request failed"));
       }
     } finally {
       setBusy("");
@@ -67,28 +71,27 @@ export default function GenerateIrn() {
   };
 
   return (
-    <section className="ofs-card ofs-card--wide">
-      <div className="ofs-card-head">
-        <span className="ofs-card-mark" />
-        <h2>Generate IRN from SAP Invoice</h2>
-      </div>
-      <p className="nic-note">
+    <Card>
+      <CardHeader>
+        <CardTitle>Generate IRN from SAP Invoice</CardTitle>
+      </CardHeader>
+      <p className="text-[12.5px] leading-relaxed text-subtle">
         Look up a SAP invoice by <strong>DocEntry</strong> (internal key) or <strong>Doc Number</strong>
         (the visible invoice no.). Preview maps and validates it without calling NIC; Generate registers
         the IRN and stores the signed invoice + QR.
       </p>
 
-      <div className="nic-form-grid" style={{ marginTop: 14 }}>
+      <div className="grid gap-x-5 gap-y-4 grid-cols-[repeat(auto-fit,minmax(220px,1fr))] mt-3.5">
         <NicField label="Look up by">
-          <select className="nic-select" value={idType}
+          <Select value={idType}
             onChange={(e) => setIdType(e.target.value as "docentry" | "docnum")}>
             <option value="docentry">DocEntry (internal key)</option>
             <option value="docnum">Doc Number (visible no.)</option>
-          </select>
+          </Select>
         </NicField>
         <NicField label={`Invoice ${idLabel}`}
           hint={idType === "docnum" ? "Visible invoice no. (e.g. 626070166)" : "OINV DocEntry (e.g. 76038)"}>
-          <input className="nic-input" value={docentry} inputMode="numeric"
+          <Input value={docentry} inputMode="numeric"
             onChange={(e) => setDocentry(e.target.value)}
             placeholder={idType === "docnum" ? "626070166" : "76038"} />
         </NicField>
@@ -98,15 +101,15 @@ export default function GenerateIrn() {
         </NicField>
       </div>
 
-      <div className="nic-actions-row">
-        <button className="ofs-secondary" onClick={() => void doPreview()} disabled={!!busy}>
-          <HiDocumentMagnifyingGlass style={{ verticalAlign: "-3px", marginRight: 6 }} />
+      <div className="mt-4 flex flex-wrap items-center gap-2.5">
+        <Button onClick={() => void doPreview()} disabled={!!busy}>
+          <HiDocumentMagnifyingGlass aria-hidden="true" />
           {busy === "preview" ? "Loading…" : "Preview & Validate"}
-        </button>
-        <button className="ofs-primary" onClick={() => void doGenerate()} disabled={!!busy}>
-          <HiBolt style={{ verticalAlign: "-3px", marginRight: 6 }} />
+        </Button>
+        <Button variant="primary" onClick={() => void doGenerate()} disabled={!!busy}>
+          <HiBolt aria-hidden="true" />
           {busy === "generate" ? "Generating…" : "Generate IRN"}
-        </button>
+        </Button>
       </div>
 
       <ErrorAlert>{error}</ErrorAlert>
@@ -114,8 +117,8 @@ export default function GenerateIrn() {
 
       {/* preview block */}
       {preview ? (
-        <div className="nic-result">
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+        <div className="mt-5 space-y-4">
+          <div className="mb-1.5 flex items-center gap-2.5">
             <StatusBadge tone={preview.valid ? "ok" : "err"}>
               {preview.valid ? "Valid — ready to generate" : `${preview.error_count} issue(s)`}
             </StatusBadge>
@@ -129,18 +132,18 @@ export default function GenerateIrn() {
 
       {/* success block */}
       {result ? (
-        <div className="nic-result">
+        <div className="mt-5 space-y-4">
           <SuccessAlert>
             IRN generated successfully{genResp?.company_db ? ` (from ${genResp.company_db})` : ""}.
           </SuccessAlert>
           {genResp?.test_warning ? (
-            <div className="nic-alert nic-alert--err" style={{ marginTop: 10, fontWeight: 600 }}>
-              <span>{genResp.test_warning}</span>
-            </div>
+            <Notice tone="bad" className="mt-2.5 font-semibold">
+              {genResp.test_warning}
+            </Notice>
           ) : null}
           <KeyValues
             items={[
-              ["IRN", <span className="nic-mono">{result.Irn}</span>],
+              ["IRN", <span className="font-mono text-[12px]">{result.Irn}</span>],
               ["Ack No", result.AckNo],
               ["Ack Date", result.AckDt],
               ["Status", result.Status],
@@ -150,7 +153,7 @@ export default function GenerateIrn() {
             ]}
           />
           {result.SignedQRCode ? (
-            <div style={{ marginTop: 16 }}>
+            <div className="mt-4">
               <QrFromData
                 data={result.SignedQRCode}
                 irn={result.Irn}
@@ -161,14 +164,14 @@ export default function GenerateIrn() {
             </div>
           ) : null}
           {genResp?.persistence_warning ? (
-            <div className="nic-alert nic-alert--err" style={{ marginTop: 12 }}>
-              <span>{genResp.persistence_warning}</span>
-            </div>
+            <Notice tone="bad" className="mt-3">
+              {genResp.persistence_warning}
+            </Notice>
           ) : null}
           <JsonView data={result} title="Full NIC response" />
         </div>
       ) : null}
-    </section>
+    </Card>
   );
 }
 
@@ -179,10 +182,10 @@ function QrFromData({ data, irn, ackNo, ackDt, docNo }: {
   const [uri, setUri] = useState("");
   const [err, setErr] = useState("");
   useEffect(() => {
-    einvoiceService.renderQr(data).then((r) => setUri(r.data_uri)).catch((e) => setErr(apiErrorMessage(e)));
+    einvoiceService.renderQr(data).then((r) => setUri(r.data_uri)).catch((e) => setErr(messageFrom(e, "Request failed")));
   }, [data]);
-  if (err) return <span className="nic-note">QR render failed: {err}</span>;
-  if (!uri) return <span className="nic-note">Rendering QR…</span>;
+  if (err) return <span className="text-[12.5px] leading-relaxed text-subtle">QR render failed: {err}</span>;
+  if (!uri) return <span className="text-[12.5px] leading-relaxed text-subtle">Rendering QR…</span>;
   return (
     <QrViewer src={uri} caption="Signed QR — print this on the invoice."
       irn={irn} ackNo={ackNo} ackDt={ackDt} docNo={docNo} />

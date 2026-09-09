@@ -1,17 +1,59 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+/**
+ * Add Scheme — the legacy per-state free-item schemes.
+ *
+ * One form (name, state, item) above the list of what exists. Editing a row
+ * loads it into the same form, so the page never has two editors open.
+ *
+ * This is the OLD scheme model: one free item per state, matched by code.
+ * `/Scheme_Manager` is the v2 engine (triggers, benefits, assignments). Both
+ * are live, and Add Sales reads both — which is why this page still exists.
+ */
+import { useMemo, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { HiOutlineSquaresPlus } from "react-icons/hi2";
+
+import { Badge } from "@/components/ui/badge";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { SearchSelect } from "@/components/ui/dropdown";
+import {
+  FilterBar,
+  FilterCheckbox,
+  FilterCount,
+  FilterSearch,
+  FilterSpacer,
+} from "@/components/ui/filter-bar";
+import { Field, FormActions, FormGrid, Input } from "@/components/ui/form";
+import { Card, CardHeader, CardTitle, EmptyState, Page, PageHeader } from "@/components/ui/page";
+import { TableSkeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { showToast } from "@/lib/toastStore";
+import { cn } from "@/lib/utils";
+
+import { useStates } from "../lib/authQueries";
 import { ordersService } from "../services/ordersService";
 import type { SchemeRow } from "../services/ordersService";
-import { userService } from "../services/userService";
-import "../styles/Add_Scheme.css";
-
-type StateOption = {
-  id: number;
-  name: string;
-  code: string;
-};
 
 const EMPTY_FORM = { scheme_name: "", item_code: "", state_code: "" };
+
+/** One identity for "no schemes", so `visibleSchemes` does not recompute forever. */
+const NO_SCHEMES: SchemeRow[] = [];
 
 // The API reports duplicate/validation problems per field; surface the first one
 // rather than a generic "failed" alert.
@@ -28,21 +70,19 @@ const readApiError = (error: unknown, fallback: string): string => {
 };
 
 export default function Add_Scheme() {
-  const stateDropdownRef = useRef<HTMLDivElement>(null);
+  const queryClient = useQueryClient();
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [states, setStates] = useState<StateOption[]>([]);
-  const [isLoadingStates, setIsLoadingStates] = useState(false);
-  const [stateDropdownOpen, setStateDropdownOpen] = useState(false);
+  // Shared with Scheme_Manager and App_User under ["auth","states"], so the
+  // list of states is fetched once per session rather than once per page.
+  const { states, isLoading: isLoadingStates } = useStates();
   const [formData, setFormData] = useState(EMPTY_FORM);
 
   // null = creating a new scheme; a number = editing that scheme_id.
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [schemes, setSchemes] = useState<SchemeRow[]>([]);
-  const [isLoadingSchemes, setIsLoadingSchemes] = useState(false);
   const [search, setSearch] = useState("");
   const [includeInactive, setIncludeInactive] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
-  const [feedback, setFeedback] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+  const [confirmDeactivate, setConfirmDeactivate] = useState<SchemeRow | null>(null);
 
   const payload = {
     scheme_name: formData.scheme_name,
@@ -50,25 +90,25 @@ export default function Add_Scheme() {
     state_code: formData.state_code,
   };
 
-  const loadSchemes = useCallback(async () => {
-    setIsLoadingSchemes(true);
-    try {
-      const rows = await ordersService.getSchemesForManage({
-        include_inactive: includeInactive,
-      });
-      setSchemes(rows);
-    } catch (error) {
-      console.error("Error fetching schemes:", error);
-      setSchemes([]);
-      setFeedback({ kind: "error", text: readApiError(error, "Could not load schemes") });
-    } finally {
-      setIsLoadingSchemes(false);
-    }
-  }, [includeInactive]);
+  /*
+   * `includeInactive` is part of the key, not a dependency of a refetch. The
+   * old `useCallback`/`useEffect` pair re-created the fetcher whenever the
+   * checkbox moved and re-ran it — and, having thrown the previous result
+   * away, showed a spinner every time you toggled back to a list it had
+   * already downloaded. Two keys means both are cached.
+   */
+  const {
+    data: schemeData,
+    isPending: isLoadingSchemes,
+    error: schemeError,
+  } = useQuery({
+    queryKey: ["schemes", "manage", { includeInactive }],
+    queryFn: () => ordersService.getSchemesForManage({ include_inactive: includeInactive }),
+  });
+  const schemes = schemeData ?? NO_SCHEMES;
 
-  useEffect(() => {
-    void loadSchemes();
-  }, [loadSchemes]);
+  /** Re-read after any create/update/deactivate/delete, both keys at once. */
+  const reloadSchemes = () => queryClient.invalidateQueries({ queryKey: ["schemes", "manage"] });
 
   // Client-side filter: the list is small (tens of rows) so there is no need to
   // round-trip the server on every keystroke.
@@ -84,63 +124,36 @@ export default function Add_Scheme() {
     );
   }, [schemes, search]);
 
-  useEffect(() => {
-    const fetchStates = async () => {
-      setIsLoadingStates(true);
-      try {
-        const data = await userService.getState();
-        setStates(Array.isArray(data) ? data : []);
-      } catch (error) {
-        console.error("Error fetching states:", error);
-        setStates([]);
-      } finally {
-        setIsLoadingStates(false);
-      }
-    };
+  const stateOptions = useMemo(
+    () => states.map((state) => ({ value: state.code, label: state.name, hint: state.code })),
+    [states],
+  );
 
-    void fetchStates();
-  }, []);
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (
-        stateDropdownRef.current &&
-        !stateDropdownRef.current.contains(event.target as Node)
-      ) {
-        setStateDropdownOpen(false);
-      }
-    };
-
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+  const fail = (title: string, error: unknown, fallback: string) => {
+    console.error(title, error);
+    showToast({ title, message: readApiError(error, fallback) });
+  };
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
-    setFeedback(null);
-
     try {
       if (editingId !== null) {
         await ordersService.updateScheme(editingId, payload);
-        setFeedback({ kind: "ok", text: `Scheme #${editingId} updated` });
+        showToast({ title: `Scheme #${editingId} updated`, message: formData.scheme_name });
       } else {
         await ordersService.createScheme(payload);
-        setFeedback({ kind: "ok", text: "Scheme created successfully" });
+        showToast({ title: "Scheme created", message: formData.scheme_name });
       }
-
       setFormData(EMPTY_FORM);
       setEditingId(null);
-      await loadSchemes();
+      await reloadSchemes();
     } catch (error) {
-      console.error("Error:", error);
-      setFeedback({
-        kind: "error",
-        text: readApiError(
-          error,
-          editingId !== null ? "Failed to update scheme" : "Failed to create scheme",
-        ),
-      });
+      fail(
+        editingId !== null ? "Could not update the scheme" : "Could not create the scheme",
+        error,
+        "The server refused the request.",
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -153,37 +166,29 @@ export default function Add_Scheme() {
       item_code: row.item_code ?? "",
       state_code: row.state_code ?? "",
     });
-    setFeedback(null);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    // The form is above the list; bring it back into view. `body` is the
+    // scroll box in this app (see DESIGN_SYSTEM.md §1.6), not the window.
+    document.body.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const cancelEdit = () => {
     setEditingId(null);
     setFormData(EMPTY_FORM);
-    setFeedback(null);
   };
 
-  const handleDelete = async (row: SchemeRow) => {
-    const confirmed = window.confirm(
-      `Deactivate "${row.scheme_name}" (${row.state_code || "no state"} / ${row.item_code || "no item"})?\n\n` +
-        "It will stop appearing in Add Sales and stop adding free lines to new SAP orders. " +
-        "Existing orders keep their history, and you can re-activate it later.",
-    );
-    if (!confirmed) return;
-
+  const handleDeactivate = async (row: SchemeRow) => {
     setBusyId(row.scheme_id);
-    setFeedback(null);
     try {
       const result = await ordersService.deleteScheme(row.scheme_id);
-      setFeedback({
-        kind: "ok",
-        text: result?.message || `Scheme #${row.scheme_id} deactivated`,
+      showToast({
+        title: "Scheme deactivated",
+        message: result?.message || `${row.scheme_name} no longer applies to new orders.`,
       });
+      setConfirmDeactivate(null);
       if (editingId === row.scheme_id) cancelEdit();
-      await loadSchemes();
+      await reloadSchemes();
     } catch (error) {
-      console.error("Error:", error);
-      setFeedback({ kind: "error", text: readApiError(error, "Failed to deactivate scheme") });
+      fail("Could not deactivate the scheme", error, "The server refused the request.");
     } finally {
       setBusyId(null);
     }
@@ -191,292 +196,266 @@ export default function Add_Scheme() {
 
   const handleReactivate = async (row: SchemeRow) => {
     setBusyId(row.scheme_id);
-    setFeedback(null);
     try {
       await ordersService.updateScheme(row.scheme_id, { is_active: true });
-      setFeedback({ kind: "ok", text: `Scheme #${row.scheme_id} re-activated` });
-      await loadSchemes();
+      showToast({ title: "Scheme re-activated", message: row.scheme_name ?? "" });
+      await reloadSchemes();
     } catch (error) {
-      console.error("Error:", error);
-      setFeedback({ kind: "error", text: readApiError(error, "Failed to re-activate scheme") });
+      fail("Could not re-activate the scheme", error, "The server refused the request.");
     } finally {
       setBusyId(null);
     }
   };
 
-  const handleChange = (
-    e: ChangeEvent<HTMLInputElement>,
-  ) => {
+  const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
+    setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
-  const selectedStateName =
-    states.find((state) => state.code === formData.state_code)?.name ||
-    (isLoadingStates ? "Loading states..." : "Select state");
-
   return (
-    <div className="asg-page app-page">
-      {/* <div className="asg-header app-page-head">
-        <div>
-          <span className="app-chip asg-chip">Scheme Setup</span>
-          <h1 className="asg-title app-page-title">Add Scheme</h1>
-          <p className="asg-subtitle app-page-subtitle">
-            Create product schemes.
-          </p>
-        </div>
-      </div> */}
+    <Page>
+      <Breadcrumbs items={[{ label: "Schemes" }, { label: "Add Scheme" }]} />
 
-      <div className="asg-form-card app-card">
-        <div className="asg-form-head">
-          <h1 className="asg-form-title">
-            {editingId !== null ? `Edit Scheme #${editingId}` : "Add Scheme"}
-          </h1>
-          {editingId !== null && (
-            <p className="asg-form-subtitle">
-              Editing an existing scheme. Changes apply to future orders only.
-            </p>
-          )}
-        </div>
+      <PageHeader
+        title={editingId !== null ? `Edit Scheme #${editingId}` : "Add Scheme"}
+        description={
+          editingId !== null
+            ? "Editing an existing scheme. Changes apply to future orders only."
+            : "A free item for every order from one state. Add Sales picks it up automatically."
+        }
+      />
 
-        {feedback && (
-          <div
-            className={`asg-feedback is-${feedback.kind}`}
-            role={feedback.kind === "error" ? "alert" : "status"}
-          >
-            {feedback.text}
-          </div>
-        )}
-
-        <form className="asg-form" onSubmit={handleSubmit}>
-          <div className="asg-form-grid">
-            <div className="asg-field">
-              <label className="asg-label" htmlFor="scheme_name">
-                Scheme Name
-              </label>
-              <div className="asg-input-wrap">
-                <input
-                  id="scheme_name"
+      <Card>
+        <form onSubmit={handleSubmit} className="space-y-5">
+          <FormGrid>
+            <Field label="Scheme name" required>
+              {(control) => (
+                <Input
+                  {...control}
                   name="scheme_name"
-                  type="text"
                   placeholder="Enter scheme name"
                   value={formData.scheme_name}
                   onChange={handleChange}
-                  required
                 />
-              </div>
-            </div>
-
-            <div className="asg-field">
-              <label className="asg-label">
-                State
-              </label>
-              <div className="asg-dropdown" ref={stateDropdownRef}>
-                <button
-                  type="button"
-                  className="asg-dropdown-trigger"
-                  onClick={() => !isLoadingStates && setStateDropdownOpen((value) => !value)}
+              )}
+            </Field>
+            <Field label="State" required>
+              {(control) => (
+                <SearchSelect
+                  id={control.id}
+                  value={formData.state_code}
+                  onChange={(code) => setFormData((prev) => ({ ...prev, state_code: code }))}
+                  options={stateOptions}
+                  placeholder={isLoadingStates ? "Loading states…" : "Select state"}
+                  searchPlaceholder="State name or code"
                   disabled={isLoadingStates}
-                  aria-expanded={stateDropdownOpen}
-                >
-                  <span>{selectedStateName}</span>
-                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                    <path
-                      d="M3 4.5L6 7.5L9 4.5"
-                      stroke="#64748b"
-                      strokeWidth="1.4"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </button>
-                {stateDropdownOpen && (
-                  <div className="asg-dropdown-menu">
-                    {states.map((state) => (
-                      <button
-                        key={state.id}
-                        type="button"
-                        className={`asg-dropdown-option${formData.state_code === state.code ? " is-selected" : ""}`}
-                        onClick={() => {
-                          setFormData((prev) => ({ ...prev, state_code: state.code }));
-                          setStateDropdownOpen(false);
-                        }}
-                      >
-                        {state.name}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="asg-field">
-              <label className="asg-label" htmlFor="item_code">
-                Item Code
-              </label>
-              <div className="asg-input-wrap">
-                <input
-                  id="item_code"
+                />
+              )}
+            </Field>
+            <Field label="Item code" required hint="The SAP finished-good code, e.g. FG0000005.">
+              {(control) => (
+                <Input
+                  {...control}
                   name="item_code"
-                  type="text"
-                  placeholder="Eg: FG0000005"
+                  placeholder="FG0000005"
                   value={formData.item_code}
                   onChange={handleChange}
-                  required
+                  autoComplete="off"
                 />
-              </div>
-            </div>
+              )}
+            </Field>
+          </FormGrid>
 
-          </div>
-
-          <div className="asg-actions">
+          <FormActions>
             {editingId !== null && (
-              <button
-                className="asg-cancel"
-                type="button"
-                onClick={cancelEdit}
-                disabled={isSubmitting}
-              >
+              <Button type="button" onClick={cancelEdit} disabled={isSubmitting}>
                 Cancel
-              </button>
+              </Button>
             )}
-            <button
-              className="asg-submit"
+            <Button
               type="submit"
-              disabled={isSubmitting}
+              variant="primary"
+              disabled={isSubmitting || !formData.state_code}
             >
-              {isSubmitting
-                ? "Saving..."
-                : editingId !== null
-                  ? "Update Scheme"
-                  : "Submit"}
-            </button>
-          </div>
+              {isSubmitting ? "Saving…" : editingId !== null ? "Update scheme" : "Add scheme"}
+            </Button>
+          </FormActions>
         </form>
-      </div>
+      </Card>
 
-      <div className="asg-list-card app-card">
-        <div className="asg-list-head">
-          <h2 className="asg-list-title">
-            Existing Schemes{" "}
-            <span className="asg-count">
+      <FilterBar>
+        <FilterSearch
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Name, item code or state"
+          aria-label="Search name, item code or state"
+          fieldClassName="min-w-[240px]"
+        />
+        <FilterCheckbox
+          label="Show deactivated"
+          checked={includeInactive}
+          onChange={(e) => setIncludeInactive(e.target.checked)}
+        />
+        <FilterSpacer />
+      </FilterBar>
+
+      <Card className="overflow-hidden p-0">
+        <CardHeader className="mb-0 border-b border-line px-4 py-3">
+          <CardTitle>
+            Existing schemes{" "}
+            {/* `(2)` is what the e2e spec reads to tell loaded from loading
+                from empty — blank while loading, a count otherwise. */}
+            <span className="font-medium text-subtle">
               {isLoadingSchemes ? "" : `(${visibleSchemes.length})`}
             </span>
-          </h2>
+          </CardTitle>
+          <FilterCount className="pb-0">
+            {includeInactive ? "Active and deactivated" : "Active only"}
+          </FilterCount>
+        </CardHeader>
 
-          <div className="asg-list-tools">
-            <input
-              className="asg-search"
-              type="search"
-              placeholder="Search name, item code or state"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-            <label className="asg-toggle">
-              <input
-                type="checkbox"
-                checked={includeInactive}
-                onChange={(e) => setIncludeInactive(e.target.checked)}
-              />
-              Show deactivated
-            </label>
-          </div>
-        </div>
-
-        <div className="asg-table-wrap">
-          <table className="asg-table">
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Scheme Name</th>
-                <th>State</th>
-                <th>Free Item</th>
-                <th>Status</th>
-                <th aria-label="Actions" />
-              </tr>
-            </thead>
-            <tbody>
-              {isLoadingSchemes ? (
-                <tr>
-                  <td colSpan={6} className="asg-empty">
-                    Loading schemes...
-                  </td>
-                </tr>
-              ) : visibleSchemes.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="asg-empty">
-                    No schemes found.
-                  </td>
-                </tr>
-              ) : (
-                visibleSchemes.map((row) => {
+        {isLoadingSchemes ? (
+          <TableSkeleton rows={5} columns={6} />
+        ) : schemeError ? (
+          <EmptyState
+            icon={HiOutlineSquaresPlus}
+            title="Could not load schemes"
+            hint={readApiError(schemeError, "Check that you are signed in and try again.")}
+          />
+        ) : visibleSchemes.length === 0 ? (
+          <EmptyState
+            icon={HiOutlineSquaresPlus}
+            title="No schemes found"
+            hint={
+              search.trim()
+                ? "Nothing matches that search."
+                : "Add one above — it applies to every order from the chosen state."
+            }
+          />
+        ) : (
+          <div className="overflow-x-auto">
+            <Table density="compact">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>ID</TableHead>
+                  <TableHead>Scheme name</TableHead>
+                  <TableHead>State</TableHead>
+                  <TableHead>Free item</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {visibleSchemes.map((row) => {
                   const isBusy = busyId === row.scheme_id;
                   return (
-                    <tr
+                    <TableRow
                       key={row.scheme_id}
-                      className={[
-                        row.is_active ? "" : "is-inactive",
-                        editingId === row.scheme_id ? "is-editing" : "",
-                      ]
-                        .filter(Boolean)
-                        .join(" ")}
+                      className={cn(
+                        editingId === row.scheme_id && "bg-brand-soft/50 hover:bg-brand-soft/50",
+                      )}
                     >
-                      <td>{row.scheme_id}</td>
-                      <td>{row.scheme_name}</td>
-                      <td>{row.state_code || "—"}</td>
-                      <td>
+                      <TableCell className="text-subtle">{row.scheme_id}</TableCell>
+                      <TableCell
+                        className={cn(
+                          "font-medium",
+                          row.is_active ? "text-ink" : "text-subtle line-through",
+                        )}
+                      >
+                        {row.scheme_name}
+                      </TableCell>
+                      <TableCell>{row.state_code || "—"}</TableCell>
+                      <TableCell>
                         {row.item_code || "—"}
                         {row.item_name ? (
-                          <span className="asg-item-name">{row.item_name}</span>
+                          <span className="mt-0.5 block text-[11px] text-subtle">
+                            {row.item_name}
+                          </span>
                         ) : null}
-                      </td>
-                      <td>
-                        <span
-                          className={`asg-badge ${row.is_active ? "is-active" : "is-off"}`}
-                        >
+                      </TableCell>
+                      <TableCell>
+                        <Badge tone={row.is_active ? "ok" : "neutral"} dot>
                           {row.is_active ? "Active" : "Deactivated"}
-                        </span>
-                      </td>
-                      <td className="asg-row-actions">
-                        <button
-                          type="button"
-                          className="asg-link"
-                          onClick={() => startEdit(row)}
-                          disabled={isBusy}
-                        >
-                          Edit
-                        </button>
-                        {row.is_active ? (
-                          <button
-                            type="button"
-                            className="asg-link is-danger"
-                            onClick={() => handleDelete(row)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="xs"
+                            onClick={() => startEdit(row)}
                             disabled={isBusy}
                           >
-                            {isBusy ? "..." : "Delete"}
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            className="asg-link"
-                            onClick={() => handleReactivate(row)}
-                            disabled={isBusy}
-                          >
-                            {isBusy ? "..." : "Re-activate"}
-                          </button>
-                        )}
-                      </td>
-                    </tr>
+                            Edit
+                          </Button>
+                          {row.is_active ? (
+                            <Button
+                              variant="danger"
+                              size="xs"
+                              onClick={() => setConfirmDeactivate(row)}
+                              disabled={isBusy}
+                            >
+                              Turn off
+                            </Button>
+                          ) : (
+                            <Button
+                              variant="success"
+                              size="xs"
+                              onClick={() => void handleReactivate(row)}
+                              disabled={isBusy}
+                            >
+                              {isBusy ? "…" : "Turn on"}
+                            </Button>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
                   );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </Card>
+
+      <Dialog
+        open={confirmDeactivate !== null}
+        onOpenChange={(next) => {
+          if (!next && busyId === null) setConfirmDeactivate(null);
+        }}
+      >
+        {confirmDeactivate ? (
+          <DialogContent title="Turn scheme off" size="sm">
+            <DialogHeader>
+              <DialogTitle>Turn off {confirmDeactivate.scheme_name}?</DialogTitle>
+            </DialogHeader>
+            <DialogBody className="space-y-2 text-[13px] text-body">
+              <p className="m-0">
+                <strong className="font-semibold text-ink">
+                  {confirmDeactivate.state_code || "no state"} /{" "}
+                  {confirmDeactivate.item_code || "no item"}
+                </strong>
+              </p>
+              <p className="m-0">
+                It will stop appearing in Add Sales and stop adding free lines to new SAP
+                orders. Existing orders keep their history, and you can turn it back on later.
+              </p>
+            </DialogBody>
+            <DialogFooter>
+              <Button onClick={() => setConfirmDeactivate(null)} disabled={busyId !== null}>
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                onClick={() => void handleDeactivate(confirmDeactivate)}
+                disabled={busyId !== null}
+              >
+                {busyId !== null ? "Working…" : "Turn off"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        ) : null}
+      </Dialog>
+    </Page>
   );
 }

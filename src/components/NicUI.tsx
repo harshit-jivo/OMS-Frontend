@@ -1,8 +1,21 @@
 import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { HiCheckCircle, HiExclamationCircle, HiChevronDown } from "react-icons/hi2";
+import { HiOutlineCheckCircle, HiOutlineExclamationCircle, HiOutlineChevronDown } from "react-icons/hi2";
 import { einvoiceService } from "../services/einvoiceService";
 import type { CompanyChoice, ValidationError } from "../services/einvoiceService";
+import { Badge, type BadgeTone } from "@/components/ui/badge";
+import { Select } from "@/components/ui/form";
+import { Notice } from "@/components/ui/page";
+import { cn } from "@/lib/utils";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 /* ---- Field (label + control) ---- */
 type FieldProps = {
@@ -11,12 +24,22 @@ type FieldProps = {
   children: ReactNode;
   full?: boolean;
 };
+/**
+ * The same shape as `ui/form`'s `Field`, but wrapping its control instead of
+ * addressing it by id.
+ *
+ * `Field` takes a RENDER PROP so it can put `id`/`aria-describedby` on the
+ * control; twenty call sites across e-Invoice, e-Way Bill and HAIS pass a
+ * plain child. Wrapping in a `<label>` is the other valid way to associate the
+ * two, so the association is real either way — and the API stays what those
+ * twenty callers already pass.
+ */
 export function NicField({ label, hint, children, full }: FieldProps) {
   return (
-    <label className={`nic-field${full ? " nic-field--full" : ""}`}>
-      <span className="nic-label">{label}</span>
+    <label className={cn("flex min-w-0 flex-col gap-1.5", full && "col-span-full")}>
+      <span className="text-[12px] font-medium text-body">{label}</span>
       {children}
-      {hint ? <small className="nic-hint">{hint}</small> : null}
+      {hint ? <small className="text-[11.5px] leading-snug text-subtle">{hint}</small> : null}
     </label>
   );
 }
@@ -25,31 +48,34 @@ export function NicField({ label, hint, children, full }: FieldProps) {
    The selected company DB decides BOTH which company's Service Layer the invoice
    is read from AND which schema's OMS_IRN_LOG the IRN is mirrored into, so the
    options come from the server (settings) rather than a hardcoded list. */
-let companyCache: CompanyChoice[] | null = null;
+/* Was a module-level `companyCache` plus a mount effect. The cache is now the
+   query cache under ["einvoice","companies"], which every instance of this
+   select shares — and, unlike the module variable, it is invalidatable and does
+   not survive a logout. */
+const NO_COMPANIES: CompanyChoice[] = [];
 
 export function CompanyDbSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const [companies, setCompanies] = useState<CompanyChoice[]>(companyCache ?? []);
+  const { data } = useQuery({
+    queryKey: ["einvoice", "companies"],
+    // A failure keeps whatever is selected; the field stays usable.
+    queryFn: () => einvoiceService.listCompanies().catch(() => null),
+  });
+  const companies = data?.results ?? NO_COMPANIES;
 
+  /*
+   * Adopting the server default stays in an effect. It calls the PARENT's
+   * `onChange`, and setting another component's state during render is illegal
+   * — doing it there renders the error boundary, which is exactly what happened
+   * when this was tried. The `adopted` guard keeps it to one call per result.
+   */
+  const [adopted, setAdopted] = useState<CompanyChoice[] | null>(null);
   useEffect(() => {
-    if (companyCache) return;
-    let alive = true;
-    einvoiceService
-      .listCompanies()
-      .then((data) => {
-        if (!alive) return;
-        companyCache = data.results;
-        setCompanies(data.results);
-        // Adopt the server default when nothing valid is selected yet.
-        if (data.results.length && !data.results.some((c) => c.company_db === value)) {
-          onChange(data.default || data.results[0].company_db);
-        }
-      })
-      .catch(() => {
-        /* keep whatever is selected; the field stays usable */
-      });
-    return () => { alive = false; };
+    if (!data || !companies.length || companies === adopted) return;
+    if (companies.some((c) => c.company_db === value)) return;
+    setAdopted(companies);
+    onChange(data.default || companies[0].company_db);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [data]);
 
   // Always include the current value so the select never shows a blank option.
   const options = companies.length
@@ -57,31 +83,68 @@ export function CompanyDbSelect({ value, onChange }: { value: string; onChange: 
     : [{ label: "", company_db: value }].filter((c) => c.company_db);
 
   return (
-    <select className="nic-select" value={value} onChange={(e) => onChange(e.target.value)}>
+    <Select value={value} onChange={(e) => onChange(e.target.value)}>
       {options.map((c) => (
         <option key={c.company_db} value={c.company_db}>
           {c.label ? `${c.label} — ${c.company_db}` : c.company_db}
         </option>
       ))}
-    </select>
+    </Select>
   );
 }
 
 /* ---- Status badge ---- */
+
+/**
+ * NIC tone names -> the app's shared badge tones.
+ *
+ * The four names here (`ok` / `err` / `warn` / `muted`) are kept as this
+ * component's public prop, unchanged, because seven e-invoice and e-way-bill
+ * screens pass them. Only the COLOUR is shared now — Phase 2.2. That split is
+ * the point: what counts as an error on a NIC response is NIC's vocabulary and
+ * belongs here, but what colour an error is belongs to the app.
+ */
+const NIC_TONES: Record<"ok" | "err" | "warn" | "muted", BadgeTone> = {
+  ok: "ok",
+  err: "bad",
+  warn: "hold",
+  muted: "neutral",
+};
+
+/**
+ * NOTE — there are two components called `StatusBadge` in this codebase: this
+ * one, and `components/StatusBadge.tsx` for device status. They are namespaced
+ * by import path and neither is wrong, but the collision is worth knowing
+ * before adding a third.
+ */
 export function StatusBadge({ tone, children, title }: { tone: "ok" | "err" | "warn" | "muted"; children: ReactNode; title?: string }) {
-  return <span className={`nic-badge nic-badge--${tone}`} title={title}>{children}</span>;
+  return <Badge tone={NIC_TONES[tone]} outlined title={title}>{children}</Badge>;
 }
 
 /* ---- Collapsible raw JSON ---- */
 export function JsonView({ data, title = "Raw JSON", open = false }: { data: unknown; title?: string; open?: boolean }) {
   const [show, setShow] = useState(open);
   return (
-    <div className="nic-json-wrap">
-      <button type="button" className="nic-json-toggle" onClick={() => setShow((s) => !s)}>
-        <HiChevronDown className={show ? "is-open" : ""} />
+    <div className="overflow-hidden rounded-card border border-line bg-surface">
+      <button
+        type="button"
+        // The form-control reset: Preflight is not imported, so a bare button
+        // wears the UA's outset border, grey face and font. See `ui/button`.
+        className="flex w-full appearance-none cursor-pointer items-center gap-1.5 border-0 bg-transparent px-3 py-2 text-left text-[12.5px] font-semibold text-body [font-family:inherit] hover:text-ink"
+        aria-expanded={show}
+        onClick={() => setShow((s) => !s)}
+      >
+        <HiOutlineChevronDown
+          aria-hidden="true"
+          className={cn("size-4 transition-transform", show && "rotate-180")}
+        />
         {title}
       </button>
-      {show ? <pre className="nic-json">{JSON.stringify(data, null, 2)}</pre> : null}
+      {show ? (
+        <pre className="m-0 max-h-[360px] overflow-auto border-t border-line px-3 py-2 text-[11.5px] leading-relaxed text-subtle">
+          {JSON.stringify(data, null, 2)}
+        </pre>
+      ) : null}
     </div>
   );
 }
@@ -90,15 +153,30 @@ export function JsonView({ data, title = "Raw JSON", open = false }: { data: unk
 export function KeyValues({ items }: { items: Array<[string, ReactNode]> }) {
   const shown = items.filter(([, v]) => v !== undefined && v !== null && v !== "");
   if (shown.length === 0) return null;
+  return <KeyValueGrid rows={shown} />;
+}
+
+/**
+ * The key/value grid both `KeyValues` and `DetailsView` render.
+ *
+ * A `dl`, where `.nic-kv` was nested divs: a NIC response IS a description
+ * list, and saying so is what lets a screen reader pair "Ack No" with its
+ * value instead of reading twenty unrelated strings.
+ *
+ * `auto-fit` columns rather than a fixed two: these responses carry anywhere
+ * from three fields to thirty, and a two-column grid of thirty short values
+ * wastes two thirds of a wide screen.
+ */
+function KeyValueGrid({ rows }: { rows: Array<[string, ReactNode]> }) {
   return (
-    <div className="nic-kv">
-      {shown.map(([k, v]) => (
-        <div key={k} className="nic-kv-row">
-          <span className="nic-kv-key">{k}</span>
-          <span className="nic-kv-val">{v}</span>
+    <dl className="m-0 grid grid-cols-[repeat(auto-fit,minmax(210px,1fr))] gap-x-6 gap-y-3">
+      {rows.map(([k, v]) => (
+        <div key={k} className="min-w-0">
+          <dt className="text-[11px] font-semibold uppercase tracking-wider text-subtle">{k}</dt>
+          <dd className="m-0 mt-0.5 break-words text-[13px] text-ink">{v}</dd>
         </div>
       ))}
-    </div>
+    </dl>
   );
 }
 
@@ -130,39 +208,47 @@ function renderScalar(key: string, value: unknown): ReactNode {
   }
   // Huge signed blobs (JWS) — don't dump inline.
   if (typeof value === "string" && value.length > 160) {
-    return <span className="nic-note">({value.length.toLocaleString()} chars — see raw JSON)</span>;
+    return (
+      <span className="text-[12px] italic text-subtle">
+        ({value.length.toLocaleString()} chars — see raw JSON)
+      </span>
+    );
   }
   if (typeof value === "boolean") {
     return <StatusBadge tone={value ? "ok" : "muted"}>{value ? "Yes" : "No"}</StatusBadge>;
   }
-  return <span className={_isMonoKey(key) ? "nic-mono" : undefined}>{str}</span>;
+  // IRNs, e-way-bill numbers and GSTINs are identifiers people COMPARE
+  // character by character, which proportional digits make needlessly hard.
+  return <span className={_isMonoKey(key) ? "font-mono text-[12px]" : undefined}>{str}</span>;
 }
 
 export function DetailsView({ data }: { data: unknown }): ReactNode {
-  if (data === null || data === undefined) return <p className="nic-note">No data.</p>;
+  if (data === null || data === undefined) return <p className="m-0 text-[13px] text-subtle">No data.</p>;
 
   if (Array.isArray(data)) {
-    if (data.length === 0) return <p className="nic-note">No records.</p>;
+    if (data.length === 0) return <p className="m-0 text-[13px] text-subtle">No records.</p>;
     if (typeof data[0] === "object" && data[0] !== null) {
       const cols = Array.from(new Set(data.flatMap((r) => Object.keys(r as object))));
       return (
-        <div className="nic-table-wrap">
-          <table className="nic-table">
-            <thead>
-              <tr>{cols.map((c) => <th key={c}>{humanizeKey(c)}</th>)}</tr>
-            </thead>
-            <tbody>
+        <div className="overflow-x-auto rounded-card border border-line">
+          <Table density="compact">
+            <TableHeader>
+              <TableRow className="bg-surface hover:bg-surface">
+                {cols.map((c) => <TableHead key={c}>{humanizeKey(c)}</TableHead>)}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {data.map((row, i) => (
-                <tr key={i}>
-                  {cols.map((c) => <td key={c}>{renderScalar(c, (row as Record<string, unknown>)[c])}</td>)}
-                </tr>
+                <TableRow key={i}>
+                  {cols.map((c) => <TableCell key={c}>{renderScalar(c, (row as Record<string, unknown>)[c])}</TableCell>)}
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       );
     }
-    return <div className="nic-note">{data.join(", ")}</div>;
+    return <div className="text-[13px] text-subtle">{data.join(", ")}</div>;
   }
 
   if (typeof data !== "object") return <span>{String(data)}</span>;
@@ -174,18 +260,15 @@ export function DetailsView({ data }: { data: unknown }): ReactNode {
   return (
     <>
       {scalars.length ? (
-        <div className="nic-kv">
-          {scalars.map(([k, v]) => (
-            <div key={k} className="nic-kv-row">
-              <span className="nic-kv-key">{humanizeKey(k)}</span>
-              <span className="nic-kv-val">{renderScalar(k, v)}</span>
-            </div>
-          ))}
-        </div>
+        <KeyValueGrid
+          rows={scalars.map(([k, v]) => [humanizeKey(k), renderScalar(k, v)])}
+        />
       ) : null}
       {nested.map(([k, v]) => (
-        <div key={k} className="nic-subsection">
-          <h4 className="nic-subsection-title">{humanizeKey(k)}</h4>
+        <div key={k} className="mt-4 border-t border-line pt-3">
+          <h4 className="m-0 mb-2 text-[12px] font-semibold uppercase tracking-wider text-subtle">
+            {humanizeKey(k)}
+          </h4>
           <DetailsView data={v} />
         </div>
       ))}
@@ -197,19 +280,19 @@ export function DetailsView({ data }: { data: unknown }): ReactNode {
 export function ValidationList({ errors }: { errors: ValidationError[] }) {
   if (!errors?.length) return null;
   return (
-    <div className="nic-vlist">
-      <div className="nic-vlist-head">
-        <HiExclamationCircle />
-        {errors.length} validation issue{errors.length > 1 ? "s" : ""}
-      </div>
-      <ul>
+    <Notice
+      tone="bad"
+      title={`${errors.length} validation issue${errors.length > 1 ? "s" : ""}`}
+    >
+      <ul className="m-0 mt-1.5 list-disc space-y-1 pl-5">
         {errors.map((e, i) => (
           <li key={`${e.field}-${i}`}>
-            <code>{e.code}</code> <strong>{e.field}</strong> — {e.message}
+            <code className="font-mono text-[12px]">{e.code}</code>{" "}
+            <strong className="font-semibold">{e.field}</strong> — {e.message}
           </li>
         ))}
       </ul>
-    </div>
+    </Notice>
   );
 }
 
@@ -217,23 +300,42 @@ export function ValidationList({ errors }: { errors: ValidationError[] }) {
 export function ErrorAlert({ children }: { children: ReactNode }) {
   if (!children) return null;
   return (
-    <div className="nic-alert nic-alert--err">
-      <HiExclamationCircle />
-      <span>{children}</span>
-    </div>
+    // The flex lives on a span INSIDE the Notice, not on the Notice itself:
+    // `Notice` already wraps its children in one, so flexing the outer div
+    // would lay out that wrapper rather than the icon and the text.
+    <Notice tone="bad">
+      <span className="flex items-start gap-2">
+        <HiOutlineExclamationCircle aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+        <span>{children}</span>
+      </span>
+    </Notice>
   );
 }
 export function SuccessAlert({ children }: { children: ReactNode }) {
   if (!children) return null;
   return (
-    <div className="nic-alert nic-alert--ok">
-      <HiCheckCircle />
-      <span>{children}</span>
-    </div>
+    <Notice tone="ok">
+      <span className="flex items-start gap-2">
+        <HiOutlineCheckCircle aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+        <span>{children}</span>
+      </span>
+    </Notice>
   );
 }
 
-/* ---- Pull a clean message out of an axios error ---- */
+/*
+ * Replaced by `messageFrom` in src/lib/apiError.ts, which its 17 callers now
+ * import directly.
+ *
+ * This was the narrower, older version of the same idea — three response keys
+ * against that file's five, no distinction between an HTTP failure and a
+ * TypeError thrown by our own mapping code, and no separate wording for a
+ * request that never completed. `apiError.ts` was written to be the single
+ * place this happens; leaving a second one in a module of UI components also
+ * meant Fast Refresh could not hot-update NicUI at all.
+ *
+ * Kept, commented, so the old key order stays readable next to the new one.
+
 export function apiErrorMessage(err: unknown): string {
   const e = err as { response?: { data?: { error?: string; message?: string; detail?: string } }; message?: string };
   return (
@@ -244,3 +346,4 @@ export function apiErrorMessage(err: unknown): string {
     "Request failed"
   );
 }
+*/

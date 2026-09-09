@@ -16,6 +16,12 @@
     "noEmit": true,
     "jsx": "react-jsx",
 
+    /* The `@/` alias components.json already declares. Mirrored in
+       vite.config.ts (for the build) and vitest.config.ts (for the tests) —
+       three resolvers, so all three have to be told. */
+    "baseUrl": ".",
+    "paths": { "@/*": ["./src/*"] },
+
     /* Linting */
     "strict": true,
     "noUnusedLocals": true,

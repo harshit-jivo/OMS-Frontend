@@ -1,5 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { HiTrash, HiXMark } from "react-icons/hi2";
+import { HiOutlineTrash } from "react-icons/hi2";
+
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Field, Input } from "@/components/ui/form";
+import { Card, EmptyState, Notice, SectionHeading } from "@/components/ui/page";
+import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 import { API_ORIGIN } from "../../services/api";
 import { formatMoney, lineKey, toNumber, type SelectedLine } from "./salesInvoice.utils";
 import { apiFetch, hanaUrl, reservedBatchKey, type SalesInvoiceState } from "./useSalesInvoice";
@@ -450,125 +464,190 @@ function BatchPickerModal({
   }, [allocationSignature, allocations, loadingBatches, selectedWhsCode]);
 
   return (
-    <div className="si-modal-backdrop" role="presentation">
-      <section className="si-so-modal si-batch-modal" role="dialog" aria-modal="true" aria-label="Choose item batch">
-        <header className="si-so-modal-head">
-          <div>
-            <span className="si-eyebrow">Batch Selection</span>
-            <h2>{context.itemCode}</h2>
-            <p>{context.itemName}</p>
-          </div>
-          <div className="si-modal-head-actions">
-            <button
-              className="si-modal-icon-btn si-modal-icon-close"
-              type="button"
-              aria-label="Close"
-              title="Close"
-              onClick={onClose}
-            >
-              <HiXMark aria-hidden="true" />
-            </button>
-          </div>
-        </header>
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+    >
+      <DialogContent title="Batch selection" size="lg">
+        <DialogHeader>
+          <DialogTitle>
+            <span className="flex flex-col">
+              <span className="font-mono text-[12px] font-normal text-subtle">
+                {context.itemCode}
+              </span>
+              {context.itemName}
+            </span>
+          </DialogTitle>
+        </DialogHeader>
 
-        <div className="si-batch-picker-body">
-          <aside className="si-batch-warehouse-panel">
-            <div className="si-batch-panel-title">
-              <span>Warehouse</span>
-              <strong>{context.quantity.toLocaleString("en-IN")} required</strong>
+        <DialogBody className="grid gap-4 sm:grid-cols-[minmax(0,200px)_minmax(0,1fr)]">
+          {/* -- Which warehouse -- */}
+          <aside className="space-y-2">
+            <div className="flex items-baseline justify-between gap-2">
+              <SectionHeading>Warehouse</SectionHeading>
+              <span className="text-[11.5px] tabular-nums text-subtle">
+                {context.quantity.toLocaleString("en-IN")} required
+              </span>
             </div>
-            {error && <div className="si-inline-error">{error}</div>}
+
+            {error && <Notice tone="bad">{error}</Notice>}
+
             {loadingWarehouses ? (
-              <div className="si-loader">Loading warehouse quantities...</div>
+              <div className="space-y-1.5">
+                <Skeleton className="h-14 w-full" />
+                <Skeleton className="h-14 w-full" />
+              </div>
             ) : warehouseOptions.length === 0 ? (
-              <div className="si-empty">No warehouse stock found.</div>
+              <p className="m-0 rounded-sm border border-line bg-surface px-3 py-4 text-center text-[12px] text-subtle">
+                No warehouse stock found.
+              </p>
             ) : (
-              <div className="si-batch-warehouse-cards" aria-label="Choose warehouse">
+              <ul className="m-0 max-h-[300px] list-none space-y-1.5 overflow-y-auto p-0">
                 {warehouseOptions.map(({ code: whsCode, warehouse }) => {
                   const whsBatches = warehouseBatches[whsCode] || [];
                   const quantity = warehouse ? getWarehouseQuantity(warehouse) : 0;
+                  const active = selectedWhsCode === whsCode;
                   return (
-                    <button
-                      className={`si-batch-warehouse-card${selectedWhsCode === whsCode ? " is-active" : ""}`}
-                      type="button"
-                      key={whsCode}
-                      onClick={() => {
-                        shouldApplyWarehouseToAllRef.current = true;
-                        if (selectedWhsCode === whsCode && !loadingBatches) {
-                          void onAutoSelectRef.current(allocations, whsCode, true, selectedBatches.length > 0);
-                          return;
-                        }
-                        setSelectedWhsCode(whsCode);
-                      }}
-                    >
-                      <strong>{whsCode}</strong>
-                      <span>{loadingBatches ? "..." : whsBatches.length} batches</span>
-                      <em>Qty {quantity.toLocaleString("en-IN")}</em>
-                    </button>
+                    <li key={whsCode}>
+                      <button
+                        type="button"
+                        /* A selectable card, so the DESIGN_SYSTEM 1.1 reset
+                           applies rather than `ui/button`. */
+                        className={cn(
+                          "flex w-full cursor-pointer appearance-none flex-col gap-0.5 rounded-sm border p-2.5 text-left [font-family:inherit] text-[13px] transition-colors",
+                          active
+                            ? "border-brand-line bg-brand-soft"
+                            : "border-line bg-card hover:bg-surface",
+                        )}
+                        aria-current={active ? "true" : undefined}
+                        onClick={() => {
+                          shouldApplyWarehouseToAllRef.current = true;
+                          if (selectedWhsCode === whsCode && !loadingBatches) {
+                            void onAutoSelectRef.current(
+                              allocations,
+                              whsCode,
+                              true,
+                              selectedBatches.length > 0,
+                            );
+                            return;
+                          }
+                          setSelectedWhsCode(whsCode);
+                        }}
+                      >
+                        <strong className="font-semibold text-ink">{whsCode}</strong>
+                        <span className="text-[11.5px] text-subtle">
+                          {loadingBatches ? "..." : whsBatches.length} batches - Qty{" "}
+                          {quantity.toLocaleString("en-IN")}
+                        </span>
+                      </button>
+                    </li>
                   );
                 })}
-              </div>
+              </ul>
             )}
           </aside>
 
-          <section className="si-batch-list-panel">
-            <div className="si-batch-panel-title">
-              <span>Batches</span>
-              <strong>{selectedWhsCode || "Select warehouse"}</strong>
+          {/* -- What it allocated -- */}
+          <section className="space-y-3">
+            <div className="flex items-baseline justify-between gap-2">
+              <SectionHeading>Batches</SectionHeading>
+              <span className="text-[11.5px] text-subtle">
+                {selectedWhsCode || "Select a warehouse"}
+              </span>
             </div>
-            <label className="si-batch-quantity-field">
-              <span>Invoice Quantity</span>
-              <input
-                type="number"
-                min="1"
-                max={context.maxQuantity}
-                value={context.quantity}
-                onChange={(event) => onQuantityChange(toNumber(event.target.value))}
-              />
-            </label>
-            {!loadingWarehouses && (
-              selectedWhsCode && loadingBatches ? (
-                <div className="si-loader">Loading batch availability...</div>
+
+            <Field label="Invoice quantity" hint={"At most " + context.maxQuantity + "."}>
+              {(control) => (
+                <Input
+                  {...control}
+                  type="number"
+                  min="1"
+                  max={context.maxQuantity}
+                  value={context.quantity}
+                  className="max-w-[160px] text-right tabular-nums"
+                  onChange={(event) => onQuantityChange(toNumber(event.target.value))}
+                />
+              )}
+            </Field>
+
+            {!loadingWarehouses &&
+              (selectedWhsCode && loadingBatches ? (
+                <Skeleton className="h-20 w-full" aria-label="Loading batch availability" />
               ) : selectedWhsCode && selectedBatches.length === 0 ? (
-                <div className="si-empty">No batches found for this warehouse.</div>
+                <p className="m-0 rounded-sm border border-line bg-surface px-3 py-4 text-center text-[12px] text-subtle">
+                  No batches found for this warehouse.
+                </p>
               ) : selectedWhsCode ? (
                 <>
-                  <div className={`si-batch-match-status${quantityMatches ? " is-match" : " has-error"}`}>
-                    <span>
-                      Invoice Qty: {context.quantity.toLocaleString("en-IN")} | Batch Qty:{" "}
-                      {allocatedQty.toLocaleString("en-IN")}
+                  {/*
+                    The one thing that must be right before posting: batch
+                    quantity has to equal invoice quantity, or SAP rejects the
+                    document. Stated as an outcome, not only as a colour.
+                  */}
+                  <Notice tone={quantityMatches ? "ok" : "bad"}>
+                    <span className="flex flex-wrap items-baseline justify-between gap-2">
+                      <span className="tabular-nums">
+                        Invoice qty {context.quantity.toLocaleString("en-IN")} - batch qty{" "}
+                        {allocatedQty.toLocaleString("en-IN")}
+                      </span>
+                      <strong className="font-semibold">
+                        {quantityMatches ? "Quantity matched" : "Quantity mismatch"}
+                      </strong>
                     </span>
-                    <strong>{quantityMatches ? "Quantity matched" : "Quantity mismatch"}</strong>
-                  </div>
+                  </Notice>
+
                   {held.qty > 0 && (
-                    <p className="si-batch-reserved-note">
-                      {held.qty.toLocaleString("en-IN")} held by invoices awaiting review,
-                      across {held.batches} batch{held.batches === 1 ? "" : "es"}
+                    <p className="m-0 text-[11.5px] text-subtle">
+                      {held.qty.toLocaleString("en-IN")} held by invoices awaiting review, across{" "}
+                      {held.batches} batch{held.batches === 1 ? "" : "es"}
                       {held.exhausted > 0
-                        ? ` (${held.exhausted} fully taken)`
-                        : " — the rest of those batches is still available"}
+                        ? " (" + held.exhausted + " fully taken)"
+                        : " - the rest of those batches is still available"}
                       .
                     </p>
                   )}
+
                   {allocations.length > 0 && (
-                    <div className="si-batch-auto-list">
-                    {allocations.map(({ batch, quantity }) => (
-                      <div className="si-batch-auto-row" key={`${getBatchNumber(batch)}-${batch.WhsCode}-${batch.InDate || ""}`}>
-                        <strong>Exp {formatBatchDate(batch.ExpDate)}</strong>
-                        <em>{quantity.toLocaleString("en-IN")}</em>
-                      </div>
-                    ))}
-                    </div>
+                    <ul className="m-0 max-h-[220px] list-none space-y-1 overflow-y-auto p-0">
+                      {allocations.map(({ batch, quantity }) => (
+                        <li
+                          className="flex items-center justify-between gap-2 rounded-sm border border-line bg-surface px-2.5 py-1.5 text-[12.5px]"
+                          key={
+                            getBatchNumber(batch) +
+                            "-" +
+                            batch.WhsCode +
+                            "-" +
+                            (batch.InDate || "")
+                          }
+                        >
+                          <strong className="font-semibold text-ink">
+                            Exp {formatBatchDate(batch.ExpDate)}
+                          </strong>
+                          <span className="tabular-nums text-body">
+                            {quantity.toLocaleString("en-IN")}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
                   )}
                 </>
               ) : (
-                <div className="si-empty">Select a warehouse.</div>
-              )
-            )}
+                <p className="m-0 rounded-sm border border-line bg-surface px-3 py-4 text-center text-[12px] text-subtle">
+                  Select a warehouse.
+                </p>
+              ))}
           </section>
-        </div>
-      </section>
-    </div>
+        </DialogBody>
+
+        <DialogFooter>
+          <Button variant="primary" onClick={onClose}>
+            Done
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -781,60 +860,119 @@ export default function ContentsTab({ state }: Props) {
   };
 
   return (
-    <div className="si-tab-grid">
-      {batchApplyError && <div className="si-inline-error">{batchApplyError}</div>}
-      <div className="si-invoice-line-grid" aria-label="Sales invoice lines">
-        {state.selectedLineList.map((line) => {
-          const key = lineKey(line.DocEntry, line.LineNum);
-          const selectedBatchQty = line.BatchNumbers?.reduce((sum, batch) => sum + toNumber(batch.Quantity), 0) || 0;
-          const invoiceQty = toNumber(line.invoiceQty);
-          const batchQtyMismatch = Math.abs(selectedBatchQty - invoiceQty) >= 0.0001;
-          const batchWarehouse = line.WhsCode || line.SalesOrderWhsCode || "-";
-          const warehouseQty = warehouseQtyByItemAndWhs[`${getSkuCodeKey(line.ItemCode)}|${getSkuCodeKey(batchWarehouse)}`];
-          const availableQtyText = warehouseQty === undefined ? "-" : warehouseQty.toLocaleString("en-IN");
-          const skuImageUrl = skuImageByCode[getSkuCodeKey(line.ItemCode)] || "";
+    <div className="space-y-4">
+      {batchApplyError && <Notice tone="bad">{batchApplyError}</Notice>}
 
-          return (
-            <article className="si-invoice-line-card" key={key}>
-              <div className={`si-invoice-item-visual${skuImageUrl ? " has-image" : ""}`}>
-                {skuImageUrl ? (
-                  <img src={skuImageUrl} alt="" loading="lazy" />
-                ) : (
-                  <span />
+      {state.selectedLineList.length === 0 ? (
+        <Card>
+          <EmptyState
+            icon={HiOutlineTrash}
+            title="No lines on this invoice"
+            hint="Go back and add at least one sales order line."
+          />
+        </Card>
+      ) : (
+        <ul
+          className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-3 p-0"
+          aria-label="Sales invoice lines"
+        >
+          {state.selectedLineList.map((line) => {
+            const key = lineKey(line.DocEntry, line.LineNum);
+            const selectedBatchQty =
+              line.BatchNumbers?.reduce((sum, batch) => sum + toNumber(batch.Quantity), 0) || 0;
+            const invoiceQty = toNumber(line.invoiceQty);
+            const batchQtyMismatch = Math.abs(selectedBatchQty - invoiceQty) >= 0.0001;
+            const batchWarehouse = line.WhsCode || line.SalesOrderWhsCode || "-";
+            const warehouseQty =
+              warehouseQtyByItemAndWhs[
+                getSkuCodeKey(line.ItemCode) + "|" + getSkuCodeKey(batchWarehouse)
+              ];
+            const availableQtyText =
+              warehouseQty === undefined ? "-" : warehouseQty.toLocaleString("en-IN");
+            const skuImageUrl = skuImageByCode[getSkuCodeKey(line.ItemCode)] || "";
+
+            return (
+              <li
+                className={cn(
+                  "flex flex-col gap-2 rounded-card border bg-card p-3",
+                  batchQtyMismatch ? "border-bad/40" : "border-line",
                 )}
-                <button
-                  className="si-invoice-line-remove"
-                  type="button"
-                  onClick={() => state.removeLine(key)}
-                  aria-label={`Remove ${line.Dscription || line.ItemCode || "item"}`}
-                >
-                  <HiTrash aria-hidden="true" />
-                </button>
-              </div>
-              <div className="si-invoice-item-copy">
-                <strong>{line.Dscription || "Unnamed SAP line"}</strong>
-                <dl>
+                key={key}
+              >
+                <div className="flex items-start gap-3">
+                  <span className="grid size-14 shrink-0 place-items-center overflow-hidden rounded-sm border border-line bg-surface">
+                    {skuImageUrl ? (
+                      <img
+                        src={skuImageUrl}
+                        alt=""
+                        loading="lazy"
+                        className="size-full object-contain"
+                      />
+                    ) : (
+                      <span className="font-mono text-[10px] text-subtle">no image</span>
+                    )}
+                  </span>
+
+                  <div className="min-w-0 flex-1">
+                    <strong className="block text-[13px] font-semibold text-ink">
+                      {line.Dscription || "Unnamed SAP line"}
+                    </strong>
+                    <span className="block font-mono text-[11px] text-subtle">
+                      {line.ItemCode || "-"}
+                    </span>
+                  </div>
+
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => state.removeLine(key)}
+                    aria-label={"Remove " + (line.Dscription || line.ItemCode || "item")}
+                  >
+                    <HiOutlineTrash />
+                  </Button>
+                </div>
+
+                <dl className="m-0 flex items-end justify-between gap-3">
                   <div>
-                    <dt>Unit Price</dt>
-                    <dd>{formatMoney(line.Price)}</dd>
+                    <dt className="text-[11px] uppercase tracking-wide text-subtle">Unit price</dt>
+                    <dd className="m-0 text-[13px] tabular-nums text-ink">
+                      {formatMoney(line.Price)}
+                    </dd>
                   </div>
                   <div>
-                    <dt>Quantity</dt>
-                    <dd>
-                      <input
+                    <dt className="text-[11px] uppercase tracking-wide text-subtle">Quantity</dt>
+                    <dd className="m-0">
+                      <Input
                         type="number"
                         min="1"
                         max={line.OpenQty}
                         value={line.invoiceQty}
-                        onChange={(event) => state.updateLine(key, { invoiceQty: toNumber(event.target.value) })}
-                        aria-label={`Invoice quantity for ${line.Dscription || line.ItemCode || "item"}`}
+                        onChange={(event) =>
+                          state.updateLine(key, { invoiceQty: toNumber(event.target.value) })
+                        }
+                        aria-label={
+                          "Invoice quantity for " + (line.Dscription || line.ItemCode || "item")
+                        }
+                        className="h-control-sm w-24 text-right tabular-nums"
                       />
                     </dd>
                   </div>
                 </dl>
+
+                {/*
+                  Opens the batch picker. It carries the warehouse, the stock
+                  there, and — when they disagree — the reason this line cannot
+                  post: SAP rejects a batch-managed item whose batch quantity
+                  does not equal its invoice quantity.
+                */}
                 <button
-                  className={`si-batch-select-btn${batchQtyMismatch ? " has-error" : ""}`}
                   type="button"
+                  className={cn(
+                    "w-full cursor-pointer appearance-none rounded-sm border px-2.5 py-2 text-left [font-family:inherit] text-[12px] transition-colors",
+                    batchQtyMismatch
+                      ? "border-bad/40 bg-bad-soft text-bad"
+                      : "border-line bg-surface text-body hover:border-line-strong",
+                  )}
                   onClick={() => {
                     setBatchApplyError("");
                     setBatchPickerContext({
@@ -847,20 +985,20 @@ export default function ContentsTab({ state }: Props) {
                     });
                   }}
                 >
-                  <span>
-                    Warehouse: {batchWarehouse} | Available Qty: {availableQtyText}
+                  <span className="block">
+                    Warehouse {batchWarehouse} - available {availableQtyText}
                   </span>
                   {batchQtyMismatch && (
-                    <strong className="si-batch-select-warning">
+                    <strong className="mt-0.5 block font-semibold">
                       Batch quantity does not match invoice quantity.
                     </strong>
                   )}
                 </button>
-              </div>
-            </article>
-          );
-        })}
-      </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
 
       {batchPickerContext && (
         <BatchPickerModal
@@ -871,10 +1009,18 @@ export default function ContentsTab({ state }: Props) {
             void applyBatchSelection(allocations, whsCode, applyToAll, hasBatches);
           }}
           onQuantityChange={(quantity) => {
-            const nextQuantity = Math.min(Math.max(toNumber(quantity), 1), batchPickerContext.maxQuantity);
-            setBatchPickerContext((current) => current ? { ...current, quantity: nextQuantity } : current);
+            const nextQuantity = Math.min(
+              Math.max(toNumber(quantity), 1),
+              batchPickerContext.maxQuantity,
+            );
+            setBatchPickerContext((current) =>
+              current ? { ...current, quantity: nextQuantity } : current,
+            );
             setBatchApplyError("");
-            state.updateLine(batchPickerContext.key, { invoiceQty: nextQuantity, BatchNumbers: [] });
+            state.updateLine(batchPickerContext.key, {
+              invoiceQty: nextQuantity,
+              BatchNumbers: [],
+            });
           }}
         />
       )}

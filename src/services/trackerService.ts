@@ -430,15 +430,19 @@ export const trackerService = {
     await api.delete(`/tracker/admin/stages/${id}/`);
   },
 
-  async adminGetLookup(kind: LookupKind): Promise<any[]> {
+  async adminGetLookup(kind: LookupKind): Promise<LookupRow[]> {
     const { data } = await api.get(`/tracker/admin/lookups/${kind}/`);
     return data;
   },
-  async adminCreateLookup(kind: LookupKind, payload: any): Promise<any> {
+  async adminCreateLookup(kind: LookupKind, payload: Partial<LookupRow>): Promise<LookupRow> {
     const { data } = await api.post(`/tracker/admin/lookups/${kind}/`, payload);
     return data;
   },
-  async adminUpdateLookup(kind: LookupKind, id: number, payload: any): Promise<any> {
+  async adminUpdateLookup(
+    kind: LookupKind,
+    id: number,
+    payload: Partial<LookupRow>,
+  ): Promise<LookupRow> {
     const { data } = await api.patch(`/tracker/admin/lookups/${kind}/${id}/`, payload);
     return data;
   },
@@ -556,6 +560,17 @@ export interface ReportData {
   bottleneck_by_category: BottleneckRow[];
   ageing: { bucket: string; count: number }[];
 }
+
+/** One row of any admin lookup table. Every kind carries `name`; `gst_rates`
+ *  carries `label` + `rate` instead, which is why both are optional. */
+export type LookupRow = {
+  id: number;
+  name?: string;
+  label?: string;
+  rate?: string | number;
+  sort_order?: number;
+  is_active?: boolean;
+};
 
 export type LookupKind =
   | "categories"

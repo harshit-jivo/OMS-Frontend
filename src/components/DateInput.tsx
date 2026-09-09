@@ -9,12 +9,16 @@
  * default off, so every existing usage renders exactly as before.
  */
 import { useRef } from "react";
-import { HiCalendarDays } from "react-icons/hi2";
+import { HiOutlineCalendarDays } from "react-icons/hi2";
+
+import { Input } from "@/components/ui/form";
+import { cn } from "@/lib/utils";
 
 type DateInputProps = {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
+  /** Extra classes on the text input. The control chrome comes from `Input`. */
   className?: string;
   withPicker?: boolean;
   disabled?: boolean;
@@ -43,14 +47,24 @@ export default function DateInput({
   value,
   onChange,
   placeholder = "dd/mm/yyyy",
-  className = "nic-input",
+  className,
   withPicker = false,
   disabled = false,
 }: DateInputProps) {
   const nativeRef = useRef<HTMLInputElement>(null);
 
   const textInput = (
-    <input
+    /*
+     * `Input`, not a bare `<input className="nic-input">`.
+     *
+     * `nic-input` is defined in `styles/Einvoice.css`, which only three pages
+     * ever imported — so this control was correctly styled on the e-invoice
+     * screens and UNSTYLED (raw UA border, UA font) on `Staff` and
+     * `StateWise_Report`, which use it and do not load that sheet. Taking the
+     * chrome from the shared primitive is what makes it look the same
+     * everywhere, including on the pages that have not been converted yet.
+     */
+    <Input
       className={className}
       value={value}
       inputMode="numeric"
@@ -72,24 +86,34 @@ export default function DateInput({
     else el.click();
   };
 
+  /*
+   * `nic-date-wrap`, `nic-date-btn` and `nic-date-native` were defined in NO
+   * stylesheet in the repository. So the calendar button rendered as a bare UA
+   * button, and — the visible half of the bug — the "hidden" native date input
+   * was never hidden at all: every `withPicker` field on the HAIS asset form
+   * showed a second, empty dd/mm/yyyy control beside the real one.
+   *
+   * The native input still has to be in the layout tree (not `display: none`)
+   * for `showPicker()` to work in Chrome, hence `size-0 opacity-0` with
+   * `absolute` rather than a `hidden` attribute.
+   */
   return (
-    <div className="nic-date-wrap">
+    <div className={cn("relative flex items-center", className)}>
       {textInput}
       <button
         type="button"
-        className="nic-date-btn"
+        // The form-control reset — Preflight is not imported. See `ui/button`.
+        className="absolute right-1 appearance-none rounded-sm border-0 bg-transparent p-1.5 text-subtle [font-family:inherit] cursor-pointer hover:text-brand focus-visible:outline-none focus-visible:shadow-focus"
         onClick={openPicker}
         aria-label="Open calendar"
         title="Open calendar"
       >
-        <HiCalendarDays />
+        <HiOutlineCalendarDays aria-hidden="true" className="size-4" />
       </button>
-      {/* Native date input drives the calendar; kept visually hidden but present
-          in the DOM (not display:none) so showPicker() works. */}
       <input
         ref={nativeRef}
         type="date"
-        className="nic-date-native"
+        className="pointer-events-none absolute bottom-0 right-2 size-0 opacity-0"
         value={toIso(value)}
         onChange={(e) => onChange(fromIso(e.target.value))}
         tabIndex={-1}

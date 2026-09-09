@@ -1,5 +1,6 @@
 import { Component } from "react";
 import type { ErrorInfo, ReactNode } from "react";
+import "../styles/ErrorBoundary.css";
 
 interface Props {
   children: ReactNode;
@@ -32,74 +33,25 @@ export default class ErrorBoundary extends Component<Props, State> {
   };
 
   handleHome = () => {
-    window.location.href = "/Dashboard";
+    window.location.href = "/Home";
   };
 
   render() {
     if (this.state.hasError) {
       return (
-        <div
-          style={{
-            minHeight: "100vh",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: "16px",
-            padding: "24px",
-            textAlign: "center",
-            fontFamily: "system-ui, sans-serif",
-            color: "#0f172a",
-          }}
-        >
-          <div style={{ fontSize: "48px" }}>⚠️</div>
-          <h1 style={{ margin: 0, fontSize: "1.4rem" }}>Something went wrong</h1>
-          <p style={{ margin: 0, maxWidth: 480, color: "#5b6878" }}>
+        <div className="eb-screen">
+          <div className="eb-icon">⚠️</div>
+          <h1 className="eb-title">Something went wrong</h1>
+          <p className="eb-text">
             This page hit an unexpected error. You can reload it or go back to the
             dashboard.
           </p>
-          <pre
-            style={{
-              maxWidth: 560,
-              overflowX: "auto",
-              background: "#f1f5f9",
-              padding: "12px 16px",
-              borderRadius: 8,
-              fontSize: "0.8rem",
-              color: "#dc2626",
-            }}
-          >
-            {this.state.error?.message ?? "Unknown error"}
-          </pre>
-          <div style={{ display: "flex", gap: "12px" }}>
-            <button
-              type="button"
-              onClick={this.handleReload}
-              style={{
-                padding: "10px 20px",
-                borderRadius: 8,
-                border: "none",
-                background: "#0f766e",
-                color: "#fff",
-                cursor: "pointer",
-                fontWeight: 600,
-              }}
-            >
+          <pre className="eb-message">{this.state.error?.message ?? "Unknown error"}</pre>
+          <div className="eb-actions">
+            <button type="button" onClick={this.handleReload} className="eb-btn eb-btn--reload">
               Reload page
             </button>
-            <button
-              type="button"
-              onClick={this.handleHome}
-              style={{
-                padding: "10px 20px",
-                borderRadius: 8,
-                border: "1px solid #cbd5e1",
-                background: "#fff",
-                color: "#0f172a",
-                cursor: "pointer",
-                fontWeight: 600,
-              }}
-            >
+            <button type="button" onClick={this.handleHome} className="eb-btn eb-btn--home">
               Go to Dashboard
             </button>
           </div>

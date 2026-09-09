@@ -1,16 +1,50 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import { useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  HiCheck,
-  HiEllipsisVertical,
-  HiMagnifyingGlass,
-  HiPencilSquare,
-  HiPlus,
-  HiTrash,
-  HiXMark,
+  HiOutlineBeaker,
+  HiOutlineCheck,
+  HiOutlineMagnifyingGlass,
+  HiOutlinePencilSquare,
+  HiOutlinePlus,
+  HiOutlineTrash,
+  HiOutlineXMark,
 } from "react-icons/hi2";
 import api from "../services/api";
-import "../styles/Nutrition_Manager.css";
+import { Badge } from "@/components/ui/badge";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Field, FormActions, FormGrid, Input } from "@/components/ui/form";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  EmptyState,
+  Notice,
+  Page,
+  PageHeader,
+} from "@/components/ui/page";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { cn } from "@/lib/utils";
+/* The UNIT PICKER keeps this — a popover that also creates and renames units
+   is a small application rather than a form control, and converting it is its
+   own piece of work. Everything else on this page is the design system. */
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Nutrition Manager — single-page master/detail (vanilla CSS).
@@ -55,6 +89,16 @@ const UOM_URL = "/legal/uom/";
 const NUTRITION_URL = "/legal/nutrition/";
 const ITEM_NUTRITION_URL = "/legal/item-nutrition/";
 
+/** Items + units load together (`Promise.all`): either both arrive or, on a
+ *  failure, neither does — matching the original mount effect exactly. */
+type Catalog = { items: Item[]; uoms: Uom[] };
+
+/** Stable empties, so a query with no data yet does not hand out a new `[]`
+ *  (and retrigger memos/effects) on every render. */
+const EMPTY_ITEMS: Item[] = [];
+const EMPTY_UOMS: Uom[] = [];
+const EMPTY_NUTRITION: Nutrition[] = [];
+
 const asArray = <T,>(payload: unknown): T[] => {
   if (Array.isArray(payload)) return payload as T[];
   if (payload && typeof payload === "object") {
@@ -73,7 +117,9 @@ const formatNum = (value: string | number | null | undefined): string => {
 const formatDate = (value?: string): string => {
   if (!value) return "";
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  return Number.isNaN(date.getTime())
+    ? ""
+    : date.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 };
 
 const errMessage = (error: unknown, fallback: string): string => {
@@ -88,30 +134,14 @@ const errMessage = (error: unknown, fallback: string): string => {
   return e?.message || fallback;
 };
 
-function useClickOutside<T extends HTMLElement>(onClose: () => void) {
-  const ref = useRef<T>(null);
-  useEffect(() => {
-    const handler = (event: MouseEvent) => {
-      if (ref.current && !ref.current.contains(event.target as Node)) onClose();
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [onClose]);
-  return ref;
-}
+/* `useClickOutside` is gone with the two popovers it served — the units
+   manager and the row kebab are a Dialog and two inline buttons now, and
+   `ui/dialog` owns outside-click and Escape for the one that still needs it. */
 
-/* ── Field wrapper ────────────────────────────────────────────────────────── */
+/* The local `Field` wrapper is gone: `ui/form`'s does the same job and also
+   wires `htmlFor`/`id` and `aria-describedby`, which this one did not. */
 
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <label className="nm-field">
-      <span className="nm-field-label">{label}</span>
-      {children}
-    </label>
-  );
-}
-
-/* ── Unit pills + Units manager popover ────────────────────────────────────── */
+/* ── Unit pills + the units manager ───────────────────────────────────────── */
 
 function UomToggle({
   uoms,
@@ -131,10 +161,8 @@ function UomToggle({
   const [editId, setEditId] = useState<number | null>(null);
   const [editName, setEditName] = useState("");
   const [editUnit, setEditUnit] = useState("");
-  const ref = useClickOutside<HTMLDivElement>(() => {
-    setOpen(false);
-    setEditId(null);
-  });
+  /** The unit a delete has been asked about. It used to just happen. */
+  const [confirmDelete, setConfirmDelete] = useState<Uom | null>(null);
 
   const submitNew = async () => {
     if (!name.trim() || !unit.trim() || busy) return;
@@ -160,127 +188,244 @@ function UomToggle({
     if (ok) setEditId(null);
   };
 
-  const remove = async (id: number) => {
-    const ok = await uomApi.remove(id);
-    if (ok && value === id) {
-      const fallback = uoms.find((u) => u.id !== id);
+  const remove = async () => {
+    const target = confirmDelete;
+    if (!target) return;
+    setConfirmDelete(null);
+    const ok = await uomApi.remove(target.id);
+    if (ok && value === target.id) {
+      const fallback = uoms.find((u) => u.id !== target.id);
       if (fallback) onChange(fallback.id);
     }
   };
 
   return (
-    <div className="nm-uom">
+    <div className="flex flex-wrap items-center gap-1">
       {uoms.map((uom) => (
         <button
           key={uom.id}
           type="button"
           title={uom.uom_name}
           onClick={() => onChange(uom.id)}
-          className={`nm-pill${value === uom.id ? " is-active" : ""}`}
+          /* A unit chip. Hand-rolled with the DESIGN_SYSTEM 1.1 reset because
+             it is a compact toggle inside a form row, not an action. */
+          className={cn(
+            "cursor-pointer appearance-none rounded-full border px-2.5 py-0.5 text-[12px] [font-family:inherit] transition-colors",
+            value === uom.id
+              ? "border-brand-line bg-brand text-white"
+              : "border-line bg-card text-body hover:border-line-strong hover:bg-surface",
+          )}
         >
           {uom.uom_unit}
         </button>
       ))}
 
-      <div className="nm-uom-add-wrap" ref={ref}>
-        <button type="button" aria-label="Manage units" onClick={() => setOpen((o) => !o)} className="nm-pill-add">
-          <HiPlus />
-        </button>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="size-6"
+        aria-label="Manage units"
+        onClick={() => setOpen(true)}
+      >
+        <HiOutlinePlus />
+      </Button>
 
+      {/*
+        A DIALOG, not the popover this replaces.
+
+        It creates, renames and deletes units — a small piece of CRUD rather
+        than a form control — and a popover gave it none of the focus trap,
+        Escape handling or scroll lock that a thing with its own delete button
+        deserves. It also needed a `useClickOutside` ref, which this does not.
+      */}
+      <Dialog
+        open={open}
+        onOpenChange={(next) => {
+          if (!next) {
+            setOpen(false);
+            setEditId(null);
+          }
+        }}
+      >
         {open && (
-          <div className="nm-pop">
-            <div className="nm-pop-title">Units</div>
+          <DialogContent title="Units" size="sm">
+            <DialogHeader className="items-start">
+              <div className="min-w-0">
+                <DialogTitle>Units of measure</DialogTitle>
+                <DialogDescription>
+                  Used by every nutrition row. Renaming one updates it everywhere.
+                </DialogDescription>
+              </div>
+            </DialogHeader>
 
-            <div className="nm-unit-list">
-              {uoms.length === 0 && <div className="nm-unit-empty">No units yet.</div>}
-              {uoms.map((uom) =>
-                editId === uom.id ? (
-                  <div className="nm-unit-edit" key={uom.id}>
-                    <input value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Name" className="nm-input nm-input-sm" />
-                    <input value={editUnit} onChange={(e) => setEditUnit(e.target.value)} placeholder="Unit" className="nm-input nm-input-sm" />
-                    <button type="button" aria-label="Save" className="nm-icon-btn" onClick={saveEdit}>
-                      <HiCheck />
-                    </button>
-                    <button type="button" aria-label="Cancel" className="nm-icon-btn" onClick={() => setEditId(null)}>
-                      <HiXMark />
-                    </button>
-                  </div>
-                ) : (
-                  <div className="nm-unit-row" key={uom.id}>
-                    <span className="nm-unit-tag">{uom.uom_unit}</span>
-                    <span className="nm-unit-name">{uom.uom_name}</span>
-                    <button type="button" aria-label="Edit unit" className="nm-icon-btn" onClick={() => startEdit(uom)}>
-                      <HiPencilSquare />
-                    </button>
-                    <button type="button" aria-label="Delete unit" className="nm-icon-btn is-danger" onClick={() => remove(uom.id)}>
-                      <HiTrash />
-                    </button>
-                  </div>
-                ),
+            <DialogBody className="space-y-3">
+              {uoms.length === 0 ? (
+                <p className="m-0 rounded-sm border border-line bg-surface px-3 py-4 text-center text-[12px] text-subtle">
+                  No units yet.
+                </p>
+              ) : (
+                <ul className="m-0 max-h-[280px] list-none divide-y divide-line overflow-y-auto rounded-sm border border-line p-0">
+                  {uoms.map((uom) =>
+                    editId === uom.id ? (
+                      <li className="flex items-center gap-1.5 p-2" key={uom.id}>
+                        <Input
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          placeholder="Name"
+                          aria-label={"Rename " + uom.uom_name}
+                          className="h-control-sm flex-1"
+                        />
+                        <Input
+                          value={editUnit}
+                          onChange={(e) => setEditUnit(e.target.value)}
+                          placeholder="Unit"
+                          aria-label={"Unit symbol for " + uom.uom_name}
+                          className="h-control-sm w-20"
+                        />
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label="Save unit"
+                          disabled={!editName.trim() || !editUnit.trim()}
+                          onClick={saveEdit}
+                        >
+                          <HiOutlineCheck />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label="Cancel"
+                          onClick={() => setEditId(null)}
+                        >
+                          <HiOutlineXMark />
+                        </Button>
+                      </li>
+                    ) : (
+                      <li className="flex items-center gap-2 p-2 text-[13px]" key={uom.id}>
+                        <span className="shrink-0 rounded-full bg-surface-strong px-2 py-0.5 font-mono text-[11px] text-ink">
+                          {uom.uom_unit}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-body">{uom.uom_name}</span>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label={"Edit " + uom.uom_name}
+                          onClick={() => startEdit(uom)}
+                        >
+                          <HiOutlinePencilSquare />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label={"Delete " + uom.uom_name}
+                          onClick={() => setConfirmDelete(uom)}
+                        >
+                          <HiOutlineTrash />
+                        </Button>
+                      </li>
+                    ),
+                  )}
+                </ul>
               )}
-            </div>
 
-            <div className="nm-unit-add">
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Name (e.g. Calorie)"
-                className="nm-input nm-input-sm"
-                onKeyDown={(e) => e.key === "Enter" && submitNew()}
-              />
-              <input
-                value={unit}
-                onChange={(e) => setUnit(e.target.value)}
-                placeholder="Unit"
-                className="nm-input nm-input-sm nm-input-unit"
-                onKeyDown={(e) => e.key === "Enter" && submitNew()}
-              />
-              <button type="button" onClick={submitNew} disabled={!name.trim() || !unit.trim() || busy} className="nm-btn nm-btn-primary nm-btn-sm">
-                Add
-              </button>
-            </div>
-          </div>
+              <div className="flex items-end gap-1.5 border-t border-line pt-3">
+                <Field label="Name" className="flex-1">
+                  {(control) => (
+                    <Input
+                      {...control}
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder="e.g. Calorie"
+                      className="h-control-sm"
+                      onKeyDown={(e) => e.key === "Enter" && submitNew()}
+                    />
+                  )}
+                </Field>
+                <Field label="Unit" className="w-24">
+                  {(control) => (
+                    <Input
+                      {...control}
+                      value={unit}
+                      onChange={(e) => setUnit(e.target.value)}
+                      placeholder="kcal"
+                      className="h-control-sm"
+                      onKeyDown={(e) => e.key === "Enter" && submitNew()}
+                    />
+                  )}
+                </Field>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  onClick={submitNew}
+                  disabled={!name.trim() || !unit.trim() || busy}
+                  title={
+                    !name.trim() || !unit.trim() ? "Give the unit a name and a symbol." : undefined
+                  }
+                >
+                  Add
+                </Button>
+              </div>
+            </DialogBody>
+
+            <DialogFooter>
+              <Button variant="primary" onClick={() => setOpen(false)}>
+                Done
+              </Button>
+            </DialogFooter>
+          </DialogContent>
         )}
-      </div>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(confirmDelete)}
+        onOpenChange={(next) => {
+          if (!next) setConfirmDelete(null);
+        }}
+      >
+        {confirmDelete && (
+          <DialogContent title="Delete unit" size="sm">
+            <DialogHeader>
+              <DialogTitle>Delete {confirmDelete.uom_name}?</DialogTitle>
+            </DialogHeader>
+            <DialogBody>
+              <Notice tone="hold">
+                Any nutrition row measured in{" "}
+                <strong className="font-semibold">{confirmDelete.uom_unit}</strong> loses its unit.
+                This cannot be undone, though the unit can be created again.
+              </Notice>
+            </DialogBody>
+            <DialogFooter>
+              <Button onClick={() => setConfirmDelete(null)}>Cancel</Button>
+              <Button variant="danger" onClick={() => void remove()}>
+                Delete unit
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        )}
+      </Dialog>
     </div>
   );
 }
 
-/* ── Row actions (⋮) ──────────────────────────────────────────────────────── */
+/* ── Row actions ──────────────────────────────────────────────────────────── */
 
+/**
+ * Edit and delete, as two buttons rather than a kebab menu.
+ *
+ * The menu was a popover with its own open state and a `useClickOutside` ref,
+ * for two items. Every other table in the app puts its row actions inline as
+ * ghost icon buttons; matching that costs one click less and no state at all.
+ */
 function RowMenu({ onEdit, onDelete }: { onEdit: () => void; onDelete: () => void }) {
-  const [open, setOpen] = useState(false);
-  const ref = useClickOutside<HTMLDivElement>(() => setOpen(false));
   return (
-    <div className="nm-menu" ref={ref}>
-      <button type="button" aria-label="Actions" onClick={() => setOpen((o) => !o)} className="nm-menu-btn">
-        <HiEllipsisVertical />
-      </button>
-      {open && (
-        <div className="nm-menu-list">
-          <button
-            type="button"
-            onClick={() => {
-              setOpen(false);
-              onEdit();
-            }}
-            className="nm-menu-item"
-          >
-            <HiPencilSquare /> Edit
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setOpen(false);
-              onDelete();
-            }}
-            className="nm-menu-item is-danger"
-          >
-            <HiTrash /> Delete
-          </button>
-        </div>
-      )}
-    </div>
+    <span className="flex justify-end gap-0.5">
+      <Button variant="ghost" size="icon" aria-label="Edit row" onClick={onEdit}>
+        <HiOutlinePencilSquare />
+      </Button>
+      <Button variant="ghost" size="icon" aria-label="Delete row" onClick={onDelete}>
+        <HiOutlineTrash />
+      </Button>
+    </span>
   );
 }
 
@@ -313,52 +458,66 @@ function NutritionForm({
   };
 
   return (
-    <div className="nm-form">
-      <div className="nm-form-grid">
-        <Field label="Nutrient">
-          <input
-            autoFocus
-            value={draft.nutrition_name}
-            onChange={(e) => setDraft({ ...draft, nutrition_name: e.target.value })}
-            placeholder="e.g. Energy"
-            className="nm-input"
-          />
+    <div className="space-y-4 rounded-md border border-brand-line bg-brand-soft/30 p-4">
+      <FormGrid>
+        <Field label="Nutrient" required>
+          {(control) => (
+            <Input
+              {...control}
+              autoFocus
+              value={draft.nutrition_name}
+              onChange={(e) => setDraft({ ...draft, nutrition_name: e.target.value })}
+              placeholder="e.g. Energy"
+            />
+          )}
         </Field>
         <Field label="Per serving">
-          <input
-            type="number"
-            step="any"
-            value={draft.per_serving}
-            onChange={(e) => setDraft({ ...draft, per_serving: e.target.value })}
-            placeholder="0"
-            className="nm-input nm-input-num"
-          />
+          {(control) => (
+            <Input
+              {...control}
+              type="number"
+              step="any"
+              value={draft.per_serving}
+              onChange={(e) => setDraft({ ...draft, per_serving: e.target.value })}
+              placeholder="0"
+              className="text-right tabular-nums"
+            />
+          )}
         </Field>
         <Field label="Per 100g">
-          <input
-            type="number"
-            step="any"
-            value={draft.per_100gm}
-            onChange={(e) => setDraft({ ...draft, per_100gm: e.target.value })}
-            placeholder="0"
-            className="nm-input nm-input-num"
-          />
+          {(control) => (
+            <Input
+              {...control}
+              type="number"
+              step="any"
+              value={draft.per_100gm}
+              onChange={(e) => setDraft({ ...draft, per_100gm: e.target.value })}
+              placeholder="0"
+              className="text-right tabular-nums"
+            />
+          )}
         </Field>
+      </FormGrid>
+
+      {/* The unit picker keeps its own markup: it is a popover that also
+          CREATES and renames units, which is a small application rather than
+          a form control. See the note at the top of the file. */}
+      <div className="flex flex-col gap-1.5">
+        <span className="text-[12px] font-medium text-body">Unit</span>
+        <UomToggle
+          uoms={uoms}
+          value={draft.uom}
+          onChange={(id) => setDraft({ ...draft, uom: id })}
+          api={uomApi}
+        />
       </div>
 
-      <div className="nm-form-unit">
-        <span className="nm-field-label">Unit</span>
-        <UomToggle uoms={uoms} value={draft.uom} onChange={(id) => setDraft({ ...draft, uom: id })} api={uomApi} />
-      </div>
-
-      <div className="nm-form-actions">
-        <button type="button" onClick={onCancel} className="nm-btn nm-btn-text">
-          Cancel
-        </button>
-        <button type="button" onClick={save} disabled={!valid || busy} className="nm-btn nm-btn-primary">
+      <FormActions className="pt-3">
+        <Button onClick={onCancel}>Cancel</Button>
+        <Button variant="primary" onClick={save} disabled={!valid || busy}>
           {busy ? "Saving…" : "Save"}
-        </button>
-      </div>
+        </Button>
+      </FormActions>
     </div>
   );
 }
@@ -393,7 +552,12 @@ function NutritionTable({
     per_100gm: parseFloat(draft.per_100gm) || 0,
   });
 
-  const blankDraft: Draft = { nutrition_name: "", per_serving: "", per_100gm: "", uom: uoms[0]?.id ?? null };
+  const blankDraft: Draft = {
+    nutrition_name: "",
+    per_serving: "",
+    per_100gm: "",
+    uom: uoms[0]?.id ?? null,
+  };
   const draftFor = (row: Nutrition): Draft => ({
     nutrition_name: row.nutrition_name,
     per_serving: String(row.per_serving ?? ""),
@@ -402,63 +566,95 @@ function NutritionTable({
   });
 
   return (
-    <div className="nm-grid">
-      <div className="nm-grid-head">
-        <span className="nm-col-nutrient">Nutrient</span>
-        <span className="nm-col-num">Per serving</span>
-        <span className="nm-col-num">Per 100g</span>
-        <span className="nm-col-unit">Unit</span>
-        <span className="nm-col-act" />
+    <div className="space-y-3">
+      <div className="overflow-x-auto">
+        <Table density="compact">
+          <TableHeader>
+            <TableRow className="bg-surface hover:bg-surface">
+              <TableHead>Nutrient</TableHead>
+              <TableHead className="text-right">Per serving</TableHead>
+              <TableHead className="text-right">Per 100g</TableHead>
+              <TableHead>Unit</TableHead>
+              <TableHead className="w-10" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.length === 0 && editing !== "new" ? (
+              <TableRow>
+                <TableCell colSpan={5} className="py-8 text-center text-subtle">
+                  No nutrition data yet. Add the first row below.
+                </TableCell>
+              </TableRow>
+            ) : null}
+
+            {rows.map((row) =>
+              // Editing replaces the row IN PLACE, spanning every column —
+              // the numbers being corrected stay where they were rather than
+              // the form appearing somewhere else on the page.
+              editing === row.id ? (
+                <TableRow key={row.id}>
+                  <TableCell colSpan={5} className="p-2">
+                    <NutritionForm
+                      uoms={uoms}
+                      initial={draftFor(row)}
+                      uomApi={uomApi}
+                      onCancel={() => setEditing(null)}
+                      onSubmit={async (draft) => {
+                        const ok = await onUpdate(row.id, toPayload(draft));
+                        if (ok) setEditing(null);
+                        return ok;
+                      }}
+                    />
+                  </TableCell>
+                </TableRow>
+              ) : (
+                <TableRow key={row.id}>
+                  <TableCell className="font-medium text-ink">{row.nutrition_name}</TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {formatNum(row.per_serving)}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {formatNum(row.per_100gm)}
+                  </TableCell>
+                  <TableCell>
+                    <Badge tone="neutral">{uomUnit(row.uom)}</Badge>
+                  </TableCell>
+                  <TableCell>
+                    <RowMenu
+                      onEdit={() => setEditing(row.id)}
+                      onDelete={() => onDelete(row.id)}
+                    />
+                  </TableCell>
+                </TableRow>
+              ),
+            )}
+
+            {editing === "new" ? (
+              <TableRow>
+                <TableCell colSpan={5} className="p-2">
+                  <NutritionForm
+                    uoms={uoms}
+                    initial={blankDraft}
+                    uomApi={uomApi}
+                    onCancel={() => setEditing(null)}
+                    onSubmit={async (draft) => {
+                      const ok = await onAdd(toPayload(draft));
+                      if (ok) setEditing(null);
+                      return ok;
+                    }}
+                  />
+                </TableCell>
+              </TableRow>
+            ) : null}
+          </TableBody>
+        </Table>
       </div>
 
-      {rows.length === 0 && editing !== "new" && (
-        <div className="nm-grid-empty">No nutrition data yet. Add the first row below.</div>
-      )}
-
-      {rows.map((row) =>
-        editing === row.id ? (
-          <NutritionForm
-            key={row.id}
-            uoms={uoms}
-            initial={draftFor(row)}
-            uomApi={uomApi}
-            onCancel={() => setEditing(null)}
-            onSubmit={async (draft) => {
-              const ok = await onUpdate(row.id, toPayload(draft));
-              if (ok) setEditing(null);
-              return ok;
-            }}
-          />
-        ) : (
-          <div className="nm-grid-row" key={row.id}>
-            <span className="nm-col-nutrient nm-cell-name">{row.nutrition_name}</span>
-            <span className="nm-col-num nm-cell-num">{formatNum(row.per_serving)}</span>
-            <span className="nm-col-num nm-cell-num">{formatNum(row.per_100gm)}</span>
-            <span className="nm-col-unit nm-cell-unit">{uomUnit(row.uom)}</span>
-            <span className="nm-col-act">
-              <RowMenu onEdit={() => setEditing(row.id)} onDelete={() => onDelete(row.id)} />
-            </span>
-          </div>
-        ),
-      )}
-
-      {editing === "new" ? (
-        <NutritionForm
-          uoms={uoms}
-          initial={blankDraft}
-          uomApi={uomApi}
-          onCancel={() => setEditing(null)}
-          onSubmit={async (draft) => {
-            const ok = await onAdd(toPayload(draft));
-            if (ok) setEditing(null);
-            return ok;
-          }}
-        />
-      ) : (
-        <button type="button" onClick={() => setEditing("new")} className="nm-addrow">
-          <HiPlus /> Add row
-        </button>
-      )}
+      {editing !== "new" ? (
+        <Button variant="ghost" block onClick={() => setEditing("new")}>
+          <HiOutlinePlus aria-hidden="true" /> Add row
+        </Button>
+      ) : null}
     </div>
   );
 }
@@ -504,134 +700,205 @@ function ItemSelector({
   const submit = async () => {
     if (!name.trim() || busy || !modal) return;
     setBusy(true);
-    const ok = modal.mode === "add" ? await onAdd(name.trim()) : await onUpdate(modal.id, name.trim());
+    const ok =
+      modal.mode === "add" ? await onAdd(name.trim()) : await onUpdate(modal.id, name.trim());
     setBusy(false);
     if (ok) setModal(null);
   };
 
   return (
-    <aside className="nm-master">
-      <div className="nm-master-head">
-        <h2 className="nm-master-title">Items</h2>
-        <button type="button" onClick={openAdd} className="nm-add-item">
-          <HiPlus /> Add item
-        </button>
-      </div>
+    <>
+      {/* The list SCROLLS and sticks, so a long catalogue does not push the
+          nutrition table it is meant to sit beside off the bottom of the page.
+          `min-h-0` on the scroller is load-bearing — a flex child defaults to
+          `min-height: auto`, i.e. "as tall as my content", so without it the
+          overflow never engages. */}
+      <Card className="flex flex-col p-0 lg:sticky lg:top-[74px] lg:max-h-[calc(100svh-104px)]">
+        <CardHeader className="shrink-0 px-4 pt-4">
+          <CardTitle>Items</CardTitle>
+          <Button size="sm" variant="ghost" onClick={openAdd}>
+            <HiOutlinePlus aria-hidden="true" /> Add item
+          </Button>
+        </CardHeader>
 
-      <div className="nm-search">
-        <HiMagnifyingGlass className="nm-search-icon" />
-        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search items" className="nm-search-input" />
-      </div>
-
-      <div className="nm-item-list">
-        {filtered.map((item) => (
-          <div key={item.id} className={`nm-item${item.id === selectedId ? " is-active" : ""}`}>
-            <button type="button" onClick={() => onSelect(item.id)} className="nm-item-btn">
-              <span className="nm-item-name">{item.item_name}</span>
-              {item.created_at && <span className="nm-item-date">{formatDate(item.created_at)}</span>}
-            </button>
-            <RowMenu onEdit={() => openEdit(item)} onDelete={() => onDelete(item.id)} />
-          </div>
-        ))}
-        {filtered.length === 0 && <div className="nm-item-empty">{search ? "No matches." : "No items yet."}</div>}
-      </div>
-
-      {modal && (
-        <div className="nm-modal-overlay" onClick={() => !busy && setModal(null)}>
-          <div className="nm-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="nm-modal-head">
-              <span className="nm-modal-title">{modal.mode === "add" ? "New item" : "Rename item"}</span>
-              <button type="button" aria-label="Close" onClick={() => setModal(null)} className="nm-modal-close">
-                <HiXMark />
-              </button>
-            </div>
-            <input
-              autoFocus
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && submit()}
-              placeholder="Item name"
-              className="nm-input"
-            />
-            <div className="nm-modal-actions">
-              <button type="button" onClick={() => setModal(null)} className="nm-btn nm-btn-text">
-                Cancel
-              </button>
-              <button type="button" onClick={submit} disabled={!name.trim() || busy} className="nm-btn nm-btn-primary">
-                {busy ? "Saving…" : modal.mode === "add" ? "Add item" : "Save changes"}
-              </button>
-            </div>
-          </div>
+        <div className="shrink-0 px-4 pb-3">
+          <Field label="Search items" className="[&>label]:sr-only">
+            {(control) => (
+              <Input
+                {...control}
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search items"
+                className="h-control-sm"
+              />
+            )}
+          </Field>
         </div>
-      )}
-    </aside>
+
+        {filtered.length === 0 ? (
+          <EmptyState
+            icon={HiOutlineMagnifyingGlass}
+            title={search ? "No matches" : "No items yet"}
+            hint={
+              search
+                ? "Nothing here matches that search."
+                : "Add an item to record its nutrition panel."
+            }
+          />
+        ) : (
+          <ul className="m-0 min-h-0 flex-1 list-none divide-y divide-line overflow-y-auto border-t border-line p-0">
+            {filtered.map((item) => (
+              <li
+                key={item.id}
+                className={cn(
+                  "flex items-center gap-1 px-2 py-1.5 transition-colors",
+                  item.id === selectedId && "bg-brand-soft/50",
+                )}
+              >
+                <Button
+                  variant="ghost"
+                  onClick={() => onSelect(item.id)}
+                  aria-current={item.id === selectedId ? "true" : undefined}
+                  className="h-auto min-w-0 flex-1 flex-col items-start gap-0.5 px-2 py-1.5 text-left"
+                >
+                  <span className="w-full truncate text-[13px] font-semibold text-ink">
+                    {item.item_name}
+                  </span>
+                  {item.created_at ? (
+                    <span className="text-[11.5px] font-normal text-subtle">
+                      {formatDate(item.created_at)}
+                    </span>
+                  ) : null}
+                </Button>
+                <RowMenu onEdit={() => openEdit(item)} onDelete={() => onDelete(item.id)} />
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+
+      <Dialog
+        open={Boolean(modal)}
+        onOpenChange={(next) => {
+          if (!next && !busy) setModal(null);
+        }}
+      >
+        {modal ? (
+          <DialogContent
+            title={modal.mode === "add" ? "New item" : "Rename item"}
+            size="sm"
+            className="max-w-[420px]"
+          >
+            <DialogHeader>
+              <DialogTitle>
+                {modal.mode === "add" ? "New item" : "Rename item"}
+              </DialogTitle>
+            </DialogHeader>
+            <DialogBody>
+              <Field
+                label="Item name"
+                required
+                hint="The name the label checker compares nutrition against."
+              >
+                {(control) => (
+                  <Input
+                    {...control}
+                    autoFocus
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && submit()}
+                    placeholder="e.g. Jivo Canola Oil 1 Ltr"
+                  />
+                )}
+              </Field>
+            </DialogBody>
+            <DialogFooter>
+              <Button onClick={() => setModal(null)} disabled={busy}>
+                Cancel
+              </Button>
+              <Button variant="primary" onClick={submit} disabled={!name.trim() || busy}>
+                {busy ? "Saving…" : modal.mode === "add" ? "Add item" : "Save changes"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        ) : null}
+      </Dialog>
+    </>
   );
 }
 
 /* ── Dashboard ────────────────────────────────────────────────────────────── */
 
 export default function NutritionManager() {
-  const [items, setItems] = useState<Item[]>([]);
-  const [uoms, setUoms] = useState<Uom[]>([]);
-  const [rows, setRows] = useState<Nutrition[]>([]);
-  const [rowsLoading, setRowsLoading] = useState(false);
+  const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [error, setError] = useState("");
 
-  // Items + units load once.
-  useEffect(() => {
-    (async () => {
-      try {
-        const [itemsRes, uomsRes] = await Promise.all([api.get(ITEM_URL), api.get(UOM_URL)]);
-        const loadedItems = asArray<Item>(itemsRes.data);
-        setItems(loadedItems);
-        setUoms(asArray<Uom>(uomsRes.data));
-        if (loadedItems.length) setSelectedId(loadedItems[0].id);
-      } catch (err) {
-        setError(errMessage(err, "Unable to load nutrition data."));
-      }
-    })();
-  }, []);
+  // Items + units — one query, mirroring the original `Promise.all`: either
+  // both arrive or, on a failure, neither does.
+  const {
+    data: catalog,
+    isError: catalogFailed,
+  } = useQuery<Catalog>({
+    queryKey: ["legal", "items-uoms"],
+    queryFn: async () => {
+      const [itemsRes, uomsRes] = await Promise.all([api.get(ITEM_URL), api.get(UOM_URL)]);
+      return { items: asArray<Item>(itemsRes.data), uoms: asArray<Uom>(uomsRes.data) };
+    },
+  });
+  const items = catalog?.items ?? EMPTY_ITEMS;
+  const uoms = catalog?.uoms ?? EMPTY_UOMS;
+
+  /* Re-seed during render, never in an effect: the `seededFrom` identity guard
+   * (same shape as Order_Flow_Settings' `config` adoption) fires once per new
+   * catalog snapshot, and only picks a default when nothing is selected yet —
+   * so it reproduces the old mount-effect's one-time auto-select without an
+   * effect, and still recovers a default if the first load came back empty. */
+  const [seededFrom, setSeededFrom] = useState<Catalog | undefined>(undefined);
+  if (catalog && catalog !== seededFrom) {
+    setSeededFrom(catalog);
+    if (selectedId === null && catalog.items.length) setSelectedId(catalog.items[0].id);
+  }
 
   // Nutrition facts for the selected item — fetched from the dedicated endpoint
   // (/legal/item-nutrition/?item_id=…) whenever the selection changes.
-  useEffect(() => {
-    if (selectedId == null) {
-      setRows([]);
-      return;
-    }
-    let ignore = false;
-    setRowsLoading(true);
-    (async () => {
-      try {
-        const { data } = await api.get(ITEM_NUTRITION_URL, { params: { item_id: selectedId } });
-        if (ignore) return;
-        const facts =
-          data && Array.isArray((data as { nutritional_facts?: unknown }).nutritional_facts)
-            ? (data as { nutritional_facts: Nutrition[] }).nutritional_facts
-            : asArray<Nutrition>(data);
-        setRows(facts);
-      } catch (err) {
-        if (!ignore) {
-          setRows([]);
-          setError(errMessage(err, "Unable to load nutrition facts."));
-        }
-      } finally {
-        if (!ignore) setRowsLoading(false);
-      }
-    })();
-    return () => {
-      ignore = true;
-    };
-  }, [selectedId]);
+  const {
+    data: rowsData,
+    isFetching: rowsLoading,
+    isError: rowsFailed,
+  } = useQuery<Nutrition[]>({
+    queryKey: ["legal", "nutrition", selectedId],
+    queryFn: async () => {
+      const { data } = await api.get(ITEM_NUTRITION_URL, { params: { item_id: selectedId } });
+      return data && Array.isArray((data as { nutritional_facts?: unknown }).nutritional_facts)
+        ? (data as { nutritional_facts: Nutrition[] }).nutritional_facts
+        : asArray<Nutrition>(data);
+    },
+    enabled: selectedId != null,
+  });
+  const rows = rowsData ?? EMPTY_NUTRITION;
+
+  const loadError = catalogFailed
+    ? "Unable to load nutrition data."
+    : rowsFailed
+      ? "Unable to load nutrition facts."
+      : "";
 
   const selectedItem = items.find((it) => it.id === selectedId) ?? null;
 
-  /* Items — POST / PATCH /:id/ / DELETE /:id/ */
+  /* Items — POST / PATCH /:id/ / DELETE /:id/. Each patches the shared
+     ["legal","items-uoms"] cache directly — the local patch IS the
+     persistence, same as it was against `setItems`/`setUoms`. */
+  const patchCatalog = (updater: (base: Catalog) => Catalog) =>
+    queryClient.setQueryData<Catalog>(["legal", "items-uoms"], (prev) =>
+      updater(prev ?? { items: EMPTY_ITEMS, uoms: EMPTY_UOMS }),
+    );
+
   const addItem = async (item_name: string): Promise<boolean> => {
     try {
       const { data } = await api.post<Item>(ITEM_URL, { item_name });
-      setItems((prev) => [data, ...prev]);
+      patchCatalog((base) => ({ ...base, items: [data, ...base.items] }));
       setSelectedId(data.id);
       return true;
     } catch (err) {
@@ -643,7 +910,7 @@ export default function NutritionManager() {
   const updateItem = async (id: number, item_name: string): Promise<boolean> => {
     try {
       const { data } = await api.patch<Item>(`${ITEM_URL}${id}/`, { item_name });
-      setItems((prev) => prev.map((it) => (it.id === id ? data : it)));
+      patchCatalog((base) => ({ ...base, items: base.items.map((it) => (it.id === id ? data : it)) }));
       return true;
     } catch (err) {
       setError(errMessage(err, "Could not rename the item."));
@@ -654,8 +921,10 @@ export default function NutritionManager() {
   const deleteItem = async (id: number) => {
     try {
       await api.delete(`${ITEM_URL}${id}/`);
-      setItems((prev) => prev.filter((it) => it.id !== id));
-      setSelectedId((curr) => (curr === id ? items.find((it) => it.id !== id)?.id ?? null : curr));
+      patchCatalog((base) => ({ ...base, items: base.items.filter((it) => it.id !== id) }));
+      setSelectedId((curr) =>
+        curr === id ? (items.find((it) => it.id !== id)?.id ?? null) : curr,
+      );
     } catch (err) {
       setError(errMessage(err, "Could not delete the item."));
     }
@@ -665,7 +934,7 @@ export default function NutritionManager() {
   const createUom = async (uom_name: string, uom_unit: string): Promise<Uom | null> => {
     try {
       const { data } = await api.post<Uom>(UOM_URL, { uom_name, uom_unit });
-      setUoms((prev) => [...prev, data]);
+      patchCatalog((base) => ({ ...base, uoms: [...base.uoms, data] }));
       return data;
     } catch (err) {
       setError(errMessage(err, "Could not add the unit."));
@@ -676,7 +945,7 @@ export default function NutritionManager() {
   const updateUom = async (id: number, uom_name: string, uom_unit: string): Promise<boolean> => {
     try {
       const { data } = await api.patch<Uom>(`${UOM_URL}${id}/`, { uom_name, uom_unit });
-      setUoms((prev) => prev.map((u) => (u.id === id ? data : u)));
+      patchCatalog((base) => ({ ...base, uoms: base.uoms.map((u) => (u.id === id ? data : u)) }));
       return true;
     } catch (err) {
       setError(errMessage(err, "Could not update the unit."));
@@ -687,7 +956,7 @@ export default function NutritionManager() {
   const deleteUom = async (id: number): Promise<boolean> => {
     try {
       await api.delete(`${UOM_URL}${id}/`);
-      setUoms((prev) => prev.filter((u) => u.id !== id));
+      patchCatalog((base) => ({ ...base, uoms: base.uoms.filter((u) => u.id !== id) }));
       return true;
     } catch (err) {
       setError(errMessage(err, "Could not delete the unit."));
@@ -697,11 +966,18 @@ export default function NutritionManager() {
 
   const uomApi: UomApi = { create: createUom, update: updateUom, remove: deleteUom };
 
-  /* Nutrition — POST / PATCH /:id/ / DELETE /:id/ */
+  /* Nutrition — POST / PATCH /:id/ / DELETE /:id/. Patches the
+     ["legal","nutrition",selectedId] cache the same way the catalogue
+     mutations patch ["legal","items-uoms"] above. */
+  const patchRows = (updater: (base: Nutrition[]) => Nutrition[]) =>
+    queryClient.setQueryData<Nutrition[]>(["legal", "nutrition", selectedId], (prev) =>
+      updater(prev ?? EMPTY_NUTRITION),
+    );
+
   const addNutrition = async (payload: NutritionPayload): Promise<boolean> => {
     try {
       const { data } = await api.post<Nutrition>(NUTRITION_URL, payload);
-      setRows((prev) => [...prev, data]);
+      patchRows((base) => [...base, data]);
       return true;
     } catch (err) {
       setError(errMessage(err, "Could not add the nutrition row."));
@@ -712,7 +988,7 @@ export default function NutritionManager() {
   const updateNutrition = async (id: number, payload: NutritionPayload): Promise<boolean> => {
     try {
       const { data } = await api.patch<Nutrition>(`${NUTRITION_URL}${id}/`, payload);
-      setRows((prev) => prev.map((n) => (n.id === id ? data : n)));
+      patchRows((base) => base.map((n) => (n.id === id ? data : n)));
       return true;
     } catch (err) {
       setError(errMessage(err, "Could not update the nutrition row."));
@@ -721,7 +997,9 @@ export default function NutritionManager() {
   };
 
   const deleteNutrition = async (id: number) => {
-    setRows((prev) => prev.filter((n) => n.id !== id));
+    // Optimistic, matching the original: the row is gone from the cache
+    // immediately, with no rollback if the request then fails.
+    patchRows((base) => base.filter((n) => n.id !== id));
     try {
       await api.delete(`${NUTRITION_URL}${id}/`);
     } catch (err) {
@@ -730,8 +1008,24 @@ export default function NutritionManager() {
   };
 
   return (
-    <div className="nm-root">
-      <div className="nm-shell">
+    <Page>
+      <Breadcrumbs items={[{ label: "Legal" }, { label: "Nutrition Manager" }]} />
+
+      <PageHeader
+        title="Nutrition Manager"
+        description="The nutrition panel the Label Checker compares a label against. One record per item; the units are shared across all of them."
+      />
+
+      {error || loadError ? (
+        <Notice tone="bad" title="Something went wrong">
+          {error || loadError}
+        </Notice>
+      ) : null}
+
+      {/* Master on the left, one item on the right — the same shape as
+          Compliance Rules, and for the same reason: you pick from a list and
+          edit one thing beside it. */}
+      <div className="grid gap-4 lg:grid-cols-[minmax(260px,340px)_1fr] lg:items-start">
         <ItemSelector
           items={items}
           selectedId={selectedId}
@@ -741,49 +1035,45 @@ export default function NutritionManager() {
           onDelete={deleteItem}
         />
 
-        <section className="nm-detail">
-          {error && (
-            <div className="nm-error" role="alert">
-              <span>{error}</span>
-              <button type="button" onClick={() => setError("")} aria-label="Dismiss">
-                <HiXMark />
-              </button>
-            </div>
-          )}
-
+        <Card>
           {selectedItem ? (
             <>
-              <header className="nm-detail-head">
-                <span className="nm-eyebrow">Nutrition facts</span>
-                <h2 className="nm-detail-title">{selectedItem.item_name}</h2>
-                <span className="nm-detail-count">
-                  {rowsLoading ? "Loading…" : `${rows.length} ${rows.length === 1 ? "nutrient" : "nutrients"}`}
-                </span>
-              </header>
-              <div className="nm-detail-body">
-                {rowsLoading ? (
-                  <div className="nm-loading">Loading nutrition…</div>
-                ) : (
-                  <NutritionTable
-                    itemId={selectedItem.id}
-                    rows={rows}
-                    uoms={uoms}
-                    uomApi={uomApi}
-                    onAdd={addNutrition}
-                    onUpdate={updateNutrition}
-                    onDelete={deleteNutrition}
-                  />
-                )}
-              </div>
+              <CardHeader>
+                <CardTitle>{selectedItem.item_name}</CardTitle>
+                <Badge tone="neutral">
+                  {rowsLoading
+                    ? "Loading…"
+                    : `${rows.length} ${rows.length === 1 ? "nutrient" : "nutrients"}`}
+                </Badge>
+              </CardHeader>
+              {rowsLoading ? (
+                <div className="space-y-2" role="status" aria-live="polite">
+                  <span className="sr-only">Loading nutrition</span>
+                  {[0, 1, 2].map((row) => (
+                    <Skeleton key={row} className="h-10 w-full" />
+                  ))}
+                </div>
+              ) : (
+                <NutritionTable
+                  itemId={selectedItem.id}
+                  rows={rows}
+                  uoms={uoms}
+                  uomApi={uomApi}
+                  onAdd={addNutrition}
+                  onUpdate={updateNutrition}
+                  onDelete={deleteNutrition}
+                />
+              )}
             </>
           ) : (
-            <div className="nm-detail-empty">
-              <HiMagnifyingGlass />
-              <p>Select an item to view its nutrition data.</p>
-            </div>
+            <EmptyState
+              icon={HiOutlineBeaker}
+              title="Nothing selected"
+              hint="Pick an item on the left to view and edit its nutrition data."
+            />
           )}
-        </section>
+        </Card>
       </div>
-    </div>
+    </Page>
   );
 }

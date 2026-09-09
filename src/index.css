@@ -150,29 +150,47 @@ textarea {
   font: inherit;
 }
 
-h1,
-h2 {
-  font-family: var(--heading);
-  font-weight: 500;
-  color: var(--text-h);
-}
-
-h1 {
-  font-size: 56px;
-  letter-spacing: -1.68px;
-  margin: 32px 0;
-  @media (max-width: 1024px) {
-    font-size: 36px;
-    margin: 20px 0;
+/*
+ * These are in `@layer base` for the same reason the `*` reset in
+ * styles/tailwind.css is — and it was found the same way, by a converted page
+ * looking wrong.
+ *
+ * Unlayered CSS beats every cascade layer regardless of specificity. Left
+ * unlayered, `h1 { font-size: 56px }` outranks `text-xl`, so the first page
+ * migrated to the Tailwind primitives rendered its title at 56px (63px once
+ * the >=1920px body zoom applied) with 32px of margin, and no utility could
+ * touch it.
+ *
+ * Layering changes nothing for the 100+ unconverted pages: they size their
+ * headings through class selectors (`.vo-page-title`, `.ofs-header h1`), which
+ * already outrank an element selector and are themselves unlayered. The only
+ * rules that now win here are Tailwind utilities, which is the entire point.
+ */
+@layer base {
+  h1,
+  h2 {
+    font-family: var(--heading);
+    font-weight: 500;
+    color: var(--text-h);
   }
-}
-h2 {
-  font-size: 24px;
-  line-height: 118%;
-  letter-spacing: -0.24px;
-  margin: 0 0 8px;
-  @media (max-width: 1024px) {
-    font-size: 20px;
+
+  h1 {
+    font-size: 56px;
+    letter-spacing: -1.68px;
+    margin: 32px 0;
+    @media (max-width: 1024px) {
+      font-size: 36px;
+      margin: 20px 0;
+    }
+  }
+  h2 {
+    font-size: 24px;
+    line-height: 118%;
+    letter-spacing: -0.24px;
+    margin: 0 0 8px;
+    @media (max-width: 1024px) {
+      font-size: 20px;
+    }
   }
 }
 p {

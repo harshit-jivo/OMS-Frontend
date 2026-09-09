@@ -1,9 +1,33 @@
 /**
- * Custom "explain first" notification-permission modal for the web app.
- * Matches the OMS design system; shown BEFORE the browser permission dialog.
- * The OS prompt (`Notification.requestPermission()`) only fires from the
- * "Allow Notifications" button — never automatically, never via alert/confirm.
+ * The "explain first" notification-permission prompt.
+ *
+ * Shown BEFORE the browser's own permission dialog. The OS prompt
+ * (`Notification.requestPermission()`) only fires from the "Allow" button —
+ * never automatically, and never from an `alert`/`confirm`.
+ *
+ * Why the explain-first step exists at all: a browser gives each origin ONE
+ * chance at the permission prompt. Dismissed or denied, it cannot be asked
+ * again from script — the user has to go into site settings. So asking cold,
+ * at load, spends the only ask on someone who has no idea what it is for.
+ *
+ * This was a hand-rolled overlay: a fixed div with an `onClick` to dismiss and
+ * a `stopPropagation` on the card. It is `ui/dialog` now, which brings the
+ * focus trap, Escape, the scroll lock and `aria-modal` it never had — and the
+ * `tw-page` reset, without which its buttons rendered at the 18px root size
+ * (DESIGN_SYSTEM §1.3).
  */
+import { HiOutlineBell, HiOutlineCheck } from "react-icons/hi2";
+
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 type Props = {
   open: boolean;
@@ -25,157 +49,59 @@ export default function NotificationPermissionModal({
   onAllow,
   onDismiss,
 }: Props) {
-  if (!open) return null;
-
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="oms-notif-title"
-      onClick={onDismiss}
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 2000,
-        background: "rgba(15,23,42,0.55)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: "16px",
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        // Dismissing is a real answer here ("maybe later"), so Escape and the
+        // close button route to the same handler as the button — but not while
+        // the OS prompt is being raised.
+        if (!next && !submitting) onDismiss();
       }}
     >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          width: "100%",
-          maxWidth: "420px",
-          background: "#fff",
-          borderRadius: "16px",
-          boxShadow: "0 20px 50px rgba(0,0,0,0.25)",
-          padding: "28px 24px 22px",
-          textAlign: "center",
-        }}
-      >
-        <div
-          aria-hidden="true"
-          style={{
-            width: "68px",
-            height: "68px",
-            borderRadius: "50%",
-            background: "#EFF6FF",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            margin: "0 auto 16px",
-          }}
-        >
-          <svg
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="#2563eb"
-            strokeWidth="1.8"
-            style={{ width: "34px", height: "34px" }}
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
-            />
-          </svg>
-        </div>
-
-        <h2
-          id="oms-notif-title"
-          style={{
-            margin: 0,
-            fontSize: "1.4rem",
-            fontWeight: 800,
-            color: "#0f172a",
-          }}
-        >
-          Stay Updated
-        </h2>
-        <p
-          style={{
-            margin: "6px 0 18px",
-            fontSize: "0.9rem",
-            color: "#64748b",
-            lineHeight: 1.5,
-          }}
-        >
-          Never miss an important approval or workflow update.
-        </p>
-
-        <div
-          style={{
-            textAlign: "left",
-            display: "flex",
-            flexDirection: "column",
-            gap: "10px",
-            marginBottom: "22px",
-          }}
-        >
-          {BENEFITS.map((benefit) => (
-            <div
-              key={benefit}
-              style={{ display: "flex", alignItems: "center", gap: "10px" }}
-            >
-              <svg
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="#22c55e"
-                strokeWidth="2"
-                style={{ width: "18px", height: "18px", flexShrink: 0 }}
+      {open && (
+        <DialogContent title="Notifications" size="sm">
+          <DialogHeader className="items-start">
+            <div className="min-w-0">
+              <span
+                aria-hidden="true"
+                className="mb-2 flex size-11 items-center justify-center rounded-full bg-brand-soft text-[20px] text-brand"
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M5 13l4 4L19 7"
-                />
-              </svg>
-              <span style={{ fontSize: "0.88rem", color: "#334155" }}>
-                {benefit}
+                <HiOutlineBell />
               </span>
+              <DialogTitle>Stay updated</DialogTitle>
+              <DialogDescription>
+                Never miss an important approval or workflow update.
+              </DialogDescription>
             </div>
-          ))}
-        </div>
+          </DialogHeader>
 
-        <button
-          onClick={onAllow}
-          disabled={submitting}
-          style={{
-            width: "100%",
-            background: "#2563eb",
-            color: "#fff",
-            border: "none",
-            borderRadius: "10px",
-            padding: "12px",
-            fontSize: "0.95rem",
-            fontWeight: 700,
-            cursor: submitting ? "default" : "pointer",
-            opacity: submitting ? 0.7 : 1,
-          }}
-        >
-          {submitting ? "Please wait…" : "Allow Notifications"}
-        </button>
-        <button
-          onClick={onDismiss}
-          disabled={submitting}
-          style={{
-            width: "100%",
-            background: "none",
-            color: "#64748b",
-            border: "none",
-            padding: "12px",
-            marginTop: "4px",
-            fontSize: "0.9rem",
-            fontWeight: 600,
-            cursor: "pointer",
-          }}
-        >
-          Maybe Later
-        </button>
-      </div>
-    </div>
+          <DialogBody>
+            <ul className="m-0 list-none space-y-2 p-0">
+              {BENEFITS.map((benefit) => (
+                <li key={benefit} className="flex items-center gap-2 text-[13px] text-body">
+                  <span
+                    aria-hidden="true"
+                    className="flex size-4 shrink-0 items-center justify-center rounded-full bg-ok-soft text-[11px] text-ok"
+                  >
+                    <HiOutlineCheck />
+                  </span>
+                  {benefit}
+                </li>
+              ))}
+            </ul>
+          </DialogBody>
+
+          <DialogFooter>
+            <Button onClick={onDismiss} disabled={submitting}>
+              Maybe later
+            </Button>
+            <Button variant="primary" onClick={onAllow} disabled={submitting}>
+              {submitting ? "Please wait…" : "Allow notifications"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      )}
+    </Dialog>
   );
 }

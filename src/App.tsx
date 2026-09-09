@@ -1,397 +1,478 @@
+import { Suspense, lazy } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import ErrorBoundary from "./components/ErrorBoundary";
+import PageLoading from "./components/PageLoading";
+
+/*
+ * Every page below is loaded on demand — Phase 5.1 of the frontend plan.
+ *
+ * They were all statically imported, which meant one chunk containing all 108
+ * pages: 2.71 MB (730 kB gzipped) downloaded before the LOGIN screen could
+ * render. A user signing in to check a report was paying for the Excel writer,
+ * the QR scanner and the charting library first.
+ *
+ * `Login` is the deliberate exception. It is what an anonymous visitor sees,
+ * so splitting it would add a round trip in front of the only thing they can
+ * do — the opposite of the point.
+ *
+ * These are plain `lazy(() => import(...))` calls rather than a clever
+ * registry, because Vite needs a STATIC, literal import specifier to know what
+ * to split; a computed path silently produces one chunk again, or fails at
+ * runtime with no build error.
+ */
 import Login from "./pages/Login";
-import Sidebar from "./components/Sidebar";
-import Dashboard from "./pages/Dashboard";
-import App_User from "./pages/App_User";
-import Sap_sync from "./pages/Sap_Sync";
-import Add_Sales from "./pages/Add_Sales";
-import Drafts from "./pages/Drafts";
-import View_Orders from "./pages/View_Orders";
-import Auditor_orders from "./pages/Auditor_Order";
-import Billing_orders from "./pages/Billing_Order";
-import RateApproverOrders from "./pages/Rate_Approver_Order";
-import Order_Status_Tracking from "./pages/Order_Status_Tracking";
-import Daily_Report from "./pages/Daily_Report";
-import PersonWise_Report from "./pages/PersonWise_Report";
-import Sales_Report from "./pages/Sales_Report";
-import StateWise_Report from "./pages/StateWise_Report";
-import Order_Tracking from "./pages/Order_Tracking";
+import ProtectedPage from "./components/ProtectedPage";
+const Home = lazy(() => import("./pages/Home"));
+const Sales_Dashboard = lazy(() => import("./pages/Sales_Dashboard"));
+const App_User = lazy(() => import("./pages/App_User"));
+const Sap_sync = lazy(() => import("./pages/Sap_Sync"));
+const Add_Sales = lazy(() => import("./pages/Add_Sales"));
+const Drafts = lazy(() => import("./pages/Drafts"));
+const View_Orders = lazy(() => import("./pages/View_Orders"));
+const Auditor_orders = lazy(() => import("./pages/Auditor_Order"));
+const Billing_orders = lazy(() => import("./pages/Billing_Order"));
+const RateApproverOrders = lazy(() => import("./pages/Rate_Approver_Order"));
+const Order_Status_Tracking = lazy(() => import("./pages/Order_Status_Tracking"));
+const Daily_Report = lazy(() => import("./pages/Daily_Report"));
+const PersonWise_Report = lazy(() => import("./pages/PersonWise_Report"));
+const Sales_Report = lazy(() => import("./pages/Sales_Report"));
+const StateWise_Report = lazy(() => import("./pages/StateWise_Report"));
+const Order_Tracking = lazy(() => import("./pages/Order_Tracking"));
 import "./styles/AppShell.css";
 import "./styles/UIConsistency.css";
-import Party_Assignment from "./pages/Party_Assignment";
-import Party_Product_Assignment from "./pages/Party_Product_Assignment";
-import Add_Scheme from "./pages/Add_Scheme";
-import FOC from "./pages/FOC";
-import SalesInvoice from "./pages/Sales_Invoice";    
-import SkuGalleryPage from "./pages/SalesInvoice/SkuGalleryPage";
-import InvoiceReview from "./pages/InvoiceReview";
-import Staff from "./pages/Staff";
-import Staff_Rate_Assignment from "./pages/Staff_Rate_Assignment";
-import Order_Stock_Check from "./pages/Order_Stock_Check";
-import Product_Stock from "./pages/Product_Stock";
-import Order_Flow_Settings from "./pages/Order_Flow_Settings";
-import Page_Permissions from "./pages/Page_Permissions";
-import UI_Labels from "./pages/UI_Labels";
-import Sales_Quotation from "./pages/Sales_Quotation";
-import LabelChecker from "./pages/Label_Checker";
-import NutritionManager from "./pages/Nutrition_Manager";
-import Einvoice from "./pages/Einvoice";
-import Ewaybill from "./pages/Ewaybill";
-import Tracker_Entry from "./pages/Tracker_Entry";
-import Tracker_Queue from "./pages/Tracker_Queue";
-import Tracker_Admin from "./pages/Tracker_Admin";
-import Tracker_Reports from "./pages/Tracker_Reports";
-import Tracker_Alerts from "./pages/Tracker_Alerts";
-import Tracker_Invoices from "./pages/Tracker_Invoices";
-import Profile from "./pages/Profile";
-import Device_Management from "./pages/Device_Management";
-import Invoice_Report from "./pages/Invoice_Report";
-import Inventory_Report from "./pages/Inventory_Report";
-import SO_Invoice_Report from "./pages/SO_Invoice_Report";
-import Distributor from "./pages/Distributor";
-import Distributor_Order_Tracking from "./pages/Distributor/Order_Tracking";
-import MartApproval from "./pages/MartApproval";
+const Party_Assignment = lazy(() => import("./pages/Party_Assignment"));
+const Party_Product_Assignment = lazy(() => import("./pages/Party_Product_Assignment"));
+const Add_Scheme = lazy(() => import("./pages/Add_Scheme"));
+const Scheme_Manager = lazy(() => import("./pages/Scheme_Manager"));
+const Combo_Mapping = lazy(() => import("./pages/Combo_Mapping"));
+const FOC = lazy(() => import("./pages/FOC"));
+/*
+ * Sales_Invoice was the ONE page Phase 5.1 missed — it stayed a static
+ * import while its 100 neighbours became lazy(), so the whole invoicing
+ * screen (index + useSalesInvoice + ContentsTab + DraftStep + OrdersStep,
+ * ~173 kB before minification) shipped inside the entry chunk and was
+ * downloaded before the LOGIN form could paint. Nothing about it needs to
+ * be eager: it is a routed page like every other one below.
+ */
+const SalesInvoice = lazy(() => import("./pages/Sales_Invoice"));
+const SkuGalleryPage = lazy(() => import("./pages/SalesInvoice/SkuGalleryPage"));
+const InvoiceReview = lazy(() => import("./pages/InvoiceReview"));
+const Staff = lazy(() => import("./pages/Staff"));
+const Staff_Rate_Assignment = lazy(() => import("./pages/Staff_Rate_Assignment"));
+const Order_Stock_Check = lazy(() => import("./pages/Order_Stock_Check"));
+const Product_Stock = lazy(() => import("./pages/Product_Stock"));
+const Order_Flow_Settings = lazy(() => import("./pages/Order_Flow_Settings"));
+const Page_Permissions = lazy(() => import("./pages/Page_Permissions"));
+const Role_Permissions = lazy(() => import("./pages/Role_Permissions"));
+const UI_Labels = lazy(() => import("./pages/UI_Labels"));
+const PaymentsDashboard = lazy(() => import("./pages/Payments/ApprovalManagement"));
+const LabelChecker = lazy(() => import("./pages/Label_Checker"));
+const NutritionManager = lazy(() => import("./pages/Nutrition_Manager"));
+const ComplianceRules = lazy(() => import("./pages/Compliance_Rules"));
+const LabelHistory = lazy(() => import("./pages/Label_History"));
+const Einvoice = lazy(() => import("./pages/Einvoice"));
+const Ewaybill = lazy(() => import("./pages/Ewaybill"));
+const Tracker_Entry = lazy(() => import("./pages/Tracker_Entry"));
+const Tracker_Queue = lazy(() => import("./pages/Tracker_Queue"));
+const Tracker_Admin = lazy(() => import("./pages/Tracker_Admin"));
+const Tracker_Reports = lazy(() => import("./pages/Tracker_Reports"));
+const Tracker_Alerts = lazy(() => import("./pages/Tracker_Alerts"));
+const Tracker_Invoices = lazy(() => import("./pages/Tracker_Invoices"));
+const Device_Management = lazy(() => import("./pages/Device_Management"));
+const Invoice_Report = lazy(() => import("./pages/Invoice_Report"));
+const HAIS = lazy(() => import("./pages/HAIS"));
+const AssetPublicView = lazy(() => import("./pages/HAIS/AssetPublicView"));
+const Inventory_Report = lazy(() => import("./pages/Inventory_Report"));
+const SO_Invoice_Report = lazy(() => import("./pages/SO_Invoice_Report"));
+const Distributor = lazy(() => import("./pages/Distributor"));
+const Distributor_Order_Tracking = lazy(() => import("./pages/Distributor/Order_Tracking"));
+const MartApproval = lazy(() => import("./pages/MartApproval"));
+const Ap_Invoice_Entry = lazy(() => import("./pages/Ap_Invoice_Entry"));
+
+import { AuthProvider } from "./auth";
 
 function App() {
   return (
     <BrowserRouter>
       <ErrorBoundary>
+      {/* Resolves the session ABOVE the router, so a route guard has the
+          user's grants when it runs. Previously the only thing that loaded
+          them was Sidebar.fetchCurrentUser — which runs after routing has
+          already decided what to render. See src/auth/AuthContext.tsx. */}
+      <AuthProvider>
+      {/* Covers the routes that render without the shell — the public device
+          page, and the redirects. Everything inside ProtectedPage has its own
+          boundary there, so the sidebar survives a lazy navigation. */}
+      <Suspense fallback={<PageLoading />}>
       <Routes>
         <Route path="/" element={<Login />} />
 
+        {/* Standalone device page opened by scanning a device QR (no sidebar). */}
+        <Route path="/hais/device/:code" element={<AssetPublicView />} />
+
+        {/* The landing page: every screen this user may open, as tiles.
+            Open to any signed-in user because it holds nothing but links —
+            see auth/routeAccess.ts. */}
         <Route
-          path="/Dashboard"
+          path="/Home"
           element={
-            <Sidebar>
-              <Dashboard />
-            </Sidebar>
+            <ProtectedPage>
+              <Home />
+            </ProtectedPage>
           }
         />
 
+        {/* The old `/Dashboard`, now permission-bound. The bare `/Dashboard`
+            URL still works — bookmarks point at it — and forwards here, where
+            ProtectedPage applies the gate. */}
         <Route
-          path="/Profile"
+          path="/Sales_Dashboard"
           element={
-            <Sidebar>
-              <Profile />
-            </Sidebar>
+            <ProtectedPage>
+              <Sales_Dashboard />
+            </ProtectedPage>
           }
         />
+        <Route path="/Dashboard" element={<Navigate to="/Sales_Dashboard" replace />} />
 
         {/* System — Device & Version Management (admin) */}
         <Route
           path="/Device_Management"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Device_Management />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/App_User"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <App_User />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Sap_Sync"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Sap_sync />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Add_Sales"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Add_Sales />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Drafts"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Drafts />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/FOC"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <FOC />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Sales_Invoice"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <SalesInvoice />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Sales_Invoice/SKU_Images"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <SkuGalleryPage />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Invoice_Review"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <InvoiceReview />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Invoice_Report"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Invoice_Report />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Inventory_Report"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Inventory_Report />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/SO_Invoice_Report"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <SO_Invoice_Report />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/View_Orders"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <View_Orders />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Auditor_orders"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Auditor_orders />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Billing_orders"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Billing_orders />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Rate_Approver_orders"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <RateApproverOrders />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Auditor_status_tracking"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Order_Status_Tracking mode="auditor" />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Billing_status_tracking"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Order_Status_Tracking mode="billing" />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Rate_Approver_status_tracking"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Order_Status_Tracking mode="rate_approver" />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Daily_Report"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Daily_Report />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/PersonWise_Report"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <PersonWise_Report />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Sales_Report"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Sales_Report />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/StateWise_Report"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <StateWise_Report />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Order_Tracking"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Order_Tracking />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Distributor_Order_Tracking"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Distributor_Order_Tracking />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Party_Assignment"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Party_Assignment />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Party_Product_Assignment"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Party_Product_Assignment />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Add_Scheme"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Add_Scheme />
-            </Sidebar>
+            </ProtectedPage>
+          }
+        />
+
+        <Route
+          path="/Scheme_Manager"
+          element={
+            <ProtectedPage>
+              <Scheme_Manager />
+            </ProtectedPage>
+          }
+        />
+
+        <Route
+          path="/Combo_Mapping"
+          element={
+            <ProtectedPage>
+              <Combo_Mapping />
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Staff"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Staff />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Staff_Rate_Assignment"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Staff_Rate_Assignment />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
         <Route
           path="/Product_Stock"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Product_Stock />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Order_Stock_Check"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Order_Stock_Check />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Order_Flow_Settings"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Order_Flow_Settings />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Page_Permissions"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Page_Permissions />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
-          path="/Sales_Quotation"
+          path="/Role_Permissions"
           element={
-            <Sidebar>
-              <Sales_Quotation />
-            </Sidebar>
+            <ProtectedPage>
+              <Role_Permissions />
+            </ProtectedPage>
           }
         />
+
+        {/* Sales Quotation was here — DISABLED 2026-08-27, page deleted in the
+            2026-09 sweep. The flow is closed: its backend routes and views are
+            commented out in OMS-Backend (orders/urls.py, sap_sync/urls.py),
+            and the SalesQuotationLog table is kept so history stays queryable.
+            The component is recoverable from git if the flow ever reopens. */}
 
        
 
@@ -401,122 +482,179 @@ function App() {
         <Route
           path="/Label_Checker"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <LabelChecker />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Nutrition_Manager"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <NutritionManager />
-            </Sidebar>
+            </ProtectedPage>
+          }
+        />
+
+        <Route
+          path="/Compliance_Rules"
+          element={
+            <ProtectedPage>
+              <ComplianceRules />
+            </ProtectedPage>
+          }
+        />
+
+        <Route
+          path="/Label_History"
+          element={
+            <ProtectedPage>
+              <LabelHistory />
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/UI_Labels"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <UI_Labels />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
+        <Route
+          path="/Payments_Dashboard"
+          element={
+            <ProtectedPage>
+              <PaymentsDashboard />
+            </ProtectedPage>
+          }
+        />
+
+        {/* The page was called Approval Management until it became the
+            dashboard. Redirected rather than dropped so existing bookmarks and
+            the page-permission rows that still carry the old path keep working. */}
+        <Route
+          path="/Approval_Management"
+          element={<Navigate to="/Payments_Dashboard" replace />}
+        />
+
+        {/* AP (vendor) invoice entry — copy from GRPO */}
+        <Route
+          path="/Ap_Invoice_Entry"
+          element={
+            <ProtectedPage>
+              <Ap_Invoice_Entry />
+            </ProtectedPage>
+          }
+        />
+
+
         {/* Any unknown path falls back to the dashboard instead of a blank page. */}
-        <Route path="*" element={<Navigate to="/Dashboard" replace />} />
+        <Route path="*" element={<Navigate to="/Home" replace />} />
         <Route
           path="/Einvoice"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Einvoice />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Ewaybill"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Ewaybill />
-            </Sidebar>
+            </ProtectedPage>
+          }
+        />
+
+        <Route
+          path="/HAIS"
+          element={
+            <ProtectedPage>
+              <HAIS />
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Distributor"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Distributor />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Mart_Approval"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <MartApproval />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Tracker_Entry"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Tracker_Entry />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Tracker_Queue"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Tracker_Queue />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Tracker_Admin"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Tracker_Admin />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Tracker_Reports"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Tracker_Reports />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Tracker_Alerts"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Tracker_Alerts />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
 
         <Route
           path="/Tracker_Invoices"
           element={
-            <Sidebar>
+            <ProtectedPage>
               <Tracker_Invoices />
-            </Sidebar>
+            </ProtectedPage>
           }
         />
       </Routes>
+      </Suspense>
+      </AuthProvider>
       </ErrorBoundary>
     </BrowserRouter>
   );

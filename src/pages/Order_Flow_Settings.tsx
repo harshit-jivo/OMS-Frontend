@@ -1,16 +1,43 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+/**
+ * Order Flow Settings — which approval stages an order passes through.
+ *
+ * Two scopes, chosen by the "Apply to" control: the GLOBAL flow for a role
+ * (ASM or Billing), or an override for named parties. The party override
+ * replaces the global flow entirely for those parties, which is why the
+ * preview and the party list are shown side by side rather than on two tabs —
+ * the thing worth seeing is what a change replaces.
+ */
+import { useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { HiOutlineCog6Tooth, HiOutlineTrash, HiOutlineXMark } from "react-icons/hi2";
+
+import { PermissionGrid, PermissionToggle } from "@/components/admin/PermissionToggle";
+import { Badge } from "@/components/ui/badge";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { Button } from "@/components/ui/button";
 import {
-  HiCheck,
-  HiCheckCircle,
-  HiChevronDown,
-  HiCog6Tooth,
-  HiExclamationCircle,
-  HiMagnifyingGlass,
-  HiSquares2X2,
-  HiTrash,
-  HiXMark,
-} from "react-icons/hi2";
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { MultiSelect, type MultiSelectOption } from "@/components/ui/dropdown";
+import { Field } from "@/components/ui/form";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  Notice,
+  Page,
+  PageHeader,
+  SectionHeading,
+} from "@/components/ui/page";
+import { SegmentedControl } from "@/components/ui/segmented";
+import { Skeleton } from "@/components/ui/skeleton";
+import { messageFrom } from "@/lib/apiError";
+import { showToast } from "@/lib/toastStore";
 import {
   ordersService,
   type OrderFlowConditionOption,
@@ -20,8 +47,6 @@ import {
 } from "../services/ordersService";
 import { sapService } from "../services/sapService";
 import type { Party } from "../services/sapService";
-import "../styles/Order_Flow_Settings.css";
-import "../styles/Order_Flow_Settings_Parties.css";
 
 const DEFAULT_CONDITIONS: OrderFlowConditionOption[] = [
   { code: "BASIC_GT_MARKET", label: "Price List (Basic) > Basic Price and Basic Price != 0" },
@@ -35,6 +60,10 @@ const DEFAULT_FLOW_OPTIONS: OrderFlowTypeOption[] = [
   { code: "ASM", label: "ASM Order Flow" },
   { code: "BILLING", label: "Billing Orders Flow" },
 ];
+
+/** Stable empties, so the party filter memos settle. */
+const NO_PARTIES: Party[] = [];
+const NO_PARTY_CONFIGS: PartyFlowConfig[] = [];
 
 const DEFAULT_CONFIG: OrderFlowConfig = {
   flow_type: "ASM",
@@ -59,7 +88,10 @@ type ApplyMode = "global" | "parties";
 
 const getPartyCode = (party: Party) => String(party.card_code || "").trim();
 const getPartyName = (party: Party) => String(party.card_name || "").trim();
-const getPartyCat = (party: Party) => String(party.category || "").trim().toUpperCase();
+const getPartyCat = (party: Party) =>
+  String(party.category || "")
+    .trim()
+    .toUpperCase();
 
 const normalizeParties = (data: unknown): Party[] => {
   if (Array.isArray(data)) return data as Party[];
@@ -72,53 +104,25 @@ const normalizeParties = (data: unknown): Party[] => {
   return [];
 };
 
-type ToggleRowProps = {
-  title: string;
-  subtitle?: string;
-  checked: boolean;
-  disabled?: boolean;
-  onChange: () => void;
-};
-
-function ToggleRow({ title, subtitle, checked, disabled, onChange }: ToggleRowProps) {
-  return (
-    <button
-      type="button"
-      className={`ofs-toggle-row${checked ? " is-checked" : ""}${disabled ? " is-disabled" : ""}`}
-      onClick={onChange}
-      disabled={disabled}
-    >
-      <span className="ofs-checkbox" aria-hidden="true">
-        {checked ? <HiCheck /> : null}
-      </span>
-      <span className="ofs-toggle-text">
-        <strong>{title}</strong>
-        {subtitle ? <small>{subtitle}</small> : null}
-      </span>
-    </button>
-  );
-}
+/** `code||CATEGORY` — the same card_code belongs to different parties across
+ *  categories (OIL vs BEVERAGES), so code alone is ambiguous. */
+const targetKey = (code: string, category: string) => code + "||" + category;
 
 export default function Order_Flow_Settings() {
-  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  /** Save/delete failures. The LOAD failure is the query's, below. */
+  const [saveError, setSaveError] = useState("");
   const [config, setConfig] = useState<OrderFlowConfig>(DEFAULT_CONFIG);
   const [selectedFlowType, setSelectedFlowType] = useState("ASM");
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [flowMenuOpen, setFlowMenuOpen] = useState(false);
-  const [successVisible, setSuccessVisible] = useState(false);
-  const [error, setError] = useState("");
 
   // Party-specific flow state
   const [applyMode, setApplyMode] = useState<ApplyMode>("global");
-  const [parties, setParties] = useState<Party[]>([]);
   const [selectedTargets, setSelectedTargets] = useState<
     { card_code: string; category: string; card_name: string }[]
   >([]);
-  const [partyMenuOpen, setPartyMenuOpen] = useState(false);
-  const [partySearch, setPartySearch] = useState("");
-  const [partyConfigs, setPartyConfigs] = useState<PartyFlowConfig[]>([]);
-  const partyDropdownRef = useRef<HTMLDivElement>(null);
+  /** The party override a delete has been asked about. */
+  const [confirmRemove, setConfirmRemove] = useState<PartyFlowConfig | null>(null);
 
   const conditionOptions = config.condition_options?.length
     ? config.condition_options
@@ -130,15 +134,24 @@ export default function Order_Flow_Settings() {
     "ASM Order Flow";
   const isPartyMode = applyMode === "parties";
 
-  const loadConfig = useCallback(async (flowType = selectedFlowType) => {
-    setLoading(true);
-    setError("");
-    try {
-      const data = await ordersService.getOrderFlowConfig(flowType);
-      setConfig({
+  /*
+   * `selectedFlowType` is the key. The old `loadConfig` was a `useCallback`
+   * depending on `selectedFlowType` that ALSO called
+   * `setSelectedFlowType(data.flow_type || flowType)` — so a successful load
+   * changed the callback's identity and re-fired the effect that had just run.
+   */
+  const {
+    data: configData,
+    isPending: loading,
+    isError: configFailed,
+  } = useQuery({
+    queryKey: ["order-flow", "config", selectedFlowType],
+    queryFn: async () => {
+      const data = await ordersService.getOrderFlowConfig(selectedFlowType);
+      return {
         ...DEFAULT_CONFIG,
         ...data,
-        flow_type: data.flow_type || flowType,
+        flow_type: data.flow_type || selectedFlowType,
         flow_options: data.flow_options?.length ? data.flow_options : DEFAULT_FLOW_OPTIONS,
         condition_options: data.condition_options?.length
           ? data.condition_options
@@ -146,98 +159,113 @@ export default function Order_Flow_Settings() {
         rate_conditions: Array.isArray(data.rate_conditions)
           ? data.rate_conditions
           : DEFAULT_CONFIG.rate_conditions,
-      });
-      setSelectedFlowType(data.flow_type || flowType);
-    } catch (err) {
-      console.error("Failed to load order flow settings:", err);
-      setError("Failed to load order flow settings.");
-    } finally {
-      setLoading(false);
+      };
+    },
+  });
+
+  /*
+   * `config` is server-seeded and then user-edited (every toggle below writes
+   * to it), so it stays state. Re-seeding during render rather than in an
+   * effect: an effect would be a `set-state-in-effect` violation and would also
+   * land a render late. The `seededFrom` identity guard is what stops the
+   * `flow_type` adoption from looping.
+   */
+  const [seededFrom, setSeededFrom] = useState<typeof configData>(undefined);
+  if (configData && configData !== seededFrom) {
+    setSeededFrom(configData);
+    setConfig(configData);
+    if (configData.flow_type && configData.flow_type !== selectedFlowType) {
+      setSelectedFlowType(configData.flow_type);
     }
-  }, [selectedFlowType]);
+  }
 
-  useEffect(() => {
-    void loadConfig();
-  }, [loadConfig]);
+  const error = saveError || (configFailed ? "Failed to load order flow settings." : "");
 
-  const loadParties = useCallback(async () => {
-    try {
-      const [partyData, configData] = await Promise.all([
+  const loadConfig = (flowType?: string) => {
+    if (flowType && flowType !== selectedFlowType) setSelectedFlowType(flowType);
+    return queryClient.invalidateQueries({ queryKey: ["order-flow", "config"] });
+  };
+
+  /* Parties and their per-party flow overrides, read together so the list and
+     the overrides describe the same moment. */
+  const { data: partyData } = useQuery({
+    queryKey: ["order-flow", "parties"],
+    queryFn: async () => {
+      const [rawParties, configs] = await Promise.all([
         sapService.getParties(),
         ordersService.getPartyFlowConfigs(),
       ]);
-      // The parties endpoint repeats rows; keep one entry per party + category so the
-      // category variants stay visible, but drop exact duplicates (which would create
-      // duplicate React keys and break list filtering).
+      // The parties endpoint repeats rows; keep one entry per party + category
+      // so the category variants stay visible, but drop exact duplicates (which
+      // would create duplicate React keys and break list filtering).
       const seen = new Set<string>();
-      const uniqueParties = normalizeParties(partyData).filter((party) => {
+      const uniqueParties = normalizeParties(rawParties).filter((party) => {
         const code = getPartyCode(party);
         if (!code) return false;
-        const key = `${code}||${String(party.category || "").trim()}`;
+        const key = code + "||" + String(party.category || "").trim();
         if (seen.has(key)) return false;
         seen.add(key);
         return true;
       });
-      setParties(uniqueParties);
-      setPartyConfigs(Array.isArray(configData?.data) ? configData.data : []);
-    } catch (err) {
-      console.error("Failed to load parties:", err);
-    }
-  }, []);
+      return {
+        parties: uniqueParties,
+        partyConfigs: Array.isArray(configs?.data) ? configs.data : NO_PARTY_CONFIGS,
+      };
+    },
+  });
+  const parties = partyData?.parties ?? NO_PARTIES;
+  const partyConfigs = partyData?.partyConfigs ?? NO_PARTY_CONFIGS;
 
-  useEffect(() => {
-    void loadParties();
-  }, [loadParties]);
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (partyDropdownRef.current && !partyDropdownRef.current.contains(event.target as Node)) {
-        setPartyMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+  const loadParties = () => queryClient.invalidateQueries({ queryKey: ["order-flow", "parties"] });
 
   const partyConfigByKey = useMemo(() => {
     return partyConfigs.reduce<Record<string, PartyFlowConfig>>((current, item) => {
-      current[`${item.card_code}||${item.category}||${item.flow_type}`] = item;
+      current[item.card_code + "||" + item.category + "||" + item.flow_type] = item;
       return current;
     }, {});
   }, [partyConfigs]);
 
-  const isTargetSelected = (code: string, category: string) =>
-    selectedTargets.some((target) => target.card_code === code && target.category === category);
+  /*
+   * The party picker was a hand-rolled trigger + menu + search + `partyDropdownRef`
+   * + `document.addEventListener("mousedown")`, holding `partyMenuOpen` and
+   * `partySearch` in the page. `ui/dropdown`'s MultiSelect is all of that minus
+   * the state — DESIGN_SYSTEM §5a.
+   */
+  const partyOptions = useMemo<MultiSelectOption<string>[]>(
+    () =>
+      parties.map((party) => {
+        const code = getPartyCode(party);
+        const category = getPartyCat(party);
+        const hasConfig = Boolean(
+          partyConfigByKey[code + "||" + category + "||" + selectedFlowType],
+        );
+        return {
+          value: targetKey(code, category),
+          label: getPartyName(party) || code,
+          hint: code + (category ? " · " + category : "") + (hasConfig ? " · has override" : ""),
+          keywords: String(party.state || ""),
+        };
+      }),
+    [parties, partyConfigByKey, selectedFlowType],
+  );
 
-  const filteredParties = useMemo(() => {
-    const term = partySearch.trim().toLowerCase();
-    const base = term
-      ? parties.filter((party) =>
-          [getPartyName(party), getPartyCode(party), party.category, party.state].some((value) =>
-            String(value || "").toLowerCase().includes(term)
-          )
-        )
-      : parties;
-    return [...base].sort((a, b) => {
-      const aSel = isTargetSelected(getPartyCode(a), getPartyCat(a)) ? 0 : 1;
-      const bSel = isTargetSelected(getPartyCode(b), getPartyCat(b)) ? 0 : 1;
-      if (aSel !== bSel) return aSel - bSel;
-      return getPartyName(a).localeCompare(getPartyName(b));
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [parties, partySearch, selectedTargets]);
-
-  // Keyed by code||category — the same card_code can belong to different
-  // parties across categories (e.g. OIL vs BEVERAGES), so code alone is ambiguous.
+  // Keyed by code||category, as above.
   const partyNameByKey = useMemo(() => {
     return parties.reduce<Record<string, string>>((current, party) => {
-      current[`${getPartyCode(party)}||${getPartyCat(party)}`] = getPartyName(party);
+      current[targetKey(getPartyCode(party), getPartyCat(party))] = getPartyName(party);
       return current;
     }, {});
   }, [parties]);
 
   const lookupPartyName = (code: string, category?: string | null) =>
-    partyNameByKey[`${String(code || "").trim()}||${String(category || "").trim().toUpperCase()}`] || "";
+    partyNameByKey[
+      targetKey(
+        String(code || "").trim(),
+        String(category || "")
+          .trim()
+          .toUpperCase(),
+      )
+    ] || "";
 
   const flowPreview = useMemo(() => {
     const stages = ["Order Created"];
@@ -271,11 +299,12 @@ export default function Order_Flow_Settings() {
     }));
   };
 
-  // When exactly one party+category is selected, load its saved flow (for the role); else defaults.
+  // When exactly one party+category is selected, load its saved flow (for the
+  // role); otherwise fall back to the defaults.
   const loadSelectionSettings = (targets: typeof selectedTargets, flowType: string) => {
     const single =
       targets.length === 1
-        ? partyConfigByKey[`${targets[0].card_code}||${targets[0].category}||${flowType}`]
+        ? partyConfigByKey[targets[0].card_code + "||" + targets[0].category + "||" + flowType]
         : undefined;
     if (single) applyPartySettings(single);
     else setConfig((current) => ({ ...current, ...PARTY_DEFAULT_CONFIG }));
@@ -283,42 +312,29 @@ export default function Order_Flow_Settings() {
 
   const handleFlowSelect = (flowType: string) => {
     setSelectedFlowType(flowType);
-    setFlowMenuOpen(false);
-    if (isPartyMode) {
-      loadSelectionSettings(selectedTargets, flowType);
-    } else {
-      void loadConfig(flowType);
-    }
+    if (isPartyMode) loadSelectionSettings(selectedTargets, flowType);
+    else void loadConfig(flowType);
   };
 
   const switchMode = (mode: ApplyMode) => {
     setApplyMode(mode);
-    setError("");
-    if (mode === "parties") {
-      loadSelectionSettings(selectedTargets, selectedFlowType);
-    } else {
-      void loadConfig(selectedFlowType);
-    }
+    setSaveError("");
+    if (mode === "parties") loadSelectionSettings(selectedTargets, selectedFlowType);
+    else void loadConfig(selectedFlowType);
   };
 
-  const togglePartySelect = (party: Party) => {
-    const code = getPartyCode(party);
-    if (!code) return;
-    const category = getPartyCat(party);
-    setSelectedTargets((current) => {
-      const exists = current.some((t) => t.card_code === code && t.category === category);
-      const next = exists
-        ? current.filter((t) => !(t.card_code === code && t.category === category))
-        : [...current, { card_code: code, category, card_name: getPartyName(party) || code }];
-      loadSelectionSettings(next, selectedFlowType);
-      return next;
+  /** The picker hands back `code||CATEGORY` keys; rebuild the target records. */
+  const selectTargets = (keys: string[]) => {
+    const next = keys.map((key) => {
+      const [card_code, category = ""] = key.split("||");
+      return {
+        card_code,
+        category,
+        card_name: partyNameByKey[key] || card_code,
+      };
     });
-  };
-
-  const removeSelectedTarget = (code: string, category: string) => {
-    setSelectedTargets((current) =>
-      current.filter((t) => !(t.card_code === code && t.category === category))
-    );
+    setSelectedTargets(next);
+    loadSelectionSettings(next, selectedFlowType);
   };
 
   const editConfiguredParty = (cfg: PartyFlowConfig) => {
@@ -334,38 +350,52 @@ export default function Order_Flow_Settings() {
     applyPartySettings(cfg);
   };
 
-  const removeConfiguredParty = async (cfg: PartyFlowConfig) => {
+  const removeConfiguredParty = async () => {
+    const cfg = confirmRemove;
+    if (!cfg) return;
+    setConfirmRemove(null);
     try {
       await ordersService.deletePartyFlowConfig(
         [{ card_code: cfg.card_code, category: cfg.category || "" }],
-        cfg.flow_type
+        cfg.flow_type,
       );
-      setPartyConfigs((current) =>
-        current.filter(
-          (item) =>
-            !(
-              item.card_code === cfg.card_code &&
-              item.category === cfg.category &&
-              item.flow_type === cfg.flow_type
-            )
-        )
+      queryClient.setQueryData<{ parties: Party[]; partyConfigs: PartyFlowConfig[] }>(
+        ["order-flow", "parties"],
+        (cached) =>
+          cached && {
+            ...cached,
+            partyConfigs: cached.partyConfigs.filter(
+              (item) =>
+                !(
+                  item.card_code === cfg.card_code &&
+                  item.category === cfg.category &&
+                  item.flow_type === cfg.flow_type
+                ),
+            ),
+          },
       );
+      showToast({
+        title: "Override removed",
+        message:
+          (lookupPartyName(cfg.card_code, cfg.category) || cfg.card_code) +
+          " follows the global flow again.",
+      });
     } catch (err) {
       console.error("Failed to remove party flow:", err);
-      setError("Failed to remove custom flow for this party.");
+      setSaveError("Failed to remove custom flow for this party.");
     }
   };
 
   const handleSave = async () => {
-    setError("");
+    setSaveError("");
     if (config.rate_approval_enabled && !config.rate_conditions.length) {
-      setError("Select at least one Rate Approval condition or turn Rate Approval off.");
+      setSaveError("Select at least one Rate Approval condition, or turn Rate Approval off.");
       return;
     }
 
     if (isPartyMode) {
       if (selectedTargets.length === 0) {
-        setError("Select at least one party to apply this flow to.");
+        setSaveError("Select at least one party to apply this flow to.");
         return;
       }
       setSaving(true);
@@ -378,13 +408,20 @@ export default function Order_Flow_Settings() {
             billing_enabled: config.billing_enabled,
             auditor_enabled: config.auditor_enabled,
             rate_conditions: config.rate_conditions || [],
-          }
+          },
         );
         await loadParties();
-        setSuccessVisible(true);
-      } catch (err: any) {
+        showToast({
+          title: "Party flow saved",
+          message:
+            selectedTargets.length +
+            " part" +
+            (selectedTargets.length === 1 ? "y" : "ies") +
+            " now use this flow instead of the global one.",
+        });
+      } catch (err) {
         console.error("Failed to save party flow settings:", err);
-        setError(err?.response?.data?.message || "Failed to save party flow settings.");
+        setSaveError(messageFrom(err, "Failed to save party flow settings."));
       } finally {
         setSaving(false);
       }
@@ -400,11 +437,12 @@ export default function Order_Flow_Settings() {
       });
 
       if ("success" in response && response.success === false) {
-        setError(response.message || "Failed to save order flow.");
+        setSaveError(response.message || "Failed to save order flow.");
         return;
       }
 
-      const savedConfig = "data" in response && response.data ? response.data : response as OrderFlowConfig;
+      const savedConfig =
+        "data" in response && response.data ? response.data : (response as OrderFlowConfig);
       setConfig({
         ...DEFAULT_CONFIG,
         ...savedConfig,
@@ -414,222 +452,187 @@ export default function Order_Flow_Settings() {
           ? savedConfig.condition_options
           : conditionOptions,
       });
-      setSuccessVisible(true);
-    } catch (err: any) {
+      showToast({
+        title: "Flow saved",
+        message: selectedFlowLabel + " now runs through " + flowPreview.length + " stages.",
+      });
+    } catch (err) {
       console.error("Failed to save order flow settings:", err);
-      setError(err?.response?.data?.message || "Failed to save order flow settings.");
+      setSaveError(messageFrom(err, "Failed to save order flow settings."));
     } finally {
       setSaving(false);
     }
   };
 
-  if (loading) {
-    return (
-      <div className="ofs-page">
-        <div className="ofs-loading">
-          <span className="ofs-spinner" />
-          <span>Loading order flow...</span>
-        </div>
-      </div>
-    );
-  }
-
-  const partyFilterLabel =
-    selectedTargets.length === 0
-      ? "Select parties"
-      : selectedTargets.length === 1
-        ? `${selectedTargets[0].card_name}${selectedTargets[0].category ? ` (${selectedTargets[0].category})` : ""}`
-        : `${selectedTargets.length} selected`;
+  const selectedKeys = selectedTargets.map((t) => targetKey(t.card_code, t.category));
 
   return (
-    <div className="ofs-page">
-      <div className="ofs-header">
-        <div>
-          <span className="ofs-kicker">Administration</span>
-          <h1>Order Flow Settings</h1>
-          <p>Control the approval stages and price conditions used when orders are created.</p>
-        </div>
-        <button type="button" className="ofs-refresh" onClick={() => loadConfig(selectedFlowType)}>
-          Refresh
-        </button>
+    <Page>
+      <Breadcrumbs items={[{ label: "Order Config" }, { label: "Order Flow Settings" }]} />
+
+      <PageHeader
+        eyebrow="Order Config"
+        title="Order Flow Settings"
+        description="Control the approval stages and price conditions used when orders are created."
+        actions={
+          <Button variant="ghost" onClick={() => void loadConfig(selectedFlowType)}>
+            Refresh
+          </Button>
+        }
+      />
+
+      {error && <Notice tone="bad">{error}</Notice>}
+
+      <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
+        <Card>
+          <CardHeader>
+            <CardTitle>Apply to</CardTitle>
+          </CardHeader>
+
+          <div className="space-y-3">
+            <Field
+              label="Scope"
+              hint={
+                isPartyMode
+                  ? "A party override replaces the global flow entirely for those parties."
+                  : "The flow every order of this role follows, unless a party overrides it."
+              }
+            >
+              {() => (
+                <SegmentedControl<ApplyMode>
+                  value={applyMode}
+                  onChange={switchMode}
+                  options={[
+                    { value: "global", label: "All orders (global)" },
+                    { value: "parties", label: "Specific parties" },
+                  ]}
+                />
+              )}
+            </Field>
+
+            <Field label={isPartyMode ? "Flow role" : "Selected flow"}>
+              {() => (
+                <SegmentedControl
+                  value={selectedFlowType}
+                  onChange={handleFlowSelect}
+                  options={flowOptions.map((option) => ({
+                    value: option.code,
+                    label: option.label,
+                  }))}
+                />
+              )}
+            </Field>
+
+            {isPartyMode && (
+              <>
+                <Field label="Parties" hint="Search by name, code or state.">
+                  {(control) => (
+                    <MultiSelect
+                      {...control}
+                      value={selectedKeys}
+                      onChange={selectTargets}
+                      options={partyOptions}
+                      searchable
+                      searchPlaceholder="Party name, code or state…"
+                      placeholder="Select parties"
+                      // SAP's party list runs to thousands of rows.
+                      maxShown={60}
+                      emptyText="No parties loaded"
+                      // "Select all" here would apply an override to every
+                      // party in SAP. Narrowing first is the point.
+                      selectAll={false}
+                    />
+                  )}
+                </Field>
+
+                {selectedTargets.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {selectedTargets.map((target) => (
+                      <span
+                        key={targetKey(target.card_code, target.category)}
+                        className="inline-flex items-center gap-1 rounded-full bg-surface-strong py-0.5 pl-2.5 pr-1 text-[12px] text-ink"
+                      >
+                        {target.card_name}
+                        {target.category && (
+                          <span className="text-[11px] text-subtle">{target.category}</span>
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-5 rounded-full"
+                          onClick={() =>
+                            selectTargets(
+                              selectedKeys.filter(
+                                (key) => key !== targetKey(target.card_code, target.category),
+                              ),
+                            )
+                          }
+                          aria-label={"Remove " + target.card_name}
+                        >
+                          <HiOutlineXMark />
+                        </Button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                <p className="m-0 text-[12px] text-subtle">
+                  The <strong className="font-semibold text-body">{selectedFlowLabel}</strong>{" "}
+                  stages below replace the global flow for every selected party&rsquo;s{" "}
+                  {selectedFlowType === "BILLING" ? "billing-created" : "ASM"} orders.
+                </p>
+              </>
+            )}
+          </div>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Order flow</CardTitle>
+          </CardHeader>
+          {loading ? (
+            <div className="space-y-2">
+              <Skeleton className="h-14 w-full" />
+              <Skeleton className="h-14 w-full" />
+              <Skeleton className="h-14 w-full" />
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <PermissionToggle
+                title="Rate Approval"
+                subtitle="Use Rate Approval only for selected price conditions."
+                checked={config.rate_approval_enabled}
+                onChange={() => toggleStage("rate_approval_enabled")}
+              />
+              <PermissionToggle
+                title="Billing"
+                subtitle="Send accepted orders to Billing."
+                checked={config.billing_enabled}
+                onChange={() => toggleStage("billing_enabled")}
+              />
+              <PermissionToggle
+                title="Auditor"
+                subtitle="Send accepted orders to Auditor Approval."
+                checked={config.auditor_enabled}
+                onChange={() => toggleStage("auditor_enabled")}
+              />
+            </div>
+          )}
+        </Card>
       </div>
 
-      {error ? (
-        <div className="ofs-alert">
-          <HiExclamationCircle />
-          <span>{error}</span>
-        </div>
-      ) : null}
-
-      <div className="ofs-grid">
-        <section className="ofs-card">
-          <div className="ofs-card-head">
-            <span className="ofs-card-mark" />
-            <h2>Apply To</h2>
-          </div>
-
-          <div className="ofp-mode-switch" role="tablist" aria-label="Apply flow to">
-            <button
-              type="button"
-              className={`ofp-mode-btn${!isPartyMode ? " is-active" : ""}`}
-              onClick={() => switchMode("global")}
-            >
-              All Orders (Global)
-            </button>
-            <button
-              type="button"
-              className={`ofp-mode-btn${isPartyMode ? " is-active" : ""}`}
-              onClick={() => switchMode("parties")}
-            >
-              Specific Parties
-            </button>
-          </div>
-
-          <div className="ofs-flow-select">
-            <button type="button" className="ofs-flow-trigger" onClick={() => setFlowMenuOpen((open) => !open)}>
-              <span>
-                <small>{isPartyMode ? "Flow Role" : "Selected Flow"}</small>
-                <strong>{selectedFlowLabel}</strong>
-              </span>
-              <HiChevronDown className={flowMenuOpen ? "is-open" : ""} />
-            </button>
-            {flowMenuOpen ? (
-              <div className="ofs-flow-menu">
-                {flowOptions.map((option) => (
-                  <button
-                    key={option.code}
-                    type="button"
-                    className={`ofs-flow-option${option.code === selectedFlowType ? " is-selected" : ""}`}
-                    onClick={() => handleFlowSelect(option.code)}
-                  >
-                    <span>{option.label}</span>
-                    {option.code === selectedFlowType ? <HiCheckCircle /> : null}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-          </div>
-
-          {isPartyMode ? (
-            <div className="ofs-flow-select ofp-party-select" ref={partyDropdownRef}>
-              <button type="button" className="ofs-flow-trigger" onClick={() => setPartyMenuOpen((open) => !open)}>
-                <span>
-                  <small>Selected Parties</small>
-                  <strong>{partyFilterLabel}</strong>
-                </span>
-                <HiChevronDown className={partyMenuOpen ? "is-open" : ""} />
-              </button>
-              {partyMenuOpen ? (
-                <div className="ofs-flow-menu ofp-party-menu">
-                  <label className="ofp-party-search">
-                    <HiMagnifyingGlass />
-                    <input
-                      type="text"
-                      value={partySearch}
-                      onChange={(event) => setPartySearch(event.target.value)}
-                      placeholder="Search party by name or code"
-                      autoFocus
-                    />
-                  </label>
-                  <div className="ofp-party-options">
-                    {filteredParties.length === 0 ? (
-                      <div className="ofp-party-empty">No party found</div>
-                    ) : (
-                      filteredParties.map((party) => {
-                        const code = getPartyCode(party);
-                        const category = getPartyCat(party);
-                        const selected = isTargetSelected(code, category);
-                        const hasConfig = Boolean(partyConfigByKey[`${code}||${category}||${selectedFlowType}`]);
-                        return (
-                          <button
-                            key={`${code}||${category}`}
-                            type="button"
-                            className={`ofp-party-option${selected ? " is-selected" : ""}`}
-                            onClick={() => togglePartySelect(party)}
-                          >
-                            <span className={`ofp-party-check${selected ? " is-selected" : ""}`}>
-                              {selected ? <HiCheck /> : null}
-                            </span>
-                            <span className="ofp-party-text">
-                              <span>
-                                <span className="ofp-party-name">{getPartyName(party) || code}</span>
-                                {category ? <span className="ofp-party-cat">{category}</span> : null}
-                              </span>
-                              <small>
-                                {code}
-                                {hasConfig ? ` · ${selectedFlowLabel}` : ""}
-                              </small>
-                            </span>
-                          </button>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
-              ) : null}
-
-              {selectedTargets.length > 0 ? (
-                <div className="ofp-party-chips">
-                  {selectedTargets.map((target) => (
-                    <span className="ofp-party-chip" key={`${target.card_code}||${target.category}`}>
-                      {target.card_name}
-                      {target.category ? <span className="ofp-chip-cat">{target.category}</span> : null}
-                      <button
-                        type="button"
-                        onClick={() => removeSelectedTarget(target.card_code, target.category)}
-                        aria-label="Remove party"
-                      >
-                        <HiXMark />
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              ) : null}
-              <p className="ofp-hint">
-                The <strong>{selectedFlowLabel}</strong> stages below replace the global flow for every selected
-                party's {selectedFlowType === "BILLING" ? "billing-created" : "ASM"} orders.
-              </p>
-            </div>
-          ) : null}
-        </section>
-
-        <section className="ofs-card">
-          <div className="ofs-card-head">
-            <span className="ofs-card-mark" />
-            <h2>Order Flow</h2>
-          </div>
-
-          <div className="ofs-list">
-            <ToggleRow
-              title="Rate Approval"
-              subtitle="Use Rate Approval only for selected price conditions."
-              checked={config.rate_approval_enabled}
-              onChange={() => toggleStage("rate_approval_enabled")}
-            />
-            <ToggleRow
-              title="Billing"
-              subtitle="Send accepted orders to Billing."
-              checked={config.billing_enabled}
-              onChange={() => toggleStage("billing_enabled")}
-            />
-            <ToggleRow
-              title="Auditor"
-              subtitle="Send accepted orders to Auditor Approval."
-              checked={config.auditor_enabled}
-              onChange={() => toggleStage("auditor_enabled")}
-            />
-          </div>
-        </section>
-
-        <section className="ofs-card ofs-card--wide">
-          <div className="ofs-card-head">
-            <span className="ofs-card-mark" />
-            <h2>Rate Conditions</h2>
-          </div>
-
-          <div className="ofs-condition-grid">
+      <section className="space-y-3">
+        <SectionHeading>Rate conditions</SectionHeading>
+        <Card>
+          {!config.rate_approval_enabled && (
+            <p className="m-0 mb-3 text-[12px] text-subtle">
+              Rate Approval is off, so none of these apply. Turn it on to choose which price
+              conditions send an order for approval.
+            </p>
+          )}
+          <PermissionGrid>
             {conditionOptions.map((condition) => (
-              <ToggleRow
+              <PermissionToggle
                 key={condition.code}
                 title={condition.label}
                 checked={(config.rate_conditions || []).includes(condition.code)}
@@ -637,105 +640,139 @@ export default function Order_Flow_Settings() {
                 onChange={() => toggleCondition(condition.code)}
               />
             ))}
-          </div>
-        </section>
+          </PermissionGrid>
+        </Card>
+      </section>
 
-        {isPartyMode && partyConfigs.length > 0 ? (
-          <section className="ofs-card ofs-card--wide">
-            <div className="ofs-card-head">
-              <span className="ofs-card-mark" />
-              <h2>Parties With Custom Flow</h2>
-            </div>
-            <div className="ofp-configured-list">
+      {/* The preview and the override list answer the same question — what
+          does an order actually go through — so they share this slot. */}
+      {isPartyMode && partyConfigs.length > 0 ? (
+        <section className="space-y-3">
+          <SectionHeading>Parties with a custom flow</SectionHeading>
+          <Card className="p-0">
+            <ul className="m-0 list-none divide-y divide-line p-0">
               {partyConfigs.map((cfg) => (
-                <div className="ofp-configured-row" key={`${cfg.card_code}||${cfg.category}||${cfg.flow_type}`}>
-                  <div className="ofp-configured-main">
-                    <strong>{lookupPartyName(cfg.card_code, cfg.category) || cfg.card_name || cfg.card_code}</strong>
-                    <small>
+                <li
+                  key={cfg.card_code + "||" + cfg.category + "||" + cfg.flow_type}
+                  className="flex flex-wrap items-center gap-3 px-4 py-3"
+                >
+                  <div className="min-w-[180px] flex-1">
+                    <strong className="block text-[13px] font-semibold text-ink">
+                      {lookupPartyName(cfg.card_code, cfg.category) ||
+                        cfg.card_name ||
+                        cfg.card_code}
+                    </strong>
+                    <span className="text-[11.5px] text-subtle">
                       {cfg.card_code}
-                      {cfg.category ? ` · ${cfg.category}` : ""} · {cfg.flow_label || cfg.flow_type}
-                    </small>
+                      {cfg.category ? " · " + cfg.category : ""} ·{" "}
+                      {cfg.flow_label || cfg.flow_type}
+                    </span>
                   </div>
-                  <div className="ofp-configured-stages">
-                    {cfg.rate_approval_enabled ? <span>Rate Approval</span> : null}
-                    {cfg.billing_enabled ? <span>Billing</span> : null}
-                    {cfg.auditor_enabled ? <span>Auditor</span> : null}
+                  <div className="flex flex-wrap gap-1.5">
+                    {cfg.rate_approval_enabled && <Badge tone="info">Rate Approval</Badge>}
+                    {cfg.billing_enabled && <Badge tone="info">Billing</Badge>}
+                    {cfg.auditor_enabled && <Badge tone="info">Auditor</Badge>}
+                    {!cfg.rate_approval_enabled &&
+                      !cfg.billing_enabled &&
+                      !cfg.auditor_enabled && <Badge tone="neutral">No approval stages</Badge>}
                   </div>
-                  <div className="ofp-configured-actions">
-                    <button type="button" className="ofs-secondary" onClick={() => editConfiguredParty(cfg)}>
+                  <div className="flex gap-1">
+                    <Button size="sm" onClick={() => editConfiguredParty(cfg)}>
                       Edit
-                    </button>
-                    <button
-                      type="button"
-                      className="ofp-remove-btn"
-                      onClick={() => void removeConfiguredParty(cfg)}
-                      aria-label="Remove custom flow"
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setConfirmRemove(cfg)}
+                      aria-label={
+                        "Remove the custom flow for " + (cfg.card_name || cfg.card_code)
+                      }
                     >
-                      <HiTrash />
-                    </button>
+                      <HiOutlineTrash />
+                    </Button>
                   </div>
-                </div>
+                </li>
               ))}
+            </ul>
+          </Card>
+        </section>
+      ) : (
+        <section className="space-y-3">
+          <SectionHeading>Flow preview</SectionHeading>
+          <Card>
+            <div className="mb-3 flex items-start gap-2.5">
+              <HiOutlineCog6Tooth className="mt-0.5 shrink-0 text-brand" aria-hidden="true" />
+              <p className="m-0 text-[12px] text-subtle">
+                {isPartyMode
+                  ? selectedTargets.length > 0
+                    ? "Applies to " +
+                      selectedTargets.length +
+                      " selected part" +
+                      (selectedTargets.length === 1 ? "y" : "ies") +
+                      "."
+                    : "Select parties to apply this flow."
+                  : config.rate_approval_enabled
+                    ? "Rate Approval is used only when a selected price condition matches."
+                    : "Orders will move without Rate Approval."}
+              </p>
             </div>
-          </section>
-        ) : (
-          <section className="ofs-preview">
-            <div className="ofs-preview-head">
-              <HiCog6Tooth />
-              <div>
-                <h2>Flow Preview</h2>
-                <p>
-                  {isPartyMode
-                    ? selectedTargets.length > 0
-                      ? `Applies to ${selectedTargets.length} selected part${selectedTargets.length === 1 ? "y" : "ies"}.`
-                      : "Select parties to apply this flow."
-                    : config.rate_approval_enabled
-                      ? "Rate Approval is used only when selected price conditions match."
-                      : "Orders will move without Rate Approval."}
-                </p>
-              </div>
-            </div>
-            <div className="ofs-steps">
+            <ol className="m-0 flex list-none flex-wrap items-center gap-1.5 p-0">
               {flowPreview.map((stage, index) => (
-                <span key={`${stage}-${index}`} className="ofs-step">
-                  {stage}
-                </span>
+                <li key={stage + "-" + index} className="flex items-center gap-1.5">
+                  {index > 0 && (
+                    <span className="text-subtle" aria-hidden="true">
+                      →
+                    </span>
+                  )}
+                  <span className="rounded-full border border-line bg-surface px-2.5 py-1 text-[12px] font-semibold text-ink">
+                    {stage}
+                  </span>
+                </li>
               ))}
-            </div>
-          </section>
+            </ol>
+          </Card>
+        </section>
+      )}
+
+      <div className="flex justify-end">
+        <Button variant="primary" onClick={() => void handleSave()} disabled={saving}>
+          {saving ? "Saving…" : isPartyMode ? "Save party flow" : "Save flow"}
+        </Button>
+      </div>
+
+      <Dialog
+        open={Boolean(confirmRemove)}
+        onOpenChange={(next) => {
+          if (!next) setConfirmRemove(null);
+        }}
+      >
+        {confirmRemove && (
+          <DialogContent title="Remove custom flow" size="sm">
+            <DialogHeader>
+              <DialogTitle>
+                Remove the custom flow for{" "}
+                {lookupPartyName(confirmRemove.card_code, confirmRemove.category) ||
+                  confirmRemove.card_name ||
+                  confirmRemove.card_code}
+                ?
+              </DialogTitle>
+            </DialogHeader>
+            <DialogBody>
+              <Notice tone="hold">
+                Their {confirmRemove.flow_label || confirmRemove.flow_type} orders go back to the
+                global flow from the next order onwards. Orders already in progress keep the stages
+                they started with.
+              </Notice>
+            </DialogBody>
+            <DialogFooter>
+              <Button onClick={() => setConfirmRemove(null)}>Cancel</Button>
+              <Button variant="danger" onClick={() => void removeConfiguredParty()}>
+                Remove override
+              </Button>
+            </DialogFooter>
+          </DialogContent>
         )}
-      </div>
-
-      <div className="ofs-actions">
-        <button type="button" className="ofs-save" onClick={handleSave} disabled={saving}>
-          {saving ? "Saving..." : isPartyMode ? "Save Party Flow" : "Save Flow"}
-        </button>
-      </div>
-
-      {successVisible ? (
-        <div className="ofs-modal-backdrop" onClick={() => setSuccessVisible(false)}>
-          <div className="ofs-modal" onClick={(event) => event.stopPropagation()}>
-            <div className="ofs-success-icon">
-              <HiCheck />
-            </div>
-            <h2>{isPartyMode ? "Party Flow Saved" : "Flow Saved"}</h2>
-            <p>
-              {isPartyMode
-                ? "The selected parties now use this custom order flow."
-                : "Order flow settings saved successfully."}
-            </p>
-            <div className="ofs-modal-actions">
-              <button type="button" className="ofs-secondary" onClick={() => setSuccessVisible(false)}>
-                Keep Editing
-              </button>
-              <button type="button" className="ofs-primary" onClick={() => navigate("/Dashboard")}>
-                <HiSquares2X2 />
-                Go to Dashboard
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-    </div>
+      </Dialog>
+    </Page>
   );
 }

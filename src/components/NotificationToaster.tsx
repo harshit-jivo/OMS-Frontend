@@ -1,43 +1,34 @@
-import { useEffect, useState } from "react";
-
 /**
- * Non-intrusive in-app notification popup (Phase 3, Task 3).
+ * The app's toast stack — top right, auto-dismissing.
  *
- * A tiny external store drives a stack of auto-dismissing toasts rendered
- * top-right. `showToast()` can be called from anywhere; mount
- * <NotificationToaster/> once near the app root.
+ * A tiny external store drives it; `showToast()` can be called from anywhere
+ * (including from service code outside the React tree), and this is mounted
+ * once by the shell. It renders EVERY toast in the app.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * THE LIVE REGION IS MOUNTED ALWAYS, AND THAT IS THE POINT
+ * ─────────────────────────────────────────────────────────────────────────
+ * This used to `return null` when the stack was empty, and put
+ * `role="status" aria-live="polite"` on each CARD. Both halves of that are the
+ * classic way to build an aria-live region that never announces anything: the
+ * region has to already be in the accessibility tree when the message arrives,
+ * because what is announced is the CHANGE to a live region — not the arrival
+ * of one that is already full.
+ *
+ * So every toast in the app was silent to a screen reader. That matters more
+ * here than in most places: these toasts are how the app confirms that a save
+ * WORKED. "Assignments saved" is often the only confirmation there is.
+ *
+ * The wrapper is therefore rendered unconditionally and only the cards
+ * conditionally, and the live region is the CONTAINER — one region the stack
+ * is announced from, rather than one per card.
  */
+import { useEffect, useState } from "react";
+import { HiOutlineBell, HiOutlineXMark } from "react-icons/hi2";
 
-export type ToastData = {
-  id: number;
-  title: string;
-  message: string;
-  orderNumber?: string | null;
-  onAction?: () => void;
-  actionLabel?: string;
-};
-
-type ToastInput = Omit<ToastData, "id">;
-
-const AUTO_DISMISS_MS = 6000;
-
-let seq = 1;
-let toasts: ToastData[] = [];
-const listeners = new Set<(items: ToastData[]) => void>();
-
-const emit = () => listeners.forEach((l) => l([...toasts]));
-
-export const showToast = (input: ToastInput): number => {
-  const id = seq++;
-  toasts = [{ id, ...input }, ...toasts].slice(0, 4); // cap the stack
-  emit();
-  return id;
-};
-
-export const dismissToast = (id: number) => {
-  toasts = toasts.filter((t) => t.id !== id);
-  emit();
-};
+import { Button } from "@/components/ui/button";
+import { AUTO_DISMISS_MS, dismissToast, subscribeToToasts } from "@/lib/toastStore";
+import type { ToastData } from "@/lib/toastStore";
 
 function ToastCard({ toast }: { toast: ToastData }) {
   useEffect(() => {
@@ -47,121 +38,53 @@ function ToastCard({ toast }: { toast: ToastData }) {
 
   return (
     <div
-      role="status"
-      aria-live="polite"
-      style={{
-        pointerEvents: "auto",
-        width: "340px",
-        background: "#ffffff",
-        borderRadius: "12px",
-        border: "1px solid #e2e8f0",
-        boxShadow: "0 10px 25px rgba(0,0,0,0.12)",
-        padding: "14px 16px",
-        display: "flex",
-        gap: "12px",
-        alignItems: "flex-start",
-      }}
+      data-slot="toast"
+      className={
+        "pointer-events-auto flex w-[min(92vw,360px)] gap-2.5 rounded-card border border-line " +
+        "bg-card p-3 shadow-panel motion-safe:animate-[oms-fade-slide-up_0.18s_ease-out]"
+      }
     >
-      <div
+      <span
         aria-hidden="true"
-        style={{
-          flexShrink: 0,
-          width: "36px",
-          height: "36px",
-          borderRadius: "50%",
-          background: "#eff6ff",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
+        className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-brand-soft text-brand"
       >
-        <svg
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="#2563eb"
-          strokeWidth="1.8"
-          style={{ width: "20px", height: "20px" }}
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
-          />
-        </svg>
-      </div>
+        <HiOutlineBell />
+      </span>
 
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: "8px",
-          }}
-        >
-          <span
-            style={{ fontWeight: 700, fontSize: "0.9rem", color: "#0f172a" }}
-          >
-            {toast.title}
-          </span>
-          <button
+      <div className="min-w-0 flex-1">
+        <div className="flex items-start justify-between gap-2">
+          <span className="text-[13px] font-semibold text-ink">{toast.title}</span>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="-mr-1 -mt-1 size-6 shrink-0"
             onClick={() => dismissToast(toast.id)}
-            aria-label="Dismiss"
-            style={{
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              fontSize: "18px",
-              lineHeight: 1,
-              color: "#94a3b8",
-              padding: 0,
-            }}
+            aria-label={"Dismiss: " + toast.title}
           >
-            &times;
-          </button>
+            <HiOutlineXMark />
+          </Button>
         </div>
-        <p
-          style={{
-            margin: "4px 0 0",
-            fontSize: "0.85rem",
-            color: "#475569",
-            lineHeight: 1.4,
-          }}
-        >
-          {toast.message}
-        </p>
+
+        <p className="m-0 mt-0.5 text-[12.5px] leading-snug text-body">{toast.message}</p>
+
         {toast.orderNumber ? (
-          <p
-            style={{
-              margin: "6px 0 0",
-              fontSize: "0.75rem",
-              color: "#64748b",
-              fontWeight: 600,
-            }}
-          >
+          <p className="m-0 mt-1 font-mono text-[11.5px] text-subtle">
             Order #{toast.orderNumber}
           </p>
         ) : null}
+
         {toast.onAction ? (
-          <button
+          <Button
+            variant="link"
+            size="inline"
+            className="mt-1.5"
             onClick={() => {
               toast.onAction?.();
               dismissToast(toast.id);
             }}
-            style={{
-              marginTop: "10px",
-              background: "#2563eb",
-              color: "#fff",
-              border: "none",
-              borderRadius: "8px",
-              padding: "6px 14px",
-              fontSize: "0.8rem",
-              fontWeight: 600,
-              cursor: "pointer",
-            }}
           >
             {toast.actionLabel || "View order"}
-          </button>
+          </Button>
         ) : null}
       </div>
     </div>
@@ -171,28 +94,17 @@ function ToastCard({ toast }: { toast: ToastData }) {
 export default function NotificationToaster() {
   const [items, setItems] = useState<ToastData[]>([]);
 
-  useEffect(() => {
-    const listener = (next: ToastData[]) => setItems(next);
-    listeners.add(listener);
-    return () => {
-      listeners.delete(listener);
-    };
-  }, []);
-
-  if (!items.length) return null;
+  useEffect(() => subscribeToToasts(setItems), []);
 
   return (
     <div
-      style={{
-        position: "fixed",
-        top: "16px",
-        right: "16px",
-        zIndex: 2000,
-        display: "flex",
-        flexDirection: "column",
-        gap: "10px",
-        pointerEvents: "none",
-      }}
+      data-slot="toast-region"
+      role="status"
+      aria-live="polite"
+      // `pointer-events-none` on the container, `auto` on each card: the strip
+      // spans the corner of the screen and must not swallow clicks meant for
+      // the page underneath it when it is empty.
+      className="pointer-events-none fixed right-4 top-4 z-[2000] flex flex-col gap-2.5"
     >
       {items.map((toast) => (
         <ToastCard key={toast.id} toast={toast} />

@@ -22,6 +22,9 @@ export type DeviceRow = {
   email: string;
   role: string;
   status: DeviceStatus;
+  /** "latest" | "old" vs the active version policy for this device's platform;
+   *  "unknown" when the platform has no policy (or is web). Server-derived. */
+  update_status: "latest" | "old" | "unknown";
   platform: string;
   app_type: string;
   app_version: string;
@@ -92,6 +95,42 @@ export type AnalyticsCards = {
   status_counts: StatusCounts;
   /** The server's rule set, so the UI can explain itself without hardcoding. */
   status_thresholds: StatusThresholds;
+  /** Latest-vs-old device counts per mobile platform, vs the active policy. */
+  version_policy: Record<MobilePlatform, VersionPolicyStat>;
+};
+
+export type MobilePlatform = "ANDROID" | "IOS";
+
+export type VersionPolicyStat = {
+  required_build: number | null;
+  required_version: string | null;
+  total: number;
+  latest: number;
+  old: number;
+};
+
+/** One bar in the version-adoption chart. */
+export type AdoptionBuild = {
+  build_number: number;
+  devices: number;
+  users: number;
+};
+
+export type PlatformAdoption = {
+  required_build: number | null;
+  builds: AdoptionBuild[];
+};
+
+/** An editable mobile version policy (ANDROID / IOS). */
+export type VersionPolicy = {
+  id: number;
+  platform: MobilePlatform;
+  required_version: string;
+  required_build: number;
+  store_url: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
 };
 
 export type CountRow = Record<string, string | number> & { count: number };
@@ -103,6 +142,7 @@ export type AnalyticsCharts = {
   browser_distribution: CountRow[];
   os_distribution: CountRow[];
   devices_by_last_seen: { date: string; count: number }[];
+  version_adoption: Record<MobilePlatform, PlatformAdoption>;
 };
 
 export type Analytics = { cards: AnalyticsCards; charts: AnalyticsCharts };
@@ -135,6 +175,25 @@ export const deviceAdminService = {
     const res = await api.get("/admin/devices/analytics/", {
       params: clean({ days }),
     });
+    return res.data.data;
+  },
+
+  /** Load both mobile policies at once (either may be null). */
+  async getVersionPolicies(): Promise<
+    Record<MobilePlatform, VersionPolicy | null>
+  > {
+    const res = await api.get("/admin/version-policy/");
+    return res.data.data;
+  },
+
+  /** Upsert one platform's policy. Returns the saved row. */
+  async saveVersionPolicy(payload: {
+    platform: MobilePlatform;
+    required_version: string;
+    required_build: number;
+    store_url: string;
+  }): Promise<VersionPolicy> {
+    const res = await api.put("/admin/version-policy/", payload);
     return res.data.data;
   },
 };

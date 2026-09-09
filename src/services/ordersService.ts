@@ -92,6 +92,25 @@ export interface PartyProduct {
   sal_pack_unit: string | null;
   tax_rate: string | number;
   basic_rate: string | number;
+  // Combo packs ("A + B") ship B free of cost. `free_item` is present only when
+  // the combo has a mapping configured on the party-product assignment.
+  is_combo?: boolean;
+  free_item_code?: string | null;
+  free_qty_per_unit?: number | null;
+  free_item?: ComboFreeProduct | null;
+}
+
+export interface ComboFreeProduct {
+  item_code: string;
+  item_name: string;
+  category: string;
+  brand: string | null;
+  variety: string | null;
+  sub_group: string | null;
+  sal_factor2: string | number;
+  sal_pack_unit: string | null;
+  tax_rate: string | number;
+  basic_rate: string | number;
 }
   
 export interface SchemeProduct {
@@ -147,8 +166,27 @@ export interface OrderItemScheme {
   scheme_id?: number;
   scheme_name?: string | null;
   scheme_item_code?: string | null;
+  /** The giveaway item's NAME, resolved server-side. A STATE- or VENDOR-scoped
+   *  scheme gives away items the party holds no assignment for, so the client's
+   *  own catalogues cannot name them. */
+  scheme_item_name?: string | null;
   scheme_qty?: number | string;
   qty_scheme?: number | string;
+
+  // Scheme engine v2 (Backend/docs/scheme-architecture.md). `benefit_item_code`
+  // is the snapshot SAP actually ships, so editing a scheme later cannot change
+  // what an already-approved order sends.
+  scheme_v2_id?: number;
+  benefit_id?: number;
+  benefit_item_code?: string | null;
+  /** The giveaway as the scheme spelled it ("1 BOX"); `scheme_qty` is the same
+   *  amount in pieces, which is the only unit SAP accepts. */
+  benefit_uom?: string;
+  benefit_qty?: number | string;
+  computed_qty?: number | string;
+  is_manual_override?: boolean;
+  scope_type?: string;
+  scope_value?: string;
 }
 
 export interface OrderItem {
@@ -181,9 +219,19 @@ export interface OrderItem {
   scheme_id?: number;
   schemes?: OrderItemScheme[];
   total_ltrs: number;
-  // Legacy: zero-priced companion line written by the old combo feature. Kept
-  // read-only so editing an order created back then still filters it out.
+  // Zero-priced line auto-added for the free half of a combo pack.
   is_auto_free?: boolean;
+  combo_source_code?: string | null;
+  /**
+   * The paid product a mapped combo actually bills as.
+   *
+   * A combo pack ("A + B") is a wrapper around two real products. The order
+   * keeps the COMBO's own code deliberately — it is what the customer bought
+   * and what scheme triggers match on — while SAP is sent this one instead.
+   * The approval screens show it so an auditor approves the code that ships.
+   * Null for anything that is not a mapped combo.
+   */
+  combo_parent_item_code?: string | null;
 }
 
 export interface CreateOrder {
@@ -302,7 +350,21 @@ export interface RateApproval {
 
 export interface Order {
   id: number;
-  status?: number;
+  /**
+   * The status CODE — "BILLING_REJECTED", "APPROVED", "REJECTED".
+   *
+   * Typed `number` until now, which was simply wrong: the backend sends
+   * `serializers.CharField(source="status.code")` (orders/serializers.py:451).
+   * Both readers already coerced it with `String(...)`, so nothing behaved
+   * badly — but the type said every comparison against a code string was
+   * comparing a number to a literal, i.e. dead code. The tracking page's
+   * whole accepted/rejected vocabulary is built on those comparisons, and
+   * anyone trusting the type would have deleted them.
+   *
+   * `status_display` is the human label ("Rejected by Auditor"); this is the
+   * machine one. Neither is the numeric id — that is `status_id`.
+   */
+  status?: string;
   order_number: string;
   order_type?: "PARTY" | "STAFF";
   employee_id?: string;
@@ -413,6 +475,11 @@ export interface OrderStockCheck {
 export type ItemSchemeDisplay = {
   name: string;
   qty: string | number;
+  /** The giveaway ITEM — what ships free. Blank on legacy rows. */
+  itemCode?: string;
+  itemName?: string;
+  /** e.g. "STATE DL" — how a v2 scheme was targeted. */
+  scope?: string;
 };
 
 const toNumber = (value: string | number | null | undefined) =>
@@ -425,11 +492,25 @@ export const getOrderItemSchemes = (item: OrderItem): ItemSchemeDisplay[] => {
     return schemes.map((scheme) => ({
       name: scheme.scheme_name || scheme.scheme_item_code || "",
       qty: scheme.scheme_qty ?? scheme.qty_scheme ?? 0,
+      // What is actually GIVEN AWAY, as opposed to the offer's name. The two
+      // are different things and the approval table needs both: "BUY 1 GET 1
+      // FREE" is the offer, "EXTRA LIGHT OLIVE 1 LTR" is the bottle.
+      itemCode: scheme.scheme_item_code || scheme.benefit_item_code || "",
+      itemName: scheme.scheme_item_name || "",
+      scope: [scheme.scope_type, scheme.scope_value].filter(Boolean).join(" "),
     }));
   }
 
   return item.scheme_name
-    ? [{ name: item.scheme_name, qty: item.scheme_qty ?? item.qty_scheme ?? 0 }]
+    ? [
+        {
+          name: item.scheme_name,
+          qty: item.scheme_qty ?? item.qty_scheme ?? 0,
+          itemCode: "",
+          itemName: "",
+          scope: "",
+        },
+      ]
     : [];
 };
 
@@ -491,7 +572,12 @@ const normalizeOrderItem = (item: OrderItem): OrderItem => {
   //   ((item as any).total_ltrs !== undefined
   //     ? Math.max(toNumber((item as any).total_ltrs) - toNumber(item.ltrs), 0)
   //     : schemeQty);
-  const totalLtrs = (item as any).total_ltrs ?? toNumber(item.ltrs) + toNumber(schemeQty);
+  // `total_ltrs` is sent by the API but is not on `OrderItem` — it is a
+  // computed field the backend adds, so the cast names it rather than opening
+  // the whole row to `any`.
+  const totalLtrs =
+    (item as OrderItem & { total_ltrs?: number | string | null }).total_ltrs ??
+    toNumber(item.ltrs) + toNumber(schemeQty);
 
   return {
     ...item,
@@ -505,6 +591,60 @@ const normalizeOrderItem = (item: OrderItem): OrderItem => {
 const normalizeOrder = (order: Order): Order => ({
   ...order,
   items: Array.isArray(order.items) ? order.items.map(normalizeOrderItem) : [],
+});
+
+/**
+ * One outgoing order line, with every number actually a number.
+ *
+ * The wizard's inputs are text inputs, so `qty`, `boxes`, `tax_rate` and the
+ * rest all arrive as strings; the backend's `to_float` would cope, but the
+ * payload is also logged, diffed and replayed, and a payload of strings is a
+ * payload nobody can compare.
+ *
+ * `createOrder` and `saveDraft` had a character-identical copy of this each.
+ * They are one function now because they were never allowed to differ: both
+ * post to `/orders/create/` and are parsed by the same code.
+ */
+const outgoingOrderItem = (item: OrderItem) => ({
+  ...item,
+  sub_group: item.sub_group ?? item.variety,
+  qty: Number(item.qty),
+  pcs: Number(item.pcs),
+  boxes: Number(item.boxes),
+  ltrs: Number(item.ltrs),
+  price_list_basic: Number(item.price_list_basic),
+  basic_price: Number(item.basic_price),
+  tax_rate: Number(item.tax_rate),
+  total: Number(item.total),
+  scheme_id: item.scheme_id ? Number(item.scheme_id) : undefined,
+  scheme_qty: item.scheme_qty ? Number(item.scheme_qty) : 0,
+  schemes: Array.isArray(item.schemes) ? item.schemes.map(outgoingScheme) : undefined,
+  total_ltrs: item.total_ltrs,
+});
+
+/**
+ * One scheme on an outgoing line — SPREAD, not rebuilt.
+ *
+ * This used to return a fresh `{scheme_id, scheme_qty}`, which silently
+ * discarded every other key. That was fine for a legacy hand-picked scheme,
+ * which has nothing else, and wrong for one the v2 engine resolved: the
+ * backend qualifies a v2 entry on `scheme_v2_id` alone
+ * (orders/services/order_items.py, `_extract_order_item_schemes`), so an entry
+ * stripped of it has neither a scheme nor a scheme_v2_id and is skipped —
+ * every engine-resolved giveaway placed through Add Sales was dropped on the
+ * wire. The Mart flow never hit this because `createMartOrder` posts its
+ * payload unmapped.
+ *
+ * `scheme_id` is only emitted when the source actually has one: `Number(
+ * undefined)` is NaN, which serialises to `null` and reaches the backend as a
+ * scheme lookup for nothing.
+ */
+const outgoingScheme = (scheme: OrderItemScheme) => ({
+  ...scheme,
+  ...(scheme.scheme_id === undefined || scheme.scheme_id === null
+    ? {}
+    : { scheme_id: Number(scheme.scheme_id) }),
+  scheme_qty: Number(scheme.scheme_qty ?? scheme.qty_scheme ?? 0),
 });
 
 
@@ -601,27 +741,7 @@ export const ordersService = {
   createOrder: async (formData: CreateOrder) => {
     const payload = {
       ...formData,
-      items: formData.items.map((item) => ({
-        ...item,
-        sub_group: item.sub_group ?? item.variety,
-        qty: Number(item.qty),
-        pcs: Number(item.pcs),
-        boxes: Number(item.boxes),
-        ltrs: Number(item.ltrs),
-        price_list_basic: Number(item.price_list_basic),
-        basic_price: Number(item.basic_price),
-        tax_rate: Number(item.tax_rate),
-        total: Number(item.total),
-        scheme_id: item.scheme_id ? Number(item.scheme_id) : undefined,
-        scheme_qty: item.scheme_qty ? Number(item.scheme_qty) : 0,
-        schemes: Array.isArray(item.schemes)
-          ? item.schemes.map((scheme) => ({
-              scheme_id: Number(scheme.scheme_id),
-              scheme_qty: Number(scheme.scheme_qty ?? scheme.qty_scheme ?? 0),
-            }))
-          : undefined,
-        total_ltrs: item.total_ltrs,
-      })),
+      items: formData.items.map(outgoingOrderItem),
     };
     const response = await api.post("/orders/create/", payload);
     return response.data;
@@ -690,27 +810,7 @@ export const ordersService = {
       ...formData,
       ...(orderId ? { order_id: orderId } : {}),
       is_draft: true,
-      items: items.map((item) => ({
-        ...item,
-        sub_group: item.sub_group ?? item.variety,
-        qty: Number(item.qty),
-        pcs: Number(item.pcs),
-        boxes: Number(item.boxes),
-        ltrs: Number(item.ltrs),
-        price_list_basic: Number(item.price_list_basic),
-        basic_price: Number(item.basic_price),
-        tax_rate: Number(item.tax_rate),
-        total: Number(item.total),
-        scheme_id: item.scheme_id ? Number(item.scheme_id) : undefined,
-        scheme_qty: item.scheme_qty ? Number(item.scheme_qty) : 0,
-        schemes: Array.isArray(item.schemes)
-          ? item.schemes.map((scheme) => ({
-              scheme_id: Number(scheme.scheme_id),
-              scheme_qty: Number(scheme.scheme_qty ?? scheme.qty_scheme ?? 0),
-            }))
-          : undefined,
-        total_ltrs: item.total_ltrs,
-      })),
+      items: items.map(outgoingOrderItem),
     };
     const response = await api.post("/orders/create/", payload);
     return response.data;

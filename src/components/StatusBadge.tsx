@@ -1,15 +1,21 @@
 import type { DeviceStatus } from "../services/deviceAdminService";
-import "./StatusBadge.css";
+import { Badge } from "./ui/badge";
+import { toneForStatus } from "./ui/statusTone";
 
 /**
- * StatusBadge — colour-coded pill for a device's derived activity status.
+ * StatusBadge — the pill for a device's derived activity status.
  *
- * The app had no shared Badge/Chip component (each page defined its own
- * `.xx-badge-*` classes), so this is the first one. Its colours are lifted from
- * the badges already in use (Device/Version Management) so it reads as the same
- * design system rather than a new style, and other pages can adopt it.
+ * This was the app's first attempt at a shared badge, written when each page
+ * still defined its own `.xx-badge-*` classes. Phase 2.2 finished the job it
+ * started, so it is now a thin wrapper: `components/ui/badge.tsx` draws it and
+ * `statusTone.ts` decides the colour, alongside every other status in the app.
  *
- * Identity never rests on colour alone: every badge carries its text label, and
+ * Kept as a named component rather than folded into its two call sites because
+ * it owns something the primitive should not: the LABELS map, which turns a
+ * device's internal status into the words a person reads. That is device
+ * vocabulary, not badge behaviour.
+ *
+ * Identity never rests on colour alone: the text label is always present, and
  * the dot is a CSS shape — no emoji.
  */
 const LABELS: Record<DeviceStatus, string> = {
@@ -28,9 +34,8 @@ export default function StatusBadge({
 }) {
   const label = LABELS[status] ?? String(status);
   return (
-    <span className={`status-badge status-badge-${status}`} title={title || label}>
-      <span className="status-badge-dot" aria-hidden="true" />
+    <Badge tone={toneForStatus(status)} outlined dot title={title || label}>
       {label}
-    </span>
+    </Badge>
   );
 }

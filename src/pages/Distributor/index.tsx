@@ -1,10 +1,50 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { userService } from "../../services/userService";
 import { ordersService, type MartOrderPayload } from "../../services/ordersService";
-import SearchableSelect from "./SearchableSelect";
-import "../../styles/Distributor/Distributor.css";
+import { showToast } from "@/lib/toastStore";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { Button } from "@/components/ui/button";
+import { SearchSelect } from "@/components/ui/dropdown";
+import { Input } from "@/components/ui/form";
+import { Card, Notice, Page, PageHeader, Stat, StatRow } from "@/components/ui/page";
+import {
+  HiOutlineArchiveBox,
+  HiOutlineBeaker,
+  HiOutlineCube,
+  HiOutlineCurrencyRupee,
+  HiOutlinePlus,
+  HiOutlineXMark,
+} from "react-icons/hi2";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { messageFrom } from "@/lib/apiError";
+import { useAuth } from "@/auth";
 
 const COMPANY_MART = 3; // company 3 = Mart, stamped on every distributor order
+/** A `/orders/party-products/` row as it arrives — untyped by the service, and
+ *  read here field by field to build a `PartyProduct`. Only the fields this
+ *  file reads are declared. */
+type PartyProductRow = {
+  item_code?: string;
+  item_name?: string;
+  category?: string;
+  basic_rate?: number | string;
+  brand?: string;
+  variety?: string;
+  sub_group?: string;
+  sal_factor2?: number | string;
+  sal_pack_unit?: number | string;
+  tax_rate?: number | string;
+  updated_at?: string | null;
+};
+
 const DEFAULT_WAREHOUSE_CODE = "GP-FGM"; // distributor orders default to GP-FGM
 
 type PartyAddress = { id: number; full_address: string };
@@ -27,6 +67,9 @@ type PartyAddress = { id: number; full_address: string };
  * nothing is saved yet).
  */
 const CATEGORY = "MART"; // this page only ever deals with the MART category
+
+/** Stable empty, so `productOptions` does not re-sort on every render. */
+const NO_PRODUCTS: PartyProduct[] = [];
 
 // TYPE column in Add Sales is the pack size parsed from the item name (e.g.
 // "1 LTR"), NOT the SAP U_TYPE. Mirror Add_Sales.getProductType exactly so a
@@ -84,13 +127,99 @@ const isCurrentMonth = (iso: string | null | undefined): boolean => {
 };
 
 function Distributor() {
-  const [party, setParty] = useState<{
-    card_code: string;
-    card_name: string;
-  } | null>(null);
-  const [martProducts, setMartProducts] = useState<PartyProduct[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  /*
+   * The whole bootstrap is ONE query, not three chained ones.
+   *
+   * Party -> that party's MART products -> that party's MART addresses is a
+   * strict chain, and the page's own gates are composed from all of it:
+   * `noProducts` is `!loading && !error && martProducts.length === 0`, and the
+   * product picker's placeholder and disabled state read the same flags. Split
+   * into three `enabled`-gated queries, the two downstream ones report
+   * `isPending: true` FOREVER while disabled, so a distributor with no party
+   * assigned would sit on "Loading…" instead of being told what is wrong.
+   *
+   * `userId` is read during render rather than in an effect — the old code did
+   * `if (!userId) { setError(...); setLoading(false); return; }` inside the
+   * fetch effect, which is a setState-in-effect the moment the fetch leaves.
+   */
+  // From the session, not from `localStorage` directly. `Number(undefined)` is
+  // NaN where `Number(null)` was 0, so the `?? ""` keeps the falsy check below
+  // ("no user, no bootstrap") behaving exactly as it did.
+  const { session } = useAuth();
+  const userId = Number(session?.userId ?? "");
+
+  const bootstrap = useQuery({
+    queryKey: ["distributor", "bootstrap", userId],
+    enabled: Boolean(userId),
+    // The party-product assignment carries a month gate (`isCurrentMonth`
+    // below) that decides whether an order may be placed at all, so this must
+    // not be served from a long-lived cache across a month boundary.
+    staleTime: 0,
+    queryFn: async () => {
+      const partiesRes = await userService.getUserParties(userId);
+      const parties = partiesRes?.data?.parties ?? [];
+      // "Every distributor is assigned one party" — take the first.
+      const assigned = parties[0];
+      if (!assigned) return { party: null, martProducts: NO_PRODUCTS, billTo: null, shipTo: null };
+
+      // The RICHER orders endpoint — the same one Add Sales uses — so we get
+      // sal_factor2 / sal_pack_unit / tax_rate / brand / variety needed to
+      // compute the line exactly like a billing order.
+      const prodList = await ordersService.getPartyProduct(assigned.card_code);
+      const martProducts: PartyProduct[] = (Array.isArray(prodList) ? prodList : [])
+        .filter((p: PartyProductRow) => (p.category || "").toUpperCase() === CATEGORY)
+        .map((p: PartyProductRow) => ({
+          // `?? ""` because the row type says these can be absent. They never
+          // are in practice; the coercion is what keeps that assumption from
+          // being made silently, as it was while this was `any`.
+          item_code: p.item_code ?? "",
+          item_name: p.item_name ?? "",
+          category: p.category ?? "",
+          basic_rate: Number(p.basic_rate) || 0,
+          brand: p.brand || "",
+          variety: p.variety || p.sub_group || "",
+          sub_group: p.sub_group || p.variety || "",
+          sal_factor2: Number(p.sal_factor2) || 0,
+          sal_pack_unit: Number(p.sal_pack_unit) || 0,
+          tax_rate: Number(p.tax_rate) || 0,
+          updated_at: p.updated_at ?? null,
+        }));
+
+      // Scope addresses to MART so a party that also has addresses in other
+      // categories cannot surface a non-MART (wrong) one here. A failure is
+      // tolerated: addresses are re-validated at submit time.
+      let billTo: PartyAddress | null = null;
+      let shipTo: PartyAddress | null = null;
+      try {
+        const addr = await ordersService.getPartyAdd(assigned.card_code, CATEGORY);
+        billTo = (addr?.bill_to ?? [])[0] ?? null;
+        shipTo = (addr?.ship_to ?? [])[0] ?? null;
+      } catch {
+        /* ignore */
+      }
+
+      return {
+        party: { card_code: assigned.card_code, card_name: assigned.card_name },
+        martProducts,
+        billTo,
+        shipTo,
+      };
+    },
+  });
+
+  const party = bootstrap.data?.party ?? null;
+  const martProducts = bootstrap.data?.martProducts ?? NO_PRODUCTS;
+  const billTo = bootstrap.data?.billTo ?? null;
+  const shipTo = bootstrap.data?.shipTo ?? null;
+  const loading = Boolean(userId) && bootstrap.isPending;
+
+  const error = !userId
+    ? "Could not identify the logged-in user. Please log in again."
+    : bootstrap.isError
+      ? "Failed to load your assigned party / products. Please try again."
+      : bootstrap.isSuccess && !party
+        ? "No party is assigned to your account. Please contact an administrator."
+        : "";
 
   // Monotonic id so React keys stay stable as rows are added/removed.
   const nextId = useRef(1);
@@ -102,96 +231,9 @@ function Distributor() {
   });
 
   // First bill-to (B) and ship-to (S) address for the party — auto-picked.
-  const [billTo, setBillTo] = useState<PartyAddress | null>(null);
-  const [shipTo, setShipTo] = useState<PartyAddress | null>(null);
 
   const [rows, setRows] = useState<Row[]>([makeRow()]);
   const [submitting, setSubmitting] = useState(false);
-  const [submitMsg, setSubmitMsg] = useState<
-    { kind: "ok" | "err"; text: string } | null
-  >(null);
-
-  useEffect(() => {
-    const userId = Number(localStorage.getItem("user_id"));
-    if (!userId) {
-      setError("Could not identify the logged-in user. Please log in again.");
-      setLoading(false);
-      return;
-    }
-
-    let alive = true;
-    (async () => {
-      try {
-        // 1. Which party is assigned to this distributor?
-        const partiesRes = await userService.getUserParties(userId);
-        const parties = partiesRes?.data?.parties ?? [];
-        if (!parties.length) {
-          if (alive) {
-            setError(
-              "No party is assigned to your account. Please contact an administrator.",
-            );
-          }
-          return;
-        }
-
-        // "Every distributor is assigned one party" — take the first.
-        const assigned = parties[0];
-        if (alive) {
-          setParty({
-            card_code: assigned.card_code,
-            card_name: assigned.card_name,
-          });
-        }
-
-        // 2. That party's assigned products (MART only). Use the RICHER orders
-        //    endpoint — the same one Add Sales uses — so we get sal_factor2 /
-        //    sal_pack_unit / tax_rate / brand / variety needed to compute the
-        //    line exactly like a billing order.
-        const prodList = await ordersService.getPartyProduct(assigned.card_code);
-        const list: PartyProduct[] = (Array.isArray(prodList) ? prodList : [])
-          .filter((p: any) => (p.category || "").toUpperCase() === CATEGORY)
-          .map((p: any) => ({
-            item_code: p.item_code,
-            item_name: p.item_name,
-            category: p.category,
-            basic_rate: Number(p.basic_rate) || 0,
-            brand: p.brand || "",
-            variety: p.variety || p.sub_group || "",
-            sub_group: p.sub_group || p.variety || "",
-            sal_factor2: Number(p.sal_factor2) || 0,
-            sal_pack_unit: Number(p.sal_pack_unit) || 0,
-            tax_rate: Number(p.tax_rate) || 0,
-            updated_at: p.updated_at ?? null,
-          }));
-        if (alive) setMartProducts(list);
-
-        // 3. Auto-pick the party's first MART bill-to and ship-to address.
-        //    Scope to the MART category so a party that also has addresses in
-        //    other categories can't surface a non-MART (wrong) address here.
-        try {
-          const addr = await ordersService.getPartyAdd(assigned.card_code, CATEGORY);
-          if (alive) {
-            setBillTo((addr?.bill_to ?? [])[0] ?? null);
-            setShipTo((addr?.ship_to ?? [])[0] ?? null);
-          }
-        } catch {
-          /* addresses are validated at submit time; ignore load failure here */
-        }
-      } catch {
-        if (alive) {
-          setError(
-            "Failed to load your assigned party / products. Please try again.",
-          );
-        }
-      } finally {
-        if (alive) setLoading(false);
-      }
-    })();
-
-    return () => {
-      alive = false;
-    };
-  }, []);
 
   // Product dropdown options (MART products), sorted by name.
   const productOptions = useMemo(
@@ -301,13 +343,17 @@ function Distributor() {
 
   const onSubmit = async () => {
     if (!party) {
-      setSubmitMsg({ kind: "err", text: "No party is assigned to your account." });
+      showToast({
+        title: "Cannot submit",
+        message: "No party is assigned to your account.",
+      });
       return;
     }
     if (!billTo || !shipTo) {
-      setSubmitMsg({
-        kind: "err",
-        text: "This party has no bill-to / ship-to address configured. Please contact an administrator.",
+      showToast({
+        title: "Cannot submit",
+        message:
+          "This party has no bill-to / ship-to address configured. Please contact an administrator.",
       });
       return;
     }
@@ -357,20 +403,18 @@ function Distributor() {
     };
 
     setSubmitting(true);
-    setSubmitMsg(null);
     try {
       const res = await ordersService.createMartOrder(payload);
-      setSubmitMsg({
-        kind: "ok",
-        text: `Order ${res?.order_number ?? ""} submitted for Mart approval.`,
+      showToast({
+        title: "Order submitted",
+        message: `${res?.order_number ?? "The order"} is with Mart approval.`,
+        orderNumber: res?.order_number ?? null,
       });
       setRows([makeRow()]); // reset the form for the next order
-    } catch (e: any) {
+    } catch (e) {
       const detail =
-        e?.response?.data?.error ||
-        e?.response?.data?.message ||
-        "Failed to submit the order. Please try again.";
-      setSubmitMsg({ kind: "err", text: detail });
+        messageFrom(e, "Failed to submit the order. Please try again.");
+      showToast({ title: "Could not submit the order", message: detail });
     } finally {
       setSubmitting(false);
     }
@@ -379,167 +423,202 @@ function Distributor() {
   const noProducts = !loading && !error && martProducts.length === 0;
 
   return (
-    <div className="distributor-page">
-      <h2 className="distributor-title">Distributor</h2>
+    <Page>
+      <Breadcrumbs items={[{ label: "Distributor" }, { label: "Place an order" }]} />
 
-      {party && (
-        <p className="distributor-party">
-          Party: <strong>{party.card_name}</strong>{" "}
-          <span className="distributor-party-code">({party.card_code})</span>
-        </p>
-      )}
+      <PageHeader
+        title="Distributor"
+        description={
+          party
+            ? `Ordering for ${party.card_name} (${party.card_code}).`
+            : "Pick your products and quantities, then submit for approval."
+        }
+        actions={
+          <Button
+            variant="primary"
+            onClick={onSubmit}
+            disabled={totalProducts === 0 || submitting}
+          >
+            {submitting ? "Submitting…" : "Submit order"}
+          </Button>
+        }
+      />
 
-      {/* Bill To / Ship To are resolved internally for the order payload but not
-          shown to the distributor. */}
+      {error ? (
+        <Notice tone="bad" title="Could not load your products">
+          {error}
+        </Notice>
+      ) : null}
 
-      {error && <div className="distributor-error">{error}</div>}
-      {noProducts && (
-        <div className="distributor-error">
-          No MART products are assigned to your party yet.
-        </div>
-      )}
+      {noProducts ? (
+        <Notice tone="hold" title="Nothing to order">
+          No MART products are assigned to your party yet. Ask your account
+          manager to assign them before placing an order.
+        </Notice>
+      ) : null}
 
-      {!error && (
+      {!error ? (
         <>
-          <div className="distributor-table-wrap">
-            <table className="distributor-table">
-              <thead>
-                <tr>
-                  <th className="distributor-prod-col">Product</th>
-                  <th className="distributor-rate-col">Basic Rate</th>
-                  <th className="distributor-num-col">PCS</th>
-                  <th className="distributor-qty-col">Boxes</th>
-                  <th className="distributor-num-col">Qty</th>
-                  <th className="distributor-num-col">Ltrs</th>
-                  <th className="distributor-num-col">Amount</th>
-                  <th className="distributor-action-col"></th>
-                </tr>
-              </thead>
-              <tbody>
+          {/* The running totals, above the lines rather than under them.
+              "What am I about to commit to" is the thing being watched while
+              the quantities are typed, and a footer strip means scrolling to
+              the bottom to see it change. */}
+          <StatRow>
+            <Stat
+              icon={HiOutlineCube}
+              tone="neutral"
+              label="Products"
+              value={totalProducts}
+              loading={loading}
+            />
+            <Stat
+              icon={HiOutlineArchiveBox}
+              tone="neutral"
+              label="Boxes"
+              value={totalBoxes}
+              loading={loading}
+            />
+            <Stat
+              icon={HiOutlineBeaker}
+              tone="neutral"
+              label="Total Ltrs"
+              value={inr(totalLtrs)}
+              loading={loading}
+            />
+            <Stat
+              icon={HiOutlineCurrencyRupee}
+              tone="brand"
+              label="Total Amount"
+              value={inr(totalAmount)}
+              hint={`${inr(totalQty, 0)} qty`}
+              loading={loading}
+            />
+          </StatRow>
+
+          <Card className="overflow-visible p-0">
+            {/*
+              `overflow-visible`, NOT the usual `overflow-x-auto` wrapper: each
+              row holds a `SearchSelect` whose panel is absolutely positioned,
+              and a scroll container would clip it to the table. The table is
+              narrow enough here that nothing needs to scroll.
+            */}
+            <Table density="compact">
+              <TableHeader>
+                <TableRow className="bg-surface hover:bg-surface">
+                  <TableHead className="min-w-[260px]">Product</TableHead>
+                  <TableHead className="text-right">Basic Rate</TableHead>
+                  <TableHead className="text-right">PCS</TableHead>
+                  <TableHead className="w-[110px]">Boxes</TableHead>
+                  <TableHead className="w-[110px]">Qty</TableHead>
+                  <TableHead className="text-right">Ltrs</TableHead>
+                  <TableHead className="text-right">Amount</TableHead>
+                  <TableHead className="w-10" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {rows.map((row) => {
                   const { rate, pcs, ltrs, amount } = deriveRow(row);
                   const hasItem = Boolean(row.item_code);
                   return (
-                    <tr key={row.id}>
-                      <td className="distributor-prod-col">
-                        <SearchableSelect
+                    <TableRow key={row.id}>
+                      <TableCell className="min-w-[260px] align-top">
+                        {/*
+                          Was `./SearchableSelect` — 130 lines of hand-written
+                          combobox with its own outside-click listener, its own
+                          highlight cursor and an `onMouseDown` that existed
+                          only to beat its own input's blur. `ui/dropdown` is
+                          the same control (DESIGN_SYSTEM §5a), and it was the
+                          last importer of `Distributor.css`.
+                        */}
+                        <SearchSelect
+                          id={"product-" + row.id}
                           value={row.item_code}
                           options={productOptions}
-                          onChange={(code) => setProduct(row.id, code)}
+                          onChange={(code) => setProduct(row.id, String(code))}
                           disabled={loading || martProducts.length === 0}
-                          placeholder={
-                            loading ? "Loading…" : "Search product…"
-                          }
+                          placeholder={loading ? "Loading…" : "Search product…"}
+                          searchPlaceholder="Product name or code…"
+                          emptyText="No product matches"
+                          // The MART list runs to hundreds of items.
+                          maxShown={60}
                         />
-                        {row.error && (
-                          <div className="distributor-row-error">
+                        {/* A stale party-product assignment blocks the line.
+                            The message sits under the product it is about,
+                            not in a summary at the bottom. */}
+                        {row.error ? (
+                          <p className="mt-1 text-[11.5px] leading-snug text-danger">
                             {row.error}
-                          </div>
-                        )}
-                      </td>
-                      <td className="distributor-rate-col">
+                          </p>
+                        ) : null}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
                         {hasItem ? rate.toFixed(2) : "—"}
-                      </td>
-                      <td className="distributor-num-col">
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
                         {hasItem ? pcs : "—"}
-                      </td>
-                      <td className="distributor-qty-col">
-                        <input
+                      </TableCell>
+                      <TableCell>
+                        <Input
                           type="number"
                           min={0}
                           value={row.boxes || ""}
                           onChange={(e) => setBoxes(row.id, e.target.value)}
                           placeholder="0"
+                          aria-label="Boxes"
                           disabled={!hasItem}
+                          className="h-control-sm text-right tabular-nums"
                         />
-                      </td>
-                      <td className="distributor-qty-col">
-                        <input
+                      </TableCell>
+                      <TableCell>
+                        <Input
                           type="number"
                           min={0}
                           value={row.qty || ""}
                           onChange={(e) => setQty(row.id, e.target.value)}
                           placeholder="0"
+                          aria-label="Qty"
                           disabled={!hasItem}
+                          className="h-control-sm text-right tabular-nums"
                         />
-                      </td>
-                      <td className="distributor-num-col">
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
                         {hasItem ? ltrs.toFixed(2) : "—"}
-                      </td>
-                      <td className="distributor-num-col">
+                      </TableCell>
+                      <TableCell className="text-right font-semibold tabular-nums text-ink">
                         {hasItem ? amount.toFixed(2) : "—"}
-                      </td>
-                      <td className="distributor-action-col">
-                        <button
-                          type="button"
-                          className="distributor-remove"
+                      </TableCell>
+                      <TableCell>
+                        <Button
+                          variant="ghost"
+                          size="icon"
                           onClick={() => removeRow(row.id)}
                           aria-label="Remove row"
+                          title="Remove row"
+                          className="text-subtle hover:bg-danger-soft hover:text-danger"
                         >
-                          Cancel
-                        </button>
-                      </td>
-                    </tr>
+                          <HiOutlineXMark aria-hidden="true" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
                   );
                 })}
-              </tbody>
-            </table>
-          </div>
+              </TableBody>
+            </Table>
 
-          <div className="distributor-actions">
-            <button
-              type="button"
-              className="distributor-add"
-              onClick={addRow}
-              disabled={loading || martProducts.length === 0}
-            >
-              + Add
-            </button>
-          </div>
-
-          {/* Totals + submit */}
-          <div className="distributor-footer">
-            <div className="distributor-totals">
-              <span>
-                Total Products: <strong>{totalProducts}</strong>
-              </span>
-              <span>
-                Total Boxes: <strong>{totalBoxes}</strong>
-              </span>
-              <span>
-                Total Quantity: <strong>{inr(totalQty, 0)}</strong>
-              </span>
-              <span>
-                Total Ltrs: <strong>{inr(totalLtrs)}</strong>
-              </span>
-              <span>
-                Total Amount: <strong>{inr(totalAmount)}</strong>
-              </span>
+            <div className="border-t border-line p-2">
+              <Button
+                variant="ghost"
+                block
+                onClick={addRow}
+                disabled={loading || martProducts.length === 0}
+              >
+                <HiOutlinePlus aria-hidden="true" /> Add row
+              </Button>
             </div>
-            <button
-              type="button"
-              className="distributor-submit"
-              onClick={onSubmit}
-              disabled={totalProducts === 0 || submitting}
-            >
-              {submitting ? "Submitting…" : "Submit"}
-            </button>
-          </div>
-
-          {submitMsg && (
-            <div
-              className={
-                submitMsg.kind === "ok"
-                  ? "distributor-success"
-                  : "distributor-error"
-              }
-            >
-              {submitMsg.text}
-            </div>
-          )}
+          </Card>
         </>
-      )}
-    </div>
+      ) : null}
+    </Page>
   );
 }
 

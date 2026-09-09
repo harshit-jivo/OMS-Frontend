@@ -1,0 +1,34 @@
+{
+  /*
+   * Playwright specs, the harness, and the two tool configs.
+   *
+   * These were type-checked by NOTHING before this file existed: `tsc -b`
+   * builds `tsconfig.app.json` (src only) and `tsconfig.node.json`
+   * (vite.config.ts), so a type error in the visual-regression harness — the
+   * thing whose whole job is to fail loudly — would have shipped silently.
+   *
+   * `erasableSyntaxOnly` is deliberately NOT inherited: the harness subclasses
+   * `Date` to freeze the clock, which is real runtime syntax and correct here.
+   */
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.e2e.tsbuildinfo",
+    "target": "ES2023",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "types": ["node"],
+    "skipLibCheck": true,
+
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true
+  },
+  "include": ["e2e", "playwright.config.ts", "vitest.config.ts"]
+}

@@ -1,13 +1,19 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  HiEye,
-  HiPencilSquare,
-  HiCheckCircle,
-  HiXCircle,
-  HiArrowDownTray,
-  HiArrowPath,
+  HiOutlineArrowDownTray,
+  HiOutlineArrowPath,
+  HiOutlineCheckCircle,
+  HiOutlineExclamationTriangle,
+  HiOutlineEye,
+  HiOutlineInbox,
+  HiOutlinePencilSquare,
+  HiOutlineQueueList,
+  HiOutlineShoppingCart,
+  HiOutlineXCircle,
 } from "react-icons/hi2";
+
 import {
   ordersService,
   getOrderItemTotalLtrs,
@@ -17,19 +23,77 @@ import {
   type SalesOrderSapStatus,
 } from "../../services/ordersService";
 import { startExcelExport, exportDateStamp } from "../../utils/excelExport";
-import ItemSection from "../../components/order-items/ItemSection";
-import PartyHeader from "../../components/order-items/PartyHeader";
-import "../../styles/Auditor_Order.css";
-import "../../styles/MartApproval/MartApproval.css";
+import { messageFrom } from "@/lib/apiError";
+import { showToast } from "@/lib/toastStore";
+import { Badge } from "@/components/ui/badge";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { Button } from "@/components/ui/button";
+import { DetailField, DetailGrid } from "@/components/ui/detail";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  EmptyState,
+  Notice,
+  Page,
+  PageHeader,
+  Stat,
+  StatRow,
+} from "@/components/ui/page";
+import { TableSkeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Tab, TabList } from "@/components/ui/tabs";
+import { toneForStatus } from "@/components/ui/statusTone";
+import { OrderItemsTable } from "@/components/orders/OrderItemsTable";
+import { OrderTotalsRow } from "@/components/orders/OrderTotals";
+import { orderTotals } from "@/components/orders/orderDetail";
 
 /**
- * Mart Approval — the "Pending Orders" queue for the mart_approval role.
+ * Mart Approval — the queue for the mart_approval role.
  *
- * Row actions: See (full order detail page, reusing the billing detail view),
- * Edit (opens the full Add Sales form), Approve (confirmation popup), Reject
- * (reason required) and Download (Excel). Edit / Approve / Reject only apply
- * while the order is still pending.
+ * Row actions: View, Edit (opens the full Add Sales form), Approve, Reject
+ * (reason required) and Download. Edit / Approve / Reject only apply while the
+ * order is still pending.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * THE SAP TAB IS WHAT MAKES THIS DIFFERENT FROM THE OTHER QUEUES
+ * ─────────────────────────────────────────────────────────────────────────
+ * Approving here pushes to SAP, and that push can FAIL — leaving the order
+ * "Mart Approved" rather than "Completed", visible on the Approved tab with
+ * an error from SAP attached. Such an order gets Edit and "Resend to SAP"
+ * back, which no other approval screen has. A successfully-created one is
+ * read-only: view it, nothing more.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * CONVERSION NOTE
+ * ─────────────────────────────────────────────────────────────────────────
+ * This was the last page importing `styles/Auditor_Order.css` — it borrowed
+ * the auditor detail view's classes wholesale for a screen that is not the
+ * auditor's. With it converted, that 780-line stylesheet has no consumers.
+ *
+ * The inline `mart-error` / `mart-success` banners are gone: a message that
+ * pushes the table down as it appears, and stays until the next action
+ * replaces it, is what the toaster is for. The LOAD failure is not a toast —
+ * it is a persistent state of the list, so it renders where the rows would be.
  */
+
+/** Stable empties, so the render does not see a new identity every pass. */
+const NO_MART_ORDERS: MartOrderSummary[] = [];
+const NO_SAP_STATUSES: Record<string, SalesOrderSapStatus> = {};
+
 type TabKey = "pending" | "approved" | "rejected";
 const TABS: { key: TabKey; label: string }[] = [
   { key: "pending", label: "Pending" },
@@ -49,14 +113,40 @@ function MartApproval() {
   const navigate = useNavigate();
 
   const [tab, setTab] = useState<TabKey>("pending");
-  const [orders, setOrders] = useState<MartOrderSummary[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(
-    null,
-  );
+  const queryClient = useQueryClient();
+  /*
+   * The list and the SAP statuses stay in ONE queryFn on purpose: the statuses
+   * are looked up FROM the list's ids, and the old code force-cleared them to
+   * {} on every non-Approved tab so a stale map could never paint "Created in
+   * SAP" onto a Pending row. Two queries would reintroduce exactly that gap.
+   */
+  const {
+    data: listData,
+    isPending: loading,
+    error: loadError,
+  } = useQuery({
+    queryKey: ["orders", "mart", tab],
+    queryFn: async () => {
+      const data = await ordersService.getMartOrders(tab);
+      const list = Array.isArray(data) ? data : [];
+      // Only the Approved tab can hold orders whose SAP push failed.
+      if (tab === "approved" && list.length) {
+        try {
+          return {
+            list,
+            statuses: await ordersService.getSalesOrderSapStatus(list.map((o) => o.id)),
+          };
+        } catch {
+          return { list, statuses: {} as Record<string, SalesOrderSapStatus> };
+        }
+      }
+      return { list, statuses: {} as Record<string, SalesOrderSapStatus> };
+    },
+  });
+  const orders = listData?.list ?? NO_MART_ORDERS;
+  const error = loadError ? messageFrom(loadError, "Failed to load orders. Please try again.") : "";
 
-  // Detail view (See): the full order + its items, plus whether it's pending.
+  // Detail view: the full order + its items, plus whether it is still pending.
   const [detailOrder, setDetailOrder] = useState<Order | null>(null);
   const [detailItems, setDetailItems] = useState<OrderItem[]>([]);
   const [detailPending, setDetailPending] = useState(false);
@@ -67,74 +157,56 @@ function MartApproval() {
   const [rejectReason, setRejectReason] = useState("");
   const [busy, setBusy] = useState(false);
 
-  // Latest SAP push result per order (only fetched for the Approved tab, where a
-  // failed SAP push leaves the order "Mart Approved" instead of "Completed").
-  const [sapStatuses, setSapStatuses] = useState<Record<string, SalesOrderSapStatus>>({});
+  // Latest SAP push result per order (only fetched for the Approved tab, where
+  // a failed push leaves the order "Mart Approved" instead of "Completed").
+  /* Server-derived, but ALSO patched by a failed resend below, so it is state
+     seeded from the query rather than the query data itself. */
+  const [resendStatuses, setResendStatuses] = useState<Record<string, SalesOrderSapStatus> | null>(
+    null,
+  );
+  const sapStatuses = resendStatuses ?? listData?.statuses ?? NO_SAP_STATUSES;
   const [resendingId, setResendingId] = useState<number | null>(null);
 
   const sapFor = (orderId: number) => sapStatuses[String(orderId)] ?? null;
   const isSapFailed = (orderId: number) => sapFor(orderId)?.status === "FAILED";
   const isCompletedStatus = (statusDisplay?: string) =>
-    String(statusDisplay || "").toLowerCase().includes("complete");
+    String(statusDisplay || "")
+      .toLowerCase()
+      .includes("complete");
   // In the Approved tab an order that reached 'Completed' pushed to SAP
   // successfully — it stays visible but only gets a View action.
   const isApprovedSuccess = (o: { status_display?: string }) =>
     tab === "approved" && isCompletedStatus(o.status_display);
 
-  const loadList = async (tabKey: TabKey) => {
-    setLoading(true);
-    setError("");
-    try {
-      const data = await ordersService.getMartOrders(tabKey);
-      const list = Array.isArray(data) ? data : [];
-      setOrders(list);
-      // Only the Approved tab can hold orders whose SAP push failed; fetch their
-      // SAP status so we can flag failures and offer a resend.
-      if (tabKey === "approved" && list.length) {
-        try {
-          const statuses = await ordersService.getSalesOrderSapStatus(
-            list.map((o) => o.id),
-          );
-          setSapStatuses(statuses);
-        } catch {
-          setSapStatuses({});
-        }
-      } else {
-        setSapStatuses({});
-      }
-    } catch (e: any) {
-      setError(
-        e?.response?.data?.error || "Failed to load orders. Please try again.",
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
+  const isPendingTab = tab === "pending";
+  const sapFailedCount = orders.filter((o) => isSapFailed(o.id)).length;
+  // How much work is in the queue, as against how many orders — a queue of
+  // three 40-line orders is not the same job as three single-line ones.
+  const lineCount = orders.reduce((sum, o) => sum + Number(o.items_count || 0), 0);
+
+  /** Re-read the current tab. */
+  const loadList = async () => queryClient.invalidateQueries({ queryKey: ["orders", "mart"] });
 
   const onResend = async (target: ActionTarget) => {
     setResendingId(target.id);
-    setMsg(null);
     try {
       const res = await ordersService.resendMartOrderToSap(target.id);
-      setMsg({
-        kind: "ok",
-        text: res?.message || `Order ${target.order_number} sent to SAP.`,
+      showToast({
+        title: "Sent to SAP",
+        message: res?.message || `Order ${target.order_number} sent to SAP.`,
+        orderNumber: target.order_number,
       });
       setDetailOrder(null);
-      await loadList(tab);
-    } catch (e: any) {
-      const detail =
-        e?.response?.data?.sap_error ||
-        e?.response?.data?.error ||
-        e?.response?.data?.message ||
-        "Failed to resend the order to SAP. Please try again.";
-      setMsg({ kind: "err", text: detail });
+      await loadList();
+    } catch (e) {
+      showToast({
+        title: "SAP push failed",
+        message: messageFrom(e, "Failed to resend the order to SAP. Please try again."),
+        orderNumber: target.order_number,
+      });
       // Refresh SAP statuses so the (possibly new) error message shows.
       try {
-        const statuses = await ordersService.getSalesOrderSapStatus(
-          orders.map((o) => o.id),
-        );
-        setSapStatuses(statuses);
+        setResendStatuses(await ordersService.getSalesOrderSapStatus(orders.map((o) => o.id)));
       } catch {
         /* keep the previous statuses */
       }
@@ -143,28 +215,16 @@ function MartApproval() {
     }
   };
 
-  useEffect(() => {
-    loadList(tab);
-    setDetailOrder(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab]);
-
-  const isPendingTab = tab === "pending";
-
   // --- actions --------------------------------------------------------------
   const onSee = async (order: MartOrderSummary) => {
-    setMsg(null);
     setBusy(true);
     try {
       const detail = await ordersService.getOrderDetails(order.id);
       setDetailOrder(detail);
       setDetailItems((detail.items as OrderItem[]) || []);
       setDetailPending(order.is_pending);
-    } catch (e: any) {
-      setMsg({
-        kind: "err",
-        text: e?.response?.data?.error || "Failed to open the order.",
-      });
+    } catch (e) {
+      showToast({ title: "Could not open the order", message: messageFrom(e, "Please try again.") });
     } finally {
       setBusy(false);
     }
@@ -179,17 +239,20 @@ function MartApproval() {
   const confirmApprove = async () => {
     if (!approveTarget) return;
     setBusy(true);
-    setMsg(null);
     try {
       await ordersService.approveMartOrder(approveTarget.id);
-      setMsg({ kind: "ok", text: `Order ${approveTarget.order_number} approved.` });
+      showToast({
+        title: "Order approved",
+        message: `${approveTarget.order_number} has moved on in the Mart flow.`,
+        orderNumber: approveTarget.order_number,
+      });
       setApproveTarget(null);
       setDetailOrder(null);
-      await loadList(tab);
-    } catch (e: any) {
-      setMsg({
-        kind: "err",
-        text: e?.response?.data?.error || "Failed to approve the order.",
+      await loadList();
+    } catch (e) {
+      showToast({
+        title: "Could not approve the order",
+        message: messageFrom(e, "Please try again."),
       });
     } finally {
       setBusy(false);
@@ -197,24 +260,25 @@ function MartApproval() {
   };
 
   const confirmReject = async () => {
-    if (!rejectTarget) return;
-    if (!rejectReason.trim()) {
-      setMsg({ kind: "err", text: "A rejection reason is required." });
-      return;
-    }
+    // The dialog disables its confirm without a reason, so this is a guard on
+    // the write rather than the user's feedback.
+    if (!rejectTarget || !rejectReason.trim()) return;
     setBusy(true);
-    setMsg(null);
     try {
       await ordersService.rejectMartOrder(rejectTarget.id, rejectReason.trim());
-      setMsg({ kind: "ok", text: `Order ${rejectTarget.order_number} rejected.` });
+      showToast({
+        title: "Order rejected",
+        message: `${rejectTarget.order_number} has been sent back.`,
+        orderNumber: rejectTarget.order_number,
+      });
       setRejectTarget(null);
       setRejectReason("");
       setDetailOrder(null);
-      await loadList(tab);
-    } catch (e: any) {
-      setMsg({
-        kind: "err",
-        text: e?.response?.data?.error || "Failed to reject the order.",
+      await loadList();
+    } catch (e) {
+      showToast({
+        title: "Could not reject the order",
+        message: messageFrom(e, "Please try again."),
       });
     } finally {
       setBusy(false);
@@ -222,7 +286,6 @@ function MartApproval() {
   };
 
   const onDownload = async (orderId: number, orderNumber: string) => {
-    setMsg(null);
     try {
       const detail = await ordersService.getOrderDetails(orderId);
       const rows = ((detail.items as OrderItem[]) || []).map((it) => ({
@@ -234,6 +297,7 @@ function MartApproval() {
         Pcs: Number(it.pcs),
         Boxes: Number(it.boxes),
         Ltrs: Number(it.ltrs),
+        "Total Ltrs": getOrderItemTotalLtrs(it),
         "Basic Price": Number(it.basic_price),
         "Tax %": Number(it.tax_rate),
         Amount: Number(it.total),
@@ -242,446 +306,471 @@ function MartApproval() {
         fileName: `MartOrder_${orderNumber}_${exportDateStamp()}`,
         sheetName: "Order",
       });
-    } catch (e: any) {
-      setMsg({
-        kind: "err",
-        text: e?.response?.data?.error || "Failed to download the order.",
+    } catch (e) {
+      showToast({
+        title: "Could not download the order",
+        message: messageFrom(e, "Please try again."),
       });
     }
   };
 
-  // Totals for the detail footer.
-  const subtotal = detailItems.reduce((s, i) => s + Number(i.total || 0), 0);
-  const taxTotal = detailItems.reduce(
-    (s, i) => s + (Number(i.total || 0) * Number(i.tax_rate || 0)) / 100,
-    0,
-  );
-  const totalLtrs = detailItems.reduce((s, i) => s + getOrderItemTotalLtrs(i), 0);
+  const detailTotals = orderTotals(detailItems);
 
-  // ── Detail view (See) ──────────────────────────────────────────────────────
+  /** Approve and reject, shared by the list and the detail view. */
+  const dialogs = (
+    <>
+      <Dialog
+        open={Boolean(approveTarget)}
+        onOpenChange={(next) => {
+          if (!next && !busy) setApproveTarget(null);
+        }}
+      >
+        {approveTarget ? (
+          <DialogContent title="Approve order" size="sm" className="max-w-[440px]">
+            <DialogBody className="text-center">
+              <span
+                aria-hidden="true"
+                className="mx-auto mb-3 flex size-11 items-center justify-center rounded-full bg-ok-soft text-ok"
+              >
+                <HiOutlineCheckCircle className="size-5" />
+              </span>
+              <h3 className="text-[16px] font-bold text-ink">
+                Approve {approveTarget.order_number}?
+              </h3>
+              <p className="mt-1.5 text-[13px] text-subtle">
+                Check the order carefully first. Approving pushes it to SAP and moves it on
+                in the Mart flow.
+              </p>
+            </DialogBody>
+            <DialogFooter className="justify-center">
+              <Button onClick={() => setApproveTarget(null)} disabled={busy}>
+                Cancel
+              </Button>
+              <Button variant="primary" onClick={confirmApprove} disabled={busy}>
+                {busy ? "Approving…" : "Yes, approve"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        ) : null}
+      </Dialog>
+
+      <Dialog
+        open={Boolean(rejectTarget)}
+        onOpenChange={(next) => {
+          if (!next && !busy) setRejectTarget(null);
+        }}
+      >
+        {rejectTarget ? (
+          <DialogContent title="Reject order" size="sm" className="max-w-[440px]">
+            <DialogBody className="space-y-3">
+              <div className="text-center">
+                <span
+                  aria-hidden="true"
+                  className="mx-auto mb-3 flex size-11 items-center justify-center rounded-full bg-bad-soft text-bad"
+                >
+                  <HiOutlineXCircle className="size-5" />
+                </span>
+                <h3 className="text-[16px] font-bold text-ink">
+                  Reject {rejectTarget.order_number}?
+                </h3>
+              </div>
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="mart-reject-reason"
+                  className="block text-[11px] font-medium text-subtle"
+                >
+                  Reason (required)
+                </label>
+                {/* `[font-family:inherit]`: preflight is not imported and
+                    `font-family` is not inherited by form controls, so without
+                    it this renders in the UA font beside Inter. */}
+                <textarea
+                  id="mart-reject-reason"
+                  rows={3}
+                  value={rejectReason}
+                  onChange={(e) => setRejectReason(e.target.value)}
+                  placeholder="Why is this rejected?"
+                  className={[
+                    "w-full rounded-sm border border-line bg-surface px-2.5 py-2",
+                    "[font-family:inherit] text-[13px] text-ink",
+                    "transition-colors hover:border-line-strong",
+                    "focus-visible:border-brand focus-visible:bg-white focus-visible:shadow-focus focus-visible:outline-none",
+                  ].join(" ")}
+                />
+              </div>
+            </DialogBody>
+            <DialogFooter className="justify-center">
+              <Button onClick={() => setRejectTarget(null)} disabled={busy}>
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                onClick={confirmReject}
+                disabled={busy || !rejectReason.trim()}
+                title={!rejectReason.trim() ? "A reason is required to reject an order" : undefined}
+              >
+                {busy ? "Rejecting…" : "Reject order"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        ) : null}
+      </Dialog>
+    </>
+  );
+
+  // ── Detail view ───────────────────────────────────────────────────────────
   if (detailOrder) {
+    const rejected = String(detailOrder.status_display || "")
+      .toLowerCase()
+      .includes("reject");
+    const sapFailed = isSapFailed(detailOrder.id);
+
     return (
-      <div className="ao-detail mart-page">
-        <div className="ao-d-nav">
-          <button className="ao-d-back" onClick={() => setDetailOrder(null)}>
-            ‹ Back to Orders
-          </button>
-          <div className="ao-d-actions">
-            <button
-              className="ao-d-export"
-              onClick={() => onDownload(detailOrder.id, detailOrder.order_number)}
-            >
-              <HiArrowDownTray /> Export Excel
-            </button>
-            {/* SAP push failed → edit + retry from the detail view too. */}
-            {isSapFailed(detailOrder.id) && (
-              <>
-                <button
-                  className="ao-d-action-btn"
+      <Page>
+        <Breadcrumbs
+          items={[
+            { label: "Orders" },
+            { label: "Mart Approval", onClick: () => setDetailOrder(null) },
+            { label: detailOrder.order_number },
+          ]}
+        />
+
+        <PageHeader
+          title={detailOrder.order_number}
+          description={detailOrder.card_name}
+          badges={
+            <>
+              {detailOrder.status_display ? (
+                <Badge tone={toneForStatus(detailOrder.status_display)}>
+                  {detailOrder.status_display}
+                </Badge>
+              ) : null}
+              {sapFailed ? <Badge tone="bad">SAP failed</Badge> : null}
+            </>
+          }
+          actions={
+            <>
+              <Button
+                variant="ghost"
+                onClick={() => onDownload(detailOrder.id, detailOrder.order_number)}
+              >
+                <HiOutlineArrowDownTray aria-hidden="true" /> Export Excel
+              </Button>
+              {(sapFailed || detailPending) && (
+                <Button
+                  variant="ghost"
                   onClick={() =>
                     onEdit({ id: detailOrder.id, order_number: detailOrder.order_number })
                   }
                 >
-                  <HiPencilSquare /> Edit
-                </button>
-                <button
-                  className="ao-d-action-btn ao-d-approve"
+                  <HiOutlinePencilSquare aria-hidden="true" /> Edit
+                </Button>
+              )}
+              {sapFailed && (
+                <Button
+                  variant="primary"
+                  disabled={resendingId === detailOrder.id}
                   onClick={() =>
                     onResend({ id: detailOrder.id, order_number: detailOrder.order_number })
                   }
-                  disabled={resendingId === detailOrder.id}
                 >
-                  <HiArrowPath />{" "}
+                  <HiOutlineArrowPath aria-hidden="true" />
                   {resendingId === detailOrder.id ? "Sending…" : "Resend to SAP"}
-                </button>
-              </>
-            )}
-            {detailPending && (
-              <>
-                <button
-                  className="ao-d-action-btn"
-                  onClick={() =>
-                    onEdit({ id: detailOrder.id, order_number: detailOrder.order_number })
-                  }
-                >
-                  <HiPencilSquare /> Edit
-                </button>
-                <button
-                  className="ao-d-action-btn ao-d-approve"
-                  onClick={() =>
-                    setApproveTarget({
-                      id: detailOrder.id,
-                      order_number: detailOrder.order_number,
-                    })
-                  }
-                >
-                  <HiCheckCircle /> Approve
-                </button>
-                <button
-                  className="ao-d-action-btn ao-d-reject"
-                  onClick={() => {
-                    setRejectReason("");
-                    setRejectTarget({
-                      id: detailOrder.id,
-                      order_number: detailOrder.order_number,
-                    });
-                  }}
-                >
-                  <HiXCircle /> Reject
-                </button>
-              </>
-            )}
-          </div>
-        </div>
+                </Button>
+              )}
+              {detailPending && (
+                <>
+                  <Button
+                    variant="danger"
+                    onClick={() => {
+                      setRejectReason("");
+                      setRejectTarget({
+                        id: detailOrder.id,
+                        order_number: detailOrder.order_number,
+                      });
+                    }}
+                  >
+                    <HiOutlineXCircle aria-hidden="true" /> Reject
+                  </Button>
+                  <Button
+                    variant="primary"
+                    onClick={() =>
+                      setApproveTarget({
+                        id: detailOrder.id,
+                        order_number: detailOrder.order_number,
+                      })
+                    }
+                  >
+                    <HiOutlineCheckCircle aria-hidden="true" /> Approve
+                  </Button>
+                </>
+              )}
+            </>
+          }
+        />
 
-        <PartyHeader order={detailOrder} />
+        {/* Why this order is where it is. Above the numbers, because on a
+            rejected or failed order it is the reason the reader opened it. */}
+        {rejected && detailOrder.rejection_reason ? (
+          <Notice tone="bad" title="Rejection reason">
+            {detailOrder.rejection_reason}
+          </Notice>
+        ) : null}
 
-        {String(detailOrder.status_display || "")
-          .toLowerCase()
-          .includes("reject") &&
-          detailOrder.rejection_reason && (
-            <div
-              style={{
-                margin: "12px 0",
-                padding: "12px 14px",
-                borderRadius: 10,
-                border: "1px solid #FECACA",
-                background: "#FEF2F2",
-                color: "#7F1D1D",
+        {sapFailed ? (
+          <Notice tone="bad" title="SAP push failed">
+            {sapFor(detailOrder.id)?.error_message || "SAP did not return an error message."}
+          </Notice>
+        ) : null}
+
+        <OrderTotalsRow totals={detailTotals} itemCount={detailItems.length} />
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Party &amp; delivery</CardTitle>
+          </CardHeader>
+          <DetailGrid>
+            <DetailField label="Party state" value={detailOrder.party_state} />
+            <DetailField label="Delivery date" value={detailOrder.delivery_date} />
+            <DetailField label="PO number" value={detailOrder.po_number} />
+            <DetailField label="Bill to" value={detailOrder.bill_to_address} />
+            <DetailField label="Ship to" value={detailOrder.ship_to_address} />
+            <DetailField
+              label="Remark"
+              value={detailOrder.remarks?.trim() ? detailOrder.remarks : ""}
+              span="full"
+              hideWhenEmpty
+            />
+          </DetailGrid>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Items</CardTitle>
+            <Badge tone="neutral">{detailItems.length}</Badge>
+          </CardHeader>
+          <OrderItemsTable items={detailItems} variety={false} />
+        </Card>
+
+        {dialogs}
+      </Page>
+    );
+  }
+
+  // ── List view ─────────────────────────────────────────────────────────────
+  return (
+    <Page>
+      <Breadcrumbs items={[{ label: "Orders" }, { label: "Mart Approval" }]} />
+
+      <PageHeader
+        title="Mart Approval"
+        description="Review and action distributor (Mart) orders."
+      />
+
+      <StatRow>
+        <Stat
+          icon={HiOutlineShoppingCart}
+          tone="brand"
+          label={`${TABS.find((t) => t.key === tab)?.label} orders`}
+          value={orders.length}
+          loading={loading}
+        />
+        <Stat
+          icon={HiOutlineQueueList}
+          tone="neutral"
+          label="Line items"
+          value={lineCount}
+          hint="across the queue"
+          loading={loading}
+        />
+        {/* Only the Approved tab can hold a failed push, so the tile only
+            appears where it can be non-zero — a permanent "SAP failed: 0" on
+            the Pending tab is a tile that never says anything. */}
+        {tab === "approved" ? (
+          <Stat
+            icon={HiOutlineExclamationTriangle}
+            tone={sapFailedCount ? "bad" : "neutral"}
+            label="SAP push failed"
+            value={sapFailedCount}
+            hint={sapFailedCount ? "needs a resend" : undefined}
+            loading={loading}
+          />
+        ) : null}
+      </StatRow>
+
+      <Card className="flex flex-wrap items-center justify-between gap-3 py-2.5">
+        <TabList label="Order state">
+          {TABS.map((t) => (
+            <Tab
+              key={t.key}
+              selected={t.key === tab}
+              onClick={() => {
+                setTab(t.key);
+                // Was a bare `setDetailOrder(null)` in a `[tab]` effect —
+                // setState derived from state.
+                setDetailOrder(null);
+                setResendStatuses(null);
               }}
             >
-              <strong style={{ color: "#B91C1C" }}>Rejection reason:</strong>{" "}
-              <span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                {detailOrder.rejection_reason}
-              </span>
-            </div>
-          )}
+              {t.label}
+            </Tab>
+          ))}
+        </TabList>
+        <span className="text-[11.5px] text-subtle">Total: {orders.length}</span>
+      </Card>
 
-        {isSapFailed(detailOrder.id) && (
-          <div
-            style={{
-              margin: "12px 0",
-              padding: "12px 14px",
-              borderRadius: 10,
-              border: "1px solid #FECACA",
-              background: "#FEF2F2",
-              color: "#7F1D1D",
-            }}
-          >
-            <strong style={{ color: "#B91C1C" }}>SAP push failed.</strong>{" "}
-            <span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-              {sapFor(detailOrder.id)?.error_message ||
-                "SAP did not return an error message."}
-            </span>
+      {loading ? (
+        <TableSkeleton columns={6} label="Loading orders" />
+      ) : error ? (
+        <Card>
+          <EmptyState
+            icon={HiOutlineExclamationTriangle}
+            title="Could not load orders"
+            hint={error}
+          />
+        </Card>
+      ) : orders.length === 0 ? (
+        <Card>
+          <EmptyState
+            icon={HiOutlineInbox}
+            title={`No ${tab} orders`}
+            hint="Nothing in this state right now."
+          />
+        </Card>
+      ) : (
+        <Card className="overflow-hidden p-0">
+          <div className="overflow-x-auto">
+            <Table density="compact">
+              <TableHeader>
+                <TableRow className="bg-surface hover:bg-surface">
+                  <TableHead>Order ID</TableHead>
+                  <TableHead>Card Name</TableHead>
+                  <TableHead>Items</TableHead>
+                  <TableHead>Created At</TableHead>
+                  <TableHead>Delivery Date</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {orders.map((o) => (
+                  <TableRow key={o.id}>
+                    <TableCell className="whitespace-nowrap font-semibold text-brand">
+                      {o.order_number}
+                    </TableCell>
+                    <TableCell className="text-ink">
+                      <span className="flex flex-wrap items-center gap-2">
+                        {o.card_name}
+                        {isSapFailed(o.id) ? (
+                          <Badge
+                            tone="bad"
+                            title={sapFor(o.id)?.error_message || "SAP push failed"}
+                          >
+                            SAP failed
+                          </Badge>
+                        ) : null}
+                        {isApprovedSuccess(o) ? (
+                          <Badge tone="ok">
+                            Created in SAP
+                            {sapFor(o.id)?.doc_num != null ? ` #${sapFor(o.id)?.doc_num}` : ""}
+                          </Badge>
+                        ) : null}
+                      </span>
+                    </TableCell>
+                    <TableCell>{o.items_count}</TableCell>
+                    <TableCell>{fmtDateTime(o.created_at)}</TableCell>
+                    <TableCell>{o.delivery_date || "—"}</TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => onSee(o)}
+                          disabled={busy}
+                          aria-label={`View order ${o.order_number}`}
+                          title="View order"
+                        >
+                          <HiOutlineEye aria-hidden="true" />
+                        </Button>
+
+                        {/* A successfully-created order is read-only: it exists
+                            in SAP, so editing or re-pushing it here would make
+                            this app disagree with the system of record. */}
+                        {!isApprovedSuccess(o) && (
+                          <>
+                            {(isSapFailed(o.id) || isPendingTab) && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => onEdit({ id: o.id, order_number: o.order_number })}
+                                aria-label={`Edit order ${o.order_number}`}
+                                title="Edit order"
+                              >
+                                <HiOutlinePencilSquare aria-hidden="true" />
+                              </Button>
+                            )}
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => onDownload(o.id, o.order_number)}
+                              aria-label={`Download order ${o.order_number}`}
+                              title="Download order"
+                            >
+                              <HiOutlineArrowDownTray aria-hidden="true" />
+                            </Button>
+
+                            {(isSapFailed(o.id) || isPendingTab) && (
+                              <span aria-hidden="true" className="mx-1 h-5 w-px bg-line" />
+                            )}
+
+                            {isSapFailed(o.id) && (
+                              <Button
+                                size="sm"
+                                variant="success"
+                                onClick={() => onResend({ id: o.id, order_number: o.order_number })}
+                                disabled={resendingId === o.id}
+                              >
+                                <HiOutlineArrowPath aria-hidden="true" />
+                                {resendingId === o.id ? "Sending…" : "Resend to SAP"}
+                              </Button>
+                            )}
+
+                            {isPendingTab && (
+                              <>
+                                <Button
+                                  size="sm"
+                                  variant="success"
+                                  onClick={() =>
+                                    setApproveTarget({ id: o.id, order_number: o.order_number })
+                                  }
+                                >
+                                  <HiOutlineCheckCircle aria-hidden="true" /> Approve
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="danger"
+                                  onClick={() => {
+                                    setRejectReason("");
+                                    setRejectTarget({ id: o.id, order_number: o.order_number });
+                                  }}
+                                >
+                                  <HiOutlineXCircle aria-hidden="true" /> Reject
+                                </Button>
+                              </>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           </div>
-        )}
-
-        <div className="ao-d-items">
-          <div className="ao-d-items-head">
-            <span className="ao-d-items-title">Items</span>
-            <span className="ao-d-items-count">{detailItems.length}</span>
-          </div>
-          <div className="ao-d-items-scroll">
-            <ItemSection items={detailItems} />
-          </div>
-        </div>
-
-        <div className="ao-d-bottombar">
-          <div className="ao-d-summary">
-            <div className="ao-d-sum-row">
-              <span className="ao-d-sum-label">Total Ltrs</span>
-              <span className="ao-d-sum-val">{totalLtrs.toFixed(2)}</span>
-            </div>
-            <div className="ao-d-sum-row">
-              <span className="ao-d-sum-label">Subtotal</span>
-              <span className="ao-d-sum-val">{subtotal.toFixed(2)}</span>
-            </div>
-            <div className="ao-d-sum-row">
-              <span className="ao-d-sum-label">Tax</span>
-              <span className="ao-d-sum-val">{taxTotal.toFixed(2)}</span>
-            </div>
-            <div className="ao-d-sum-row ao-d-sum-grand">
-              <span className="ao-d-sum-label">Grand Total</span>
-              <span className="ao-d-sum-val">
-                {(subtotal + taxTotal).toFixed(2)}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {renderModals()}
-      </div>
-    );
-  }
-
-  // ── List view ──────────────────────────────────────────────────────────────
-  function renderModals() {
-    return (
-      <>
-        {approveTarget && (
-          <div className="mart-modal-overlay" onClick={() => setApproveTarget(null)}>
-            <div className="mart-modal mart-modal-sm" onClick={(e) => e.stopPropagation()}>
-              <h3>Approve order {approveTarget.order_number}?</h3>
-              <p className="mart-confirm-text">
-                Please check all the details of the order carefully before
-                approving. Once approved, the order will move ahead in the Mart
-                flow.
-              </p>
-              <div className="mart-modal-actions">
-                <button
-                  className="mart-btn mart-cancel"
-                  onClick={() => setApproveTarget(null)}
-                  disabled={busy}
-                >
-                  Cancel
-                </button>
-                <button
-                  className="mart-btn mart-approve"
-                  onClick={confirmApprove}
-                  disabled={busy}
-                >
-                  {busy ? "Approving…" : "Yes, Approve"}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {rejectTarget && (
-          <div className="mart-modal-overlay" onClick={() => setRejectTarget(null)}>
-            <div className="mart-modal mart-modal-sm" onClick={(e) => e.stopPropagation()}>
-              <h3>Reject order {rejectTarget.order_number}?</h3>
-              <p className="mart-confirm-text">Please enter a reason for rejection.</p>
-              <textarea
-                className="mart-reason-input"
-                value={rejectReason}
-                onChange={(e) => setRejectReason(e.target.value)}
-                placeholder="Reason for rejection…"
-                rows={3}
-              />
-              <div className="mart-modal-actions">
-                <button
-                  className="mart-btn mart-cancel"
-                  onClick={() => setRejectTarget(null)}
-                  disabled={busy}
-                >
-                  Cancel
-                </button>
-                <button
-                  className="mart-btn mart-reject"
-                  onClick={confirmReject}
-                  disabled={busy}
-                >
-                  {busy ? "Rejecting…" : "Reject Order"}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-      </>
-    );
-  }
-
-  return (
-    <div className="mart-page">
-      <div className="mart-header">
-        <h2 className="mart-title">Pending Orders</h2>
-        <p className="mart-subtitle">
-          Review and action distributor (Mart) orders.
-        </p>
-      </div>
-
-      <div className="mart-tabs">
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            className={`mart-tab ${t.key === tab ? "is-active" : ""}`}
-            onClick={() => setTab(t.key)}
-          >
-            {t.label}
-          </button>
-        ))}
-        <span className="mart-total">Total: {orders.length}</span>
-      </div>
-
-      {error && <div className="mart-error">{error}</div>}
-      {msg && (
-        <div className={msg.kind === "ok" ? "mart-success" : "mart-error"}>
-          {msg.text}
-        </div>
+        </Card>
       )}
 
-      <div className="mart-list">
-        <table className="mart-table">
-          <thead>
-            <tr>
-              <th>Order ID</th>
-              <th>Card Name</th>
-              <th className="mart-num">Items</th>
-              <th>Created At</th>
-              <th>Delivery Date</th>
-              <th className="mart-actions-col">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr>
-                <td colSpan={6} className="mart-empty">
-                  Loading…
-                </td>
-              </tr>
-            ) : orders.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="mart-empty">
-                  No {tab} orders.
-                </td>
-              </tr>
-            ) : (
-              orders.map((o) => (
-                <tr key={o.id}>
-                  <td className="mart-cell-id">{o.order_number}</td>
-                  <td>
-                    {o.card_name}
-                    {isSapFailed(o.id) && (
-                      <span
-                        title={sapFor(o.id)?.error_message || "SAP push failed"}
-                        style={{
-                          display: "inline-block",
-                          marginLeft: 8,
-                          padding: "2px 8px",
-                          borderRadius: 20,
-                          fontSize: "0.68rem",
-                          fontWeight: 700,
-                          color: "#fff",
-                          background: "#DC2626",
-                          verticalAlign: "middle",
-                          cursor: "help",
-                        }}
-                      >
-                        SAP Failed
-                      </span>
-                    )}
-                    {isApprovedSuccess(o) && (
-                      <span
-                        title={
-                          sapFor(o.id)?.doc_num != null
-                            ? `SAP Doc Num ${sapFor(o.id)?.doc_num}`
-                            : "Created in SAP"
-                        }
-                        style={{
-                          display: "inline-block",
-                          marginLeft: 8,
-                          padding: "2px 8px",
-                          borderRadius: 20,
-                          fontSize: "0.68rem",
-                          fontWeight: 700,
-                          color: "#fff",
-                          background: "#16A34A",
-                          verticalAlign: "middle",
-                        }}
-                      >
-                        Created in SAP
-                        {sapFor(o.id)?.doc_num != null ? ` #${sapFor(o.id)?.doc_num}` : ""}
-                      </span>
-                    )}
-                  </td>
-                  <td className="mart-num">{o.items_count}</td>
-                  <td>{fmtDateTime(o.created_at)}</td>
-                  <td>{o.delivery_date || "—"}</td>
-                  <td>
-                    <div className="mart-row-actions">
-                      <button
-                        className="mart-icon-btn view"
-                        title="See"
-                        onClick={() => onSee(o)}
-                        disabled={busy}
-                      >
-                        <HiEye size={18} />
-                      </button>
-                      {/* A successfully-approved (Completed in SAP) order only
-                          gets a View action — no edit/resend/download. */}
-                      {!isApprovedSuccess(o) && (
-                        <>
-                      {/* SAP push failed → let the approver edit and retry the push. */}
-                      {isSapFailed(o.id) && (
-                        <>
-                          <button
-                            className="mart-icon-btn edit"
-                            title="Edit"
-                            onClick={() =>
-                              onEdit({ id: o.id, order_number: o.order_number })
-                            }
-                          >
-                            <HiPencilSquare size={18} />
-                          </button>
-                          <button
-                            className="mart-row-btn mart-approve"
-                            onClick={() =>
-                              onResend({ id: o.id, order_number: o.order_number })
-                            }
-                            disabled={resendingId === o.id}
-                          >
-                            <HiArrowPath size={16} />{" "}
-                            {resendingId === o.id ? "Sending…" : "Resend to SAP"}
-                          </button>
-                        </>
-                      )}
-                      {isPendingTab && (
-                        <>
-                          <button
-                            className="mart-icon-btn edit"
-                            title="Edit"
-                            onClick={() =>
-                              onEdit({ id: o.id, order_number: o.order_number })
-                            }
-                          >
-                            <HiPencilSquare size={18} />
-                          </button>
-                          <button
-                            className="mart-row-btn mart-approve"
-                            onClick={() =>
-                              setApproveTarget({
-                                id: o.id,
-                                order_number: o.order_number,
-                              })
-                            }
-                          >
-                            <HiCheckCircle size={16} /> Approve
-                          </button>
-                          <button
-                            className="mart-row-btn mart-reject"
-                            onClick={() => {
-                              setRejectReason("");
-                              setRejectTarget({
-                                id: o.id,
-                                order_number: o.order_number,
-                              });
-                            }}
-                          >
-                            <HiXCircle size={16} /> Reject
-                          </button>
-                        </>
-                      )}
-                      <button
-                        className="mart-icon-btn download"
-                        title="Download"
-                        onClick={() => onDownload(o.id, o.order_number)}
-                      >
-                        <HiArrowDownTray size={18} />
-                      </button>
-                        </>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {renderModals()}
-    </div>
+      {dialogs}
+    </Page>
   );
 }
 

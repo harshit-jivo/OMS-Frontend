@@ -14,7 +14,12 @@ import {
   type SalespersonDetails,
   type SelectedLine,
 } from "./salesInvoice.utils";
-import api, { API_BASE_URL } from "../../services/api";
+import type { Method } from "axios";
+
+import api from "../../services/api";
+import { resolveApiUrl, toBasePath } from "../../services/apiPaths";
+import { requestIdOf } from "../../services/requestId";
+import { loadSession } from "@/auth";
 
 export type SalesOrderLine = {
   LineNum: number;
@@ -102,23 +107,22 @@ const createFreightRow = (): FreightRow => ({ expenseCode: "", expenseName: "", 
 const linesToRecord = (lines: SelectedLine[]) =>
   Object.fromEntries(lines.map((line) => [lineKey(line.DocEntry, line.LineNum), line]));
 
-export const resolveApiUrl = (url: string) => {
-  if (/^https?:\/\//i.test(url)) return url;
-
-  const normalizedUrl = url.startsWith("/") ? url : `/${url}`;
-  const path = /\/api$/i.test(API_BASE_URL)
-    ? normalizedUrl.replace(/^\/api(?=\/|$)/i, "")
-    : normalizedUrl;
-
-  return `${API_BASE_URL}${path}`;
-};
+/**
+ * Re-exported so the ~20 files importing it from here keep working.
+ *
+ * The implementation moved to `services/apiPaths.ts`. It used to decide whether
+ * to strip a caller's `/api` prefix by testing `/\/api$/` against the base URL,
+ * which quietly stops matching the moment the base names a version — sending
+ * every `apiFetch("/api/...")` call to `/api/v1/api/...`. It also had no
+ * business living in a Sales Invoice hook.
+ */
+export { resolveApiUrl };
 
 // Map an app URL to the shared axios instance. Absolute URLs bypass Axios'
 // baseURL so sale-invoice calls use the exact same configured API endpoint.
 const toAxiosRequest = (url: string): { url: string; baseURL?: string } => {
-  const resolved = resolveApiUrl(url);
-  if (/^https?:\/\//i.test(resolved)) return { url: resolved, baseURL: "" };
-  return { url: resolved.replace(/^\/api(?=\/|$)/i, "") || "/" };
+  if (/^https?:\/\//i.test(url)) return { url, baseURL: "" };
+  return { url: toBasePath(url) };
 };
 
 // Best-effort stringify that never throws (circular refs fall back to String()).
@@ -136,13 +140,29 @@ const safeJsonStringify = (value: unknown): string => {
 export class RequestError extends Error {
   status?: number;
   data?: unknown;
+  /**
+   * The `X-Request-ID` this call was made with — the string the server logged
+   * every line of this request against. Empty when the request never left the
+   * browser. See services/requestId.ts.
+   */
+  requestId?: string;
 }
 
 // Normalise an axios error into the same Error(message) contract the previous
 // fetch()-based helpers threw (never logs tokens).
-const toRequestError = (error: any): RequestError => {
-  const status = error?.response?.status;
-  const data = error?.response?.data;
+const toRequestError = (error: unknown): RequestError => {
+  // Narrowed once, here, rather than typed `any` and dereferenced blind. An
+  // `any` in a catch is how an error handler ends up throwing INSIDE the
+  // catch — turning a readable server message into a hard crash.
+  const failure = error as {
+    response?: { status?: number; data?: unknown };
+    message?: string;
+  } | null | undefined;
+  const status = failure?.response?.status;
+  const data = failure?.response?.data as
+    | Record<string, unknown>
+    | string
+    | undefined;
   let message: string | undefined;
   if (typeof data === "string") message = data;
   else if (typeof data?.detail === "string" && data.detail) message = data.detail;
@@ -162,13 +182,49 @@ const toRequestError = (error: any): RequestError => {
       })
       .join(" ");
   }
+  const reference = requestIdOf(error);
+
   const requestError = new RequestError(
-    message || error?.message || `Request failed with ${status ?? ""}`.trim(),
+    withReference(
+      message || failure?.message || `Request failed with ${status ?? ""}`.trim(),
+      status,
+      reference,
+    ),
   );
   requestError.status = status;
   requestError.data = data;
+  requestError.requestId = reference;
+
+  // Always in the console, whatever the status. This is where a developer
+  // looks first, it costs the user nothing, and it covers the 4xx cases that
+  // deliberately do not carry the reference in their visible message.
+  if (reference) {
+    console.error(`[${reference}] ${status ?? "network"} ${requestError.message}`);
+  }
   return requestError;
 };
+
+/**
+ * Append a support reference — but only where it helps.
+ *
+ * A 4xx is the server telling the user something true and actionable ("A
+ * rejection reason is required"). Tacking an opaque ID onto that makes a clear
+ * sentence look like a crash, and trains people to ignore the ID, so by the
+ * time one actually matters nobody reads it.
+ *
+ * A 5xx or a network failure is the opposite: the message says nothing useful
+ * because there is nothing useful to say, and the only way anyone finds out
+ * what happened is by quoting this string to whoever can read the server log.
+ *
+ * 401 and 403 are excluded for the same reason as the other 4xxs — and a 401
+ * is usually invisible anyway, being retried after a token refresh.
+ */
+function withReference(message: string, status: number | undefined, reference: string): string {
+  if (!reference) return message;
+  const serverSideOrUnreachable = status === undefined || status >= 500;
+  if (!serverSideOrUnreachable) return message;
+  return `${message} (ref: ${reference})`;
+}
 
 /**
  * JSON request through the ONE shared axios instance (services/api.ts), so it
@@ -181,7 +237,7 @@ export const apiFetch = async <T,>(url: string, init?: RequestInit): Promise<T> 
   try {
     const response = await api.request<T>({
       url: axiosUrl,
-      method: (init?.method || "GET") as any,
+      method: (init?.method || "GET") as Method,
       ...(baseURL !== undefined ? { baseURL } : {}),
       // Pass the already-serialized JSON body straight through.
       ...(init?.body !== undefined ? { data: init.body } : {}),
@@ -236,11 +292,42 @@ export const apiDelete = async <T,>(url: string): Promise<T | null> => {
   }
 };
 
-export const getCurrentUserId = (): number | null => Number(localStorage.getItem("user_id")) || null;
+/** The signed-in user's id, for the `created_by` on a saved invoice. Reads the
+ *  session rather than the raw key, so a half-written session (a token with no
+ *  user id) answers null here instead of 0. */
+export const getCurrentUserId = (): number | null => Number(loadSession()?.userId) || null;
 
 // The Sales Invoice flow runs against exactly one company branch at a time.
 // Every /api/hana/ endpoint requires it as a query param (OIL | BEVERAGE).
 export type InvoiceBranch = "OIL" | "BEVERAGE";
+
+/**
+ * Which invoice branches a user's assigned categories permit.
+ *
+ * The branch gate used to offer Oil and Beverage to everyone, so a user
+ * assigned only to Oil could pick Beverage and then work against a customer
+ * list, a price list and a stock position that were never theirs.
+ *
+ * MART and anything unrecognised map to NO branch, deliberately: Sales Invoice
+ * runs against Oil or Beverage only, and inventing a branch for a category the
+ * flow does not serve would be worse than asking.
+ *
+ * An EMPTY result means "these categories say nothing about the branch", which
+ * callers treat exactly like having no category at all: offer the full choice.
+ * That is the honest fallback — hiding both options would lock the user out of
+ * the page over a data gap.
+ */
+export const branchesForCategories = (categories: readonly string[]): InvoiceBranch[] => {
+  const branches = new Set<InvoiceBranch>();
+  for (const raw of categories) {
+    const name = String(raw).trim().toUpperCase();
+    if (name === "OIL") branches.add("OIL");
+    // The category master says BEVERAGES; the branch is BEVERAGE. Both are
+    // accepted so a rename on either side does not silently stop matching.
+    if (name === "BEVERAGE" || name === "BEVERAGES") branches.add("BEVERAGE");
+  }
+  return [...branches];
+};
 
 export const withBranch = (url: string, branch: string) =>
   `${url}${url.includes("?") ? "&" : "?"}branch=${encodeURIComponent(branch)}`;
@@ -499,8 +586,35 @@ const resolveDefaultAddress = (
 
 export function useSalesInvoice() {
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
-  // No branch selected yet → the wizard shows the branch gate and loads nothing.
-  const [branch, setBranch] = useState<InvoiceBranch | null>(null);
+
+  /*
+   * The branches this user's assigned categories permit. Read once: the
+   * session does not change under a mounted wizard, and re-reading would
+   * invite the branch to move out from under an invoice in progress.
+   *
+   * Empty = no usable category, which means the full choice (see
+   * branchesForCategories).
+   */
+  const allowedBranches = useMemo(
+    () => branchesForCategories(loadSession()?.categories ?? []),
+    [],
+  );
+
+  /*
+   * No branch selected yet → the wizard shows the branch gate and loads
+   * nothing.
+   *
+   * A user whose categories permit exactly ONE branch never sees that gate:
+   * the answer is already decided, so asking would be a question with a single
+   * option. A lazy initialiser rather than an effect — an effect would render
+   * the gate for a frame before replacing it, which reads as a flash.
+   */
+  const [branch, setBranch] = useState<InvoiceBranch | null>(() =>
+    allowedBranches.length === 1 ? allowedBranches[0] : null,
+  );
+
+  // Switching branch only makes sense when there is something to switch to.
+  const canChangeBranch = allowedBranches.length !== 1;
 
   // Keep the module-scoped mirror (used by hanaUrl in nested pickers) in sync.
   useEffect(() => {
@@ -752,7 +866,13 @@ export function useSalesInvoice() {
     changeParty();
   };
 
-  // Back to the branch gate (also clears any in-progress invoice).
+  /**
+   * Back to the branch gate (also clears any in-progress invoice).
+   *
+   * The wizard hides the Change affordance unless `canChangeBranch`, because
+   * for a single-branch user this would clear the branch only for the gate to
+   * re-answer it immediately.
+   */
   const changeBranch = () => {
     setBranch(null);
     setParties([]);
@@ -1261,6 +1381,8 @@ export function useSalesInvoice() {
     step,
     setStep,
     branch,
+    allowedBranches,
+    canChangeBranch,
     selectBranch,
     changeBranch,
     parties,
