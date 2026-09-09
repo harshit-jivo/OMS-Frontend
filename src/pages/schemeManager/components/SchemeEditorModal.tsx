@@ -53,6 +53,16 @@ import { PRODUCT_PICKER_LIMIT } from "./productOptions";
 
 const WORD = "text-[13px] text-body";
 const SENTENCE = "flex flex-wrap items-center gap-2";
+/**
+ * The product picker sits on its own line.
+ *
+ * `basis-full` inside the wrapping sentence above. Sharing the row left it
+ * whatever the five fixed-width controls did not take — about 260px — and
+ * product names here run to "COLD PRESS 5 LTR + EXTRA LIGHT OLIVE 1 LTR
+ * 4 PCS". The truncated tail is exactly the part that tells two combos apart,
+ * so the picker showed "COLD PRESS ..." for several different products.
+ */
+const PRODUCT_LINE = "basis-full";
 const BLOCK_TITLE = "mb-2 text-[11px] font-semibold uppercase tracking-wider text-subtle";
 
 function StepHeading({ n, title, hint }: { n: number; title: string; hint: string }) {
@@ -109,7 +119,7 @@ export default function SchemeEditorModal({ sm }: { sm: SchemeManagerState }) {
 
   return (
     <Dialog open={editingId !== null} onOpenChange={(next) => !next && closeEditor()}>
-      <DialogContent title={title} size="lg">
+      <DialogContent title={title} size="xl">
         <DialogHeader className="items-start">
           <div className="min-w-0">
             <DialogTitle>{title}</DialogTitle>
@@ -268,7 +278,7 @@ export default function SchemeEditorModal({ sm }: { sm: SchemeManagerState }) {
                     ))}
                   </Select>
                   {trigger.match_type !== "ALL" && (
-                    <span className="min-w-[220px] flex-1">
+                    <span className={PRODUCT_LINE}>
                       {trigger.match_type === "ITEM" ? (
                         <SearchSelect
                           value={trigger.match_value}
@@ -333,7 +343,7 @@ export default function SchemeEditorModal({ sm }: { sm: SchemeManagerState }) {
                     ))}
                   </Select>
                   <span className={WORD}>of</span>
-                  <span className="min-w-[220px] flex-1">
+                  <span className={PRODUCT_LINE}>
                     <SearchSelect
                       value={benefit.free_item_code ?? ""}
                       onChange={(itemCode) => patchBenefit(index, { free_item_code: itemCode })}

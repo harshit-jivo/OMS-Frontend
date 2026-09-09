@@ -127,7 +127,7 @@ export function useSchemeManager() {
 
   // The same catalogue as picker rows, built once rather than per render of
   // a modal with five pickers in it.
-  const itemOptions = useMemo(() => productOptions(products), [products]);
+  const allItemOptions = useMemo(() => productOptions(products), [products]);
 
   // Item codes are what the engine matches on, but nobody reads them — every
   // list on this page shows the product name instead.
@@ -139,6 +139,34 @@ export function useSchemeManager() {
   // Editor — `null` means closed, `0` means "new scheme".
   const [editingId, setEditingId] = useState<number | null>(null);
   const [draft, setDraft] = useState<SchemeWritePayload>(emptyScheme());
+
+  /*
+   * The picker list, narrowed to the scheme's own category.
+   *
+   * A scheme is written for ONE category, and the editor asks for it in step
+   * 1 — but every product picker after that offered the whole catalogue, so
+   * setting up a MART offer meant scrolling past OIL and BEVERAGES products
+   * that the engine would refuse to match anyway. Worse, nothing stopped you
+   * picking one: `resolve_schemes` walls schemes off by category, so a
+   * cross-category trigger produced a scheme that silently never fired.
+   *
+   * "Every category" (a blank draft.category) keeps the full list, which is
+   * what that option means.
+   */
+  const itemOptions = useMemo(() => {
+    const wanted = (draft.category || "").trim().toUpperCase();
+    if (!wanted) return allItemOptions;
+    const inCategory = new Set(
+      products
+        .filter((p) => (p.category || "").trim().toUpperCase() === wanted)
+        .map((p) => p.item_code),
+    );
+    // Fall back to the whole catalogue rather than showing an empty picker:
+    // a category with no products mapped is a data gap, and hiding every
+    // option would look like the page is broken.
+    if (inCategory.size === 0) return allItemOptions;
+    return allItemOptions.filter((option) => inCategory.has(option.value));
+  }, [allItemOptions, products, draft.category]);
   const [isSaving, setIsSaving] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   // The editor is a wizard: one question per screen, so a half-built offer never
