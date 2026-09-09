@@ -71,6 +71,9 @@ export interface VendorTds {
     default_wt_code?: string | null;
   };
   tds_codes: TdsCode[];
+  // true = tds_codes is the vendor's own assigned (BPWithholdingTaxCollection)
+  // list; false = the vendor had none assigned, so the full active master is offered.
+  applicable_only: boolean;
 }
 
 export interface ApInvoiceLineWrite {
@@ -82,21 +85,30 @@ export interface ApInvoiceLineWrite {
 export interface ApInvoiceWrite {
   grpo_entry: number;
   card_code?: string;
-  num_at_card: string;
-  doc_date?: string;
-  due_date?: string;
+  num_at_card: string; // Vendor Ref. No. (NumAtCard)
+  doc_date?: string; // Posting Date  (DocDate)
+  tax_date?: string; // Document Date (TaxDate)
+  due_date?: string; // Due Date      (DocDueDate)
   comments?: string;
   attachment_entry?: number | null;
-  tds?: { liable: boolean; wt_code: string };
+  // One or more WT codes -> WithholdingTaxDataCollection. A single wt_code is
+  // still accepted by the backend for back-compat.
+  tds?: { liable: boolean; wt_codes: string[] };
   lines: ApInvoiceLineWrite[];
 }
 
 export interface ApInvoiceResult {
+  is_draft?: boolean; // AP invoices are added as SAP drafts (approval workflow)
   doc_entry: number;
   doc_num: number;
   doc_total: number | null;
   card_code: string | null;
   num_at_card: string | null;
+}
+
+export interface ApAttachmentResult {
+  attachment_entry: number; // SAP Attachments2 AbsoluteEntry
+  file_name: string;
 }
 
 const apInvoiceService = {
@@ -127,7 +139,23 @@ const apInvoiceService = {
     const { data } = await api.get("/service-layer/ap/vendor-tds/", {
       params: { branch, card_code: cardCode },
     });
-    return { vendor: data.vendor, tds_codes: data.tds_codes };
+    return {
+      vendor: data.vendor,
+      tds_codes: data.tds_codes,
+      applicable_only: !!data.applicable_only,
+    };
+  },
+
+  // Upload the vendor invoice file to SAP (Attachments2) and get back the
+  // AttachmentEntry to pass into createApInvoice.
+  async uploadAttachment(branch: ApBranch, file: File): Promise<ApAttachmentResult> {
+    const form = new FormData();
+    form.append("file", file);
+    const { data } = await api.post("/service-layer/ap/attachment/", form, {
+      params: { branch },
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+    return data as ApAttachmentResult;
   },
 
   async createApInvoice(
