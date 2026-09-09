@@ -20,7 +20,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Checkbox, Field, FormActions, FormGrid, Input, Select } from "@/components/ui/form";
+import {
+  Checkbox,
+  Field,
+  FieldGroup,
+  FormActions,
+  FormGrid,
+  Input,
+} from "@/components/ui/form";
 import {
   Card,
   CardHeader,
@@ -70,6 +77,10 @@ export default function Ap_Invoice_Entry() {
   // GRPO lookup
   const [docNumInput, setDocNumInput] = useState("");
   const [loadingGrpo, setLoadingGrpo] = useState(false);
+  // The GRPO being loaded from the browse list, so its row can show a spinner
+  // while the detail fetch is in flight — without it users re-click, thinking
+  // nothing happened (the panel only closes once the fetch returns).
+  const [selectingEntry, setSelectingEntry] = useState<number | null>(null);
   const [grpo, setGrpo] = useState<GrpoDetail | null>(null);
 
   // Browse-open-GRPOs panel
@@ -79,16 +90,24 @@ export default function Ap_Invoice_Entry() {
   const [browseLoading, setBrowseLoading] = useState(false);
 
   // Editable header fields
-  const [numAtCard, setNumAtCard] = useState("");
-  const [docDate, setDocDate] = useState(todayISO());
-  const [dueDate, setDueDate] = useState("");
+  // Labelled to match the SAP A/P invoice screen.
+  const [numAtCard, setNumAtCard] = useState(""); // Vendor Ref. No. (NumAtCard)
+  const [docDate, setDocDate] = useState(todayISO()); // Posting Date  (DocDate)
+  const [taxDate, setTaxDate] = useState(todayISO()); // Document Date (TaxDate)
+  const [dueDate, setDueDate] = useState(""); // Due Date      (DocDueDate)
   const [comments, setComments] = useState("");
   const [attachGrpoDoc, setAttachGrpoDoc] = useState(true);
+  // Vendor invoice uploaded to SAP (Attachments2) at this step. When present it
+  // supersedes reusing the GRPO's own attachment.
+  const [uploadedEntry, setUploadedEntry] = useState<number | null>(null);
+  const [uploadedName, setUploadedName] = useState("");
+  const [uploading, setUploading] = useState(false);
 
-  // TDS
+  // TDS — the vendor's applicable WT codes, multi-select.
   const [tdsCodes, setTdsCodes] = useState<TdsCode[]>([]);
   const [tdsLiable, setTdsLiable] = useState(false);
-  const [tdsCode, setTdsCode] = useState("");
+  const [tdsSelected, setTdsSelected] = useState<string[]>([]);
+  const [tdsApplicableOnly, setTdsApplicableOnly] = useState(true);
   const [vendorSubjectToWt, setVendorSubjectToWt] = useState(false);
 
   // Editable lines
@@ -97,7 +116,11 @@ export default function Ap_Invoice_Entry() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [showReview, setShowReview] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<{ doc_num: number; doc_total: number | null } | null>(null);
+  const [result, setResult] = useState<{
+    doc_num: number;
+    doc_total: number | null;
+    is_draft?: boolean;
+  } | null>(null);
 
   const flash = (title: string, message = "") => showToast({ title, message });
 
@@ -125,11 +148,16 @@ export default function Ap_Invoice_Entry() {
     setLines([]);
     setNumAtCard("");
     setDocDate(todayISO());
+    setTaxDate(todayISO());
     setDueDate("");
     setComments("");
     setAttachGrpoDoc(true);
+    setUploadedEntry(null);
+    setUploadedName("");
+    setUploading(false);
     setTdsLiable(false);
-    setTdsCode("");
+    setTdsSelected([]);
+    setTdsApplicableOnly(true);
     setTdsCodes([]);
     setVendorSubjectToWt(false);
     setErrors({});
@@ -137,7 +165,9 @@ export default function Ap_Invoice_Entry() {
   }
 
   async function loadGrpo(key: { doc_entry?: number; doc_num?: number | string }) {
+    if (loadingGrpo) return; // guard: ignore re-clicks while one load is in flight
     setLoadingGrpo(true);
+    setSelectingEntry(key.doc_entry ?? null);
     setResult(null);
     try {
       const g = await apInvoiceService.getGrpo(branch, key);
@@ -152,24 +182,53 @@ export default function Ap_Invoice_Entry() {
         })),
       );
       setAttachGrpoDoc(g.attachment_entry != null);
+      // Default the Vendor Ref. No. from the GRPO; stays editable so the user
+      // can replace it with the number actually printed on the invoice.
+      setNumAtCard(g.grpo_num_at_card ?? "");
       setBrowseOpen(false);
       // vendor TDS (best-effort; failure just means an empty dropdown)
       try {
         const t = await apInvoiceService.getVendorTds(branch, g.card_code);
         setTdsCodes(t.tds_codes);
+        setTdsApplicableOnly(t.applicable_only);
         setVendorSubjectToWt(!!t.vendor.subject_to_wt);
-        if (t.vendor.subject_to_wt && t.vendor.default_wt_code) {
+        const preset = t.vendor.default_wt_code;
+        if (t.vendor.subject_to_wt && preset) {
           setTdsLiable(true);
-          setTdsCode(t.vendor.default_wt_code);
+          // Pre-tick the vendor's default code, but only if it is on offer.
+          setTdsSelected(t.tds_codes.some((c) => c.wt_code === preset) ? [preset] : []);
         }
       } catch {
         setTdsCodes([]);
+        setTdsApplicableOnly(true);
       }
     } catch (err) {
       setGrpo(null);
       flash("Could not load the GRPO", readErr(err));
     } finally {
       setLoadingGrpo(false);
+      setSelectingEntry(null);
+    }
+  }
+
+  /** Upload the chosen vendor-invoice file to SAP; on success we hold its
+   *  AttachmentEntry to send with the draft. */
+  async function onUploadAttachment(file: File | undefined) {
+    if (!file) return;
+    setUploading(true);
+    setErrors((e) => ({ ...e, attachment: "" }));
+    try {
+      const res = await apInvoiceService.uploadAttachment(branch, file);
+      setUploadedEntry(res.attachment_entry);
+      setUploadedName(res.file_name);
+      setAttachGrpoDoc(false); // the uploaded file supersedes the GRPO's copy
+      flash("Attachment uploaded", res.file_name);
+    } catch (err) {
+      setUploadedEntry(null);
+      setUploadedName("");
+      setErrors((e) => ({ ...e, attachment: readErr(err) }));
+    } finally {
+      setUploading(false);
     }
   }
 
@@ -212,8 +271,9 @@ export default function Ap_Invoice_Entry() {
 
   function validate() {
     const e: Record<string, string> = {};
-    if (!numAtCard.trim()) e.numAtCard = "Vendor invoice number is required.";
-    if (tdsLiable && !tdsCode) e.tdsCode = "Choose a TDS code, or turn TDS off.";
+    if (!numAtCard.trim()) e.numAtCard = "Vendor Ref. No. is required.";
+    if (tdsLiable && tdsSelected.length === 0)
+      e.tdsCode = "Select at least one TDS code, or turn TDS off.";
     lines.forEach((l) => {
       if (l.quantity !== "" && !(parseFloat(l.quantity) > 0))
         e[`q_${l.base_line}`] = "Qty must be > 0";
@@ -250,21 +310,30 @@ export default function Ap_Invoice_Entry() {
         card_code: grpo.card_code,
         num_at_card: numAtCard.trim(),
         doc_date: docDate || undefined,
+        tax_date: taxDate || undefined,
         due_date: dueDate || undefined,
         comments: comments.trim() || undefined,
-        attachment_entry: attachGrpoDoc ? grpo.attachment_entry : null,
-        tds: tdsLiable && tdsCode ? { liable: true, wt_code: tdsCode } : undefined,
+        attachment_entry: uploadedEntry ?? (attachGrpoDoc ? grpo.attachment_entry : null),
+        tds:
+          tdsLiable && tdsSelected.length ? { liable: true, wt_codes: tdsSelected } : undefined,
         lines: payloadLines,
       });
 
       setShowReview(false);
-      setResult({ doc_num: res.doc_num, doc_total: res.doc_total });
-      flash(`AP invoice ${res.doc_num} created`, `In ${branchLabel}.`);
+      // Reset FIRST, then set the result: resetForm() clears `result`, so doing
+      // it afterwards is what wiped the banner and hid the draft number.
       resetForm();
       setDocNumInput("");
+      setResult({ doc_num: res.doc_num, doc_total: res.doc_total, is_draft: res.is_draft });
+      flash(
+        res.is_draft
+          ? `AP invoice draft ${res.doc_num} created`
+          : `AP invoice ${res.doc_num} created`,
+        `In ${branchLabel}.`,
+      );
     } catch (err) {
       setShowReview(false);
-      flash("Could not post the invoice", readErr(err));
+      flash("Could not submit the draft", readErr(err));
     } finally {
       setSubmitting(false);
     }
@@ -329,7 +398,7 @@ export default function Ap_Invoice_Entry() {
           </div>
 
           <Field
-            label="GRPO Doc Number"
+            label="Goods Receipt PO No."
             error={errors.docNum}
             className="min-w-[220px] flex-1 basis-[220px]"
           >
@@ -376,7 +445,12 @@ export default function Ap_Invoice_Entry() {
               </Button>
             </div>
 
-            <div className="max-h-[360px] overflow-auto rounded-sm border border-line bg-card">
+            <div
+              className={cn(
+                "max-h-[360px] overflow-auto rounded-sm border border-line bg-card",
+                loadingGrpo && "pointer-events-none opacity-55",
+              )}
+            >
               {browseLoading ? (
                 <TableSkeleton rows={4} columns={5} />
               ) : (
@@ -414,9 +488,21 @@ export default function Ap_Invoice_Entry() {
                             <Button
                               size="xs"
                               type="button"
+                              disabled={loadingGrpo}
+                              aria-busy={selectingEntry === r.doc_entry}
                               onClick={() => void loadGrpo({ doc_entry: r.doc_entry })}
                             >
-                              Select
+                              {selectingEntry === r.doc_entry ? (
+                                <>
+                                  <HiOutlineArrowPath
+                                    aria-hidden="true"
+                                    className="size-3.5 animate-spin"
+                                  />
+                                  Loading…
+                                </>
+                              ) : (
+                                "Select"
+                              )}
                             </Button>
                           </TableCell>
                         </TableRow>
@@ -433,8 +519,18 @@ export default function Ap_Invoice_Entry() {
       {/* ---- Success banner ------------------------------------------------- */}
       {result && (
         <Notice tone="ok">
-          AP invoice <strong className="font-semibold">{result.doc_num}</strong> created in{" "}
-          {branchLabel} — total {money(result.doc_total)}.
+          {result.is_draft ? (
+            <>
+              AP invoice{" "}
+              <strong className="font-semibold">draft No. {result.doc_num}</strong> created in{" "}
+              {branchLabel} — total {money(result.doc_total)}. It now awaits approval in SAP.
+            </>
+          ) : (
+            <>
+              AP invoice <strong className="font-semibold">{result.doc_num}</strong> created in{" "}
+              {branchLabel} — total {money(result.doc_total)}.
+            </>
+          )}
         </Notice>
       )}
 
@@ -463,7 +559,7 @@ export default function Ap_Invoice_Entry() {
                 value={`${grpo.card_name} (${grpo.card_code})`}
               />
               <DetailField
-                label="GRPO total"
+                label="Doc. Total (GRPO)"
                 value={`${money(grpo.doc_total)} ${grpo.currency}`}
                 strong
               />
@@ -471,7 +567,12 @@ export default function Ap_Invoice_Entry() {
 
             {/* Editable header fields */}
             <FormGrid>
-              <Field label="Vendor invoice No." required error={errors.numAtCard}>
+              <Field
+                label="Vendor Ref. No."
+                required
+                error={errors.numAtCard}
+                hint="Defaulted from the GRPO — replace it with the number on the vendor's invoice."
+              >
                 {(c) => (
                   <Input
                     {...c}
@@ -481,7 +582,18 @@ export default function Ap_Invoice_Entry() {
                   />
                 )}
               </Field>
-              <Field label="Invoice date">
+              <Field label="Document Date" hint="Date on the vendor's invoice (SAP TaxDate).">
+                {(c) => (
+                  <Input
+                    {...c}
+                    type="date"
+                    max={todayISO()}
+                    value={taxDate}
+                    onChange={(e) => setTaxDate(e.target.value)}
+                  />
+                )}
+              </Field>
+              <Field label="Posting Date" hint="Accounting / GL date (SAP DocDate).">
                 {(c) => (
                   <Input
                     {...c}
@@ -492,7 +604,7 @@ export default function Ap_Invoice_Entry() {
                   />
                 )}
               </Field>
-              <Field label="Payment due date">
+              <Field label="Due Date" hint="Payment due date (SAP DocDueDate).">
                 {(c) => (
                   <Input
                     {...c}
@@ -527,39 +639,129 @@ export default function Ap_Invoice_Entry() {
                   checked={tdsLiable}
                   onChange={(e) => setTdsLiable(e.target.checked)}
                 />
-                {tdsLiable && (
-                  <Field
-                    label="TDS code"
-                    required
-                    error={errors.tdsCode}
-                    className="min-w-[280px] flex-1"
-                  >
-                    {(c) => (
-                      <Select {...c} value={tdsCode} onChange={(e) => setTdsCode(e.target.value)}>
-                        <option value="">— Select —</option>
-                        {tdsCodes.map((t) => (
-                          <option key={t.wt_code} value={t.wt_code}>
-                            {t.wt_code} — {t.wt_name} ({t.rate}%{t.section ? `, ${t.section}` : ""})
-                          </option>
-                        ))}
-                      </Select>
-                    )}
-                  </Field>
-                )}
               </div>
 
-              <Checkbox
-                label={
-                  <span className="inline-flex items-center gap-1.5">
-                    <HiOutlinePaperClip aria-hidden="true" className="size-4" />
-                    Attach the GRPO&rsquo;s document
-                  </span>
-                }
-                hint={grpo.attachment_entry == null ? "This GRPO has no attachment." : undefined}
-                checked={attachGrpoDoc}
-                disabled={grpo.attachment_entry == null}
-                onChange={(e) => setAttachGrpoDoc(e.target.checked)}
-              />
+              {/* Only the codes SAP has assigned to this vendor, and more than
+                  one may apply — SAP enforces the vendor's list on post, so a
+                  free choice from the whole master invited a rejection the user
+                  could not have predicted. */}
+              {tdsLiable && (
+                <FieldGroup
+                  legend="TDS codes"
+                  hint={
+                    tdsApplicableOnly
+                      ? "Assigned to this vendor — tick every code that applies."
+                      : "This vendor has no codes assigned, so all active codes are listed."
+                  }
+                >
+                  {tdsCodes.length === 0 ? (
+                    <p className="m-0 text-[12.5px] text-subtle">
+                      No withholding tax codes available for this vendor.
+                    </p>
+                  ) : (
+                    <div className="flex max-h-48 flex-col gap-2 overflow-y-auto">
+                      {tdsCodes.map((t) => (
+                        <Checkbox
+                          key={t.wt_code}
+                          label={
+                            <span>
+                              <span className="font-semibold">{t.wt_code}</span>
+                              {t.wt_name ? ` — ${t.wt_name}` : ""}
+                              {t.rate != null ? ` (${t.rate}%` : ""}
+                              {t.rate != null && t.section ? `, ${t.section})` : t.rate != null ? ")" : ""}
+                            </span>
+                          }
+                          checked={tdsSelected.includes(t.wt_code)}
+                          onChange={(e) =>
+                            setTdsSelected((prev) =>
+                              e.target.checked
+                                ? [...prev, t.wt_code]
+                                : prev.filter((c) => c !== t.wt_code),
+                            )
+                          }
+                        />
+                      ))}
+                    </div>
+                  )}
+                  {errors.tdsCode && (
+                    <p className="mt-2 mb-0 text-[12px] text-danger">{errors.tdsCode}</p>
+                  )}
+                </FieldGroup>
+              )}
+
+              {/* The vendor invoice is uploaded HERE, at the AP-entry step, the
+                  same as in the SAP client. It becomes a SAP Attachments2 row
+                  whose AttachmentEntry travels with the draft. */}
+              <FieldGroup
+                legend="Vendor invoice attachment"
+                hint="Uploaded straight into SAP. An uploaded file replaces the GRPO's own document."
+              >
+                {uploadedEntry != null ? (
+                  <div className="flex flex-wrap items-center gap-3 rounded-md border border-ok bg-ok-soft px-3 py-2">
+                    <HiOutlinePaperClip aria-hidden="true" className="size-4 shrink-0 text-ok" />
+                    <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">
+                      {uploadedName}
+                    </span>
+                    <Badge tone="ok">uploaded to SAP</Badge>
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="ghost"
+                      disabled={uploading}
+                      onClick={() => {
+                        setUploadedEntry(null);
+                        setUploadedName("");
+                      }}
+                    >
+                      <HiOutlineXMark aria-hidden="true" /> Remove
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Input
+                      type="file"
+                      aria-label="Vendor invoice file"
+                      className="max-w-sm file:mr-3 file:rounded-sm file:border-0 file:bg-brand-soft file:px-3 file:py-1 file:text-[12px] file:font-semibold file:text-brand"
+                      disabled={uploading}
+                      accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.doc,.docx,.xls,.xlsx,.txt,.eml,.msg"
+                      onChange={(e) => {
+                        void onUploadAttachment(e.target.files?.[0]);
+                        e.target.value = ""; // allow re-picking the same file
+                      }}
+                    />
+                    {uploading && (
+                      <span className="inline-flex items-center gap-1.5 text-[12.5px] text-subtle">
+                        <HiOutlineArrowPath aria-hidden="true" className="size-4 animate-spin" />
+                        Uploading to SAP…
+                      </span>
+                    )}
+                  </div>
+                )}
+                {errors.attachment && (
+                  <p className="mt-2 mb-0 text-[12px] text-danger">{errors.attachment}</p>
+                )}
+
+                <div className="mt-3 border-t border-line pt-3">
+                  <Checkbox
+                    label={
+                      <span className="inline-flex items-center gap-1.5">
+                        <HiOutlinePaperClip aria-hidden="true" className="size-4" />
+                        Or reuse the GRPO&rsquo;s document
+                      </span>
+                    }
+                    hint={
+                      grpo.attachment_entry == null
+                        ? "This GRPO has no attachment."
+                        : uploadedEntry != null
+                          ? "Superseded by the uploaded file."
+                          : undefined
+                    }
+                    checked={attachGrpoDoc && uploadedEntry == null}
+                    disabled={grpo.attachment_entry == null || uploadedEntry != null}
+                    onChange={(e) => setAttachGrpoDoc(e.target.checked)}
+                  />
+                </div>
+              </FieldGroup>
             </div>
           </Card>
 
@@ -669,7 +871,7 @@ export default function Ap_Invoice_Entry() {
                 Cancel
               </Button>
               <Button type="button" variant="primary" onClick={onReview}>
-                Review &amp; post
+                Review &amp; submit
               </Button>
             </FormActions>
           </Card>
@@ -684,23 +886,31 @@ export default function Ap_Invoice_Entry() {
         }}
       >
         {showReview && grpo && (
-          <DialogContent title="Confirm A/P invoice">
+          <DialogContent title="Confirm A/P invoice draft">
             <DialogHeader>
-              <DialogTitle>Confirm A/P invoice</DialogTitle>
+              <DialogTitle>Confirm A/P invoice draft</DialogTitle>
             </DialogHeader>
             <DialogBody className="space-y-4">
               <DetailGrid>
                 <DetailField label="Company" value={branchLabel} />
                 <DetailField label="Vendor" value={`${grpo.card_name} (${grpo.card_code})`} />
                 <DetailField label="From GRPO" value={grpo.doc_num} />
-                <DetailField label="Vendor invoice No." value={numAtCard} />
-                <DetailField label="Invoice date" value={docDate} />
-                <DetailField label="Due date" value={dueDate} />
-                <DetailField label="TDS" value={tdsLiable && tdsCode ? tdsCode : "None"} />
+                <DetailField label="Vendor Ref. No." value={numAtCard} />
+                <DetailField label="Document Date" value={taxDate || "—"} />
+                <DetailField label="Posting Date" value={docDate || "—"} />
+                <DetailField label="Due Date" value={dueDate || "—"} />
+                <DetailField
+                  label="TDS"
+                  value={tdsLiable && tdsSelected.length ? tdsSelected.join(", ") : "None"}
+                />
                 <DetailField
                   label="Attachment"
                   value={
-                    attachGrpoDoc && grpo.attachment_entry != null ? "GRPO document" : "None"
+                    uploadedEntry != null
+                      ? uploadedName
+                      : attachGrpoDoc && grpo.attachment_entry != null
+                        ? "GRPO document"
+                        : "None"
                   }
                 />
                 <DetailField label="Lines" value={lines.length} />
@@ -711,7 +921,9 @@ export default function Ap_Invoice_Entry() {
                 />
               </DetailGrid>
               <Notice tone="info">
-                SAP computes the final tax and total from the GRPO. Posting closes the GRPO.
+                SAP computes the final tax and total from the GRPO. This is submitted as a{" "}
+                <strong className="font-semibold">draft</strong> for approval — the GRPO closes
+                only once the draft is approved and added in SAP.
               </Notice>
             </DialogBody>
             <DialogFooter>
@@ -719,7 +931,7 @@ export default function Ap_Invoice_Entry() {
                 Back
               </Button>
               <Button variant="primary" onClick={() => void onConfirm()} disabled={submitting}>
-                {submitting ? "Posting…" : "Post invoice"}
+                {submitting ? "Submitting…" : "Submit draft"}
               </Button>
             </DialogFooter>
           </DialogContent>
