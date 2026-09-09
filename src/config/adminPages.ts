@@ -109,8 +109,38 @@ export const PAYMENT_ACTION_PERMISSIONS: GrantablePage[] = [
 
 export const PAYMENT_ACTION_KEYS = PAYMENT_ACTION_PERMISSIONS.map((p) => p.key);
 
-/** Every key an admin may grant — page access plus payment actions. */
+/**
+ * Order visibility. An ACTION grant like the payments block above, not a page:
+ * it opens no screen of its own, it widens what the screens you already hold
+ * are allowed to show you.
+ *
+ * `Sales_Dashboard` answers "may you open the analytics screen". This answers
+ * "whose orders are on it" — and they are genuinely separate. Every dashboard
+ * and order list scopes through `_get_base_orders`, which used to decide that
+ * by matching `user.role.name` against seven literals, so any role an
+ * administrator created saw nothing at all: not a refusal, a screen of zeroes.
+ * Scope is this key now, so a new role can be given a company-wide view
+ * without a backend change.
+ *
+ * Listed here, and not only in the server registry, for the reason the
+ * registry-parity test in `adminPages.test.ts` exists: a key registered on the
+ * server but absent from this file can only ever be granted through Role
+ * Permissions, never to one person. That is exactly how `Payments_Verify` went
+ * missing.
+ */
+export const ORDER_SCOPE_PERMISSIONS: GrantablePage[] = [
+  {
+    key: "orders.sales.view_all",
+    label: "Orders — see every order, company-wide",
+    path: "/Sales_Dashboard",
+  },
+];
+
+export const ORDER_SCOPE_KEYS = ORDER_SCOPE_PERMISSIONS.map((p) => p.key);
+
+/** Every key an admin may grant — page access, payment and order actions. */
 export const ALL_GRANTABLE_KEYS = [
   ...GRANTABLE_PAGE_KEYS,
   ...PAYMENT_ACTION_KEYS,
+  ...ORDER_SCOPE_KEYS,
 ];
