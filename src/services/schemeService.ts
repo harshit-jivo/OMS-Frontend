@@ -154,6 +154,15 @@ export type SchemeProposal = {
   scheme_name: string;
   benefit_id: number;
   benefit_item_code: string;
+  /**
+   * The giveaway item's name, resolved by the engine.
+   *
+   * A STATE- or VENDOR-scoped scheme deliberately gives away items the party
+   * has no assignment for, so the order form's catalogues cannot name them —
+   * which is why this arrives from the server rather than being looked up.
+   * Empty when the product is not in sap_products.
+   */
+  benefit_item_name?: string;
   free_uom: Uom;
   /** In `free_uom` — what the scheme was written in, and what the UI shows. */
   qty: string;

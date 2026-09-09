@@ -1392,7 +1392,14 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
         kind: "scheme",
         key: `v2-${index}-${proposal.scheme_id}-${proposal.benefit_id}`,
         itemCode: proposal.benefit_item_code,
+        // The engine's own name first. The two catalogue lookups below only
+        // hold items the PARTY is assigned, and a STATE- or VENDOR-scoped
+        // scheme gives away items that are deliberately outside that list —
+        // so they missed, and the row showed a bare code ("FG0000031") where
+        // every other line showed a name. They stay as a fallback for a
+        // frontend running against a server that predates the field.
         itemName:
+          proposal.benefit_item_name?.trim() ||
           products.find((p) => p.item_code === proposal.benefit_item_code)?.item_name ||
           partyProducts.find((p) => p.item_code === proposal.benefit_item_code)?.item_name ||
           proposal.benefit_item_code,
