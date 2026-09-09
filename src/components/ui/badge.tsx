@@ -58,6 +58,20 @@ const badgeVariants = cva(
         hold: "bg-hold-soft text-hold",
         bad: "bg-bad-soft text-bad",
         note: "bg-note-soft text-note",
+        /**
+         * For a badge sitting ON a solid brand surface — a selected `Tab`, a
+         * primary `Button`. Every tone above is a `*-soft` fill, and those are
+         * TRANSLUCENT: `--color-brand-soft` is `rgba(37, 99, 235, 0.1)`. At 10%
+         * over white that reads as a pale chip, but over `bg-brand` it is blue
+         * on the same blue, and `text-brand` makes the label the background
+         * colour too — so an `info` badge on a selected tab vanishes entirely,
+         * count and all. That is what hid the stage counts on My Stage Queue.
+         *
+         * White at 20% inverts the relationship: it lightens whatever brand
+         * colour is underneath in either theme, and the label matches the
+         * `text-white` its parent already uses.
+         */
+        onBrand: "bg-white/20 text-white",
       },
       /** Adds the tone's own colour as a visible edge. */
       outlined: { true: "border-current/30", false: "" },

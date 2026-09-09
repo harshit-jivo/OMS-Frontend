@@ -732,7 +732,11 @@ export default function Tracker_Queue() {
                 onClick={() => setActiveStage(s.code)}
               >
                 {s.name}
-                <Badge tone={s.code === activeStage ? "info" : "neutral"}>{s.count}</Badge>
+                {/* `onBrand`, not `info`: the selected tab is `bg-brand`, and
+                    an `info` badge is translucent brand-blue with brand-blue
+                    text — invisible on it, which hid the count of whichever
+                    stage you were actually looking at. */}
+                <Badge tone={s.code === activeStage ? "onBrand" : "neutral"}>{s.count}</Badge>
               </Tab>
             ))}
           </TabList>

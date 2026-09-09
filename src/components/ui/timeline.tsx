@@ -43,6 +43,12 @@ const DOT_TONES: Record<BadgeTone, string> = {
   hold: "bg-hold ring-hold-soft",
   bad: "bg-bad ring-bad-soft",
   note: "bg-note ring-note-soft",
+  // `onBrand` exists for a badge sitting on a solid brand surface. A timeline
+  // never is one — it renders on a card — so the dot falls back to the brand
+  // colour rather than the white-on-brand treatment, which would be an
+  // invisible white dot on white. Present because the Record is exhaustive by
+  // design: adding a tone should make you decide what it means here.
+  onBrand: "bg-brand ring-brand-soft",
 };
 
 export function Timeline({ className, ...props }: React.ComponentProps<"ol">) {
