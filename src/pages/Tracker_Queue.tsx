@@ -188,6 +188,10 @@ export default function Tracker_Queue() {
   >("current");
   // Send-back tabs: also list rejections the invoice has already come back from.
   const [showResolved, setShowResolved] = useState(false);
+  // Hold / Debit tabs are split into what is still on this desk and what has
+  // since moved on; the moved-on half is collapsed by default so the desk sees
+  // only actionable rows. See `splitRows` below.
+  const [showMovedOn, setShowMovedOn] = useState(false);
   const [advancedRows, setAdvancedRows] = useState<Invoice[]>([]);
   // Decision-log rows for the OK / Hold / Debit / verdict tabs.
   const [decisionRows, setDecisionRows] = useState<StageDecision[]>([]);
@@ -317,6 +321,28 @@ export default function Tracker_Queue() {
     return q ? decisionRows.filter((d) => decMatch(d, q)) : decisionRows;
   }, [decisionRows, search]);
 
+  /**
+   * Hold / Debit split into "still on this desk" vs "has moved on".
+   *
+   * A DEBIT and a PARTIAL hold both ADVANCE the invoice — only a FULL hold
+   * parks it here — so these tabs otherwise list rows for invoices that are
+   * now at another stage, which reads as "why is this under Pre-Audit?".
+   * Rather than drop that history (it is the only record of what this desk
+   * decided, and the amounts), the moved-on rows are kept but collapsed
+   * behind a divider, so the default view is only what is actionable here.
+   *
+   * Every other decision tab (OK, verdicts, send-backs) is a pure log and is
+   * left as one flat list.
+   */
+  const isSplitTab = AMOUNT_TABS.has(subTab);
+  const { activeDecRows, movedOnDecRows } = useMemo(() => {
+    if (!isSplitTab) return { activeDecRows: decRows, movedOnDecRows: [] as StageDecision[] };
+    return {
+      activeDecRows: decRows.filter((d) => d.is_still_here),
+      movedOnDecRows: decRows.filter((d) => !d.is_still_here),
+    };
+  }, [decRows, isSplitTab]);
+
   // Reset sub-tab + selection whenever the stage changes.
   useEffect(() => {
     setSelected(new Set());
@@ -325,7 +351,13 @@ export default function Tracker_Queue() {
     setHoldType("");
     setAmount("");
     setSubTab("current");
+    setShowMovedOn(false);
   }, [activeStage]);
+
+  // Collapse the moved-on half again whenever the sub-tab changes.
+  useEffect(() => {
+    setShowMovedOn(false);
+  }, [subTab]);
   const loadDecisions = async (clear = false) => {
     const decision = DECISION_TABS[subTab];
     if (!decision || !activeStage) return;
@@ -620,6 +652,59 @@ export default function Tracker_Queue() {
     (readOnly ? 0 : 1) +
     (subTab === "returned" ? 2 : 0) +
     (isJsap && subTab !== "advanced" ? 1 : 0);
+
+  /** One decision-log row. Shared by the active and moved-on halves of a
+   *  split tab, and by the flat list every other decision tab renders. */
+  const renderDecisionRow = (d: StageDecision) => (
+    <TableRow key={d.event_id}>
+      {canReleaseHolds && (
+        <TableCell>
+          {d.is_still_here && d.hold_type === "FULL" && (
+            <input
+              type="checkbox"
+              className="size-4 cursor-pointer accent-brand"
+              checked={selected.has(d.invoice_id)}
+              aria-label={`Select invoice ${d.invoice_number}`}
+              onChange={() => toggle(d.invoice_id)}
+            />
+          )}
+        </TableCell>
+      )}
+      <TableCell className="whitespace-nowrap font-medium text-ink">{d.invoice_number}</TableCell>
+      <TableCell>{d.party_name}</TableCell>
+      <TableCell className="whitespace-nowrap">{fmtDate(d.invoice_date)}</TableCell>
+      <TableCell className="whitespace-nowrap text-right tabular-nums">
+        ₹{money(d.net_invoice_value ?? d.invoice_value)}
+      </TableCell>
+      <TableCell>
+        <Badge outlined tone={decisionTone(d.decision)}>
+          {d.decision}
+          {d.hold_type ? ` · ${d.hold_type}` : ""}
+        </Badge>
+        {d.awaiting_remarks && <div className={CELL_NOTE}>reason still owed</div>}
+        {d.came_back && SENT_BACK_TABS.has(subTab) && (
+          <div className={cn(CELL_NOTE, "text-ok")}>came back since</div>
+        )}
+      </TableCell>
+      {AMOUNT_TABS.has(subTab) && (
+        <TableCell className="whitespace-nowrap text-right tabular-nums">
+          {d.amount ? `₹${money(d.amount)}` : "—"}
+          {d.decision === "HOLD" && d.hold_type === "FULL" && (
+            <div className={CELL_NOTE}>full value</div>
+          )}
+        </TableCell>
+      )}
+      <TableCell className="max-w-[240px] whitespace-normal">{d.remarks || "—"}</TableCell>
+      <TableCell>{d.acted_by_name || "—"}</TableCell>
+      <TableCell className="whitespace-nowrap">{fmtDT(d.decided_at)}</TableCell>
+      <TableCell>
+        <Badge outlined tone={d.is_still_here ? "hold" : "info"}>
+          {d.invoice_status === "COMPLETED" ? "Completed" : d.current_stage_name}
+        </Badge>
+        {d.is_still_here && <div className={CELL_NOTE}>still here</div>}
+      </TableCell>
+    </TableRow>
+  );
 
   return (
     <Page>
@@ -932,67 +1017,54 @@ export default function Tracker_Queue() {
                               : "Nothing outstanding — anything sent back has since come back here."
                             : `No ${DECISION_TABS[subTab].toLowerCase()} decisions recorded at this stage.`}
                         </TableEmpty>
+                      ) : isSplitTab ? (
+                        <>
+                          {activeDecRows.length === 0 ? (
+                            <TableRow>
+                              <TableCell
+                                colSpan={decisionColumns}
+                                className="py-3 text-center text-[12px] text-subtle"
+                              >
+                                Nothing {DECISION_TABS[subTab].toLowerCase()} is still on this
+                                desk — a debit and a partial hold both let the invoice move on.
+                              </TableCell>
+                            </TableRow>
+                          ) : (
+                            activeDecRows.map(renderDecisionRow)
+                          )}
+
+                          {movedOnDecRows.length > 0 && (
+                            <>
+                              <TableRow>
+                                <TableCell colSpan={decisionColumns} className="bg-surface p-0">
+                                  <button
+                                    type="button"
+                                    aria-expanded={showMovedOn}
+                                    onClick={() => setShowMovedOn((v) => !v)}
+                                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] font-semibold text-subtle transition-colors hover:bg-surface-strong"
+                                  >
+                                    <span
+                                      aria-hidden
+                                      className={cn(
+                                        "inline-block transition-transform duration-150",
+                                        showMovedOn && "rotate-90",
+                                      )}
+                                    >
+                                      ▶
+                                    </span>
+                                    Moved on ({movedOnDecRows.length})
+                                    <span className="font-normal">
+                                      — decided here, now at a later stage
+                                    </span>
+                                  </button>
+                                </TableCell>
+                              </TableRow>
+                              {showMovedOn && movedOnDecRows.map(renderDecisionRow)}
+                            </>
+                          )}
+                        </>
                       ) : (
-                        decRows.map((d) => (
-                          <TableRow key={d.event_id}>
-                            {canReleaseHolds && (
-                              <TableCell>
-                                {d.is_still_here && d.hold_type === "FULL" && (
-                                  <input
-                                    type="checkbox"
-                                    className="size-4 cursor-pointer accent-brand"
-                                    checked={selected.has(d.invoice_id)}
-                                    aria-label={`Select invoice ${d.invoice_number}`}
-                                    onChange={() => toggle(d.invoice_id)}
-                                  />
-                                )}
-                              </TableCell>
-                            )}
-                            <TableCell className="whitespace-nowrap font-medium text-ink">
-                              {d.invoice_number}
-                            </TableCell>
-                            <TableCell>{d.party_name}</TableCell>
-                            <TableCell className="whitespace-nowrap">
-                              {fmtDate(d.invoice_date)}
-                            </TableCell>
-                            <TableCell className="whitespace-nowrap text-right tabular-nums">
-                              ₹{money(d.net_invoice_value ?? d.invoice_value)}
-                            </TableCell>
-                            <TableCell>
-                              <Badge outlined tone={decisionTone(d.decision)}>
-                                {d.decision}
-                                {d.hold_type ? ` · ${d.hold_type}` : ""}
-                              </Badge>
-                              {d.awaiting_remarks && (
-                                <div className={CELL_NOTE}>reason still owed</div>
-                              )}
-                              {d.came_back && SENT_BACK_TABS.has(subTab) && (
-                                <div className={cn(CELL_NOTE, "text-ok")}>came back since</div>
-                              )}
-                            </TableCell>
-                            {AMOUNT_TABS.has(subTab) && (
-                              <TableCell className="whitespace-nowrap text-right tabular-nums">
-                                {d.amount ? `₹${money(d.amount)}` : "—"}
-                                {d.decision === "HOLD" && d.hold_type === "FULL" && (
-                                  <div className={CELL_NOTE}>full value</div>
-                                )}
-                              </TableCell>
-                            )}
-                            <TableCell className="max-w-[240px] whitespace-normal">
-                              {d.remarks || "—"}
-                            </TableCell>
-                            <TableCell>{d.acted_by_name || "—"}</TableCell>
-                            <TableCell className="whitespace-nowrap">{fmtDT(d.decided_at)}</TableCell>
-                            <TableCell>
-                              <Badge outlined tone={d.is_still_here ? "hold" : "info"}>
-                                {d.invoice_status === "COMPLETED"
-                                  ? "Completed"
-                                  : d.current_stage_name}
-                              </Badge>
-                              {d.is_still_here && <div className={CELL_NOTE}>still here</div>}
-                            </TableCell>
-                          </TableRow>
-                        ))
+                        decRows.map(renderDecisionRow)
                       )}
                     </TableBody>
                   </Table>
