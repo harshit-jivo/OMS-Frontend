@@ -1,0 +1,36 @@
+# node_modules is the big one — ~400 packages. The image runs `npm ci`
+# against package-lock.json instead, which also guarantees the build uses
+# the locked tree rather than whatever the host happens to have.
+node_modules/
+dist/
+dist-ssr/
+
+.git/
+.github/
+.gitignore
+.gitattributes
+
+# Local env files stay on the host. The API base URL is a BUILD ARG
+# (see Dockerfile) because Vite inlines it into the bundle, so copying a
+# developer's .env in would silently bake localhost:8000 into a release.
+#
+# .env.production is NOT excluded — it holds VITE_BUILD_NUMBER, is committed,
+# and `vite build` reads it via loadEnv(). Without it the release reports
+# build 0.
+.env
+.env.local
+.env.*.local
+
+# Test and tooling OUTPUT. The test SOURCES stay: `npm run build` runs
+# `tsc -b`, which builds all three referenced projects including
+# tsconfig.e2e.json — drop e2e/ and the build fails with "No inputs were
+# found in config file" on a tree that compiles fine locally.
+playwright-report/
+test-results/
+coverage/
+storybook-static/
+
+.vscode/
+.idea/
+*.log
+npm-debug.log*
