@@ -150,7 +150,9 @@ export default function Tracker_Alerts() {
                   </TableEmpty>
                 ) : (
                   alerts.map((a) => (
-                    <TableRow key={a.id}>
+                    // Keyed on the invoice, not `a.id`: rows are derived live
+                    // and `id` is null until the sweep has logged that visit.
+                    <TableRow key={a.invoice}>
                       <TableCell className="whitespace-nowrap font-medium text-ink">
                         {a.invoice_number}
                       </TableCell>
