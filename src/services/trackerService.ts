@@ -599,8 +599,15 @@ export interface TrackerUser {
   is_active: boolean;
 }
 
+/**
+ * A stuck row as `/tracker/alerts/` returns it. The backend derives these live
+ * from dwell time rather than reading the StuckAlert table, so the ledger-only
+ * fields (`id`, `created_at`, `updated_at`) are null until the
+ * `scan_stuck_alerts` sweep has recorded that visit. Key rows on `invoice`, not
+ * `id` — an invoice sits at exactly one stage, so it is unique per response.
+ */
 export interface StuckAlert {
-  id: number;
+  id: number | null;
   invoice: number;
   invoice_number: string;
   party_name: string;
@@ -615,8 +622,8 @@ export interface StuckAlert {
   is_active: boolean;
   last_notified_at: string | null;
   notified: { user: string; email: string; sent_at: string }[];
-  created_at: string;
-  updated_at: string;
+  created_at: string | null;
+  updated_at: string | null;
 }
 
 export default trackerService;
