@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { newestFirst, statusAfterFailedPost } from "./helpers";
+import { isCreditLimitError, newestFirst, statusAfterFailedPost } from "./helpers";
 import type { InvoiceRecord } from "./types";
 
 const row = (id: number, created_at?: string) => ({ id, created_at }) as InvoiceRecord;
@@ -102,5 +102,58 @@ describe("statusAfterFailedPost", () => {
 
   it("records ERROR when the row carries no status at all", () => {
     expect(statusAfterFailedPost(withStatus(undefined))).toBe("ERROR");
+  });
+});
+
+/**
+ * Whether a row offers "Raise CL".
+ *
+ * Every message below is a real one taken from `invoice_log.error_message` on
+ * production. They are all the SAME SAP check — transaction-notification code
+ * 13000316 — reworded between releases, and only the newest of the three ever
+ * said "credit limit". Keying on the phrase meant an invoice blocked by an
+ * older message showed no way to raise the request, leaving the reviewer to
+ * repost into the same block forever.
+ */
+describe("isCreditLimitError", () => {
+  const withError = (error_message?: string) => ({ id: 1, error_message }) as InvoiceRecord;
+
+  it("matches the current wording", () => {
+    expect(
+      isCreditLimitError(
+        withError("(13000316) Credit Limit Exceeded! Current Limit is 10.00, Balance Amount is 5,379.00"),
+      ),
+    ).toBe(true);
+  });
+
+  it("matches the older wordings that never say 'credit limit'", () => {
+    expect(
+      isCreditLimitError(withError("(13000316) Limit is Over, Current Limit is 10.00 Balance Amount Is 9022.00")),
+    ).toBe(true);
+    expect(
+      isCreditLimitError(
+        withError("(13000316) Limit if Over By, Current Limit is 45000.00 Balance Amount Is 46000.00"),
+      ),
+    ).toBe(true);
+  });
+
+  it("matches on the code alone, whatever SAP renames the message to next", () => {
+    expect(isCreditLimitError(withError("(13000316) Something nobody has written yet"))).toBe(true);
+  });
+
+  it("does NOT offer the action on an unrelated SAP failure", () => {
+    // These are the other real ERROR messages on the same table. Offering
+    // "Raise CL" here would raise a JSAP document for a stock problem.
+    expect(
+      isCreditLimitError(withError("10001153 - Insufficient quantity for item FG0000324 with batch NM0308 in warehouse")),
+    ).toBe(false);
+    expect(isCreditLimitError(withError("Cannot add row without complete selection of batch/serial numbers"))).toBe(false);
+    expect(isCreditLimitError(withError("(130001) Please Select the corrrect Godown"))).toBe(false);
+    expect(isCreditLimitError(withError("(13204583) YOU CANNOT MAKE BILL WITHOUST GST MORE THAN 49999"))).toBe(false);
+  });
+
+  it("does NOT offer the action on a row with no message at all", () => {
+    expect(isCreditLimitError(withError(undefined))).toBe(false);
+    expect(isCreditLimitError(withError(""))).toBe(false);
   });
 });
