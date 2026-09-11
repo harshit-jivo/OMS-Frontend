@@ -33,6 +33,7 @@ import {
   parsePayload,
   POSTED_TO_SAP_STATUS,
   readableSapError,
+  statusAfterFailedPost,
   STATUS_FILTERS,
   trimmed,
   updateInvoiceStatus,
@@ -520,7 +521,9 @@ export function useInvoiceReview({ canApproveReject, canPostToSap }: UseInvoiceR
         // in the log, overwriting any previous error.
         const readable = readableSapError(rawError || message);
         try {
-          await updateInvoiceStatus(record.id, "ERROR", { error_message: readable });
+          await updateInvoiceStatus(record.id, statusAfterFailedPost(record), {
+            error_message: readable,
+          });
         } catch (logErr) {
           console.error("Unable to log SAP post error:", logErr);
         }

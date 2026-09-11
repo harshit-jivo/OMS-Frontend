@@ -210,6 +210,23 @@ export const creditLimitFlowSummary = (stages: CreditLimitStage[]): StageState |
 export const isCreditLimitError = (record: InvoiceRecord) =>
   /credit\s*limit/i.test(String(record.error_message || ""));
 
+/**
+ * The status to record when a post to SAP fails.
+ *
+ * ERROR for everything — EXCEPT a record that already has a credit-limit
+ * request in flight. That request is not withdrawn just because this attempt
+ * failed, and until JSAP clears it a repost keeps failing the same check, so
+ * the invoice genuinely still belongs on the CL Raised tab. Demoting it to
+ * ERROR takes away "Show Flow" — the only way back to the approval stages of
+ * the request the reviewer already raised — and offers "Raise CL" again,
+ * which the backend refuses with a 409 because a request for that log exists.
+ *
+ * The backend stores the latest SAP message either way, so keeping the status
+ * costs nothing: the reviewer still sees what SAP said on this attempt.
+ */
+export const statusAfterFailedPost = (record: InvoiceRecord): InvoiceStatus =>
+  normalizeStatus(record.status) === "CL_RAISED" ? "CL_RAISED" : "ERROR";
+
 // A value is a usable lineage reference (log id) — 0 is not a valid pk here.
 export const hasRef = (value: unknown) => value !== undefined && value !== null && value !== "";
 

@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { newestFirst } from "./helpers";
+import { newestFirst, statusAfterFailedPost } from "./helpers";
 import type { InvoiceRecord } from "./types";
 
 const row = (id: number, created_at?: string) => ({ id, created_at }) as InvoiceRecord;
@@ -67,5 +67,40 @@ describe("newestFirst", () => {
 
   it("handles an empty list", () => {
     expect(newestFirst([])).toEqual([]);
+  });
+});
+
+/**
+ * What a failed post to SAP does to the row's status.
+ *
+ * The case worth pinning is the credit-limit one: an invoice whose request is
+ * already with JSAP keeps failing the same SAP check until the approval
+ * clears, and each of those failures used to knock it off the CL Raised tab —
+ * taking "Show Flow", the only route back to the request's approval stages,
+ * with it.
+ */
+describe("statusAfterFailedPost", () => {
+  const withStatus = (status?: string) => ({ id: 1, status }) as InvoiceRecord;
+
+  it("keeps a record with a credit-limit request in flight on CL_RAISED", () => {
+    expect(statusAfterFailedPost(withStatus("CL_RAISED"))).toBe("CL_RAISED");
+  });
+
+  it("still recognises CL_RAISED when the backend spells it with a space", () => {
+    // normalizeStatus is what the tabs and the row buttons read, so this has
+    // to agree with them or the row lands somewhere the button isn't.
+    expect(statusAfterFailedPost(withStatus("CL raised"))).toBe("CL_RAISED");
+  });
+
+  it("records ERROR for an approved invoice failing its first post", () => {
+    expect(statusAfterFailedPost(withStatus("APPROVED"))).toBe("ERROR");
+  });
+
+  it("leaves an existing ERROR as ERROR on a retry", () => {
+    expect(statusAfterFailedPost(withStatus("ERROR"))).toBe("ERROR");
+  });
+
+  it("records ERROR when the row carries no status at all", () => {
+    expect(statusAfterFailedPost(withStatus(undefined))).toBe("ERROR");
   });
 });
