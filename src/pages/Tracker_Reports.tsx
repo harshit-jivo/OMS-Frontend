@@ -66,6 +66,34 @@ const AGE_COLORS = ["#10b981", "#f59e0b", "#f97316", "#ef4444"];
 const GRID = "#eef0f3";
 const BRAND = "#2563eb";
 const BAD = "#ef4444";
+// Second series on the throughput chart. Validated against BRAND: CVD ΔE 29.3
+// (deutan), normal-vision 32.0 — comfortably clear of the ΔE 15 floor.
+const BRAND_ALT = "#10b981";
+
+/**
+ * Per-disposition colours for the decisions table.
+ *
+ * Re-stepped, not chosen by eye: the obvious amber/orange pair for HOLD and
+ * DEBIT measured ΔE 9.6 for NORMAL vision — under the 15 floor, i.e. hard to
+ * tell apart even without a colour-vision deficiency — so DEBIT moved to violet.
+ * The set now passes lightness, chroma, CVD separation and the normal-vision
+ * floor. Colour is never the only cue here: every row is a labelled count, which
+ * is also what discharges the sub-3:1 contrast warning on the lighter fills.
+ *
+ * SKIPPED is deliberately the neutral ink token rather than a hue. It is not a
+ * decision anyone made — it marks a desk a fast-tracked invoice was sent past —
+ * so it should read as absence, not as a fifth verdict.
+ */
+const DECISION_TONES: Record<string, string> = {
+  OK: "#10b981",
+  APPROVED: "#10b981",
+  HOLD: "#f59e0b",
+  DEBIT: "#8b5cf6",
+  RETURN: "#ef4444",
+  REJECTED: "#ef4444",
+  SKIPPED: "#94a3b8",
+};
+const DECISION_FALLBACK = "#64748b";
 
 export default function Tracker_Reports() {
   // Draft vs applied, as on Tracker_Invoices: `applied` IS the query key, so
@@ -282,6 +310,128 @@ export default function Tracker_Reports() {
                 </BarChart>
               </ResponsiveContainer>
             )}
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Volume per stage</CardTitle>
+            </CardHeader>
+            <p className="mb-3 text-[12.5px] text-subtle">
+              Invoices that <strong>reached</strong> each desk in the selected
+              period, against the decisions those desks recorded. This is
+              throughput — unlike “Pending per stage” above, which is a snapshot
+              of what is sitting there right now, so the two will not tally.
+            </p>
+            {data.flow_by_stage.every((s) => !s.arrived && !s.decided) ? (
+              <EmptyState
+                title="Nothing moved in this period"
+                className="py-10"
+              />
+            ) : (
+              <ResponsiveContainer width="100%" height={280}>
+                <BarChart
+                  data={data.flow_by_stage}
+                  margin={{ top: 8, right: 16, bottom: 8, left: 0 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke={GRID} />
+                  <XAxis
+                    dataKey="stage_name"
+                    fontSize={11}
+                    interval={0}
+                    angle={-15}
+                    textAnchor="end"
+                    height={60}
+                  />
+                  <YAxis fontSize={11} allowDecimals={false} />
+                  <Tooltip />
+                  <Legend />
+                  <Bar dataKey="arrived" name="Arrived" fill={BRAND} radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="decided" name="Decided" fill={BRAND_ALT} radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Decisions by stage</CardTitle>
+            </CardHeader>
+            <p className="mb-3 text-[12.5px] text-subtle">
+              What each desk decided in the period. An invoice held and later
+              advanced counts twice — those are two real decisions, not a
+              duplicate. <strong>Skipped</strong> marks a desk a fast-tracked
+              invoice was sent past.
+            </p>
+            {/* A table, not a stacked bar: the question is "how many approved,
+                how many rejected", and that is a number. Nine stages × up to
+                five dispositions would also be an unreadable stack. It doubles
+                as the table view the lighter fills require. */}
+            <div className="overflow-x-auto">
+              <Table density="compact">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Stage</TableHead>
+                    <TableHead className="text-right">Arrived</TableHead>
+                    <TableHead className="text-right">Decided</TableHead>
+                    <TableHead>Breakdown</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {data.flow_by_stage.filter((s) => s.arrived || s.decided)
+                    .length === 0 ? (
+                    <TableEmpty colSpan={4}>
+                      No stage activity in this period.
+                    </TableEmpty>
+                  ) : (
+                    data.flow_by_stage
+                      .filter((s) => s.arrived || s.decided)
+                      .map((s) => (
+                        <TableRow key={s.stage_code}>
+                          <TableCell className="whitespace-nowrap font-medium text-ink">
+                            {s.stage_name}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {s.arrived}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {s.decided}
+                          </TableCell>
+                          <TableCell>
+                            {s.decisions.length === 0 ? (
+                              <span className="text-subtle">—</span>
+                            ) : (
+                              <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                                {s.decisions.map((d) => (
+                                  <span
+                                    key={d.status}
+                                    className="flex items-center gap-1.5 whitespace-nowrap"
+                                  >
+                                    <span
+                                      aria-hidden="true"
+                                      className="size-2.5 shrink-0 rounded-full"
+                                      style={{
+                                        background:
+                                          DECISION_TONES[d.status] ??
+                                          DECISION_FALLBACK,
+                                      }}
+                                    />
+                                    <span className="text-[12.5px] text-subtle">
+                                      {d.status}
+                                    </span>
+                                    <span className="text-[12.5px] font-semibold tabular-nums text-ink">
+                                      {d.count}
+                                    </span>
+                                  </span>
+                                ))}
+                              </span>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
           </Card>
 
           <Card>
