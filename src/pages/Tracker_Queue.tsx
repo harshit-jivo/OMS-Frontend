@@ -8,6 +8,7 @@ import {
   HiOutlineBanknotes,
   HiOutlineClock,
   HiOutlineEye,
+  HiOutlineForward,
   HiOutlineMapPin,
   HiOutlinePauseCircle,
 } from "react-icons/hi2";
@@ -16,7 +17,7 @@ import { saveAs } from "file-saver";
 import { Badge, type BadgeTone } from "@/components/ui/badge";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { Button } from "@/components/ui/button";
-import { FilterBar, FilterCheckbox, FilterCount, FilterSearch, FilterSpacer } from "@/components/ui/filter-bar";
+import { FilterBar, FilterCheckbox, FilterCount, FilterDate, FilterSearch, FilterSelect, FilterSpacer } from "@/components/ui/filter-bar";
 import { Input, Select } from "@/components/ui/form";
 import { Card, EmptyState, Notice, Page, PageHeader } from "@/components/ui/page";
 import { TableSkeleton } from "@/components/ui/skeleton";
@@ -220,9 +221,24 @@ export default function Tracker_Queue() {
    * `setStageTabs` from one payload), which React batched but which meant the
    * two could be read apart by anything that suspended between them.
    */
+  /*
+   * Category + arrival-date filters are sent to the SERVER and are part of the
+   * query key, so each filter set is cached separately and the stage tab counts
+   * that come back describe the same rows the table is showing. Narrowing the
+   * array here instead would have left those counts describing an unfiltered
+   * queue the user cannot see.
+   */
+  const [category, setCategory] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const queueFilters = useMemo(
+    () => ({ category, dateFrom, dateTo }),
+    [category, dateFrom, dateTo],
+  );
+
   const { data: queueData } = useQuery({
-    queryKey: ["tracker", "my-queue"],
-    queryFn: () => trackerService.myQueue(),
+    queryKey: ["tracker", "my-queue", queueFilters],
+    queryFn: () => trackerService.myQueue(queueFilters),
     refetchInterval: 30_000,
     staleTime: 30_000,
   });
@@ -483,6 +499,40 @@ export default function Tracker_Queue() {
   const allHeldSelected = heldHere.length > 0 && heldHere.every((d) => selected.has(d.invoice_id));
 
   const onAdvance = () => runBulk({ action: "ADVANCE", remarks });
+
+  /**
+   * Fast-track: Invoice Entry straight to SAP Approval, skipping Pre-Audit and
+   * Data Entry (and Bilty/GRPO for transport). Offered only at the entry desk
+   * and only on the Current tab.
+   *
+   * Remarks are checked here as well as server-side. The server is the
+   * authority, but this bypasses the desk where holds and debits are captured,
+   * so the user should be told what is missing before the request rather than
+   * after it — and told what they are about to skip.
+   */
+  const canFastTrack = activeStage === "entry" && subTab === "current";
+  const onFastTrack = async () => {
+    if (selected.size === 0) {
+      flash("Select at least one invoice");
+      return;
+    }
+    if (!remarks.trim()) {
+      flash("A reason is required to skip Pre-Audit and Data Entry");
+      return;
+    }
+    try {
+      const res = await trackerService.fastTrack([...selected], remarks);
+      flash(
+        `${res.processed_count} sent to SAP Approval`,
+        res.errors.length ? `${res.errors.length} failed` : "",
+      );
+      setRemarks("");
+      setSelected(new Set());
+      void load();
+    } catch (err) {
+      flash("Fast-track failed", messageFrom(err, "The server refused the request."));
+    }
+  };
   /** Release the selected full holds: mark them OK and let them move on. */
   const onReleaseHold = (status: string) => {
     if (!selected.size) {
@@ -770,6 +820,43 @@ export default function Tracker_Queue() {
               placeholder="Invoice no., party, GSTIN, category…"
               fieldClassName="min-w-[280px]"
             />
+            <FilterSelect
+              label="Category"
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+            >
+              <option value="">All categories</option>
+              {(lookups?.categories ?? []).map((c) => (
+                <option key={c.id} value={c.name}>
+                  {c.name}
+                </option>
+              ))}
+            </FilterSelect>
+            {/* Dated on ARRIVAL at this desk, matching how the queue is
+                ordered — "what reached me this week", not when the invoice
+                was raised. */}
+            <FilterDate
+              label="Arrived from"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+            />
+            <FilterDate
+              label="Arrived to"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+            />
+            {(category || dateFrom || dateTo) && (
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setCategory("");
+                  setDateFrom("");
+                  setDateTo("");
+                }}
+              >
+                Clear
+              </Button>
+            )}
             {SENT_BACK_TABS.has(subTab) && (
               <FilterCheckbox
                 label="Also show ones that came back"
@@ -912,14 +999,31 @@ export default function Tracker_Queue() {
                 <>
                   <Input
                     className="min-w-[220px] flex-1"
-                    placeholder="Remarks (optional for advance)"
-                    aria-label="Remarks (optional for advance)"
+                    placeholder={
+                      canFastTrack
+                        ? "Remarks (optional to advance, required to fast-track)"
+                        : "Remarks (optional for advance)"
+                    }
+                    aria-label="Remarks"
                     value={remarks}
                     onChange={(e) => setRemarks(e.target.value)}
                   />
                   <Button variant="primary" onClick={onAdvance} disabled={selected.size === 0}>
                     <HiOutlineArrowRight aria-hidden="true" /> Advance
                   </Button>
+                  {/* Deliberately NOT the primary action: this skips the desks
+                      that capture holds and debits, so it should read as the
+                      exception, not the default way out of entry. */}
+                  {canFastTrack && (
+                    <Button
+                      variant="ghost"
+                      onClick={() => void onFastTrack()}
+                      disabled={selected.size === 0}
+                      title="Skip Pre-Audit and Data Entry — a reason is required"
+                    >
+                      <HiOutlineForward aria-hidden="true" /> Send to SAP Approval
+                    </Button>
+                  )}
                   {stageCfg.can_return && (
                     <Button variant="danger" onClick={onReturn} disabled={selected.size === 0}>
                       <HiOutlineArrowUturnLeft aria-hidden="true" /> Return

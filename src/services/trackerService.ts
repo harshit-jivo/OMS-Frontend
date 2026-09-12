@@ -332,8 +332,33 @@ export const trackerService = {
     await api.delete(`/tracker/invoices/${id}/`);
   },
 
-  async myQueue(): Promise<MyQueue> {
-    const { data } = await api.get("/tracker/my-queue/");
+  /**
+   * The actionable inbox. Filters are applied SERVER-side, not by narrowing the
+   * rows here, so the per-stage tab counts agree with what is listed — a count
+   * that contradicts the visible rows is worse than no count.
+   *
+   * `date_from`/`date_to` are dated on ARRIVAL at the desk (matching the queue's
+   * ordering), and `date_to` is inclusive of that whole day.
+   */
+  async myQueue(filters: QueueFilters = {}): Promise<MyQueue> {
+    const params: Record<string, string> = {};
+    if (filters.category) params.category = filters.category;
+    if (filters.dateFrom) params.date_from = filters.dateFrom;
+    if (filters.dateTo) params.date_to = filters.dateTo;
+    const { data } = await api.get("/tracker/my-queue/", { params });
+    return data;
+  },
+
+  /**
+   * Send invoices from Invoice Entry straight to SAP Approval, skipping
+   * Pre-Audit and Data Entry. `remarks` is mandatory server-side — this bypasses
+   * where holds and debits are captured, so the reason is the only record of why.
+   */
+  async fastTrack(ids: number[], remarks: string): Promise<BulkResult> {
+    const { data } = await api.post("/tracker/actions/fast-track/", {
+      ids,
+      remarks,
+    });
     return data;
   },
 
@@ -546,6 +571,30 @@ export interface BottleneckRow {
   avg_days: number;
   visits: number;
 }
+/** Filters for the queue. Empty strings are omitted from the request. */
+export interface QueueFilters {
+  category?: string;
+  dateFrom?: string;   // YYYY-MM-DD, on arrival at the stage
+  dateTo?: string;     // YYYY-MM-DD, inclusive
+}
+
+/**
+ * Throughput at one desk over the selected window — what MOVED, as opposed to
+ * `StageCount`'s snapshot of what is sitting there now. The two answer different
+ * questions and deliberately will not tally.
+ */
+export interface StageFlow {
+  stage_code: string;
+  stage_name: string;
+  order: number;
+  /** Visits that BEGAN in the window: how many invoices reached this desk. */
+  arrived: number;
+  /** Decisions recorded at this desk in the window (sum of `decisions`). */
+  decided: number;
+  /** Per-disposition counts, biggest first. `SKIPPED` marks a fast-tracked bypass. */
+  decisions: { status: string; count: number }[];
+}
+
 export interface ReportData {
   summary: {
     in_progress: number;
@@ -554,6 +603,7 @@ export interface ReportData {
     avg_cycle_days: number;
   };
   pending_by_stage: StageCount[];
+  flow_by_stage: StageFlow[];
   avg_days_per_stage: StageAvg[];
   bottleneck_by_person: BottleneckRow[];
   bottleneck_by_vendor: BottleneckRow[];
