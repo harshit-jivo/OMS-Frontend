@@ -41,6 +41,12 @@ export const GRANTABLE_ADMIN_PAGES: GrantablePage[] = [
   // grantable: the pages they gated are gone, so offering those permissions
   // would grant nothing. Any stored grant with those keys is simply ignored.
   { key: "Device_Management", label: "Device Management", path: "/Device_Management" },
+  // Workflow Engine configuration. The key is the BACKEND permission key
+  // (core/permission_registry.py -> workflow.config.manage), not a new
+  // frontend-only name: the backend reads the same string out of
+  // User.extra_pages via HasKey, so granting it here grants the API too.
+  // ONE page covers modules, workflows, queries, stages and replacements.
+  { key: "workflow.config.manage", label: "Workflows", path: "/Workflows" },
   // Staff orders — an internal order raised against an employee ID rather
   // than a party, priced from each product's staff rate.
   //
