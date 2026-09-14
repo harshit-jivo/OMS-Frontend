@@ -453,12 +453,28 @@ export default function Tracker_Queue() {
     try {
       const res = await trackerService.syncJsap();
       const n = (res.advanced?.length ?? 0) + (res.returned?.length ?? 0);
-      flash(
-        n === 0 ? "No change from JSAP" : "JSAP decisions applied",
-        n === 0
-          ? `${res.waiting?.length ?? 0} still awaiting a JSAP decision.`
-          : `${res.advanced?.length ?? 0} approved, ${res.returned?.length ?? 0} returned.`,
-      );
+      const unreachable = res.unreachable?.length ?? 0;
+      // An unreachable SAP is reported as such rather than folded into
+      // "awaiting a decision" — those invoices are unknown, not pending, and
+      // saying otherwise turns an outage into a false all-clear.
+      if (n === 0 && unreachable > 0) {
+        flash(
+          "Could not reach SAP",
+          `${unreachable} invoice(s) could not be checked — their JSAP status is unknown, not pending. Try again once SAP is back.`,
+        );
+      } else {
+        flash(
+          n === 0 ? "No change from JSAP" : "JSAP decisions applied",
+          [
+            n === 0
+              ? `${res.waiting?.length ?? 0} still awaiting a JSAP decision.`
+              : `${res.advanced?.length ?? 0} approved, ${res.returned?.length ?? 0} returned.`,
+            unreachable ? `${unreachable} could not be checked — SAP unreachable.` : "",
+          ]
+            .filter(Boolean)
+            .join(" "),
+        );
+      }
       void load();
     } catch (err) {
       flash("Could not reach JSAP", messageFrom(err, "The request failed."));
