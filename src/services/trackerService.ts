@@ -54,7 +54,13 @@ export interface StageEvent {
   stage: number;
   stage_name: string;
   stage_code: string;
-  event_type: "RECEIVE" | "ADVANCE" | "RETURN";
+  /**
+   * NOTE is an ANNOTATION on a visit, not an occupancy — a hold, or a rejection
+   * awaiting its written reason. It copies `entered_at` from the visit it
+   * annotates and keeps `exited_at` NULL for good, so it must never be read as
+   * "the invoice is here now". It was missing from this union entirely.
+   */
+  event_type: "RECEIVE" | "ADVANCE" | "RETURN" | "NOTE";
   stage_status: string;
   hold_type: "" | "FULL" | "PARTIAL";
   amount: string | null;
@@ -146,6 +152,14 @@ export interface Invoice {
   returned_at?: string;
   // Present in the stage-advanced payload:
   advanced_at?: string;
+  /**
+   * The desk this invoice is DUE at next, from the detail endpoint only —
+   * computing it queries the stage table per invoice, which would be an N+1 on
+   * a queue. Null at the terminal desk, on a completed invoice, and on a detour
+   * desk, where the next step is decided on the way out rather than fixed.
+   */
+  next_stage_code?: string | null;
+  next_stage_name?: string | null;
 }
 
 /**
