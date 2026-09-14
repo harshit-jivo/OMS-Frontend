@@ -20,15 +20,28 @@
  * ─────────────────────────────────────────────────────────────────────────
  * THE RAIL IS DRAWN BY THE ITEMS, NOT BY THE LIST
  * ─────────────────────────────────────────────────────────────────────────
- * The connecting line is a `border-l` on each item rather than one absolutely
+ * The connecting line belongs to each item rather than being one absolutely
  * positioned element on the `<ol>`. That is what makes a separator work: a
  * single tall rail would run straight through the "Version 2 of 3" row, and
  * the old CSS solved it by painting a background chip over the line — which
  * only looks right while the background behind it is the exact colour the
- * chip is. Per-item borders simply stop and restart.
+ * chip is. Per-item rails simply stop and restart.
  *
- * The last item's rail is hidden, so the line ends at the final dot instead
- * of trailing into the padding below it.
+ * It is its own element rather than a `border-l` on the `li`, because a border
+ * spans the item's FULL height — including the few pixels above the dot. On
+ * every item but the first that stub is invisible, since the rail above joins
+ * it. On the first item it is a line hanging off the top of the origin, which
+ * reads as history that is not there. The rail therefore starts at the dot's
+ * centre and the dot, painted after it, covers the join.
+ *
+ * The last item has no rail, so the line ends at the final dot instead of
+ * trailing into the padding below it.
+ *
+ * `rail` colours the segment BELOW an item, which is what makes the line say
+ * something rather than just connect dots: a solid brand rail is ground the
+ * document actually covered, a dashed one is a leg it was fast-forwarded past,
+ * and a red one is a step backwards. Separate from `tone`, which colours the
+ * dot and describes the STOP; this describes the JOURNEY out of it.
  */
 import * as React from "react";
 
@@ -55,34 +68,60 @@ export function Timeline({ className, ...props }: React.ComponentProps<"ol">) {
   );
 }
 
+/**
+ * The rail BELOW an item — how the document left this stop, not what the stop
+ * was. `covered` is the default for anything already behind the reader.
+ */
+const RAIL_TONES = {
+  /** Nothing asserted: the plain connector. */
+  idle: "border-line",
+  /** Ground actually covered — a desk saw it and decided. */
+  covered: "border-brand",
+  /** Fast-forwarded past: dashed, because nobody walked this leg. */
+  skipped: "border-dashed border-line-strong",
+  /** A step backwards — a return or rejection sending it to an earlier desk. */
+  back: "border-bad",
+} as const;
+
+export type TimelineRail = keyof typeof RAIL_TONES;
+
 export function TimelineItem({
   tone = "neutral",
+  rail = "idle",
   last = false,
   className,
   children,
   ...props
 }: React.ComponentProps<"li"> & {
   tone?: BadgeTone;
+  /** Colour of the connecting rail below this item. */
+  rail?: TimelineRail;
   /** Hides the connecting rail below this item. */
   last?: boolean;
 }) {
   return (
     <li
       data-slot="timeline-item"
-      className={cn(
-        "relative pb-4 pl-6",
-        // `border-transparent` rather than dropping the border on the last
-        // item: removing it would change the item's left padding by a pixel
-        // and shift the final row out of line with the ones above it.
-        last ? "border-l border-transparent pb-0" : "border-l border-line",
-        className,
-      )}
+      className={cn("relative pl-6", last ? "pb-0" : "pb-4", className)}
       {...props}
     >
+      {/* Runs from the dot's centre to the bottom of the item. Declared BEFORE
+          the dot so the dot paints over the join. */}
+      {!last && (
+        <span
+          aria-hidden="true"
+          data-slot="timeline-rail"
+          className={cn(
+            "absolute bottom-0 left-0 top-2 -translate-x-1/2 border-l",
+            RAIL_TONES[rail],
+          )}
+        />
+      )}
       {/* Centred ON the rail: half the dot's width to the left, so the line
           runs through it rather than beside it. */}
       <span
         aria-hidden="true"
+        data-slot="timeline-dot"
         className={cn(
           "absolute left-0 top-1 size-2.5 -translate-x-1/2 rounded-full ring-4",
           DOT_TONES[tone],

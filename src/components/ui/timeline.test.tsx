@@ -28,9 +28,9 @@ describe("Timeline", () => {
   });
 
   it("keeps the rail off the last item without moving it", () => {
-    // The rail is a left border on each item, so dropping it on the last one
-    // would change that item's box by a pixel and knock it out of line with
-    // the ones above. Transparent, not absent.
+    // The rail is its own element, not a border on the item, so the last item
+    // simply has none — and because no item carries a border, dropping it
+    // cannot knock the final row out of line with the ones above.
     const { container } = render(
       <Timeline>
         <TimelineItem>first</TimelineItem>
@@ -39,9 +39,14 @@ describe("Timeline", () => {
     );
 
     const items = Array.from(container.querySelectorAll('[data-slot="timeline-item"]'));
-    expect(items[0].className).toContain("border-line");
-    expect(items[1].className).toContain("border-transparent");
-    expect(items[1].className).toContain("border-l");
+    const rails = container.querySelectorAll('[data-slot="timeline-rail"]');
+    expect(rails).toHaveLength(1);
+    expect(items[0].querySelector('[data-slot="timeline-rail"]')).not.toBeNull();
+    expect(items[1].querySelector('[data-slot="timeline-rail"]')).toBeNull();
+    // Same left padding on both, so nothing shifts.
+    expect(items[0].className).toContain("pl-6");
+    expect(items[1].className).toContain("pl-6");
+    expect(items[0].className).not.toContain("border-l");
   });
 
   it("colours the dot from the same tone vocabulary as Badge", () => {
@@ -56,8 +61,38 @@ describe("Timeline", () => {
       </Timeline>,
     );
 
-    const dot = container.querySelector('[data-slot="timeline-item"] span[aria-hidden="true"]');
+    const dot = container.querySelector('[data-slot="timeline-dot"]');
     expect(dot?.className).toContain("bg-bad");
     expect(screen.getByText("SAP refused the push").className).toContain("text-danger");
+  });
+  it("starts the rail at the dot, so nothing hangs above the first one", () => {
+    // A border on the item spans its FULL height, including the few pixels
+    // above the dot. Invisible on every item but the first, where it reads as
+    // history that is not there — the origin appearing to come from somewhere.
+    const { container } = render(
+      <Timeline>
+        <TimelineItem>origin</TimelineItem>
+        <TimelineItem last>end</TimelineItem>
+      </Timeline>,
+    );
+
+    const rail = container.querySelector('[data-slot="timeline-rail"]');
+    expect(rail?.className).toContain("top-2");
+    expect(rail?.className).toContain("bottom-0");
+  });
+
+  it("colours the rail independently of the dot", () => {
+    // The dot describes the STOP, the rail describes the JOURNEY out of it.
+    const { container } = render(
+      <Timeline>
+        <TimelineItem tone="ok" rail="skipped">
+          passed without a decision
+        </TimelineItem>
+      </Timeline>,
+    );
+
+    expect(container.querySelector('[data-slot="timeline-dot"]')?.className).toContain("bg-ok");
+    const rail = container.querySelector('[data-slot="timeline-rail"]');
+    expect(rail?.className).toContain("border-dashed");
   });
 });
