@@ -238,11 +238,15 @@ export interface BulkResult {
  *   not_submitted  the draft exists but has not reached JSAP yet
  *   not_configured JSAP database not set up on the server
  *   rejection_pending  rejected by hand here, awaiting remarks (sync stands down)
+ *   sap_unreachable    the SAP lookup FAILED — the status is unknown, NOT
+ *                      pending. Distinct from the others on purpose: an
+ *                      outage reported as "awaiting a decision" reads as a
+ *                      quiet all-clear.
  */
 export interface JsapStatus {
   available: boolean;
   reason?: "not_in_jsap" | "no_party_code" | "no_draft" | "not_submitted"
-    | "not_configured" | "rejection_pending";
+    | "not_configured" | "rejection_pending" | "sap_unreachable";
   detail?: string;
   status?: "A" | "P" | "R";
   label?: string;
@@ -269,6 +273,13 @@ export interface JsapSyncResult {
   returned?: number[];
   waiting?: number[];
   errors?: { id: number; error: string }[];
+  /**
+   * Invoices whose status could NOT be determined because SAP was unreachable.
+   * Deliberately separate from `waiting`: these are unknown, not pending, and
+   * reporting them as pending is how a failed lookup came to read as a quiet
+   * all-clear.
+   */
+  unreachable?: number[];
   // Single invoice
   changed?: boolean;
   action?: "ADVANCE" | "RETURN" | null;
