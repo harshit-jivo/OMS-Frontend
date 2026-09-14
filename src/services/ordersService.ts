@@ -895,9 +895,17 @@ export const ordersService = {
     return Array.isArray(response.data) ? response.data.map(normalizeOrder) : response.data;
   },
 
-  getBranches: async () => {
-    const response = await api.get("/orders/branch/"
-    );
+  /**
+   * Dispatch branches for one business line.
+   *
+   * `category` is the party's OIL/BEVERAGES/MART. It matters: `bpl_id` is
+   * unique only WITHIN a category (id 2 is FACTORY under OIL and HARYANA
+   * under MART), so an unfiltered list is ambiguous, not merely long.
+   */
+  getBranches: async (category?: string) => {
+    const response = await api.get("/orders/branch/", {
+      params: category ? { category } : undefined,
+    });
     return response.data;
   },
 

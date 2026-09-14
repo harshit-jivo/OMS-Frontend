@@ -82,6 +82,8 @@ type PartyOption = {
 type BranchOption = {
   bpl_id: string | number;
   bpl_name?: string | null;
+  /** OIL / BEVERAGES / MART. Only `bpl_id` + this pair is unique. */
+  category?: string | null;
   /** Shown on the wizard's review step, and only there. */
   address?: string | null;
 };
@@ -362,11 +364,19 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
   // Use Effects
   useEffect(() => {
     fetchPartyName();
-    fetchBranch();
     fetchProducts();
     fetchCompany();
     fetchCurrentUserProfile();
   }, []);
+
+  // Dispatch branches belong to a business line, so they are re-fetched
+  // whenever the party's category changes rather than once on mount. Before
+  // the category is known (the profile default has not landed, no party is
+  // picked) this asks for all of them, which is the honest answer — the
+  // selector is just not narrowed yet.
+  useEffect(() => {
+    fetchBranch(selectedPartyCategory);
+  }, [selectedPartyCategory]);
 
   useEffect(() => {
     if (!isLoadingFromOrder) {
@@ -389,11 +399,20 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
     }
   };
 
+  // Keep `dispatch` pointing at a branch the current list actually contains.
+  //
+  // The list changes under this field when the party's category changes, and
+  // `bpl_id` is unique only within a category — id 2 is FACTORY under OIL and
+  // HARYANA under MART. So a held-over id is not a harmless stale value; it
+  // silently renames itself into a different place. Anything not in the new
+  // list is dropped and replaced with that list's first entry.
   useEffect(() => {
-    if (isLoadingFromOrder || formData.dispatch || branch.length === 0) return;
+    if (isLoadingFromOrder || branch.length === 0) return;
+    const stillOffered = branch.some((d) => String(d.bpl_id) === formData.dispatch);
+    if (formData.dispatch && stillOffered) return;
     setFormData((prev) => ({
       ...prev,
-      dispatch: prev.dispatch || String(branch[0]?.bpl_id || ""),
+      dispatch: String(branch[0]?.bpl_id || ""),
     }));
   }, [branch, formData.dispatch, isLoadingFromOrder]);
 
@@ -501,12 +520,13 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
     }
   };
 
-  const fetchBranch = async () => {
+  const fetchBranch = async (category = "") => {
     try {
-      const data = await ordersService.getBranches();
-      setBranch(data);
+      const data = await ordersService.getBranches(category);
+      setBranch(Array.isArray(data) ? data : []);
     } catch (error) {
       console.log("Error fetching dispatch data:", error);
+      setBranch([]);
     }
   };
 

@@ -1185,7 +1185,7 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
                     branch.map((d) => (
                       <button
                         type="button"
-                        key={d.bpl_id}
+                        key={`${d.category ?? ""}-${d.bpl_id}`}
                         {...optionProps(String(d.bpl_id) === formData.dispatch)}
                         onClick={() => handleDispatchSelect(String(d.bpl_id))}
                       >
