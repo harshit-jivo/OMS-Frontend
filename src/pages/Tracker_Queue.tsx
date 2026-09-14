@@ -6,6 +6,7 @@ import {
   HiOutlineArrowRight,
   HiOutlineArrowUturnLeft,
   HiOutlineBanknotes,
+  HiOutlineBellSlash,
   HiOutlineClock,
   HiOutlineEye,
   HiOutlineForward,
@@ -18,7 +19,16 @@ import { Badge, type BadgeTone } from "@/components/ui/badge";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { Button } from "@/components/ui/button";
 import { FilterBar, FilterCheckbox, FilterCount, FilterDate, FilterSearch, FilterSelect, FilterSpacer } from "@/components/ui/filter-bar";
-import { Input, Select } from "@/components/ui/form";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Field, Input, Select, Textarea } from "@/components/ui/form";
 import { Card, EmptyState, Notice, Page, PageHeader } from "@/components/ui/page";
 import { TableSkeleton } from "@/components/ui/skeleton";
 import { Tab, TabList } from "@/components/ui/tabs";
@@ -193,6 +203,11 @@ export default function Tracker_Queue() {
   // since moved on; the moved-on half is collapsed by default so the desk sees
   // only actionable rows. See `splitRows` below.
   const [showMovedOn, setShowMovedOn] = useState(false);
+  // The invoice whose alert emails are being muted, and the reason being typed
+  // for it. Null when the dialog is closed. Un-muting needs no dialog.
+  const [muteFor, setMuteFor] = useState<Invoice | null>(null);
+  const [muteReason, setMuteReason] = useState("");
+  const [savingMute, setSavingMute] = useState(false);
   const [advancedRows, setAdvancedRows] = useState<Invoice[]>([]);
   // Decision-log rows for the OK / Hold / Debit / verdict tabs.
   const [decisionRows, setDecisionRows] = useState<StageDecision[]>([]);
@@ -533,6 +548,49 @@ export default function Tracker_Queue() {
       flash("Fast-track failed", messageFrom(err, "The server refused the request."));
     }
   };
+  /**
+   * The "no alert email" tick.
+   *
+   * Un-ticking is immediate — turning the reminders back on needs no
+   * justification. Ticking opens the dialog below, because a reason is
+   * mandatory: a silent overdue invoice has to carry the explanation for why it
+   * is silent, or the flag just becomes a way to lose work quietly.
+   */
+  const onMuteToggle = async (inv: Invoice) => {
+    if (!inv.email_muted) {
+      setMuteReason("");
+      setMuteFor(inv);
+      return;
+    }
+    try {
+      await trackerService.unmuteAlerts([inv.id]);
+      flash("Alert emails resumed", `Invoice ${inv.invoice_number}`);
+      void load();
+    } catch (err) {
+      flash("Could not resume alerts", messageFrom(err, "The request failed."));
+    }
+  };
+
+  const saveMute = async () => {
+    if (!muteFor) return;
+    if (!muteReason.trim()) {
+      flash("A reason is required to stop the alert emails");
+      return;
+    }
+    setSavingMute(true);
+    try {
+      await trackerService.muteAlerts([muteFor.id], muteReason);
+      flash("Alert emails stopped", `Invoice ${muteFor.invoice_number}`);
+      setMuteFor(null);
+      setMuteReason("");
+      void load();
+    } catch (err) {
+      flash("Could not stop the alerts", messageFrom(err, "The request failed."));
+    } finally {
+      setSavingMute(false);
+    }
+  };
+
   /** Release the selected full holds: mark them OK and let them move on. */
   const onReleaseHold = (status: string) => {
     if (!selected.size) {
@@ -707,7 +765,8 @@ export default function Tracker_Queue() {
   const decisionColumns = 10 + (canReleaseHolds ? 1 : 0) + (AMOUNT_TABS.has(subTab) ? 1 : 0);
   const queueColumns =
     8 +
-    (readOnly ? 0 : 1) +
+    // select + "no email" both hang off the same non-read-only condition
+    (readOnly ? 0 : 2) +
     (subTab === "returned" ? 2 : 0) +
     (isJsap && subTab !== "advanced" ? 1 : 0);
 
@@ -1204,6 +1263,14 @@ export default function Tracker_Queue() {
                           />
                         </TableHead>
                       )}
+                      {!readOnly && (
+                        <TableHead
+                          className="w-16 text-center"
+                          title="Tick to stop the overdue alert emails for this invoice while it sits at this desk"
+                        >
+                          No email
+                        </TableHead>
+                      )}
                       <TableHead>Invoice No.</TableHead>
                       <TableHead>Party</TableHead>
                       <TableHead>Inv. date</TableHead>
@@ -1258,8 +1325,34 @@ export default function Tracker_Queue() {
                               />
                             </TableCell>
                           )}
+                          {!readOnly && (
+                            <TableCell className="text-center">
+                              <input
+                                type="checkbox"
+                                className="size-4 cursor-pointer accent-hold"
+                                checked={Boolean(inv.email_muted)}
+                                aria-label={`Stop alert emails for invoice ${inv.invoice_number}`}
+                                title={
+                                  inv.email_muted
+                                    ? `No alert emails — ${inv.email_mute_reason}`
+                                    : "Stop the overdue alert emails for this invoice"
+                                }
+                                onChange={() => void onMuteToggle(inv)}
+                              />
+                            </TableCell>
+                          )}
                           <TableCell className="whitespace-nowrap font-medium text-ink">
                             {inv.invoice_number}
+                            {inv.email_muted && (
+                              <div className={cn(CELL_NOTE, "text-hold")}>
+                                <HiOutlineBellSlash
+                                  aria-hidden="true"
+                                  className="inline size-3 align-[-1px]"
+                                />{" "}
+                                {inv.email_mute_reason}
+                                {inv.email_muted_by ? ` — ${inv.email_muted_by}` : ""}
+                              </div>
+                            )}
                           </TableCell>
                           <TableCell>{inv.party_name}</TableCell>
                           <TableCell className="whitespace-nowrap">
@@ -1370,6 +1463,48 @@ export default function Tracker_Queue() {
       />
 
       <InvoiceTimelineDialog invoice={timelineInv} onClose={() => setTimelineInv(null)} />
+
+      <Dialog open={Boolean(muteFor)} onOpenChange={(open) => !open && setMuteFor(null)}>
+        <DialogContent title="Stop the alert emails" size="sm">
+          <DialogHeader>
+            <DialogTitle>Stop the alert emails</DialogTitle>
+            <DialogDescription>
+              Invoice {muteFor?.invoice_number} — {muteFor?.party_name}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogBody>
+            <Field label="Why should this one not be chased?" required>
+              {(c) => (
+                <Textarea
+                  {...c}
+                  rows={3}
+                  autoFocus
+                  value={muteReason}
+                  placeholder="e.g. vendor is issuing a credit note, awaiting their paperwork"
+                  onChange={(e) => setMuteReason(e.target.value)}
+                />
+              )}
+            </Field>
+            <p className="mt-3 text-[12px] leading-snug text-subtle">
+              The invoice keeps ageing and stays in this queue — only the overdue
+              email stops. The flag clears itself as soon as the invoice moves to
+              the next stage.
+            </p>
+          </DialogBody>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setMuteFor(null)} disabled={savingMute}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => void saveMute()}
+              disabled={savingMute || !muteReason.trim()}
+            >
+              {savingMute ? "Saving…" : "Stop the emails"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {payInv && (
         <PaymentDialog

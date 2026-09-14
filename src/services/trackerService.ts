@@ -129,6 +129,15 @@ export interface Invoice {
   updated_at: string;
   events?: StageEvent[];
   payment?: PaymentDetail | null;
+  /**
+   * Alert-email mute, set from the desk with a written reason. Suppresses the
+   * stuck-alert EMAIL only, and only while the invoice is on the stage visit it
+   * was set for — the flag lapses on its own when the invoice moves on.
+   */
+  email_muted?: boolean;
+  email_mute_reason?: string;
+  email_muted_by?: string | null;
+  email_muted_at?: string | null;
   // Present in the my-queue payload:
   arrived_via_return?: boolean;
   return_reason?: string;
@@ -514,6 +523,30 @@ export const trackerService = {
     return data;
   },
 
+  /**
+   * Stop the stuck-alert emails for these invoices, with the reason why.
+   *
+   * The reason is mandatory (the server rejects a blank one): the next person
+   * to see a silent overdue invoice has to be able to find out why it is
+   * silent. Nothing else changes — the invoice keeps ageing, keeps its overdue
+   * badge, and still appears on the Alerts page, marked as muted.
+   *
+   * The mute is tied to the stage visit, so it lapses by itself when the
+   * invoice reaches the next desk.
+   */
+  async muteAlerts(ids: number[], reason: string): Promise<BulkResult> {
+    const { data } = await api.post("/tracker/alerts/mute/", { ids, reason });
+    return data;
+  },
+
+  /** Turn the alert emails back on. No reason required to un-mute. */
+  async unmuteAlerts(ids: number[]): Promise<BulkResult> {
+    const { data } = await api.delete("/tracker/alerts/mute/", {
+      data: { ids },
+    });
+    return data;
+  },
+
   async adminAllInvoices(filters: AllInvoiceFilters = {}): Promise<Invoice[]> {
     const params: Record<string, string> = {};
     Object.entries(filters).forEach(([k, v]) => {
@@ -674,6 +707,15 @@ export interface StuckAlert {
   notified: { user: string; email: string; sent_at: string }[];
   created_at: string | null;
   updated_at: string | null;
+  /**
+   * Alert-email mute, set from the desk with a written reason. Suppresses the
+   * stuck-alert EMAIL only, and only while the invoice is on the stage visit it
+   * was set for — the flag lapses on its own when the invoice moves on.
+   */
+  email_muted?: boolean;
+  email_mute_reason?: string;
+  email_muted_by?: string | null;
+  email_muted_at?: string | null;
 }
 
 export default trackerService;
