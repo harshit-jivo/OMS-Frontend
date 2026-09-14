@@ -11,6 +11,7 @@ import {
   HiOutlineEye,
   HiOutlineForward,
   HiOutlineMapPin,
+  HiOutlinePaperAirplane,
   HiOutlinePauseCircle,
 } from "react-icons/hi2";
 import { saveAs } from "file-saver";
@@ -208,6 +209,7 @@ export default function Tracker_Queue() {
   const [muteFor, setMuteFor] = useState<Invoice | null>(null);
   const [muteReason, setMuteReason] = useState("");
   const [savingMute, setSavingMute] = useState(false);
+  const [syncingSap, setSyncingSap] = useState(false);
   const [advancedRows, setAdvancedRows] = useState<Invoice[]>([]);
   // Decision-log rows for the OK / Hold / Debit / verdict tabs.
   const [decisionRows, setDecisionRows] = useState<StageDecision[]>([]);
@@ -588,6 +590,50 @@ export default function Tracker_Queue() {
       flash("Could not stop the alerts", messageFrom(err, "The request failed."));
     } finally {
       setSavingMute(false);
+    }
+  };
+
+  /**
+   * Check SAP for invoices it has already posted and walk those to Payment.
+   *
+   * Offered at the Save in SAP desk, which is the desk that would otherwise
+   * carry the consequence: a document saved in SAP without anyone advancing
+   * the tracker row leaves that row ageing at whatever stage it was on, in the
+   * queue and in the stuck-alert mail, describing a state of the world that
+   * ended when the document was saved.
+   *
+   * With rows selected it checks only those; with none selected it sweeps the
+   * whole queue. The same sweep runs nightly, so this is for when you don't
+   * want to wait for it.
+   */
+  const canSyncSap = activeStage === "save_in_sap" && subTab === "current";
+  const onSyncSap = async () => {
+    setSyncingSap(true);
+    try {
+      const res = await trackerService.syncSapSaved(
+        selected.size ? [...selected] : undefined,
+      );
+      const detail = [
+        `${res.checked} checked`,
+        res.errors.length ? `${res.errors.length} failed` : "",
+        res.cross_company_count
+          ? `${res.cross_company_count} found in another company — not moved`
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      flash(
+        res.advanced_count
+          ? `${res.advanced_count} invoice(s) moved to Payment`
+          : "Nothing to move — SAP has none of these posted yet",
+        detail,
+      );
+      setSelected(new Set());
+      void load();
+    } catch (err) {
+      flash("SAP check failed", messageFrom(err, "The server refused the request."));
+    } finally {
+      setSyncingSap(false);
     }
   };
 
@@ -1081,6 +1127,25 @@ export default function Tracker_Queue() {
                       title="Skip Pre-Audit and Data Entry — a reason is required"
                     >
                       <HiOutlineForward aria-hidden="true" /> Send to SAP Approval
+                    </Button>
+                  )}
+                  {canSyncSap && (
+                    <Button
+                      variant="ghost"
+                      onClick={() => void onSyncSap()}
+                      disabled={syncingSap}
+                      title={
+                        selected.size
+                          ? "Check SAP for the selected invoices and move any already posted to Payment"
+                          : "Check SAP for every pending invoice and move any already posted to Payment"
+                      }
+                    >
+                      <HiOutlinePaperAirplane aria-hidden="true" />{" "}
+                      {syncingSap
+                        ? "Checking SAP…"
+                        : selected.size
+                          ? `Check SAP (${selected.size})`
+                          : "Check SAP — all"}
                     </Button>
                   )}
                   {stageCfg.can_return && (

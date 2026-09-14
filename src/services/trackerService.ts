@@ -539,6 +539,28 @@ export const trackerService = {
     return data;
   },
 
+  /**
+   * Ask the server to check SAP for invoices it has already posted, and walk
+   * those to the Payment stage.
+   *
+   * Same service the nightly `sync_sap_saved` job runs, so the button and the
+   * schedule cannot drift apart. Pass `ids` to check only those invoices; omit
+   * it to sweep every in-progress invoice. `dryRun` reports what would move
+   * without moving anything.
+   *
+   * Only POSTED documents count — a SAP draft is pending, not saved.
+   */
+  async syncSapSaved(
+    ids?: number[],
+    dryRun = false,
+  ): Promise<SapSavedSyncResult> {
+    const { data } = await api.post("/tracker/actions/sync-sap-saved/", {
+      ...(ids && ids.length ? { ids } : {}),
+      dry_run: dryRun,
+    });
+    return data;
+  },
+
   /** Turn the alert emails back on. No reason required to un-mute. */
   async unmuteAlerts(ids: number[]): Promise<BulkResult> {
     const { data } = await api.delete("/tracker/alerts/mute/", {
@@ -689,6 +711,32 @@ export interface TrackerUser {
  * `scan_stuck_alerts` sweep has recorded that visit. Key rows on `invoice`, not
  * `id` — an invoice sits at exactly one stage, so it is unique per response.
  */
+/** One invoice the SAP-saved sweep moved, and the document that justified it. */
+export interface SapSavedAdvance {
+  id: number;
+  invoice_number: string;
+  party_name: string;
+  /** Where it was sitting before the sweep moved it. */
+  from_stage: string;
+  sap_table: string;
+  sap_docnum: number;
+  sap_docentry: number;
+}
+
+export interface SapSavedSyncResult {
+  checked: number;
+  dry_run: boolean;
+  advanced_count: number;
+  advanced: SapSavedAdvance[];
+  errors: { id: number; invoice_number: string; detail: string }[];
+  /**
+   * Invoices whose document exists, but in a different company database than
+   * their branch/unit selects. Reported, never advanced — the tracker row or
+   * the posting is wrong, and a person has to decide which.
+   */
+  cross_company_count: number;
+}
+
 export interface StuckAlert {
   id: number | null;
   invoice: number;
