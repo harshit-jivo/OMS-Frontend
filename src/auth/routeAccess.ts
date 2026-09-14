@@ -139,6 +139,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // page nobody can reach is worse than a missing one — it reads as protection.
   // The test strips comments now, which is what surfaced this.
   "/Device_Management": { permissions: ["Device_Management"] },
+  // Workflow Engine configuration. The grant key is the BACKEND permission
+  // key (core/permission_registry.py), so one string gates the sidebar,
+  // the route and the API — no frontend-only alias to drift.
+  "/Workflows": { permissions: ["workflow.config.manage"] },
   "/Sap_Sync": { permissions: ["Sap_Sync"] },
   "/Party_Assignment": { permissions: ["Party_Assignment"] },
   "/Party_Product_Assignment": { permissions: ["Party_Product_Assignment"] },

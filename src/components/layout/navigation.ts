@@ -44,6 +44,7 @@ import {
   HiOutlineClipboardDocumentCheck,
   HiOutlineClipboardDocumentList,
   HiOutlineClock,
+  HiOutlineCog6Tooth,
   HiOutlineComputerDesktop,
   HiOutlineCube,
   HiOutlineCurrencyRupee,
@@ -260,6 +261,7 @@ export const SIDEBAR_SECTIONS: SidebarSectionDef[] = [
       { to: "/Role_Permissions", label: "Role Permissions", icon: HiOutlineKey },
       { to: "/Device_Management", label: "Device Management", icon: HiOutlineDevicePhoneMobile },
       { to: "/UI_Labels", label: "UI Labels", icon: HiOutlineLanguage },
+      { to: "/Workflows", label: "Workflows", icon: HiOutlineCog6Tooth },
     ],
   },
 ];
