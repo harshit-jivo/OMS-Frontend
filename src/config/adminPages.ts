@@ -30,6 +30,12 @@ export const GRANTABLE_ADMIN_PAGES: GrantablePage[] = [
   { key: "Einvoice", label: "e-Invoice (IRN)", path: "/Einvoice" },
   { key: "Ewaybill", label: "e-Way Bill", path: "/Ewaybill" },
   { key: "HAIS", label: "Hardware Assets (HAIS)", path: "/HAIS" },
+  { key: "BackDate", label: "BackDate — raise requests", path: "/BackDate" },
+  {
+    key: "BackDate_Approval",
+    label: "BackDate — approve/reject",
+    path: "/BackDate_Approval",
+  },
   { key: "Distributor", label: "Distributor", path: "/Distributor" },
   { key: "Mart_Approval", label: "Mart Approval", path: "/Mart_Approval" },
   // One key for the whole Legal module — unlocks Label Checker AND Nutrition

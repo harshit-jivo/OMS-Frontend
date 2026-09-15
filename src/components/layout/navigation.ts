@@ -205,6 +205,13 @@ export const SIDEBAR_SECTIONS: SidebarSectionDef[] = [
     links: [{ to: "/HAIS", label: "Hardware Assets", icon: HiOutlineComputerDesktop }],
   },
   {
+    label: "BackDate",
+    links: [
+      { to: "/BackDate", label: "BackDate Requests", icon: HiOutlineClock },
+      { to: "/BackDate_Approval", label: "BackDate Approval", icon: HiOutlineShieldCheck },
+    ],
+  },
+  {
     label: "Tracker",
     links: [
       { to: "/Tracker_Entry", label: "Invoice Entry", icon: HiOutlinePencilSquare },
