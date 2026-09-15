@@ -41,7 +41,7 @@ import {
  */
 function backendRegistryKeys(): Set<string> {
   const source = readFileSync(
-    join(__dirname, "../../../Backend/core/permission_registry.py"),
+    join(__dirname, "../../../OMS-Backend/core/permission_registry.py"),
     "utf8",
   );
   const body = source
@@ -67,7 +67,7 @@ describe("the grantable key lists", () => {
 
   it("offers every page and payment key the server registers", () => {
     const source = readFileSync(
-      join(__dirname, "../../../Backend/core/permission_registry.py"),
+      join(__dirname, "../../../OMS-Backend/core/permission_registry.py"),
       "utf8",
     );
     const body = source
