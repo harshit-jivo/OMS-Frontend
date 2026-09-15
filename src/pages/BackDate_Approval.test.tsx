@@ -21,13 +21,12 @@ function request(id: number, company: string, withStage = true) {
     company_label: company,
     companies: [company],
     sap_username: "USER0" + id,
-    document_type: 2,
+    document_type_name: "Business Partner",
     from_date: "2026-09-15",
     to_date: "2026-09-15",
     time_limit: null,
     action: "A",
     action_label: "Add",
-    remarks: "",
     created_by_username: "admin",
     created_at: "2026-09-15T10:00:00Z",
     updated_at: "2026-09-15T10:00:00Z",
@@ -57,7 +56,9 @@ function request(id: number, company: string, withStage = true) {
 
 const QUEUE = [request(13, "BEVERAGES")];
 const HISTORY = [request(12, "OIL", false)];
-const INSIGHTS = { pending: 1, approved: 1, rejected: 0, total: 2 };
+const INSIGHTS = {
+  pending: 1, approved: 1, completed: 1, rejected: 0, total: 2,
+};
 
 function stub() {
   vi.spyOn(backdateService, "approvalQueue").mockResolvedValue(QUEUE as never);
@@ -67,6 +68,23 @@ function stub() {
   vi.spyOn(backdateService, "approvalInsights").mockResolvedValue(
     INSIGHTS as never,
   );
+  vi.spyOn(backdateService, "history").mockResolvedValue({
+    actions: [],
+    stages: [
+      {
+        stage_id: 11, sequence: 1, stage_name: "Manager Approval",
+        status: "AWAITING", reviewer: "Navdeep",
+        configured_reviewer: "Navdeep", has_active_replacement: false,
+        acted_by: "", acted_at: null, remarks: "",
+      },
+      {
+        stage_id: 12, sequence: 2, stage_name: "Finance Approval",
+        status: "UPCOMING", reviewer: "tannu",
+        configured_reviewer: "tannu", has_active_replacement: false,
+        acted_by: "", acted_at: null, remarks: "",
+      },
+    ],
+  } as never);
 }
 
 describe("BackDateApproval", () => {
@@ -89,7 +107,7 @@ describe("BackDateApproval", () => {
 
   it("opens on the queue, which is the only list with anything to do", async () => {
     render(<BackDateApproval />);
-    await screen.findByRole("button", { name: /^approve$/i });
+    await screen.findByRole("button", { name: /^details$/i });
 
     expect(backdateService.approvalQueue).toHaveBeenCalledWith({});
     expect(backdateService.approvalHistory).not.toHaveBeenCalled();
@@ -102,7 +120,7 @@ describe("BackDateApproval", () => {
   it("switches to decided requests from the Approved card", async () => {
     const user = userEvent.setup();
     render(<BackDateApproval />);
-    await screen.findByRole("button", { name: /^approve$/i });
+    await screen.findByRole("button", { name: /^details$/i });
 
     await user.click(screen.getByRole("button", { name: /approved/i }));
 
@@ -111,33 +129,81 @@ describe("BackDateApproval", () => {
         status: "APPROVED",
       }),
     );
-    // A request already decided offers no decision — the server would refuse
-    // it, so the buttons are not drawn.
+  });
+
+  it("offers only Details and Progress in the row", async () => {
+    render(<BackDateApproval />);
+    await screen.findByRole("button", { name: /^details$/i });
+
+    // Deciding moved into the detail dialog: a one-click Approve from a table
+    // row is a decision made without reading what is being agreed to.
+    expect(screen.getByRole("button", { name: /^progress$/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^approve$/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^reject$/i })).toBeNull();
+  });
+
+  it("decides from inside the detail dialog", async () => {
+    const user = userEvent.setup();
+    render(<BackDateApproval />);
+    await user.click(await screen.findByRole("button", { name: /^details$/i }));
+
+    // The queued request is actionable, so the dialog offers the decision.
+    expect(await screen.findByRole("button", { name: /^approve$/i }))
+      .toBeTruthy();
+    expect(screen.getByRole("button", { name: /^reject$/i })).toBeTruthy();
+  });
+
+  it("shows every stage in the progress dialog, reached or not", async () => {
+    const user = userEvent.setup();
+    render(<BackDateApproval />);
+    await user.click(await screen.findByRole("button", { name: /^progress$/i }));
+
+    // The stage AHEAD is shown too — a requester chasing an approval needs to
+    // know somebody else comes after this one.
+    expect(await screen.findByText("Manager Approval")).toBeTruthy();
+    expect(screen.getByText("Finance Approval")).toBeTruthy();
+    expect(screen.getByText("Awaiting review")).toBeTruthy();
+    expect(screen.getByText("Not yet reached")).toBeTruthy();
+  });
+
+  it("searches by id and by SAP user", async () => {
+    const user = userEvent.setup();
+    render(<BackDateApproval />);
+    await screen.findByRole("button", { name: /^details$/i });
+
+    await user.type(screen.getByLabelText(/search requests/i), "USER013");
+
+    // Debounced, and the counts take the same term so a card cannot disagree
+    // with the table beneath it.
     await waitFor(() =>
-      expect(screen.queryByRole("button", { name: /^approve$/i })).toBeNull(),
+      expect(backdateService.approvalQueue).toHaveBeenLastCalledWith({
+        search: "USER013",
+      }),
     );
+    expect(backdateService.approvalInsights).toHaveBeenLastCalledWith({
+      search: "USER013",
+    });
   });
 
   it("merges the queue and the history when no status is chosen", async () => {
     const user = userEvent.setup();
     render(<BackDateApproval />);
-    await screen.findByRole("button", { name: /^approve$/i });
+    await screen.findByRole("button", { name: /^details$/i });
 
     await user.click(screen.getByRole("button", { name: /^total/i }));
 
     await waitFor(() =>
       expect(backdateService.approvalHistory).toHaveBeenCalledWith({}),
     );
-    // Both rows show, and only the queued one keeps its decision buttons.
-    expect(await screen.findByText("USER013")).toBeTruthy();
-    expect(screen.getByText("USER012")).toBeTruthy();
-    expect(screen.getAllByRole("button", { name: /^approve$/i })).toHaveLength(1);
+    // The SAP user column is gone; the id is what identifies a row now.
+    expect(await screen.findByText("#13")).toBeTruthy();
+    expect(screen.getByText("#12")).toBeTruthy();
   });
 
   it("passes the company filter to every call", async () => {
     const user = userEvent.setup();
     render(<BackDateApproval />);
-    await screen.findByRole("button", { name: /^approve$/i });
+    await screen.findByRole("button", { name: /^details$/i });
 
     await user.selectOptions(
       screen.getByLabelText(/filter requests by company/i),

@@ -20,13 +20,12 @@ const REQUESTS = [
     company_label: "OIL",
     companies: ["OIL"],
     sap_username: "USER12",
-    document_type: 13,
+    document_type_name: "G/L Accounts",
     from_date: "2026-01-01",
     to_date: "2026-01-31",
     time_limit: null,
     action: "A",
     action_label: "Add",
-    remarks: "",
     created_by_username: "mukesh",
     created_at: "2026-02-01T10:00:00Z",
     flow: null,
@@ -34,7 +33,32 @@ const REQUESTS = [
   },
 ];
 
-const INSIGHTS = { pending: 3, approved: 5, rejected: 2, total: 10 };
+// `completed` is a SUBSET of `approved`, so `total` excludes it.
+/** A finished flow, for the tests that care what SAP said. */
+const FLOW = {
+  id: 1,
+  backdate: 11,
+  status: "APPROVED",
+  hana_status: null,
+  sap_payload: null,
+  hana_status_text: "",
+  workflow: 1,
+  workflow_code: "BKDT_OIL",
+  current_user: null,
+  current_user_username: "",
+  effective_user_username: "",
+  has_active_replacement: false,
+  current_stage: null,
+  current_stage_name: "",
+  current_stage_sequence: null,
+  total_stage: 1,
+  created_at: "2026-02-01T10:00:00Z",
+  updated_at: "2026-02-02T09:00:00Z",
+};
+
+const INSIGHTS = {
+  pending: 3, approved: 5, completed: 4, rejected: 2, total: 10,
+};
 
 function stub() {
   vi.spyOn(backdateService, "listRequests").mockResolvedValue(
@@ -62,7 +86,7 @@ function stub() {
         acted_by_username: "mukesh", remarks: "Dates corrected",
         action_data: {
           from_date: { old: "2026-01-01", new: "2026-01-05" },
-          document_type: { old: 13, new: 15 },
+          document_type_name: { old: "A/R Invoice", new: "Delivery" },
         },
         acted_at: "2026-02-01T11:00:00Z",
       },
@@ -71,6 +95,14 @@ function stub() {
         stage: 11, stage_name: "Finance Approval", acted_by: 2,
         acted_by_username: "tannu", remarks: "ok", action_data: null,
         acted_at: "2026-02-02T09:00:00Z",
+      },
+    ],
+    stages: [
+      {
+        stage_id: 11, sequence: 1, stage_name: "Finance Approval",
+        status: "APPROVED", reviewer: "tannu", configured_reviewer: "tannu",
+        has_active_replacement: false, acted_by: "tannu",
+        acted_at: "2026-02-02T09:00:00Z", remarks: "ok",
       },
     ],
   } as never);
@@ -109,7 +141,7 @@ describe("BackDate", () => {
     expect(screen.queryByLabelText(/filter requests by status/i)).toBeNull();
   });
 
-  it("raises ONE request however many companies are ticked", async () => {
+  it("raises ONE request per company, and never per action", async () => {
     const user = userEvent.setup();
     render(<BackDate />);
     await screen.findByRole("tab", { name: /entries/i });
@@ -131,22 +163,20 @@ describe("BackDate", () => {
       "2026-12-31T18:30",
     );
 
-    // Two companies and both actions is still ONE business decision, so the
-    // button never offers to submit more than one.
-    expect(screen.queryByRole("button", { name: /submit 2 requests/i }))
-      .toBeNull();
-    await user.click(screen.getByRole("button", { name: "Submit Request" }));
+    // Two companies is two requests — each grant is approved on its own and
+    // written to its own SAP schema. Both ACTIONS stay on each one.
+    await user.click(screen.getByRole("button", { name: "Submit 2 Requests" }));
 
     await waitFor(() =>
-      expect(backdateService.createRequest).toHaveBeenCalledTimes(1),
+      expect(backdateService.createRequest).toHaveBeenCalledTimes(2),
     );
-    const [body] = vi.mocked(backdateService.createRequest).mock.calls[0];
-    // The companies travel together INSIDE the request.
-    expect(body.company).toEqual(["OIL", "BEVERAGES"]);
-    expect(body.action).toBe("A,U");
+    const sent = vi
+      .mocked(backdateService.createRequest)
+      .mock.calls.map(([body]) => `${body.company}/${body.action}`);
+    expect(sent).toEqual(["OIL/A,U", "BEVERAGES/A,U"]);
   });
 
-  it("reports one submission, not one per company", async () => {
+  it("reports how many requests were raised", async () => {
     const user = userEvent.setup();
     render(<BackDate />);
     await screen.findByRole("tab", { name: /entries/i });
@@ -159,11 +189,10 @@ describe("BackDate", () => {
       screen.getByLabelText(/rights expire/i),
       "2026-12-31T18:30",
     );
-    await user.click(screen.getByRole("button", { name: "Submit Request" }));
+    await user.click(screen.getByRole("button", { name: "Submit 2 Requests" }));
 
-    expect(await screen.findByText(/request submitted successfully/i))
+    expect(await screen.findByText(/2 BackDate requests submitted/i))
       .toBeTruthy();
-    expect(screen.queryByText(/2 BackDate requests/i)).toBeNull();
   });
 
   it("refuses to submit without an expiry", async () => {
@@ -197,7 +226,8 @@ describe("BackDate", () => {
     );
     const [body] = vi.mocked(backdateService.createRequest).mock.calls[0];
     expect(body.action).toBe("A");
-    expect(body.company).toEqual(["OIL"]);
+    // ONE company, not a list of one.
+    expect(body.company).toBe("OIL");
     expect(body.time_limit).toBe("2026-12-31T18:30");
   });
 
@@ -288,25 +318,102 @@ describe("BackDate", () => {
     );
   });
 
-  it("renders an UPDATE as a readable diff of the changed fields", async () => {
+  it("shows SAP's exact response, and never the payload", async () => {
+    vi.mocked(backdateService.listRequests).mockResolvedValue([
+      {
+        ...REQUESTS[0],
+        flow: {
+          ...FLOW,
+          status: "APPROVED",
+          hana_status: "FAILED",
+          hana_status_text: JSON.stringify({
+            results: [{
+              branch: "OIL", status: "FAILED",
+              response: 'RuntimeError: (259, "invalid userid USER12")',
+            }],
+          }),
+          sap_payload: { calls: [{ branch: "OIL", parameters: { USERID: "USER12" } }] },
+        },
+      },
+    ] as never);
     const user = userEvent.setup();
     render(<BackDate />);
     await screen.findByRole("tab", { name: /entries/i });
 
-    await user.click(await screen.findByRole("button", { name: /details/i }));
-    await screen.findByText("Approval history");
+    await user.click(await screen.findByRole("button", { name: /progress/i }));
 
-    // The diff is its own list; the detail block above it repeats some of the
-    // same labels, so the assertions are scoped to the diff.
-    const updated = screen.getByText("Updated").closest("li") as HTMLElement;
+    // SAP's own words, verbatim — that is the whole point of the column.
+    expect(await screen.findByText(/invalid userid USER12/)).toBeTruthy();
+    // And no way to pull up the request parameters beside them.
+    expect(screen.queryByText(/show payload/i)).toBeNull();
+    expect(screen.queryByText(/USERID/)).toBeNull();
+  });
+
+  it("does not call a successful SAP write FAILED", async () => {
+    // An older row stores a plain sentence rather than the JSON shape. Reading
+    // it as a failure printed a red FAILED beside a green "rights applied".
+    vi.mocked(backdateService.listRequests).mockResolvedValue([
+      {
+        ...REQUESTS[0],
+        flow: {
+          ...FLOW,
+          status: "APPROVED",
+          hana_status: "SUCCESS",
+          hana_status_text: "Rights applied in SAP for USER01 (OIL).",
+        },
+      },
+    ] as never);
+    const user = userEvent.setup();
+    render(<BackDate />);
+    await screen.findByRole("tab", { name: /entries/i });
+
+    await user.click(await screen.findByRole("button", { name: /progress/i }));
+
+    expect(await screen.findByText(/Rights applied in SAP/)).toBeTruthy();
+    expect(screen.queryByText(/refused/i)).toBeNull();
+  });
+
+  it("offers Completed as its own card and filter", async () => {
+    const user = userEvent.setup();
+    render(<BackDate />);
+    await screen.findByRole("tab", { name: /entries/i });
+
+    const card = await screen.findByRole("button", { name: /completed/i });
+    expect(card).toBeTruthy();
+    // It is a SUBSET of approved, so the card says so rather than leaving a
+    // reader to wonder why the two numbers differ.
+    expect(screen.getByText(/rights reached SAP/i)).toBeTruthy();
+
+    await user.click(card);
+    await waitFor(() =>
+      expect(backdateService.listRequests).toHaveBeenLastCalledWith(
+        expect.objectContaining({ status: "COMPLETED" }),
+      ),
+    );
+  });
+
+  it("renders an UPDATE as a readable diff on the progress line", async () => {
+    const user = userEvent.setup();
+    render(<BackDate />);
+    await screen.findByRole("tab", { name: /entries/i });
+
+    // The edit belongs to the request's PROGRESS — it happened between the
+    // creation and the approval — so that is where the diff is shown.
+    await user.click(await screen.findByRole("button", { name: /progress/i }));
+
+    const updated = (await screen.findByText("Updated"))
+      .closest("li") as HTMLElement;
     const diff = within(updated);
     // Field labels, not column names, and only the fields that changed.
     expect(diff.getByText("From date")).toBeTruthy();
     expect(diff.getByText("Document type")).toBeTruthy();
     expect(diff.queryByText("To date")).toBeNull();
-    // Old and new both shown, so the reader can see what it was.
-    expect(diff.getByText("13")).toBeTruthy();
-    expect(diff.getByText("15")).toBeTruthy();
+    // The document reads by NAME in the diff too — "13 → 15" says nothing.
+    // Old and new are BOTH shown, so the reader can see what it was; dates
+    // are localised on the way out, so the document name is what this can
+    // assert literally.
+    expect(diff.getByText("A/R Invoice")).toBeTruthy();
+    expect(diff.getByText("Delivery")).toBeTruthy();
   });
 
   it("shows the stage name the server resolved, not a stored copy", async () => {
@@ -314,8 +421,77 @@ describe("BackDate", () => {
     render(<BackDate />);
     await screen.findByRole("tab", { name: /entries/i });
 
-    await user.click(await screen.findByRole("button", { name: /details/i }));
+    await user.click(await screen.findByRole("button", { name: /progress/i }));
     expect(await screen.findByText(/Finance Approval/)).toBeTruthy();
+  });
+
+  it("opens the progress with the creation as its first event", async () => {
+    const user = userEvent.setup();
+    render(<BackDate />);
+    await screen.findByRole("tab", { name: /entries/i });
+
+    await user.click(await screen.findByRole("button", { name: /progress/i }));
+
+    // A progress line that starts at the first approver is missing the event
+    // that began the entry.
+    const created = (await screen.findByText("Created"))
+      .closest("li") as HTMLElement;
+    expect(within(created).getByText("mukesh")).toBeTruthy();
+    expect(within(created).getByText("Created by")).toBeTruthy();
+  });
+
+  it("shows the document type by NAME, not by its number", async () => {
+    const user = userEvent.setup();
+    render(<BackDate />);
+    await screen.findByRole("tab", { name: /entries/i });
+
+    await user.click(await screen.findByRole("button", { name: /details/i }));
+
+    // "13" means nothing to the person approving.
+    expect(await screen.findByText("G/L Accounts")).toBeTruthy();
+  });
+
+  it("does not offer Edit when the server says this caller may not", async () => {
+    const user = userEvent.setup();
+    render(<BackDate />);
+    await screen.findByRole("tab", { name: /entries/i });
+
+    await user.click(await screen.findByRole("button", { name: /details/i }));
+    await screen.findByText("G/L Accounts");
+
+    // The fixture carries no `can_edit`, which is the server declining. A
+    // button that 403s on click is worse than no button.
+    expect(screen.queryByRole("button", { name: /edit this request/i }))
+      .toBeNull();
+  });
+
+  it("offers Edit when the server says this caller may", async () => {
+    vi.mocked(backdateService.listRequests).mockResolvedValue(
+      [{ ...REQUESTS[0], can_edit: true }] as never,
+    );
+    const user = userEvent.setup();
+    render(<BackDate />);
+    await screen.findByRole("tab", { name: /entries/i });
+
+    await user.click(await screen.findByRole("button", { name: /details/i }));
+
+    expect(await screen.findByRole("button", { name: /edit this request/i }))
+      .toBeTruthy();
+  });
+
+  it("shows only the agreed columns in the table", async () => {
+    render(<BackDate />);
+    await screen.findByRole("tab", { name: /entries/i });
+
+    for (const heading of ["ID", "Company", "From Date", "To Date",
+                           "Time Limit", "Created By"]) {
+      expect(screen.getByRole("columnheader", { name: heading })).toBeTruthy();
+    }
+    // Everything else is in Details or Progress, so the table stays scannable.
+    for (const gone of ["SAP User", "Document Type", "Status", "Waiting On",
+                        "Window"]) {
+      expect(screen.queryByRole("columnheader", { name: gone })).toBeNull();
+    }
   });
 
   it("clears the filter from the Total card", async () => {

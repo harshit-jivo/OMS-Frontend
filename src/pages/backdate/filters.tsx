@@ -7,6 +7,8 @@
  * requester page counts the caller's own requests, the approval desk counts
  * what is waiting on them.
  */
+import { HiMagnifyingGlass } from "react-icons/hi2";
+
 import { Stat } from "../../components/ui/page";
 import { cn } from "../../lib/utils";
 import {
@@ -14,11 +16,20 @@ import {
   type BackDateCompany,
 } from "../../services/backdateService";
 
-/** The status filter, and what each KPI card selects when it is clicked. */
+/**
+ * The status filter, and what each KPI card selects when it is clicked.
+ *
+ * `COMPLETED` is not a flow status. It means "approved AND the rights actually
+ * reached SAP", so it selects a SUBSET of Approved rather than a fifth state.
+ * Since SAP became the gate on the final approval the two differ only for
+ * requests approved under the old order — which is exactly why it is worth
+ * being able to ask for one and not the other.
+ */
 const STATUSES = [
   { value: "", label: "All requests" },
   { value: "PENDING", label: "Pending" },
   { value: "APPROVED", label: "Approved" },
+  { value: "COMPLETED", label: "Completed (in SAP)" },
   { value: "REJECTED", label: "Rejected" },
 ] as const;
 
@@ -39,6 +50,47 @@ const SELECT_CLASS = cn(
   "transition-colors hover:border-line-strong",
   "focus-visible:border-brand focus-visible:bg-card focus-visible:shadow-focus focus-visible:outline-none",
 );
+
+/**
+ * Find one entry by the number on the screen, or by whose SAP login it is for.
+ *
+ * Those are the two ways a person refers to one of these requests, and the
+ * server matches both: an all-digit term matches the id exactly as well as
+ * appearing in a SAP username, so searching "82" finds request 82 rather than
+ * burying it under every id containing 82.
+ */
+export function SearchBox({
+  value,
+  onChange,
+  placeholder = "Search",
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
+  return (
+    <div className="relative">
+      <HiMagnifyingGlass
+        className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-subtle"
+        aria-hidden
+      />
+      <input
+        type="search"
+        aria-label="Search requests by ID or SAP user"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className={cn(
+          "h-control-xs w-52 min-w-0 rounded-sm",
+          "border border-line bg-surface pl-7 pr-2.5",
+          "[font-family:inherit] text-[12.5px] text-ink placeholder:text-subtle",
+          "transition-colors hover:border-line-strong",
+          "focus-visible:border-brand focus-visible:bg-card focus-visible:shadow-focus focus-visible:outline-none",
+        )}
+      />
+    </div>
+  );
+}
 
 export function CompanyFilterSelect({
   value,
@@ -97,12 +149,14 @@ export function StatusFilterSelect({
  */
 export function KpiFilter({
   label,
+  hint,
   value,
   tone,
   active,
   onSelect,
 }: {
   label: string;
+  hint?: string;
   value: number;
   tone?: "ok" | "bad" | "hold";
   active: boolean;
@@ -111,6 +165,7 @@ export function KpiFilter({
   return (
     <Stat
       label={label}
+      hint={hint}
       value={value}
       tone={tone}
       role="button"
@@ -132,14 +187,20 @@ export function KpiFilter({
   );
 }
 
-/** The four cards, wired to a status filter. Identical on both pages. */
+/** The cards, wired to the status filter. Identical on both pages. */
 export function KpiFilterRow({
   counts,
   status,
   onSelect,
   live = true,
 }: {
-  counts: { pending: number; approved: number; rejected: number; total: number };
+  counts: {
+    pending: number;
+    approved: number;
+    rejected: number;
+    completed: number;
+    total: number;
+  };
   status: StatusFilter;
   onSelect: (status: StatusFilter) => void;
   /**
@@ -163,6 +224,18 @@ export function KpiFilterRow({
         tone="ok"
         active={live && status === "APPROVED"}
         onSelect={() => onSelect("APPROVED")}
+      />
+      {/* Sits beside Approved because it is a subset of it, and says so: an
+          approved request whose SAP write never landed grants nothing, and a
+          reader comparing the two numbers should not have to guess why they
+          differ. */}
+      <KpiFilter
+        label="Completed"
+        hint="rights reached SAP"
+        value={counts.completed}
+        tone="ok"
+        active={live && status === "COMPLETED"}
+        onSelect={() => onSelect("COMPLETED")}
       />
       <KpiFilter
         label="Rejected"

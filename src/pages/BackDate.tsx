@@ -35,6 +35,8 @@ import {
   HiClock,
   HiExclamationCircle,
   HiExclamationTriangle,
+  HiMinusCircle,
+  HiPencilSquare,
   HiPlus,
   HiXCircle,
 } from "react-icons/hi2";
@@ -76,6 +78,7 @@ import {
   type BackDateInsights,
   type BackDateRequest,
   type BackDateSapResult,
+  type BackDateStageProgress,
   type SapDocumentType,
   type SapUser,
 } from "../services/backdateService";
@@ -106,10 +109,12 @@ type FormState = {
   companies: BackDateCompany[];
   actions: BackDateAction[];
   sap_username: string;
-  document_type?: number;
+  /** The SAP object NAME. There is no numeric type on a request any more. */
+  document_type_name: string;
   from_date: string;
   to_date: string;
   time_limit: string;
+  /** Write-only: this becomes the CREATE log's remark, not a column. */
   remarks: string;
 };
 
@@ -117,7 +122,7 @@ const EMPTY_FORM: FormState = {
   companies: ["OIL"],
   actions: ["A"],
   sap_username: "",
-  document_type: undefined,
+  document_type_name: "",
   from_date: "",
   to_date: "",
   time_limit: "",
@@ -184,12 +189,11 @@ function StateBlock({
 /** Field names as a person reading the history would say them. */
 const FIELD_LABELS: Record<string, string> = {
   sap_username: "SAP user",
-  document_type: "Document type",
+  document_type_name: "Document type",
   from_date: "From date",
   to_date: "To date",
   time_limit: "Rights expire",
   action: "Action",
-  remarks: "Reason",
 };
 
 /**
@@ -249,71 +253,59 @@ function formatChange(value: string | number | null) {
  * the flow cannot say which. Nothing here is a summary: the parameters are the
  * ones actually bound, and the response is SAP's own text or its own error.
  */
-function SapOutcome({ flow }: { flow: BackDateFlow | null }) {
-  const [open, setOpen] = useState(false);
-  if (!flow || flow.hana_status === null) return null;
-
-  const results = parseResults(flow.hana_status_text);
-  const calls = flow.sap_payload?.calls ?? [];
+/**
+ * What SAP said, as the last node of the progress timeline.
+ *
+ * THE RESPONSE, AND ONLY THE RESPONSE. The request parameters are recorded in
+ * `sap_payload` and are there for an administrator with database access; this
+ * is read by the person deciding what to do next, and the only thing that
+ * tells them is what SAP sent BACK. A payload dump beside it buried that.
+ *
+ * Rendered as a `TimelineNode` rather than a banner of its own so it joins the
+ * same rail as the approvals: the SAP write is the last thing that happens to
+ * a request, not a footnote under the history of it.
+ */
+function SapTimelineNode({ flow }: { flow: BackDateFlow }) {
   const failed = flow.hana_status === "FAILED";
+  const results = parseResults(flow.hana_status_text, flow.hana_status);
 
   return (
-    <div
-      className={cn(
-        "mb-4 rounded-lg px-3.5 py-2.5 text-[13px]",
-        failed ? "bg-bad-soft text-bad" : "bg-ok-soft text-ok",
-      )}
-    >
-      <div className="flex items-start gap-2">
-        {failed ? (
-          <HiXCircle className="mt-0.5 shrink-0" aria-hidden />
-        ) : (
-          <HiCheckCircle className="mt-0.5 shrink-0" aria-hidden />
-        )}
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="font-semibold">
-              SAP {failed ? "write failed" : "rights applied"}
-              {results.length > 1 && ` · ${results.length} companies`}
-            </span>
-            <button
-              type="button"
-              onClick={() => setOpen((v) => !v)}
-              className="cursor-pointer appearance-none border-0 bg-transparent p-0 text-[12.5px] font-medium underline [font-family:inherit]"
+    <TimelineNode
+      tone={failed ? "bg-bad" : "bg-ok"}
+      icon={failed ? HiXCircle : HiCheckCircle}
+      title="SAP"
+      subtitle={results.map((r) => r.branch).join(", ") || undefined}
+      state={failed ? "Refused" : "Rights applied"}
+      stateTone={failed ? "text-bad" : "text-ok"}
+      last
+      rows={[
+        [
+          "Timestamp",
+          flow.updated_at ? new Date(flow.updated_at).toLocaleString() : "—",
+        ],
+      ]}
+      extra={
+        <ul className="m-0 mt-1.5 list-none space-y-1.5 p-0">
+          {results.map((result) => (
+            <li
+              key={result.branch}
+              className={cn(
+                "rounded-lg px-3 py-2 text-[12.5px] leading-relaxed",
+                result.status === "FAILED"
+                  ? "bg-bad-soft text-bad"
+                  : "bg-ok-soft text-ok",
+              )}
             >
-              {open ? "Hide detail" : "Show payload and response"}
-            </button>
-          </div>
-
-          {/* The per-company outcome is always visible: when one company fails
-              and another does not, that IS the headline. */}
-          <ul className="m-0 mt-1.5 list-none space-y-1 p-0">
-            {results.map((result) => (
-              <li key={result.branch} className="text-[12.5px]">
-                <span className="font-semibold">{result.branch}</span>
-                <span className="opacity-80"> · {result.status} · </span>
-                <span className="opacity-90">{result.response}</span>
-              </li>
-            ))}
-          </ul>
-
-          {open && (
-            <div className="mt-2.5 space-y-2.5">
-              {calls.map((call) => (
-                <div key={call.branch}>
-                  <div className="text-[12px] font-semibold uppercase tracking-wide opacity-70">
-                    {call.branch} payload
-                  </div>
-                  <pre className="m-0 mt-1 overflow-x-auto rounded bg-card/60 p-2 text-[11.5px] leading-relaxed text-body">
-                    {JSON.stringify(call.parameters, null, 2)}
-                  </pre>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
+              {/* SAP's own words, verbatim and never truncated: on a refusal
+                  they are the only thing that says what to correct. */}
+              <span className="whitespace-pre-wrap break-words">
+                {result.response || "SAP returned no message."}
+              </span>
+            </li>
+          ))}
+        </ul>
+      }
+    />
   );
 }
 
@@ -323,8 +315,17 @@ function SapOutcome({ flow }: { flow: BackDateFlow | null }) {
  * Falls back to showing the raw text rather than hiding it: an operator needs
  * whatever SAP said even when it does not parse, and swallowing it is exactly
  * the failure this column was added to prevent.
+ *
+ * The fallback takes its status from the FLOW. Older rows store a plain
+ * sentence rather than the JSON shape, and assuming "FAILED" for those printed
+ * a red "FAILED" beside a green "rights applied" on requests that had in fact
+ * succeeded — the record contradicting itself, which is the one thing this
+ * column exists to prevent.
  */
-function parseResults(text: string): BackDateSapResult[] {
+function parseResults(
+  text: string,
+  flowStatus: BackDateFlow["hana_status"],
+): BackDateSapResult[] {
   if (!text) return [];
   try {
     const parsed = JSON.parse(text) as { results?: BackDateSapResult[] };
@@ -334,7 +335,60 @@ function parseResults(text: string): BackDateSapResult[] {
   } catch {
     // Not JSON — an older row, or a message from somewhere else.
   }
-  return [{ branch: "SAP", status: "FAILED", response: text }];
+  return [
+    {
+      branch: "SAP",
+      status: flowStatus === "FAILED" ? "FAILED" : "SUCCESS",
+      response: text,
+    },
+  ];
+}
+
+/** A titled block of label/value rows. */
+function InfoGroup({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="mb-4 rounded-lg border border-line px-3.5 py-3">
+      <h4 className="m-0 mb-2 text-[12px] font-semibold uppercase tracking-wide text-brand">
+        {title}
+      </h4>
+      <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-5 gap-y-1.5 text-[13px]">
+        {children}
+      </dl>
+    </section>
+  );
+}
+
+function InfoRow({
+  label,
+  value,
+  mono = false,
+  wrap = false,
+}: {
+  label: string;
+  value: React.ReactNode;
+  mono?: boolean;
+  wrap?: boolean;
+}) {
+  return (
+    <>
+      <dt className="text-subtle">{label}</dt>
+      <dd
+        className={cn(
+          "m-0 font-medium text-ink",
+          mono && "font-mono text-[12.5px]",
+          wrap && "whitespace-pre-wrap font-normal text-body",
+        )}
+      >
+        {value}
+      </dd>
+    </>
+  );
 }
 
 function formatDate(value: string | null | undefined) {
@@ -359,6 +413,7 @@ export default function BackDate() {
    */
   const [tab, setTab] = useState<"entries" | "create">("entries");
   const [detail, setDetail] = useState<BackDateRequest | null>(null);
+  const [progress, setProgress] = useState<BackDateRequest | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -475,70 +530,16 @@ export default function BackDate() {
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-20">ID</TableHead>
-                    <TableHead>Company</TableHead>
-                    <TableHead>SAP User</TableHead>
-                    <TableHead>Document Type</TableHead>
-                    <TableHead>Window</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Waiting On</TableHead>
-                    <TableHead className="text-right">Action</TableHead>
-                  </TableRow>
+                  <EntryTableHead />
                 </TableHeader>
                 <TableBody>
                   {rows.map((row) => (
-                    <TableRow key={row.id}>
-                      <TableCell className="font-mono text-[12.5px]">{row.id}</TableCell>
-                      <TableCell>
-                        {/* One badge per company: the set is the request. */}
-                        <div className="flex flex-wrap gap-1">
-                          {row.companies.map((c) => (
-                            <Badge key={c} tone="info" caps>{c}</Badge>
-                          ))}
-                        </div>
-                      </TableCell>
-                      <TableCell className="font-medium">{row.sap_username}</TableCell>
-                      <TableCell>{row.document_type}</TableCell>
-                      <TableCell className="whitespace-nowrap">
-                        {formatDate(row.from_date)} — {formatDate(row.to_date)}
-                      </TableCell>
-                      <TableCell><StatusBadge request={row} /></TableCell>
-                      <TableCell>
-                        {row.flow?.current_stage ? (
-                          <>
-                            <div className="text-[13px]">
-                              {row.flow.current_stage_name}
-                              {row.flow.total_stage > 1 && (
-                                <span className="text-subtle">
-                                  {" "}({row.flow.current_stage_sequence} of{" "}
-                                  {row.flow.total_stage})
-                                </span>
-                              )}
-                            </div>
-                            <div className="text-[12px] text-subtle">
-                              {row.flow.effective_user_username}
-                              {/* The stand-in, named, so a requester chasing an
-                                  approval knows who actually has it today. */}
-                              {row.flow.has_active_replacement && (
-                                <span className="text-hold">
-                                  {" "}(covering {row.flow.current_user_username})
-                                </span>
-                              )}
-                            </div>
-                          </>
-                        ) : (
-                          <span className="text-subtle">—</span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex justify-end">
-                          <Button variant="secondary" size="sm" onClick={() => setDetail(row)}>
-                            Details
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
+                    <EntryTableRow
+                      key={row.id}
+                      request={row}
+                      onDetails={() => setDetail(row)}
+                      onProgress={() => setProgress(row)}
+                    />
                   ))}
                 </TableBody>
               </Table>
@@ -547,7 +548,19 @@ export default function BackDate() {
         </Card>
       )}
 
-      <RequestDetailDialog request={detail} onClose={() => setDetail(null)} />
+      <RequestDetailDialog
+        request={detail}
+        onClose={() => setDetail(null)}
+        onEdited={(message) => {
+          flash(message);
+          void load();
+        }}
+      />
+
+      <RequestProgressDialog
+        request={progress}
+        onClose={() => setProgress(null)}
+      />
     </Page>
   );
 }
@@ -610,14 +623,19 @@ function NewRequestForm({
     () => sapUsers.map((u) => ({ value: u.user_code, label: u.user_code })),
     [sapUsers],
   );
-  // The SAP object NAME only. The numeric `ObjType` is what gets stored and
-  // sent to HANA, but it means nothing to the person filling the form in.
+  // The SAP object NAME, as both the value and the label: the name is what a
+  // request stores now. SAP's numeric `ObjType` is resolved from it server-side
+  // at the moment of the OPEN_BKDT call, so it never travels through the form.
   const typeOptions = useMemo(
-    () => docTypes.map((t) => ({ value: t.object_type, label: t.name })),
+    () => docTypes.map((t) => ({ value: t.name, label: t.name })),
     [docTypes],
   );
 
-  /** Both actions ticked is the single combined value, never two requests. */
+  /**
+   * Both actions ticked is the single combined value, never two requests —
+   * `OPEN_BKDT` has no action parameter, so splitting the pair would write SAP
+   * rows identical in every column SAP reads.
+   */
   const actionValue = form.actions.includes("A") && form.actions.includes("U")
     ? "A,U"
     : form.actions[0];
@@ -640,26 +658,44 @@ function NewRequestForm({
     setSaving(true);
     setFormError("");
 
+    let created = 0;
     try {
-      // ONE call, whatever was ticked. The companies travel together inside
-      // the request; splitting them here is exactly what this page used to do
-      // and what made the same decision reach an approver twice.
-      await backdateService.createRequest({
-        company: form.companies,
-        sap_username: form.sap_username.trim(),
-        document_type: Number(form.document_type),
-        from_date: form.from_date,
-        to_date: form.to_date,
-        time_limit: form.time_limit,
-        action: actionValue,
-        remarks: form.remarks,
-      });
+      // ONE REQUEST PER COMPANY. Each company's grant is approved on its own
+      // and written to its own SAP schema, so a refusal in one cannot
+      // half-grant another. Sequential, not `Promise.all`: if the third is
+      // refused the first two have still been raised, and saying how many
+      // landed is the honest report.
+      //
+      // The ACTION never fans out — both ticked is one request carrying
+      // "A,U", because SAP is never told the action at all.
+      for (const company of form.companies) {
+        await backdateService.createRequest({
+          company,
+          sap_username: form.sap_username.trim(),
+          document_type_name: form.document_type_name,
+          from_date: form.from_date,
+          to_date: form.to_date,
+          time_limit: form.time_limit,
+          action: actionValue,
+          remarks: form.remarks,
+        });
+        created += 1;
+      }
       // The tab stays mounted, so the form is cleared here rather than by an
       // open/close cycle — otherwise the next visit shows the last request.
       setForm({ ...EMPTY_FORM });
-      onCreated("BackDate request submitted successfully.");
+      onCreated(
+        created === 1
+          ? "BackDate request submitted successfully."
+          : `${created} BackDate requests submitted successfully — one per company.`,
+      );
     } catch (e) {
-      setFormError(backdateError(e));
+      setFormError(
+        created > 0
+          ? `${created} of ${form.companies.length} requests were submitted. `
+            + `The next one failed: ${backdateError(e)}`
+          : backdateError(e),
+      );
     } finally {
       setSaving(false);
     }
@@ -670,8 +706,8 @@ function NewRequestForm({
       <div className="mb-4">
         <h2 className="m-0 text-[15px] font-semibold text-ink">New BackDate Request</h2>
         <p className="m-0 mt-0.5 text-[13px] text-subtle">
-          One request, however many companies you tick — approved once, then
-          applied in each company&rsquo;s SAP database.
+          One request per company — each is approved on its own. Ticking both
+          actions widens the one request rather than adding another.
         </p>
       </div>
 
@@ -704,7 +740,7 @@ function NewRequestForm({
                     companies: BACKDATE_COMPANIES.filter((co) => next.includes(co)),
                     // Cleared on purpose — see the effect above.
                     sap_username: "",
-                    document_type: undefined,
+                    document_type_name: "",
                   })
                 }
                 options={BACKDATE_COMPANIES.map((co) => ({ value: co, label: co }))}
@@ -759,10 +795,11 @@ function NewRequestForm({
           <Field label="Document Type" required>
             {(c) =>
               typeOptions.length > 0 ? (
-                <SearchSelect<number>
+                <SearchSelect<string>
                   id={c.id}
-                  value={form.document_type ?? ""}
-                  onChange={(v) => v !== "" && setForm({ ...form, document_type: v as number })}
+                  value={form.document_type_name}
+                  onChange={(v) =>
+                    setForm({ ...form, document_type_name: String(v) })}
                   options={typeOptions}
                   placeholder={loadingMasters ? "Loading document types…" : "Select a document type"}
                   searchPlaceholder="Search document types"
@@ -771,11 +808,11 @@ function NewRequestForm({
               ) : (
                 <Input
                   {...c}
-                  type="number"
-                  value={form.document_type ?? ""}
-                  placeholder={loadingMasters ? "Loading…" : "13"}
+                  value={form.document_type_name}
+                  placeholder={loadingMasters ? "Loading…" : "A/R Invoice"}
+                  maxLength={120}
                   onChange={(e) =>
-                    setForm({ ...form, document_type: Number(e.target.value) })
+                    setForm({ ...form, document_type_name: e.target.value })
                   }
                 />
               )
@@ -831,8 +868,11 @@ function NewRequestForm({
         <div className="mt-5 flex flex-wrap items-center justify-end gap-2.5">
           <Button variant="secondary" onClick={onCancel}>Cancel</Button>
           <Button variant="primary" onClick={save} disabled={saving}>
-            {/* Always singular: several companies is one request. */}
-            {saving ? "Submitting…" : "Submit Request"}
+            {saving
+              ? "Submitting…"
+              : form.companies.length > 1
+                ? `Submit ${form.companies.length} Requests`
+                : "Submit Request"}
           </Button>
         </div>
       </div>
@@ -841,33 +881,354 @@ function NewRequestForm({
 }
 
 /* ================================================================== *
- * Detail + history
+ * The shared entry table
  * ================================================================== */
 
-export function RequestDetailDialog({
+/**
+ * The columns both BackDate pages show.
+ *
+ * ONE definition rather than two: the requester and the approver are looking
+ * at the same entries, and two tables that drift apart make the same request
+ * read differently depending on who opened it. Everything else about a request
+ * — its status, its stage, who holds it — lives in Details and Progress, so
+ * the table stays scannable.
+ */
+export function EntryTableHead() {
+  return (
+    <TableRow>
+      <TableHead className="w-20">ID</TableHead>
+      <TableHead>Company</TableHead>
+      <TableHead>From Date</TableHead>
+      <TableHead>To Date</TableHead>
+      <TableHead>Time Limit</TableHead>
+      <TableHead>Created By</TableHead>
+      <TableHead className="text-right">Action</TableHead>
+    </TableRow>
+  );
+}
+
+export function EntryTableRow({
+  request,
+  onDetails,
+  onProgress,
+}: {
+  request: BackDateRequest;
+  onDetails: () => void;
+  onProgress: () => void;
+}) {
+  return (
+    <TableRow>
+      {/* The id is how a person refers to one of these, so it is set apart
+          rather than left as one number among many. */}
+      <TableCell>
+        <span className="rounded bg-surface-strong px-1.5 py-0.5 font-mono text-[12.5px] font-semibold text-ink">
+          #{request.id}
+        </span>
+      </TableCell>
+      <TableCell>
+        {/* One badge per company: the SET is the request. */}
+        <div className="flex flex-wrap gap-1">
+          {request.companies.map((c) => (
+            <Badge key={c} tone="info" caps>{c}</Badge>
+          ))}
+        </div>
+      </TableCell>
+      <TableCell className="whitespace-nowrap">
+        {formatDate(request.from_date)}
+      </TableCell>
+      <TableCell className="whitespace-nowrap">
+        {formatDate(request.to_date)}
+      </TableCell>
+      <TableCell className="whitespace-nowrap">
+        {request.time_limit
+          ? new Date(request.time_limit).toLocaleString()
+          : "—"}
+      </TableCell>
+      <TableCell className="whitespace-nowrap">
+        <div>{request.created_by_username}</div>
+        <div className="text-[12px] text-subtle">
+          {new Date(request.created_at).toLocaleString()}
+        </div>
+      </TableCell>
+      <TableCell>
+        <div className="flex items-center justify-end gap-1.5">
+          <Button variant="secondary" size="sm" onClick={onDetails}>
+            Details
+          </Button>
+          <Button variant="secondary" size="sm" onClick={onProgress}>
+            Progress
+          </Button>
+        </div>
+      </TableCell>
+    </TableRow>
+  );
+}
+
+/**
+ * Correct a request in place, without leaving the dialog.
+ *
+ * The reason this exists is the SAP refusal below it: an approver reads
+ * "invalid userid USER99", and the fix is one field away. Sending them to
+ * another screen to find the same request again is how a two-second
+ * correction becomes a support ticket.
+ *
+ * `company` is absent on purpose — it decides which workflow applies and the
+ * request has already been routed. A different company is a different request.
+ */
+function EditRequestForm({
+  request,
+  onCancel,
+  onSaved,
+}: {
+  request: BackDateRequest;
+  onCancel: () => void;
+  onSaved: (message: string) => void;
+}) {
+  const [form, setForm] = useState({
+    sap_username: request.sap_username,
+    document_type_name: request.document_type_name,
+    from_date: request.from_date,
+    to_date: request.to_date,
+    time_limit: toLocalInput(request.time_limit),
+    // Starts EMPTY, never seeded from an earlier remark: this is the reason
+    // for THIS edit, and it is written to this edit's own log row. Prefilling
+    // it with somebody else's sentence would put their words in this user's
+    // mouth on a new history entry.
+    remarks: "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const save = async () => {
+    setSaving(true);
+    setError("");
+    try {
+      await backdateService.updateRequest(request.id, {
+        sap_username: form.sap_username.trim(),
+        document_type_name: form.document_type_name,
+        from_date: form.from_date,
+        to_date: form.to_date,
+        time_limit: form.time_limit,
+        remarks: form.remarks,
+      });
+      onSaved(`Request #${request.id} updated. Approve again to retry SAP.`);
+    } catch (e) {
+      setError(backdateError(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section className="mb-4 rounded-lg border border-brand bg-brand-soft/40 px-3.5 py-3">
+      <h4 className="m-0 mb-2 text-[12px] font-semibold uppercase tracking-wide text-brand">
+        Edit request
+      </h4>
+      {error && (
+        <div className="mb-3 whitespace-pre-wrap rounded-lg bg-bad-soft px-3 py-2.5 text-[13px] text-bad">
+          {error}
+        </div>
+      )}
+      <FormGrid>
+        <Field label="SAP User" required>
+          {(c) => (
+            <Input
+              {...c}
+              value={form.sap_username}
+              maxLength={20}
+              onChange={(e) =>
+                setForm({ ...form, sap_username: e.target.value })}
+            />
+          )}
+        </Field>
+        <Field label="Document Type" required>
+          {(c) => (
+            <Input
+              {...c}
+              value={form.document_type_name}
+              maxLength={120}
+              onChange={(e) =>
+                setForm({ ...form, document_type_name: e.target.value })}
+            />
+          )}
+        </Field>
+      </FormGrid>
+      <FormGrid>
+        <Field label="From Date" required>
+          {(c) => (
+            <Input
+              {...c}
+              type="date"
+              value={form.from_date}
+              onChange={(e) => setForm({ ...form, from_date: e.target.value })}
+            />
+          )}
+        </Field>
+        <Field label="To Date" required>
+          {(c) => (
+            <Input
+              {...c}
+              type="date"
+              value={form.to_date}
+              onChange={(e) => setForm({ ...form, to_date: e.target.value })}
+            />
+          )}
+        </Field>
+        <Field label="Rights Expire" required>
+          {(c) => (
+            <Input
+              {...c}
+              type="datetime-local"
+              value={form.time_limit}
+              onChange={(e) => setForm({ ...form, time_limit: e.target.value })}
+            />
+          )}
+        </Field>
+      </FormGrid>
+      <Field label="Reason for this change">
+        {(c) => (
+          <Textarea
+            {...c}
+            rows={2}
+            placeholder="Recorded against this edit in the request's history"
+            value={form.remarks}
+            onChange={(e) => setForm({ ...form, remarks: e.target.value })}
+          />
+        )}
+      </Field>
+      <div className="mt-3 flex flex-wrap items-center justify-end gap-2.5">
+        <Button variant="secondary" size="sm" onClick={onCancel}>Cancel</Button>
+        <Button variant="primary" size="sm" onClick={save} disabled={saving}>
+          {saving ? "Saving…" : "Save changes"}
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+/** An ISO timestamp as `datetime-local` wants it, in the viewer's own zone. */
+function toLocalInput(value: string | null) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-`
+    + `${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+/* ================================================================== *
+ * Progress
+ * ================================================================== */
+
+/**
+ * One node on the progress line: a dot on a rail, then its detail rows.
+ *
+ * Shared by the creation event, any edits, and every stage, so they line up
+ * on one rail instead of three lists that happen to sit under each other.
+ */
+function TimelineNode({
+  tone,
+  icon: Icon,
+  title,
+  subtitle,
+  state,
+  stateTone,
+  rows,
+  last,
+  extra,
+}: {
+  tone: string;
+  icon: typeof HiCheckCircle;
+  title: string;
+  subtitle?: string;
+  state: string;
+  stateTone: string;
+  rows: [string, React.ReactNode][];
+  last: boolean;
+  extra?: React.ReactNode;
+}) {
+  return (
+    <li className="flex gap-3">
+      {/* The rail: a dot per event, joined by a line that stops at the last
+          one rather than trailing into nothing. */}
+      <div className="flex flex-col items-center">
+        <span
+          className={cn(
+            "mt-1 grid size-6 shrink-0 place-items-center rounded-full",
+            tone,
+          )}
+        >
+          <Icon className="size-3.5 text-white" aria-hidden />
+        </span>
+        {!last && <span className="w-px flex-1 bg-line" />}
+      </div>
+
+      <div className={cn("min-w-0 flex-1", last ? "pb-0" : "pb-4")}>
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+          <span className="text-[13px] font-semibold text-ink">
+            {title}
+            {subtitle && (
+              <span className="font-normal text-subtle"> · {subtitle}</span>
+            )}
+          </span>
+          <span className={cn("text-[12.5px] font-medium", stateTone)}>
+            {state}
+          </span>
+        </div>
+
+        <dl className="m-0 mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[12.5px]">
+          {rows.map(([label, value]) => (
+            <Fragment key={label}>
+              <dt className="text-subtle">{label}</dt>
+              <dd className="m-0 whitespace-pre-wrap text-body">{value}</dd>
+            </Fragment>
+          ))}
+        </dl>
+        {extra}
+      </div>
+    </li>
+  );
+}
+
+/** How each stage state reads, and how it is coloured. */
+const STAGE_STATES: Record<
+  BackDateStageProgress["status"],
+  { label: string; tone: string; dot: string; icon: typeof HiCheckCircle }
+> = {
+  APPROVED: { label: "Approved", tone: "text-ok", dot: "bg-ok", icon: HiCheckCircle },
+  REJECTED: { label: "Rejected", tone: "text-bad", dot: "bg-bad", icon: HiXCircle },
+  AWAITING: { label: "Awaiting review", tone: "text-hold", dot: "bg-hold", icon: HiClock },
+  UPCOMING: { label: "Not yet reached", tone: "text-subtle", dot: "bg-line-strong", icon: HiClock },
+  SKIPPED: { label: "Never reached", tone: "text-subtle", dot: "bg-line-strong", icon: HiMinusCircle },
+};
+
+/**
+ * Where a request is, stage by stage.
+ *
+ * Separate from the detail dialog because it answers a different question:
+ * the detail says WHAT was asked for, this says HOW FAR it has got and who is
+ * holding it. Stages ahead are shown too — a requester chasing an approval
+ * needs to know there are two more people after this one.
+ *
+ * Every reviewer name is resolved server-side from the CURRENT configuration,
+ * so a stage reassigned or covered by a stand-in reads correctly here without
+ * anything being stored against the request.
+ */
+export function RequestProgressDialog({
   request,
   onClose,
-  footer,
 }: {
   request: BackDateRequest | null;
   onClose: () => void;
-  footer?: React.ReactNode;
 }) {
   return (
     <Dialog open={!!request} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent title="BackDate Request" size="lg">
-        {/*
-          Keyed on the request id so opening a different request remounts the
-          body and its history state starts empty. The alternative — clearing
-          state from an effect when `request` becomes null — is a synchronous
-          setState in an effect, which cascades renders for no benefit.
-        */}
+      <DialogContent title="Request progress" size="lg">
         {request && (
-          <RequestDetailBody
+          <RequestProgressBody
             key={request.id}
             request={request}
             onClose={onClose}
-            footer={footer}
           />
         )}
       </DialogContent>
@@ -875,14 +1236,12 @@ export function RequestDetailDialog({
   );
 }
 
-function RequestDetailBody({
+function RequestProgressBody({
   request,
   onClose,
-  footer,
 }: {
   request: BackDateRequest;
   onClose: () => void;
-  footer?: React.ReactNode;
 }) {
   const [history, setHistory] = useState<BackDateHistory | null>(null);
   const [loading, setLoading] = useState(true);
@@ -900,130 +1259,307 @@ function RequestDetailBody({
     };
   }, [request.id]);
 
+  const stages = history?.stages ?? [];
+  /*
+   * A progress line that starts at the first APPROVER is missing its first
+   * event. The entry began when somebody raised it, and an approver reading
+   * this needs to see who that was and what they said.
+   */
+  const created = history?.actions.find((a) => a.action === "CREATE");
+  /*
+   * Edits belong on the line too: they happen BETWEEN creation and approval,
+   * and an approver deciding today should see that the dates moved after the
+   * request was first raised.
+   */
+  const edits = history?.actions.filter((a) => a.action === "UPDATE") ?? [];
+
   return (
     <>
       <DialogHeader className="pr-10">
         <div className="min-w-0">
-          <DialogTitle>BackDate Request #{request.id}</DialogTitle>
+          <DialogTitle>BackDate Request #{request.id} — progress</DialogTitle>
           <DialogDescription className="mt-0.5">
             {request.sap_username} · {request.company_label} ·{" "}
-            {formatDate(request.from_date)} to {formatDate(request.to_date)}
+            {request.flow?.workflow_code}
           </DialogDescription>
         </div>
       </DialogHeader>
 
       <DialogBody>
-        <dl className="mb-4 grid grid-cols-[auto_1fr] gap-x-5 gap-y-2 text-[13px]">
-          <dt className="text-subtle">Status</dt>
-          <dd className="m-0"><StatusBadge request={request} /></dd>
-          <dt className="text-subtle">Document type</dt>
-          <dd className="m-0 font-medium text-ink">{request.document_type}</dd>
-          <dt className="text-subtle">Action</dt>
-          <dd className="m-0 font-medium text-ink">{request.action_label}</dd>
-          <dt className="text-subtle">Rights expire</dt>
-          <dd className="m-0 font-medium text-ink">
-            {request.time_limit ? formatDate(request.time_limit) : "No expiry"}
-          </dd>
-          <dt className="text-subtle">Raised by</dt>
-          <dd className="m-0 font-medium text-ink">
-            {request.created_by_username} on {formatDate(request.created_at)}
-          </dd>
-          {request.remarks && (
-            <>
-              <dt className="text-subtle">Reason</dt>
-              <dd className="m-0 whitespace-pre-wrap text-body">{request.remarks}</dd>
-            </>
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <StatusBadge request={request} />
+          {request.flow && request.flow.total_stage > 0 && (
+            <span className="text-[12.5px] text-subtle">
+              {request.flow.current_stage
+                ? `Stage ${request.flow.current_stage_sequence} of ${request.flow.total_stage}`
+                : `${request.flow.total_stage} stage${request.flow.total_stage === 1 ? "" : "s"}`}
+            </span>
           )}
-          {request.flow && (
-            <>
-              <dt className="text-subtle">Workflow</dt>
-              <dd className="m-0 text-body">
-                <span className="font-mono text-[12.5px]">
-                  {request.flow.workflow_code}
-                </span>
-              </dd>
-              <dt className="text-subtle">Current stage</dt>
-              <dd className="m-0 font-medium text-ink">
-                {request.flow.current_stage ? (
-                  <>
-                    {request.flow.current_stage_name}
-                    <span className="font-normal text-subtle">
-                      {" "}({request.flow.current_stage_sequence} of{" "}
-                      {request.flow.total_stage})
-                    </span>
-                  </>
-                ) : (
-                  <span className="font-normal text-subtle">
-                    — ({request.flow.total_stage} stage
-                    {request.flow.total_stage === 1 ? "" : "s"})
-                  </span>
-                )}
-              </dd>
-              {request.flow.current_stage && (
-                <>
-                  <dt className="text-subtle">Current user</dt>
-                  <dd className="m-0 font-medium text-ink">
-                    {request.flow.effective_user_username}
-                    {request.flow.has_active_replacement && (
-                      <span className="font-normal text-hold">
-                        {" "}(covering {request.flow.current_user_username})
-                      </span>
-                    )}
-                  </dd>
-                </>
-              )}
-            </>
-          )}
-        </dl>
+        </div>
 
-        {/* SAP outcome, stated plainly. An approved request whose SAP write
-            failed has NOT granted anything yet. */}
-        <SapOutcome flow={request.flow} />
-
-        <h4 className="mb-2 text-[13px] font-semibold text-ink">Approval history</h4>
         <StateBlock
           loading={loading}
           error={error}
-          empty={!loading && !error && (history?.actions.length ?? 0) === 0}
-          emptyText="No activity recorded yet."
+          empty={!loading && !error && stages.length === 0}
+          emptyText="This request has no approval stages configured."
         />
-        {history && history.actions.length > 0 && (
-          <ol className="m-0 list-none space-y-2 p-0">
-            {history.actions.map((entry) => (
-              <li
-                key={entry.id}
-                className={cn(
-                  "rounded-lg border border-line px-3.5 py-2.5 text-[13px]",
-                  entry.action === "REJECT" &&
-                    "border-bad-soft bg-bad-soft/40",
-                )}
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="font-semibold text-ink">
-                    {entry.action_label}
-                    {entry.stage_name && (
-                      <span className="font-normal text-subtle"> · {entry.stage_name}</span>
-                    )}
-                  </span>
-                  <span className="text-[12px] text-subtle">
-                    {new Date(entry.acted_at).toLocaleString()}
-                  </span>
-                </div>
-                {entry.acted_by_username && (
-                  <div className="mt-0.5 text-[12.5px] text-body">
-                    {entry.acted_by_username}
-                  </div>
-                )}
-                {entry.remarks && (
-                  <p className="mt-1 whitespace-pre-wrap text-[12.5px] text-subtle">
-                    {entry.remarks}
-                  </p>
-                )}
-                <ChangedData data={entry.action_data} />
-              </li>
+
+        {!loading && !error && (
+          <ol className="m-0 list-none p-0">
+            <TimelineNode
+              tone="bg-brand"
+              icon={HiPlus}
+              title="Created"
+              state="Raised"
+              stateTone="text-brand"
+              last={stages.length === 0 && edits.length === 0}
+              rows={[
+                ["Created by",
+                 created?.acted_by_username || request.created_by_username],
+                ["Timestamp",
+                 new Date(created?.acted_at ?? request.created_at)
+                   .toLocaleString()],
+                ["Remarks", created?.remarks || "No remarks"],
+              ]}
+            />
+
+            {edits.map((entry) => (
+              <TimelineNode
+                key={`edit-${entry.id}`}
+                tone="bg-hold"
+                icon={HiPencilSquare}
+                title="Updated"
+                state="Edited"
+                stateTone="text-hold"
+                last={false}
+                rows={[
+                  ["Edited by", entry.acted_by_username || "—"],
+                  ["Timestamp", new Date(entry.acted_at).toLocaleString()],
+                  ["Remarks", entry.remarks || "No remarks"],
+                ]}
+                extra={<ChangedData data={entry.action_data} />}
+              />
             ))}
+
+            {stages.map((stage, index) => {
+              const state = STAGE_STATES[stage.status];
+              return (
+                <TimelineNode
+                  key={stage.stage_id}
+                  tone={state.dot}
+                  icon={state.icon}
+                  title={stage.stage_name}
+                  subtitle={`Stage ${stage.sequence}`}
+                  state={state.label}
+                  stateTone={state.tone}
+                  last={
+                    index === stages.length - 1 && !request.flow?.hana_status
+                  }
+                  rows={[
+                    [
+                      "Reviewer",
+                      /* Who ACTED on a decided stage; who WOULD act on one
+                         still ahead. Different facts, same row, and the
+                         covering note says when they differ. */
+                      <>
+                        {stage.acted_by || stage.reviewer || "—"}
+                        {!stage.acted_by && stage.has_active_replacement && (
+                          <span className="text-hold">
+                            {" "}(covering {stage.configured_reviewer})
+                          </span>
+                        )}
+                      </>,
+                    ],
+                    [
+                      "Timestamp",
+                      stage.acted_at
+                        ? new Date(stage.acted_at).toLocaleString()
+                        : "—",
+                    ],
+                    ["Remarks", stage.remarks || "No remarks"],
+                  ]}
+                />
+              );
+            })}
+
+            {/* Last on the same rail: the SAP write is the final event of an
+                approved request, not a footnote under the history of it. */}
+            {request.flow?.hana_status && (
+              <SapTimelineNode flow={request.flow} />
+            )}
           </ol>
         )}
+      </DialogBody>
+
+      <DialogFooter>
+        <Button variant="secondary" onClick={onClose}>Close</Button>
+      </DialogFooter>
+    </>
+  );
+}
+
+/* ================================================================== *
+ * Detail + history
+ * ================================================================== */
+
+export function RequestDetailDialog({
+  request,
+  onClose,
+  footer,
+  onEdited,
+}: {
+  request: BackDateRequest | null;
+  onClose: () => void;
+  footer?: React.ReactNode;
+  /** Called after a successful edit, so the caller can reload its list. */
+  onEdited?: (message: string) => void;
+}) {
+  return (
+    <Dialog open={!!request} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent title="BackDate Request" size="lg">
+        {/*
+          Keyed on the request id so opening a different request remounts the
+          body and its history state starts empty. The alternative — clearing
+          state from an effect when `request` becomes null — is a synchronous
+          setState in an effect, which cascades renders for no benefit.
+        */}
+        {request && (
+          <RequestDetailBody
+            key={request.id}
+            request={request}
+            onClose={onClose}
+            footer={footer}
+            onEdited={onEdited}
+          />
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function RequestDetailBody({
+  request,
+  onClose,
+  footer,
+  onEdited,
+}: {
+  request: BackDateRequest;
+  onClose: () => void;
+  footer?: React.ReactNode;
+  onEdited?: (message: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+
+  /*
+   * WHAT was asked for, and nothing about how far it has got. Where the
+   * request is, who holds it and what has happened to it are all in the
+   * Progress dialog — one place, not two that can read differently.
+   */
+  return (
+    <>
+      <DialogHeader className="pr-10">
+        <div className="flex min-w-0 items-center gap-3">
+          {/* The id is unique and is what somebody quotes when they ask about
+              an entry, so it leads rather than hiding inside a sentence. */}
+          <span className="shrink-0 rounded-lg bg-brand px-2.5 py-1 font-mono text-[15px] font-bold text-white">
+            #{request.id}
+          </span>
+          <div className="min-w-0 flex-1">
+            <DialogTitle>BackDate Request</DialogTitle>
+            <DialogDescription className="mt-0.5">
+              {request.sap_username} · {request.company_label} ·{" "}
+              {formatDate(request.from_date)} to {formatDate(request.to_date)}
+            </DialogDescription>
+          </div>
+          {/* Edit sits by the title because the reason to reach for it is
+              usually the SAP error further down: correct the request, then
+              approve again. `can_edit` is the SERVER's answer for this caller
+              and this request — offering a control that is going to 403 is
+              worse than not offering it. */}
+          {!editing && request.can_edit && (
+            <Button
+              variant="secondary"
+              size="sm"
+              aria-label="Edit this request"
+              onClick={() => setEditing(true)}
+            >
+              <HiPencilSquare aria-hidden /> Edit
+            </Button>
+          )}
+        </div>
+      </DialogHeader>
+
+      <DialogBody>
+        {editing && (
+          <EditRequestForm
+            request={request}
+            onCancel={() => setEditing(false)}
+            onSaved={(message) => {
+              setEditing(false);
+              onEdited?.(message);
+              onClose();
+            }}
+          />
+        )}
+
+        {/* Grouped rather than one long list: a reader is asking three
+            different questions — what was asked for, who for, and over what
+            window — and a flat table makes them hunt. */}
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <StatusBadge request={request} />
+          {request.companies.map((c) => (
+            <Badge key={c} tone="info" caps>{c}</Badge>
+          ))}
+        </div>
+
+        <InfoGroup title="Request information">
+          <InfoRow label="Document type" value={request.document_type_name} />
+          <InfoRow label="Action" value={request.action_label} />
+          {/* No "Reason" here. A request has no single reason: the one given
+              at creation, at each edit, and with each decision are different
+              statements by different people, and they are all in Progress,
+              each against the event it explains. */}
+        </InfoGroup>
+
+        <InfoGroup title="User details">
+          <InfoRow label="Branch" value={request.company_label} />
+          <InfoRow label="SAP user" value={request.sap_username} />
+          <InfoRow label="Created by" value={request.created_by_username} />
+        </InfoGroup>
+
+        <InfoGroup title="Timeline">
+          <InfoRow label="From date" value={formatDate(request.from_date)} />
+          <InfoRow label="To date" value={formatDate(request.to_date)} />
+          <InfoRow
+            label="Time limit"
+            value={request.time_limit
+              ? new Date(request.time_limit).toLocaleString()
+              : "—"}
+          />
+          <InfoRow
+            label="Created on"
+            value={new Date(request.created_at).toLocaleString()}
+          />
+        </InfoGroup>
+
+        {/* SAP sits after Timeline, as its own box: it is the last thing
+            that happens to a request and the first thing somebody looks for
+            when a grant did not appear. It is absent until SAP has actually
+            been called — an empty box would imply it had. */}
+        {request.flow?.hana_status && (
+          <section className="mb-4 rounded-lg border border-line px-3.5 py-3">
+            <h4 className="m-0 mb-2 text-[12px] font-semibold uppercase tracking-wide text-brand">
+              SAP response
+            </h4>
+            {/* The same node the progress timeline ends with, so the two can
+                never describe one SAP call differently. `<ol>` because the
+                node is an `<li>`; one item, no rail to draw. */}
+            <ol className="m-0 list-none p-0">
+              <SapTimelineNode flow={request.flow} />
+            </ol>
+          </section>
+        )}
+
       </DialogBody>
 
       <DialogFooter>

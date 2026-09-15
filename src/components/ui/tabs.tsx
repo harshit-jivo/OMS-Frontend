@@ -127,7 +127,10 @@ export function Tab({
           ? variant === "subtle"
             ? "bg-surface-strong text-ink"
             : "bg-brand text-white"
-          : "text-subtle hover:bg-surface hover:text-body",
+          // An UNSELECTED tab used to set no background at all, which left it
+          // reading as a line of text rather than something pressable. It now
+          // carries the same surface and border the page's other controls do.
+          : "border border-line bg-surface text-body hover:border-line-strong hover:bg-surface-strong hover:text-ink",
         className,
       )}
       {...props}
