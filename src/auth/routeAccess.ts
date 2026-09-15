@@ -139,6 +139,21 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // page nobody can reach is worse than a missing one — it reads as protection.
   // The test strips comments now, which is what surfaced this.
   "/Device_Management": { permissions: ["Device_Management"] },
+  // Workflow Engine configuration. The grant key is the BACKEND permission
+  // key (core/permission_registry.py), so one string gates the sidebar,
+  // the route and the API — no frontend-only alias to drift.
+  "/Workflows": { permissions: ["workflow.config.manage"] },
+
+  // BackDate (BKDT) — back-posting rights in SAP.
+  //
+  // TWO keys, because raising a request and deciding one are different
+  // authorities. `BackDate_Approval` opens the approval desk; it does NOT by
+  // itself let anyone approve — the backend also requires the caller to be the
+  // workflow stage's current effective user, which no route table can express.
+  // `workflow.config.manage` is deliberately NOT listed: configuring workflows
+  // and raising a BackDate request are unrelated jobs.
+  "/BackDate": { permissions: ["BackDate"] },
+  "/BackDate_Approval": { permissions: ["BackDate_Approval"] },
   "/Sap_Sync": { permissions: ["Sap_Sync"] },
   "/Party_Assignment": { permissions: ["Party_Assignment"] },
   "/Party_Product_Assignment": { permissions: ["Party_Product_Assignment"] },

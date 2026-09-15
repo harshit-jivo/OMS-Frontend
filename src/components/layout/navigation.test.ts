@@ -75,6 +75,7 @@ describe("where the pages that have moved now live", () => {
       "/Role_Permissions",
       "/Device_Management",
       "/UI_Labels",
+      "/Workflows",
     ]);
   });
 

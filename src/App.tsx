@@ -79,6 +79,9 @@ const Tracker_Reports = lazy(() => import("./pages/Tracker_Reports"));
 const Tracker_Alerts = lazy(() => import("./pages/Tracker_Alerts"));
 const Tracker_Invoices = lazy(() => import("./pages/Tracker_Invoices"));
 const Device_Management = lazy(() => import("./pages/Device_Management"));
+const Workflows = lazy(() => import("./pages/Workflows"));
+const BackDate = lazy(() => import("./pages/BackDate"));
+const BackDateApproval = lazy(() => import("./pages/BackDate_Approval"));
 const Invoice_Report = lazy(() => import("./pages/Invoice_Report"));
 const HAIS = lazy(() => import("./pages/HAIS"));
 const AssetPublicView = lazy(() => import("./pages/HAIS/AssetPublicView"));
@@ -141,6 +144,32 @@ function App() {
           element={
             <ProtectedPage>
               <Device_Management />
+            </ProtectedPage>
+          }
+        />
+
+        {/* Workflow Engine configuration — ONE page, five tabs inside it. */}
+        <Route
+          path="/Workflows"
+          element={
+            <ProtectedPage>
+              <Workflows />
+            </ProtectedPage>
+          }
+        />
+        <Route
+          path="/BackDate"
+          element={
+            <ProtectedPage>
+              <BackDate />
+            </ProtectedPage>
+          }
+        />
+        <Route
+          path="/BackDate_Approval"
+          element={
+            <ProtectedPage>
+              <BackDateApproval />
             </ProtectedPage>
           }
         />

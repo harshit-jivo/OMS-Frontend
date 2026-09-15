@@ -44,6 +44,7 @@ import {
   HiOutlineClipboardDocumentCheck,
   HiOutlineClipboardDocumentList,
   HiOutlineClock,
+  HiOutlineCog6Tooth,
   HiOutlineComputerDesktop,
   HiOutlineCube,
   HiOutlineCurrencyRupee,
@@ -204,6 +205,13 @@ export const SIDEBAR_SECTIONS: SidebarSectionDef[] = [
     links: [{ to: "/HAIS", label: "Hardware Assets", icon: HiOutlineComputerDesktop }],
   },
   {
+    label: "BackDate",
+    links: [
+      { to: "/BackDate", label: "BackDate Requests", icon: HiOutlineClock },
+      { to: "/BackDate_Approval", label: "BackDate Approval", icon: HiOutlineShieldCheck },
+    ],
+  },
+  {
     label: "Tracker",
     links: [
       { to: "/Tracker_Entry", label: "Invoice Entry", icon: HiOutlinePencilSquare },
@@ -257,6 +265,7 @@ export const SIDEBAR_SECTIONS: SidebarSectionDef[] = [
       { to: "/Role_Permissions", label: "Role Permissions", icon: HiOutlineKey },
       { to: "/Device_Management", label: "Device Management", icon: HiOutlineDevicePhoneMobile },
       { to: "/UI_Labels", label: "UI Labels", icon: HiOutlineLanguage },
+      { to: "/Workflows", label: "Workflows", icon: HiOutlineCog6Tooth },
     ],
   },
 ];
