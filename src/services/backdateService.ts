@@ -95,27 +95,44 @@ export interface BackDateFlow {
 
 export interface BackDateRequest {
   id: number;
-  /** The selected companies, canonical and comma-separated: `"OIL,BEVERAGES"`. */
-  company: string;
-  /** The same set, rendered for people: `"OIL, BEVERAGES"`. */
+  /** ONE company. Two companies is two requests — see `NewBackDateRequest`. */
+  company: BackDateCompany;
   company_label: string;
-  /** The same set as a list, so a client never splits the string itself. */
+  /** The same company as a one-element list, for a renderer that maps. */
   companies: BackDateCompany[];
   /** The SAP user being granted rights — not the OMS user who asked. */
   sap_username: string;
-  /** SAP object type (MOBJ.ObjType). Numeric because SAP requires it. */
-  document_type: number;
+  /**
+   * THE document identity: the SAP object name, e.g. "A/R Invoice".
+   *
+   * There is no numeric type on a request. `OPEN_BKDT` needs a number, and
+   * the server resolves it from this name against SAP's own MOBJ list at the
+   * moment of the call — one place, never a second stored copy to drift.
+   */
+  document_type_name: string;
   from_date: string;
   to_date: string;
   time_limit: string;
   action: BackDateActionValue;
   action_label: string;
-  remarks: string;
+  /*
+   * NO `remarks`. A request has no single remark: the reason for raising it,
+   * for each edit, and for each decision are separate statements by separate
+   * people. They live on the action log rows in `BackDateHistory.actions`,
+   * each attached to the event it explains.
+   */
   created_by: number;
   created_by_username: string;
   created_at: string;
   updated_at: string;
   flow: BackDateFlow | null;
+  /**
+   * Whether THIS caller may edit THIS request right now, decided by the server.
+   * Not re-derived here: the rule involves who holds the stage and whether SAP
+   * refused the grant, and a second copy of it would drift and offer a control
+   * that 403s.
+   */
+  can_edit: boolean;
 }
 
 /** One field an edit changed. */
@@ -141,14 +158,45 @@ export interface BackDateActionRow {
   acted_at: string;
 }
 
+/**
+ * One stage of the request's workflow, decided or not yet reached.
+ *
+ * The action log alone cannot say "where is this?" — it records only what has
+ * HAPPENED, so a request waiting at stage 1 of 3 has one row and says nothing
+ * about the two ahead. These come from the engine, joined to the log server-side.
+ */
+export interface BackDateStageProgress {
+  stage_id: number;
+  sequence: number;
+  stage_name: string;
+  /** `APPROVED` / `REJECTED` = decided; `AWAITING` = here now; `UPCOMING` = ahead; `SKIPPED` = never got its turn. */
+  status: "APPROVED" | "REJECTED" | "AWAITING" | "UPCOMING" | "SKIPPED";
+  /** Who would act TODAY — the effective user, replacements applied. */
+  reviewer: string;
+  /** Who the stage is permanently configured to. */
+  configured_reviewer: string;
+  has_active_replacement: boolean;
+  /** Who actually acted, on a decided stage. */
+  acted_by: string;
+  acted_at: string | null;
+  remarks: string;
+}
+
 export interface BackDateHistory {
   actions: BackDateActionRow[];
+  stages: BackDateStageProgress[];
 }
 
 export interface BackDateInsights {
   pending: number;
   approved: number;
   rejected: number;
+  /**
+   * Approved AND the rights actually reached SAP — a SUBSET of `approved`,
+   * not a fourth state, so it is deliberately NOT part of `total`.
+   */
+  completed: number;
+  /** `pending + approved + rejected`. The three disjoint states. */
   total: number;
 }
 
@@ -176,15 +224,16 @@ export interface DecisionResult {
 
 export interface NewBackDateRequest {
   /**
-   * The companies this ONE request covers.
+   * ONE company.
    *
-   * Several companies is one request, not one per company: it is a single
-   * business decision, approved once. The fan-out happens at the SAP layer,
-   * where `OPEN_BKDT` takes one branch per call.
+   * Each company's grant is approved on its own and written to its own SAP
+   * schema, so a refusal in one cannot half-grant another. Ticking two
+   * companies in the form raises two requests.
    */
-  company: BackDateCompany[];
+  company: BackDateCompany;
+  /** THE document identity — the SAP object name, e.g. "A/R Invoice". */
+  document_type_name: string;
   sap_username: string;
-  document_type: number;
   from_date: string;
   to_date: string;
   /**
@@ -194,6 +243,10 @@ export interface NewBackDateRequest {
    */
   time_limit: string;
   action: BackDateActionValue;
+  /**
+   * Write-only, and not a field of the request. On a create it becomes the
+   * CREATE log's remark; on an edit, that edit's UPDATE log remark.
+   */
   remarks?: string;
 }
 
@@ -286,7 +339,10 @@ export const backdateService = {
   },
   updateRequest: async (
     id: number,
-    body: Partial<NewBackDateRequest> & { log_remarks?: string },
+    /* `remarks` here is the reason for THIS edit; it lands on the UPDATE log
+       row, never on the request. The old `log_remarks` side channel is gone
+       — there is only one remarks field now, and one place it goes. */
+    body: Partial<NewBackDateRequest>,
   ): Promise<BackDateRequest> => {
     const res = await api.patch(BASE + "/requests/" + id + "/", body);
     return unwrap<BackDateRequest>(res.data);
@@ -308,19 +364,21 @@ export const backdateService = {
   // --- approval desk -------------------------------------------------
   /** Only what THIS user may act on — membership resolved server-side. */
   approvalQueue: async (
-    opts: { company?: string } = {},
+    opts: { company?: string; search?: string } = {},
   ): Promise<BackDateRequest[]> => {
-    const res = await api.get(BASE + "/approvals/queue/", {
-      params: opts.company ? { company: opts.company } : {},
-    });
+    const params: Record<string, string> = {};
+    if (opts.company) params.company = opts.company;
+    if (opts.search) params.search = opts.search;
+    const res = await api.get(BASE + "/approvals/queue/", { params });
     return unwrap<BackDateRequest[]>(res.data) || [];
   },
   approvalHistory: async (
-    opts: { status?: string; company?: string } = {},
+    opts: { status?: string; company?: string; search?: string } = {},
   ): Promise<BackDateRequest[]> => {
     const params: Record<string, string> = {};
     if (opts.status) params.status = opts.status;
     if (opts.company) params.company = opts.company;
+    if (opts.search) params.search = opts.search;
     const res = await api.get(BASE + "/approvals/history/", { params });
     return unwrap<BackDateRequest[]>(res.data) || [];
   },
@@ -332,11 +390,12 @@ export const backdateService = {
    * answer different questions for the same user.
    */
   approvalInsights: async (
-    opts: { company?: string } = {},
+    opts: { company?: string; search?: string } = {},
   ): Promise<BackDateInsights> => {
-    const res = await api.get(BASE + "/approvals/insights/", {
-      params: opts.company ? { company: opts.company } : {},
-    });
+    const params: Record<string, string> = {};
+    if (opts.company) params.company = opts.company;
+    if (opts.search) params.search = opts.search;
+    const res = await api.get(BASE + "/approvals/insights/", { params });
     return unwrap<BackDateInsights>(res.data);
   },
   /**

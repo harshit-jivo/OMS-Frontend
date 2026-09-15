@@ -17,6 +17,11 @@
  * That `effective` user is why a temporary replacement works with no code
  * here — during a delegation window the stand-in's queue fills and the
  * configured user's empties, without anything being reassigned.
+ *
+ * The table, the detail dialog and the progress dialog are the SAME components
+ * the requester's page uses, imported rather than reimplemented: an approver
+ * and a requester looking at one request must not be able to see two different
+ * accounts of it.
  */
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -26,7 +31,6 @@ import {
   HiShieldCheck,
 } from "react-icons/hi2";
 
-import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import {
   Dialog,
@@ -43,10 +47,7 @@ import { Skeleton } from "../components/ui/skeleton";
 import {
   Table,
   TableBody,
-  TableCell,
-  TableHead,
   TableHeader,
-  TableRow,
 } from "../components/ui/table";
 import {
   backdateError,
@@ -55,89 +56,93 @@ import {
   type BackDateRequest,
 } from "../services/backdateService";
 import {
+  EntryTableHead,
+  EntryTableRow,
+  RequestDetailDialog,
+  RequestProgressDialog,
+} from "./BackDate";
+import {
+  type CompanyFilter,
   CompanyFilterSelect,
   KpiFilterRow,
-  StatusFilterSelect,
-  type CompanyFilter,
+  SearchBox,
   type StatusFilter,
+  StatusFilterSelect,
 } from "./backdate/filters";
-import { RequestDetailDialog } from "./BackDate";
 
 function formatDate(value: string | null | undefined) {
   if (!value) return "—";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? value : d.toLocaleDateString();
 }
 
 export default function BackDateApproval() {
-  /*
-   * The desk opens on PENDING rather than on everything, because the only list
-   * with anything to DO in it is the one waiting on this user. The other
-   * statuses are a record of what they already decided.
-   */
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("PENDING");
-  const [companyFilter, setCompanyFilter] = useState<CompanyFilter>("");
+  const [status, setStatus] = useState<StatusFilter>("PENDING");
+  const [company, setCompany] = useState<CompanyFilter>("");
   const [rows, setRows] = useState<BackDateRequest[]>([]);
-  const [insights, setInsights] = useState<BackDateInsights | null>(null);
+  const [counts, setCounts] = useState<BackDateInsights | null>(null);
   /**
-   * Which rows came from the QUEUE — the ones this user may act on now.
+   * Which of the listed requests are ACTIONABLE by this user.
    *
-   * Not `statusFilter === "PENDING"`: the All view mixes the queue with
-   * already-decided requests, and only the queue half is actionable. The
-   * backend enforces this regardless; showing the buttons anywhere else would
-   * just be offering a guaranteed 403.
+   * The queue endpoint answers that question and the history endpoint does
+   * not, so the ids are remembered rather than re-derived from a status: a
+   * request can be PENDING and still not be this user's to decide.
    */
   const [actionable, setActionable] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [detail, setDetail] = useState<BackDateRequest | null>(null);
-  const [deciding, setDeciding] = useState<{
-    request: BackDateRequest;
-    approve: boolean;
-  } | null>(null);
+  const [progress, setProgress] = useState<BackDateRequest | null>(null);
+  const [pending, setPending] = useState<
+    { request: BackDateRequest; approve: boolean } | null
+  >(null);
+
+  // Typing an id should not be one request per keystroke.
+  useEffect(() => {
+    const t = window.setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => window.clearTimeout(t);
+  }, [search]);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const scope = companyFilter ? { company: companyFilter } : {};
-
-      // Pending is the SERVER's answer to "what may this user act on",
-      // resolved from the stage's current effective user — not a client-side
-      // filter over everything. Decided requests come from a different
-      // endpoint, so All is the two of them merged rather than one call.
-      const wantsQueue = statusFilter === "" || statusFilter === "PENDING";
-      const wantsHistory = statusFilter !== "PENDING";
-
-      const [queue, history, counts] = await Promise.all([
-        wantsQueue ? backdateService.approvalQueue(scope) : Promise.resolve([]),
+      const params = {
+        ...(company ? { company } : {}),
+        ...(debouncedSearch ? { search: debouncedSearch } : {}),
+      };
+      const wantsQueue = status === "" || status === "PENDING";
+      const wantsHistory = status !== "PENDING";
+      const [queue, history, insights] = await Promise.all([
+        wantsQueue ? backdateService.approvalQueue(params) : Promise.resolve([]),
         wantsHistory
           ? backdateService.approvalHistory(
-              statusFilter ? { ...scope, status: statusFilter } : scope,
+              status ? { ...params, status } : params,
             )
           : Promise.resolve([]),
-        backdateService.approvalInsights(scope),
+        backdateService.approvalInsights(params),
       ]);
-
       const queueIds = new Set(queue.map((r) => r.id));
       setActionable(queueIds);
-      // Queue first: what needs doing sits above what is already done.
+      // History can repeat a queued request when "All" is selected; the queue
+      // copy wins because only it carries the right to act.
       setRows([...queue, ...history.filter((r) => !queueIds.has(r.id))]);
-      setInsights(counts);
+      setCounts(insights);
     } catch (e) {
       setError(backdateError(e));
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, companyFilter]);
+  }, [status, company, debouncedSearch]);
 
   useEffect(() => {
-    void load();
+    load();
   }, [load]);
 
-  const flash = (message: string) => {
+  const announce = (message: string) => {
     setNotice(message);
     window.setTimeout(() => setNotice(""), 8000);
   };
@@ -162,19 +167,22 @@ export default function BackDateApproval() {
         </div>
       )}
 
-      {insights && (
+      {/* `StatRow`, not a `Card`: the cards ARE the row. Wrapping them in a
+          card stacked them one per line down the page. */}
+      {counts && (
         <StatRow className="mb-4">
-          <KpiFilterRow
-            counts={insights}
-            status={statusFilter}
-            onSelect={setStatusFilter}
-          />
+          <KpiFilterRow counts={counts} status={status} onSelect={setStatus} />
         </StatRow>
       )}
 
       <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
-        <CompanyFilterSelect value={companyFilter} onChange={setCompanyFilter} />
-        <StatusFilterSelect value={statusFilter} onChange={setStatusFilter} />
+        <SearchBox
+          value={search}
+          onChange={setSearch}
+          placeholder="Search ID or SAP user"
+        />
+        <CompanyFilterSelect value={company} onChange={setCompany} />
+        <StatusFilterSelect value={status} onChange={setStatus} />
       </div>
 
       <Card className="p-4 md:p-5">
@@ -195,13 +203,11 @@ export default function BackDateApproval() {
 
         {!loading && !error && rows.length === 0 && (
           <p className="px-5 py-12 text-center text-[13px] text-subtle">
-            {statusFilter === "PENDING"
+            {status === "PENDING"
               ? "Nothing is waiting for your approval. Requests appear here only when you are the current approver for their stage."
-              : statusFilter
-                ? `No requests you have ${statusFilter.toLowerCase()}` +
-                  `${companyFilter ? ` for ${companyFilter}` : ""}.`
-                : `No BackDate requests have reached you` +
-                  `${companyFilter ? ` for ${companyFilter}` : ""} yet.`}
+              : status
+                ? `No requests you have ${status.toLowerCase()}${company ? ` for ${company}` : ""}.`
+                : `No BackDate requests have reached you${company ? ` for ${company}` : ""} yet.`}
           </p>
         )}
 
@@ -209,89 +215,16 @@ export default function BackDateApproval() {
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
-                <TableRow>
-                  <TableHead className="w-20">ID</TableHead>
-                  <TableHead>Company</TableHead>
-                  <TableHead>SAP User</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Window</TableHead>
-                  <TableHead>Raised By</TableHead>
-                  <TableHead>Stage</TableHead>
-                  <TableHead className="text-right">Decision</TableHead>
-                </TableRow>
+                <EntryTableHead />
               </TableHeader>
               <TableBody>
-                {rows.map((row) => (
-                  <TableRow key={row.id}>
-                    <TableCell className="font-mono text-[12.5px]">{row.id}</TableCell>
-                    <TableCell>
-                      {/* One badge per company: the SET is the request, and
-                          an approver is deciding all of it at once. */}
-                      <div className="flex flex-wrap gap-1">
-                        {row.companies.map((c) => (
-                          <Badge key={c} tone="info" caps>{c}</Badge>
-                        ))}
-                      </div>
-                    </TableCell>
-                    <TableCell className="font-medium">{row.sap_username}</TableCell>
-                    <TableCell>{row.document_type}</TableCell>
-                    <TableCell className="whitespace-nowrap">
-                      {formatDate(row.from_date)} — {formatDate(row.to_date)}
-                    </TableCell>
-                    <TableCell>
-                      <div>{row.created_by_username}</div>
-                      <div className="text-[12px] text-subtle">
-                        {formatDate(row.created_at)}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      {row.flow?.current_stage ? (
-                        <>
-                          <div className="text-[13px]">
-                            {row.flow.current_stage_name}
-                            {row.flow.total_stage > 1 && (
-                              <span className="text-subtle">
-                                {" "}({row.flow.current_stage_sequence} of{" "}
-                                {row.flow.total_stage})
-                              </span>
-                            )}
-                          </div>
-                          {row.flow.has_active_replacement && (
-                            <div className="text-[12px] text-hold">
-                              you are covering {row.flow.current_user_username}
-                            </div>
-                          )}
-                        </>
-                      ) : (
-                        <span className="text-subtle">—</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center justify-end gap-1.5">
-                        <Button variant="secondary" size="sm" onClick={() => setDetail(row)}>
-                          Details
-                        </Button>
-                        {actionable.has(row.id) && row.flow?.current_stage && (
-                          <>
-                            <Button
-                              variant="secondary"
-                              size="sm"
-                              onClick={() => setDeciding({ request: row, approve: false })}
-                            >
-                              Reject
-                            </Button>
-                            <Button
-                              variant="primary"
-                              size="sm"
-                              onClick={() => setDeciding({ request: row, approve: true })}
-                            >
-                              Approve
-                            </Button>
-                          </>
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
+                {rows.map((request) => (
+                  <EntryTableRow
+                    key={request.id}
+                    request={request}
+                    onDetails={() => setDetail(request)}
+                    onProgress={() => setProgress(request)}
+                  />
                 ))}
               </TableBody>
             </Table>
@@ -299,23 +232,51 @@ export default function BackDateApproval() {
         )}
       </Card>
 
-      <RequestDetailDialog request={detail} onClose={() => setDetail(null)} />
+      {/* Deciding happens from the detail dialog, not the row: nobody should
+          approve a grant from a table without having opened what it says. */}
+      <RequestDetailDialog
+        request={detail}
+        onClose={() => setDetail(null)}
+        onEdited={(message) => {
+          announce(message);
+          load();
+        }}
+        footer={
+          detail && actionable.has(detail.id) && detail.flow?.current_stage ? (
+            <>
+              <Button
+                variant="secondary"
+                onClick={() => setPending({ request: detail, approve: false })}
+              >
+                Reject
+              </Button>
+              <Button
+                variant="primary"
+                onClick={() => setPending({ request: detail, approve: true })}
+              >
+                Approve
+              </Button>
+            </>
+          ) : undefined
+        }
+      />
+
+      <RequestProgressDialog
+        request={progress}
+        onClose={() => setProgress(null)}
+      />
 
       <DecisionDialog
-        pending={deciding}
-        onClose={() => setDeciding(null)}
+        pending={pending}
+        onClose={() => setPending(null)}
         onDone={(message) => {
-          flash(message);
-          void load();
+          announce(message);
+          load();
         }}
       />
     </Page>
   );
 }
-
-/* ================================================================== *
- * Approve / reject
- * ================================================================== */
 
 function DecisionDialog({
   pending,
@@ -346,15 +307,10 @@ function DecisionDialog({
   }
 
   const { request, approve } = pending;
-  // Decisions are addressed by REQUEST id: there is no task table, and a
-  // request waits at one stage at a time, so nothing else is needed to say
-  // which decision is being made.
   const canDecide = !!request.flow?.current_stage;
 
   const submit = async () => {
     if (!canDecide) return;
-    // A rejection must say why — the requester is told the reason, and JSAP
-    // told them nothing at all.
     if (!approve && !remarks.trim()) {
       setFormError("Please give a reason for the rejection.");
       return;
@@ -373,17 +329,16 @@ function DecisionDialog({
       }
       if (result.flow_status === "PENDING") {
         onDone(`Request #${request.id} approved and moved to the next stage.`);
-      } else if (result.hana_applied === false) {
-        // Deliberately not phrased as success. The approval stands; the SAP
-        // rights do not exist. JSAP reported 200/Success here regardless.
-        onDone(
-          `Request #${request.id} approved, but SAP did not accept the rights. ` +
-            `${result.hana_status_text ?? ""} An administrator can retry the SAP write.`,
-        );
       } else {
+        // "Approved" can only be reached now by SAP having accepted the
+        // grant: the last approval calls SAP first and is only written if it
+        // succeeded. A refusal arrives as an error, below.
         onDone(`Request #${request.id} approved. Rights applied in SAP.`);
       }
     } catch (e) {
+      // A SAP refusal means NOTHING was approved — the request is still
+      // sitting at this stage. Say that, and show what SAP actually said, so
+      // the approver can correct it from the Details dialog and try again.
       setFormError(backdateError(e));
     } finally {
       setSaving(false);
@@ -416,7 +371,9 @@ function DecisionDialog({
 
           <dl className="mb-4 grid grid-cols-[auto_1fr] gap-x-5 gap-y-1.5 text-[13px]">
             <dt className="text-subtle">Document type</dt>
-            <dd className="m-0 font-medium text-ink">{request.document_type}</dd>
+            <dd className="m-0 font-medium text-ink">
+              {request.document_type_name}
+            </dd>
             <dt className="text-subtle">Posting window</dt>
             <dd className="m-0 font-medium text-ink">
               {formatDate(request.from_date)} — {formatDate(request.to_date)}
@@ -424,13 +381,14 @@ function DecisionDialog({
             <dt className="text-subtle">Action</dt>
             <dd className="m-0 font-medium text-ink">{request.action_label}</dd>
             <dt className="text-subtle">Raised by</dt>
-            <dd className="m-0 font-medium text-ink">{request.created_by_username}</dd>
-            {request.remarks && (
-              <>
-                <dt className="text-subtle">Reason given</dt>
-                <dd className="m-0 whitespace-pre-wrap text-body">{request.remarks}</dd>
-              </>
-            )}
+            <dd className="m-0 font-medium text-ink">
+              {request.created_by_username}
+            </dd>
+            {/* The reason for raising it is an action-log entry, not a field of
+                the request, and Progress shows it beside every other remark
+                with its author and its date. Repeating one of them here,
+                stripped of both, is how a summary starts disagreeing with the
+                history it summarises. */}
           </dl>
 
           <Field
@@ -452,21 +410,45 @@ function DecisionDialog({
             )}
           </Field>
 
-          {/* Final approval is what actually grants the rights in SAP, so say
-              so before the button is pressed rather than after. */}
-          <p className="mt-3 rounded-lg bg-brand-soft px-3.5 py-2.5 text-[12.5px] leading-relaxed text-brand">
-            {approve
-              ? "If this is the last stage, approving grants the back-posting rights in SAP immediately."
-              : "Rejecting ends this request. The requester can raise a new one."}
-          </p>
+          {/* SAP is a network call. An approver who cannot tell it is running
+              will press the button again, so the busy state is a banner rather
+              than a disabled button nobody looks at. */}
+          {saving && approve ? (
+            <div
+              role="status"
+              className="mt-3 flex items-center gap-2.5 rounded-lg bg-brand-soft px-3.5 py-2.5 text-[12.5px] text-brand"
+            >
+              <span
+                className="size-3.5 shrink-0 animate-spin rounded-full border-2 border-brand border-t-transparent"
+                aria-hidden
+              />
+              <span>
+                Sending the grant to SAP. This can take a few seconds — the
+                request is only approved once SAP accepts it.
+              </span>
+            </div>
+          ) : (
+            <p className="mt-3 rounded-lg bg-brand-soft px-3.5 py-2.5 text-[12.5px] leading-relaxed text-brand">
+              {approve
+                ? "If this is the last stage, SAP is called FIRST — the request is approved only if SAP accepts the grant."
+                : "Rejecting ends this request. The requester can raise a new one."}
+            </p>
+          )}
         </DialogBody>
 
         <DialogFooter>
-          <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" onClick={submit} disabled={saving || !canDecide}>
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            onClick={submit}
+            disabled={saving || !canDecide}
+            aria-busy={saving}
+          >
             {saving
               ? approve
-                ? "Approving…"
+                ? "Calling SAP…"
                 : "Rejecting…"
               : approve
                 ? "Approve"
