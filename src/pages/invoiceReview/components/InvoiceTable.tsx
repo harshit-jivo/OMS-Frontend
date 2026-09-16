@@ -102,6 +102,7 @@ export default function InvoiceTable({ view }: { view: UseInvoiceReviewResult })
     records,
     actionId,
     canApproveReject,
+    canApproveWarehouse,
     canPostToSap,
     setSelected,
     setActionError,
@@ -238,7 +239,7 @@ export default function InvoiceTable({ view }: { view: UseInvoiceReviewResult })
                       <HiOutlineClock aria-hidden="true" /> History
                     </Button>
                     {(status === "PENDING" || status === "EDITED") &&
-                      (canApproveReject ? (
+                      (canApproveReject && canApproveWarehouse(record.warehouse) ? (
                         <>
                           <Button
                             size="sm"
@@ -262,7 +263,10 @@ export default function InvoiceTable({ view }: { view: UseInvoiceReviewResult })
                       ) : (
                         /* Not a disabled button: there is nothing here for
                            this user to enable, so a greyed-out Approve would
-                           be an invitation that never becomes true. */
+                           be an invitation that never becomes true. Reached
+                           two ways now — this desk does not approve at all, or
+                           it does but not for THIS invoice's warehouse — and
+                           the reasoning is the same either way. */
                         <Badge tone="hold">Pending approval</Badge>
                       ))}
                     {status === "APPROVED" && canPostToSap && (

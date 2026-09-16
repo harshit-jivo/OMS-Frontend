@@ -33,6 +33,29 @@ export const STATUS_FILTERS: Array<{ key: FilterKey; label: string }> = [
   { key: "ALL", label: "All" },
 ];
 
+/**
+ * Which status tabs to render. Every one of them, for everybody.
+ *
+ * There WAS a rule here: an approver saw only the decision tabs, because
+ * "the approver's workflow ends at the decision, so the SAP-side statuses
+ * would only ever be empty for them". That premise was wrong twice over.
+ *
+ * It was wrong about the data — POSTED_TO_SAP is 152 of 158 live rows and
+ * every ERROR row sits in DL-MP, the warehouse whose approver was the one
+ * person being shown neither. And it was wrong about the people: it keyed off
+ * `canApproveReject`, which for most of this app's life was true only for
+ * admins, so nobody noticed. The moment real users were granted approval
+ * (KP, whose PRIMARY role is `billing`, and Preshit on Billing Admin), the
+ * rule started hiding billing's own tabs from the billing desk.
+ *
+ * Approving a bill is not a different job from billing one here — the same
+ * people do both — so the tab strip does not split by desk. Actions still do:
+ * Approve/Reject is gated on `canApproveReject` (and the warehouse, see
+ * `auth/invoiceWarehouses.ts`), Post to SAP on `canPostToSap`. A tab is a
+ * view, and hiding a view only hid the work.
+ */
+export const visibleStatusFilters = (): typeof STATUS_FILTERS => STATUS_FILTERS;
+
 // Human-readable label for a status (e.g. POSTED_TO_SAP -> "POSTED TO SAP").
 export const statusLabel = (status: InvoiceStatus) => status.replace(/_/g, " ");
 

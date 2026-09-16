@@ -8,8 +8,14 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { isCreditLimitError, newestFirst, statusAfterFailedPost } from "./helpers";
-import type { InvoiceRecord } from "./types";
+import {
+  isCreditLimitError,
+  newestFirst,
+  statusAfterFailedPost,
+  STATUS_FILTERS,
+  visibleStatusFilters,
+} from "./helpers";
+import type { InvoiceRecord, InvoiceStatus } from "./types";
 
 const row = (id: number, created_at?: string) => ({ id, created_at }) as InvoiceRecord;
 
@@ -155,5 +161,44 @@ describe("isCreditLimitError", () => {
   it("does NOT offer the action on a row with no message at all", () => {
     expect(isCreditLimitError(withError(undefined))).toBe(false);
     expect(isCreditLimitError(withError(""))).toBe(false);
+  });
+});
+
+/**
+ * Which tabs each desk sees: all of them.
+ *
+ * Worth pinning because the failure is silent in the worst direction. A tab
+ * that is missing does not look broken, it looks like there is no work — which
+ * is how a whole desk lost sight of Posted to SAP and Error at once, and why
+ * this is a guard rather than a preference.
+ */
+describe("visibleStatusFilters", () => {
+  const keys = () => visibleStatusFilters().map((f) => f.key);
+
+  it("renders every tab in STATUS_FILTERS, in order", () => {
+    expect(keys()).toEqual(STATUS_FILTERS.map((f) => f.key));
+  });
+
+  it("includes the tabs the approver-only strip used to drop", () => {
+    for (const key of ["POSTED_TO_SAP", "ERROR", "CL_RAISED", "ALL"]) {
+      expect(keys()).toContain(key);
+    }
+  });
+
+  it("offers a tab for every invoice status the screen can show", () => {
+    // STATUS_FILTERS is FilterKey[] = InvoiceStatus | "ALL". If a status is
+    // ever added to the union without a tab, its rows become unreachable on
+    // every tab but All — so pin the count as well as the members.
+    const statuses: InvoiceStatus[] = [
+      "PENDING",
+      "APPROVED",
+      "REJECTED",
+      "EDITED",
+      "ERROR",
+      "POSTED_TO_SAP",
+      "CL_RAISED",
+    ];
+    for (const status of statuses) expect(keys()).toContain(status);
+    expect(keys()).toHaveLength(statuses.length + 1); // + "ALL"
   });
 });

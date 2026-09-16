@@ -70,6 +70,34 @@ describe("invoice review — two desks, opposite halves", () => {
     expect(canDo(other, "invoice.approve")).toBe(false);
     expect(canDo(other, "invoice.postToSap")).toBe(false);
   });
+
+  it("admits an approver granted invoices.review.decide", () => {
+    // `factory_approver` names no row in users_userrole and nobody holds it,
+    // so the role arm of this rule admits nobody and approval was effectively
+    // admin-only. The registry key is the grantable route — it is also what
+    // /Invoice_Review accepts for route access, so one grant opens the screen
+    // and enables the button together.
+    const kp = session({ username: "kp", role: "billing", roles: ["billing"] });
+    expect(canDo(kp, "invoice.approve")).toBe(false);
+
+    const kpGranted = session({
+      username: "kp",
+      role: "billing",
+      roles: ["billing"],
+      grants: ["invoices.review.decide"],
+    });
+    expect(canDo(kpGranted, "invoice.approve")).toBe(true);
+  });
+
+  it("does not let the grant leak into the SAP-posting half", () => {
+    const granted = session({
+      role: "auditor",
+      roles: ["auditor"],
+      grants: ["invoices.review.decide"],
+    });
+    expect(canDo(granted, "invoice.approve")).toBe(true);
+    expect(canDo(granted, "invoice.postToSap")).toBe(false);
+  });
 });
 
 describe("mart.manageSap mirrors the server, including where the server is odd", () => {

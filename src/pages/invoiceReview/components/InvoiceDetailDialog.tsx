@@ -62,6 +62,7 @@ export default function InvoiceDetailDialog({ view }: { view: UseInvoiceReviewRe
     itemNameOf,
     actionId,
     canApproveReject,
+    canApproveWarehouse,
     canPostToSap,
     setActionError,
     handleAction,
@@ -250,7 +251,7 @@ export default function InvoiceDetailDialog({ view }: { view: UseInvoiceReviewRe
 
           {["PENDING", "EDITED"].includes(status) && (
             <DialogFooter>
-              {canApproveReject ? (
+              {canApproveReject && canApproveWarehouse(selected.warehouse) ? (
                 <>
                   <Button
                     variant="danger"
@@ -283,14 +284,27 @@ export default function InvoiceDetailDialog({ view }: { view: UseInvoiceReviewRe
 
           {status === "POSTED_TO_SAP" && (
             <DialogFooter>
+              {/* `primary`, like the Post to SAP footer above it: on a posted
+                  invoice this is the one action the dialog is for, which is
+                  what that variant is defined to mean. It was the only Button
+                  in this file with no `variant` at all, so it fell through to
+                  the `secondary` default and rendered as a bordered white box
+                  beside footers that are all deliberate — the odd colour out.
+                  The row version in InvoiceTable stays `ghost`, which is the
+                  variant the design system reserves for row actions. */}
               {invoiceReportRef(selected) ? (
                 <Button
+                  variant="primary"
                   onClick={() => openReport(invoiceReportRef(selected)!, setActionError)}
                 >
                   <HiOutlineDocumentText aria-hidden="true" /> Generate Invoice Report
                 </Button>
               ) : (
-                <Button disabled title="No SAP document number was recorded for this invoice">
+                <Button
+                  variant="primary"
+                  disabled
+                  title="No SAP document number was recorded for this invoice"
+                >
                   <HiOutlineDocumentText aria-hidden="true" /> Generate Invoice Report
                 </Button>
               )}
