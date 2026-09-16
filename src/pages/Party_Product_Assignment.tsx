@@ -3,8 +3,14 @@
  * basic rate.
  *
  * One party selected shows and edits that party's catalogue; several selected
- * is a bulk-assign mode, because the common job is "give these forty parties
- * the new SKU".
+ * is a bulk mode, because the common jobs are "give these forty parties the new
+ * SKU" and "put Haryana's mustard up ₹4" — neither of which is forty trips
+ * through a one-party screen.
+ *
+ * Which forty is the other half of it: the picker is filtered by state, group
+ * and category, so "all Haryana distributors" is three clicks rather than forty
+ * recognitions of a name in a dropdown. Re-pricing itself lives in
+ * `partyProducts/BulkRateEditor`.
  */
 import { useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -28,7 +34,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { MultiSelect, type MultiSelectOption } from "@/components/ui/dropdown";
-import { FilterBar, FilterCount, FilterSearch } from "@/components/ui/filter-bar";
+import {
+  FilterActions,
+  FilterBar,
+  FilterCount,
+  FilterMultiSelect,
+  FilterSearch,
+} from "@/components/ui/filter-bar";
 import { Field, Input } from "@/components/ui/form";
 import {
   Card,
@@ -53,6 +65,7 @@ import type { Product } from "../services/ordersService";
 import type { Party } from "../services/sapService";
 import { userService } from "../services/userService";
 import api from "../services/api";
+import BulkRateEditor, { type PartySelection } from "./partyProducts/BulkRateEditor";
 
 interface PartyProduct {
   id: number;
@@ -111,6 +124,10 @@ const getSelectionFromKey = (key: string) => {
 
 const getPartyMetaLine = (party: SearchableParty) =>
   [getPartyCode(party), party.state, getPartyCategory(party)].filter(Boolean).join(" · ");
+
+/** Sorted distinct values for a filter dropdown, blanks dropped. */
+const distinctValues = (values: string[]) =>
+  [...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b));
 
 const mergeParties = (partyList: Party[]) => {
   const seen = new Set<string>();
@@ -183,6 +200,16 @@ export default function Party_Product_Assignment() {
   const products = sapProducts as unknown as Product[];
 
   const [selectedParties, setSelectedParties] = useState<string[]>([]);
+
+  /*
+   * Narrowing the PICKER, not the selection. A party already selected stays
+   * selected when the filters move off it — otherwise building "Haryana plus
+   * these two in Punjab" is impossible, and worse, the second filter would
+   * silently drop the first forty from a price change about to be applied.
+   */
+  const [stateFilter, setStateFilter] = useState<string[]>([]);
+  const [groupFilter, setGroupFilter] = useState<string[]>([]);
+  const [partyCategoryFilter, setPartyCategoryFilter] = useState<string[]>([]);
 
   /*
    * Exactly one party selected -> that party's products. `enabled` replaces the
@@ -631,15 +658,76 @@ export default function Party_Product_Assignment() {
 
   /* ── Derived ──────────────────────────────────────────────────────────── */
 
-  const partyPickerOptions = useMemo<MultiSelectOption<string>[]>(
-    () =>
-      partyOptions.map((party) => ({
-        value: getPartySelectionKey(party),
-        label: getPartyName(party) || getPartyCode(party),
-        hint: getPartyMetaLine(party),
-        keywords: asText(party.main_group),
-      })),
+  const stateOptions = useMemo(
+    () => distinctValues(partyOptions.map((party) => asText(party.state))),
     [partyOptions],
+  );
+  const groupOptions = useMemo(
+    () => distinctValues(partyOptions.map((party) => asText(party.main_group))),
+    [partyOptions],
+  );
+  const categoryOptions = useMemo(
+    () => distinctValues(partyOptions.map((party) => normalizeCategory(getPartyCategory(party)))),
+    [partyOptions],
+  );
+
+  /** The parties the three filters leave standing. Empty filter = no narrowing. */
+  const matchingParties = useMemo(
+    () =>
+      partyOptions.filter(
+        (party) =>
+          (stateFilter.length === 0 || stateFilter.includes(asText(party.state))) &&
+          (groupFilter.length === 0 || groupFilter.includes(asText(party.main_group))) &&
+          (partyCategoryFilter.length === 0 ||
+            partyCategoryFilter.includes(normalizeCategory(getPartyCategory(party)))),
+      ),
+    [partyOptions, stateFilter, groupFilter, partyCategoryFilter],
+  );
+
+  const hasPartyFilters =
+    stateFilter.length > 0 || groupFilter.length > 0 || partyCategoryFilter.length > 0;
+
+  const matchingKeys = useMemo(
+    () => matchingParties.map(getPartySelectionKey),
+    [matchingParties],
+  );
+
+  /** Matching parties not yet selected — what "Select all" would actually add. */
+  const unselectedMatchCount = useMemo(() => {
+    const selected = new Set(selectedParties);
+    return new Set(matchingKeys.filter((key) => !selected.has(key))).size;
+  }, [matchingKeys, selectedParties]);
+
+  const partyPickerOptions = useMemo<MultiSelectOption<string>[]>(() => {
+    const matching = new Set(matchingKeys);
+    const selected = new Set(selectedParties);
+    // A selected party the filters exclude keeps its row, so the tick that
+    // removes it stays reachable from inside the dropdown.
+    const rows = partyOptions.filter(
+      (party) =>
+        matching.has(getPartySelectionKey(party)) || selected.has(getPartySelectionKey(party)),
+    );
+    return rows.map((party) => ({
+      value: getPartySelectionKey(party),
+      label: getPartyName(party) || getPartyCode(party),
+      hint: getPartyMetaLine(party),
+      keywords: asText(party.main_group),
+    }));
+  }, [partyOptions, matchingKeys, selectedParties]);
+
+  const selectAllMatching = () =>
+    setSelectedParties((prev) => [...new Set([...prev, ...matchingKeys])]);
+
+  const clearPartyFilters = () => {
+    setStateFilter([]);
+    setGroupFilter([]);
+    setPartyCategoryFilter([]);
+  };
+
+  /** What the bulk endpoints are addressed with — one entry per selected party. */
+  const partySelections = useMemo<PartySelection[]>(
+    () => selectedParties.map(getSelectionFromKey),
+    [selectedParties],
   );
 
   const isSingleParty = selectedParties.length === 1;
@@ -734,9 +822,74 @@ export default function Party_Product_Assignment() {
           )}
         </CardHeader>
 
+        {/* Whole groups of parties at once — the point of the filters is that
+            "every Haryana distributor" is a description, not forty names to
+            recognise one at a time in a dropdown. */}
+        <FilterBar className="mb-3">
+          <FilterMultiSelect
+            label="State"
+            value={stateFilter}
+            onChange={setStateFilter}
+            options={stateOptions.map((state) => ({ value: state, label: state }))}
+            placeholder="Any state"
+            searchable
+            searchPlaceholder="State…"
+            emptyText="No states loaded"
+          />
+          <FilterMultiSelect
+            label="Main group"
+            value={groupFilter}
+            onChange={setGroupFilter}
+            options={groupOptions.map((group) => ({ value: group, label: group }))}
+            placeholder="Any group"
+            searchable
+            searchPlaceholder="Group…"
+            emptyText="No groups loaded"
+          />
+          <FilterMultiSelect
+            label="Category"
+            value={partyCategoryFilter}
+            onChange={setPartyCategoryFilter}
+            options={categoryOptions.map((category) => ({ value: category, label: category }))}
+            placeholder="Any category"
+            emptyText="No categories loaded"
+          />
+          <FilterCount>
+            {matchingParties.length} of {partyOptions.length} parties match
+          </FilterCount>
+          <FilterActions>
+            <Button
+              variant="primary"
+              onClick={selectAllMatching}
+              disabled={unselectedMatchCount === 0}
+              title={
+                unselectedMatchCount === 0
+                  ? "Every matching party is already selected."
+                  : undefined
+              }
+            >
+              {/* The count is of what would be ADDED, not of what matches: with
+                  thirty-nine of forty already selected, "Select 40" reads as
+                  though the button had not been pressed yet. */}
+              {unselectedMatchCount === 0
+                ? "All matching selected"
+                : "Select " + unselectedMatchCount + " matching"}
+            </Button>
+            <Button variant="ghost" onClick={clearPartyFilters} disabled={!hasPartyFilters}>
+              Clear filters
+            </Button>
+          </FilterActions>
+        </FilterBar>
+
         <Field
           label="Parties"
-          hint="One party to see and edit its catalogue; several to assign the same products to all of them."
+          hint={
+            hasPartyFilters
+              ? "Showing the " +
+                matchingParties.length +
+                " parties that match the filters, plus any already selected."
+              : "One party to see and edit its catalogue; several to price or assign products across all of them."
+          }
         >
           {(control) => (
             <MultiSelect
@@ -827,6 +980,12 @@ export default function Party_Product_Assignment() {
           </ul>
         </Card>
       )}
+
+      {/* ── Re-pricing the whole selection ──
+          Below the assignment card because it answers the question that comes
+          AFTER "who": these parties hold these products — at what, and what
+          should they hold them at now. */}
+      {selectedParties.length > 1 && <BulkRateEditor selections={partySelections} />}
 
       {/* ── One party's catalogue ── */}
       {selectedParties.length === 0 ? (
