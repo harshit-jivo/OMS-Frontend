@@ -36,6 +36,16 @@ export const GRANTABLE_ADMIN_PAGES: GrantablePage[] = [
     label: "BackDate — approve/reject",
     path: "/BackDate_Approval",
   },
+  {
+    key: "Production_Order",
+    label: "Production Order — view requests",
+    path: "/Production_Orders",
+  },
+  {
+    key: "Production_Order_Approval",
+    label: "Production Order — approve/reject",
+    path: "/Production_Approval",
+  },
   { key: "Distributor", label: "Distributor", path: "/Distributor" },
   { key: "Mart_Approval", label: "Mart Approval", path: "/Mart_Approval" },
   // One key for the whole Legal module — unlocks Label Checker AND Nutrition
