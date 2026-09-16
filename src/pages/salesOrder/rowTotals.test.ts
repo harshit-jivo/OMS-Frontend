@@ -25,6 +25,9 @@ const PRODUCT = {
   item_name: "JIVO CANOLA OIL 1 LTR",
   sal_factor2: 12,
   sal_pack_unit: 1,
+  // The rate agreed with this party. Price List is derived from THIS, never
+  // from whatever Basic Price the operator types.
+  basic_rate: 107,
 } as unknown as PartyProduct;
 
 const row = (overrides: Partial<SalesRow> = {}): SalesRow => ({
@@ -61,7 +64,22 @@ describe("recalculateRowTotals", () => {
     expect(result.qty).toBe("60"); // 5 boxes x 12 per box
     expect(result.ltrs).toBe("60"); // 60 pieces x 1 litre
     expect(result.amount).toBe("6420.00"); // 60 x 107, pre-tax
-    expect(result.priceListBasic).toBe("112.35"); // 107 + 5%
+    expect(result.priceListBasic).toBe("112.35"); // agreed rate 107 + 5%
+  });
+
+  it("keeps Price List on the party's agreed rate when Basic Price is edited", () => {
+    // The bug this pins: Price List used to be recomputed from `basicPrice`, so
+    // discounting a line rewrote the very figure the discount is measured
+    // against — on screen and in `price_list_basic` on the saved order.
+    const discounted = recalculateRowTotals(
+      row({ qty: "60", basicPrice: "90" }),
+      "price",
+      PRODUCT,
+      false,
+    );
+
+    expect(discounted.priceListBasic).toBe("112.35"); // still 107 + 5%
+    expect(discounted.amount).toBe("5400.00"); // priced off the typed 90
   });
 
   it("turns pieces back into boxes", () => {

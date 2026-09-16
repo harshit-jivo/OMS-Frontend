@@ -101,8 +101,7 @@ export const recalculateRowTotals = (
   const factor = Number(product.sal_factor2) || 1;
   const packUnit = Number(product.sal_pack_unit) || 0;
   const qty = source === "boxes" ? (Number(row.boxes) || 0) * factor : Number(row.qty) || 0;
-  // Priced off the Basic rate so the amount stays pre-tax; Landing is kept in
-  // step with it rather than driving it.
+  // Priced off the Basic rate so the amount stays pre-tax.
   const price = Number(row.basicPrice) || 0;
 
   return withFoc({
@@ -110,7 +109,16 @@ export const recalculateRowTotals = (
     qty: source === "boxes" ? (qty > 0 ? String(qty) : "") : row.qty,
     boxes: source === "qty" ? (qty > 0 && factor > 0 ? String(qty / factor) : "") : row.boxes,
     ltrs: qty > 0 ? String(packUnit * qty) : "",
-    priceListBasic: computeLandingPrice(price, row.tax),
+    // Price List is the rate AGREED WITH THIS PARTY (`basic_rate` on
+    // party_product_assignments), plus tax — NOT the Basic Price the operator
+    // typed. It used to be `computeLandingPrice(price, row.tax)`, which
+    // recomputed the column from that typed figure on every keystroke, so the
+    // party's reference rate was overwritten by the salesperson's own number
+    // the moment they edited the line. That left Price List carrying no party
+    // data at all (ORD-20260912-0007 stored 3025.00 = 2880.9524 x 1.05, while
+    // the party's agreed rate was 0), and made it useless both as a thing to
+    // compare against on screen and as an approval control.
+    priceListBasic: computeLandingPrice(product.basic_rate, row.tax),
     amount: qty > 0 && price > 0 ? (price * qty).toFixed(2) : "",
   });
 };
