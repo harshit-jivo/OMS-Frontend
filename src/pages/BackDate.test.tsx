@@ -141,19 +141,21 @@ describe("BackDate", () => {
     expect(screen.queryByLabelText(/filter requests by status/i)).toBeNull();
   });
 
-  it("raises ONE request per company, and never per action", async () => {
+  it("raises ONE request for ONE company, and never one per action", async () => {
     const user = userEvent.setup();
     render(<BackDate />);
     await screen.findByRole("tab", { name: /entries/i });
     await user.click(screen.getByRole("tab", { name: /new request/i }));
 
+    // One company at a time: a request is routed by its company and written
+    // to that company's SAP schema, so there is no half-picked pair.
     const company = screen.getByLabelText(/company/i);
     expect(company.textContent).toContain("OIL");
-
     await user.click(company);
-    await user.click(screen.getByRole("checkbox", { name: "BEVERAGES" }));
-    await user.keyboard("{Escape}");
+    await user.click(await screen.findByRole("option", { name: "BEVERAGES" }));
 
+    // The ACTION still takes both, and both stay on the ONE request: SAP is
+    // never told the action, so splitting the pair would write twins.
     await user.click(screen.getByLabelText(/action/i));
     await user.click(screen.getByRole("checkbox", { name: "Update" }));
     await user.keyboard("{Escape}");
@@ -162,37 +164,41 @@ describe("BackDate", () => {
       screen.getByLabelText(/rights expire/i),
       "2026-12-31T18:30",
     );
-
-    // Two companies is two requests — each grant is approved on its own and
-    // written to its own SAP schema. Both ACTIONS stay on each one.
-    await user.click(screen.getByRole("button", { name: "Submit 2 Requests" }));
+    await user.click(screen.getByRole("button", { name: "Submit Request" }));
 
     await waitFor(() =>
-      expect(backdateService.createRequest).toHaveBeenCalledTimes(2),
+      expect(backdateService.createRequest).toHaveBeenCalledTimes(1),
     );
-    const sent = vi
-      .mocked(backdateService.createRequest)
-      .mock.calls.map(([body]) => `${body.company}/${body.action}`);
-    expect(sent).toEqual(["OIL/A,U", "BEVERAGES/A,U"]);
+    const [body] = vi.mocked(backdateService.createRequest).mock.calls[0];
+    expect(body.company).toBe("BEVERAGES");
+    expect(body.action).toBe("A,U");
   });
 
-  it("reports how many requests were raised", async () => {
+  it("sends the expiry as the instant the user actually picked", async () => {
+    // `datetime-local` gives a WALL CLOCK with no zone, and the server reads a
+    // zoneless timestamp as UTC — so "2 o'clock" arrived as 14:00 UTC, which
+    // is 19:30 in Indian time. Every request read back 5h30m late.
     const user = userEvent.setup();
     render(<BackDate />);
     await screen.findByRole("tab", { name: /entries/i });
     await user.click(screen.getByRole("tab", { name: /new request/i }));
 
-    await user.click(screen.getByLabelText(/company/i));
-    await user.click(screen.getByRole("checkbox", { name: "BEVERAGES" }));
-    await user.keyboard("{Escape}");
     await user.type(
       screen.getByLabelText(/rights expire/i),
-      "2026-12-31T18:30",
+      "2026-09-16T14:00",
     );
-    await user.click(screen.getByRole("button", { name: "Submit 2 Requests" }));
+    await user.click(screen.getByRole("button", { name: "Submit Request" }));
 
-    expect(await screen.findByText(/2 BackDate requests submitted/i))
-      .toBeTruthy();
+    await waitFor(() =>
+      expect(backdateService.createRequest).toHaveBeenCalledTimes(1),
+    );
+    const [body] = vi.mocked(backdateService.createRequest).mock.calls[0];
+    // An instant, not a bare wall clock — nothing left for the server to
+    // assume. It must mean 14:00 in THIS browser's zone.
+    expect(body.time_limit).toBe(
+      new Date("2026-09-16T14:00").toISOString(),
+    );
+    expect(new Date(body.time_limit!).getHours()).toBe(14);
   });
 
   it("refuses to submit without an expiry", async () => {
@@ -228,7 +234,8 @@ describe("BackDate", () => {
     expect(body.action).toBe("A");
     // ONE company, not a list of one.
     expect(body.company).toBe("OIL");
-    expect(body.time_limit).toBe("2026-12-31T18:30");
+    // The expiry travels as an instant; see the test above.
+    expect(body.time_limit).toBe(new Date("2026-12-31T18:30").toISOString());
   });
 
   it("labels the action plainly, with no trailing explanation", async () => {
@@ -347,6 +354,9 @@ describe("BackDate", () => {
     // And no way to pull up the request parameters beside them.
     expect(screen.queryByText(/show payload/i)).toBeNull();
     expect(screen.queryByText(/USERID/)).toBeNull();
+    // No SQL either: a query pasted into the response buried the one thing
+    // an approver is reading for.
+    expect(screen.queryByText(/SELECT \* FROM/)).toBeNull();
   });
 
   it("does not call a successful SAP write FAILED", async () => {
@@ -371,6 +381,103 @@ describe("BackDate", () => {
 
     expect(await screen.findByText(/Rights applied in SAP/)).toBeTruthy();
     expect(screen.queryByText(/refused/i)).toBeNull();
+  });
+
+  it("edits every field, from SAP's own lists", async () => {
+    vi.mocked(backdateService.listRequests).mockResolvedValue(
+      [{ ...REQUESTS[0], can_edit: true, action: "A", action_label: "Add" }] as never,
+    );
+    vi.spyOn(backdateService, "updateRequest").mockResolvedValue({} as never);
+    const user = userEvent.setup();
+    render(<BackDate />);
+    await screen.findByRole("tab", { name: /entries/i });
+
+    await user.click(await screen.findByRole("button", { name: /details/i }));
+    await user.click(
+      await screen.findByRole("button", { name: /edit this request/i }),
+    );
+
+    const form = within(
+      (await screen.findByText("Edit request")).closest("section") as HTMLElement,
+    );
+
+    // The SAP user and the document type come from SAP, not a free-text box —
+    // a typed name SAP has never heard of is refused at the LAST stage.
+    await user.click(form.getByLabelText(/sap user/i));
+    await user.click(await screen.findByRole("option", { name: "USER12" }));
+    await user.click(form.getByLabelText(/document type/i));
+    await user.click(await screen.findByRole("option", { name: "A/R Invoice" }));
+
+    // Action is editable here now; it was missing from this form entirely.
+    const actionTrigger = form.getByLabelText(/action/i);
+    await user.click(actionTrigger);
+    await user.click(screen.getByRole("checkbox", { name: "Update" }));
+    // Toggle the trigger to close it — Escape would close the whole dialog.
+    await user.click(actionTrigger);
+
+    // By placeholder, not by label: Testing Library refuses to resolve a
+    // <textarea> through `htmlFor` even when the pairing is correct.
+    await user.type(
+      form.getByPlaceholderText(/recorded against this edit/i),
+      "fixed it",
+    );
+    await user.click(form.getByRole("button", { name: /save changes/i }));
+
+    await waitFor(() =>
+      expect(backdateService.updateRequest).toHaveBeenCalled(),
+    );
+    const [, body] = vi.mocked(backdateService.updateRequest).mock.calls[0];
+    expect(body.sap_username).toBe("USER12");
+    expect(body.document_type_name).toBe("A/R Invoice");
+    expect(body.action).toBe("A,U");
+    // The reason rides with the edit, to land on THAT edit's log row.
+    expect(body.remarks).toBe("fixed it");
+    // Company is never sent: it decides the approval route.
+    expect(body).not.toHaveProperty("company");
+  });
+
+  it("says the company cannot move, rather than showing a dead box", async () => {
+    vi.mocked(backdateService.listRequests).mockResolvedValue(
+      [{ ...REQUESTS[0], can_edit: true }] as never,
+    );
+    const user = userEvent.setup();
+    render(<BackDate />);
+    await screen.findByRole("tab", { name: /entries/i });
+
+    await user.click(await screen.findByRole("button", { name: /details/i }));
+    await user.click(
+      await screen.findByRole("button", { name: /edit this request/i }),
+    );
+
+    expect(await screen.findByText(/it decides the approval route/i))
+      .toBeTruthy();
+  });
+
+  it("shows where the SAP row is as a field, not as a query", async () => {
+    vi.mocked(backdateService.listRequests).mockResolvedValue([
+      {
+        ...REQUESTS[0],
+        flow: {
+          ...FLOW,
+          hana_status: "SUCCESS",
+          hana_status_text: JSON.stringify({
+            results: [{
+              branch: "OIL", status: "SUCCESS", sap_row_id: 108,
+              response: "OPEN_BKDT accepted: USER12, G/L Accounts.",
+            }],
+          }),
+        },
+      },
+    ] as never);
+    const user = userEvent.setup();
+    render(<BackDate />);
+    await screen.findByRole("tab", { name: /entries/i });
+
+    await user.click(await screen.findByRole("button", { name: /progress/i }));
+
+    expect(await screen.findByText("SAP row id")).toBeTruthy();
+    expect(screen.getByText("108")).toBeTruthy();
+    expect(screen.queryByText(/SELECT \* FROM/)).toBeNull();
   });
 
   it("offers Completed as its own card and filter", async () => {

@@ -65,7 +65,16 @@ export interface BackDateSapCall {
 export interface BackDateSapResult {
   branch: string;
   status: "SUCCESS" | "FAILED";
+  /** Exactly what SAP said — its own words on a refusal. One sentence. */
   response: string;
+  /**
+   * The id written onto the SAP row, when it could be written.
+   *
+   * `null` where the connection cannot write that column (live BEVERAGES) and
+   * absent on rows from before tagging existed — in both cases the row is
+   * found by SAP user and createdOn instead.
+   */
+  sap_row_id?: number | null;
 }
 
 export interface BackDateFlow {

@@ -219,4 +219,37 @@ describe("BackDateApproval", () => {
       company: "BEVERAGES",
     });
   });
+
+  it("shows what SAP said before closing, not after", async () => {
+    // The approver used to lose the response the instant it arrived and have
+    // to hunt for it under Completed > Details.
+    vi.spyOn(backdateService, "approve").mockResolvedValue({
+      flow_id: 1,
+      flow_status: "APPROVED",
+      hana_status: "SUCCESS",
+      hana_status_text: JSON.stringify({
+        results: [{
+          branch: "OIL", status: "SUCCESS", sap_row_id: 130,
+          response: "OPEN_BKDT accepted: USER01, G/L Accounts.",
+        }],
+      }),
+    } as never);
+
+    const user = userEvent.setup();
+    render(<BackDateApproval />);
+    await user.click(await screen.findByRole("button", { name: /^details$/i }));
+    await user.click(await screen.findByRole("button", { name: /^approve$/i }));
+    await user.click(await screen.findByRole("button", { name: /^approve$/i }));
+
+    // The dialog stays, showing SAP's own words and the row id.
+    expect(await screen.findByText(/OPEN_BKDT accepted/)).toBeTruthy();
+    expect(screen.getByText(/SAP accepted the grant/i)).toBeTruthy();
+    expect(screen.getByText(/SAP row id 130/)).toBeTruthy();
+
+    // And it only closes when the approver says so.
+    await user.click(screen.getByRole("button", { name: /^done$/i }));
+    await waitFor(() =>
+      expect(screen.queryByText(/OPEN_BKDT accepted/)).toBeNull(),
+    );
+  });
 });

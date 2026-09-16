@@ -54,12 +54,14 @@ import {
   backdateService,
   type BackDateInsights,
   type BackDateRequest,
+  type DecisionResult,
 } from "../services/backdateService";
 import {
   EntryTableHead,
   EntryTableRow,
   RequestDetailDialog,
   RequestProgressDialog,
+  SapResultList,
 } from "./BackDate";
 import {
   type CompanyFilter,
@@ -290,10 +292,20 @@ function DecisionDialog({
   const [remarks, setRemarks] = useState("");
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
+  /**
+   * What SAP said, held on screen once the grant lands.
+   *
+   * The dialog used to close the instant SAP accepted, which meant the one
+   * moment the approver most wants to see the response is the moment it
+   * disappears — leaving them to switch to Completed, open Details and scroll
+   * to find it. It stays here until they dismiss it.
+   */
+  const [outcome, setOutcome] = useState<DecisionResult | null>(null);
 
   useEffect(() => {
     setRemarks("");
     setFormError("");
+    setOutcome(null);
   }, [pending]);
 
   if (!pending) {
@@ -322,19 +334,20 @@ function DecisionDialog({
         ? await backdateService.approve(request.id, remarks)
         : await backdateService.reject(request.id, remarks);
 
-      onClose();
       if (!approve) {
+        onClose();
         onDone(`Request #${request.id} rejected.`);
         return;
       }
       if (result.flow_status === "PENDING") {
+        // No SAP call on an intermediate stage — nothing to show.
+        onClose();
         onDone(`Request #${request.id} approved and moved to the next stage.`);
-      } else {
-        // "Approved" can only be reached now by SAP having accepted the
-        // grant: the last approval calls SAP first and is only written if it
-        // succeeded. A refusal arrives as an error, below.
-        onDone(`Request #${request.id} approved. Rights applied in SAP.`);
+        return;
       }
+      // Final approval: SAP accepted, or we would be in the catch below. Hold
+      // the dialog open on the response instead of closing over it.
+      setOutcome(result);
     } catch (e) {
       // A SAP refusal means NOTHING was approved — the request is still
       // sitting at this stage. Say that, and show what SAP actually said, so
@@ -344,6 +357,49 @@ function DecisionDialog({
       setSaving(false);
     }
   };
+
+  const finish = () => {
+    onClose();
+    onDone(`Request #${request.id} approved. Rights applied in SAP.`);
+  };
+
+  if (outcome) {
+    return (
+      <Dialog open onOpenChange={(o) => !o && finish()}>
+        <DialogContent title="Rights applied in SAP" size="md">
+          <DialogHeader className="pr-10">
+            <div className="min-w-0">
+              <DialogTitle>Rights applied in SAP</DialogTitle>
+              <DialogDescription className="mt-0.5">
+                #{request.id} · {request.sap_username} · {request.company}
+              </DialogDescription>
+            </div>
+          </DialogHeader>
+
+          <DialogBody>
+            <div className="mb-3 flex items-start gap-2 rounded-lg bg-ok-soft px-3.5 py-2.5 text-[13px] text-ok">
+              <HiCheckCircle className="mt-0.5 shrink-0" aria-hidden />
+              <span>
+                Approved. SAP accepted the grant — this is what it said.
+              </span>
+            </div>
+            {/* The same component the Progress timeline ends with, so one SAP
+                call cannot read two different ways. */}
+            <SapResultList
+              status={outcome.hana_status ?? null}
+              text={outcome.hana_status_text ?? ""}
+            />
+          </DialogBody>
+
+          <DialogFooter>
+            <Button variant="primary" onClick={finish}>
+              Done
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  }
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
