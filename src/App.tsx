@@ -83,6 +83,8 @@ const Device_Management = lazy(() => import("./pages/Device_Management"));
 const Workflows = lazy(() => import("./pages/Workflows"));
 const BackDate = lazy(() => import("./pages/BackDate"));
 const BackDateApproval = lazy(() => import("./pages/BackDate_Approval"));
+const ProductionOrders = lazy(() => import("./pages/Production_Orders"));
+const ProductionApproval = lazy(() => import("./pages/Production_Approval"));
 const Invoice_Report = lazy(() => import("./pages/Invoice_Report"));
 const HAIS = lazy(() => import("./pages/HAIS"));
 const AssetPublicView = lazy(() => import("./pages/HAIS/AssetPublicView"));
@@ -171,6 +173,25 @@ function App() {
           element={
             <ProtectedPage>
               <BackDateApproval />
+            </ProtectedPage>
+          }
+        />
+        {/* PRDO — SAP raises production orders, OMS approves them.
+            Read-only list; there is no create route because there is no
+            create endpoint. */}
+        <Route
+          path="/Production_Orders"
+          element={
+            <ProtectedPage>
+              <ProductionOrders />
+            </ProtectedPage>
+          }
+        />
+        <Route
+          path="/Production_Approval"
+          element={
+            <ProtectedPage>
+              <ProductionApproval />
             </ProtectedPage>
           }
         />

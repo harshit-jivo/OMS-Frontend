@@ -215,6 +215,13 @@ export const SIDEBAR_SECTIONS: SidebarSectionDef[] = [
     ],
   },
   {
+    label: "Production",
+    links: [
+      { to: "/Production_Orders", label: "Production Orders", icon: HiOutlineClipboardDocumentList },
+      { to: "/Production_Approval", label: "Production Approval", icon: HiOutlineShieldCheck },
+    ],
+  },
+  {
     label: "Tracker",
     links: [
       { to: "/Tracker_Entry", label: "Invoice Entry", icon: HiOutlinePencilSquare },
