@@ -13,10 +13,10 @@ import {
   HiOutlineShieldCheck,
 } from "react-icons/hi2";
 import { apiFetch, apiUpload, resolveApiUrl } from "./SalesInvoice/useSalesInvoice";
-import { API_ORIGIN } from "../services/apiPaths";
 import MarkdownReport from "../components/legal/MarkdownReport";
 import FindingsChecklist from "../components/legal/FindingsChecklist";
 import LabelImage from "../components/legal/LabelImage";
+import useLabelPreview from "../components/legal/useLabelPreview";
 import {
   buildReportMarkdown,
   summarise,
@@ -89,18 +89,6 @@ const formatBytes = (bytes: number): string =>
     : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 
 const baseName = (path: string): string => path.split(/[\\/]/).pop() ?? path;
-
-/**
- * Absolute URL for an uploaded file.
- *
- * NOT `resolveApiUrl`: that hangs everything off `/api`, and Django serves
- * MEDIA_URL from the server root — `/media/labels/x.png` would become
- * `/api/media/labels/x.png` and 404. `API_ORIGIN` exists for exactly this
- * (its own docstring names media files as the case). An absolute URL is
- * returned untouched, so moving media to a CDN needs no change here.
- */
-const mediaUrl = (path: string): string =>
-  /^https?:\/\//i.test(path) ? path : `${API_ORIGIN}${path.startsWith("/") ? "" : "/"}${path}`;
 
 const isAccepted = (file: File): boolean =>
   ACCEPTED_EXTENSIONS.test(file.name) ||
@@ -195,7 +183,14 @@ export default function LabelChecker() {
 
   // The stored copy once the check returns (it renders a PDF's first page as
   // an image the browser can show); the local blob until then.
-  const imageSrc = report?.image_url ? mediaUrl(report.image_url) : previewUrl;
+  //
+  // Fetched rather than linked: the endpoint serving it is behind the legal
+  // gate and an <img src> carries no bearer token — `useLabelPreview` has the
+  // long version. `previewUrl` stays the fallback for the window while that
+  // request is in flight, so an image upload does not blink out of the pane
+  // at the moment its report arrives.
+  const stored = useLabelPreview(report?.image_url);
+  const imageSrc = stored.src || previewUrl;
 
   /* ── Actions ──────────────────────────────────────────────────────────── */
 
@@ -548,6 +543,22 @@ export default function LabelChecker() {
                 }}
               />
             </>
+          ) : stored.loading ? (
+            /* The render exists by now — the check returned it — and it is
+               being fetched. Repeating "a PDF cannot be shown" here would
+               tell the reviewer the opposite of what is happening. */
+            <div
+              className="flex items-center justify-center rounded-[9px] bg-surface px-4 py-10"
+              role="status"
+              aria-label="Loading the rendered label"
+            >
+              <i
+                aria-hidden="true"
+                className="size-[26px] rounded-full border-[3px] border-line-strong border-t-brand motion-safe:animate-spin"
+              />
+            </div>
+          ) : stored.error ? (
+            <Notice tone="hold">{stored.error}</Notice>
           ) : (
             <div className="flex flex-col items-center gap-2 rounded-[9px] bg-surface px-4 py-10 text-center text-[14px] leading-relaxed text-body">
               <HiOutlineInformationCircle aria-hidden="true" className="text-[18px]" />
