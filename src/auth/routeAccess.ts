@@ -154,6 +154,17 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // and raising a BackDate request are unrelated jobs.
   "/BackDate": { permissions: ["BackDate"] },
   "/BackDate_Approval": { permissions: ["BackDate_Approval"] },
+
+  // PRDO (Production Orders) — SAP is the origin, OMS approves.
+  //
+  // Two keys, same reasoning as BackDate: seeing the orders and deciding
+  // them are different authorities. `Production_Order_Approval` opens the
+  // desk; it does NOT by itself let you approve anything. The backend also
+  // requires you to be the current effective user of that workflow stage,
+  // which is also what scopes an approver to a company — a stage belongs to
+  // exactly one company's workflow, and OMS has no user->company map.
+  "/Production_Orders": { permissions: ["Production_Order"] },
+  "/Production_Approval": { permissions: ["Production_Order_Approval"] },
   "/Sap_Sync": { permissions: ["Sap_Sync"] },
   "/Party_Assignment": { permissions: ["Party_Assignment"] },
   "/Party_Product_Assignment": { permissions: ["Party_Product_Assignment"] },
