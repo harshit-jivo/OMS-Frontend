@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
-import { startExcelExport } from "../utils/excelExport";
+import { startExcelExport, startOrderReportExport } from "../utils/excelExport";
+import type { OrderReportData } from "../utils/excelExport";
 import {
   getOrderItemSchemeNames,
   getOrderItemSchemeQtyText,
@@ -16,14 +17,16 @@ import type {
 import { useQueryClient } from "@tanstack/react-query";
 
 import { useAssignedParties, useCurrentUserOrders, useOrderStatuses } from "../lib/orderQueries";
-import { OrderItemsTable } from "@/components/orders/OrderItemsTable";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
-  HiEye, // View
-  HiArrowDownTray, // Download
+  HiOutlineEye, // View
+  HiOutlineMapPin, // Track
+  HiOutlineArrowDownTray, // Download
+  HiOutlineDocumentDuplicate, // Duplicate
+  HiOutlineInformationCircle, // Order info
   HiPlus,
   HiXMark,
-  HiClipboardDocumentList,
+  HiOutlineClipboardDocumentList,
   HiCheckCircle,
   HiExclamationTriangle,
   HiInboxStack,
@@ -33,7 +36,6 @@ import {
   HiCube,
   HiCalendarDays,
   HiBeaker,
-  HiReceiptPercent,
   HiCurrencyRupee,
 } from "react-icons/hi2";
 import { useAuth } from "../auth/useAuth";
@@ -80,8 +82,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Pagination } from "@/components/ui/pagination";
+import { OrderTimelineDialog } from "@/components/orders/OrderTimelineDialog";
+import { OrderItemCards } from "@/components/orders/OrderItemCards";
 import { TableSkeleton } from "@/components/ui/skeleton";
 import { messageFrom } from "@/lib/apiError";
+import { useUILabels } from "../services/uiConfig";
 
 const now = new Date();
 
@@ -152,7 +157,15 @@ const getRejectedByFromLogs = (logs: OrderLog[]) => {
   );
 };
 
-export default function View_Orders() {
+export default function View_Orders({
+  // When rendered as the DISTRIBUTOR's "View Orders" (see App.tsx). A
+  // distributor never places FOC orders, so the FOC column is dropped for
+  // them, and the row actions include a Track shortcut.
+  distributor = false,
+}: {
+  distributor?: boolean;
+} = {}) {
+  const { t } = useUILabels();
   const location = useLocation();
   const navigate = useNavigate();
   // Shared with both Order_Tracking pages — one key, so moving between them
@@ -167,7 +180,15 @@ export default function View_Orders() {
   const canCreateOrder = canOpen(session, "/Add_Sales");
   const [showDetails, setShowDetails] = useState(false);
   const [orderDetails, setOrderDetails] = useState<Order | null>(null);
+  // The "i" order-information dialog on the detail view — addresses, creator,
+  // current stage and any rejection reason, in one place.
+  const [infoOpen, setInfoOpen] = useState(false);
   const [selectedItems, setSelectedItems] = useState<OrderItem[]>([]);
+  // Track-order timeline modal (distributor row action).
+  const [trackOpen, setTrackOpen] = useState(false);
+  const [trackTarget, setTrackTarget] = useState<Order | null>(null);
+  const [trackLogs, setTrackLogs] = useState<OrderLog[]>([]);
+  const [trackLoading, setTrackLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState("");
   const [partyFilter, setPartyFilter] = useState("");
   const [itemFilter, setItemFilter] = useState("");
@@ -204,6 +225,24 @@ export default function View_Orders() {
       setShowDetails(true);
     } catch (error) {
       console.log("Error fetching order details:", error);
+    }
+  };
+
+  // Track an order (distributor row action): open the status-timeline modal and
+  // load the order's logs into it. Reuses the shared OrderTimelineDialog.
+  const trackOrder = async (order: Order) => {
+    setTrackTarget(order);
+    setTrackLogs([]);
+    setTrackOpen(true);
+    setTrackLoading(true);
+    try {
+      const logs = await ordersService.getOrderLogs(order.id);
+      setTrackLogs(Array.isArray(logs) ? logs : []);
+    } catch (error) {
+      console.log("Error fetching order logs:", error);
+      setTrackLogs([]);
+    } finally {
+      setTrackLoading(false);
     }
   };
 
@@ -438,13 +477,15 @@ export default function View_Orders() {
   // markup, where subtotal and tax were each summed twice — once for their own
   // row and again inside the grand total.
   const detailTotals = useMemo(() => {
+    const pcs = selectedItems.reduce((s, i) => s + (Number(i.qty) || 0), 0);
+    const boxes = selectedItems.reduce((s, i) => s + (Number(i.boxes) || 0), 0);
     const litres = selectedItems.reduce((s, i) => s + getOrderItemTotalLtrs(i), 0);
     const subtotal = selectedItems.reduce((s, i) => s + Number(i.total || 0), 0);
     const tax = selectedItems.reduce(
       (s, i) => s + (Number(i.total || 0) * Number(i.tax_rate || 0)) / 100,
       0,
     );
-    return { litres, subtotal, tax, grand: subtotal + tax };
+    return { pcs, boxes, litres, subtotal, tax, grand: subtotal + tax };
   }, [selectedItems]);
 
   // Only the variety costs that are actually present.
@@ -511,9 +552,116 @@ export default function View_Orders() {
     }));
   };
 
-  const downloadExcel = (order: Order) => {
-    startExcelExport(buildOrderRows(order), {
-      fileName: `Order_${order.order_number}.xlsx`,
+  // Map an order to the styled single-order report layout (the distributor
+  // "attachment" format): header block, navy columns, lines, totals.
+  const toOrderReport = (order: Order): OrderReportData => ({
+    order_number: order.order_number,
+    card_name: order.card_name,
+    card_code: order.card_code,
+    bill_to_address: order.bill_to_address,
+    ship_to_address: order.ship_to_address,
+    items: (order.items || []).map((item) => ({
+      item_code: item.item_code,
+      item_name: item.item_name,
+      scheme: getOrderItemSchemeNames(item),
+      scheme_qty: getOrderItemSchemeQtyText(item),
+      qty: Number(item.qty) || 0,
+      boxes: Number(item.boxes) || 0,
+      liters: Number(item.ltrs) || 0,
+      total_ltrs: getOrderItemTotalLtrs(item),
+      price_list_basic: Number(item.price_list_basic) || 0,
+      basic_price: Number(item.basic_price) || 0,
+      total: Number(item.total) || 0,
+      tax_rate: Number(item.tax_rate) || 0,
+    })),
+  });
+
+  // Which company's Crystal layout a SO report renders through. Distributor
+  // orders are always company 3 (Mart) today, but the mapping is company-driven
+  // so oil/beverage light up automatically when those distributors exist.
+  const companyToBranch = (company: string | number | undefined): string => {
+    switch (String(company ?? "").trim()) {
+      case "1":
+        return "OIL";
+      case "2":
+        return "BEVERAGE";
+      case "3":
+        return "MART";
+      default:
+        return "MART"; // distributor default
+    }
+  };
+
+  // "Generate Report" — the SAP sales-order Crystal PDF for this order. Needs
+  // the order to exist in SAP (a DocEntry/DocNum); orders still in the approval
+  // flow have none yet, so we say so rather than hitting a 404.
+  const generateReport = async (order: Order) => {
+    const branch = companyToBranch(order.company);
+    let docEntry: number | string | null | undefined;
+    let docNum: number | string | null | undefined = order.sap_doc_number;
+    try {
+      const statuses = await ordersService.getSalesOrderSapStatus([order.id]);
+      const sap = statuses[String(order.id)];
+      if (sap?.doc_entry != null) docEntry = sap.doc_entry;
+      if (sap?.doc_num != null) docNum = sap.doc_num;
+    } catch {
+      /* fall back to order.sap_doc_number */
+    }
+
+    if (docEntry == null && (docNum == null || docNum === "")) {
+      window.alert(
+        "This order has not been created in SAP yet, so its sales-order report is not available.",
+      );
+      return;
+    }
+
+    try {
+      const blob = await ordersService.getSalesOrderReport({
+        branch,
+        docEntry,
+        docNum,
+        party: order.card_name,
+      });
+      const url = URL.createObjectURL(blob);
+      // Open in a new tab; if the popup is blocked, fall back to a download.
+      const opened = window.open(url, "_blank");
+      if (!opened) {
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `SO_${order.order_number}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch {
+      window.alert("Failed to generate the sales-order report. Please try again.");
+    }
+  };
+
+  // "Duplicate" — open the distributor Create Order page prefilled from this
+  // order. The new order is created fresh; the original is untouched.
+  const duplicateOrder = (order: Order) =>
+    navigate("/Distributor", { state: { duplicateOrderId: order.id } });
+
+  const downloadExcel = async (order: Order) => {
+    // The list row carries only a summary — fetch the full order (with items)
+    // before building the report so a row download is as complete as a detail
+    // download.
+    let full = order;
+    if (!order.items || order.items.length === 0) {
+      const details = await ordersService.getOrderDetails(order.id).catch(() => null);
+      if (details) full = details;
+    }
+
+    // Distributors get the styled, print-like report everywhere they download;
+    // staff keep the flat, sortable table export.
+    if (distributor) {
+      startOrderReportExport(toOrderReport(full), `Order_${full.order_number}.xlsx`);
+      return;
+    }
+    startExcelExport(buildOrderRows(full), {
+      fileName: `Order_${full.order_number}.xlsx`,
       sheetName: "Order Details",
     });
   };
@@ -548,12 +696,13 @@ export default function View_Orders() {
 
           <StatRow>
             <Stat
-              icon={HiClipboardDocumentList}
+              icon={HiOutlineClipboardDocumentList}
               tone="brand"
               label="Total orders"
               value={filteredOrders.length}
               hint="matching filters"
               loading={isOrdersLoading}
+              className="border-sky-200 bg-sky-50 dark:bg-sky-950/20"
             />
             <Stat
               icon={HiCheckCircle}
@@ -561,6 +710,7 @@ export default function View_Orders() {
               label="Completed"
               value={completedCount}
               loading={isOrdersLoading}
+              className="border-emerald-200 bg-emerald-50 dark:bg-emerald-950/20"
             />
             <Stat
               icon={HiExclamationTriangle}
@@ -570,6 +720,9 @@ export default function View_Orders() {
               label="Rejected"
               value={rejectedCount}
               loading={isOrdersLoading}
+              // Always the light rose tint so the card matches the other two;
+              // the icon/value tone still goes neutral at zero (above).
+              className="border-rose-200 bg-rose-50 dark:bg-rose-950/20"
             />
           </StatRow>
 
@@ -613,9 +766,13 @@ export default function View_Orders() {
                 ))}
               </FilterSelect>
 
-            <FilterSelect
-              label="Item"
-              icon={HiCube}
+            {/* The Item filter is hidden for distributors — their party is
+                fixed, so "Select Party First" never resolves and the filter is
+                dead weight. Staff keep it. */}
+            {!distributor ? (
+              <FilterSelect
+                label="Item"
+                icon={HiCube}
                 value={itemFilter}
                 disabled={!partyFilter || isLoadingItems}
                 onChange={(e) => {
@@ -640,6 +797,7 @@ export default function View_Orders() {
                   </option>
                 ))}
               </FilterSelect>
+            ) : null}
 
             <FilterDate
               label="From"
@@ -692,11 +850,12 @@ export default function View_Orders() {
                     <TableHead>Order ID</TableHead>
                     <TableHead>Card Name</TableHead>
                     <TableHead>Items</TableHead>
-                    <TableHead>FOC</TableHead>
+                    {!distributor ? <TableHead>FOC</TableHead> : null}
                     <TableHead>Created At</TableHead>
                     <TableHead>Delivery Date</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Actions</TableHead>
+                    <TableHead>Report</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -707,13 +866,15 @@ export default function View_Orders() {
                       </TableCell>
                       <TableCell className="text-ink">{order.card_name}</TableCell>
                       <TableCell>{order.items_count ?? order.items?.length ?? 0}</TableCell>
-                      <TableCell>
-                        {order.is_foc ? (
-                          <Badge tone="note">FOC</Badge>
-                        ) : (
-                          <span className="text-subtle">-</span>
-                        )}
-                      </TableCell>
+                      {!distributor ? (
+                        <TableCell>
+                          {order.is_foc ? (
+                            <Badge tone="note">FOC</Badge>
+                          ) : (
+                            <span className="text-subtle">-</span>
+                          )}
+                        </TableCell>
+                      ) : null}
                       <TableCell>{formatCreatedDateTime(order.created_at)}</TableCell>
                       <TableCell>{order.delivery_date}</TableCell>
                       <TableCell>
@@ -751,19 +912,65 @@ export default function View_Orders() {
                             onClick={() => fetchOrderDetails(order.id)}
                             title="View order"
                             aria-label={`View order ${order.order_number}`}
+                            className="text-brand hover:bg-brand-soft hover:text-brand"
                           >
-                            <HiEye />
+                            <HiOutlineEye />
                           </Button>
+                          {distributor ? (
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              onClick={() => trackOrder(order)}
+                              title="Track order"
+                              aria-label={`Track order ${order.order_number}`}
+                              className="text-amber-600 hover:bg-amber-50 hover:text-amber-700"
+                            >
+                              <HiOutlineMapPin />
+                            </Button>
+                          ) : null}
+                          {distributor ? (
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              onClick={() => duplicateOrder(order)}
+                              title="Duplicate order"
+                              aria-label={`Duplicate order ${order.order_number}`}
+                              className="text-violet-600 hover:bg-violet-50 hover:text-violet-700"
+                            >
+                              <HiOutlineDocumentDuplicate />
+                            </Button>
+                          ) : null}
                           <Button
                             size="icon"
                             variant="ghost"
-                            onClick={() => downloadExcel(order)}
+                            onClick={() => void downloadExcel(order)}
                             title="Download order"
                             aria-label={`Download order ${order.order_number}`}
+                            className="text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700"
                           >
-                            <HiArrowDownTray />
+                            <HiOutlineArrowDownTray />
                           </Button>
                         </div>
+                      </TableCell>
+                      <TableCell>
+                        {/* Only a completed order has a posted SAP sales order,
+                            so the report is offered only then. */}
+                        {String(order.status_display || "")
+                          .toLowerCase()
+                          .includes("complete") ? (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => void generateReport(order)}
+                            title="Generate sales-order report (PDF)"
+                            aria-label={`Generate report for order ${order.order_number}`}
+                            className="whitespace-nowrap text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800"
+                          >
+                            <HiOutlineClipboardDocumentList aria-hidden="true" /> Generate Report
+                          </Button>
+                        ) : (
+                          <span className="text-subtle">-</span>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -838,6 +1045,24 @@ export default function View_Orders() {
             }
             actions={
               <>
+                <Button
+                  variant="ghost"
+                  onClick={() => setInfoOpen(true)}
+                  title="Order information"
+                  className="border border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100 hover:text-sky-800"
+                >
+                  <HiOutlineInformationCircle aria-hidden="true" /> Info
+                </Button>
+                {distributor ? (
+                  <Button
+                    variant="ghost"
+                    onClick={() => duplicateOrder(orderDetails)}
+                    title="Duplicate this order"
+                    className="border border-violet-300 bg-violet-50 text-violet-700 hover:bg-violet-100 hover:text-violet-800"
+                  >
+                    <HiOutlineDocumentDuplicate aria-hidden="true" /> Duplicate
+                  </Button>
+                ) : null}
                 {!orderDetails.quotation_cancelled && canCancelQuotation(orderDetails) ? (
                   <Button
                     variant="danger"
@@ -849,8 +1074,12 @@ export default function View_Orders() {
                     <HiXMark aria-hidden="true" /> Cancel sales quotation
                   </Button>
                 ) : null}
-                <Button variant="ghost" onClick={() => downloadExcel(orderDetails)}>
-                  <HiArrowDownTray aria-hidden="true" /> Export Excel
+                <Button
+                  variant="success"
+                  onClick={() => void downloadExcel(orderDetails)}
+                  className="border-transparent bg-emerald-600 text-white shadow-sm hover:bg-emerald-700 hover:text-white"
+                >
+                  <HiOutlineArrowDownTray aria-hidden="true" /> Export Excel
                 </Button>
               </>
             }
@@ -861,29 +1090,40 @@ export default function View_Orders() {
               reviewer actually wants: what is this worth, then what is in it. */}
           <StatRow>
             <Stat
+              icon={HiCube}
+              tone="neutral"
+              label="Total QTY"
+              value={detailTotals.pcs.toLocaleString("en-IN")}
+              className="border-sky-200 bg-sky-50"
+            />
+            <Stat
+              icon={HiInboxStack}
+              tone="neutral"
+              label="Total Boxes"
+              value={detailTotals.boxes.toLocaleString("en-IN")}
+              className="border-amber-200 bg-amber-50"
+            />
+            <Stat
               icon={HiBeaker}
               tone="neutral"
               label="Total Ltrs"
               value={detailTotals.litres.toFixed(2)}
+              className="border-teal-200 bg-teal-50"
             />
             <Stat
               icon={HiBanknotes}
               tone="neutral"
-              label="Subtotal"
+              label="Total Amount"
               value={detailTotals.subtotal.toFixed(2)}
-            />
-            <Stat
-              icon={HiReceiptPercent}
-              tone="neutral"
-              label="Tax"
-              value={detailTotals.tax.toFixed(2)}
+              className="border-violet-200 bg-violet-50"
             />
             <Stat
               icon={HiCurrencyRupee}
               tone="brand"
-              label="Grand Total"
+              label="Grand Total (incl. tax)"
               value={detailTotals.grand.toFixed(2)}
               hint={`${selectedItems.length} item${selectedItems.length === 1 ? "" : "s"}`}
+              className="border-brand/30 bg-brand/[0.08]"
             />
           </StatRow>
 
@@ -919,13 +1159,218 @@ export default function View_Orders() {
               <CardTitle>Items</CardTitle>
               <Badge tone="neutral">{selectedItems.length}</Badge>
             </CardHeader>
-            {/* The shared line-item cards — the same ones every approval
-                screen draws. `ItemSection` used to render the same items a
-                second time above this as collapsible Premium / Commodity /
-                Others accordions; the variety-cost cards above state that
-                split now, so the per-line chip is off while they show. */}
-            <OrderItemsTable items={selectedItems} variety={varietyCosts.length === 0} />
+            {/* The table IS the item list now. `ItemSection` rendered the
+                same items a second time above it, as collapsible Premium /
+                Commodity / Others accordions of cards — so every line appeared
+                twice on the page. The variety it grouped by is a column here
+                instead. It stays in use on five other order screens. */}
+            {distributor ? (
+              /* Distributor view: one CARD per line item (shared with the Mart
+                 Approval detail, so the same order looks identical wherever it
+                 is opened) instead of a wide table. */
+              <OrderItemCards items={selectedItems} />
+            ) : (
+              <div className="overflow-x-auto">
+                <Table density="compact">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>#</TableHead>
+                      <TableHead>Item Code</TableHead>
+                      <TableHead className="min-w-[250px]">Item Name</TableHead>
+                      <TableHead>Category</TableHead>
+                      <TableHead>Variety</TableHead>
+                      <TableHead>Scheme</TableHead>
+                      <TableHead>Scheme Qty</TableHead>
+                      <TableHead>Qty</TableHead>
+                      <TableHead>Pcs</TableHead>
+                      <TableHead>Boxes</TableHead>
+                      <TableHead>Ltrs</TableHead>
+                      {/* <TableHead>Scheme Ltrs</TableHead> */}
+                      <TableHead>Total Ltrs</TableHead>
+                      <TableHead>{t("price_list", "Price List (Basic)")}</TableHead>
+                      <TableHead>Basic Price</TableHead>
+                      <TableHead>Tax %</TableHead>
+                      <TableHead className="text-right">Amount</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {selectedItems.length > 0 ? (
+                      selectedItems.map((item, i) => {
+                        const schemes = getOrderItemSchemes(item);
+
+                        return (
+                          <TableRow key={i}>
+                            <TableCell className="text-center text-subtle">
+                              {i + 1}
+                            </TableCell>
+                            <TableCell>
+                              <span className="font-medium whitespace-nowrap text-ink">{item.item_code}</span>
+                            </TableCell>
+                            <TableCell className="min-w-[250px] font-medium text-ink">
+                              {item.item_name}
+                            </TableCell>
+                            <TableCell>{item.category}</TableCell>
+                            <TableCell>
+                              {item.variety_type ? (
+                                <Badge tone={varietyBadgeTone(item.variety_type)}>
+                                  {titleCaseVariety(item.variety_type)}
+                                </Badge>
+                              ) : (
+                                <span className="text-subtle">-</span>
+                              )}
+                            </TableCell>
+                            <TableCell colSpan={2}>
+                              {schemes.length > 0 ? (
+                                <div className="flex flex-col gap-1" aria-label="Applied schemes">
+                                  {schemes.map((scheme, schemeIndex) => (
+                                    <div
+                                      className="flex items-baseline gap-1.5 text-[12px]"
+                                      key={`${item.item_code}-scheme-${schemeIndex}`}
+                                    >
+                                      <span className="text-ink">{scheme.name || "-"}</span>
+                                      <span className="text-subtle">Qty {scheme.qty || 0}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <span className="text-[12px] text-subtle">No scheme</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-center">{item.qty}</TableCell>
+                            <TableCell className="text-center">{item.pcs}</TableCell>
+                            <TableCell className="text-center">
+                              {Number(item.boxes).toFixed(2)}
+                            </TableCell>
+                            <TableCell className="text-center">{item.ltrs}</TableCell>
+                            {/* <TableCell style={{textAlign:'center'}}>{item.scheme_name ? ((item as any).scheme_ltrs || 0) : "—"}</TableCell> */}
+                            <TableCell className="text-center">
+                              {getOrderItemTotalLtrs(item).toFixed(2)}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {Number(item.price_list_basic).toFixed(2)}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {Number(item.basic_price).toFixed(2)}
+                            </TableCell>
+                            <TableCell className="text-center">
+                              {Number(item.tax_rate).toFixed(2)}
+                            </TableCell>
+                            <TableCell className="text-right font-semibold text-ink">
+                              {Number(item.total).toFixed(2)}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })
+                    ) : (
+                      <TableRow>
+                        <TableCell colSpan={15} className="py-8 text-center text-subtle">
+                          No items found
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
           </Card>
+
+          {/* The "i" order-information dialog: addresses, creator, current
+              stage and any rejection reason — everything about the order that
+              is not a line item, in one place. */}
+          <Dialog open={infoOpen} onOpenChange={setInfoOpen}>
+            <DialogContent title={`Order ${orderDetails.order_number} information`} size="md">
+              <DialogHeader>
+                <DialogTitle>Order information</DialogTitle>
+                {orderDetails.status_display ? (
+                  <Badge tone={toneForStatus(orderDetails.status_display)}>
+                    {orderDetails.status_display}
+                  </Badge>
+                ) : null}
+              </DialogHeader>
+
+              <DialogBody className="space-y-4">
+                <div className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
+                  {[
+                    {
+                      label: "Party name",
+                      value: `${orderDetails.card_name}${
+                        orderDetails.card_code ? ` (${orderDetails.card_code})` : ""
+                      }`,
+                      full: true,
+                    },
+                    {
+                      label: "Created by",
+                      value:
+                        orderDetails.created_by_name ||
+                        String(orderDetails.created_by ?? ""),
+                    },
+                    {
+                      label: "Created at",
+                      value: formatCreatedDateTime(orderDetails.created_at),
+                    },
+                    {
+                      label: "Current stage",
+                      value: orderDetails.status_display,
+                      hint: "Where the order has reached in the workflow.",
+                    },
+                    { label: "Delivery date", value: orderDetails.delivery_date },
+                    { label: "Warehouse", value: orderDetails.warehouse_code },
+                    { label: "Dispatch from", value: orderDetails.dispatch_from_name },
+                    { label: "PO number", value: orderDetails.po_number },
+                    {
+                      label: "Bill to",
+                      value: orderDetails.bill_to_address,
+                      full: true,
+                    },
+                    {
+                      label: "Ship to",
+                      value: orderDetails.ship_to_address,
+                      full: true,
+                    },
+                  ].map((field) => (
+                    <div
+                      key={field.label}
+                      className={field.full ? "sm:col-span-2" : undefined}
+                    >
+                      <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-subtle">
+                        {field.label}
+                      </p>
+                      <p className="m-0 mt-0.5 text-[13.5px] font-semibold text-ink">
+                        {field.value ? field.value : <span className="font-normal text-subtle">—</span>}
+                      </p>
+                      {field.hint ? (
+                        <p className="m-0 mt-0.5 text-[10px] text-subtle">{field.hint}</p>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Rejection — who rejected it and why. Shown only when the
+                    order is rejected. */}
+                {isRejectedOrder(orderDetails) ||
+                orderDetails.rejection_reason ||
+                rejectedByByOrderId[orderDetails.id] ? (
+                  <div className="rounded-xl border border-danger/40 bg-danger/5 p-3">
+                    <p className="m-0 text-[12px] font-bold uppercase tracking-wide text-danger">
+                      Order rejected
+                    </p>
+                    {(rejectedByByOrderId[orderDetails.id] || orderDetails.rejected_by) ? (
+                      <p className="m-0 mt-1.5 text-[13px] text-ink">
+                        <span className="font-semibold">Rejected by:</span>{" "}
+                        {rejectedByByOrderId[orderDetails.id] || orderDetails.rejected_by}
+                      </p>
+                    ) : null}
+                    {orderDetails.rejection_reason ? (
+                      <p className="m-0 mt-1 text-[13px] text-ink">
+                        <span className="font-semibold">Reason:</span>{" "}
+                        {orderDetails.rejection_reason}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+              </DialogBody>
+            </DialogContent>
+          </Dialog>
 
         </>
       )}
@@ -974,6 +1419,65 @@ export default function View_Orders() {
           </DialogContent>
         )}
       </Dialog>
+
+      {/* Distributor "Track" action — the order's status timeline in a modal,
+          with a summary of who created it, where it has reached, and whether
+          it is completed. */}
+      <OrderTimelineDialog
+        open={trackOpen}
+        onOpenChange={setTrackOpen}
+        order={trackTarget}
+        logs={trackLogs}
+        loading={trackLoading}
+        formatDateTime={formatCreatedDateTime}
+        summary={
+          trackTarget ? (
+            <div className="rounded-xl border border-line bg-surface p-3.5">
+              <div className="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2">
+                <div>
+                  <p className="m-0 text-[10.5px] font-semibold uppercase tracking-wide text-subtle">
+                    Created by
+                  </p>
+                  <p className="m-0 mt-0.5 text-[13px] font-semibold text-ink">
+                    {trackTarget.created_by_name ||
+                      String(trackTarget.created_by ?? "") ||
+                      "—"}
+                  </p>
+                </div>
+                <div>
+                  <p className="m-0 text-[10.5px] font-semibold uppercase tracking-wide text-subtle">
+                    Created at
+                  </p>
+                  <p className="m-0 mt-0.5 text-[13px] font-semibold text-ink">
+                    {formatCreatedDateTime(trackTarget.created_at)}
+                  </p>
+                </div>
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-3">
+                <span className="text-[10.5px] font-semibold uppercase tracking-wide text-subtle">
+                  {String(trackTarget.status_display || "")
+                    .toLowerCase()
+                    .includes("complete")
+                    ? "Status"
+                    : "Currently at"}
+                </span>
+                {trackTarget.status_display ? (
+                  <Badge tone={toneForStatus(trackTarget.status_display)}>
+                    {trackTarget.status_display}
+                  </Badge>
+                ) : null}
+                {String(trackTarget.status_display || "")
+                  .toLowerCase()
+                  .includes("complete") ? (
+                  <span className="text-[12px] font-medium text-ok">
+                    This order is completed.
+                  </span>
+                ) : null}
+              </div>
+            </div>
+          ) : null
+        }
+      />
     </Page>
   );
 }

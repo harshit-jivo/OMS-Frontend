@@ -299,6 +299,12 @@ export interface MartOrderPayload {
   po_number?: string;
   company: number;
   warehouse_code?: string;
+  // Dispatch location. Optional: the backend defaults distributor orders to the
+  // factory when it isn't sent, but the Mart editor can override it.
+  dispatch_from_id?: number;
+  dispatch_from_name?: string;
+  /** Free-text comment stored on the order (Order.remarks). */
+  remarks?: string;
   total_amount: number;
   items: MartOrderItemPayload[];
 }
@@ -320,6 +326,9 @@ export interface MartOrderSummary {
   created_by?: string | null;
   created_at?: string;
   rejection_reason?: string;
+  rejected_at?: string | null;
+  cancellation_reason?: string;
+  cancelled_at?: string | null;
   items_count: number;
 }
 
@@ -393,6 +402,7 @@ export interface Order {
   created_by: string | number;
   rejected_by?: string | null;
   rejection_reason?: string | null;
+  cancellation_reason?: string | null;
   total_amount: number;
   sap_doc_number?: string;
   quotation_cancelled?: boolean;
@@ -716,6 +726,46 @@ const outgoingScheme = (scheme: OrderItemScheme) => ({
 });
 
 
+/** One distributor's rolled-up totals across completed Mart orders. */
+export interface DistributorReportDistributor {
+  card_code: string;
+  card_name: string;
+  order_count: number;
+  sku_count: number;
+  qty: number;
+  boxes: number;
+  pcs: number;
+  value: number;
+}
+
+/** One SKU/item's rolled-up totals across completed Mart orders. */
+export interface DistributorReportSku {
+  item_code: string;
+  item_name: string;
+  order_count: number;
+  distributor_count: number;
+  qty: number;
+  boxes: number;
+  pcs: number;
+  value: number;
+}
+
+export interface DistributorReport {
+  from_date: string | null;
+  to_date: string | null;
+  distributors: DistributorReportDistributor[];
+  skus: DistributorReportSku[];
+  totals: {
+    distributor_count: number;
+    sku_count: number;
+    order_count: number;
+    qty: number;
+    boxes: number;
+    pcs: number;
+    value: number;
+  };
+}
+
 export const ordersService = {
 
   getPartyName: async () => {
@@ -738,6 +788,21 @@ export const ordersService = {
   getPartyProduct: async (card_code: string) => {
     const response = await api.get(`/orders/party-products/${card_code}/`);
     return response.data;
+  },
+
+  /**
+   * The Distributor Report: completed distributor (Mart) orders aggregated
+   * distributor-wise and SKU/item-wise. Reads OMS's own tables; `from`/`to`
+   * are YYYY-MM-DD and filter on the order date.
+   */
+  getDistributorReport: async (range?: { from?: string; to?: string }) => {
+    const response = await api.get("/orders/distributor-report/", {
+      params: {
+        ...(range?.from ? { from_date: range.from } : {}),
+        ...(range?.to ? { to_date: range.to } : {}),
+      },
+    });
+    return response.data as DistributorReport;
   },
 
   getProducts: async () => {
@@ -825,7 +890,9 @@ export const ordersService = {
     return response.data;
   },
 
-  getMartOrders: async (tab?: "pending" | "approved" | "rejected") => {
+  getMartOrders: async (
+    tab?: "pending" | "approved" | "rejected" | "completed" | "cancelled",
+  ) => {
     const response = await api.get("/orders/mart/list/", {
       params: tab ? { tab } : undefined,
     });
@@ -847,6 +914,20 @@ export const ordersService = {
     return response.data;
   },
 
+  // Cancel a COMPLETED distributor order (mart cancel authority only). This
+  // reverses the SAP Sales Order too — SAP is cancelled first, then OMS moves
+  // to "Cancelled". Reason is mandatory. Throws with the SAP error if SAP
+  // refuses (e.g. the order already has a delivery/invoice against it).
+  cancelMartOrder: async (orderId: number, reason: string) => {
+    const response = await api.post(`/orders/mart/${orderId}/cancel/`, { reason });
+    return response.data as {
+      message: string;
+      order_number: string;
+      status?: string;
+      sap?: { doc_entry: number | null };
+    };
+  },
+
   // Batch lookup of the latest SAP Sales Order result for distributor orders.
   // Returns a map keyed by order id (as string). Used by the Distributor Order
   // Tracking page to show DocEntry/DocNum (success) or the SAP error (failure).
@@ -856,6 +937,33 @@ export const ordersService = {
       params: { order_ids: orderIds.join(",") },
     });
     return (response.data?.statuses ?? {}) as Record<string, SalesOrderSapStatus>;
+  },
+
+  // Sales-order print (Crystal Reports PDF). The company decides which layout
+  // renders (OIL → SO_OIL.rpt, BEVERAGE → SO_BEVERAGE.rpt, MART → SO_MART.rpt),
+  // so `branch` is required. Pass docEntry (SAP internal key) when known, else
+  // docNum (the resolver looks it up against that branch's schema). Returns the
+  // PDF as a Blob.
+  getSalesOrderReport: async (params: {
+    branch: string;
+    docEntry?: number | string | null;
+    docNum?: number | string | null;
+    party?: string;
+  }) => {
+    const response = await api.get("/orders/crystal/", {
+      params: {
+        branch: params.branch,
+        ...(params.docEntry != null && params.docEntry !== ""
+          ? { docEntry: params.docEntry }
+          : {}),
+        ...(params.docNum != null && params.docNum !== ""
+          ? { docNum: params.docNum }
+          : {}),
+        ...(params.party ? { party: params.party } : {}),
+      },
+      responseType: "blob",
+    });
+    return response.data as Blob;
   },
 
   // Retry pushing an already-approved distributor order to SAP (mart approver /

@@ -12,6 +12,7 @@ import { Page, PageHeader } from "@/components/ui/page";
 import { Tab, TabList } from "@/components/ui/tabs";
 import { haisService } from "../../services/haisService";
 
+import AssetBatchAdd from "./AssetBatchAdd";
 import AssetForm from "./AssetForm";
 import AssetLookup from "./AssetLookup";
 import AssetRegister from "./AssetRegister";
@@ -93,10 +94,15 @@ export default function HAIS() {
           />
         )}
 
-        {view === "add" && <AssetForm key="add" editId={null} onSaved={backToList} />}
+        {view === "add" && <AssetBatchAdd key="add" onSaved={backToList} />}
 
         {view === "edit" && (
-          <AssetForm key={editId ?? "edit"} editId={editId} onSaved={backToList} />
+          <AssetForm
+            key={editId ?? "edit"}
+            editId={editId}
+            onSaved={backToList}
+            onAdd={() => openTab("add")}
+          />
         )}
 
         {view === "lookup" && <AssetLookup onEdit={editAsset} />}
@@ -107,6 +113,8 @@ export default function HAIS() {
             singular="Asset Type"
             load={haisService.options.assetTypes}
             create={haisService.options.createAssetType}
+            update={haisService.options.updateAssetType}
+            fieldPicker
           />
         )}
 
@@ -116,6 +124,7 @@ export default function HAIS() {
             singular="Department"
             load={haisService.options.departments}
             create={haisService.options.createDepartment}
+            update={haisService.options.updateDepartment}
           />
         )}
 
@@ -125,6 +134,7 @@ export default function HAIS() {
             singular="Storage Type"
             load={haisService.options.storageTypes}
             create={haisService.options.createStorageType}
+            update={haisService.options.updateStorageType}
           />
         )}
 

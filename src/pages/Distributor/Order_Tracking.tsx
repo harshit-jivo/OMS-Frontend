@@ -34,10 +34,18 @@ import {
   HiOutlineArrowPath,
   HiOutlineFunnel,
   HiOutlineInbox,
+  HiOutlineInformationCircle,
   HiOutlinePencilSquare,
   HiOutlinePresentationChartLine,
   HiOutlineMapPin,
 } from "react-icons/hi2";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Table,
   TableBody,
@@ -47,7 +55,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Pagination } from "@/components/ui/pagination";
-import { TableSkeleton } from "@/components/ui/skeleton";
+import { PageLoader } from "@/components/ui/spinner";
 import { messageFrom } from "@/lib/apiError";
 
 // Distributor-facing Order Tracking page.
@@ -57,6 +65,13 @@ import { messageFrom } from "@/lib/apiError";
 // into /Add_Sales). Distributors can only VIEW and TRACK their own orders.
 // Data is scoped to the logged-in user via loadCurrentUserOrderSummaries(), and
 // the backend additionally enforces created_by == request.user for this role.
+
+// Indian grouping (e.g. 12,34,567.00) for item-card figures and totals.
+const inr = (n: number | string | null | undefined, decimals = 2) =>
+  (Number(n) || 0).toLocaleString("en-IN", {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
 
 const formatCreatedDateTime = (value?: string | null) => {
   if (!value) return "-";
@@ -106,6 +121,9 @@ export default function Distributor_Order_Tracking() {
     null,
   );
   const [statusFilter, setStatusFilter] = useState("");
+  // The "i" info dialog on the detail view — addresses, creator, current stage,
+  // rejection reason and any SAP error, all in one place.
+  const [infoOpen, setInfoOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
   // Only the Mart approver / admin may edit a failed order or resend it to SAP;
@@ -593,6 +611,30 @@ export default function Distributor_Order_Tracking() {
     ];
   }, [selectedOrder, displayLogs]);
 
+  // Order totals for the summary card, computed like the place-order page:
+  //   Total PCS   = total pieces ordered (the line qty)
+  //   Total Boxes = sum of boxes
+  //   Total Ltrs  = sum of the line's total litres
+  //   Total Amount = sum of the pre-tax line totals
+  //   Grand Total  = amount + per-line tax (tax_rate% of the line total)
+  const detailTotals = useMemo(() => {
+    const items = selectedOrder?.items ?? [];
+    let pcs = 0;
+    let boxes = 0;
+    let ltrs = 0;
+    let amount = 0;
+    let tax = 0;
+    for (const it of items) {
+      pcs += Number(it.qty) || 0;
+      boxes += Number(it.boxes) || 0;
+      ltrs += Number(it.total_ltrs ?? it.ltrs) || 0;
+      const lineTotal = Number(it.total) || 0;
+      amount += lineTotal;
+      tax += lineTotal * ((Number(it.tax_rate) || 0) / 100);
+    }
+    return { pcs, boxes, ltrs, amount, grand: amount + tax };
+  }, [selectedOrder]);
+
   const formatDateTime = (value?: string | null) => {
     if (!value) return "-";
     const parsed = new Date(value);
@@ -748,8 +790,9 @@ export default function Distributor_Order_Tracking() {
     setLogsLoading(true);
     setSapStatus(null);
     setSapActionMsg(null);
-    // SAP details are for the Mart approver / admin only — distributors don't see them.
-    if (isSapManager) void fetchSapStatus(order.id);
+    // The SAP *result card* (Doc entry, resend) stays manager-only, but the SAP
+    // error itself is surfaced to everyone in the info dialog, so always fetch.
+    void fetchSapStatus(order.id);
 
     try {
       const [details, response] = await Promise.all([
@@ -802,12 +845,11 @@ export default function Distributor_Order_Tracking() {
 
   const handleEditOrder = () => {
     if (!selectedOrder) return;
-    // Reuse the full Add Sales edit form (same path Mart Approval uses); return
-    // here afterwards so the approver can resend to SAP.
-    navigate("/Add_Sales", {
+    // The dedicated Mart editor (same one Mart Approval uses); return here
+    // afterwards so the approver can resend to SAP.
+    navigate("/Mart_Edit_Order", {
       state: {
         editOrderId: selectedOrder.id,
-        mode: "edit",
         returnTo: "/Distributor_Order_Tracking",
       },
     });
@@ -819,6 +861,7 @@ export default function Distributor_Order_Tracking() {
     setLogs([]);
     setSapStatus(null);
     setSapActionMsg(null);
+    setInfoOpen(false);
   };
 
   return (
@@ -863,7 +906,9 @@ export default function Distributor_Order_Tracking() {
           </FilterBar>
 
           {loading ? (
-            <TableSkeleton columns={7} label="Loading orders" />
+            <Card>
+              <PageLoader label="Loading orders…" />
+            </Card>
           ) : filteredOrders.length > 0 ? (
             <Card className="overflow-hidden p-0">
               <div className="overflow-x-auto">
@@ -960,6 +1005,16 @@ export default function Distributor_Order_Tracking() {
                 {selectedOrder.is_foc ? <Badge tone="note">FOC</Badge> : null}
               </>
             }
+            actions={
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setInfoOpen(true)}
+                title="Order information"
+              >
+                <HiOutlineInformationCircle aria-hidden="true" /> Info
+              </Button>
+            }
           />
 
           <Card>
@@ -981,6 +1036,107 @@ export default function Distributor_Order_Tracking() {
                 hideWhenEmpty
               />
             </DetailGrid>
+          </Card>
+
+          {/* Order line items, as cards rather than a table — one card per
+              product, each showing the figures the line bills at. */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Items</CardTitle>
+              <Badge tone="neutral">{selectedOrder.items?.length ?? 0}</Badge>
+            </CardHeader>
+
+            {selectedOrder.items && selectedOrder.items.length > 0 ? (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {selectedOrder.items.map((item, index) => (
+                  <div
+                    key={item.id ?? `${item.item_code}-${index}`}
+                    className="rounded-xl border border-line bg-surface p-4"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="m-0 truncate text-[13.5px] font-bold text-ink">
+                          {item.item_name || item.item_code}
+                        </p>
+                        <p className="m-0 mt-0.5 text-[11.5px] text-subtle">
+                          {item.item_code}
+                          {item.item_type ? ` · ${item.item_type}` : ""}
+                        </p>
+                      </div>
+                      {item.category ? (
+                        <Badge tone="note">{item.category}</Badge>
+                      ) : null}
+                    </div>
+
+                    <dl className="mt-3 grid grid-cols-3 gap-x-3 gap-y-2">
+                      {[
+                        { label: "Qty", value: inr(item.qty, 0) },
+                        { label: "Boxes", value: inr(item.boxes, 0) },
+                        { label: "PCS", value: inr(item.pcs, 0) },
+                        { label: "Ltrs", value: inr(item.ltrs) },
+                        { label: "Basic rate", value: `₹${inr(item.basic_price)}` },
+                        { label: "Tax", value: `${inr(item.tax_rate, 0)}%` },
+                      ].map((cell) => (
+                        <div key={cell.label} className="min-w-0">
+                          <dt className="m-0 text-[10.5px] font-semibold uppercase tracking-wide text-subtle">
+                            {cell.label}
+                          </dt>
+                          <dd className="m-0 mt-0.5 truncate text-[13px] font-semibold tabular-nums text-ink">
+                            {cell.value}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+
+                    <div className="mt-3 flex items-center justify-between border-t border-line pt-2.5">
+                      <span className="text-[11.5px] font-semibold uppercase tracking-wide text-subtle">
+                        Total
+                      </span>
+                      <span className="text-[15px] font-bold tabular-nums text-brand">
+                        ₹{inr(item.total)}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <EmptyState
+                icon={HiOutlineInbox}
+                title="No items"
+                hint="This order has no line items."
+              />
+            )}
+          </Card>
+
+          {/* Order totals, below the line items. */}
+          <Card>
+            <div className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3 lg:grid-cols-5">
+              {[
+                { label: "Total PCS", value: inr(detailTotals.pcs, 0) },
+                { label: "Total Boxes", value: inr(detailTotals.boxes, 0) },
+                { label: "Total Ltrs", value: inr(detailTotals.ltrs) },
+                { label: "Total Amount", value: `₹${inr(detailTotals.amount)}` },
+                {
+                  label: "Grand Total (incl. tax)",
+                  value: `₹${inr(detailTotals.grand)}`,
+                  highlight: true,
+                },
+              ].map((cell) => (
+                <div key={cell.label} className="min-w-0">
+                  <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-subtle">
+                    {cell.label}
+                  </p>
+                  <p
+                    className={
+                      "m-0 mt-1 truncate text-lg font-bold tabular-nums " +
+                      (cell.highlight ? "text-brand" : "text-ink")
+                    }
+                  >
+                    {cell.value}
+                  </p>
+                </div>
+              ))}
+            </div>
           </Card>
 
           {/* The SAP result: DocEntry/DocNum on success, SAP's own error on
@@ -1067,12 +1223,7 @@ export default function Distributor_Order_Tracking() {
             </CardHeader>
 
             {logsLoading ? (
-              <div className="space-y-3" role="status" aria-live="polite">
-                <span className="sr-only">Loading order logs</span>
-                {[0, 1, 2].map((row) => (
-                  <Skeleton key={row} className="h-16 w-full" />
-                ))}
-              </div>
+              <PageLoader label="Loading order log…" />
             ) : timelineLogs.length === 0 ? (
               <EmptyState
                 icon={HiOutlineArrowPath}
@@ -1153,6 +1304,78 @@ export default function Distributor_Order_Tracking() {
               />
             )}
           </Card>
+
+          {/* The "i" info dialog: addresses, creator, current stage, rejection
+              reason and any SAP error — everything about the order that is not
+              a line item or a timeline entry, in one place. */}
+          <Dialog open={infoOpen} onOpenChange={setInfoOpen}>
+            <DialogContent title={`Order ${selectedOrder.order_number} information`} size="md">
+              <DialogHeader>
+                <DialogTitle>Order information</DialogTitle>
+                <Badge tone={toneForStatus(selectedOrder.status_display)}>
+                  {selectedOrder.status_display}
+                </Badge>
+              </DialogHeader>
+
+              <DialogBody className="space-y-4">
+                <DetailGrid>
+                  <DetailField
+                    label="Created by"
+                    value={selectedOrder.created_by_name || String(selectedOrder.created_by ?? "")}
+                  />
+                  <DetailField
+                    label="Created at"
+                    value={formatCreatedDateTime(selectedOrder.created_at)}
+                  />
+                  <DetailField
+                    label="Current stage"
+                    value={selectedOrder.status_display}
+                    hint="Where the order has reached in the workflow."
+                  />
+                  <DetailField label="Delivery date" value={selectedOrder.delivery_date} />
+                  <DetailField
+                    label="Bill to"
+                    value={selectedOrder.bill_to_address}
+                    span="full"
+                    hideWhenEmpty
+                  />
+                  <DetailField
+                    label="Ship to"
+                    value={selectedOrder.ship_to_address}
+                    span="full"
+                    hideWhenEmpty
+                  />
+                </DetailGrid>
+
+                {/* Rejection — who rejected it and why. Shown only when the
+                    order carries a rejection. */}
+                {selectedOrder.rejected_by || selectedOrder.rejection_reason ? (
+                  <Notice tone="bad" title="Order rejected">
+                    {selectedOrder.rejected_by ? (
+                      <p className="m-0">
+                        <span className="font-semibold">Rejected by:</span>{" "}
+                        {selectedOrder.rejected_by}
+                      </p>
+                    ) : null}
+                    {selectedOrder.rejection_reason ? (
+                      <p className="m-0 mt-1">
+                        <span className="font-semibold">Reason:</span>{" "}
+                        {selectedOrder.rejection_reason}
+                      </p>
+                    ) : null}
+                  </Notice>
+                ) : null}
+
+                {/* SAP error — visible to everyone here, unlike the manager-only
+                    SAP result card. */}
+                {sapStatus?.status === "FAILED" ? (
+                  <Notice tone="bad" title="SAP error">
+                    {sapStatus.error_message || "SAP did not return an error message."}
+                  </Notice>
+                ) : null}
+              </DialogBody>
+            </DialogContent>
+          </Dialog>
         </>
       ) : null}
     </Page>

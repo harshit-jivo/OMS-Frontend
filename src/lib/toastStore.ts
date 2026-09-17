@@ -26,7 +26,11 @@
  * apart and the only difference afterwards is the sentence, which is exactly
  * the thing nobody reads on a toast that is about to disappear.
  */
-export type ToastTone = "ok" | "bad";
+// `ok`/`bad` are the canonical tones (live). `success`/`error`/`default` are
+// accepted as aliases so the Distributor/Mart screens carried over from the
+// kamal branch keep working without rewriting every call site; the toaster
+// maps success→ok and error→bad. See NotificationToaster's TONES.
+export type ToastTone = "ok" | "bad" | "success" | "error" | "default";
 
 export type ToastData = {
   id: number;

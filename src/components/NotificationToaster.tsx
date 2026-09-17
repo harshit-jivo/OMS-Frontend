@@ -45,17 +45,25 @@ import { cn } from "@/lib/utils";
  * plus the chip is enough to read green-or-red from across the desk, which is
  * the whole requirement.
  */
-const TONES: Record<ToastTone, { edge: string; chip: string; Icon: typeof HiOutlineBell }> = {
-  ok: {
-    edge: "border-l-[3px] border-l-ok",
-    chip: "bg-ok-soft text-ok",
-    Icon: HiOutlineCheckCircle,
-  },
-  bad: {
-    edge: "border-l-[3px] border-l-bad",
-    chip: "bg-bad-soft text-bad",
-    Icon: HiOutlineXCircle,
-  },
+const OK_TONE = {
+  edge: "border-l-[3px] border-l-ok",
+  chip: "bg-ok-soft text-ok",
+  Icon: HiOutlineCheckCircle,
+};
+const BAD_TONE = {
+  edge: "border-l-[3px] border-l-bad",
+  chip: "bg-bad-soft text-bad",
+  Icon: HiOutlineXCircle,
+};
+
+// `success`/`error` are aliases of `ok`/`bad` (see toastStore's ToastTone) so
+// the Distributor/Mart screens carried over from kamal render the same way.
+// `default` has no entry — it falls through to the neutral brand styling.
+const TONES: Partial<Record<ToastTone, { edge: string; chip: string; Icon: typeof HiOutlineBell }>> = {
+  ok: OK_TONE,
+  bad: BAD_TONE,
+  success: OK_TONE,
+  error: BAD_TONE,
 };
 
 function ToastCard({ toast }: { toast: ToastData }) {

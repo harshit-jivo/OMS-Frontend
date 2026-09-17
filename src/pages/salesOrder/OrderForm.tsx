@@ -732,6 +732,7 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
                     <span className="flex min-w-0 flex-col gap-0.5">
                       <span className="text-[13.5px] font-semibold leading-snug text-ink">
                         {product.item_name}
+                        {product.item_code ? ` (${product.item_code})` : ""}
                       </span>
                       <span className="text-[11.5px] text-subtle">
                         {[product.category, product.brand, product.variety]

@@ -90,9 +90,16 @@ const HAIS = lazy(() => import("./pages/HAIS"));
 const AssetPublicView = lazy(() => import("./pages/HAIS/AssetPublicView"));
 const Inventory_Report = lazy(() => import("./pages/Inventory_Report"));
 const SO_Invoice_Report = lazy(() => import("./pages/SO_Invoice_Report"));
+const Distributor_Report = lazy(() => import("./pages/Distributor_Report"));
 const Distributor = lazy(() => import("./pages/Distributor"));
-const Distributor_Order_Tracking = lazy(() => import("./pages/Distributor/Order_Tracking"));
-const MartApproval = lazy(() => import("./pages/MartApproval"));
+const Distributor_Edit_Order = lazy(() => import("./pages/Distributor/Edit_Order"));
+// The distributor's "Order Tracking" reuses the shared View Orders page — it
+// already lists the SIGNED-IN user's own orders and hides the create actions
+// for anyone without /Add_Sales access, so a distributor sees their orders
+// read-only. Kept on the distributor-scoped /Distributor_Order_Tracking route
+// so /View_Orders' billing/manager gate stays untouched.
+const MartApproval = lazy(() => import("./pages/Distributor/Mart_Approval"));
+const Mart_Cancel = lazy(() => import("./pages/Distributor/Mart_Cancel"));
 const Ap_Invoice_Entry = lazy(() => import("./pages/Ap_Invoice_Entry"));
 // Advance Payments — the request FORM only, and it is UI with mock data:
 // no endpoint, no model, no approval route. See the page header comment.
@@ -293,6 +300,15 @@ function App() {
         />
 
         <Route
+          path="/Distributor_Report"
+          element={
+            <ProtectedPage>
+              <Distributor_Report />
+            </ProtectedPage>
+          }
+        />
+
+        <Route
           path="/SO_Invoice_Report"
           element={
             <ProtectedPage>
@@ -421,7 +437,7 @@ function App() {
           path="/Distributor_Order_Tracking"
           element={
             <ProtectedPage>
-              <Distributor_Order_Tracking />
+              <View_Orders distributor />
             </ProtectedPage>
           }
         />
@@ -690,6 +706,24 @@ function App() {
           element={
             <ProtectedPage>
               <MartApproval />
+            </ProtectedPage>
+          }
+        />
+
+        <Route
+          path="/Mart_Edit_Order"
+          element={
+            <ProtectedPage>
+              <Distributor_Edit_Order />
+            </ProtectedPage>
+          }
+        />
+
+        <Route
+          path="/Mart_Cancel"
+          element={
+            <ProtectedPage>
+              <Mart_Cancel />
             </ProtectedPage>
           }
         />
