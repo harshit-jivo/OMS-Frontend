@@ -4,11 +4,20 @@ import {
   HiOutlineArrowDownTray,
   HiOutlineArrowPath,
   HiOutlineCheckCircle,
+  HiOutlineClock,
+  HiOutlineCube,
   HiOutlineEye,
   HiOutlineFunnel,
   HiOutlineInbox,
+  HiOutlineInformationCircle,
   HiOutlineMagnifyingGlass,
+  HiOutlineTruck,
   HiOutlineXCircle,
+  HiCube,
+  HiInboxStack,
+  HiBeaker,
+  HiBanknotes,
+  HiCurrencyRupee,
 } from "react-icons/hi2";
 
 import { exportToExcel } from "../utils/excelExport";
@@ -19,6 +28,13 @@ import { Badge } from "@/components/ui/badge";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { Button } from "@/components/ui/button";
 import { DetailField, DetailGrid } from "@/components/ui/detail";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   FilterBar,
   FilterCount,
@@ -32,6 +48,7 @@ import {
   CardHeader,
   CardTitle,
   EmptyState,
+  Notice,
   Page,
   PageHeader,
   Stat,
@@ -48,6 +65,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { toneForStatus } from "@/components/ui/statusTone";
+import { OrderItemCards } from "@/components/orders/OrderItemCards";
 import { OrderItemsTable } from "@/components/orders/OrderItemsTable";
 import {
   OrderTimeline,
@@ -143,6 +161,11 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
   const [orderDetails, setOrderDetails] = useState<Order | null>(null);
   const [selectedItems, setSelectedItems] = useState<OrderItem[]>([]);
   const [orderLogs, setOrderLogs] = useState<OrderLog[]>([]);
+  const [infoOpen, setInfoOpen] = useState(false);
+
+  // The rate approver's tracking screen gets the richer, colour-coded layout
+  // (card list + Mart-style detail); auditor and billing keep the table.
+  const isRateApprover = mode === "rate_approver";
 
   const itemsPerPage = 10;
   const [showTrackModal, setShowTrackModal] = useState(false);
@@ -229,6 +252,14 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
 
   const detailTotals = useMemo(() => orderTotals(selectedItems), [selectedItems]);
   const detailVarieties = useMemo(() => varietyCosts(orderDetails), [orderDetails]);
+  const detailQty = useMemo(
+    () => selectedItems.reduce((sum, item) => sum + (Number(item.qty) || 0), 0),
+    [selectedItems],
+  );
+  const detailBoxes = useMemo(
+    () => selectedItems.reduce((sum, item) => sum + (Number(item.boxes) || 0), 0),
+    [selectedItems],
+  );
 
   const fetchOrderDetails = async (orderId: number) => {
     try {
@@ -343,6 +374,7 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
               value={acceptedCount}
               hint="in this period"
               loading={isOrdersLoading}
+              className={isRateApprover ? "border-emerald-200 bg-emerald-50" : undefined}
             />
             <Stat
               icon={HiOutlineXCircle}
@@ -353,6 +385,7 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
               value={rejectedCount}
               hint="in this period"
               loading={isOrdersLoading}
+              className={isRateApprover ? "border-rose-200 bg-rose-50" : undefined}
             />
           </StatRow>
 
@@ -406,6 +439,118 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
           {isOrdersLoading ? (
             <TableSkeleton columns={8} label="Loading orders" />
           ) : filteredOrders.length > 0 ? (
+            isRateApprover ? (
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {paginatedOrders.map((order) => {
+                  const decision = getDecisionType(order, mode);
+                  const accent =
+                    decision === "accepted"
+                      ? "border-emerald-200 bg-gradient-to-br from-emerald-50 to-transparent"
+                      : decision === "rejected"
+                        ? "border-rose-200 bg-gradient-to-br from-rose-50 to-transparent"
+                        : "border-line bg-card";
+                  return (
+                    <div
+                      key={order.id}
+                      className={`flex flex-col gap-3 rounded-xl border p-4 shadow-sm transition-shadow hover:shadow-card ${accent}`}
+                    >
+                      {/* Header: order number (opens details) + party + status */}
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <button
+                            type="button"
+                            onClick={() => fetchOrderDetails(order.id)}
+                            className="cursor-pointer appearance-none truncate bg-transparent p-0 text-[15px] font-bold text-brand [font-family:inherit] hover:underline"
+                            title="View order details"
+                          >
+                            {order.order_number}
+                          </button>
+                          <p className="m-0 mt-0.5 truncate text-[13px] font-semibold text-ink">
+                            {order.card_name}
+                          </p>
+                        </div>
+                        <div className="flex flex-none flex-col items-end gap-1">
+                          <Badge tone={toneForStatus(order.status_display)}>
+                            {order.status_display || "Unknown"}
+                          </Badge>
+                          {order.is_foc ? <Badge tone="note">FOC</Badge> : null}
+                        </div>
+                      </div>
+
+                      {/* Colour-coded facts */}
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="flex items-center gap-2 rounded-lg bg-indigo-50 px-2.5 py-2">
+                          <HiOutlineCube
+                            className="size-4 flex-none text-indigo-500"
+                            aria-hidden="true"
+                          />
+                          <div className="min-w-0">
+                            <p className="m-0 text-[10px] font-semibold uppercase tracking-wide text-subtle">
+                              Items
+                            </p>
+                            <p className="m-0 text-[13px] font-bold text-ink">
+                              {order.items_count ?? order.items?.length ?? 0}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="col-span-2 flex items-center gap-2 rounded-lg bg-emerald-50 px-2.5 py-2">
+                          <HiOutlineTruck
+                            className="size-4 flex-none text-emerald-500"
+                            aria-hidden="true"
+                          />
+                          <div className="min-w-0">
+                            <p className="m-0 text-[10px] font-semibold uppercase tracking-wide text-subtle">
+                              Delivery date
+                            </p>
+                            <p className="m-0 truncate text-[13px] font-bold text-ink">
+                              {order.delivery_date || "-"}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="col-span-3 flex items-center gap-2 rounded-lg bg-amber-50 px-2.5 py-2">
+                          <HiOutlineClock
+                            className="size-4 flex-none text-amber-500"
+                            aria-hidden="true"
+                          />
+                          <div className="min-w-0">
+                            <p className="m-0 text-[10px] font-semibold uppercase tracking-wide text-subtle">
+                              Created at
+                            </p>
+                            <p className="m-0 truncate text-[13px] font-bold text-ink">
+                              {formatCreatedDateTime(order.created_at)}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Actions */}
+                      <div className="mt-auto flex items-center gap-1.5 border-t border-line pt-3">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => fetchOrderDetails(order.id)}
+                          aria-label={`View order ${order.order_number}`}
+                          title="View order"
+                          className="text-brand"
+                        >
+                          <HiOutlineEye aria-hidden="true" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => downloadExcel(order)}
+                          aria-label={`Download order ${order.order_number}`}
+                          title="Download order"
+                          className="text-sky-600"
+                        >
+                          <HiOutlineArrowDownTray aria-hidden="true" />
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
             <Card className="overflow-hidden p-0">
               <div className="overflow-x-auto">
                 <Table density="compact">
@@ -482,6 +627,7 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
                 </Table>
               </div>
             </Card>
+            )
           ) : (
             <Card>
               <EmptyState
@@ -527,46 +673,175 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
               </>
             }
             actions={
-              <Button variant="ghost" onClick={() => downloadExcel(orderDetails)}>
-                <HiOutlineArrowDownTray aria-hidden="true" /> Export Excel
-              </Button>
+              isRateApprover ? (
+                <>
+                  <Button
+                    variant="secondary"
+                    className="border-sky-300 text-sky-700 hover:border-sky-400 hover:bg-sky-50"
+                    onClick={() => setInfoOpen(true)}
+                  >
+                    <HiOutlineInformationCircle aria-hidden="true" /> Info
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    className="border-emerald-600 bg-emerald-600 text-white hover:border-emerald-700 hover:bg-emerald-700"
+                    onClick={() => downloadExcel(orderDetails)}
+                  >
+                    <HiOutlineArrowDownTray aria-hidden="true" /> Export Excel
+                  </Button>
+                </>
+              ) : (
+                <Button variant="ghost" onClick={() => downloadExcel(orderDetails)}>
+                  <HiOutlineArrowDownTray aria-hidden="true" /> Export Excel
+                </Button>
+              )
             }
           />
 
-          <OrderTotalsRow totals={detailTotals} itemCount={selectedItems.length} />
+          {isRateApprover ? (
+            /* Rate approver: the Mart / View Orders detail layout — coloured
+               KPI cards, item cards and the party facts behind an "i" dialog. */
+            <>
+              <StatRow>
+                <Stat
+                  icon={HiCube}
+                  tone="neutral"
+                  label="Total QTY"
+                  value={detailQty.toLocaleString("en-IN")}
+                  className="border-sky-200 bg-sky-50"
+                />
+                <Stat
+                  icon={HiInboxStack}
+                  tone="neutral"
+                  label="Total Boxes"
+                  value={detailBoxes.toLocaleString("en-IN")}
+                  className="border-amber-200 bg-amber-50"
+                />
+                <Stat
+                  icon={HiBeaker}
+                  tone="neutral"
+                  label="Total Ltrs"
+                  value={detailTotals.litres.toFixed(2)}
+                  className="border-teal-200 bg-teal-50"
+                />
+                <Stat
+                  icon={HiBanknotes}
+                  tone="neutral"
+                  label="Total Amount"
+                  value={detailTotals.subtotal.toFixed(2)}
+                  className="border-violet-200 bg-violet-50"
+                />
+                <Stat
+                  icon={HiCurrencyRupee}
+                  tone="brand"
+                  label="Grand Total (incl. tax)"
+                  value={detailTotals.grand.toFixed(2)}
+                  hint={`${selectedItems.length} item${selectedItems.length === 1 ? "" : "s"}`}
+                  className="border-brand/30 bg-brand/[0.08]"
+                />
+              </StatRow>
 
-          <VarietyCostCards costs={detailVarieties} />
+              <Card>
+                <CardHeader>
+                  <CardTitle>Items</CardTitle>
+                  <Badge tone="neutral">{selectedItems.length}</Badge>
+                </CardHeader>
+                <OrderItemCards items={selectedItems} showSchemes />
+              </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Party &amp; delivery</CardTitle>
-            </CardHeader>
-            <DetailGrid>
-              <DetailField label="Party state" value={orderDetails.party_state} />
-              <DetailField label="Delivery date" value={orderDetails.delivery_date} />
-              <DetailField label="PO number" value={orderDetails.po_number} />
-              {/* Only ever present once an order has actually reached SAP, so
-                  it is worth showing HERE — unlike on the approval queues,
-                  where it is blank by definition. */}
-              <DetailField label="Quotation no" value={orderDetails.sap_doc_number} />
-              <DetailField label="Bill to" value={orderDetails.bill_to_address} />
-              <DetailField label="Ship to" value={orderDetails.ship_to_address} />
-              <DetailField
-                label="Remark"
-                value={orderDetails.remarks?.trim() ? orderDetails.remarks : ""}
-                span="full"
-                hideWhenEmpty
-              />
-            </DetailGrid>
-          </Card>
+              <Dialog open={infoOpen} onOpenChange={setInfoOpen}>
+                <DialogContent
+                  title={`Order ${orderDetails.order_number} information`}
+                  size="md"
+                >
+                  <DialogHeader>
+                    <DialogTitle>Order information</DialogTitle>
+                    {orderDetails.status_display ? (
+                      <Badge tone={toneForStatus(orderDetails.status_display)}>
+                        {orderDetails.status_display}
+                      </Badge>
+                    ) : null}
+                  </DialogHeader>
+                  <DialogBody className="space-y-4">
+                    <DetailGrid>
+                      <DetailField
+                        label="Party name"
+                        value={`${orderDetails.card_name}${
+                          orderDetails.card_code ? ` (${orderDetails.card_code})` : ""
+                        }`}
+                        span="full"
+                      />
+                      <DetailField label="Party state" value={orderDetails.party_state} />
+                      <DetailField label="Delivery date" value={orderDetails.delivery_date} />
+                      <DetailField label="PO number" value={orderDetails.po_number} />
+                      <DetailField label="Quotation no" value={orderDetails.sap_doc_number} />
+                      <DetailField
+                        label="Bill to"
+                        value={orderDetails.bill_to_address}
+                        span="full"
+                        hideWhenEmpty
+                      />
+                      <DetailField
+                        label="Ship to"
+                        value={orderDetails.ship_to_address}
+                        span="full"
+                        hideWhenEmpty
+                      />
+                      <DetailField
+                        label="Remark"
+                        value={orderDetails.remarks?.trim() ? orderDetails.remarks : ""}
+                        span="full"
+                        hideWhenEmpty
+                      />
+                    </DetailGrid>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Items</CardTitle>
-              <Badge tone="neutral">{selectedItems.length}</Badge>
-            </CardHeader>
-            <OrderItemsTable items={selectedItems} variety={false} />
-          </Card>
+                    {orderDetails.rejection_reason ? (
+                      <Notice tone="bad" title="Rejection reason">
+                        {orderDetails.rejection_reason}
+                      </Notice>
+                    ) : null}
+                  </DialogBody>
+                </DialogContent>
+              </Dialog>
+            </>
+          ) : (
+            <>
+              <OrderTotalsRow totals={detailTotals} itemCount={selectedItems.length} />
+
+              <VarietyCostCards costs={detailVarieties} />
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Party &amp; delivery</CardTitle>
+                </CardHeader>
+                <DetailGrid>
+                  <DetailField label="Party state" value={orderDetails.party_state} />
+                  <DetailField label="Delivery date" value={orderDetails.delivery_date} />
+                  <DetailField label="PO number" value={orderDetails.po_number} />
+                  {/* Only ever present once an order has actually reached SAP, so
+                      it is worth showing HERE — unlike on the approval queues,
+                      where it is blank by definition. */}
+                  <DetailField label="Quotation no" value={orderDetails.sap_doc_number} />
+                  <DetailField label="Bill to" value={orderDetails.bill_to_address} />
+                  <DetailField label="Ship to" value={orderDetails.ship_to_address} />
+                  <DetailField
+                    label="Remark"
+                    value={orderDetails.remarks?.trim() ? orderDetails.remarks : ""}
+                    span="full"
+                    hideWhenEmpty
+                  />
+                </DetailGrid>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Items</CardTitle>
+                  <Badge tone="neutral">{selectedItems.length}</Badge>
+                </CardHeader>
+                <OrderItemsTable items={selectedItems} variety={false} />
+              </Card>
+            </>
+          )}
 
           {/* The progress trail, inline.
               Billing is the desk that has to answer "why is this not billed
