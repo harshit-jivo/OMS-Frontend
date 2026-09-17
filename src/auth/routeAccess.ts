@@ -170,6 +170,12 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
     roles: ["distributor"],
   },
   "/Mart_Approval": { permissions: ["Mart_Approval"], roles: ["mart_approval"] },
+  "/Mart_Edit_Order": { permissions: ["Mart_Approval"], roles: ["mart_approval"] },
+  // Cancelling a completed Mart order (and reversing it in SAP) is gated by the
+  // dedicated `orders.mart.cancel` key — the heavier authority — with the
+  // mart_approval role as the transitional fallback (mirrors the backend
+  // `_can_cancel_mart` gate and the users/0037 role grant).
+  "/Mart_Cancel": { permissions: ["orders.mart.cancel"], roles: ["mart_approval"] },
   "/Payments_Dashboard": { permissions: ["Payments_Dashboard"] },
 
   // --- Document tracker ---------------------------------------------------
@@ -237,7 +243,16 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   "/PersonWise_Report": REPORTS,
   "/Sales_Report": REPORTS,
   "/StateWise_Report": REPORTS,
-  "/Inventory_Report": REPORTS,
+  // Split out of the shared REPORTS gate onto its own key so it can be granted
+  // independently of the sales reports (e.g. to a mart_approval user). The
+  // `billing` role is kept as a fallback so billing keeps the page without
+  // needing the new key; every non-billing holder of `Reports` is back-granted
+  // `Inventory_Report` by users/0036 so nobody loses the page on deploy.
+  "/Inventory_Report": { permissions: ["Inventory_Report"], roles: ["billing"] },
+  // A brand-new report gated purely by its own per-user grant — no role
+  // fallback, so access is exactly "who was given the key" (plus admins, who
+  // pass every key). Nobody held it before, so no back-grant migration.
+  "/Distributor_Report": { permissions: ["Distributor_Report"] },
   "/SO_Invoice_Report": REPORTS,
 
   // --- No sidebar link, and nothing navigates here ------------------------

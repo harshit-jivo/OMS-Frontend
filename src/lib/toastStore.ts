@@ -25,6 +25,9 @@ export type ToastData = {
   orderNumber?: string | null;
   onAction?: () => void;
   actionLabel?: string;
+  /** Visual tone. `success` renders the card green with a check icon, `error`
+   *  renders it red with an X icon; `default` uses the neutral brand styling. */
+  tone?: "default" | "success" | "error";
 };
 
 export type ToastInput = Omit<ToastData, "id">;

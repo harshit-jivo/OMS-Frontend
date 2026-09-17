@@ -24,7 +24,12 @@
  * is announced from, rather than one per card.
  */
 import { useEffect, useState } from "react";
-import { HiOutlineBell, HiOutlineXMark } from "react-icons/hi2";
+import {
+  HiOutlineBell,
+  HiOutlineCheckCircle,
+  HiOutlineXCircle,
+  HiOutlineXMark,
+} from "react-icons/hi2";
 
 import { Button } from "@/components/ui/button";
 import { AUTO_DISMISS_MS, dismissToast, subscribeToToasts } from "@/lib/toastStore";
@@ -36,19 +41,37 @@ function ToastCard({ toast }: { toast: ToastData }) {
     return () => clearTimeout(timer);
   }, [toast.id]);
 
+  const success = toast.tone === "success";
+  const error = toast.tone === "error";
+
+  const cardTone = success
+    ? "border-green-300 bg-green-50 dark:bg-green-950/30"
+    : error
+      ? "border-red-300 bg-red-50 dark:bg-red-950/30"
+      : "border-line bg-card";
+  const iconTone = success
+    ? "bg-green-100 text-green-600 dark:bg-green-900/50"
+    : error
+      ? "bg-red-100 text-red-600 dark:bg-red-900/50"
+      : "bg-brand-soft text-brand";
+
   return (
     <div
       data-slot="toast"
+      data-tone={toast.tone ?? "default"}
       className={
-        "pointer-events-auto flex w-[min(92vw,360px)] gap-2.5 rounded-card border border-line " +
-        "bg-card p-3 shadow-panel motion-safe:animate-[oms-fade-slide-up_0.18s_ease-out]"
+        "pointer-events-auto flex w-[min(92vw,360px)] gap-2.5 rounded-card border p-3 " +
+        "shadow-panel motion-safe:animate-[oms-fade-slide-up_0.18s_ease-out] " +
+        cardTone
       }
     >
       <span
         aria-hidden="true"
-        className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-brand-soft text-brand"
+        className={
+          "mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full " + iconTone
+        }
       >
-        <HiOutlineBell />
+        {success ? <HiOutlineCheckCircle /> : error ? <HiOutlineXCircle /> : <HiOutlineBell />}
       </span>
 
       <div className="min-w-0 flex-1">

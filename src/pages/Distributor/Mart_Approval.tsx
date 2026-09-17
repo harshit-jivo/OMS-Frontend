@@ -8,10 +8,16 @@ import {
   HiOutlineExclamationTriangle,
   HiOutlineEye,
   HiOutlineInbox,
+  HiOutlineInformationCircle,
   HiOutlinePencilSquare,
   HiOutlineQueueList,
   HiOutlineShoppingCart,
   HiOutlineXCircle,
+  HiCube,
+  HiInboxStack,
+  HiBeaker,
+  HiBanknotes,
+  HiCurrencyRupee,
 } from "react-icons/hi2";
 
 import {
@@ -23,7 +29,7 @@ import {
   type SalesOrderSapStatus,
 } from "../../services/ordersService";
 import { startExcelExport, exportDateStamp } from "../../utils/excelExport";
-import { messageFrom } from "@/lib/apiError";
+import { errorBody, messageFrom } from "@/lib/apiError";
 import { showToast } from "@/lib/toastStore";
 import { Badge } from "@/components/ui/badge";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
@@ -34,6 +40,8 @@ import {
   DialogBody,
   DialogContent,
   DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
 import {
   Card,
@@ -47,6 +55,9 @@ import {
   StatRow,
 } from "@/components/ui/page";
 import { TableSkeleton } from "@/components/ui/skeleton";
+import { Spinner } from "@/components/ui/spinner";
+import { Pagination } from "@/components/ui/pagination";
+import { OrderItemCards } from "@/components/orders/OrderItemCards";
 import {
   Table,
   TableBody,
@@ -57,8 +68,6 @@ import {
 } from "@/components/ui/table";
 import { Tab, TabList } from "@/components/ui/tabs";
 import { toneForStatus } from "@/components/ui/statusTone";
-import { OrderItemsTable } from "@/components/orders/OrderItemsTable";
-import { OrderTotalsRow } from "@/components/orders/OrderTotals";
 import { orderTotals } from "@/components/orders/orderDetail";
 
 /**
@@ -103,7 +112,7 @@ const TABS: { key: TabKey; label: string }[] = [
 
 type ActionTarget = { id: number; order_number: string };
 
-function fmtDateTime(iso?: string) {
+function fmtDateTime(iso?: string | null) {
   if (!iso) return "—";
   const d = new Date(iso);
   return isNaN(d.getTime()) ? "—" : d.toLocaleString();
@@ -150,6 +159,9 @@ function MartApproval() {
   const [detailOrder, setDetailOrder] = useState<Order | null>(null);
   const [detailItems, setDetailItems] = useState<OrderItem[]>([]);
   const [detailPending, setDetailPending] = useState(false);
+  // The "i" order-information dialog on the detail view (same as the
+  // distributor's View Orders detail).
+  const [infoOpen, setInfoOpen] = useState(false);
 
   // Approve / reject targets (work from both the list and the detail view).
   const [approveTarget, setApproveTarget] = useState<ActionTarget | null>(null);
@@ -178,6 +190,14 @@ function MartApproval() {
   const isApprovedSuccess = (o: { status_display?: string }) =>
     tab === "approved" && isCompletedStatus(o.status_display);
 
+  // Client-side pagination, 10 rows a page. Clamp the page rather than track it
+  // with an effect, so switching tabs (fewer rows) can't strand an empty page.
+  const [page, setPage] = useState(1);
+  const itemsPerPage = 10;
+  const totalPages = Math.max(1, Math.ceil(orders.length / itemsPerPage));
+  const pageNumber = Math.min(page, totalPages);
+  const pageOrders = orders.slice((pageNumber - 1) * itemsPerPage, pageNumber * itemsPerPage);
+
   const isPendingTab = tab === "pending";
   const sapFailedCount = orders.filter((o) => isSapFailed(o.id)).length;
   // How much work is in the queue, as against how many orders — a queue of
@@ -192,6 +212,7 @@ function MartApproval() {
     try {
       const res = await ordersService.resendMartOrderToSap(target.id);
       showToast({
+        tone: "success",
         title: "Sent to SAP",
         message: res?.message || `Order ${target.order_number} sent to SAP.`,
         orderNumber: target.order_number,
@@ -200,6 +221,7 @@ function MartApproval() {
       await loadList();
     } catch (e) {
       showToast({
+        tone: "error",
         title: "SAP push failed",
         message: messageFrom(e, "Failed to resend the order to SAP. Please try again."),
         orderNumber: target.order_number,
@@ -224,38 +246,62 @@ function MartApproval() {
       setDetailItems((detail.items as OrderItem[]) || []);
       setDetailPending(order.is_pending);
     } catch (e) {
-      showToast({ title: "Could not open the order", message: messageFrom(e, "Please try again.") });
+      showToast({
+        tone: "error",
+        title: "Could not open the order",
+        message: messageFrom(e, "Please try again."),
+      });
     } finally {
       setBusy(false);
     }
   };
 
   const onEdit = (target: ActionTarget) => {
-    navigate("/Add_Sales", {
-      state: { editOrderId: target.id, mode: "edit", returnTo: "/Mart_Approval" },
+    // Mart orders edit on the dedicated Mart editor, not the oil/beverage
+    // Add Sales form.
+    navigate("/Mart_Edit_Order", {
+      state: { editOrderId: target.id, returnTo: "/Mart_Approval" },
     });
   };
 
   const confirmApprove = async () => {
     if (!approveTarget) return;
+    const target = approveTarget;
     setBusy(true);
     try {
-      await ordersService.approveMartOrder(approveTarget.id);
+      const res = await ordersService.approveMartOrder(target.id);
+      // Tell the user whether the SAP sales order was actually created.
+      const docNum = res?.sap?.doc_num;
       showToast({
+        tone: "success",
         title: "Order approved",
-        message: `${approveTarget.order_number} has moved on in the Mart flow.`,
-        orderNumber: approveTarget.order_number,
+        message: docNum
+          ? `${target.order_number} approved — SAP sales order #${docNum} created.`
+          : res?.message || `${target.order_number} approved and sent to SAP.`,
+        orderNumber: target.order_number,
       });
-      setApproveTarget(null);
-      setDetailOrder(null);
-      await loadList();
     } catch (e) {
+      // A 502 carrying `sap_state` means the order WAS approved but the SAP push
+      // failed — it now sits on the Approved tab with a "SAP failed" badge, so
+      // it is not a plain failure. Anything else is a real approve failure.
+      const sapFailed = Boolean(errorBody(e)?.sap_state);
       showToast({
-        title: "Could not approve the order",
-        message: messageFrom(e, "Please try again."),
+        tone: "error",
+        title: sapFailed ? "Approved — but SAP failed" : "Could not approve the order",
+        message: messageFrom(
+          e,
+          sapFailed
+            ? "The order was approved but could not be created in SAP."
+            : "Please try again.",
+        ),
+        orderNumber: target.order_number,
       });
     } finally {
+      // Always close the confirm dialog and refresh the list, whatever happened.
+      setApproveTarget(null);
+      setDetailOrder(null);
       setBusy(false);
+      await loadList();
     }
   };
 
@@ -263,25 +309,30 @@ function MartApproval() {
     // The dialog disables its confirm without a reason, so this is a guard on
     // the write rather than the user's feedback.
     if (!rejectTarget || !rejectReason.trim()) return;
+    const target = rejectTarget;
     setBusy(true);
     try {
-      await ordersService.rejectMartOrder(rejectTarget.id, rejectReason.trim());
+      await ordersService.rejectMartOrder(target.id, rejectReason.trim());
       showToast({
+        tone: "success",
         title: "Order rejected",
-        message: `${rejectTarget.order_number} has been sent back.`,
-        orderNumber: rejectTarget.order_number,
+        message: `${target.order_number} has been sent back.`,
+        orderNumber: target.order_number,
       });
+    } catch (e) {
+      showToast({
+        tone: "error",
+        title: "Could not reject the order",
+        message: messageFrom(e, "Please try again."),
+        orderNumber: target.order_number,
+      });
+    } finally {
+      // Always close the dialog and refresh, whatever the outcome.
       setRejectTarget(null);
       setRejectReason("");
       setDetailOrder(null);
-      await loadList();
-    } catch (e) {
-      showToast({
-        title: "Could not reject the order",
-        message: messageFrom(e, "Please try again."),
-      });
-    } finally {
       setBusy(false);
+      await loadList();
     }
   };
 
@@ -308,6 +359,7 @@ function MartApproval() {
       });
     } catch (e) {
       showToast({
+        tone: "error",
         title: "Could not download the order",
         message: messageFrom(e, "Please try again."),
       });
@@ -315,6 +367,8 @@ function MartApproval() {
   };
 
   const detailTotals = orderTotals(detailItems);
+  const detailQty = detailItems.reduce((s, it) => s + (Number(it.qty) || 0), 0);
+  const detailBoxes = detailItems.reduce((s, it) => s + (Number(it.boxes) || 0), 0);
 
   /** Approve and reject, shared by the list and the detail view. */
   const dialogs = (
@@ -347,7 +401,13 @@ function MartApproval() {
                 Cancel
               </Button>
               <Button variant="primary" onClick={confirmApprove} disabled={busy}>
-                {busy ? "Approving…" : "Yes, approve"}
+                {busy ? (
+                  <>
+                    <Spinner className="size-4" /> Approving…
+                  </>
+                ) : (
+                  "Yes, approve"
+                )}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -409,7 +469,13 @@ function MartApproval() {
                 disabled={busy || !rejectReason.trim()}
                 title={!rejectReason.trim() ? "A reason is required to reject an order" : undefined}
               >
-                {busy ? "Rejecting…" : "Reject order"}
+                {busy ? (
+                  <>
+                    <Spinner className="size-4" /> Rejecting…
+                  </>
+                ) : (
+                  "Reject order"
+                )}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -429,8 +495,7 @@ function MartApproval() {
       <Page>
         <Breadcrumbs
           items={[
-            { label: "Orders" },
-            { label: "Mart Approval", onClick: () => setDetailOrder(null) },
+            { label: "Orders", onClick: () => setDetailOrder(null) },
             { label: detailOrder.order_number },
           ]}
         />
@@ -452,7 +517,16 @@ function MartApproval() {
             <>
               <Button
                 variant="ghost"
+                onClick={() => setInfoOpen(true)}
+                title="Order information"
+                className="border border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100 hover:text-sky-800"
+              >
+                <HiOutlineInformationCircle aria-hidden="true" /> Info
+              </Button>
+              <Button
+                variant="success"
                 onClick={() => onDownload(detailOrder.id, detailOrder.order_number)}
+                className="border-transparent bg-emerald-600 text-white shadow-sm hover:bg-emerald-700 hover:text-white"
               >
                 <HiOutlineArrowDownTray aria-hidden="true" /> Export Excel
               </Button>
@@ -462,6 +536,7 @@ function MartApproval() {
                   onClick={() =>
                     onEdit({ id: detailOrder.id, order_number: detailOrder.order_number })
                   }
+                  className="border border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 hover:text-amber-800"
                 >
                   <HiOutlinePencilSquare aria-hidden="true" /> Edit
                 </Button>
@@ -523,34 +598,119 @@ function MartApproval() {
           </Notice>
         ) : null}
 
-        <OrderTotalsRow totals={detailTotals} itemCount={detailItems.length} />
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Party &amp; delivery</CardTitle>
-          </CardHeader>
-          <DetailGrid>
-            <DetailField label="Party state" value={detailOrder.party_state} />
-            <DetailField label="Delivery date" value={detailOrder.delivery_date} />
-            <DetailField label="PO number" value={detailOrder.po_number} />
-            <DetailField label="Bill to" value={detailOrder.bill_to_address} />
-            <DetailField label="Ship to" value={detailOrder.ship_to_address} />
-            <DetailField
-              label="Remark"
-              value={detailOrder.remarks?.trim() ? detailOrder.remarks : ""}
-              span="full"
-              hideWhenEmpty
-            />
-          </DetailGrid>
-        </Card>
+        {/* Totals — same coloured KPI row as the distributor's View Orders
+            detail, so the same order reads identically on either screen. */}
+        <StatRow>
+          <Stat
+            icon={HiCube}
+            tone="neutral"
+            label="Total QTY"
+            value={detailQty.toLocaleString("en-IN")}
+            className="border-sky-200 bg-sky-50"
+          />
+          <Stat
+            icon={HiInboxStack}
+            tone="neutral"
+            label="Total Boxes"
+            value={detailBoxes.toLocaleString("en-IN")}
+            className="border-amber-200 bg-amber-50"
+          />
+          <Stat
+            icon={HiBeaker}
+            tone="neutral"
+            label="Total Ltrs"
+            value={detailTotals.litres.toFixed(2)}
+            className="border-teal-200 bg-teal-50"
+          />
+          <Stat
+            icon={HiBanknotes}
+            tone="neutral"
+            label="Total Amount"
+            value={detailTotals.subtotal.toFixed(2)}
+            className="border-violet-200 bg-violet-50"
+          />
+          <Stat
+            icon={HiCurrencyRupee}
+            tone="brand"
+            label="Grand Total (incl. tax)"
+            value={detailTotals.grand.toFixed(2)}
+            hint={`${detailItems.length} item${detailItems.length === 1 ? "" : "s"}`}
+            className="border-brand/30 bg-brand/[0.08]"
+          />
+        </StatRow>
 
         <Card>
           <CardHeader>
             <CardTitle>Items</CardTitle>
             <Badge tone="neutral">{detailItems.length}</Badge>
           </CardHeader>
-          <OrderItemsTable items={detailItems} variety={false} />
+          <OrderItemCards items={detailItems} />
         </Card>
+
+        {/* The "i" info dialog — addresses, delivery, creator, current stage,
+            rejection reason: the same set the distributor detail shows. */}
+        <Dialog open={infoOpen} onOpenChange={setInfoOpen}>
+          <DialogContent title={`Order ${detailOrder.order_number} information`} size="md">
+            <DialogHeader>
+              <DialogTitle>Order information</DialogTitle>
+              {detailOrder.status_display ? (
+                <Badge tone={toneForStatus(detailOrder.status_display)}>
+                  {detailOrder.status_display}
+                </Badge>
+              ) : null}
+            </DialogHeader>
+            <DialogBody className="space-y-4">
+              <DetailGrid>
+                <DetailField
+                  label="Party name"
+                  value={`${detailOrder.card_name}${
+                    detailOrder.card_code ? ` (${detailOrder.card_code})` : ""
+                  }`}
+                  span="full"
+                />
+                <DetailField
+                  label="Created by"
+                  value={detailOrder.created_by_name || String(detailOrder.created_by ?? "")}
+                />
+                <DetailField label="Current stage" value={detailOrder.status_display} />
+                <DetailField label="Party state" value={detailOrder.party_state} />
+                <DetailField label="Delivery date" value={detailOrder.delivery_date} />
+                <DetailField label="Warehouse" value={detailOrder.warehouse_code} />
+                <DetailField label="Dispatch from" value={detailOrder.dispatch_from_name} />
+                <DetailField label="PO number" value={detailOrder.po_number} />
+                <DetailField
+                  label="Bill to"
+                  value={detailOrder.bill_to_address}
+                  span="full"
+                  hideWhenEmpty
+                />
+                <DetailField
+                  label="Ship to"
+                  value={detailOrder.ship_to_address}
+                  span="full"
+                  hideWhenEmpty
+                />
+                <DetailField
+                  label="Comment"
+                  value={detailOrder.remarks?.trim() ? detailOrder.remarks : ""}
+                  span="full"
+                  hideWhenEmpty
+                />
+              </DetailGrid>
+
+              {rejected && detailOrder.rejection_reason ? (
+                <Notice tone="bad" title="Rejection reason">
+                  {detailOrder.rejection_reason}
+                </Notice>
+              ) : null}
+              {sapFailed ? (
+                <Notice tone="bad" title="SAP error">
+                  {sapFor(detailOrder.id)?.error_message || "SAP did not return an error message."}
+                </Notice>
+              ) : null}
+            </DialogBody>
+          </DialogContent>
+        </Dialog>
 
         {dialogs}
       </Page>
@@ -560,10 +720,10 @@ function MartApproval() {
   // ── List view ─────────────────────────────────────────────────────────────
   return (
     <Page>
-      <Breadcrumbs items={[{ label: "Orders" }, { label: "Mart Approval" }]} />
+      <Breadcrumbs items={[{ label: "Orders" }]} />
 
       <PageHeader
-        title="Mart Approval"
+        title="Orders"
         description="Review and action distributor (Mart) orders."
       />
 
@@ -574,6 +734,7 @@ function MartApproval() {
           label={`${TABS.find((t) => t.key === tab)?.label} orders`}
           value={orders.length}
           loading={loading}
+          className="border-sky-200 bg-sky-50"
         />
         <Stat
           icon={HiOutlineQueueList}
@@ -582,6 +743,7 @@ function MartApproval() {
           value={lineCount}
           hint="across the queue"
           loading={loading}
+          className="border-violet-200 bg-violet-50"
         />
         {/* Only the Approved tab can hold a failed push, so the tile only
             appears where it can be non-zero — a permanent "SAP failed: 0" on
@@ -594,6 +756,7 @@ function MartApproval() {
             value={sapFailedCount}
             hint={sapFailedCount ? "needs a resend" : undefined}
             loading={loading}
+            className={sapFailedCount ? "border-rose-200 bg-rose-50" : "border-amber-200 bg-amber-50"}
           />
         ) : null}
       </StatRow>
@@ -606,6 +769,7 @@ function MartApproval() {
               selected={t.key === tab}
               onClick={() => {
                 setTab(t.key);
+                setPage(1);
                 // Was a bare `setDetailOrder(null)` in a `[tab]` effect —
                 // setState derived from state.
                 setDetailOrder(null);
@@ -647,12 +811,19 @@ function MartApproval() {
                   <TableHead>Card Name</TableHead>
                   <TableHead>Items</TableHead>
                   <TableHead>Created At</TableHead>
-                  <TableHead>Delivery Date</TableHead>
+                  {tab === "rejected" ? (
+                    <>
+                      <TableHead>Rejected At</TableHead>
+                      <TableHead>Reject Reason</TableHead>
+                    </>
+                  ) : (
+                    <TableHead>Delivery Date</TableHead>
+                  )}
                   <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {orders.map((o) => (
+                {pageOrders.map((o) => (
                   <TableRow key={o.id}>
                     <TableCell className="whitespace-nowrap font-semibold text-brand">
                       {o.order_number}
@@ -678,7 +849,16 @@ function MartApproval() {
                     </TableCell>
                     <TableCell>{o.items_count}</TableCell>
                     <TableCell>{fmtDateTime(o.created_at)}</TableCell>
-                    <TableCell>{o.delivery_date || "—"}</TableCell>
+                    {tab === "rejected" ? (
+                      <>
+                        <TableCell>{fmtDateTime(o.rejected_at)}</TableCell>
+                        <TableCell className="max-w-[24rem] truncate" title={o.rejection_reason}>
+                          {o.rejection_reason || "—"}
+                        </TableCell>
+                      </>
+                    ) : (
+                      <TableCell>{o.delivery_date || "—"}</TableCell>
+                    )}
                     <TableCell>
                       <div className="flex items-center gap-1">
                         <Button
@@ -688,6 +868,7 @@ function MartApproval() {
                           disabled={busy}
                           aria-label={`View order ${o.order_number}`}
                           title="View order"
+                          className="text-brand hover:bg-brand-soft hover:text-brand"
                         >
                           <HiOutlineEye aria-hidden="true" />
                         </Button>
@@ -704,6 +885,7 @@ function MartApproval() {
                                 onClick={() => onEdit({ id: o.id, order_number: o.order_number })}
                                 aria-label={`Edit order ${o.order_number}`}
                                 title="Edit order"
+                                className="text-amber-600 hover:bg-amber-50 hover:text-amber-700"
                               >
                                 <HiOutlinePencilSquare aria-hidden="true" />
                               </Button>
@@ -714,6 +896,7 @@ function MartApproval() {
                               onClick={() => onDownload(o.id, o.order_number)}
                               aria-label={`Download order ${o.order_number}`}
                               title="Download order"
+                              className="text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700"
                             >
                               <HiOutlineArrowDownTray aria-hidden="true" />
                             </Button>
@@ -768,6 +951,10 @@ function MartApproval() {
           </div>
         </Card>
       )}
+
+      {!loading && !error && orders.length > itemsPerPage ? (
+        <Pagination page={pageNumber} totalPages={totalPages} onPageChange={setPage} />
+      ) : null}
 
       {dialogs}
     </Page>

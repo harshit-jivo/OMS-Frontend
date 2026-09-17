@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type * as React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { HiOutlineCheckCircle } from "react-icons/hi2";
+import { HiOutlineCheckCircle, HiOutlinePlus } from "react-icons/hi2";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox, Field, FormActions, FormGrid, Input, Select, Textarea } from "@/components/ui/form";
@@ -17,24 +17,17 @@ import {
 } from "../../services/haisService";
 
 import ErrorPopup from "./ErrorPopup";
+import {
+  ALL_ASSET_FIELD_KEYS,
+  type AssetFieldKey,
+  EMAIL_RE,
+  EMP_ID_PREFIX,
+  fieldVisible,
+  isValidDdMmYyyy,
+  normalizeEmpId,
+} from "./assetShared";
 import { MONO, NOTE } from "./assetTone";
 import { useHaisOptions } from "./useHaisOptions";
-
-/** Employee IDs are always prefixed with the company code. */
-const EMP_ID_PREFIX = "JWPL";
-
-/** Basic email shape check (case-insensitive). */
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-/** True only for a real dd/mm/yyyy calendar date (rejects 31/02, 99/99/9999…). */
-function isValidDdMmYyyy(s: string): boolean {
-  const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  if (!m) return false;
-  const day = +m[1], month = +m[2], year = +m[3];
-  if (month < 1 || month > 12 || day < 1 || day > 31 || year < 1900 || year > 2200) return false;
-  const dt = new Date(year, month - 1, day);
-  return dt.getFullYear() === year && dt.getMonth() === month - 1 && dt.getDate() === day;
-}
 
 /* An empty record — every field is present so nothing is missed. */
 const EMPTY: Asset = {
@@ -72,9 +65,11 @@ type Props = {
   editId?: string | null;
   /** Called after a successful save so the parent can refresh / switch tabs. */
   onSaved?: (asset: Asset) => void;
+  /** Called when the user wants to leave editing and add new assets. */
+  onAdd?: () => void;
 };
 
-export default function AssetForm({ editId, onSaved }: Props) {
+export default function AssetForm({ editId, onSaved, onAdd }: Props) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState<Asset>(EMPTY);
   const [busy, setBusy] = useState(false);
@@ -130,15 +125,33 @@ export default function AssetForm({ editId, onSaved }: Props) {
   const set = (key: keyof Asset) => (value: string) =>
     setForm((f) => ({ ...f, [key]: value }));
 
+  // Which fields the SELECTED type shows, from its web-configured field list.
+  const selectedType = assetTypes.find((t) => t.name === (form.asset_type as string));
+  const vis = (k: AssetFieldKey) => fieldVisible(selectedType?.field_config, k);
+  const showConfig =
+    vis("processor") || vis("memory") || vis("operating_system") || vis("storage_types") || vis("storage");
+  const showPurchase =
+    vis("purchase_invoice_no") || vis("purchase_invoice_date") || vis("vendor") || vis("amount");
+
+  // Changing the type clears any now-hidden field, so a keyboard never carries a
+  // stale processor/RAM/vendor saved from when it was a laptop type.
+  const changeAssetType = (value: string) => {
+    const next = assetTypes.find((t) => t.name === value);
+    setForm((f) => {
+      const cleared: Record<string, unknown> = {};
+      for (const k of ALL_ASSET_FIELD_KEYS) {
+        if (!fieldVisible(next?.field_config, k)) cleared[k] = k === "storage_types" ? [] : "";
+      }
+      return { ...f, asset_type: value, ...cleared };
+    });
+  };
+
   // Text fields are stored in CAPITAL letters.
   const setUpper = (key: keyof Asset) => (value: string) => set(key)(value.toUpperCase());
 
   // Emp ID is auto-prefixed with the company code (JWPL); the user just adds
   // their own code after it. Kept as a single clean prefix, uppercased.
-  const setEmpId = (raw: string) => {
-    const code = raw.toUpperCase().replace(/\s+/g, "").replace(/^(JWPL)+/, "");
-    set("current_user_id")(code ? `${EMP_ID_PREFIX}${code}` : "");
-  };
+  const setEmpId = (raw: string) => set("current_user_id")(normalizeEmpId(raw));
 
   // Toggle one storage type in the multi-select.
   const toggleStorageType = (name: string) =>
@@ -240,8 +253,9 @@ export default function AssetForm({ editId, onSaved }: Props) {
         <div className="space-y-6">
           {isEdit && (
             <Notice tone="info">
-              Editing a device changes only its <strong>Configuration</strong> and{" "}
-              <strong>Maintenance</strong>. To change the holder, use <strong>Handover</strong>.
+              All fields are editable. Changing the <strong>holder</strong> records a{" "}
+              <strong>Handover</strong> and changing the <strong>configuration</strong> records a{" "}
+              <strong>Config Update</strong> in the device history — add a reason when prompted.
             </Notice>
           )}
 
@@ -258,8 +272,7 @@ export default function AssetForm({ editId, onSaved }: Props) {
                 <Select
                   {...c}
                   value={form.asset_type as string}
-                  onChange={(e) => set("asset_type")(e.target.value)}
-                  disabled={isEdit}
+                  onChange={(e) => changeAssetType(e.target.value)}
                 >
                   <option value="">— Select —</option>
                   {assetTypes.map((t) => (
@@ -270,45 +283,59 @@ export default function AssetForm({ editId, onSaved }: Props) {
                 </Select>
               )}
             </Field>
-            <Field label="Company" hint="Manufacturer / brand">
-              {(c) => (
-                <Input {...c} value={form.company ?? ""} onChange={(e) => setUpper("company")(e.target.value)} disabled={isEdit} placeholder="e.g. DELL, HP, LOGITECH" />
-              )}
-            </Field>
-            <Field label="Model number">
-              {(c) => (
-                <Input {...c} value={form.model_num ?? ""} onChange={(e) => setUpper("model_num")(e.target.value)} disabled={isEdit} placeholder="e.g. LATITUDE 5440" />
-              )}
-            </Field>
+            {vis("company") && (
+              <Field label="Company" hint="Manufacturer / brand">
+                {(c) => (
+                  <Input {...c} value={form.company ?? ""} onChange={(e) => setUpper("company")(e.target.value)} placeholder="e.g. DELL, HP, LOGITECH" />
+                )}
+              </Field>
+            )}
+            {vis("model_num") && (
+              <Field label="Model number">
+                {(c) => (
+                  <Input {...c} value={form.model_num ?? ""} onChange={(e) => setUpper("model_num")(e.target.value)} placeholder="e.g. LATITUDE 5440" />
+                )}
+              </Field>
+            )}
             <Field label="Serial number" required hint="Unique — the device QR is generated from this">
               {(c) => (
-                <Input {...c} className={MONO} value={form.serial_num ?? ""} onChange={(e) => setUpper("serial_num")(e.target.value)} disabled={isEdit} placeholder="e.g. DL5440X92KK" />
+                <Input {...c} className={MONO} value={form.serial_num ?? ""} onChange={(e) => setUpper("serial_num")(e.target.value)} placeholder="e.g. DL5440X92KK" />
               )}
             </Field>
-            <Field label="Warranty ends">
-              {() => <DateInput value={form.warranty_ends ?? ""} onChange={set("warranty_ends")} withPicker disabled={isEdit} />}
-            </Field>
+            {vis("warranty_ends") && (
+              <Field label="Warranty ends">
+                {() => <DateInput value={form.warranty_ends ?? ""} onChange={set("warranty_ends")} withPicker />}
+              </Field>
+            )}
           </FormSection>
 
+          {showConfig && (
           <FormSection
             title="Configuration"
-            note="For computing devices only — leave blank for peripherals like a keyboard or mouse."
+            note="The device's hardware specs."
           >
+            {vis("processor") && (
             <Field label="Processor">
               {(c) => (
                 <Input {...c} value={form.processor ?? ""} onChange={(e) => setUpper("processor")(e.target.value)} placeholder="e.g. INTEL CORE I5 12TH GEN" />
               )}
             </Field>
+            )}
+            {vis("memory") && (
             <Field label="Memory (RAM)">
               {(c) => (
                 <Input {...c} value={form.memory ?? ""} onChange={(e) => setUpper("memory")(e.target.value)} placeholder="e.g. 16 GB" />
               )}
             </Field>
+            )}
+            {vis("operating_system") && (
             <Field label="Operating system">
               {(c) => (
                 <Input {...c} value={form.operating_system ?? ""} onChange={(e) => setUpper("operating_system")(e.target.value)} placeholder="e.g. WINDOWS 11 PRO" />
               )}
             </Field>
+            )}
+            {vis("storage_types") && (
             <Field label="Storage type" hint="Select one or more">
               {() => (
                 <div className="flex min-h-control flex-wrap items-center gap-x-5 gap-y-2">
@@ -329,12 +356,16 @@ export default function AssetForm({ editId, onSaved }: Props) {
                 </div>
               )}
             </Field>
+            )}
+            {vis("storage") && (
             <Field label="Storage">
               {(c) => (
                 <Input {...c} value={form.storage ?? ""} onChange={(e) => setUpper("storage")(e.target.value)} placeholder="e.g. 512 GB" />
               )}
             </Field>
+            )}
           </FormSection>
+          )}
 
           <FormSection title="Assignment & tracking">
             <div className="col-span-full">
@@ -343,7 +374,6 @@ export default function AssetForm({ editId, onSaved }: Props) {
                 hint="The device is in stock / not issued to anyone yet."
                 checked={unassigned}
                 onChange={(e) => toggleUnassigned(e.target.checked)}
-                disabled={isEdit}
               />
             </div>
             <Field label="Current user name" required={!unassigned}>
@@ -352,7 +382,7 @@ export default function AssetForm({ editId, onSaved }: Props) {
                   {...c}
                   value={form.current_user_name ?? ""}
                   onChange={(e) => setUpper("current_user_name")(e.target.value)}
-                  disabled={unassigned || isEdit}
+                  disabled={unassigned}
                   placeholder={unassigned ? "— Unassigned —" : "e.g. RAHUL SHARMA"}
                 />
               )}
@@ -364,14 +394,14 @@ export default function AssetForm({ editId, onSaved }: Props) {
                   className={MONO}
                   value={form.current_user_id ?? ""}
                   onChange={(e) => setEmpId(e.target.value)}
-                  disabled={unassigned || isEdit}
+                  disabled={unassigned}
                   placeholder={`${EMP_ID_PREFIX}0001`}
                 />
               )}
             </Field>
             <Field label="Department">
               {(c) => (
-                <Select {...c} value={form.department ?? ""} onChange={(e) => set("department")(e.target.value)} disabled={isEdit}>
+                <Select {...c} value={form.department ?? ""} onChange={(e) => set("department")(e.target.value)}>
                   <option value="">— Select —</option>
                   {departments.map((d) => (
                     <option key={d.id} value={d.name}>
@@ -388,18 +418,17 @@ export default function AssetForm({ editId, onSaved }: Props) {
                   type="email"
                   value={form.email_id ?? ""}
                   onChange={(e) => set("email_id")(e.target.value.toLowerCase())}
-                  disabled={isEdit}
                   placeholder="e.g. name@company.com"
                 />
               )}
             </Field>
             <Field label="Current location">
               {(c) => (
-                <Input {...c} value={form.current_location ?? ""} onChange={(e) => setUpper("current_location")(e.target.value)} disabled={isEdit} />
+                <Input {...c} value={form.current_location ?? ""} onChange={(e) => setUpper("current_location")(e.target.value)} />
               )}
             </Field>
             <Field label="Handover date">
-              {() => <DateInput value={form.handover_date ?? ""} onChange={set("handover_date")} withPicker disabled={isEdit} />}
+              {() => <DateInput value={form.handover_date ?? ""} onChange={set("handover_date")} withPicker />}
             </Field>
 
             {/* When the holder or the configuration changes while editing,
@@ -426,20 +455,28 @@ export default function AssetForm({ editId, onSaved }: Props) {
             )}
           </FormSection>
 
+          {showPurchase && (
           <FormSection title="Purchase">
+            {vis("purchase_invoice_no") && (
             <Field label="Purchase invoice No.">
               {(c) => (
-                <Input {...c} value={form.purchase_invoice_no ?? ""} onChange={(e) => setUpper("purchase_invoice_no")(e.target.value)} disabled={isEdit} placeholder="e.g. INV-2025-8841" />
+                <Input {...c} value={form.purchase_invoice_no ?? ""} onChange={(e) => setUpper("purchase_invoice_no")(e.target.value)} placeholder="e.g. INV-2025-8841" />
               )}
             </Field>
+            )}
+            {vis("purchase_invoice_date") && (
             <Field label="Purchase invoice date">
-              {() => <DateInput value={form.purchase_invoice_date ?? ""} onChange={set("purchase_invoice_date")} withPicker disabled={isEdit} />}
+              {() => <DateInput value={form.purchase_invoice_date ?? ""} onChange={set("purchase_invoice_date")} withPicker />}
             </Field>
+            )}
+            {vis("vendor") && (
             <Field label="Vendor" hint="Supplier the device was bought from">
               {(c) => (
-                <Input {...c} value={form.vendor ?? ""} onChange={(e) => setUpper("vendor")(e.target.value)} disabled={isEdit} placeholder="e.g. COMPUTECH SOLUTIONS" />
+                <Input {...c} value={form.vendor ?? ""} onChange={(e) => setUpper("vendor")(e.target.value)} placeholder="e.g. COMPUTECH SOLUTIONS" />
               )}
             </Field>
+            )}
+            {vis("amount") && (
             <Field label="Amount (₹)">
               {(c) => (
                 <Input
@@ -449,16 +486,19 @@ export default function AssetForm({ editId, onSaved }: Props) {
                   step="0.01"
                   value={form.amount as string}
                   onChange={(e) => set("amount")(e.target.value)}
-                  disabled={isEdit}
                 />
               )}
             </Field>
+            )}
           </FormSection>
+          )}
 
           <FormSection title="Maintenance">
+            {vis("date_of_last_service") && (
             <Field label="Date of last service">
               {() => <DateInput value={form.date_of_last_service ?? ""} onChange={set("date_of_last_service")} withPicker />}
             </Field>
+            )}
             <Field label="Working status">
               {(c) => (
                 <Select
@@ -474,6 +514,7 @@ export default function AssetForm({ editId, onSaved }: Props) {
                 </Select>
               )}
             </Field>
+            {vis("remarks") && (
             <Field label="Remarks" span="full">
               {(c) => (
                 <Textarea
@@ -484,6 +525,7 @@ export default function AssetForm({ editId, onSaved }: Props) {
                 />
               )}
             </Field>
+            )}
           </FormSection>
 
           <FormActions>
@@ -491,6 +533,12 @@ export default function AssetForm({ editId, onSaved }: Props) {
               <HiOutlineCheckCircle aria-hidden="true" />
               {busy ? "Saving…" : isEdit ? "Update asset" : "Save asset"}
             </Button>
+            {isEdit && onAdd && (
+              <Button variant="secondary" onClick={onAdd} disabled={busy}>
+                <HiOutlinePlus className="text-brand" aria-hidden="true" />
+                Add assets
+              </Button>
+            )}
           </FormActions>
         </div>
       )}

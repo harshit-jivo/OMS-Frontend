@@ -73,9 +73,22 @@ describe("AppSidebar", () => {
   });
 
   it("gates a link on `gate` where it differs from `to`", () => {
-    // The two SAP reports sit under the Reports grant but are billing-only,
-    // so their links follow /Sales_Invoice instead of their own path.
+    // Open SO sits under the Reports grant but is billing-only, so its link
+    // follows /Sales_Invoice instead of its own path. (Inventory Report used to
+    // share this treatment; it now carries its own `Inventory_Report` key and
+    // its link follows its own route — see the case below.)
     renderRail({ canShow: (path) => path === "/Sales_Invoice" });
+
+    expect(screen.getByRole("link", { name: "Open SO" })).toHaveAttribute(
+      "href",
+      "/SO_Invoice_Report",
+    );
+  });
+
+  it("shows Inventory Report on its own key, not the billing gate", () => {
+    // The split gave it a dedicated `Inventory_Report` route, so the link
+    // follows that route — a holder of the key who is not billing still sees it.
+    renderRail({ canShow: (path) => path === "/Inventory_Report" });
 
     expect(screen.getByRole("link", { name: "Inventory Report" })).toHaveAttribute(
       "href",

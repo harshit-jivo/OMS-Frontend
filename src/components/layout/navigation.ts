@@ -11,9 +11,11 @@
  * is how a mart user ends up with a two-section sidebar without any
  * role-specific markup.
  *
- * `gate` overrides the visibility path for the two SAP reports that are
- * billing-only even though their routes sit under the Reports grant — the
- * pages themselves bounce anyone else, so the links follow /Sales_Invoice.
+ * `gate` overrides the visibility path for Open SO, a billing-only SAP report
+ * whose route sits under the Reports grant — the page itself bounces anyone
+ * else, so the link follows /Sales_Invoice. (Inventory Report used to share
+ * this treatment; it now carries its own `Inventory_Report` key and so needs
+ * no override — its link follows its own route.)
  *
  * To add a page: add a route + routeAccess entry, then one line here.
  *
@@ -30,6 +32,7 @@ import type { ComponentType } from "react";
 import {
   HiOutlineAdjustmentsHorizontal,
   HiOutlineArchiveBox,
+  HiOutlineArchiveBoxXMark,
   HiOutlineArrowPath,
   HiOutlineBanknotes,
   HiOutlineBeaker,
@@ -128,7 +131,8 @@ export const SIDEBAR_SECTIONS: SidebarSectionDef[] = [
       { to: "/Billing_status_tracking", label: "Billing Tracking", icon: HiOutlineCurrencyRupee },
       { to: "/Rate_Approver_orders", label: "Approver Queue", icon: HiOutlineCheckBadge },
       { to: "/Rate_Approver_status_tracking", label: "Approver Tracking", icon: HiOutlineCheckCircle },
-      { to: "/Mart_Approval", label: "Mart Approval", icon: HiOutlineShoppingCart },
+      { to: "/Mart_Approval", label: "Orders", icon: HiOutlineShoppingCart },
+      { to: "/Mart_Cancel", label: "SO Cancel", icon: HiOutlineArchiveBoxXMark },
       // Both were reachable only by typing the URL — admin-only routes with no
       // link anywhere, so they were absent from the rail AND from /Home, which
       // builds its tiles from this same table.
@@ -165,7 +169,11 @@ export const SIDEBAR_SECTIONS: SidebarSectionDef[] = [
       { to: "/PersonWise_Report", label: "Person Wise", icon: HiOutlineUserCircle },
       { to: "/Sales_Report", label: "Sales Report", icon: HiOutlineChartBar },
       { to: "/StateWise_Report", label: "State Wise", icon: HiOutlineMap },
-      { to: "/Inventory_Report", label: "Inventory Report", icon: HiOutlineArchiveBox, gate: "/Sales_Invoice" },
+      // No `gate`: unlike Open SO below, this page now carries its own
+      // `Inventory_Report` key, so the link should show to exactly whoever can
+      // open the route (the key holders plus billing) — which is what a bare
+      // `to`-based visibility check does.
+      { to: "/Inventory_Report", label: "Inventory Report", icon: HiOutlineArchiveBox },
       // Was a section of its own called "Stock", holding this one link. It is
       // a report — HANA stock beside open-order demand — and a section with
       // one link in it reads as a module the app does not have. It sits next
@@ -173,6 +181,7 @@ export const SIDEBAR_SECTIONS: SidebarSectionDef[] = [
       // warehouse-wise from SAP, this one is per party and per product.
       { to: "/Product_Stock", label: "Product Stock", icon: HiOutlineCube },
       { to: "/SO_Invoice_Report", label: "Open SO", icon: HiOutlineFolderOpen, gate: "/Sales_Invoice" },
+      { to: "/Distributor_Report", label: "Distributor Report", icon: HiOutlineUserGroup },
     ],
   },
   {
@@ -186,8 +195,8 @@ export const SIDEBAR_SECTIONS: SidebarSectionDef[] = [
   {
     label: "Distributor",
     links: [
-      { to: "/Distributor", label: "Distributor", icon: HiOutlineBuildingStorefront },
-      { to: "/Distributor_Order_Tracking", label: "Order Tracking", icon: HiOutlineMapPin },
+      { to: "/Distributor", label: "Create Order", icon: HiOutlineBuildingStorefront },
+      { to: "/Distributor_Order_Tracking", label: "View Orders", icon: HiOutlineMapPin },
     ],
   },
   {
