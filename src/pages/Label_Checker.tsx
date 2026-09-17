@@ -7,9 +7,11 @@ import {
   HiOutlineArrowUpTray,
   HiOutlineBeaker,
   HiOutlineCheckCircle,
+  HiOutlineChevronDown,
   HiOutlineClipboardDocument,
   HiOutlineExclamationTriangle,
   HiOutlineInformationCircle,
+  HiOutlineScale,
   HiOutlineShieldCheck,
 } from "react-icons/hi2";
 import { apiFetch, apiUpload, resolveApiUrl } from "./SalesInvoice/useSalesInvoice";
@@ -17,6 +19,12 @@ import { API_ORIGIN } from "../services/apiPaths";
 import MarkdownReport from "../components/legal/MarkdownReport";
 import FindingsChecklist from "../components/legal/FindingsChecklist";
 import LabelImage from "../components/legal/LabelImage";
+import PackageDimensions, {
+  appendPackageForm,
+  EMPTY_PACKAGE_FORM,
+  isPackageFormActive,
+  type PackageForm,
+} from "../components/legal/PackageDimensions";
 import {
   buildReportMarkdown,
   summarise,
@@ -118,6 +126,12 @@ export default function LabelChecker() {
   const [error, setError] = useState("");
   const [stepIndex, setStepIndex] = useState(0);
   const [itemId, setItemId] = useState("");
+  // The dimensional panel. Kept between checks rather than reset with the
+  // file: a reviewer working through a pack's artwork revisions is measuring
+  // the same pack each time, and re-typing the circumference for every
+  // upload is the fastest way to make them stop filling it in at all.
+  const [packageForm, setPackageForm] = useState<PackageForm>(EMPTY_PACKAGE_FORM);
+  const [dimensionsOpen, setDimensionsOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [view, setView] = useState<"report" | "text">("report");
@@ -233,6 +247,9 @@ export default function LabelChecker() {
       body.append("label_file", file);
       // Optional: it only adds the nutrition panel to compare against.
       if (itemId) body.append("item_id", itemId);
+      // Sends nothing at all unless a shape was chosen, so an untouched panel
+      // leaves this request identical to the ones sent before it existed.
+      appendPackageForm(body, packageForm);
       const data = await apiUpload<LabelReport>(UPLOAD_URL, body, "POST");
       if (!data) throw new Error("The server returned an empty response.");
       setReport(data);
@@ -464,9 +481,71 @@ export default function LabelChecker() {
         ) : null}
       </FilterBar>
 
+      {/* The dimensional panel.
+
+          Collapsed by default and never required. The five measurement rules
+          are computed from what is entered here (`legal/dimensions.py`); an
+          untouched panel means they are SKIPPED with that reason on the
+          report, not failed — so a reviewer who ignores this section gets
+          exactly the check they got before it existed. The summary line is
+          what tells them the section is doing something when it is closed. */}
+      <Card className="p-0">
+        <button
+          type="button"
+          onClick={() => setDimensionsOpen((open) => !open)}
+          aria-expanded={dimensionsOpen}
+          className="flex w-full items-center gap-2.5 px-4 py-3 text-left"
+        >
+          <HiOutlineScale aria-hidden="true" className="size-4 text-subtle" />
+          <span className="text-[13px] font-medium text-ink">
+            Package &amp; logo dimensions
+          </span>
+          <span className="text-[12px] text-subtle">
+            {isPackageFormActive(packageForm)
+              ? "Dimensional checks will run"
+              : "Optional — skipped unless a package shape is chosen"}
+          </span>
+          <HiOutlineChevronDown
+            aria-hidden="true"
+            className={cn(
+              "ml-auto size-4 shrink-0 text-subtle transition-transform",
+              dimensionsOpen && "rotate-180",
+            )}
+          />
+        </button>
+        {dimensionsOpen ? (
+          <div className="border-t border-line p-4">
+            <PackageDimensions
+              value={packageForm}
+              onChange={setPackageForm}
+              disabled={isAnalysing}
+            />
+          </div>
+        ) : null}
+      </Card>
+
       {error ? (
         <Notice tone="bad" title="The check did not finish">
           {error}
+        </Notice>
+      ) : null}
+
+      {/* Rules that did not apply to this pack — not failures, and not shown
+          as any. An unfortified product was never asked the fortification
+          rules; saying so is what stops the gap between "26 rules" and "21
+          checked" reading as a bug. */}
+      {status === "done" && (report?.skipped?.length ?? 0) > 0 ? (
+        <Notice
+          tone="info"
+          title={`Not checked (${report?.skipped?.length})`}
+        >
+          <ul className="m-0 list-none space-y-1 p-0">
+            {report?.skipped?.map((rule) => (
+              <li key={rule.rule_id}>
+                <span className="font-medium">{rule.rule_name}</span> — {rule.reason}
+              </li>
+            ))}
+          </ul>
         </Notice>
       ) : null}
 
