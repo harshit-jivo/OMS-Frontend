@@ -694,10 +694,30 @@ export default function RateApproverOrders() {
                     }`}
                     span="full"
                   />
+                  <DetailField
+                    label="Punched by"
+                    value={
+                      orderDetails.created_by_name || String(orderDetails.created_by ?? "")
+                    }
+                  />
+                  <DetailField
+                    label="Punched at"
+                    value={formatCreatedDateTime(orderDetails.created_at)}
+                  />
+                  <DetailField label="Current stage" value={orderDetails.status_display} />
                   <DetailField label="Party state" value={orderDetails.party_state} />
                   <DetailField label="Delivery date" value={orderDetails.delivery_date} />
-                  <DetailField label="PO number" value={orderDetails.po_number} />
-                  <DetailField label="Current stage" value={orderDetails.status_display} />
+                  <DetailField label="PO number" value={orderDetails.po_number} hideWhenEmpty />
+                  <DetailField
+                    label="Warehouse"
+                    value={orderDetails.warehouse_code}
+                    hideWhenEmpty
+                  />
+                  <DetailField
+                    label="Dispatch from"
+                    value={orderDetails.dispatch_from_name}
+                    hideWhenEmpty
+                  />
                   <DetailField
                     label="Bill to"
                     value={orderDetails.bill_to_address}
