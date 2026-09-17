@@ -1320,7 +1320,7 @@ export default function Distributor_Order_Tracking() {
               <DialogBody className="space-y-4">
                 <DetailGrid>
                   <DetailField
-                    label="Created by"
+                    label="Punched by"
                     value={selectedOrder.created_by_name || String(selectedOrder.created_by ?? "")}
                   />
                   <DetailField

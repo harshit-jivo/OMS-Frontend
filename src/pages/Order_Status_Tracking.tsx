@@ -152,6 +152,9 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
   // The rate approver hands off rather than moving an order along a queue, so
   // there is no per-order progress trail to open from its rows.
   const showTrackAction = mode !== "rate_approver";
+  // Rate-approver rows get colour-coded action icons (view = brand, download =
+  // green); the other tracking modes keep the plain ghost buttons.
+  const isRateApprover = mode === "rate_approver";
 
   /*
    * `mode` is part of the query key — this page is mounted three times under

@@ -669,7 +669,7 @@ function MartApproval() {
                   span="full"
                 />
                 <DetailField
-                  label="Created by"
+                  label="Punched by"
                   value={detailOrder.created_by_name || String(detailOrder.created_by ?? "")}
                 />
                 <DetailField label="Current stage" value={detailOrder.status_display} />
