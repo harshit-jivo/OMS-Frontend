@@ -508,7 +508,7 @@ export default function RateApproverOrders() {
                               onClick={() => downloadExcel(order)}
                               aria-label={`Download order ${order.order_number}`}
                               title="Download order"
-                              className="text-sky-600"
+                              className="text-emerald-600"
                             >
                               <HiOutlineArrowDownTray aria-hidden="true" />
                             </Button>
