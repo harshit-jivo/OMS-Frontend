@@ -72,7 +72,7 @@ import FieldError from "./FieldError";
 import ProblemSummary from "./ProblemSummary";
 import WarehouseField from "./WarehouseField";
 import { stepOneComplete, stepThreeComplete } from "./orderHeaderSchema";
-import { FOC_TOKEN_BASIC_PRICE, computeLandingPrice } from "./rowTotals";
+import { FOC_TOKEN_BASIC_PRICE } from "./rowTotals";
 import { PICKER_FACETS, type PickerFacet, type SalesOrderForm } from "./useSalesOrderForm";
 import { createEmptyRow, type SalesRow } from "../salesOrderRow";
 
@@ -269,7 +269,10 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
         item: product.item_name,
         pcs: String(product.sal_factor2 ?? ""),
         tax: String(getProductTaxRate(product)),
-        // Basic Price = pre-tax basic rate; Landing = basic + tax%.
+        // Both columns start from the party's agreed rate (pre-tax). Basic Price
+        // is then editable — that is the discount. Price List keeps the agreed
+        // rate so the two can be compared, and so the SAP fallback reads a
+        // pre-tax rate. See the note in `recalculateRowTotals`.
         basicPrice:
           isFocOrder || product.basic_rate == null
             ? isFocOrder
@@ -278,7 +281,9 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
             : String(product.basic_rate),
         priceListBasic: isFocOrder
           ? "0"
-          : computeLandingPrice(product.basic_rate, getProductTaxRate(product)),
+          : product.basic_rate == null
+            ? ""
+            : String(product.basic_rate),
         qty: "",
         ltrs: "",
         boxes: "",

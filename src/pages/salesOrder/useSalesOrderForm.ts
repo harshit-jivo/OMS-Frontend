@@ -52,7 +52,6 @@ import { NO_PROBLEMS, hasProblems, orderProblems } from "./orderProblems";
 import {
   FOC_TOKEN_BASIC_PRICE,
   applyFocPricingToRow,
-  computeLandingPrice,
   recalculateRowTotals as recalculateRowTotalsFor,
 } from "./rowTotals";
 
@@ -654,10 +653,11 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
             qty: valueToString(item.qty),
             ltrs: valueToString(item.ltrs),
             boxes: valueToString(item.boxes),
-            // Price List comes back as SAVED. It used to be recomputed here as
-            // basic + tax%, which meant reopening an order showed the landing
-            // price of the operator's own Basic Price instead of the party's
-            // agreed rate — the same overwrite the create side had.
+            // Show the Price List the order was actually saved with rather than
+            // recomputing one. This line's agreed rate is a fact about the day
+            // it was placed; re-deriving it here would overwrite it on any
+            // subsequent save, and a later edit to the party's rate would
+            // silently reprice an order that had already been approved.
             basicPrice: valueToString(item.basic_price),
             priceListBasic: valueToString(item.price_list_basic),
             tax: valueToString(item.tax_rate),
@@ -1522,22 +1522,22 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
         row.type = match ? `${match[1]} ${match[2].toUpperCase()}` : "Others";
         row.pcs = String(partyProduct.sal_factor2 ?? "");
         row.tax = String(getProductTaxRate(partyProduct));
-        // Basic Price = the product's basic rate (pre-tax). Landing Price is that
-        // rate plus tax. Both must fill on select — the Basic column was blank
-        // before because only Landing (priceListBasic) was being set.
+        // Both columns start from the party's AGREED RATE (pre-tax). Basic Price
+        // is then editable — that is the discount; Price List keeps the agreed
+        // rate so it stays the benchmark the line is measured against. It must
+        // NOT be derived from `row.basicPrice`: see the note in
+        // `recalculateRowTotals`.
         row.basicPrice =
           isFocOrder || partyProduct.basic_rate == null
             ? isFocOrder
               ? FOC_TOKEN_BASIC_PRICE
               : ""
             : String(partyProduct.basic_rate);
-        // Anchored to the party's agreed rate, not to `row.basicPrice`. They are
-        // equal at this instant (basicPrice was just seeded from basic_rate
-        // above), but reading basic_rate directly keeps the column tied to the
-        // party reference rather than to whatever the operator types next.
         row.priceListBasic = isFocOrder
           ? "0"
-          : computeLandingPrice(partyProduct.basic_rate, row.tax);
+          : partyProduct.basic_rate == null
+            ? ""
+            : String(partyProduct.basic_rate);
         void fetchSchemesForRow(row.uid, true);
       } else {
         void fetchSchemesForRow(row.uid, false);
