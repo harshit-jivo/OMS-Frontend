@@ -1476,8 +1476,18 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
 
   /** `rowTotals.recalculateRowTotals`, with the product and the FOC flag this
    *  form already knows filled in. */
-  const recalculateRowTotals = (row: SalesRow, source: "boxes" | "qty" | "price") =>
-    recalculateRowTotalsFor(row, source, getRowProduct(row), isFocOrder);
+  const recalculateRowTotals = (row: SalesRow, source: "boxes" | "qty" | "price") => {
+    const next = recalculateRowTotalsFor(row, source, getRowProduct(row), isFocOrder);
+    // Wizard-only: Price List shows the item's set rate AS-IS (the party's
+    // pre-tax basic_rate), so pin it back to that instead of the tax-inclusive
+    // landing figure the shared helper recomputes on every Qty/Basic Price
+    // keystroke. The legacy form keeps the landing behaviour untouched.
+    if (useWizard && !isFocOrder) {
+      const product = getRowProduct(row);
+      if (product?.basic_rate != null) next.priceListBasic = String(product.basic_rate);
+    }
+    return next;
+  };
 
   const handleRowChange = (
     index: number,

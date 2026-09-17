@@ -1,10 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
-import { startExcelExport, startOrderReportExport } from "../utils/excelExport";
-import type { OrderReportData } from "../utils/excelExport";
+import { startExcelExport } from "../utils/excelExport";
 import {
-  getOrderItemSchemeNames,
-  getOrderItemSchemes,
-  getOrderItemSchemeQtyText,
   getOrderItemTotalLtrs,
   ordersService,
 } from "../services/ordersService";
@@ -12,13 +8,11 @@ import type {
   OrderItem,
   Order,
   OrderLog,
-  PartyProduct,
   QuotationStatus,
 } from "../services/ordersService";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { useAssignedParties, useCurrentUserOrders, useOrderStatuses } from "../lib/orderQueries";
-import { useUILabels } from "../services/uiConfig";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   HiOutlineEye, // View
@@ -97,11 +91,6 @@ const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().sp
 // Last day of current month
 const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString().split("T")[0];
 
-type ItemFilterOption = {
-  itemCode: string;
-  itemName: string;
-};
-
 const formatCreatedDateTime = (value?: string | null) => {
   if (!value) return "-";
   const parsed = new Date(value);
@@ -127,15 +116,6 @@ const VARIETY_TONE: Record<string, "info" | "note" | "neutral"> = {
   Premium: "note",
   Other: "neutral",
 };
-
-/** `item.variety_type` arrives as SAP's uppercase key (PREMIUM / COMMODITY). */
-const titleCaseVariety = (value: string): string => {
-  const text = String(value).trim().toLowerCase();
-  return text ? text.charAt(0).toUpperCase() + text.slice(1) : "";
-};
-
-const varietyBadgeTone = (value: string): "info" | "note" | "neutral" =>
-  VARIETY_TONE[titleCaseVariety(value)] ?? "neutral";
 
 const isRejectedOrder = (order: Pick<Order, "status_display">) =>
   String(order.status_display || "")
@@ -175,7 +155,6 @@ export default function View_Orders({
 }: {
   distributor?: boolean;
 } = {}) {
-  const { t } = useUILabels();
   const location = useLocation();
   const navigate = useNavigate();
   // Shared with both Order_Tracking pages — one key, so moving between them
@@ -201,9 +180,6 @@ export default function View_Orders({
   const [trackLoading, setTrackLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState("");
   const [partyFilter, setPartyFilter] = useState("");
-  const [itemFilter, setItemFilter] = useState("");
-  const [partyItems, setPartyItems] = useState<PartyProduct[]>([]);
-  const [isLoadingItems, setIsLoadingItems] = useState(false);
   const [fromDate, setFromDate] = useState(firstDay);
   const [toDate, setToDate] = useState(lastDay);
   const [currentPage, setCurrentPage] = useState(1);
@@ -255,43 +231,6 @@ export default function View_Orders({
       setTrackLoading(false);
     }
   };
-
-  useEffect(() => {
-    let isCancelled = false;
-
-    const fetchPartyItems = async () => {
-      if (!partyFilter) {
-        setPartyItems([]);
-        setItemFilter("");
-        return;
-      }
-
-      setIsLoadingItems(true);
-      setItemFilter("");
-
-      try {
-        const data = await ordersService.getPartyProduct(partyFilter);
-        if (isCancelled) return;
-
-        setPartyItems(Array.isArray(data) ? data : []);
-      } catch (error) {
-        console.log("Error fetching party items:", error);
-        if (!isCancelled) {
-          setPartyItems([]);
-        }
-      } finally {
-        if (!isCancelled) {
-          setIsLoadingItems(false);
-        }
-      }
-    };
-
-    fetchPartyItems();
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [partyFilter]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -436,38 +375,12 @@ export default function View_Orders({
     }
   };
 
-  const itemOptions = useMemo<ItemFilterOption[]>(() => {
-    const uniqueItems = new Map<string, ItemFilterOption>();
-
-    partyItems.forEach((item) => {
-      const itemCode = String(item.item_code || "").trim();
-      const itemName = String(item.item_name || "").trim();
-      const key = itemCode || itemName;
-
-      if (!key) return;
-
-      uniqueItems.set(key, {
-        itemCode,
-        itemName: itemName || itemCode,
-      });
-    });
-
-    return Array.from(uniqueItems.values()).sort((a, b) => a.itemName.localeCompare(b.itemName));
-  }, [partyItems]);
-
   const filteredOrders = orders.filter((order) => {
     const matchStatus = statusFilter ? order.status_display === statusFilter : true;
     let matchDate = true;
 
     const matchParty = partyFilter
       ? order.card_code === partyFilter || order.card_name === partyFilter
-      : true;
-    const matchItem = itemFilter
-      ? Boolean(
-          order.items?.some(
-            (item) => item.item_code === itemFilter || item.item_name === itemFilter,
-          ),
-        )
       : true;
 
     if (fromDate && toDate) {
@@ -478,7 +391,7 @@ export default function View_Orders({
       matchDate = orderDate >= from && orderDate <= to;
     }
 
-    return matchStatus && matchDate && matchParty && matchItem;
+    return matchStatus && matchDate && matchParty;
   });
 
   const totalPages = Math.max(1, Math.ceil(filteredOrders.length / itemsPerPage));
@@ -523,68 +436,28 @@ export default function View_Orders({
   // Raw values only — exportToExcel infers the Excel type per column, so dates
   // stay dates and money stays numeric and summable.
   const buildOrderRows = (order: Order): Record<string, unknown>[] => {
-    // If no items → still export the order header on its own.
-    if (!order.items || order.items.length === 0) {
-      return [
-        {
-          "Order Number": order.order_number,
-          "Card Code": order.card_code,
-          "Card Name": order.card_name,
-          "Delivery Date": order.delivery_date,
-          Status: order.status_display,
-          "Bill To": order.bill_to_address,
-          "Ship To": order.ship_to_address,
-          "Price List (Basic)": "",
-          "Basic Price": "",
-        },
-      ];
+    // Mart-format sheet: one item-focused row per line, matching the Mart
+    // Approval download so orders export the same way everywhere.
+    const items = order.items ?? [];
+    if (items.length === 0) {
+      return [{ "Order Number": order.order_number }];
     }
 
-    return order.items.map((item: OrderItem) => ({
+    return items.map((item: OrderItem) => ({
       "Order Number": order.order_number,
-      "Card Code": order.card_code,
-      "Card Name": order.card_name,
-      "Delivery Date": order.delivery_date,
-      Status: order.status_display,
-      "Bill To": order.bill_to_address,
-      "Ship To": order.ship_to_address,
       "Item Code": item.item_code,
-      "Item Name": item.item_name,
-      Scheme: getOrderItemSchemeNames(item),
-      "Scheme Qty": getOrderItemSchemeQtyText(item),
-      Qty: item.qty,
-      Boxes: item.boxes,
-      Liters: item.ltrs,
+      Product: item.item_name,
+      Category: item.category,
+      Qty: Number(item.qty),
+      Pcs: Number(item.pcs),
+      Boxes: Number(item.boxes),
+      Ltrs: Number(item.ltrs),
       "Total Ltrs": getOrderItemTotalLtrs(item),
-      "Price List (Basic)": item.price_list_basic,
-      "Basic Price": item.basic_price,
-      "Total Amount": item.total,
+      "Basic Price": Number(item.basic_price),
+      "Tax %": Number(item.tax_rate),
+      Amount: Number(item.total),
     }));
   };
-
-  // Map an order to the styled single-order report layout (the distributor
-  // "attachment" format): header block, navy columns, lines, totals.
-  const toOrderReport = (order: Order): OrderReportData => ({
-    order_number: order.order_number,
-    card_name: order.card_name,
-    card_code: order.card_code,
-    bill_to_address: order.bill_to_address,
-    ship_to_address: order.ship_to_address,
-    items: (order.items || []).map((item) => ({
-      item_code: item.item_code,
-      item_name: item.item_name,
-      scheme: getOrderItemSchemeNames(item),
-      scheme_qty: getOrderItemSchemeQtyText(item),
-      qty: Number(item.qty) || 0,
-      boxes: Number(item.boxes) || 0,
-      liters: Number(item.ltrs) || 0,
-      total_ltrs: getOrderItemTotalLtrs(item),
-      price_list_basic: Number(item.price_list_basic) || 0,
-      basic_price: Number(item.basic_price) || 0,
-      total: Number(item.total) || 0,
-      tax_rate: Number(item.tax_rate) || 0,
-    })),
-  });
 
   // Which company's Crystal layout a SO report renders through. Distributor
   // orders are always company 3 (Mart) today, but the mapping is company-driven
@@ -664,15 +537,11 @@ export default function View_Orders({
       if (details) full = details;
     }
 
-    // Distributors get the styled, print-like report everywhere they download;
-    // staff keep the flat, sortable table export.
-    if (distributor) {
-      startOrderReportExport(toOrderReport(full), `Order_${full.order_number}.xlsx`);
-      return;
-    }
+    // Every download — staff and distributor alike — uses the Mart order
+    // sheet, so an order exports the same way wherever it is opened.
     startExcelExport(buildOrderRows(full), {
       fileName: `Order_${full.order_number}.xlsx`,
-      sheetName: "Order Details",
+      sheetName: "Order",
     });
   };
   return (
@@ -760,7 +629,6 @@ export default function View_Orders({
                 value={partyFilter}
                 onChange={(e) => {
                   setPartyFilter(e.target.value);
-                  setItemFilter("");
                   setCurrentPage(1);
                 }}
               >
@@ -775,39 +643,6 @@ export default function View_Orders({
                   </option>
                 ))}
               </FilterSelect>
-
-            {/* The Item filter is hidden for distributors — their party is
-                fixed, so "Select Party First" never resolves and the filter is
-                dead weight. Staff keep it. */}
-            {!distributor ? (
-              <FilterSelect
-                label="Item"
-                icon={HiCube}
-                value={itemFilter}
-                disabled={!partyFilter || isLoadingItems}
-                onChange={(e) => {
-                  setItemFilter(e.target.value);
-                  setCurrentPage(1);
-                }}
-              >
-                <option value="">
-                  {partyFilter
-                    ? isLoadingItems
-                      ? "Loading Items..."
-                      : "All Items"
-                    : "Select Party First"}
-                </option>
-                {itemOptions.map((item) => (
-                  <option
-                    key={item.itemCode || item.itemName}
-                    value={item.itemCode || item.itemName}
-                  >
-                    {item.itemName}
-                    {item.itemCode ? ` (${item.itemCode})` : ""}
-                  </option>
-                ))}
-              </FilterSelect>
-            ) : null}
 
             <FilterDate
               label="From"
@@ -828,7 +663,7 @@ export default function View_Orders({
                 }}
               />
 
-            {(statusFilter || partyFilter || itemFilter) && (
+            {(statusFilter || partyFilter) && (
               <FilterActions>
                 <Button
                   size="sm"
@@ -836,7 +671,6 @@ export default function View_Orders({
                   onClick={() => {
                     setStatusFilter("");
                     setPartyFilter("");
-                    setItemFilter("");
                     setCurrentPage(1);
                   }}
                 >
@@ -1174,114 +1008,11 @@ export default function View_Orders({
                 Commodity / Others accordions of cards — so every line appeared
                 twice on the page. The variety it grouped by is a column here
                 instead. It stays in use on five other order screens. */}
-            {distributor ? (
-              /* Distributor view: one CARD per line item (shared with the Mart
-                 Approval detail, so the same order looks identical wherever it
-                 is opened) instead of a wide table. */
-              <OrderItemCards items={selectedItems} />
-            ) : (
-              <div className="overflow-x-auto">
-                <Table density="compact">
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>#</TableHead>
-                      <TableHead>Item Code</TableHead>
-                      <TableHead className="min-w-[250px]">Item Name</TableHead>
-                      <TableHead>Category</TableHead>
-                      <TableHead>Variety</TableHead>
-                      <TableHead>Scheme</TableHead>
-                      <TableHead>Scheme Qty</TableHead>
-                      <TableHead>Qty</TableHead>
-                      <TableHead>Pcs</TableHead>
-                      <TableHead>Boxes</TableHead>
-                      <TableHead>Ltrs</TableHead>
-                      {/* <TableHead>Scheme Ltrs</TableHead> */}
-                      <TableHead>Total Ltrs</TableHead>
-                      <TableHead>{t("price_list", "Price List (Basic)")}</TableHead>
-                      <TableHead>Basic Price</TableHead>
-                      <TableHead>Tax %</TableHead>
-                      <TableHead className="text-right">Amount</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {selectedItems.length > 0 ? (
-                      selectedItems.map((item, i) => {
-                        const schemes = getOrderItemSchemes(item);
-
-                        return (
-                          <TableRow key={i}>
-                            <TableCell className="text-center text-subtle">
-                              {i + 1}
-                            </TableCell>
-                            <TableCell>
-                              <span className="font-medium whitespace-nowrap text-ink">{item.item_code}</span>
-                            </TableCell>
-                            <TableCell className="min-w-[250px] font-medium text-ink">
-                              {item.item_name}
-                            </TableCell>
-                            <TableCell>{item.category}</TableCell>
-                            <TableCell>
-                              {item.variety_type ? (
-                                <Badge tone={varietyBadgeTone(item.variety_type)}>
-                                  {titleCaseVariety(item.variety_type)}
-                                </Badge>
-                              ) : (
-                                <span className="text-subtle">-</span>
-                              )}
-                            </TableCell>
-                            <TableCell colSpan={2}>
-                              {schemes.length > 0 ? (
-                                <div className="flex flex-col gap-1" aria-label="Applied schemes">
-                                  {schemes.map((scheme, schemeIndex) => (
-                                    <div
-                                      className="flex items-baseline gap-1.5 text-[12px]"
-                                      key={`${item.item_code}-scheme-${schemeIndex}`}
-                                    >
-                                      <span className="text-ink">{scheme.name || "-"}</span>
-                                      <span className="text-subtle">Qty {scheme.qty || 0}</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              ) : (
-                                <span className="text-[12px] text-subtle">No scheme</span>
-                              )}
-                            </TableCell>
-                            <TableCell className="text-center">{item.qty}</TableCell>
-                            <TableCell className="text-center">{item.pcs}</TableCell>
-                            <TableCell className="text-center">
-                              {Number(item.boxes).toFixed(2)}
-                            </TableCell>
-                            <TableCell className="text-center">{item.ltrs}</TableCell>
-                            {/* <TableCell style={{textAlign:'center'}}>{item.scheme_name ? ((item as any).scheme_ltrs || 0) : "—"}</TableCell> */}
-                            <TableCell className="text-center">
-                              {getOrderItemTotalLtrs(item).toFixed(2)}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              {Number(item.price_list_basic).toFixed(2)}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              {Number(item.basic_price).toFixed(2)}
-                            </TableCell>
-                            <TableCell className="text-center">
-                              {Number(item.tax_rate).toFixed(2)}
-                            </TableCell>
-                            <TableCell className="text-right font-semibold text-ink">
-                              {Number(item.total).toFixed(2)}
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })
-                    ) : (
-                      <TableRow>
-                        <TableCell colSpan={15} className="py-8 text-center text-subtle">
-                          No items found
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
+            {/* One CARD per line item, with full details, for every viewer.
+                Distributor / Mart keep their leaner card (schemes hidden); the
+                staff view shows schemes too so nothing from the old wide table
+                is lost. */}
+            <OrderItemCards items={selectedItems} showSchemes={!distributor} />
           </Card>
 
           {/* The "i" order-information dialog: addresses, creator, current

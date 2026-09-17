@@ -1,5 +1,9 @@
 import { Badge } from "@/components/ui/badge";
-import { getOrderItemTotalLtrs, type OrderItem } from "@/services/ordersService";
+import {
+  getOrderItemSchemes,
+  getOrderItemTotalLtrs,
+  type OrderItem,
+} from "@/services/ordersService";
 
 /**
  * Order line items rendered as CARDS (one card per line) instead of a wide
@@ -26,7 +30,15 @@ const titleCaseVariety = (value: string): string => {
 const varietyBadgeTone = (value: string): "info" | "note" | "neutral" =>
   VARIETY_TONE[titleCaseVariety(value)] ?? "neutral";
 
-export function OrderItemCards({ items }: { items: OrderItem[] }) {
+export function OrderItemCards({
+  items,
+  showSchemes = false,
+}: {
+  items: OrderItem[];
+  /** Show the applied schemes on each card (staff / approval views). Off by
+   *  default so the distributor and Mart card layouts stay unchanged. */
+  showSchemes?: boolean;
+}) {
   if (!items.length) {
     return <p className="py-8 text-center text-subtle">No items found</p>;
   }
@@ -83,6 +95,26 @@ export function OrderItemCards({ items }: { items: OrderItem[] }) {
               </div>
             ))}
           </dl>
+
+          {/* Schemes are shown only when one was actually added to the line. */}
+          {showSchemes && getOrderItemSchemes(item).length > 0 ? (
+            <div className="mt-3 border-t border-brand/15 pt-2.5">
+              <p className="m-0 text-[10px] font-semibold uppercase tracking-wide text-subtle">
+                Scheme
+              </p>
+              <div className="mt-1 flex flex-col gap-1" aria-label="Applied schemes">
+                {getOrderItemSchemes(item).map((scheme, schemeIndex) => (
+                  <div
+                    className="flex items-baseline gap-1.5 text-[12.5px]"
+                    key={`${item.item_code}-scheme-${schemeIndex}`}
+                  >
+                    <span className="font-medium text-ink">{scheme.name || "-"}</span>
+                    <span className="text-subtle">Qty {scheme.qty || 0}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </div>
       ))}
     </div>

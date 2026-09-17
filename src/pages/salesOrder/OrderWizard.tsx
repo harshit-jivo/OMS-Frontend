@@ -72,7 +72,7 @@ import FieldError from "./FieldError";
 import ProblemSummary from "./ProblemSummary";
 import WarehouseField from "./WarehouseField";
 import { stepOneComplete, stepThreeComplete } from "./orderHeaderSchema";
-import { FOC_TOKEN_BASIC_PRICE, computeLandingPrice } from "./rowTotals";
+import { FOC_TOKEN_BASIC_PRICE } from "./rowTotals";
 import { PICKER_FACETS, type PickerFacet, type SalesOrderForm } from "./useSalesOrderForm";
 import { createEmptyRow, type SalesRow } from "../salesOrderRow";
 
@@ -269,16 +269,17 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
         item: product.item_name,
         pcs: String(product.sal_factor2 ?? ""),
         tax: String(getProductTaxRate(product)),
-        // Basic Price = pre-tax basic rate; Landing = basic + tax%.
-        basicPrice:
-          isFocOrder || product.basic_rate == null
-            ? isFocOrder
-              ? FOC_TOKEN_BASIC_PRICE
-              : ""
-            : String(product.basic_rate),
+        // Basic Price starts empty on the wizard — the operator types the
+        // actual selling rate themselves. (FOC still needs its token rate.)
+        basicPrice: isFocOrder ? FOC_TOKEN_BASIC_PRICE : "",
+        // Price List shows the item's set rate AS-IS (the party's basic_rate,
+        // pre-tax), not the tax-inclusive landing figure, so the operator sees
+        // the configured price to bill against.
         priceListBasic: isFocOrder
           ? "0"
-          : computeLandingPrice(product.basic_rate, getProductTaxRate(product)),
+          : product.basic_rate != null
+            ? String(product.basic_rate)
+            : "",
         qty: "",
         ltrs: "",
         boxes: "",
@@ -292,6 +293,21 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
     void fetchSchemesForRow(rows[index].uid, true);
     setIsPickingItem(false);
   };
+
+  /** The item code for a confirmed row, resolved from the party's catalogue by
+   *  name + facets (rows store the item name, not the code). "" when unknown. */
+  const itemCodeForRow = (row: SalesRow) =>
+    (
+      partyProducts.find(
+        (p) =>
+          p.item_name === row.item &&
+          p.category === row.category &&
+          (p.brand || "") === (row.brand || "") &&
+          (p.variety || "") === (row.variety || ""),
+      ) ||
+      partyProducts.find((p) => p.item_name === row.item && p.category === row.category) ||
+      partyProducts.find((p) => p.item_name === row.item)
+    )?.item_code || "";
 
   /** Distinct values of one facet, with how many products carry each. */
   const facetsOf = (list: PartyProduct[], valueOf: (product: PartyProduct) => string) => {
@@ -1448,13 +1464,15 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
           ))}
         </div>
         <div className="overflow-hidden rounded-md border border-line">
-          <div className="flex items-center justify-between border-b border-line bg-surface px-4 py-2.5">
-            <span className="text-[12px] font-bold uppercase tracking-[0.04em] text-subtle">
+          <div className="flex items-center gap-3 border-b border-line bg-surface px-4 py-2.5 text-[12px] font-bold uppercase tracking-[0.04em] text-subtle">
+            <span className="min-w-0 flex-1">
               Items
+              <span className="ml-2 rounded-full bg-surface-strong px-1.5 py-px text-[11px] normal-case text-body">
+                {visibleLineCount}
+              </span>
             </span>
-            <span className="text-[12px] font-bold uppercase tracking-[0.04em] text-subtle">
-              {visibleLineCount}
-            </span>
+            <span className="w-16 flex-none text-right">Qty</span>
+            <span className="w-28 flex-none text-right">Amount</span>
           </div>
           {/* Free lines are listed here too. This is the last screen before the
               order is saved, so it has to match what actually gets sent. */}
@@ -1464,9 +1482,12 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
                 <div className="flex items-center gap-3 border-b border-line px-4 py-2.5 last:border-b-0">
                   <strong className="min-w-0 flex-1 text-[14px] font-bold text-ink">
                     {row.item || "Item"}
+                    {itemCodeForRow(row) ? ` (${itemCodeForRow(row)})` : ""}
                   </strong>
-                  <span className="text-[12px] text-subtle">Qty {row.qty || 0}</span>
-                  <span className="text-[12px] font-bold text-ink">
+                  <span className="w-16 flex-none text-right text-[12px] text-subtle">
+                    {row.qty || 0}
+                  </span>
+                  <span className="w-28 flex-none text-right text-[12px] font-bold text-ink">
                     ₹ {Number(row.amount || 0).toFixed(2)}
                   </span>
                 </div>
@@ -1477,6 +1498,7 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
                   >
                     <strong className="min-w-0 flex-1 text-[14px] font-semibold text-body">
                       {line.itemName}
+                      {line.itemCode ? ` (${line.itemCode})` : ""}
                       <span
                         className={cn(
                           "ml-2 inline-block rounded-full px-1.5 py-px align-middle text-[11px] font-semibold",
@@ -1488,8 +1510,12 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
                         {line.kind === "combo" ? "Combo" : "Scheme"}
                       </span>
                     </strong>
-                    <span className="text-[12px] text-subtle">Qty {line.qtyLabel}</span>
-                    <span className="text-[12px] font-semibold text-body">₹ 0.00</span>
+                    <span className="w-16 flex-none text-right text-[12px] text-subtle">
+                      {line.qtyLabel}
+                    </span>
+                    <span className="w-28 flex-none text-right text-[12px] font-semibold text-body">
+                      ₹ 0.00
+                    </span>
                   </div>
                 ))}
               </Fragment>
@@ -1517,13 +1543,31 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
               </strong>
             </div>
           )}
-          <div className="flex items-start justify-between gap-4 border-t border-dashed border-line-strong pt-3">
-            <span className="flex-none text-[12px] font-semibold uppercase tracking-[0.02em] text-subtle">
-              Grand Total
-            </span>
-            <strong className="text-right text-[20px] font-bold text-brand">
-              ₹ {grandTotal.toFixed(2)}
-            </strong>
+          <div className="ml-auto flex w-full max-w-xs flex-col gap-2 rounded-md border border-line p-3.5">
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-[12px] font-semibold uppercase tracking-[0.02em] text-subtle">
+                Total Amount
+              </span>
+              <span className="text-[14px] font-semibold text-ink">
+                ₹ {totalAmount.toFixed(2)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-[12px] font-semibold uppercase tracking-[0.02em] text-subtle">
+                Tax
+              </span>
+              <span className="text-[14px] font-semibold text-ink">
+                ₹ {taxAmount.toFixed(2)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-4 border-t border-line pt-2">
+              <span className="text-[12px] font-semibold uppercase tracking-[0.02em] text-subtle">
+                Grand Total
+              </span>
+              <strong className="text-[20px] font-bold text-brand">
+                ₹ {grandTotal.toFixed(2)}
+              </strong>
+            </div>
           </div>
         </div>
       </div>
