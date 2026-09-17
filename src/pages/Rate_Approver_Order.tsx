@@ -585,15 +585,21 @@ export default function RateApproverOrders() {
             }
             actions={
               <>
-                {/* Tertiary actions are `ghost` — text and icon, no box.
-                    A page header with four bordered buttons is four boxes for
-                    two levels of importance. Only the decision this screen
-                    exists for keeps a filled button; everything else is
-                    available without competing for the eye. */}
-                <Button variant="ghost" onClick={() => setInfoOpen(true)}>
+                {/* Colour-coded header actions, matching the Mart detail:
+                    Info (blue outline), Export Excel (green filled), Reject
+                    (rose outline) and Approve (blue filled). */}
+                <Button
+                  variant="secondary"
+                  className="border-sky-300 text-sky-700 hover:border-sky-400 hover:bg-sky-50"
+                  onClick={() => setInfoOpen(true)}
+                >
                   <HiOutlineInformationCircle aria-hidden="true" /> Info
                 </Button>
-                <Button variant="ghost" onClick={() => downloadExcel(orderDetails)}>
+                <Button
+                  variant="secondary"
+                  className="border-emerald-600 bg-emerald-600 text-white hover:border-emerald-700 hover:bg-emerald-700"
+                  onClick={() => downloadExcel(orderDetails)}
+                >
                   <HiOutlineArrowDownTray aria-hidden="true" /> Export Excel
                 </Button>
                 <Button
