@@ -1,9 +1,20 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render as rtlRender, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import BackDateApproval from "./BackDate_Approval";
 import { backdateService } from "../services/backdateService";
+
+/**
+ * Both pages are ROUTED pages: they read `?requestId=` so a notification can
+ * open one entry rather than dropping the reader on the list. That needs a
+ * router in the tree, so every `render` below goes through this wrapper and
+ * the call sites stay unchanged.
+ */
+const render = (ui: React.ReactElement, route = "/") =>
+  rtlRender(<MemoryRouter initialEntries={[route]}>{ui}</MemoryRouter>);
+
 
 /**
  * The BackDate approval desk.
@@ -67,6 +78,10 @@ function stub() {
   );
   vi.spyOn(backdateService, "approvalInsights").mockResolvedValue(
     INSIGHTS as never,
+  );
+  // Only reached by a deep link to a request that is not in the list.
+  vi.spyOn(backdateService, "getRequest").mockResolvedValue(
+    request(13, "BEVERAGES") as never,
   );
   vi.spyOn(backdateService, "history").mockResolvedValue({
     actions: [],
@@ -151,6 +166,52 @@ describe("BackDateApproval", () => {
     expect(await screen.findByRole("button", { name: /^approve$/i }))
       .toBeTruthy();
     expect(screen.getByRole("button", { name: /^reject$/i })).toBeTruthy();
+  });
+
+  /**
+   * Arriving from a notification.
+   *
+   * The push says "request #13 needs your approval". Landing on the desk with
+   * forty rows and leaving the approver to find it is most of the way to not
+   * having sent the notification at all.
+   */
+  it("opens the request a notification names, ready to decide", async () => {
+    render(<BackDateApproval />, "/BackDate_Approval?requestId=13");
+
+    // The dialog opens by itself — no Details click — and because #13 is in
+    // the QUEUE, it opens with the decision available.
+    expect(await screen.findByRole("button", { name: /^approve$/i }))
+      .toBeTruthy();
+    expect(screen.getByRole("button", { name: /^reject$/i })).toBeTruthy();
+    // It never had to fetch: the row was already on screen.
+    expect(backdateService.getRequest).not.toHaveBeenCalled();
+  });
+
+  it("opens a request that is no longer in the queue, read-only", async () => {
+    // Somebody else decided it between the push and the click. Showing it
+    // without buttons is the honest answer; showing buttons that 403 is not.
+    vi.spyOn(backdateService, "getRequest").mockResolvedValue(
+      request(99, "OIL", false) as never,
+    );
+    render(<BackDateApproval />, "/BackDate_Approval?requestId=99");
+
+    await waitFor(() =>
+      expect(backdateService.getRequest).toHaveBeenCalledWith(99),
+    );
+    expect(await screen.findByText("USER099")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^approve$/i })).toBeNull();
+  });
+
+  it("ignores a request id that no longer exists", async () => {
+    // Deleted, or another user's. Nothing to show and nothing the reader can
+    // do about it, so the desk simply loads.
+    vi.spyOn(backdateService, "getRequest").mockRejectedValue(
+      new Error("not found"),
+    );
+    render(<BackDateApproval />, "/BackDate_Approval?requestId=4242");
+
+    expect(await screen.findByRole("button", { name: /^details$/i }))
+      .toBeTruthy();
   });
 
   it("shows every stage in the progress dialog, reached or not", async () => {

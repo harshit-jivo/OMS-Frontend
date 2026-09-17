@@ -65,6 +65,7 @@ import {
   TableRow,
 } from "../components/ui/table";
 import { Tab, TabList } from "../components/ui/tabs";
+import { useDeepLinkedRequest } from "./backdate/useDeepLinkedRequest";
 import { cn } from "../lib/utils";
 import {
   BACKDATE_COMPANIES,
@@ -440,7 +441,11 @@ function formatDate(value: string | null | undefined) {
 export default function BackDate() {
   const [rows, setRows] = useState<BackDateRequest[]>([]);
   const [insights, setInsights] = useState<BackDateInsights | null>(null);
-  const [loading, setLoading] = useState(false);
+  // Starts TRUE. The first fetch is fired from an effect, so a `false` here
+  // means one render claiming "loaded, nothing here" before anything has been
+  // asked for — an empty-state flash, and the reason a deep-linked request
+  // used to be looked for in a list that had not arrived yet.
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("");
   const [companyFilter, setCompanyFilter] = useState<CompanyFilter>("");
@@ -480,6 +485,15 @@ export default function BackDate() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Arriving from a notification ("your request was approved"): open that
+  // request, not just the list it is somewhere in. Opening the Entries tab
+  // first matters — the deep link can land while Create is selected, and the
+  // dialog would otherwise appear over a half-filled form.
+  useDeepLinkedRequest(rows, !loading, (request) => {
+    setTab("entries");
+    setDetail(request);
+  });
 
   const flash = (message: string) => {
     setNotice(message);
