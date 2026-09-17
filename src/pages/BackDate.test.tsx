@@ -1,9 +1,29 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render as rtlRender, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 import BackDate from "./BackDate";
 import { backdateService } from "../services/backdateService";
+
+/**
+ * Both pages are ROUTED pages: they read `?requestId=` so a notification can
+ * open one entry rather than dropping the reader on the list. That needs a
+ * router in the tree, so every `render` below goes through this wrapper and
+ * the call sites stay unchanged.
+ */
+function LocationProbe() {
+  return <span data-testid="location-search">{useLocation().search}</span>;
+}
+
+const render = (ui: React.ReactElement, route = "/") =>
+  rtlRender(
+    <MemoryRouter initialEntries={[route]}>
+      {ui}
+      <LocationProbe />
+    </MemoryRouter>,
+  );
+
 
 /**
  * The BackDate requester page.
@@ -599,6 +619,34 @@ describe("BackDate", () => {
                         "Window"]) {
       expect(screen.queryByRole("columnheader", { name: gone })).toBeNull();
     }
+  });
+
+  /**
+   * Arriving from "your request was approved".
+   *
+   * The notification names one request; the page must open THAT one. Before
+   * this, a BackDate notification had no route of its own and the click ended
+   * on the orders page — the alert arrived, and the thing it was about was
+   * unreachable from it.
+   */
+  it("opens the request a notification names", async () => {
+    render(<BackDate />, "/BackDate?requestId=11");
+
+    // No Details click: the dialog is already open on #11.
+    expect(await screen.findByText("G/L Accounts")).toBeTruthy();
+    expect(screen.getByText("USER12")).toBeTruthy();
+  });
+
+  it("consumes the link, so a refresh does not reopen what was closed", async () => {
+    render(<BackDate />, "/BackDate?requestId=11");
+    await screen.findByText("G/L Accounts");
+
+    // `?requestId=` is a one-shot instruction, not page state. Left in place,
+    // the dialog would spring back every reload and the user could not get
+    // past it.
+    await waitFor(() =>
+      expect(screen.getByTestId("location-search").textContent).toBe(""),
+    );
   });
 
   it("clears the filter from the Total card", async () => {

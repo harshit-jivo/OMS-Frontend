@@ -71,6 +71,7 @@ import {
   type StatusFilter,
   StatusFilterSelect,
 } from "./backdate/filters";
+import { useDeepLinkedRequest } from "./backdate/useDeepLinkedRequest";
 
 function formatDate(value: string | null | undefined) {
   if (!value) return "—";
@@ -91,7 +92,11 @@ export default function BackDateApproval() {
    * request can be PENDING and still not be this user's to decide.
    */
   const [actionable, setActionable] = useState<Set<number>>(new Set());
-  const [loading, setLoading] = useState(false);
+  // Starts TRUE. The first fetch is fired from an effect, so a `false` here
+  // means one render claiming "loaded, nothing here" before anything has been
+  // asked for — an empty-state flash, and the reason a deep-linked request
+  // used to be looked for in a list that had not arrived yet.
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [search, setSearch] = useState("");
@@ -143,6 +148,13 @@ export default function BackDateApproval() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Arriving from a "needs your approval" notification: open that request's
+  // detail dialog, which is the only place the decision can be made. If it is
+  // in `rows` via the queue the Approve and Reject buttons come with it; if it
+  // has since been decided by someone else it opens read-only, which is the
+  // honest answer rather than buttons that would fail.
+  useDeepLinkedRequest(rows, !loading, setDetail);
 
   const announce = (message: string) => {
     setNotice(message);

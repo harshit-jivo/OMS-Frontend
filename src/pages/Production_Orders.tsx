@@ -46,6 +46,7 @@ import {
   type ProductionInsights,
   type ProductionOrder,
 } from "../services/productionService";
+import { useDeepLinkedOrder } from "./production/useDeepLinkedOrder";
 import { fmtDate, fmtDateTime, fmtQty, orderNumber } from "./production/format";
 import {
   CompanyFilterSelect,
@@ -100,6 +101,10 @@ export default function ProductionOrders() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Arriving from a notification ("this order was approved"): open THAT order,
+  // not just the list it is somewhere in.
+  useDeepLinkedOrder(orders, !loading, setDetail);
 
   /**
    * Companies whose feed has not reported in over a day.

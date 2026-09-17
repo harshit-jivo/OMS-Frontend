@@ -4,7 +4,8 @@
  *   - receive `push` events and either relay to open tabs (in-app popup/sound)
  *     or show a desktop notification when no tab is visible;
  *   - handle `notificationclick`: focus an existing app tab (or open a new one)
- *     and deep-link to the related Sales Order;
+ *     and deep-link to the subject — a Sales Order, or any entity carried by
+ *     the reusable notification framework as `entity_type` / `entity_id`;
  *   - re-subscribe on `pushsubscriptionchange`.
  *
  * Notification handling is never duplicated: a desktop notification is shown
@@ -41,6 +42,10 @@ function parsePushData(event) {
 
 function notificationTag(data) {
   if (data.order_id) return `oms-order-${data.order_id}`;
+  // One tag per entity, so a second alert about the same request replaces the
+  // first rather than stacking — the same courtesy orders already get.
+  if (data.entity_type && data.entity_id !== undefined && data.entity_id !== null)
+    return `oms-${data.entity_type}-${data.entity_id}`;
   if (data.notification_id) return `oms-notif-${data.notification_id}`;
   return "oms-notification";
 }
@@ -124,6 +129,21 @@ self.addEventListener("notificationclick", (event) => {
   if (data.order_id) url.searchParams.set("openOrderId", String(data.order_id));
   if (data.notification_id)
     url.searchParams.set("notificationId", String(data.notification_id));
+
+  // Modules on the reusable notification framework identify their subject
+  // generically. Pass it straight through: this worker deliberately does NOT
+  // know that `backdate` means /BackDate_Approval. It cannot import the app's
+  // route map (it is un-bundled JS, and it outlives any given build), and a
+  // second copy of the routing table here would drift from the real one
+  // without anything failing loudly. The app resolves these on mount —
+  // `routeFromSearchParams` in src/utils/notificationRouting.ts, which is also
+  // where these three param names are declared.
+  if (data.entity_type && data.entity_id !== undefined && data.entity_id !== null) {
+    url.searchParams.set("entityType", String(data.entity_type));
+    url.searchParams.set("entityId", String(data.entity_id));
+    if (data.event_type) url.searchParams.set("eventType", String(data.event_type));
+  }
+
   const target = url.pathname + url.search;
 
   event.waitUntil(
