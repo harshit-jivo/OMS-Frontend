@@ -4,14 +4,11 @@ import {
   HiOutlineArrowDownTray,
   HiOutlineArrowPath,
   HiOutlineCheckCircle,
-  HiOutlineClock,
-  HiOutlineCube,
   HiOutlineEye,
   HiOutlineFunnel,
   HiOutlineInbox,
   HiOutlineInformationCircle,
   HiOutlineMagnifyingGlass,
-  HiOutlineTruck,
   HiOutlineXCircle,
   HiCube,
   HiInboxStack,
@@ -439,118 +436,6 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
           {isOrdersLoading ? (
             <TableSkeleton columns={8} label="Loading orders" />
           ) : filteredOrders.length > 0 ? (
-            isRateApprover ? (
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-                {paginatedOrders.map((order) => {
-                  const decision = getDecisionType(order, mode);
-                  const accent =
-                    decision === "accepted"
-                      ? "border-emerald-200 bg-gradient-to-br from-emerald-50 to-transparent"
-                      : decision === "rejected"
-                        ? "border-rose-200 bg-gradient-to-br from-rose-50 to-transparent"
-                        : "border-line bg-card";
-                  return (
-                    <div
-                      key={order.id}
-                      className={`flex flex-col gap-3 rounded-xl border p-4 shadow-sm transition-shadow hover:shadow-card ${accent}`}
-                    >
-                      {/* Header: order number (opens details) + party + status */}
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <button
-                            type="button"
-                            onClick={() => fetchOrderDetails(order.id)}
-                            className="cursor-pointer appearance-none truncate bg-transparent p-0 text-[15px] font-bold text-brand [font-family:inherit] hover:underline"
-                            title="View order details"
-                          >
-                            {order.order_number}
-                          </button>
-                          <p className="m-0 mt-0.5 truncate text-[13px] font-semibold text-ink">
-                            {order.card_name}
-                          </p>
-                        </div>
-                        <div className="flex flex-none flex-col items-end gap-1">
-                          <Badge tone={toneForStatus(order.status_display)}>
-                            {order.status_display || "Unknown"}
-                          </Badge>
-                          {order.is_foc ? <Badge tone="note">FOC</Badge> : null}
-                        </div>
-                      </div>
-
-                      {/* Colour-coded facts */}
-                      <div className="grid grid-cols-3 gap-2">
-                        <div className="flex items-center gap-2 rounded-lg bg-indigo-50 px-2.5 py-2">
-                          <HiOutlineCube
-                            className="size-4 flex-none text-indigo-500"
-                            aria-hidden="true"
-                          />
-                          <div className="min-w-0">
-                            <p className="m-0 text-[10px] font-semibold uppercase tracking-wide text-subtle">
-                              Items
-                            </p>
-                            <p className="m-0 text-[13px] font-bold text-ink">
-                              {order.items_count ?? order.items?.length ?? 0}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="col-span-2 flex items-center gap-2 rounded-lg bg-emerald-50 px-2.5 py-2">
-                          <HiOutlineTruck
-                            className="size-4 flex-none text-emerald-500"
-                            aria-hidden="true"
-                          />
-                          <div className="min-w-0">
-                            <p className="m-0 text-[10px] font-semibold uppercase tracking-wide text-subtle">
-                              Delivery date
-                            </p>
-                            <p className="m-0 truncate text-[13px] font-bold text-ink">
-                              {order.delivery_date || "-"}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="col-span-3 flex items-center gap-2 rounded-lg bg-amber-50 px-2.5 py-2">
-                          <HiOutlineClock
-                            className="size-4 flex-none text-amber-500"
-                            aria-hidden="true"
-                          />
-                          <div className="min-w-0">
-                            <p className="m-0 text-[10px] font-semibold uppercase tracking-wide text-subtle">
-                              Created at
-                            </p>
-                            <p className="m-0 truncate text-[13px] font-bold text-ink">
-                              {formatCreatedDateTime(order.created_at)}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Actions */}
-                      <div className="mt-auto flex items-center gap-1.5 border-t border-line pt-3">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => fetchOrderDetails(order.id)}
-                          aria-label={`View order ${order.order_number}`}
-                          title="View order"
-                          className="text-brand"
-                        >
-                          <HiOutlineEye aria-hidden="true" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => downloadExcel(order)}
-                          aria-label={`Download order ${order.order_number}`}
-                          title="Download order"
-                          className="text-sky-600"
-                        >
-                          <HiOutlineArrowDownTray aria-hidden="true" />
-                        </Button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
             <Card className="overflow-hidden p-0">
               <div className="overflow-x-auto">
                 <Table density="compact">
@@ -627,7 +512,6 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
                 </Table>
               </div>
             </Card>
-            )
           ) : (
             <Card>
               <EmptyState
