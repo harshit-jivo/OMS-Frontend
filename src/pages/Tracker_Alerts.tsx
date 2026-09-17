@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   HiOutlineArrowPath,
+  HiOutlineBellSlash,
   HiOutlineCheckCircle,
   HiOutlineEnvelope,
   HiOutlineExclamationTriangle,
@@ -150,7 +151,9 @@ export default function Tracker_Alerts() {
                   </TableEmpty>
                 ) : (
                   alerts.map((a) => (
-                    <TableRow key={a.id}>
+                    // Keyed on the invoice, not `a.id`: rows are derived live
+                    // and `id` is null until the sweep has logged that visit.
+                    <TableRow key={a.invoice}>
                       <TableCell className="whitespace-nowrap font-medium text-ink">
                         {a.invoice_number}
                       </TableCell>
@@ -172,7 +175,24 @@ export default function Tracker_Alerts() {
                       </TableCell>
                       <TableCell className="whitespace-nowrap">{fmtDT(a.stage_entered_at)}</TableCell>
                       <TableCell className="max-w-[220px] whitespace-normal">
-                        {a.notified && a.notified.length ? (
+                        {a.email_muted ? (
+                          // Muted rows stay listed on purpose: the invoice is
+                          // still overdue and still someone's work — only the
+                          // chasing email has been switched off, and by whom
+                          // and why is the thing worth showing here.
+                          <span
+                            className="flex flex-wrap items-center gap-1.5"
+                            title={a.email_mute_reason}
+                          >
+                            <Badge tone="hold" outlined>
+                              <HiOutlineBellSlash aria-hidden="true" className="size-3" /> Muted
+                            </Badge>
+                            <span className="text-[12px] text-subtle">
+                              {a.email_mute_reason}
+                              {a.email_muted_by ? ` — ${a.email_muted_by}` : ""}
+                            </span>
+                          </span>
+                        ) : a.notified && a.notified.length ? (
                           <span
                             className="flex flex-wrap items-center gap-1.5"
                             title={a.notified

@@ -64,12 +64,24 @@ export const ACTIONS = {
    */
   "invoice.approve": {
     roles: ["factory_approver"],
+    permissions: ["invoices.review.decide"],
     server: "NOT ENFORCED — invoice.views.InvoicelogStatusUpdateView carries "
-      + "only the project-wide IsAuthenticated. Any signed-in user can PATCH "
-      + "/api/invoice/<id>/update-status/ to APPROVED. This gate is the ONLY "
-      + "thing standing in front of it, which makes it the one place in the "
-      + "app where the client-side check is load-bearing. It should not be: "
-      + "the fix is a permission class on that view, not a better button.",
+      + "permission_classes = [AllowAny], so not even authentication is "
+      + "required: any caller at all can PATCH /api/invoice/<id>/update-status/ "
+      + "to APPROVED. This gate is the ONLY thing standing in front of it, "
+      + "which makes it the one place in the app where the client-side check "
+      + "is load-bearing. It should not be: the fix is a permission class on "
+      + "that view, not a better button.",
+    note:
+      "`roles: ['factory_approver']` admits NOBODY — there is no such row in "
+      + "users_userrole and no user holds it, primary or extra. Until the key "
+      + "below was added, that left invoice approval as admin-only in practice. "
+      + "`invoices.review.decide` ('Invoice Review — approve/reject') was "
+      + "already in core/permission_registry.py for exactly this and is the "
+      + "grantable route: give it through extra_pages per user. The stale role "
+      + "name is kept so an environment that does define it keeps working. "
+      + "WHICH WAREHOUSES an approver may act on is a separate, per-invoice "
+      + "question — see auth/invoiceWarehouses.ts.",
   },
 
   /**

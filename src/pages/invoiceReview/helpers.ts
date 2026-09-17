@@ -33,6 +33,29 @@ export const STATUS_FILTERS: Array<{ key: FilterKey; label: string }> = [
   { key: "ALL", label: "All" },
 ];
 
+/**
+ * Which status tabs to render. Every one of them, for everybody.
+ *
+ * There WAS a rule here: an approver saw only the decision tabs, because
+ * "the approver's workflow ends at the decision, so the SAP-side statuses
+ * would only ever be empty for them". That premise was wrong twice over.
+ *
+ * It was wrong about the data — POSTED_TO_SAP is 152 of 158 live rows and
+ * every ERROR row sits in DL-MP, the warehouse whose approver was the one
+ * person being shown neither. And it was wrong about the people: it keyed off
+ * `canApproveReject`, which for most of this app's life was true only for
+ * admins, so nobody noticed. The moment real users were granted approval
+ * (KP, whose PRIMARY role is `billing`, and Preshit on Billing Admin), the
+ * rule started hiding billing's own tabs from the billing desk.
+ *
+ * Approving a bill is not a different job from billing one here — the same
+ * people do both — so the tab strip does not split by desk. Actions still do:
+ * Approve/Reject is gated on `canApproveReject` (and the warehouse, see
+ * `auth/invoiceWarehouses.ts`), Post to SAP on `canPostToSap`. A tab is a
+ * view, and hiding a view only hid the work.
+ */
+export const visibleStatusFilters = (): typeof STATUS_FILTERS => STATUS_FILTERS;
+
 // Human-readable label for a status (e.g. POSTED_TO_SAP -> "POSTED TO SAP").
 export const statusLabel = (status: InvoiceStatus) => status.replace(/_/g, " ");
 
@@ -205,10 +228,53 @@ export const creditLimitFlowSummary = (stages: CreditLimitStage[]): StageState |
     : { label: `Pending — ${approved} of ${stages.length} stages approved`, tone: "pending" };
 };
 
-// The raise-credit-limit action only applies to errors that are actually about
-// the customer's credit limit.
-export const isCreditLimitError = (record: InvoiceRecord) =>
-  /credit\s*limit/i.test(String(record.error_message || ""));
+/**
+ * Does this SAP failure mean the customer's credit limit blocked the post?
+ *
+ * The block is raised by SAP's own transaction-notification procedure, which
+ * always reports it under error code 13000316 — but the wording shipped with
+ * that code has been rewritten more than once on this install, and only the
+ * newest phrasing contains the words "credit limit" at all:
+ *
+ *   (13000316) Credit Limit Exceeded! Current Limit is 10.00, Balance Amount is 5,379.00
+ *   (13000316) Limit is Over, Current Limit is 10.00 Balance Amount Is 9022.00
+ *   (13000316) Limit if Over By, Current Limit is 45000.00 Balance Amount Is 46000.00
+ *
+ * Matching the phrase alone hid "Raise CL" on every invoice stopped by the two
+ * older messages: the reviewer saw a plainly credit-limit failure with no way
+ * to raise the request, and the row could only be reposted into the same block.
+ *
+ * So the CODE is what we key on — it survives rewording, which the text does
+ * not. The phrase and the "Limit is/if Over" wording stay as fallbacks for a
+ * message that arrives without the code.
+ */
+const SAP_CREDIT_LIMIT_CODE = "13000316";
+
+export const isCreditLimitError = (record: InvoiceRecord) => {
+  const message = String(record.error_message || "");
+  return (
+    message.includes(SAP_CREDIT_LIMIT_CODE) ||
+    /credit\s*limit/i.test(message) ||
+    /\blimit\s+(?:is|if)\s+over\b/i.test(message)
+  );
+};
+
+/**
+ * The status to record when a post to SAP fails.
+ *
+ * ERROR for everything — EXCEPT a record that already has a credit-limit
+ * request in flight. That request is not withdrawn just because this attempt
+ * failed, and until JSAP clears it a repost keeps failing the same check, so
+ * the invoice genuinely still belongs on the CL Raised tab. Demoting it to
+ * ERROR takes away "Show Flow" — the only way back to the approval stages of
+ * the request the reviewer already raised — and offers "Raise CL" again,
+ * which the backend refuses with a 409 because a request for that log exists.
+ *
+ * The backend stores the latest SAP message either way, so keeping the status
+ * costs nothing: the reviewer still sees what SAP said on this attempt.
+ */
+export const statusAfterFailedPost = (record: InvoiceRecord): InvoiceStatus =>
+  normalizeStatus(record.status) === "CL_RAISED" ? "CL_RAISED" : "ERROR";
 
 // A value is a usable lineage reference (log id) — 0 is not a valid pk here.
 export const hasRef = (value: unknown) => value !== undefined && value !== null && value !== "";

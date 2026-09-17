@@ -21,9 +21,12 @@
  * the strip instead of seven) and Left/Right/Home/End, neither of which the
  * buttons had.
  */
+import { useCallback } from "react";
 import { HiOutlineArrowPath } from "react-icons/hi2";
 
 import { useAction } from "../auth/actions";
+import { canApproveWarehouse as canApproveWarehouseFor } from "../auth/invoiceWarehouses";
+import { useAuth } from "../auth/useAuth";
 import MissionControlLoader from "../components/MissionControlLoader";
 import { Badge } from "@/components/ui/badge";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
@@ -53,7 +56,17 @@ export default function InvoiceReview() {
   // a permission class on the view; this comment stays until there is one.
   const canApproveReject = useAction("invoice.approve");
   const canPostToSap = useAction("invoice.postToSap");
-  const view = useInvoiceReview({ canApproveReject, canPostToSap });
+  // The second half of the approve rule, and the half `useAction` cannot
+  // answer: whether THIS invoice's warehouse is one this user approves for.
+  // KP is DL-MP only, Preshit is BH-PS only; everyone else is unrestricted.
+  // See `auth/invoiceWarehouses.ts` — including why this is a hidden button
+  // rather than access control.
+  const { session } = useAuth();
+  const canApproveWarehouse = useCallback(
+    (warehouse: string | null | undefined) => canApproveWarehouseFor(session, warehouse),
+    [session],
+  );
+  const view = useInvoiceReview({ canApproveReject, canPostToSap, canApproveWarehouse });
   const {
     loading,
     loadInvoices,

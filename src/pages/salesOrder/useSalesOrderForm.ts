@@ -654,10 +654,12 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
             qty: valueToString(item.qty),
             ltrs: valueToString(item.ltrs),
             boxes: valueToString(item.boxes),
-            // Landing is always basic + tax% (recomputed, not the stored value)
-            // so the edit side shows the same figure the create side does.
+            // Price List comes back as SAVED. It used to be recomputed here as
+            // basic + tax%, which meant reopening an order showed the landing
+            // price of the operator's own Basic Price instead of the party's
+            // agreed rate — the same overwrite the create side had.
             basicPrice: valueToString(item.basic_price),
-            priceListBasic: computeLandingPrice(item.basic_price, item.tax_rate),
+            priceListBasic: valueToString(item.price_list_basic),
             tax: valueToString(item.tax_rate),
             amount: valueToString(item.total),
             confirmed: true,
@@ -1529,7 +1531,13 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
               ? FOC_TOKEN_BASIC_PRICE
               : ""
             : String(partyProduct.basic_rate);
-        row.priceListBasic = isFocOrder ? "0" : computeLandingPrice(row.basicPrice, row.tax);
+        // Anchored to the party's agreed rate, not to `row.basicPrice`. They are
+        // equal at this instant (basicPrice was just seeded from basic_rate
+        // above), but reading basic_rate directly keeps the column tied to the
+        // party reference rather than to whatever the operator types next.
+        row.priceListBasic = isFocOrder
+          ? "0"
+          : computeLandingPrice(partyProduct.basic_rate, row.tax);
         void fetchSchemesForRow(row.uid, true);
       } else {
         void fetchSchemesForRow(row.uid, false);
