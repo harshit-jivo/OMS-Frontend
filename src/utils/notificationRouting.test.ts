@@ -68,6 +68,47 @@ describe("routeForNotification", () => {
   });
 });
 
+describe("routeForNotification — production orders", () => {
+  it("sends an approver to the desk where the buttons are", () => {
+    expect(
+      routeForNotification({
+        entity_type: "productionorder",
+        entity_id: 412,
+        event_type: "PRDO_AWAITING_APPROVAL",
+      }),
+    ).toEqual({ pathname: "/Production_Approval", search: "?orderId=412" });
+  });
+
+  it("sends everyone else to the order list", () => {
+    // PRDO has no requester — SAP raised it — so these reach whoever approved
+    // it earlier in the chain, and their screen is the list.
+    for (const event of ["PRDO_APPROVED", "PRDO_REJECTED"]) {
+      expect(
+        routeForNotification({
+          entity_type: "productionorder",
+          entity_id: 9,
+          event_type: event,
+        }),
+      ).toEqual({ pathname: "/Production_Orders", search: "?orderId=9" });
+    }
+  });
+
+  it("does not confuse the two modules' id params", () => {
+    // `?requestId=` and `?orderId=` are read by different pages. Crossing them
+    // would open the right page on no record at all, silently.
+    const backdate = routeForNotification({
+      entity_type: "backdate",
+      entity_id: 1,
+    });
+    const production = routeForNotification({
+      entity_type: "productionorder",
+      entity_id: 1,
+    });
+    expect(backdate?.search).toBe("?requestId=1");
+    expect(production?.search).toBe("?orderId=1");
+  });
+});
+
 describe("routeFromSearchParams", () => {
   it("resolves the cold-start URL the service worker opens", () => {
     // No tab was open, so the worker could not ask anything to navigate; it

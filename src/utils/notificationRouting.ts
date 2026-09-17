@@ -68,6 +68,13 @@ export interface RoutableNotification {
  */
 const BACKDATE_APPROVER_EVENTS = new Set(["BACKDATE_AWAITING_APPROVAL"]);
 
+/**
+ * Production Orders splits the same way, for the same reason: the approval
+ * desk is the only place the Approve and Reject buttons exist, so the person
+ * being asked to decide belongs there and everyone else belongs on the list.
+ */
+const PRODUCTION_APPROVER_EVENTS = new Set(["PRDO_AWAITING_APPROVAL"]);
+
 type RouteResolver = (
   id: string,
   notification: RoutableNotification,
@@ -81,6 +88,14 @@ const ENTITY_ROUTES: Record<string, RouteResolver> = {
     // Read back by `useDeepLinkedRequest`, which opens the detail dialog for
     // this request once the page's rows have loaded.
     search: `?requestId=${encodeURIComponent(id)}`,
+  }),
+  // `productionorder` — one word, no underscore. Read off
+  // ContentType.objects.get_for_model(ProductionOrder) rather than guessed.
+  productionorder: (id, notification) => ({
+    pathname: PRODUCTION_APPROVER_EVENTS.has(notification.event_type ?? "")
+      ? "/Production_Approval"
+      : "/Production_Orders",
+    search: `?orderId=${encodeURIComponent(id)}`,
   }),
 };
 

@@ -55,6 +55,7 @@ import {
   productionService,
   type ProductionOrder,
 } from "../services/productionService";
+import { useDeepLinkedOrder } from "./production/useDeepLinkedOrder";
 import { OrderDetailDialog } from "./Production_Orders";
 import { fmtDate, fmtQty, orderNumber } from "./production/format";
 import {
@@ -100,6 +101,11 @@ export default function ProductionApproval() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Arriving from a "needs your approval" notification: open that order's
+  // detail dialog. The row behind it keeps its Approve and Reject buttons,
+  // which are rendered from queue membership — the server's answer, not ours.
+  useDeepLinkedOrder(rows, !loading, setDetail);
 
   const flash = (message: string) => {
     setNotice(message);
