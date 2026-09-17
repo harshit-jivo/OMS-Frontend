@@ -466,6 +466,7 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
                               onClick={() => fetchOrderDetails(order.id)}
                               aria-label={`View order ${order.order_number}`}
                               title="View order"
+                              className={isRateApprover ? "text-brand" : undefined}
                             >
                               <HiOutlineEye aria-hidden="true" />
                             </Button>
@@ -486,6 +487,7 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
                               onClick={() => downloadExcel(order)}
                               aria-label={`Download order ${order.order_number}`}
                               title="Download order"
+                              className={isRateApprover ? "text-emerald-600" : undefined}
                             >
                               <HiOutlineArrowDownTray aria-hidden="true" />
                             </Button>
