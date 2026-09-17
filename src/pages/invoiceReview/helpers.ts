@@ -205,10 +205,53 @@ export const creditLimitFlowSummary = (stages: CreditLimitStage[]): StageState |
     : { label: `Pending — ${approved} of ${stages.length} stages approved`, tone: "pending" };
 };
 
-// The raise-credit-limit action only applies to errors that are actually about
-// the customer's credit limit.
-export const isCreditLimitError = (record: InvoiceRecord) =>
-  /credit\s*limit/i.test(String(record.error_message || ""));
+/**
+ * Does this SAP failure mean the customer's credit limit blocked the post?
+ *
+ * The block is raised by SAP's own transaction-notification procedure, which
+ * always reports it under error code 13000316 — but the wording shipped with
+ * that code has been rewritten more than once on this install, and only the
+ * newest phrasing contains the words "credit limit" at all:
+ *
+ *   (13000316) Credit Limit Exceeded! Current Limit is 10.00, Balance Amount is 5,379.00
+ *   (13000316) Limit is Over, Current Limit is 10.00 Balance Amount Is 9022.00
+ *   (13000316) Limit if Over By, Current Limit is 45000.00 Balance Amount Is 46000.00
+ *
+ * Matching the phrase alone hid "Raise CL" on every invoice stopped by the two
+ * older messages: the reviewer saw a plainly credit-limit failure with no way
+ * to raise the request, and the row could only be reposted into the same block.
+ *
+ * So the CODE is what we key on — it survives rewording, which the text does
+ * not. The phrase and the "Limit is/if Over" wording stay as fallbacks for a
+ * message that arrives without the code.
+ */
+const SAP_CREDIT_LIMIT_CODE = "13000316";
+
+export const isCreditLimitError = (record: InvoiceRecord) => {
+  const message = String(record.error_message || "");
+  return (
+    message.includes(SAP_CREDIT_LIMIT_CODE) ||
+    /credit\s*limit/i.test(message) ||
+    /\blimit\s+(?:is|if)\s+over\b/i.test(message)
+  );
+};
+
+/**
+ * The status to record when a post to SAP fails.
+ *
+ * ERROR for everything — EXCEPT a record that already has a credit-limit
+ * request in flight. That request is not withdrawn just because this attempt
+ * failed, and until JSAP clears it a repost keeps failing the same check, so
+ * the invoice genuinely still belongs on the CL Raised tab. Demoting it to
+ * ERROR takes away "Show Flow" — the only way back to the approval stages of
+ * the request the reviewer already raised — and offers "Raise CL" again,
+ * which the backend refuses with a 409 because a request for that log exists.
+ *
+ * The backend stores the latest SAP message either way, so keeping the status
+ * costs nothing: the reviewer still sees what SAP said on this attempt.
+ */
+export const statusAfterFailedPost = (record: InvoiceRecord): InvoiceStatus =>
+  normalizeStatus(record.status) === "CL_RAISED" ? "CL_RAISED" : "ERROR";
 
 // A value is a usable lineage reference (log id) — 0 is not a valid pk here.
 export const hasRef = (value: unknown) => value !== undefined && value !== null && value !== "";

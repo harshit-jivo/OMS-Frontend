@@ -59,7 +59,7 @@ import {
   useStates,
   useUserList,
 } from "../lib/authQueries";
-import { useProductVarieties } from "../lib/sapQueries";
+import { useProductVarietiesMulti } from "../lib/sapQueries";
 import { errorBody, fieldError, messageFrom } from "@/lib/apiError";
 
 const ITEMS_PER_PAGE = 7;
@@ -77,6 +77,10 @@ const BLANK_FORM: CreateUserData = {
   role: 0,
   company: 0,
   category: null,
+  // A user may hold several — OIL and BEVERAGES, say. `category` stays the
+  // PRIMARY (the first picked): the server still uses it as the default scope
+  // where a request names no category of its own.
+  categories: [],
   variety: "",
 };
 
@@ -105,8 +109,27 @@ export default function App_User() {
   const [isEditMode, setIsEditMode] = useState(false);
   const [editUserId, setEditUserId] = useState<number | null>(null);
 
-  const selectedCategoryName =
-    categories.find((item) => item.id === formData.category)?.category || "";
+  /** The categories this user holds, primary first. */
+  const selectedCategoryIds = useMemo(
+    () =>
+      formData.categories?.length
+        ? formData.categories
+        : formData.category
+          ? [formData.category]
+          : [],
+    [formData.categories, formData.category],
+  );
+
+  const selectedCategoryNames = useMemo(
+    () =>
+      selectedCategoryIds
+        .map((id) => categories.find((item) => item.id === id)?.category)
+        .filter((name): name is string => Boolean(name)),
+    [selectedCategoryIds, categories],
+  );
+
+  // Kept for the copy that names one category ("Sub groups within OIL").
+  const selectedCategoryName = selectedCategoryNames.join(", ");
 
   /*
    * Was `useEffect(() => fetchVarieties(selectedCategoryName), [selectedCategoryName])`,
@@ -116,7 +139,7 @@ export default function App_User() {
    * unanalysable. `enabled` inside the hook replaces both the effect and that
    * clearing branch.
    */
-  const { varieties: varietyOptions } = useProductVarieties(selectedCategoryName);
+  const { varieties: varietyOptions } = useProductVarietiesMulti(selectedCategoryNames);
 
   /*
    * FOUR hand-rolled dropdowns lived here — Main Group, State, Role and Sub
@@ -676,10 +699,15 @@ export default function App_User() {
                     </Field>
                   </FormGrid>
 
-                  {/* Company and Category are short, mutually exclusive lists,
-                      so every option stays visible — one tap to pick. A
-                      SegmentedControl is a real radiogroup, which the
-                      hand-rolled `au-pellet` buttons only imitated. */}
+                  {/* Company is a short, mutually exclusive list, so every
+                      option stays visible — one tap to pick. A SegmentedControl
+                      is a real radiogroup, which the hand-rolled `au-pellet`
+                      buttons only imitated.
+
+                      Category is NOT exclusive: a user can sell across OIL and
+                      BEVERAGES, so it is a MultiSelect below. The first pick is
+                      the primary, which is what the server falls back to when a
+                      request names no category of its own. */}
                   <Field label="Company" required>
                     {() =>
                       company.length === 0 ? (
@@ -700,28 +728,46 @@ export default function App_User() {
                   <Field
                     label="Category"
                     required
-                    hint="Changing this clears the sub groups, which belong to it."
+                    hint={
+                      selectedCategoryNames.length > 1
+                        ? "Primary is " +
+                          selectedCategoryNames[0] +
+                          " — the default when a screen asks for no category in particular."
+                        : "Pick more than one for someone who sells across companies."
+                    }
                   >
-                    {() =>
+                    {(control) =>
                       categories.length === 0 ? (
                         <p className="m-0 text-[12px] text-subtle">No categories available.</p>
                       ) : (
-                        <SegmentedControl
-                          value={String(formData.category ?? "")}
+                        <MultiSelect
+                          {...control}
+                          value={selectedCategoryIds}
                           onChange={(next) => {
-                            const id = Number(next);
-                            // Switching category invalidates the sub groups under it.
+                            // Sub groups belong to a category, so REMOVING one
+                            // can orphan the sub groups that came with it and
+                            // the picks are cleared. Adding one cannot orphan
+                            // anything, so the existing picks survive — losing
+                            // them every time an admin widens a user's access
+                            // would be its own small betrayal.
+                            const isAddition = selectedCategoryIds.every((id) =>
+                              next.includes(id),
+                            );
                             setFormData((prev) => ({
                               ...prev,
-                              category: id,
-                              categories: [id],
-                              variety: "",
+                              categories: next,
+                              // First picked is the primary.
+                              category: next[0] ?? null,
+                              variety: isAddition ? prev.variety : "",
                             }));
                           }}
                           options={categories.map((c) => ({
-                            value: String(c.id),
+                            value: c.id,
                             label: c.category,
                           }))}
+                          selectAll={false}
+                          placeholder="Select category"
+                          emptyText="No categories available"
                           aria-label="Category"
                         />
                       )

@@ -28,6 +28,22 @@ describe("tone", () => {
     expect(badge.className).toContain("text-bad");
   });
 
+  it("onBrand is opaque, so it survives a solid brand background", () => {
+    // Every other tone is a `*-soft` fill, and those are TRANSLUCENT —
+    // `--color-brand-soft` is `rgba(37, 99, 235, 0.1)`. On a white surface
+    // that reads as a pale chip; on a selected `Tab` (`bg-brand`) it is blue
+    // over the same blue, and `text-brand` paints the label the background
+    // colour too, so the badge disappears with its number inside it. That is
+    // exactly what hid the stage counts on My Stage Queue.
+    render(<Badge tone="onBrand">7</Badge>);
+    const badge = screen.getByText("7");
+    expect(badge).toHaveAttribute("data-tone", "onBrand");
+    expect(badge.className).toContain("text-white");
+    // The guard that matters: no `-soft` token, which is what made the others
+    // vanish here.
+    expect(badge.className).not.toContain("-soft");
+  });
+
   it("does not carry another tone's colours", () => {
     // `cva` composes variants, so a bug that emitted two tones would leave both
     // sets of classes on the element and the later one would silently win.
