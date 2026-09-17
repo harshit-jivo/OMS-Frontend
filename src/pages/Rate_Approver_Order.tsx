@@ -3,13 +3,21 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   HiOutlineArrowDownTray,
+  HiOutlineBuildingStorefront,
+  HiOutlineCalendarDays,
   HiOutlineCheckCircle,
   HiOutlineCurrencyRupee,
   HiOutlineEye,
   HiOutlineGift,
   HiOutlineInbox,
+  HiOutlineInformationCircle,
   HiOutlineXCircle,
   HiOutlineXMark,
+  HiCube,
+  HiInboxStack,
+  HiBeaker,
+  HiBanknotes,
+  HiCurrencyRupee,
 } from "react-icons/hi2";
 
 import {
@@ -28,9 +36,17 @@ import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { Button } from "@/components/ui/button";
 import { DetailField, DetailGrid } from "@/components/ui/detail";
 import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   FilterBar,
   FilterCount,
   FilterDate,
+  FilterSelect,
   FilterSpacer,
 } from "@/components/ui/filter-bar";
 import {
@@ -38,6 +54,7 @@ import {
   CardHeader,
   CardTitle,
   EmptyState,
+  Notice,
   Page,
   PageHeader,
   Stat,
@@ -61,9 +78,8 @@ import {
   ApprovalSuccessDialog,
   type ApprovalAction,
 } from "@/components/orders/ApprovalDialogs";
-import { OrderItemsTable } from "@/components/orders/OrderItemsTable";
-import { OrderTotalsRow, VarietyCostCards } from "@/components/orders/OrderTotals";
-import { orderTotals, varietyCosts } from "@/components/orders/orderDetail";
+import { OrderItemCards } from "@/components/orders/OrderItemCards";
+import { orderTotals } from "@/components/orders/orderDetail";
 
 /**
  * The rate approver's queue.
@@ -115,6 +131,8 @@ export default function RateApproverOrders() {
   const [reviewStep, setReviewStep] = useState<"review" | "confirm">("review");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
+  const [partyFilter, setPartyFilter] = useState("");
+  const [infoOpen, setInfoOpen] = useState(false);
   const queryClient = useQueryClient();
   const fetchOrderDetails_ = useOrderDetailsFetcher();
   // No `refetchOrders`: its only caller was the redundant refetch that followed
@@ -305,9 +323,26 @@ export default function RateApproverOrders() {
     });
   };
 
+  // Distinct parties present in the queue, for the Party filter dropdown.
+  const partyOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    orders.forEach((order) => {
+      const value = order.card_code || order.card_name || "";
+      if (!value) return;
+      if (!map.has(value)) map.set(value, order.card_name || value);
+    });
+    return [...map.entries()]
+      .map(([value, label]) => ({ value, label }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [orders]);
+
   const filteredOrders = useMemo(
     () =>
       orders.filter((order) => {
+        const matchParty = partyFilter
+          ? order.card_code === partyFilter || order.card_name === partyFilter
+          : true;
+        if (!matchParty) return false;
         if (!fromDate || !toDate) return true;
         const orderDate = new Date(order.created_at);
         return (
@@ -315,7 +350,7 @@ export default function RateApproverOrders() {
           orderDate <= new Date(`${toDate}T23:59:59.999`)
         );
       }),
-    [orders, fromDate, toDate],
+    [orders, fromDate, toDate, partyFilter],
   );
 
   const focCount = filteredOrders.filter((order) => order.is_foc).length;
@@ -327,7 +362,14 @@ export default function RateApproverOrders() {
   );
 
   const detailTotals = useMemo(() => orderTotals(selectedItems), [selectedItems]);
-  const detailVarieties = useMemo(() => varietyCosts(orderDetails), [orderDetails]);
+  const detailQty = useMemo(
+    () => selectedItems.reduce((sum, item) => sum + (Number(item.qty) || 0), 0),
+    [selectedItems],
+  );
+  const detailBoxes = useMemo(
+    () => selectedItems.reduce((sum, item) => sum + (Number(item.boxes) || 0), 0),
+    [selectedItems],
+  );
 
   return (
     <Page>
@@ -349,6 +391,7 @@ export default function RateApproverOrders() {
               value={filteredOrders.length}
               hint="matching filters"
               loading={isOrdersLoading}
+              className="border-sky-200 bg-sky-50 dark:bg-sky-950/20"
             />
             <Stat
               icon={HiOutlineGift}
@@ -356,12 +399,30 @@ export default function RateApproverOrders() {
               label="FOC orders"
               value={focCount}
               loading={isOrdersLoading}
+              className="border-amber-200 bg-amber-50 dark:bg-amber-950/20"
             />
           </StatRow>
 
           <FilterBar>
+            <FilterSelect
+              label="Party"
+              icon={HiOutlineBuildingStorefront}
+              value={partyFilter}
+              onChange={(e) => {
+                setPartyFilter(e.target.value);
+                setCurrentPage(1);
+              }}
+            >
+              <option value="">All Parties</option>
+              {partyOptions.map((party) => (
+                <option key={party.value} value={party.value}>
+                  {party.label}
+                </option>
+              ))}
+            </FilterSelect>
             <FilterDate
               label="From"
+              icon={HiOutlineCalendarDays}
               value={fromDate}
               onChange={(e) => {
                 setFromDate(e.target.value);
@@ -370,19 +431,21 @@ export default function RateApproverOrders() {
             />
             <FilterDate
               label="To"
+              icon={HiOutlineCalendarDays}
               value={toDate}
               onChange={(e) => {
                 setToDate(e.target.value);
                 setCurrentPage(1);
               }}
             />
-            {(fromDate || toDate) && (
+            {(fromDate || toDate || partyFilter) && (
               <Button
                 size="sm"
                 variant="ghost"
                 onClick={() => {
                   setFromDate("");
                   setToDate("");
+                  setPartyFilter("");
                   setCurrentPage(1);
                 }}
               >
@@ -435,6 +498,7 @@ export default function RateApproverOrders() {
                               onClick={() => fetchOrderDetails(order.id)}
                               aria-label={`View order ${order.order_number}`}
                               title="View order"
+                              className="text-brand"
                             >
                               <HiOutlineEye aria-hidden="true" />
                             </Button>
@@ -444,6 +508,7 @@ export default function RateApproverOrders() {
                               onClick={() => downloadExcel(order)}
                               aria-label={`Download order ${order.order_number}`}
                               title="Download order"
+                              className="text-sky-600"
                             >
                               <HiOutlineArrowDownTray aria-hidden="true" />
                             </Button>
@@ -525,6 +590,9 @@ export default function RateApproverOrders() {
                     two levels of importance. Only the decision this screen
                     exists for keeps a filled button; everything else is
                     available without competing for the eye. */}
+                <Button variant="ghost" onClick={() => setInfoOpen(true)}>
+                  <HiOutlineInformationCircle aria-hidden="true" /> Info
+                </Button>
                 <Button variant="ghost" onClick={() => downloadExcel(orderDetails)}>
                   <HiOutlineArrowDownTray aria-hidden="true" /> Export Excel
                 </Button>
@@ -548,40 +616,110 @@ export default function RateApproverOrders() {
             }
           />
 
-          <OrderTotalsRow totals={detailTotals} itemCount={selectedItems.length} />
-
-          <VarietyCostCards costs={detailVarieties} />
-
-          {/* The five facts an approver checks. See `Auditor_Order` for why
-              the other six that `PartyHeader`'s modal showed are not here. */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Party &amp; delivery</CardTitle>
-            </CardHeader>
-            <DetailGrid>
-              <DetailField label="Party state" value={orderDetails.party_state} />
-              <DetailField label="Delivery date" value={orderDetails.delivery_date} />
-              <DetailField label="PO number" value={orderDetails.po_number} />
-              <DetailField label="Bill to" value={orderDetails.bill_to_address} />
-              <DetailField label="Ship to" value={orderDetails.ship_to_address} />
-              <DetailField
-                label="Remark"
-                value={orderDetails.remarks?.trim() ? orderDetails.remarks : ""}
-                span="full"
-                hideWhenEmpty
-              />
-            </DetailGrid>
-          </Card>
+          {/* Coloured KPI row — the same layout the Mart / View Orders detail
+              uses, so the same order reads identically on either screen. */}
+          <StatRow>
+            <Stat
+              icon={HiCube}
+              tone="neutral"
+              label="Total QTY"
+              value={detailQty.toLocaleString("en-IN")}
+              className="border-sky-200 bg-sky-50"
+            />
+            <Stat
+              icon={HiInboxStack}
+              tone="neutral"
+              label="Total Boxes"
+              value={detailBoxes.toLocaleString("en-IN")}
+              className="border-amber-200 bg-amber-50"
+            />
+            <Stat
+              icon={HiBeaker}
+              tone="neutral"
+              label="Total Ltrs"
+              value={detailTotals.litres.toFixed(2)}
+              className="border-teal-200 bg-teal-50"
+            />
+            <Stat
+              icon={HiBanknotes}
+              tone="neutral"
+              label="Total Amount"
+              value={detailTotals.subtotal.toFixed(2)}
+              className="border-violet-200 bg-violet-50"
+            />
+            <Stat
+              icon={HiCurrencyRupee}
+              tone="brand"
+              label="Grand Total (incl. tax)"
+              value={detailTotals.grand.toFixed(2)}
+              hint={`${selectedItems.length} item${selectedItems.length === 1 ? "" : "s"}`}
+              className="border-brand/30 bg-brand/[0.08]"
+            />
+          </StatRow>
 
           <Card>
             <CardHeader>
               <CardTitle>Items</CardTitle>
               <Badge tone="neutral">{selectedItems.length}</Badge>
             </CardHeader>
-            {/* Rates are what this screen approves, so the per-line variety
-                matters here in a way it does not on the auditor's queue. */}
-            <OrderItemsTable items={selectedItems} />
+            {/* Rates are what this screen approves, so schemes (free goods that
+                shift the effective rate) are shown on each card when present. */}
+            <OrderItemCards items={selectedItems} showSchemes />
           </Card>
+
+          {/* The party / delivery facts, in the "i" dialog — same set and same
+              place the Mart and View Orders detail put them. */}
+          <Dialog open={infoOpen} onOpenChange={setInfoOpen}>
+            <DialogContent title={`Order ${orderDetails.order_number} information`} size="md">
+              <DialogHeader>
+                <DialogTitle>Order information</DialogTitle>
+                {orderDetails.status_display ? (
+                  <Badge tone={toneForStatus(orderDetails.status_display)}>
+                    {orderDetails.status_display}
+                  </Badge>
+                ) : null}
+              </DialogHeader>
+              <DialogBody className="space-y-4">
+                <DetailGrid>
+                  <DetailField
+                    label="Party name"
+                    value={`${orderDetails.card_name}${
+                      orderDetails.card_code ? ` (${orderDetails.card_code})` : ""
+                    }`}
+                    span="full"
+                  />
+                  <DetailField label="Party state" value={orderDetails.party_state} />
+                  <DetailField label="Delivery date" value={orderDetails.delivery_date} />
+                  <DetailField label="PO number" value={orderDetails.po_number} />
+                  <DetailField label="Current stage" value={orderDetails.status_display} />
+                  <DetailField
+                    label="Bill to"
+                    value={orderDetails.bill_to_address}
+                    span="full"
+                    hideWhenEmpty
+                  />
+                  <DetailField
+                    label="Ship to"
+                    value={orderDetails.ship_to_address}
+                    span="full"
+                    hideWhenEmpty
+                  />
+                  <DetailField
+                    label="Remark"
+                    value={orderDetails.remarks?.trim() ? orderDetails.remarks : ""}
+                    span="full"
+                    hideWhenEmpty
+                  />
+                </DetailGrid>
+
+                {orderDetails.rejection_reason ? (
+                  <Notice tone="bad" title="Rejection reason">
+                    {orderDetails.rejection_reason}
+                  </Notice>
+                ) : null}
+              </DialogBody>
+            </DialogContent>
+          </Dialog>
         </>
       )}
 

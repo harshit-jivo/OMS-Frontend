@@ -327,6 +327,21 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
     setIsPickingItem(false);
   };
 
+  /** The item code for a confirmed row, resolved from the party's catalogue by
+   *  name + facets (rows store the item name, not the code). "" when unknown. */
+  const itemCodeForRow = (row: SalesRow) =>
+    (
+      partyProducts.find(
+        (p) =>
+          p.item_name === row.item &&
+          p.category === row.category &&
+          (p.brand || "") === (row.brand || "") &&
+          (p.variety || "") === (row.variety || ""),
+      ) ||
+      partyProducts.find((p) => p.item_name === row.item && p.category === row.category) ||
+      partyProducts.find((p) => p.item_name === row.item)
+    )?.item_code || "";
+
   /** Distinct values of one facet, with how many products carry each. */
   const facetsOf = (list: PartyProduct[], valueOf: (product: PartyProduct) => string) => {
     const counts = new Map<string, number>();
@@ -1574,13 +1589,15 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
           ))}
         </div>
         <div className="overflow-hidden rounded-md border border-line">
-          <div className="flex items-center justify-between border-b border-line bg-surface px-4 py-2.5">
-            <span className="text-[12px] font-bold uppercase tracking-[0.04em] text-subtle">
+          <div className="flex items-center gap-3 border-b border-line bg-surface px-4 py-2.5 text-[12px] font-bold uppercase tracking-[0.04em] text-subtle">
+            <span className="min-w-0 flex-1">
               Items
+              <span className="ml-2 rounded-full bg-surface-strong px-1.5 py-px text-[11px] normal-case text-body">
+                {visibleLineCount}
+              </span>
             </span>
-            <span className="text-[12px] font-bold uppercase tracking-[0.04em] text-subtle">
-              {visibleLineCount}
-            </span>
+            <span className="w-16 flex-none text-right">Qty</span>
+            <span className="w-28 flex-none text-right">Amount</span>
           </div>
           {/* Free lines are listed here too. This is the last screen before the
               order is saved, so it has to match what actually gets sent. */}
@@ -1590,9 +1607,12 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
                 <div className="flex items-center gap-3 border-b border-line px-4 py-2.5 last:border-b-0">
                   <strong className="min-w-0 flex-1 text-[14px] font-bold text-ink">
                     {row.item || "Item"}
+                    {itemCodeForRow(row) ? ` (${itemCodeForRow(row)})` : ""}
                   </strong>
-                  <span className="text-[12px] text-subtle">Qty {row.qty || 0}</span>
-                  <span className="text-[12px] font-bold text-ink">
+                  <span className="w-16 flex-none text-right text-[12px] text-subtle">
+                    {row.qty || 0}
+                  </span>
+                  <span className="w-28 flex-none text-right text-[12px] font-bold text-ink">
                     ₹ {Number(row.amount || 0).toFixed(2)}
                   </span>
                 </div>
@@ -1603,6 +1623,7 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
                   >
                     <strong className="min-w-0 flex-1 text-[14px] font-semibold text-body">
                       {line.itemName}
+                      {line.itemCode ? ` (${line.itemCode})` : ""}
                       <span
                         className={cn(
                           "ml-2 inline-block rounded-full px-1.5 py-px align-middle text-[11px] font-semibold",
@@ -1614,8 +1635,12 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
                         {line.kind === "combo" ? "Combo" : "Scheme"}
                       </span>
                     </strong>
-                    <span className="text-[12px] text-subtle">Qty {line.qtyLabel}</span>
-                    <span className="text-[12px] font-semibold text-body">₹ 0.00</span>
+                    <span className="w-16 flex-none text-right text-[12px] text-subtle">
+                      {line.qtyLabel}
+                    </span>
+                    <span className="w-28 flex-none text-right text-[12px] font-semibold text-body">
+                      ₹ 0.00
+                    </span>
                   </div>
                 ))}
               </Fragment>
@@ -1643,13 +1668,31 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
               </strong>
             </div>
           )}
-          <div className="flex items-start justify-between gap-4 border-t border-dashed border-line-strong pt-3">
-            <span className="flex-none text-[12px] font-semibold uppercase tracking-[0.02em] text-subtle">
-              Grand Total
-            </span>
-            <strong className="text-right text-[20px] font-bold text-brand">
-              ₹ {grandTotal.toFixed(2)}
-            </strong>
+          <div className="ml-auto flex w-full max-w-xs flex-col gap-2 rounded-md border border-line p-3.5">
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-[12px] font-semibold uppercase tracking-[0.02em] text-subtle">
+                Total Amount
+              </span>
+              <span className="text-[14px] font-semibold text-ink">
+                ₹ {totalAmount.toFixed(2)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-[12px] font-semibold uppercase tracking-[0.02em] text-subtle">
+                Tax
+              </span>
+              <span className="text-[14px] font-semibold text-ink">
+                ₹ {taxAmount.toFixed(2)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-4 border-t border-line pt-2">
+              <span className="text-[12px] font-semibold uppercase tracking-[0.02em] text-subtle">
+                Grand Total
+              </span>
+              <strong className="text-[20px] font-bold text-brand">
+                ₹ {grandTotal.toFixed(2)}
+              </strong>
+            </div>
           </div>
         </div>
       </div>
