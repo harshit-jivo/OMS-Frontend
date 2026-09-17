@@ -2046,7 +2046,17 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
   // OIL/BEVERAGES scheme from the same state would leak into a MART order. The
   // category-gated auto-fetch (v2 engine) is unaffected — this only governs the
   // manual picker's visibility.
+  //
+  // Admins can also switch the manual picker off everywhere (UI Labels →
+  // `manual_scheme_box`) so a line doesn't get a hand-picked scheme on top of
+  // the one the scheme mapping auto-attaches.
+  const manualSchemeBox = field("manual_scheme_box", {
+    label: "Schemes",
+    enabled: true,
+    required: false,
+  });
   const isSchemePanelHidden = (row: SalesRow) => {
+    if (!manualSchemeBox.enabled) return true;
     if (isMartOrder) return true;
     const category = String(row.category || selectedPartyCategory || "")
       .trim()
