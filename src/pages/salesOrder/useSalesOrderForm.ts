@@ -17,9 +17,9 @@
  * destructure what they need, and `SalesOrderForm` is its inferred type, so a
  * value added here needs no second declaration to reach a consumer.
  *
- * `useWizard` is decided from `location.state` and never changes for the life
- * of a mount, which is what makes one hook safe for both forms: only ever one
- * of them is rendered against it.
+ * There is one form. `OrderWizard` / `LegacyOrderForm` were the same job done
+ * twice — this hook fed both, and `useWizard` chose between them from
+ * `location.state`. Every mode now renders the single-page `OrderForm`.
  */
 import { useState, useEffect, useRef } from "react";
 import { useFieldArray, useForm } from "react-hook-form";
@@ -352,11 +352,6 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
   // `allowPoNumber` guard is preserved so editing an existing order doesn't
   // newly expose PO where it wasn't intended.
   const canEditPoNumber = poField.enabled && (!isEditMode || locationState?.allowPoNumber === true);
-  // The guided 4-step wizard is used for both the standard create flow and the
-  // FOC create flow, so Add Sales and Add FOC share the same UI. FOC-specific
-  // behaviour (price forced to 0, no scheme panel) is handled via `isFocOrder`.
-  // Edit and Duplicate modes keep the original single-page form.
-  const useWizard = mode === "create" && !isLoadingFromOrder;
 
   // Use Effects
   useEffect(() => {
@@ -2117,7 +2112,6 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
     isFocOrder,
     poField,
     canEditPoNumber,
-    useWizard,
     getProductType,
     fetchSchemesForRow,
     validateBeforeSave,

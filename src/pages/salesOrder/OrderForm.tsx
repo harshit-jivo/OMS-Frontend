@@ -195,7 +195,31 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
     selectedShipAddressLabel,
     selectedDispatchLabel,
     selectedCompanyLabel,
+    // Edit-mode flags. This form was create-only until edit moved onto it.
+    isEditMode,
+    isDuplicateMode,
+    isFocMode,
+    isLoadingFromOrder,
+    editOrderIsDraft,
+    t,
   } = form;
+
+  /**
+   * Steps for a NEW order, one page for one that already exists.
+   *
+   * A wizard is for work you are doing for the first time: it decides the
+   * order of the questions because you do not yet know them. Editing is the
+   * opposite — the order exists, you came to change one thing, and being made
+   * to walk four steps to reach it is the "messed up" part. So a loaded order
+   * (edit, duplicate, edit-an-FOC) renders every section stacked with one
+   * action row, and creating keeps the guided path.
+   *
+   * Both are this one component. The sections are the same render functions;
+   * only the assembly differs. `LegacyOrderForm` was the previous answer to
+   * the same question and it drifted — a 14-column item row that overflowed
+   * its container, and a grand total printed to one decimal beside a raw tax.
+   */
+  const stepped = !isLoadingFromOrder;
 
   // ---------------------------------------------------------------------------
   // Add Item picker — search first, filters second.
@@ -799,7 +823,9 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
                         <Input {...control} type="number" value={row.ltrs} readOnly />
                       )}
                     </Field>
-                    <Field label="Price List">
+                    {/* `uilabels` lets an administrator rename this column.
+                        Only the legacy form honoured it. */}
+                    <Field label={t("price_list", "Price List (Basic)")}>
                       {(control) => (
                         <Input
                           {...control}
@@ -1063,7 +1089,7 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
   const renderStepParty = () => (
     <div className={cn(PANEL, "p-5 motion-safe:animate-page")}>
       <div className="mb-4.5">
-        <div className={EYEBROW}>Step 1</div>
+        <div className={EYEBROW}>{stepped ? "Step 1" : "Party"}</div>
         <h2 className="m-0 mt-1 text-[19px] font-bold tracking-tight text-ink">
           Party Information
         </h2>
@@ -1283,7 +1309,7 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
     <div className={cn(PANEL, "p-5 motion-safe:animate-page")}>
       <div className="mb-4 flex items-start justify-between gap-3">
         <div>
-          <div className={EYEBROW}>Step 2</div>
+          <div className={EYEBROW}>{stepped ? "Step 2" : "Items"}</div>
           <h2 className="m-0 mt-1 text-[19px] font-bold tracking-tight text-ink">Items</h2>
         </div>
         <div className="flex flex-col items-end gap-0.5">
@@ -1324,7 +1350,7 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
   const renderStepSummary = () => (
     <div className={cn(PANEL, "p-5 motion-safe:animate-page")}>
       <div className="mb-4.5">
-        <div className={EYEBROW}>Step 3</div>
+        <div className={EYEBROW}>{stepped ? "Step 3" : "Order details"}</div>
         <h2 className="m-0 mt-1 text-[19px] font-bold tracking-tight text-ink">Order Summary</h2>
       </div>
       <div className="grid grid-cols-1 gap-3.5 md:grid-cols-2 lg:grid-cols-3">
@@ -1633,10 +1659,14 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
         "bg-card/90 backdrop-blur-[8px] shadow-[0_-2px_16px_rgba(15,23,42,0.05)]",
       )}
     >
-      {currentStep > 1 ? (
+      {stepped && currentStep > 1 ? (
         <Button onClick={() => setCurrentStep((s) => Math.max(1, s - 1))}>Back</Button>
       ) : (
-        <Button onClick={handleClearForm}>Clear</Button>
+        // `handleClearForm` navigates back to `returnTo` once an order was
+        // loaded, so on the edit form this button is a Cancel, not a Clear.
+        <Button onClick={handleClearForm}>
+          {isLoadingFromOrder ? "Cancel" : "Clear"}
+        </Button>
       )}
       <div className="flex-1" />
       {/*
@@ -1653,18 +1683,23 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
         through, and a draft saved without one is a row nobody can resume.
       */}
       {/*
-        No `(!isEditMode || editOrderIsDraft)` guard, which is what the legacy
-        form carries: `useWizard` requires mode "create" and `isEditMode`
-        requires mode "edit", so inside this component the guard is always true.
-        Copying it across would have been a condition that cannot be false.
+        `(!isEditMode || editOrderIsDraft)` — the legacy form's guard. It used
+        to be vacuous here, because this component only rendered for mode
+        "create" and `isEditMode` could never be true. Edit renders this form
+        now, so it is load-bearing: without it, editing a LIVE order offers
+        Save as Draft, and `handleSaveDraft` passes `draftOrderId` only when
+        the loaded order is itself a draft — so the click would quietly create
+        a second, new draft beside the live order instead of parking the edit.
       */}
-      <Button
-        onClick={handleSaveDraft}
-        disabled={isSaving || isSavingDraft || !formData.parties}
-      >
-        {isSavingDraft ? "Saving Draft..." : "Save as Draft"}
-      </Button>
-      {currentStep < 4 ? (
+      {!isEditMode || editOrderIsDraft ? (
+        <Button
+          onClick={handleSaveDraft}
+          disabled={isSaving || isSavingDraft || !formData.parties}
+        >
+          {isSavingDraft ? "Saving Draft..." : "Save as Draft"}
+        </Button>
+      ) : null}
+      {stepped && currentStep < 4 ? (
         <Button
           variant="primary"
           disabled={!canAdvance(currentStep)}
@@ -1680,11 +1715,38 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
           disabled={isSaving || confirmedRows.length === 0}
           onClick={handleWizardSubmit}
         >
-          {isSaving ? "Saving..." : "Save Order"}
+          {isSaving
+            ? "Saving..."
+            : isEditMode
+              ? "Update Order"
+              : isDuplicateMode
+                ? "Create as New"
+                : isFocMode
+                  ? "Create FOC Order"
+                  : "Save Order"}
         </Button>
       )}
     </div>
   );
+
+  if (!stepped) {
+    return (
+      <div className="flex flex-col gap-4.5">
+        {renderStepParty()}
+        {renderStepItems()}
+        {renderStepSummary()}
+        {/*
+          No review section. Every field it showed is already on this page, so
+          it would be the same order printed twice — but `ProblemSummary` was
+          only ever rendered inside it, so that comes across on its own, just
+          above the action row. That is where the legacy form kept it too.
+        */}
+        <ProblemSummary problems={problems} />
+        {renderWizardFooter()}
+        {renderItemModal()}
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-4.5">
