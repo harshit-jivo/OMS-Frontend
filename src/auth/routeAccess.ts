@@ -230,6 +230,11 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   "/Rate_Approver_orders": { roles: RATE_APPROVER_ROLES },
   "/Rate_Approver_status_tracking": { roles: RATE_APPROVER_ROLES },
   "/Order_Tracking": { roles: BILLING_OR_MANAGER },
+  // Company-wide by definition, so it is gated on the key that already means
+  // exactly that — `_shared.sees_all_orders` reads the same one to build the
+  // queryset. A second key meaning "see the master page" would be a second
+  // authority source for one fact; PERMISSIONS.md §1 is about what that costs.
+  "/Order_Master": { permissions: ["orders.sales.view_all"] },
   "/Invoice_Report": { permissions: ["invoices.report.view"], roles: ["billing"] },
 
   // --- Reports ------------------------------------------------------------
