@@ -31,6 +31,7 @@ import { useUserList } from "../lib/authQueries";
 import {
   ALL_GRANTABLE_KEYS,
   GRANTABLE_ADMIN_PAGES,
+  ORDER_SCOPE_PERMISSIONS,
   PAYMENT_ACTION_PERMISSIONS,
 } from "../config/adminPages";
 
@@ -326,6 +327,35 @@ export default function Page_Permissions() {
               </p>
               <PermissionGrid>
                 {PAYMENT_ACTION_PERMISSIONS.map((perm) => (
+                  <PermissionToggle
+                    key={perm.key}
+                    title={perm.label}
+                    checked={pages.includes(perm.key)}
+                    onChange={() => togglePage(perm.key)}
+                  />
+                ))}
+              </PermissionGrid>
+            </>
+          )}
+        </Card>
+      </section>
+
+      {/* Order visibility — widens what the screens a user already holds can
+          show them, rather than opening a screen of its own. */}
+      <section className="space-y-3">
+        <SectionHeading>Order visibility</SectionHeading>
+        <Card>
+          {nonAdminSelected.length === 0 ? (
+            <p className="m-0 text-[13px] text-subtle">{pickerHint}</p>
+          ) : (
+            <>
+              <p className="m-0 mb-3 text-[12px] text-subtle">
+                Separate from the Sales Dashboard page grant: that decides whether a user can
+                open the screen, this decides whose orders appear on it. Without it a user
+                sees only the orders their role already scopes them to.
+              </p>
+              <PermissionGrid>
+                {ORDER_SCOPE_PERMISSIONS.map((perm) => (
                   <PermissionToggle
                     key={perm.key}
                     title={perm.label}
