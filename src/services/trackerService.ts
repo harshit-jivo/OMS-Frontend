@@ -54,7 +54,13 @@ export interface StageEvent {
   stage: number;
   stage_name: string;
   stage_code: string;
-  event_type: "RECEIVE" | "ADVANCE" | "RETURN";
+  /**
+   * NOTE is an ANNOTATION on a visit, not an occupancy — a hold, or a rejection
+   * awaiting its written reason. It copies `entered_at` from the visit it
+   * annotates and keeps `exited_at` NULL for good, so it must never be read as
+   * "the invoice is here now". It was missing from this union entirely.
+   */
+  event_type: "RECEIVE" | "ADVANCE" | "RETURN" | "NOTE";
   stage_status: string;
   hold_type: "" | "FULL" | "PARTIAL";
   amount: string | null;
@@ -129,6 +135,15 @@ export interface Invoice {
   updated_at: string;
   events?: StageEvent[];
   payment?: PaymentDetail | null;
+  /**
+   * Alert-email mute, set from the desk with a written reason. Suppresses the
+   * stuck-alert EMAIL only, and only while the invoice is on the stage visit it
+   * was set for — the flag lapses on its own when the invoice moves on.
+   */
+  email_muted?: boolean;
+  email_mute_reason?: string;
+  email_muted_by?: string | null;
+  email_muted_at?: string | null;
   // Present in the my-queue payload:
   arrived_via_return?: boolean;
   return_reason?: string;
@@ -137,6 +152,14 @@ export interface Invoice {
   returned_at?: string;
   // Present in the stage-advanced payload:
   advanced_at?: string;
+  /**
+   * The desk this invoice is DUE at next, from the detail endpoint only —
+   * computing it queries the stage table per invoice, which would be an N+1 on
+   * a queue. Null at the terminal desk, on a completed invoice, and on a detour
+   * desk, where the next step is decided on the way out rather than fixed.
+   */
+  next_stage_code?: string | null;
+  next_stage_name?: string | null;
 }
 
 /**
@@ -229,11 +252,15 @@ export interface BulkResult {
  *   not_submitted  the draft exists but has not reached JSAP yet
  *   not_configured JSAP database not set up on the server
  *   rejection_pending  rejected by hand here, awaiting remarks (sync stands down)
+ *   sap_unreachable    the SAP lookup FAILED — the status is unknown, NOT
+ *                      pending. Distinct from the others on purpose: an
+ *                      outage reported as "awaiting a decision" reads as a
+ *                      quiet all-clear.
  */
 export interface JsapStatus {
   available: boolean;
   reason?: "not_in_jsap" | "no_party_code" | "no_draft" | "not_submitted"
-    | "not_configured" | "rejection_pending";
+    | "not_configured" | "rejection_pending" | "sap_unreachable";
   detail?: string;
   status?: "A" | "P" | "R";
   label?: string;
@@ -260,6 +287,13 @@ export interface JsapSyncResult {
   returned?: number[];
   waiting?: number[];
   errors?: { id: number; error: string }[];
+  /**
+   * Invoices whose status could NOT be determined because SAP was unreachable.
+   * Deliberately separate from `waiting`: these are unknown, not pending, and
+   * reporting them as pending is how a failed lookup came to read as a quiet
+   * all-clear.
+   */
+  unreachable?: number[];
   // Single invoice
   changed?: boolean;
   action?: "ADVANCE" | "RETURN" | null;
@@ -332,8 +366,33 @@ export const trackerService = {
     await api.delete(`/tracker/invoices/${id}/`);
   },
 
-  async myQueue(): Promise<MyQueue> {
-    const { data } = await api.get("/tracker/my-queue/");
+  /**
+   * The actionable inbox. Filters are applied SERVER-side, not by narrowing the
+   * rows here, so the per-stage tab counts agree with what is listed — a count
+   * that contradicts the visible rows is worse than no count.
+   *
+   * `date_from`/`date_to` are dated on ARRIVAL at the desk (matching the queue's
+   * ordering), and `date_to` is inclusive of that whole day.
+   */
+  async myQueue(filters: QueueFilters = {}): Promise<MyQueue> {
+    const params: Record<string, string> = {};
+    if (filters.category) params.category = filters.category;
+    if (filters.dateFrom) params.date_from = filters.dateFrom;
+    if (filters.dateTo) params.date_to = filters.dateTo;
+    const { data } = await api.get("/tracker/my-queue/", { params });
+    return data;
+  },
+
+  /**
+   * Send invoices from Invoice Entry straight to SAP Approval, skipping
+   * Pre-Audit and Data Entry. `remarks` is mandatory server-side — this bypasses
+   * where holds and debits are captured, so the reason is the only record of why.
+   */
+  async fastTrack(ids: number[], remarks: string): Promise<BulkResult> {
+    const { data } = await api.post("/tracker/actions/fast-track/", {
+      ids,
+      remarks,
+    });
     return data;
   },
 
@@ -489,6 +548,52 @@ export const trackerService = {
     return data;
   },
 
+  /**
+   * Stop the stuck-alert emails for these invoices, with the reason why.
+   *
+   * The reason is mandatory (the server rejects a blank one): the next person
+   * to see a silent overdue invoice has to be able to find out why it is
+   * silent. Nothing else changes — the invoice keeps ageing, keeps its overdue
+   * badge, and still appears on the Alerts page, marked as muted.
+   *
+   * The mute is tied to the stage visit, so it lapses by itself when the
+   * invoice reaches the next desk.
+   */
+  async muteAlerts(ids: number[], reason: string): Promise<BulkResult> {
+    const { data } = await api.post("/tracker/alerts/mute/", { ids, reason });
+    return data;
+  },
+
+  /**
+   * Ask the server to check SAP for invoices it has already posted, and walk
+   * those to the Payment stage.
+   *
+   * Same service the nightly `sync_sap_saved` job runs, so the button and the
+   * schedule cannot drift apart. Pass `ids` to check only those invoices; omit
+   * it to sweep every in-progress invoice. `dryRun` reports what would move
+   * without moving anything.
+   *
+   * Only POSTED documents count — a SAP draft is pending, not saved.
+   */
+  async syncSapSaved(
+    ids?: number[],
+    dryRun = false,
+  ): Promise<SapSavedSyncResult> {
+    const { data } = await api.post("/tracker/actions/sync-sap-saved/", {
+      ...(ids && ids.length ? { ids } : {}),
+      dry_run: dryRun,
+    });
+    return data;
+  },
+
+  /** Turn the alert emails back on. No reason required to un-mute. */
+  async unmuteAlerts(ids: number[]): Promise<BulkResult> {
+    const { data } = await api.delete("/tracker/alerts/mute/", {
+      data: { ids },
+    });
+    return data;
+  },
+
   async adminAllInvoices(filters: AllInvoiceFilters = {}): Promise<Invoice[]> {
     const params: Record<string, string> = {};
     Object.entries(filters).forEach(([k, v]) => {
@@ -546,6 +651,30 @@ export interface BottleneckRow {
   avg_days: number;
   visits: number;
 }
+/** Filters for the queue. Empty strings are omitted from the request. */
+export interface QueueFilters {
+  category?: string;
+  dateFrom?: string;   // YYYY-MM-DD, on arrival at the stage
+  dateTo?: string;     // YYYY-MM-DD, inclusive
+}
+
+/**
+ * Throughput at one desk over the selected window — what MOVED, as opposed to
+ * `StageCount`'s snapshot of what is sitting there now. The two answer different
+ * questions and deliberately will not tally.
+ */
+export interface StageFlow {
+  stage_code: string;
+  stage_name: string;
+  order: number;
+  /** Visits that BEGAN in the window: how many invoices reached this desk. */
+  arrived: number;
+  /** Decisions recorded at this desk in the window (sum of `decisions`). */
+  decided: number;
+  /** Per-disposition counts, biggest first. `SKIPPED` marks a fast-tracked bypass. */
+  decisions: { status: string; count: number }[];
+}
+
 export interface ReportData {
   summary: {
     in_progress: number;
@@ -554,6 +683,7 @@ export interface ReportData {
     avg_cycle_days: number;
   };
   pending_by_stage: StageCount[];
+  flow_by_stage: StageFlow[];
   avg_days_per_stage: StageAvg[];
   bottleneck_by_person: BottleneckRow[];
   bottleneck_by_vendor: BottleneckRow[];
@@ -599,8 +729,41 @@ export interface TrackerUser {
   is_active: boolean;
 }
 
-export interface StuckAlert {
+/**
+ * A stuck row as `/tracker/alerts/` returns it. The backend derives these live
+ * from dwell time rather than reading the StuckAlert table, so the ledger-only
+ * fields (`id`, `created_at`, `updated_at`) are null until the
+ * `scan_stuck_alerts` sweep has recorded that visit. Key rows on `invoice`, not
+ * `id` — an invoice sits at exactly one stage, so it is unique per response.
+ */
+/** One invoice the SAP-saved sweep moved, and the document that justified it. */
+export interface SapSavedAdvance {
   id: number;
+  invoice_number: string;
+  party_name: string;
+  /** Where it was sitting before the sweep moved it. */
+  from_stage: string;
+  sap_table: string;
+  sap_docnum: number;
+  sap_docentry: number;
+}
+
+export interface SapSavedSyncResult {
+  checked: number;
+  dry_run: boolean;
+  advanced_count: number;
+  advanced: SapSavedAdvance[];
+  errors: { id: number; invoice_number: string; detail: string }[];
+  /**
+   * Invoices whose document exists, but in a different company database than
+   * their branch/unit selects. Reported, never advanced — the tracker row or
+   * the posting is wrong, and a person has to decide which.
+   */
+  cross_company_count: number;
+}
+
+export interface StuckAlert {
+  id: number | null;
   invoice: number;
   invoice_number: string;
   party_name: string;
@@ -615,8 +778,17 @@ export interface StuckAlert {
   is_active: boolean;
   last_notified_at: string | null;
   notified: { user: string; email: string; sent_at: string }[];
-  created_at: string;
-  updated_at: string;
+  created_at: string | null;
+  updated_at: string | null;
+  /**
+   * Alert-email mute, set from the desk with a written reason. Suppresses the
+   * stuck-alert EMAIL only, and only while the invoice is on the stage visit it
+   * was set for — the flag lapses on its own when the invoice moves on.
+   */
+  email_muted?: boolean;
+  email_mute_reason?: string;
+  email_muted_by?: string | null;
+  email_muted_at?: string | null;
 }
 
 export default trackerService;

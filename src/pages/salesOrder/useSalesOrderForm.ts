@@ -82,6 +82,8 @@ type PartyOption = {
 type BranchOption = {
   bpl_id: string | number;
   bpl_name?: string | null;
+  /** OIL / BEVERAGES / MART. Only `bpl_id` + this pair is unique. */
+  category?: string | null;
   /** Shown on the wizard's review step, and only there. */
   address?: string | null;
 };
@@ -362,11 +364,19 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
   // Use Effects
   useEffect(() => {
     fetchPartyName();
-    fetchBranch();
     fetchProducts();
     fetchCompany();
     fetchCurrentUserProfile();
   }, []);
+
+  // Dispatch branches belong to a business line, so they are re-fetched
+  // whenever the party's category changes rather than once on mount. Before
+  // the category is known (the profile default has not landed, no party is
+  // picked) this asks for all of them, which is the honest answer — the
+  // selector is just not narrowed yet.
+  useEffect(() => {
+    fetchBranch(selectedPartyCategory);
+  }, [selectedPartyCategory]);
 
   useEffect(() => {
     if (!isLoadingFromOrder) {
@@ -389,11 +399,20 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
     }
   };
 
+  // Keep `dispatch` pointing at a branch the current list actually contains.
+  //
+  // The list changes under this field when the party's category changes, and
+  // `bpl_id` is unique only within a category — id 2 is FACTORY under OIL and
+  // HARYANA under MART. So a held-over id is not a harmless stale value; it
+  // silently renames itself into a different place. Anything not in the new
+  // list is dropped and replaced with that list's first entry.
   useEffect(() => {
-    if (isLoadingFromOrder || formData.dispatch || branch.length === 0) return;
+    if (isLoadingFromOrder || branch.length === 0) return;
+    const stillOffered = branch.some((d) => String(d.bpl_id) === formData.dispatch);
+    if (formData.dispatch && stillOffered) return;
     setFormData((prev) => ({
       ...prev,
-      dispatch: prev.dispatch || String(branch[0]?.bpl_id || ""),
+      dispatch: String(branch[0]?.bpl_id || ""),
     }));
   }, [branch, formData.dispatch, isLoadingFromOrder]);
 
@@ -501,12 +520,13 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
     }
   };
 
-  const fetchBranch = async () => {
+  const fetchBranch = async (category = "") => {
     try {
-      const data = await ordersService.getBranches();
-      setBranch(data);
+      const data = await ordersService.getBranches(category);
+      setBranch(Array.isArray(data) ? data : []);
     } catch (error) {
       console.log("Error fetching dispatch data:", error);
+      setBranch([]);
     }
   };
 
@@ -1392,7 +1412,14 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
         kind: "scheme",
         key: `v2-${index}-${proposal.scheme_id}-${proposal.benefit_id}`,
         itemCode: proposal.benefit_item_code,
+        // The engine's own name first. The two catalogue lookups below only
+        // hold items the PARTY is assigned, and a STATE- or VENDOR-scoped
+        // scheme gives away items that are deliberately outside that list —
+        // so they missed, and the row showed a bare code ("FG0000031") where
+        // every other line showed a name. They stay as a fallback for a
+        // frontend running against a server that predates the field.
         itemName:
+          proposal.benefit_item_name?.trim() ||
           products.find((p) => p.item_code === proposal.benefit_item_code)?.item_name ||
           partyProducts.find((p) => p.item_code === proposal.benefit_item_code)?.item_name ||
           proposal.benefit_item_code,
@@ -2019,7 +2046,17 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
   // OIL/BEVERAGES scheme from the same state would leak into a MART order. The
   // category-gated auto-fetch (v2 engine) is unaffected — this only governs the
   // manual picker's visibility.
+  //
+  // Admins can also switch the manual picker off everywhere (UI Labels →
+  // `manual_scheme_box`) so a line doesn't get a hand-picked scheme on top of
+  // the one the scheme mapping auto-attaches.
+  const manualSchemeBox = field("manual_scheme_box", {
+    label: "Schemes",
+    enabled: true,
+    required: false,
+  });
   const isSchemePanelHidden = (row: SalesRow) => {
+    if (!manualSchemeBox.enabled) return true;
     if (isMartOrder) return true;
     const category = String(row.category || selectedPartyCategory || "")
       .trim()

@@ -1,0 +1,669 @@
+import { render as rtlRender, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { MemoryRouter, useLocation } from "react-router-dom";
+import { describe, expect, it, vi, beforeEach } from "vitest";
+
+import BackDate from "./BackDate";
+import { backdateService } from "../services/backdateService";
+
+/**
+ * Both pages are ROUTED pages: they read `?requestId=` so a notification can
+ * open one entry rather than dropping the reader on the list. That needs a
+ * router in the tree, so every `render` below goes through this wrapper and
+ * the call sites stay unchanged.
+ */
+function LocationProbe() {
+  return <span data-testid="location-search">{useLocation().search}</span>;
+}
+
+const render = (ui: React.ReactElement, route = "/") =>
+  rtlRender(
+    <MemoryRouter initialEntries={[route]}>
+      {ui}
+      <LocationProbe />
+    </MemoryRouter>,
+  );
+
+
+/**
+ * The BackDate requester page.
+ *
+ * Creating a request used to be a modal. It is a TAB now, and the KPI cards
+ * are the list's filter — both are behaviours nothing else in the suite would
+ * catch: the route smoke test only mounts the page, and `tsc` is perfectly
+ * happy with a card that counts something and does nothing when clicked.
+ */
+const REQUESTS = [
+  {
+    id: 11,
+    company: "OIL",
+    company_label: "OIL",
+    companies: ["OIL"],
+    sap_username: "USER12",
+    document_type_name: "G/L Accounts",
+    from_date: "2026-01-01",
+    to_date: "2026-01-31",
+    time_limit: null,
+    action: "A",
+    action_label: "Add",
+    created_by_username: "mukesh",
+    created_at: "2026-02-01T10:00:00Z",
+    flow: null,
+    current_stage: null,
+  },
+];
+
+// `completed` is a SUBSET of `approved`, so `total` excludes it.
+/** A finished flow, for the tests that care what SAP said. */
+const FLOW = {
+  id: 1,
+  backdate: 11,
+  status: "APPROVED",
+  hana_status: null,
+  sap_payload: null,
+  hana_status_text: "",
+  workflow: 1,
+  workflow_code: "BKDT_OIL",
+  current_user: null,
+  current_user_username: "",
+  effective_user_username: "",
+  has_active_replacement: false,
+  current_stage: null,
+  current_stage_name: "",
+  current_stage_sequence: null,
+  total_stage: 1,
+  created_at: "2026-02-01T10:00:00Z",
+  updated_at: "2026-02-02T09:00:00Z",
+};
+
+const INSIGHTS = {
+  pending: 3, approved: 5, completed: 4, rejected: 2, total: 10,
+};
+
+function stub() {
+  vi.spyOn(backdateService, "listRequests").mockResolvedValue(
+    REQUESTS as never,
+  );
+  vi.spyOn(backdateService, "insights").mockResolvedValue(INSIGHTS as never);
+  vi.spyOn(backdateService, "sapUsers").mockResolvedValue([
+    { user_id: 1, user_code: "USER12" },
+  ] as never);
+  vi.spyOn(backdateService, "documentTypes").mockResolvedValue([
+    { object_type: 13, name: "A/R Invoice" },
+  ] as never);
+  vi.spyOn(backdateService, "createRequest").mockResolvedValue({} as never);
+  vi.spyOn(backdateService, "history").mockResolvedValue({
+    actions: [
+      {
+        id: 1, backdate: 11, action: "CREATE", action_label: "Created",
+        stage: null, stage_name: "", acted_by: 1,
+        acted_by_username: "mukesh", remarks: "", action_data: null,
+        acted_at: "2026-02-01T10:00:00Z",
+      },
+      {
+        id: 2, backdate: 11, action: "UPDATE", action_label: "Updated",
+        stage: null, stage_name: "", acted_by: 1,
+        acted_by_username: "mukesh", remarks: "Dates corrected",
+        action_data: {
+          from_date: { old: "2026-01-01", new: "2026-01-05" },
+          document_type_name: { old: "A/R Invoice", new: "Delivery" },
+        },
+        acted_at: "2026-02-01T11:00:00Z",
+      },
+      {
+        id: 3, backdate: 11, action: "APPROVE", action_label: "Approved",
+        stage: 11, stage_name: "Finance Approval", acted_by: 2,
+        acted_by_username: "tannu", remarks: "ok", action_data: null,
+        acted_at: "2026-02-02T09:00:00Z",
+      },
+    ],
+    stages: [
+      {
+        stage_id: 11, sequence: 1, stage_name: "Finance Approval",
+        status: "APPROVED", reviewer: "tannu", configured_reviewer: "tannu",
+        has_active_replacement: false, acted_by: "tannu",
+        acted_at: "2026-02-02T09:00:00Z", remarks: "ok",
+      },
+    ],
+  } as never);
+}
+
+describe("BackDate", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    stub();
+  });
+
+  it("offers creating as a tab, not a header button", async () => {
+    render(<BackDate />);
+    await screen.findByRole("tab", { name: /entries/i });
+
+    // The only header action left is Refresh — "New Request" moved into the
+    // tab strip, so it must NOT also exist as a button.
+    expect(screen.queryByRole("button", { name: /new request/i })).toBeNull();
+    expect(screen.getByRole("tab", { name: /new request/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /refresh/i })).toBeTruthy();
+  });
+
+  it("shows the create form only on the create tab", async () => {
+    const user = userEvent.setup();
+    render(<BackDate />);
+    await screen.findByRole("tab", { name: /entries/i });
+
+    expect(screen.queryByText("New BackDate Request")).toBeNull();
+    // The status filter belongs to the list, so it goes away with it.
+    expect(screen.getByLabelText(/filter requests by status/i)).toBeTruthy();
+
+    await user.click(screen.getByRole("tab", { name: /new request/i }));
+
+    expect(screen.getByText("New BackDate Request")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /submit request/i })).toBeTruthy();
+    expect(screen.queryByLabelText(/filter requests by status/i)).toBeNull();
+  });
+
+  it("raises ONE request for ONE company, and never one per action", async () => {
+    const user = userEvent.setup();
+    render(<BackDate />);
+    await screen.findByRole("tab", { name: /entries/i });
+    await user.click(screen.getByRole("tab", { name: /new request/i }));
+
+    // One company at a time: a request is routed by its company and written
+    // to that company's SAP schema, so there is no half-picked pair.
+    const company = screen.getByLabelText(/company/i);
+    expect(company.textContent).toContain("OIL");
+    await user.click(company);
+    await user.click(await screen.findByRole("option", { name: "BEVERAGES" }));
+
+    // The ACTION still takes both, and both stay on the ONE request: SAP is
+    // never told the action, so splitting the pair would write twins.
+    await user.click(screen.getByLabelText(/action/i));
+    await user.click(screen.getByRole("checkbox", { name: "Update" }));
+    await user.keyboard("{Escape}");
+
+    await user.type(
+      screen.getByLabelText(/rights expire/i),
+      "2026-12-31T18:30",
+    );
+    await user.click(screen.getByRole("button", { name: "Submit Request" }));
+
+    await waitFor(() =>
+      expect(backdateService.createRequest).toHaveBeenCalledTimes(1),
+    );
+    const [body] = vi.mocked(backdateService.createRequest).mock.calls[0];
+    expect(body.company).toBe("BEVERAGES");
+    expect(body.action).toBe("A,U");
+  });
+
+  it("sends the expiry as the instant the user actually picked", async () => {
+    // `datetime-local` gives a WALL CLOCK with no zone, and the server reads a
+    // zoneless timestamp as UTC — so "2 o'clock" arrived as 14:00 UTC, which
+    // is 19:30 in Indian time. Every request read back 5h30m late.
+    const user = userEvent.setup();
+    render(<BackDate />);
+    await screen.findByRole("tab", { name: /entries/i });
+    await user.click(screen.getByRole("tab", { name: /new request/i }));
+
+    await user.type(
+      screen.getByLabelText(/rights expire/i),
+      "2026-09-16T14:00",
+    );
+    await user.click(screen.getByRole("button", { name: "Submit Request" }));
+
+    await waitFor(() =>
+      expect(backdateService.createRequest).toHaveBeenCalledTimes(1),
+    );
+    const [body] = vi.mocked(backdateService.createRequest).mock.calls[0];
+    // An instant, not a bare wall clock — nothing left for the server to
+    // assume. It must mean 14:00 in THIS browser's zone.
+    expect(body.time_limit).toBe(
+      new Date("2026-09-16T14:00").toISOString(),
+    );
+    expect(new Date(body.time_limit!).getHours()).toBe(14);
+  });
+
+  it("refuses to submit without an expiry", async () => {
+    const user = userEvent.setup();
+    render(<BackDate />);
+    await screen.findByRole("tab", { name: /entries/i });
+    await user.click(screen.getByRole("tab", { name: /new request/i }));
+
+    await user.click(screen.getByRole("button", { name: /submit request/i }));
+
+    // Caught before the fan-out, or one missing field would be reported once
+    // per company.
+    expect(backdateService.createRequest).not.toHaveBeenCalled();
+    expect(screen.getByText(/SAP ignores back-posting rights/i)).toBeTruthy();
+  });
+
+  it("sends a single action unchanged", async () => {
+    const user = userEvent.setup();
+    render(<BackDate />);
+    await screen.findByRole("tab", { name: /entries/i });
+    await user.click(screen.getByRole("tab", { name: /new request/i }));
+
+    await user.type(
+      screen.getByLabelText(/rights expire/i),
+      "2026-12-31T18:30",
+    );
+    await user.click(screen.getByRole("button", { name: /submit request/i }));
+
+    await waitFor(() =>
+      expect(backdateService.createRequest).toHaveBeenCalledTimes(1),
+    );
+    const [body] = vi.mocked(backdateService.createRequest).mock.calls[0];
+    expect(body.action).toBe("A");
+    // ONE company, not a list of one.
+    expect(body.company).toBe("OIL");
+    // The expiry travels as an instant; see the test above.
+    expect(body.time_limit).toBe(new Date("2026-12-31T18:30").toISOString());
+  });
+
+  it("labels the action plainly, with no trailing explanation", async () => {
+    const user = userEvent.setup();
+    render(<BackDate />);
+    await screen.findByRole("tab", { name: /entries/i });
+    await user.click(screen.getByRole("tab", { name: /new request/i }));
+
+    await user.click(screen.getByLabelText(/action/i));
+    expect(screen.getByRole("checkbox", { name: "Add" })).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: "Update" })).toBeTruthy();
+    expect(screen.queryByText(/create back-dated documents/i)).toBeNull();
+  });
+
+  it("shows the counts on the KPI cards", async () => {
+    render(<BackDate />);
+    const pending = await screen.findByRole("button", { name: /pending/i });
+    expect(within(pending).getByText("3")).toBeTruthy();
+    expect(
+      within(screen.getByRole("button", { name: /^total/i })).getByText("10"),
+    ).toBeTruthy();
+  });
+
+  it("filters the list from a KPI card and returns to the entries tab", async () => {
+    const user = userEvent.setup();
+    render(<BackDate />);
+    await screen.findByRole("tab", { name: /entries/i });
+
+    await user.click(screen.getByRole("tab", { name: /new request/i }));
+    expect(screen.getByText("New BackDate Request")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: /pending/i }));
+
+    // Back on the list, scoped to the status that was clicked — the select
+    // and the request it sent must agree.
+    await waitFor(() =>
+      expect(backdateService.listRequests).toHaveBeenCalledWith({
+        status: "PENDING",
+      }),
+    );
+    const select = screen.getByLabelText(
+      /filter requests by status/i,
+    ) as HTMLSelectElement;
+    expect(select.value).toBe("PENDING");
+    expect(screen.getByRole("button", { name: /pending/i }).getAttribute("aria-pressed"))
+      .toBe("true");
+  });
+
+  it("narrows both the list and the counts by company", async () => {
+    const user = userEvent.setup();
+    render(<BackDate />);
+    await screen.findByRole("tab", { name: /entries/i });
+
+    await user.selectOptions(
+      screen.getByLabelText(/filter requests by company/i),
+      "BEVERAGES",
+    );
+
+    // The counts head the list, so they take the same filter — otherwise the
+    // card says 3 over a table showing 1.
+    await waitFor(() =>
+      expect(backdateService.listRequests).toHaveBeenLastCalledWith({
+        company: "BEVERAGES",
+      }),
+    );
+    expect(backdateService.insights).toHaveBeenLastCalledWith({
+      company: "BEVERAGES",
+    });
+  });
+
+  it("combines the company and status filters", async () => {
+    const user = userEvent.setup();
+    render(<BackDate />);
+    await screen.findByRole("tab", { name: /entries/i });
+
+    await user.selectOptions(
+      screen.getByLabelText(/filter requests by company/i),
+      "OIL",
+    );
+    await user.click(screen.getByRole("button", { name: /pending/i }));
+
+    await waitFor(() =>
+      expect(backdateService.listRequests).toHaveBeenLastCalledWith({
+        company: "OIL",
+        status: "PENDING",
+      }),
+    );
+  });
+
+  it("shows SAP's exact response, and never the payload", async () => {
+    vi.mocked(backdateService.listRequests).mockResolvedValue([
+      {
+        ...REQUESTS[0],
+        flow: {
+          ...FLOW,
+          status: "APPROVED",
+          hana_status: "FAILED",
+          hana_status_text: JSON.stringify({
+            results: [{
+              branch: "OIL", status: "FAILED",
+              response: 'RuntimeError: (259, "invalid userid USER12")',
+            }],
+          }),
+          sap_payload: { calls: [{ branch: "OIL", parameters: { USERID: "USER12" } }] },
+        },
+      },
+    ] as never);
+    const user = userEvent.setup();
+    render(<BackDate />);
+    await screen.findByRole("tab", { name: /entries/i });
+
+    await user.click(await screen.findByRole("button", { name: /progress/i }));
+
+    // SAP's own words, verbatim — that is the whole point of the column.
+    expect(await screen.findByText(/invalid userid USER12/)).toBeTruthy();
+    // And no way to pull up the request parameters beside them.
+    expect(screen.queryByText(/show payload/i)).toBeNull();
+    expect(screen.queryByText(/USERID/)).toBeNull();
+    // No SQL either: a query pasted into the response buried the one thing
+    // an approver is reading for.
+    expect(screen.queryByText(/SELECT \* FROM/)).toBeNull();
+  });
+
+  it("does not call a successful SAP write FAILED", async () => {
+    // An older row stores a plain sentence rather than the JSON shape. Reading
+    // it as a failure printed a red FAILED beside a green "rights applied".
+    vi.mocked(backdateService.listRequests).mockResolvedValue([
+      {
+        ...REQUESTS[0],
+        flow: {
+          ...FLOW,
+          status: "APPROVED",
+          hana_status: "SUCCESS",
+          hana_status_text: "Rights applied in SAP for USER01 (OIL).",
+        },
+      },
+    ] as never);
+    const user = userEvent.setup();
+    render(<BackDate />);
+    await screen.findByRole("tab", { name: /entries/i });
+
+    await user.click(await screen.findByRole("button", { name: /progress/i }));
+
+    expect(await screen.findByText(/Rights applied in SAP/)).toBeTruthy();
+    expect(screen.queryByText(/refused/i)).toBeNull();
+  });
+
+  it("edits every field, from SAP's own lists", async () => {
+    vi.mocked(backdateService.listRequests).mockResolvedValue(
+      [{ ...REQUESTS[0], can_edit: true, action: "A", action_label: "Add" }] as never,
+    );
+    vi.spyOn(backdateService, "updateRequest").mockResolvedValue({} as never);
+    const user = userEvent.setup();
+    render(<BackDate />);
+    await screen.findByRole("tab", { name: /entries/i });
+
+    await user.click(await screen.findByRole("button", { name: /details/i }));
+    await user.click(
+      await screen.findByRole("button", { name: /edit this request/i }),
+    );
+
+    const form = within(
+      (await screen.findByText("Edit request")).closest("section") as HTMLElement,
+    );
+
+    // The SAP user and the document type come from SAP, not a free-text box —
+    // a typed name SAP has never heard of is refused at the LAST stage.
+    await user.click(form.getByLabelText(/sap user/i));
+    await user.click(await screen.findByRole("option", { name: "USER12" }));
+    await user.click(form.getByLabelText(/document type/i));
+    await user.click(await screen.findByRole("option", { name: "A/R Invoice" }));
+
+    // Action is editable here now; it was missing from this form entirely.
+    const actionTrigger = form.getByLabelText(/action/i);
+    await user.click(actionTrigger);
+    await user.click(screen.getByRole("checkbox", { name: "Update" }));
+    // Toggle the trigger to close it — Escape would close the whole dialog.
+    await user.click(actionTrigger);
+
+    // By placeholder, not by label: Testing Library refuses to resolve a
+    // <textarea> through `htmlFor` even when the pairing is correct.
+    await user.type(
+      form.getByPlaceholderText(/recorded against this edit/i),
+      "fixed it",
+    );
+    await user.click(form.getByRole("button", { name: /save changes/i }));
+
+    await waitFor(() =>
+      expect(backdateService.updateRequest).toHaveBeenCalled(),
+    );
+    const [, body] = vi.mocked(backdateService.updateRequest).mock.calls[0];
+    expect(body.sap_username).toBe("USER12");
+    expect(body.document_type_name).toBe("A/R Invoice");
+    expect(body.action).toBe("A,U");
+    // The reason rides with the edit, to land on THAT edit's log row.
+    expect(body.remarks).toBe("fixed it");
+    // Company is never sent: it decides the approval route.
+    expect(body).not.toHaveProperty("company");
+  });
+
+  it("says the company cannot move, rather than showing a dead box", async () => {
+    vi.mocked(backdateService.listRequests).mockResolvedValue(
+      [{ ...REQUESTS[0], can_edit: true }] as never,
+    );
+    const user = userEvent.setup();
+    render(<BackDate />);
+    await screen.findByRole("tab", { name: /entries/i });
+
+    await user.click(await screen.findByRole("button", { name: /details/i }));
+    await user.click(
+      await screen.findByRole("button", { name: /edit this request/i }),
+    );
+
+    expect(await screen.findByText(/it decides the approval route/i))
+      .toBeTruthy();
+  });
+
+  it("shows where the SAP row is as a field, not as a query", async () => {
+    vi.mocked(backdateService.listRequests).mockResolvedValue([
+      {
+        ...REQUESTS[0],
+        flow: {
+          ...FLOW,
+          hana_status: "SUCCESS",
+          hana_status_text: JSON.stringify({
+            results: [{
+              branch: "OIL", status: "SUCCESS", sap_row_id: 108,
+              response: "OPEN_BKDT accepted: USER12, G/L Accounts.",
+            }],
+          }),
+        },
+      },
+    ] as never);
+    const user = userEvent.setup();
+    render(<BackDate />);
+    await screen.findByRole("tab", { name: /entries/i });
+
+    await user.click(await screen.findByRole("button", { name: /progress/i }));
+
+    expect(await screen.findByText("SAP row id")).toBeTruthy();
+    expect(screen.getByText("108")).toBeTruthy();
+    expect(screen.queryByText(/SELECT \* FROM/)).toBeNull();
+  });
+
+  it("offers Completed as its own card and filter", async () => {
+    const user = userEvent.setup();
+    render(<BackDate />);
+    await screen.findByRole("tab", { name: /entries/i });
+
+    const card = await screen.findByRole("button", { name: /completed/i });
+    expect(card).toBeTruthy();
+    // It is a SUBSET of approved, so the card says so rather than leaving a
+    // reader to wonder why the two numbers differ.
+    expect(screen.getByText(/rights reached SAP/i)).toBeTruthy();
+
+    await user.click(card);
+    await waitFor(() =>
+      expect(backdateService.listRequests).toHaveBeenLastCalledWith(
+        expect.objectContaining({ status: "COMPLETED" }),
+      ),
+    );
+  });
+
+  it("renders an UPDATE as a readable diff on the progress line", async () => {
+    const user = userEvent.setup();
+    render(<BackDate />);
+    await screen.findByRole("tab", { name: /entries/i });
+
+    // The edit belongs to the request's PROGRESS — it happened between the
+    // creation and the approval — so that is where the diff is shown.
+    await user.click(await screen.findByRole("button", { name: /progress/i }));
+
+    const updated = (await screen.findByText("Updated"))
+      .closest("li") as HTMLElement;
+    const diff = within(updated);
+    // Field labels, not column names, and only the fields that changed.
+    expect(diff.getByText("From date")).toBeTruthy();
+    expect(diff.getByText("Document type")).toBeTruthy();
+    expect(diff.queryByText("To date")).toBeNull();
+    // The document reads by NAME in the diff too — "13 → 15" says nothing.
+    // Old and new are BOTH shown, so the reader can see what it was; dates
+    // are localised on the way out, so the document name is what this can
+    // assert literally.
+    expect(diff.getByText("A/R Invoice")).toBeTruthy();
+    expect(diff.getByText("Delivery")).toBeTruthy();
+  });
+
+  it("shows the stage name the server resolved, not a stored copy", async () => {
+    const user = userEvent.setup();
+    render(<BackDate />);
+    await screen.findByRole("tab", { name: /entries/i });
+
+    await user.click(await screen.findByRole("button", { name: /progress/i }));
+    expect(await screen.findByText(/Finance Approval/)).toBeTruthy();
+  });
+
+  it("opens the progress with the creation as its first event", async () => {
+    const user = userEvent.setup();
+    render(<BackDate />);
+    await screen.findByRole("tab", { name: /entries/i });
+
+    await user.click(await screen.findByRole("button", { name: /progress/i }));
+
+    // A progress line that starts at the first approver is missing the event
+    // that began the entry.
+    const created = (await screen.findByText("Created"))
+      .closest("li") as HTMLElement;
+    expect(within(created).getByText("mukesh")).toBeTruthy();
+    expect(within(created).getByText("Created by")).toBeTruthy();
+  });
+
+  it("shows the document type by NAME, not by its number", async () => {
+    const user = userEvent.setup();
+    render(<BackDate />);
+    await screen.findByRole("tab", { name: /entries/i });
+
+    await user.click(await screen.findByRole("button", { name: /details/i }));
+
+    // "13" means nothing to the person approving.
+    expect(await screen.findByText("G/L Accounts")).toBeTruthy();
+  });
+
+  it("does not offer Edit when the server says this caller may not", async () => {
+    const user = userEvent.setup();
+    render(<BackDate />);
+    await screen.findByRole("tab", { name: /entries/i });
+
+    await user.click(await screen.findByRole("button", { name: /details/i }));
+    await screen.findByText("G/L Accounts");
+
+    // The fixture carries no `can_edit`, which is the server declining. A
+    // button that 403s on click is worse than no button.
+    expect(screen.queryByRole("button", { name: /edit this request/i }))
+      .toBeNull();
+  });
+
+  it("offers Edit when the server says this caller may", async () => {
+    vi.mocked(backdateService.listRequests).mockResolvedValue(
+      [{ ...REQUESTS[0], can_edit: true }] as never,
+    );
+    const user = userEvent.setup();
+    render(<BackDate />);
+    await screen.findByRole("tab", { name: /entries/i });
+
+    await user.click(await screen.findByRole("button", { name: /details/i }));
+
+    expect(await screen.findByRole("button", { name: /edit this request/i }))
+      .toBeTruthy();
+  });
+
+  it("shows only the agreed columns in the table", async () => {
+    render(<BackDate />);
+    await screen.findByRole("tab", { name: /entries/i });
+
+    for (const heading of ["ID", "Company", "From Date", "To Date",
+                           "Time Limit", "Created By"]) {
+      expect(screen.getByRole("columnheader", { name: heading })).toBeTruthy();
+    }
+    // Everything else is in Details or Progress, so the table stays scannable.
+    for (const gone of ["SAP User", "Document Type", "Status", "Waiting On",
+                        "Window"]) {
+      expect(screen.queryByRole("columnheader", { name: gone })).toBeNull();
+    }
+  });
+
+  /**
+   * Arriving from "your request was approved".
+   *
+   * The notification names one request; the page must open THAT one. Before
+   * this, a BackDate notification had no route of its own and the click ended
+   * on the orders page — the alert arrived, and the thing it was about was
+   * unreachable from it.
+   */
+  it("opens the request a notification names", async () => {
+    render(<BackDate />, "/BackDate?requestId=11");
+
+    // No Details click: the dialog is already open on #11.
+    expect(await screen.findByText("G/L Accounts")).toBeTruthy();
+    expect(screen.getByText("USER12")).toBeTruthy();
+  });
+
+  it("consumes the link, so a refresh does not reopen what was closed", async () => {
+    render(<BackDate />, "/BackDate?requestId=11");
+    await screen.findByText("G/L Accounts");
+
+    // `?requestId=` is a one-shot instruction, not page state. Left in place,
+    // the dialog would spring back every reload and the user could not get
+    // past it.
+    await waitFor(() =>
+      expect(screen.getByTestId("location-search").textContent).toBe(""),
+    );
+  });
+
+  it("clears the filter from the Total card", async () => {
+    const user = userEvent.setup();
+    render(<BackDate />);
+    await screen.findByRole("tab", { name: /entries/i });
+
+    await user.click(screen.getByRole("button", { name: /rejected/i }));
+    await waitFor(() =>
+      expect(backdateService.listRequests).toHaveBeenCalledWith({
+        status: "REJECTED",
+      }),
+    );
+
+    await user.click(screen.getByRole("button", { name: /^total/i }));
+    await waitFor(() =>
+      expect(backdateService.listRequests).toHaveBeenLastCalledWith({}),
+    );
+  });
+});

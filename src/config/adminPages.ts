@@ -30,6 +30,22 @@ export const GRANTABLE_ADMIN_PAGES: GrantablePage[] = [
   { key: "Einvoice", label: "e-Invoice (IRN)", path: "/Einvoice" },
   { key: "Ewaybill", label: "e-Way Bill", path: "/Ewaybill" },
   { key: "HAIS", label: "Hardware Assets (HAIS)", path: "/HAIS" },
+  { key: "BackDate", label: "BackDate — raise requests", path: "/BackDate" },
+  {
+    key: "BackDate_Approval",
+    label: "BackDate — approve/reject",
+    path: "/BackDate_Approval",
+  },
+  {
+    key: "Production_Order",
+    label: "Production Order — view requests",
+    path: "/Production_Orders",
+  },
+  {
+    key: "Production_Order_Approval",
+    label: "Production Order — approve/reject",
+    path: "/Production_Approval",
+  },
   { key: "Distributor", label: "Distributor", path: "/Distributor" },
   { key: "Mart_Approval", label: "Mart Approval", path: "/Mart_Approval" },
   // One key for the whole Legal module — unlocks Label Checker AND Nutrition
@@ -41,6 +57,12 @@ export const GRANTABLE_ADMIN_PAGES: GrantablePage[] = [
   // grantable: the pages they gated are gone, so offering those permissions
   // would grant nothing. Any stored grant with those keys is simply ignored.
   { key: "Device_Management", label: "Device Management", path: "/Device_Management" },
+  // Workflow Engine configuration. The key is the BACKEND permission key
+  // (core/permission_registry.py -> workflow.config.manage), not a new
+  // frontend-only name: the backend reads the same string out of
+  // User.extra_pages via HasKey, so granting it here grants the API too.
+  // ONE page covers modules, workflows, queries, stages and replacements.
+  { key: "workflow.config.manage", label: "Workflows", path: "/Workflows" },
   // Staff orders — an internal order raised against an employee ID rather
   // than a party, priced from each product's staff rate.
   //

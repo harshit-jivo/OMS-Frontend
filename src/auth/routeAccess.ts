@@ -139,6 +139,32 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // page nobody can reach is worse than a missing one — it reads as protection.
   // The test strips comments now, which is what surfaced this.
   "/Device_Management": { permissions: ["Device_Management"] },
+  // Workflow Engine configuration. The grant key is the BACKEND permission
+  // key (core/permission_registry.py), so one string gates the sidebar,
+  // the route and the API — no frontend-only alias to drift.
+  "/Workflows": { permissions: ["workflow.config.manage"] },
+
+  // BackDate (BKDT) — back-posting rights in SAP.
+  //
+  // TWO keys, because raising a request and deciding one are different
+  // authorities. `BackDate_Approval` opens the approval desk; it does NOT by
+  // itself let anyone approve — the backend also requires the caller to be the
+  // workflow stage's current effective user, which no route table can express.
+  // `workflow.config.manage` is deliberately NOT listed: configuring workflows
+  // and raising a BackDate request are unrelated jobs.
+  "/BackDate": { permissions: ["BackDate"] },
+  "/BackDate_Approval": { permissions: ["BackDate_Approval"] },
+
+  // PRDO (Production Orders) — SAP is the origin, OMS approves.
+  //
+  // Two keys, same reasoning as BackDate: seeing the orders and deciding
+  // them are different authorities. `Production_Order_Approval` opens the
+  // desk; it does NOT by itself let you approve anything. The backend also
+  // requires you to be the current effective user of that workflow stage,
+  // which is also what scopes an approver to a company — a stage belongs to
+  // exactly one company's workflow, and OMS has no user->company map.
+  "/Production_Orders": { permissions: ["Production_Order"] },
+  "/Production_Approval": { permissions: ["Production_Order_Approval"] },
   "/Sap_Sync": { permissions: ["Sap_Sync"] },
   "/Party_Assignment": { permissions: ["Party_Assignment"] },
   "/Party_Product_Assignment": { permissions: ["Party_Product_Assignment"] },

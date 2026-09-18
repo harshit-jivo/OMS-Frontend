@@ -6,9 +6,12 @@ import {
   HiOutlineArrowRight,
   HiOutlineArrowUturnLeft,
   HiOutlineBanknotes,
+  HiOutlineBellSlash,
   HiOutlineClock,
   HiOutlineEye,
+  HiOutlineForward,
   HiOutlineMapPin,
+  HiOutlinePaperAirplane,
   HiOutlinePauseCircle,
 } from "react-icons/hi2";
 import { saveAs } from "file-saver";
@@ -16,8 +19,17 @@ import { saveAs } from "file-saver";
 import { Badge, type BadgeTone } from "@/components/ui/badge";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { Button } from "@/components/ui/button";
-import { FilterBar, FilterCheckbox, FilterCount, FilterSearch, FilterSpacer } from "@/components/ui/filter-bar";
-import { Input, Select } from "@/components/ui/form";
+import { FilterBar, FilterCheckbox, FilterCount, FilterDate, FilterSearch, FilterSelect, FilterSpacer } from "@/components/ui/filter-bar";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Field, Input, Select, Textarea } from "@/components/ui/form";
 import { Card, EmptyState, Notice, Page, PageHeader } from "@/components/ui/page";
 import { TableSkeleton } from "@/components/ui/skeleton";
 import { Tab, TabList } from "@/components/ui/tabs";
@@ -188,6 +200,16 @@ export default function Tracker_Queue() {
   >("current");
   // Send-back tabs: also list rejections the invoice has already come back from.
   const [showResolved, setShowResolved] = useState(false);
+  // Hold / Debit tabs are split into what is still on this desk and what has
+  // since moved on; the moved-on half is collapsed by default so the desk sees
+  // only actionable rows. See `splitRows` below.
+  const [showMovedOn, setShowMovedOn] = useState(false);
+  // The invoice whose alert emails are being muted, and the reason being typed
+  // for it. Null when the dialog is closed. Un-muting needs no dialog.
+  const [muteFor, setMuteFor] = useState<Invoice | null>(null);
+  const [muteReason, setMuteReason] = useState("");
+  const [savingMute, setSavingMute] = useState(false);
+  const [syncingSap, setSyncingSap] = useState(false);
   const [advancedRows, setAdvancedRows] = useState<Invoice[]>([]);
   // Decision-log rows for the OK / Hold / Debit / verdict tabs.
   const [decisionRows, setDecisionRows] = useState<StageDecision[]>([]);
@@ -216,9 +238,24 @@ export default function Tracker_Queue() {
    * `setStageTabs` from one payload), which React batched but which meant the
    * two could be read apart by anything that suspended between them.
    */
+  /*
+   * Category + arrival-date filters are sent to the SERVER and are part of the
+   * query key, so each filter set is cached separately and the stage tab counts
+   * that come back describe the same rows the table is showing. Narrowing the
+   * array here instead would have left those counts describing an unfiltered
+   * queue the user cannot see.
+   */
+  const [category, setCategory] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const queueFilters = useMemo(
+    () => ({ category, dateFrom, dateTo }),
+    [category, dateFrom, dateTo],
+  );
+
   const { data: queueData } = useQuery({
-    queryKey: ["tracker", "my-queue"],
-    queryFn: () => trackerService.myQueue(),
+    queryKey: ["tracker", "my-queue", queueFilters],
+    queryFn: () => trackerService.myQueue(queueFilters),
     refetchInterval: 30_000,
     staleTime: 30_000,
   });
@@ -317,6 +354,28 @@ export default function Tracker_Queue() {
     return q ? decisionRows.filter((d) => decMatch(d, q)) : decisionRows;
   }, [decisionRows, search]);
 
+  /**
+   * Hold / Debit split into "still on this desk" vs "has moved on".
+   *
+   * A DEBIT and a PARTIAL hold both ADVANCE the invoice — only a FULL hold
+   * parks it here — so these tabs otherwise list rows for invoices that are
+   * now at another stage, which reads as "why is this under Pre-Audit?".
+   * Rather than drop that history (it is the only record of what this desk
+   * decided, and the amounts), the moved-on rows are kept but collapsed
+   * behind a divider, so the default view is only what is actionable here.
+   *
+   * Every other decision tab (OK, verdicts, send-backs) is a pure log and is
+   * left as one flat list.
+   */
+  const isSplitTab = AMOUNT_TABS.has(subTab);
+  const { activeDecRows, movedOnDecRows } = useMemo(() => {
+    if (!isSplitTab) return { activeDecRows: decRows, movedOnDecRows: [] as StageDecision[] };
+    return {
+      activeDecRows: decRows.filter((d) => d.is_still_here),
+      movedOnDecRows: decRows.filter((d) => !d.is_still_here),
+    };
+  }, [decRows, isSplitTab]);
+
   // Reset sub-tab + selection whenever the stage changes.
   useEffect(() => {
     setSelected(new Set());
@@ -325,7 +384,13 @@ export default function Tracker_Queue() {
     setHoldType("");
     setAmount("");
     setSubTab("current");
+    setShowMovedOn(false);
   }, [activeStage]);
+
+  // Collapse the moved-on half again whenever the sub-tab changes.
+  useEffect(() => {
+    setShowMovedOn(false);
+  }, [subTab]);
   const loadDecisions = async (clear = false) => {
     const decision = DECISION_TABS[subTab];
     if (!decision || !activeStage) return;
@@ -388,12 +453,28 @@ export default function Tracker_Queue() {
     try {
       const res = await trackerService.syncJsap();
       const n = (res.advanced?.length ?? 0) + (res.returned?.length ?? 0);
-      flash(
-        n === 0 ? "No change from JSAP" : "JSAP decisions applied",
-        n === 0
-          ? `${res.waiting?.length ?? 0} still awaiting a JSAP decision.`
-          : `${res.advanced?.length ?? 0} approved, ${res.returned?.length ?? 0} returned.`,
-      );
+      const unreachable = res.unreachable?.length ?? 0;
+      // An unreachable SAP is reported as such rather than folded into
+      // "awaiting a decision" — those invoices are unknown, not pending, and
+      // saying otherwise turns an outage into a false all-clear.
+      if (n === 0 && unreachable > 0) {
+        flash(
+          "Could not reach SAP",
+          `${unreachable} invoice(s) could not be checked — their JSAP status is unknown, not pending. Try again once SAP is back.`,
+        );
+      } else {
+        flash(
+          n === 0 ? "No change from JSAP" : "JSAP decisions applied",
+          [
+            n === 0
+              ? `${res.waiting?.length ?? 0} still awaiting a JSAP decision.`
+              : `${res.advanced?.length ?? 0} approved, ${res.returned?.length ?? 0} returned.`,
+            unreachable ? `${unreachable} could not be checked — SAP unreachable.` : "",
+          ]
+            .filter(Boolean)
+            .join(" "),
+        );
+      }
       void load();
     } catch (err) {
       flash("Could not reach JSAP", messageFrom(err, "The request failed."));
@@ -451,6 +532,127 @@ export default function Tracker_Queue() {
   const allHeldSelected = heldHere.length > 0 && heldHere.every((d) => selected.has(d.invoice_id));
 
   const onAdvance = () => runBulk({ action: "ADVANCE", remarks });
+
+  /**
+   * Fast-track: Invoice Entry straight to SAP Approval, skipping Pre-Audit and
+   * Data Entry (and Bilty/GRPO for transport). Offered only at the entry desk
+   * and only on the Current tab.
+   *
+   * Remarks are checked here as well as server-side. The server is the
+   * authority, but this bypasses the desk where holds and debits are captured,
+   * so the user should be told what is missing before the request rather than
+   * after it — and told what they are about to skip.
+   */
+  const canFastTrack = activeStage === "entry" && subTab === "current";
+  const onFastTrack = async () => {
+    if (selected.size === 0) {
+      flash("Select at least one invoice");
+      return;
+    }
+    if (!remarks.trim()) {
+      flash("A reason is required to skip Pre-Audit and Data Entry");
+      return;
+    }
+    try {
+      const res = await trackerService.fastTrack([...selected], remarks);
+      flash(
+        `${res.processed_count} sent to SAP Approval`,
+        res.errors.length ? `${res.errors.length} failed` : "",
+      );
+      setRemarks("");
+      setSelected(new Set());
+      void load();
+    } catch (err) {
+      flash("Fast-track failed", messageFrom(err, "The server refused the request."));
+    }
+  };
+  /**
+   * The "no alert email" tick.
+   *
+   * Un-ticking is immediate — turning the reminders back on needs no
+   * justification. Ticking opens the dialog below, because a reason is
+   * mandatory: a silent overdue invoice has to carry the explanation for why it
+   * is silent, or the flag just becomes a way to lose work quietly.
+   */
+  const onMuteToggle = async (inv: Invoice) => {
+    if (!inv.email_muted) {
+      setMuteReason("");
+      setMuteFor(inv);
+      return;
+    }
+    try {
+      await trackerService.unmuteAlerts([inv.id]);
+      flash("Alert emails resumed", `Invoice ${inv.invoice_number}`);
+      void load();
+    } catch (err) {
+      flash("Could not resume alerts", messageFrom(err, "The request failed."));
+    }
+  };
+
+  const saveMute = async () => {
+    if (!muteFor) return;
+    if (!muteReason.trim()) {
+      flash("A reason is required to stop the alert emails");
+      return;
+    }
+    setSavingMute(true);
+    try {
+      await trackerService.muteAlerts([muteFor.id], muteReason);
+      flash("Alert emails stopped", `Invoice ${muteFor.invoice_number}`);
+      setMuteFor(null);
+      setMuteReason("");
+      void load();
+    } catch (err) {
+      flash("Could not stop the alerts", messageFrom(err, "The request failed."));
+    } finally {
+      setSavingMute(false);
+    }
+  };
+
+  /**
+   * Check SAP for invoices it has already posted and walk those to Payment.
+   *
+   * Offered at the Save in SAP desk, which is the desk that would otherwise
+   * carry the consequence: a document saved in SAP without anyone advancing
+   * the tracker row leaves that row ageing at whatever stage it was on, in the
+   * queue and in the stuck-alert mail, describing a state of the world that
+   * ended when the document was saved.
+   *
+   * With rows selected it checks only those; with none selected it sweeps the
+   * whole queue. The same sweep runs nightly, so this is for when you don't
+   * want to wait for it.
+   */
+  const canSyncSap = activeStage === "save_in_sap" && subTab === "current";
+  const onSyncSap = async () => {
+    setSyncingSap(true);
+    try {
+      const res = await trackerService.syncSapSaved(
+        selected.size ? [...selected] : undefined,
+      );
+      const detail = [
+        `${res.checked} checked`,
+        res.errors.length ? `${res.errors.length} failed` : "",
+        res.cross_company_count
+          ? `${res.cross_company_count} found in another company — not moved`
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      flash(
+        res.advanced_count
+          ? `${res.advanced_count} invoice(s) moved to Payment`
+          : "Nothing to move — SAP has none of these posted yet",
+        detail,
+      );
+      setSelected(new Set());
+      void load();
+    } catch (err) {
+      flash("SAP check failed", messageFrom(err, "The server refused the request."));
+    } finally {
+      setSyncingSap(false);
+    }
+  };
+
   /** Release the selected full holds: mark them OK and let them move on. */
   const onReleaseHold = (status: string) => {
     if (!selected.size) {
@@ -510,8 +712,16 @@ export default function Tracker_Queue() {
   // column. A decision log can list an invoice twice; the register is one row
   // per invoice, so the ids are de-duplicated server-side.
   const tabLabel = TAB_LABELS[subTab] ?? subTab.charAt(0).toUpperCase() + subTab.slice(1);
+  // On a split tab (Hold / Debit) export exactly what is on screen: the rows
+  // still on this desk, plus the moved-on half ONLY while it is expanded.
+  // Exporting every decision row meant the invoices that had already advanced
+  // came down again in every sheet, so each export repeated work the desk had
+  // finished — the register is meant to be what is still in hand.
+  const visibleDecRows = isSplitTab
+    ? [...activeDecRows, ...(showMovedOn ? movedOnDecRows : [])]
+    : decRows;
   const exportIds = isDecisionTab
-    ? [...new Set(decRows.map((d) => d.invoice_id))]
+    ? [...new Set(visibleDecRows.map((d) => d.invoice_id))]
     : rows.map((i) => i.id);
 
   const onExport = async () => {
@@ -617,9 +827,63 @@ export default function Tracker_Queue() {
   const decisionColumns = 10 + (canReleaseHolds ? 1 : 0) + (AMOUNT_TABS.has(subTab) ? 1 : 0);
   const queueColumns =
     8 +
-    (readOnly ? 0 : 1) +
+    // select + "no email" both hang off the same non-read-only condition
+    (readOnly ? 0 : 2) +
     (subTab === "returned" ? 2 : 0) +
     (isJsap && subTab !== "advanced" ? 1 : 0);
+
+  /** One decision-log row. Shared by the active and moved-on halves of a
+   *  split tab, and by the flat list every other decision tab renders. */
+  const renderDecisionRow = (d: StageDecision) => (
+    <TableRow key={d.event_id}>
+      {canReleaseHolds && (
+        <TableCell>
+          {d.is_still_here && d.hold_type === "FULL" && (
+            <input
+              type="checkbox"
+              className="size-4 cursor-pointer accent-brand"
+              checked={selected.has(d.invoice_id)}
+              aria-label={`Select invoice ${d.invoice_number}`}
+              onChange={() => toggle(d.invoice_id)}
+            />
+          )}
+        </TableCell>
+      )}
+      <TableCell className="whitespace-nowrap font-medium text-ink">{d.invoice_number}</TableCell>
+      <TableCell>{d.party_name}</TableCell>
+      <TableCell className="whitespace-nowrap">{fmtDate(d.invoice_date)}</TableCell>
+      <TableCell className="whitespace-nowrap text-right tabular-nums">
+        ₹{money(d.net_invoice_value ?? d.invoice_value)}
+      </TableCell>
+      <TableCell>
+        <Badge outlined tone={decisionTone(d.decision)}>
+          {d.decision}
+          {d.hold_type ? ` · ${d.hold_type}` : ""}
+        </Badge>
+        {d.awaiting_remarks && <div className={CELL_NOTE}>reason still owed</div>}
+        {d.came_back && SENT_BACK_TABS.has(subTab) && (
+          <div className={cn(CELL_NOTE, "text-ok")}>came back since</div>
+        )}
+      </TableCell>
+      {AMOUNT_TABS.has(subTab) && (
+        <TableCell className="whitespace-nowrap text-right tabular-nums">
+          {d.amount ? `₹${money(d.amount)}` : "—"}
+          {d.decision === "HOLD" && d.hold_type === "FULL" && (
+            <div className={CELL_NOTE}>full value</div>
+          )}
+        </TableCell>
+      )}
+      <TableCell className="max-w-[240px] whitespace-normal">{d.remarks || "—"}</TableCell>
+      <TableCell>{d.acted_by_name || "—"}</TableCell>
+      <TableCell className="whitespace-nowrap">{fmtDT(d.decided_at)}</TableCell>
+      <TableCell>
+        <Badge outlined tone={d.is_still_here ? "hold" : "info"}>
+          {d.invoice_status === "COMPLETED" ? "Completed" : d.current_stage_name}
+        </Badge>
+        {d.is_still_here && <div className={CELL_NOTE}>still here</div>}
+      </TableCell>
+    </TableRow>
+  );
 
   return (
     <Page>
@@ -677,6 +941,43 @@ export default function Tracker_Queue() {
               placeholder="Invoice no., party, GSTIN, category…"
               fieldClassName="min-w-[280px]"
             />
+            <FilterSelect
+              label="Category"
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+            >
+              <option value="">All categories</option>
+              {(lookups?.categories ?? []).map((c) => (
+                <option key={c.id} value={c.name}>
+                  {c.name}
+                </option>
+              ))}
+            </FilterSelect>
+            {/* Dated on ARRIVAL at this desk, matching how the queue is
+                ordered — "what reached me this week", not when the invoice
+                was raised. */}
+            <FilterDate
+              label="Arrived from"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+            />
+            <FilterDate
+              label="Arrived to"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+            />
+            {(category || dateFrom || dateTo) && (
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setCategory("");
+                  setDateFrom("");
+                  setDateTo("");
+                }}
+              >
+                Clear
+              </Button>
+            )}
             {SENT_BACK_TABS.has(subTab) && (
               <FilterCheckbox
                 label="Also show ones that came back"
@@ -819,14 +1120,50 @@ export default function Tracker_Queue() {
                 <>
                   <Input
                     className="min-w-[220px] flex-1"
-                    placeholder="Remarks (optional for advance)"
-                    aria-label="Remarks (optional for advance)"
+                    placeholder={
+                      canFastTrack
+                        ? "Remarks (optional to advance, required to fast-track)"
+                        : "Remarks (optional for advance)"
+                    }
+                    aria-label="Remarks"
                     value={remarks}
                     onChange={(e) => setRemarks(e.target.value)}
                   />
                   <Button variant="primary" onClick={onAdvance} disabled={selected.size === 0}>
                     <HiOutlineArrowRight aria-hidden="true" /> Advance
                   </Button>
+                  {/* Deliberately NOT the primary action: this skips the desks
+                      that capture holds and debits, so it should read as the
+                      exception, not the default way out of entry. */}
+                  {canFastTrack && (
+                    <Button
+                      variant="ghost"
+                      onClick={() => void onFastTrack()}
+                      disabled={selected.size === 0}
+                      title="Skip Pre-Audit and Data Entry — a reason is required"
+                    >
+                      <HiOutlineForward aria-hidden="true" /> Send to SAP Approval
+                    </Button>
+                  )}
+                  {canSyncSap && (
+                    <Button
+                      variant="ghost"
+                      onClick={() => void onSyncSap()}
+                      disabled={syncingSap}
+                      title={
+                        selected.size
+                          ? "Check SAP for the selected invoices and move any already posted to Payment"
+                          : "Check SAP for every pending invoice and move any already posted to Payment"
+                      }
+                    >
+                      <HiOutlinePaperAirplane aria-hidden="true" />{" "}
+                      {syncingSap
+                        ? "Checking SAP…"
+                        : selected.size
+                          ? `Check SAP (${selected.size})`
+                          : "Check SAP — all"}
+                    </Button>
+                  )}
                   {stageCfg.can_return && (
                     <Button variant="danger" onClick={onReturn} disabled={selected.size === 0}>
                       <HiOutlineArrowUturnLeft aria-hidden="true" /> Return
@@ -932,67 +1269,54 @@ export default function Tracker_Queue() {
                               : "Nothing outstanding — anything sent back has since come back here."
                             : `No ${DECISION_TABS[subTab].toLowerCase()} decisions recorded at this stage.`}
                         </TableEmpty>
+                      ) : isSplitTab ? (
+                        <>
+                          {activeDecRows.length === 0 ? (
+                            <TableRow>
+                              <TableCell
+                                colSpan={decisionColumns}
+                                className="py-3 text-center text-[12px] text-subtle"
+                              >
+                                Nothing {DECISION_TABS[subTab].toLowerCase()} is still on this
+                                desk — a debit and a partial hold both let the invoice move on.
+                              </TableCell>
+                            </TableRow>
+                          ) : (
+                            activeDecRows.map(renderDecisionRow)
+                          )}
+
+                          {movedOnDecRows.length > 0 && (
+                            <>
+                              <TableRow>
+                                <TableCell colSpan={decisionColumns} className="bg-surface p-0">
+                                  <button
+                                    type="button"
+                                    aria-expanded={showMovedOn}
+                                    onClick={() => setShowMovedOn((v) => !v)}
+                                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] font-semibold text-subtle transition-colors hover:bg-surface-strong"
+                                  >
+                                    <span
+                                      aria-hidden
+                                      className={cn(
+                                        "inline-block transition-transform duration-150",
+                                        showMovedOn && "rotate-90",
+                                      )}
+                                    >
+                                      ▶
+                                    </span>
+                                    Moved on ({movedOnDecRows.length})
+                                    <span className="font-normal">
+                                      — decided here, now at a later stage
+                                    </span>
+                                  </button>
+                                </TableCell>
+                              </TableRow>
+                              {showMovedOn && movedOnDecRows.map(renderDecisionRow)}
+                            </>
+                          )}
+                        </>
                       ) : (
-                        decRows.map((d) => (
-                          <TableRow key={d.event_id}>
-                            {canReleaseHolds && (
-                              <TableCell>
-                                {d.is_still_here && d.hold_type === "FULL" && (
-                                  <input
-                                    type="checkbox"
-                                    className="size-4 cursor-pointer accent-brand"
-                                    checked={selected.has(d.invoice_id)}
-                                    aria-label={`Select invoice ${d.invoice_number}`}
-                                    onChange={() => toggle(d.invoice_id)}
-                                  />
-                                )}
-                              </TableCell>
-                            )}
-                            <TableCell className="whitespace-nowrap font-medium text-ink">
-                              {d.invoice_number}
-                            </TableCell>
-                            <TableCell>{d.party_name}</TableCell>
-                            <TableCell className="whitespace-nowrap">
-                              {fmtDate(d.invoice_date)}
-                            </TableCell>
-                            <TableCell className="whitespace-nowrap text-right tabular-nums">
-                              ₹{money(d.net_invoice_value ?? d.invoice_value)}
-                            </TableCell>
-                            <TableCell>
-                              <Badge outlined tone={decisionTone(d.decision)}>
-                                {d.decision}
-                                {d.hold_type ? ` · ${d.hold_type}` : ""}
-                              </Badge>
-                              {d.awaiting_remarks && (
-                                <div className={CELL_NOTE}>reason still owed</div>
-                              )}
-                              {d.came_back && SENT_BACK_TABS.has(subTab) && (
-                                <div className={cn(CELL_NOTE, "text-ok")}>came back since</div>
-                              )}
-                            </TableCell>
-                            {AMOUNT_TABS.has(subTab) && (
-                              <TableCell className="whitespace-nowrap text-right tabular-nums">
-                                {d.amount ? `₹${money(d.amount)}` : "—"}
-                                {d.decision === "HOLD" && d.hold_type === "FULL" && (
-                                  <div className={CELL_NOTE}>full value</div>
-                                )}
-                              </TableCell>
-                            )}
-                            <TableCell className="max-w-[240px] whitespace-normal">
-                              {d.remarks || "—"}
-                            </TableCell>
-                            <TableCell>{d.acted_by_name || "—"}</TableCell>
-                            <TableCell className="whitespace-nowrap">{fmtDT(d.decided_at)}</TableCell>
-                            <TableCell>
-                              <Badge outlined tone={d.is_still_here ? "hold" : "info"}>
-                                {d.invoice_status === "COMPLETED"
-                                  ? "Completed"
-                                  : d.current_stage_name}
-                              </Badge>
-                              {d.is_still_here && <div className={CELL_NOTE}>still here</div>}
-                            </TableCell>
-                          </TableRow>
-                        ))
+                        decRows.map(renderDecisionRow)
                       )}
                     </TableBody>
                   </Table>
@@ -1014,6 +1338,14 @@ export default function Tracker_Queue() {
                               )
                             }
                           />
+                        </TableHead>
+                      )}
+                      {!readOnly && (
+                        <TableHead
+                          className="w-16 text-center"
+                          title="Tick to stop the overdue alert emails for this invoice while it sits at this desk"
+                        >
+                          No email
                         </TableHead>
                       )}
                       <TableHead>Invoice No.</TableHead>
@@ -1070,8 +1402,34 @@ export default function Tracker_Queue() {
                               />
                             </TableCell>
                           )}
+                          {!readOnly && (
+                            <TableCell className="text-center">
+                              <input
+                                type="checkbox"
+                                className="size-4 cursor-pointer accent-hold"
+                                checked={Boolean(inv.email_muted)}
+                                aria-label={`Stop alert emails for invoice ${inv.invoice_number}`}
+                                title={
+                                  inv.email_muted
+                                    ? `No alert emails — ${inv.email_mute_reason}`
+                                    : "Stop the overdue alert emails for this invoice"
+                                }
+                                onChange={() => void onMuteToggle(inv)}
+                              />
+                            </TableCell>
+                          )}
                           <TableCell className="whitespace-nowrap font-medium text-ink">
                             {inv.invoice_number}
+                            {inv.email_muted && (
+                              <div className={cn(CELL_NOTE, "text-hold")}>
+                                <HiOutlineBellSlash
+                                  aria-hidden="true"
+                                  className="inline size-3 align-[-1px]"
+                                />{" "}
+                                {inv.email_mute_reason}
+                                {inv.email_muted_by ? ` — ${inv.email_muted_by}` : ""}
+                              </div>
+                            )}
                           </TableCell>
                           <TableCell>{inv.party_name}</TableCell>
                           <TableCell className="whitespace-nowrap">
@@ -1182,6 +1540,48 @@ export default function Tracker_Queue() {
       />
 
       <InvoiceTimelineDialog invoice={timelineInv} onClose={() => setTimelineInv(null)} />
+
+      <Dialog open={Boolean(muteFor)} onOpenChange={(open) => !open && setMuteFor(null)}>
+        <DialogContent title="Stop the alert emails" size="sm">
+          <DialogHeader>
+            <DialogTitle>Stop the alert emails</DialogTitle>
+            <DialogDescription>
+              Invoice {muteFor?.invoice_number} — {muteFor?.party_name}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogBody>
+            <Field label="Why should this one not be chased?" required>
+              {(c) => (
+                <Textarea
+                  {...c}
+                  rows={3}
+                  autoFocus
+                  value={muteReason}
+                  placeholder="e.g. vendor is issuing a credit note, awaiting their paperwork"
+                  onChange={(e) => setMuteReason(e.target.value)}
+                />
+              )}
+            </Field>
+            <p className="mt-3 text-[12px] leading-snug text-subtle">
+              The invoice keeps ageing and stays in this queue — only the overdue
+              email stops. The flag clears itself as soon as the invoice moves to
+              the next stage.
+            </p>
+          </DialogBody>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setMuteFor(null)} disabled={savingMute}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => void saveMute()}
+              disabled={savingMute || !muteReason.trim()}
+            >
+              {savingMute ? "Saving…" : "Stop the emails"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {payInv && (
         <PaymentDialog
