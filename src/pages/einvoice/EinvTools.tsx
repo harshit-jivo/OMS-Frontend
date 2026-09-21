@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { HiHeart, HiKey, HiServerStack, HiIdentification } from "react-icons/hi2";
 import { einvoiceService } from "../../services/einvoiceService";
 import { NicField, JsonView, StatusBadge, ErrorAlert } from "../../components/NicUI";
@@ -6,9 +6,23 @@ import { messageFrom } from "@/lib/apiError";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/form";
 import { Card, CardHeader, CardTitle } from "@/components/ui/page";
+import EntityToggle from "./EntityToggle";
+import { useDefaultEntity } from "./useNicEntity";
 
 export default function EinvTools() {
   const [gstin, setGstin] = useState("");
+  /* Token, heartbeat and the GSTIN master all talk to NIC as one identity.
+     Wellness and Mart are different PANs with different credentials, so
+     "is the connection healthy?" has a different answer for each. */
+  const defaultEntity = useDefaultEntity();
+  const [entity, setEntity] = useState("");
+  useEffect(() => { if (!entity && defaultEntity) setEntity(defaultEntity); },
+            [entity, defaultEntity]);
+  /* Each state GSTIN has its own NIC API user, so "is auth working?" is a
+     per-GSTIN question — pinning one is the only way to test it. */
+  const [nicGstin, setNicGstin] = useState("");
+  const ent = () => entity || undefined;
+  const gst = () => nicGstin || undefined;
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [out, setOut] = useState<{ title: string; data: unknown } | null>(null);
@@ -31,19 +45,24 @@ export default function EinvTools() {
           <CardTitle>Connection & Auth</CardTitle>
         </CardHeader>
         <p className="text-[12.5px] leading-relaxed text-subtle">Check configuration and the NIC handshake without generating anything.</p>
+        <div className="mt-3">
+          <EntityToggle value={entity} onChange={setEntity}
+            gstin={nicGstin} onGstinChange={setNicGstin}
+            hint="Every state GSTIN has its own NIC API user — pin one to test that user's credentials." />
+        </div>
         <div className="mt-4 flex flex-wrap items-center gap-2.5">
           <Button disabled={!!busy}
-            onClick={() => void call("health", "Health", einvoiceService.health)}>
+            onClick={() => void call("health", "Health", () => einvoiceService.health(ent(), gst()))}>
             <HiServerStack aria-hidden="true" />
             {busy === "health" ? "…" : "Health"}
           </Button>
           <Button disabled={!!busy}
-            onClick={() => void call("token", "Auth Token", einvoiceService.token)}>
+            onClick={() => void call("token", "Auth Token", () => einvoiceService.token(ent(), gst()))}>
             <HiKey aria-hidden="true" />
             {busy === "token" ? "…" : "Get Token"}
           </Button>
           <Button disabled={!!busy}
-            onClick={() => void call("hb", "Heartbeat", einvoiceService.heartbeat)}>
+            onClick={() => void call("hb", "Heartbeat", () => einvoiceService.heartbeat(ent(), gst()))}>
             <HiHeart aria-hidden="true" />
             {busy === "hb" ? "…" : "Heartbeat"}
           </Button>
@@ -62,12 +81,12 @@ export default function EinvTools() {
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-2.5">
           <Button disabled={!!busy || !gstin.trim()}
-            onClick={() => void call("gstin", "GSTIN Details", () => einvoiceService.getGstin(gstin.trim()))}>
+            onClick={() => void call("gstin", "GSTIN Details", () => einvoiceService.getGstin(gstin.trim(), ent(), gst()))}>
             <HiIdentification aria-hidden="true" />
             {busy === "gstin" ? "…" : "Get Details"}
           </Button>
           <Button disabled={!!busy || !gstin.trim()}
-            onClick={() => void call("sync", "GSTIN Sync", () => einvoiceService.syncGstin(gstin.trim()))}>
+            onClick={() => void call("sync", "GSTIN Sync", () => einvoiceService.syncGstin(gstin.trim(), ent(), gst()))}>
             {busy === "sync" ? "…" : "Force Sync"}
           </Button>
         </div>
