@@ -121,7 +121,10 @@ export default function InvoiceDetailDialog({
                 ["Invoice value", `₹${money(inv.invoice_value)}`],
                 ...(Number(inv.debit_amount) > 0
                   ? ([
-                      ["Debit (pre-audit)", `− ₹${money(inv.debit_amount)}`],
+                      // Not "(pre-audit)" any more: Transport Approval can
+                      // restate this figure, so the label would name the wrong
+                      // desk on exactly the invoices most likely to be debited.
+                      ["Debit", `− ₹${money(inv.debit_amount)}`],
                       ["Net value", `₹${money(inv.net_invoice_value)}`],
                     ] as Row[])
                   : []),
