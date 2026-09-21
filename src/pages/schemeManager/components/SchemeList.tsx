@@ -66,7 +66,7 @@ export default function SchemeList({
   loadError,
   expandedId,
   setExpandedId,
-  itemNameOf,
+  itemNameIn,
   openNew,
   openEdit,
   deleteScheme,
@@ -78,7 +78,7 @@ export default function SchemeList({
   loadError: string;
   expandedId: number | null;
   setExpandedId: (id: number | null) => void;
-  itemNameOf: (itemCode: string) => string;
+  itemNameIn: (category?: string | null) => (itemCode: string) => string;
   openNew: () => void;
   openEdit: (scheme: Scheme) => void;
   deleteScheme: (scheme: Scheme) => void;
@@ -158,10 +158,10 @@ export default function SchemeList({
           const grants = scheme.assignments.filter((a) => !a.is_exclusion);
           const exclusions = scheme.assignments.filter((a) => a.is_exclusion);
           const buy = scheme.triggers[0]
-            ? describeTrigger(scheme.triggers[0], itemNameOf)
+            ? describeTrigger(scheme.triggers[0], itemNameIn(scheme.category))
             : "no rule set";
           const get = scheme.benefits[0]
-            ? describeBenefit(scheme.benefits[0], itemNameOf)
+            ? describeBenefit(scheme.benefits[0], itemNameIn(scheme.category))
             : "nothing set";
           const extras = scheme.triggers.length + scheme.benefits.length - 2;
 
@@ -256,7 +256,7 @@ export default function SchemeList({
                       <div className={BLOCK_TITLE}>To earn it</div>
                       <ul className={BLOCK_LIST}>
                         {scheme.triggers.map((trigger, i) => (
-                          <li key={i}>{describeTrigger(trigger, itemNameOf)}</li>
+                          <li key={i}>{describeTrigger(trigger, itemNameIn(scheme.category))}</li>
                         ))}
                       </ul>
                     </div>
@@ -265,7 +265,7 @@ export default function SchemeList({
                       <ul className={BLOCK_LIST}>
                         {scheme.benefits.map((benefit, i) => (
                           <li key={i} className="font-semibold text-ok">
-                            {describeBenefit(benefit, itemNameOf)}
+                            {describeBenefit(benefit, itemNameIn(scheme.category))}
                           </li>
                         ))}
                       </ul>

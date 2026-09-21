@@ -9,7 +9,6 @@ import {
   HiOutlineBellSlash,
   HiOutlineClock,
   HiOutlineEye,
-  HiOutlineForward,
   HiOutlineMapPin,
   HiOutlinePaperAirplane,
   HiOutlinePauseCircle,
@@ -533,39 +532,9 @@ export default function Tracker_Queue() {
 
   const onAdvance = () => runBulk({ action: "ADVANCE", remarks });
 
-  /**
-   * Fast-track: Invoice Entry straight to SAP Approval, skipping Pre-Audit and
-   * Data Entry (and Bilty/GRPO for transport). Offered only at the entry desk
-   * and only on the Current tab.
-   *
-   * Remarks are checked here as well as server-side. The server is the
-   * authority, but this bypasses the desk where holds and debits are captured,
-   * so the user should be told what is missing before the request rather than
-   * after it — and told what they are about to skip.
-   */
-  const canFastTrack = activeStage === "entry" && subTab === "current";
-  const onFastTrack = async () => {
-    if (selected.size === 0) {
-      flash("Select at least one invoice");
-      return;
-    }
-    if (!remarks.trim()) {
-      flash("A reason is required to skip Pre-Audit and Data Entry");
-      return;
-    }
-    try {
-      const res = await trackerService.fastTrack([...selected], remarks);
-      flash(
-        `${res.processed_count} sent to SAP Approval`,
-        res.errors.length ? `${res.errors.length} failed` : "",
-      );
-      setRemarks("");
-      setSelected(new Set());
-      void load();
-    } catch (err) {
-      flash("Fast-track failed", messageFrom(err, "The server refused the request."));
-    }
-  };
+  /* Fast-track (Invoice Entry straight to SAP Approval) used to live here. It
+     moved to the Invoice Entry page — see `fastTrack` in Tracker_Entry.tsx. */
+
   /**
    * The "no alert email" tick.
    *
@@ -1124,11 +1093,7 @@ export default function Tracker_Queue() {
                 <>
                   <Input
                     className="min-w-[220px] flex-1"
-                    placeholder={
-                      canFastTrack
-                        ? "Remarks (optional to advance, required to fast-track)"
-                        : "Remarks (optional for advance)"
-                    }
+                    placeholder="Remarks (optional for advance)"
                     aria-label="Remarks"
                     value={remarks}
                     onChange={(e) => setRemarks(e.target.value)}
@@ -1136,19 +1101,12 @@ export default function Tracker_Queue() {
                   <Button variant="primary" onClick={onAdvance} disabled={selected.size === 0}>
                     <HiOutlineArrowRight aria-hidden="true" /> Advance
                   </Button>
-                  {/* Deliberately NOT the primary action: this skips the desks
-                      that capture holds and debits, so it should read as the
-                      exception, not the default way out of entry. */}
-                  {canFastTrack && (
-                    <Button
-                      variant="ghost"
-                      onClick={() => void onFastTrack()}
-                      disabled={selected.size === 0}
-                      title="Skip Pre-Audit and Data Entry — a reason is required"
-                    >
-                      <HiOutlineForward aria-hidden="true" /> Send to SAP Approval
-                    </Button>
-                  )}
+                  {/* "Send to SAP Approval" used to sit here, shown only when
+                      the active stage was entry. It now lives on the Invoice
+                      Entry page beside its own Advance button — the entry desk
+                      is the audience, and `IsTrackerEntry` is what the server
+                      gates the endpoint on, so the queue was offering it to
+                      desks that could never use it. */}
                   {canSyncSap && (
                     <Button
                       variant="ghost"

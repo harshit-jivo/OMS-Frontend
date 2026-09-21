@@ -34,10 +34,10 @@ import {
   POSTED_TO_SAP_STATUS,
   readableSapError,
   statusAfterFailedPost,
-  STATUS_FILTERS,
   trimmed,
   updateInvoiceStatus,
   deleteInvoice,
+  visibleStatusFilters,
 } from "./helpers";
 import type {
   CreditLimitStage,
@@ -70,9 +70,21 @@ export type PendingAction = {
 export type UseInvoiceReviewOptions = {
   canApproveReject: boolean;
   canPostToSap: boolean;
+  /**
+   * Per-invoice half of the approve rule: `canApproveReject` says whether this
+   * desk approves at all, this says whether THIS bill's warehouse is theirs.
+   * Decided by the caller for the same reason the two booleans above are.
+   * Defaults to "every warehouse" so a caller that has no warehouse rule to
+   * apply behaves exactly as before.
+   */
+  canApproveWarehouse?: (warehouse: string | null | undefined) => boolean;
 };
 
-export function useInvoiceReview({ canApproveReject, canPostToSap }: UseInvoiceReviewOptions) {
+export function useInvoiceReview({
+  canApproveReject,
+  canPostToSap,
+  canApproveWarehouse = () => true,
+}: UseInvoiceReviewOptions) {
   const [statusFilter, setStatusFilter] = useState<FilterKey>("PENDING");
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<InvoiceRecord | null>(null);
@@ -102,14 +114,9 @@ export function useInvoiceReview({ canApproveReject, canPostToSap }: UseInvoiceR
   const sapPost = useSapPost();
   const navigate = useNavigate();
 
-  // Which status tabs to show. The approver's workflow ends at the decision, so
-  // the SAP-side statuses would only ever be empty for them.
-  const visibleFilters = canApproveReject
-    ? STATUS_FILTERS.filter(
-        (f) =>
-          f.key === "PENDING" || f.key === "APPROVED" || f.key === "REJECTED" || f.key === "EDITED",
-      )
-    : STATUS_FILTERS;
+  // Every status tab, for every desk — see `visibleStatusFilters` for why the
+  // approver-only strip that used to be here was removed rather than extended.
+  const visibleFilters = visibleStatusFilters();
 
   // Tally the number of invoices per status for the tab badges. The tab list is
   // server-filtered, so `records` only ever holds the active tab; we fetch the
@@ -663,6 +670,7 @@ export function useInvoiceReview({ canApproveReject, canPostToSap }: UseInvoiceR
     setActionError,
     actionMessage,
     canApproveReject,
+    canApproveWarehouse,
     canPostToSap,
     handleAction,
     handleDelete,

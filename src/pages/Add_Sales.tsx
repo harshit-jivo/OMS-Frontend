@@ -3,16 +3,16 @@
  * forms.
  *
  * Everything else moved out in plan step 3.4/1 — the state into
- * `useSalesOrderForm`, the two mutually exclusive forms into `OrderWizard` and
- * `LegacyOrderForm`. What is left here is the part that belongs to neither: the
- * heading, the edit-load spinner, and the two dialogs that follow a save.
+ * `useSalesOrderForm`, and the form itself into `OrderForm`. What is left here
+ * is the part that belongs to neither: the heading, the edit-load spinner, and
+ * the two dialogs that follow a save.
  *
  * `FOC.tsx` is `<Add_Sales focMode />` and nothing else, so this file is both
  * order-entry screens.
  *
- * `Add_Sales.css` is gone. Both forms are on the design system now — see the
- * conversion notes at the top of `OrderWizard` and `LegacyOrderForm` for what
- * changed in each and, more importantly, for what deliberately did not.
+ * `Add_Sales.css` is gone, and so is the second form: `OrderWizard` /
+ * `LegacyOrderForm` were one job done twice, and every mode now renders the
+ * single-page `OrderForm`. See its header for what moved and what did not.
  */
 import {
   Dialog,
@@ -29,8 +29,7 @@ import { Card, Page, PageHeader } from "@/components/ui/page";
 import { Skeleton } from "@/components/ui/skeleton";
 import { HiOutlineCheckCircle } from "react-icons/hi2";
 
-import LegacyOrderForm from "./salesOrder/LegacyOrderForm";
-import OrderWizard from "./salesOrder/OrderWizard";
+import OrderForm from "./salesOrder/OrderForm";
 import { useSalesOrderForm, type AddSalesProps } from "./salesOrder/useSalesOrderForm";
 
 export default function Add_Sales({ focMode = false }: AddSalesProps) {
@@ -46,7 +45,6 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
     isSaving,
     isLoadingEditOrder,
     isFocOrder,
-    useWizard,
     submitOrder,
     handleSuccessClose,
   } = form;
@@ -88,10 +86,8 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
           <Skeleton className="h-control w-full" />
           <Skeleton className="h-40 w-full" />
         </Card>
-      ) : useWizard ? (
-        <OrderWizard form={form} />
       ) : (
-        <LegacyOrderForm form={form} />
+        <OrderForm form={form} />
       )}
 
       {/* ── Confirm ── */}

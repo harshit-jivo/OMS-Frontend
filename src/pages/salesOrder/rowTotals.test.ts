@@ -25,6 +25,9 @@ const PRODUCT = {
   item_name: "JIVO CANOLA OIL 1 LTR",
   sal_factor2: 12,
   sal_pack_unit: 1,
+  // The rate agreed with this party. Price List is derived from THIS, never
+  // from whatever Basic Price the operator types.
+  basic_rate: 107,
 } as unknown as PartyProduct;
 
 const row = (overrides: Partial<SalesRow> = {}): SalesRow => ({
@@ -34,7 +37,10 @@ const row = (overrides: Partial<SalesRow> = {}): SalesRow => ({
   type: "1 LTR",
   pcs: "12",
   tax: "5",
+  // Both columns start at the party's agreed rate; Basic Price is what the
+  // salesperson may then discount.
   basicPrice: "107",
+  priceListBasic: "107",
   ...overrides,
 });
 
@@ -61,7 +67,25 @@ describe("recalculateRowTotals", () => {
     expect(result.qty).toBe("60"); // 5 boxes x 12 per box
     expect(result.ltrs).toBe("60"); // 60 pieces x 1 litre
     expect(result.amount).toBe("6420.00"); // 60 x 107, pre-tax
-    expect(result.priceListBasic).toBe("112.35"); // 107 + 5%
+    expect(result.priceListBasic).toBe("107"); // the agreed rate, untouched
+  });
+
+  it("leaves the agreed rate alone when the line is discounted", () => {
+    // The regression this guards: deriving `priceListBasic` from `basicPrice`
+    // dragged the Price List column down with every discount, so the benchmark
+    // rate approval and the SAP fallback both read was whatever the salesperson
+    // had just typed. Between 24 Aug and 17 Sep 2026 it also stored a
+    // TAX-INCLUSIVE figure in a column SAP consumes as a pre-tax UnitPrice.
+    const discounted = recalculateRowTotals(
+      { ...row({ boxes: "5", qty: "60" }), basicPrice: "95" },
+      "price",
+      PRODUCT,
+      false,
+    );
+
+    expect(discounted.basicPrice).toBe("95");
+    expect(discounted.priceListBasic).toBe("107");
+    expect(discounted.amount).toBe("5700.00"); // 60 x 95, pre-tax
   });
 
   it("turns pieces back into boxes", () => {

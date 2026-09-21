@@ -17,9 +17,9 @@
  * destructure what they need, and `SalesOrderForm` is its inferred type, so a
  * value added here needs no second declaration to reach a consumer.
  *
- * `useWizard` is decided from `location.state` and never changes for the life
- * of a mount, which is what makes one hook safe for both forms: only ever one
- * of them is rendered against it.
+ * There is one form. `OrderWizard` / `LegacyOrderForm` were the same job done
+ * twice — this hook fed both, and `useWizard` chose between them from
+ * `location.state`. Every mode now renders the single-page `OrderForm`.
  */
 import { useState, useEffect, useRef } from "react";
 import { useFieldArray, useForm } from "react-hook-form";
@@ -52,7 +52,6 @@ import { NO_PROBLEMS, hasProblems, orderProblems } from "./orderProblems";
 import {
   FOC_TOKEN_BASIC_PRICE,
   applyFocPricingToRow,
-  computeLandingPrice,
   recalculateRowTotals as recalculateRowTotalsFor,
 } from "./rowTotals";
 
@@ -353,11 +352,6 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
   // `allowPoNumber` guard is preserved so editing an existing order doesn't
   // newly expose PO where it wasn't intended.
   const canEditPoNumber = poField.enabled && (!isEditMode || locationState?.allowPoNumber === true);
-  // The guided 4-step wizard is used for both the standard create flow and the
-  // FOC create flow, so Add Sales and Add FOC share the same UI. FOC-specific
-  // behaviour (price forced to 0, no scheme panel) is handled via `isFocOrder`.
-  // Edit and Duplicate modes keep the original single-page form.
-  const useWizard = mode === "create" && !isLoadingFromOrder;
 
   // Use Effects
   useEffect(() => {
@@ -654,10 +648,13 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
             qty: valueToString(item.qty),
             ltrs: valueToString(item.ltrs),
             boxes: valueToString(item.boxes),
-            // Landing is always basic + tax% (recomputed, not the stored value)
-            // so the edit side shows the same figure the create side does.
+            // Show the Price List the order was actually saved with rather than
+            // recomputing one. This line's agreed rate is a fact about the day
+            // it was placed; re-deriving it here would overwrite it on any
+            // subsequent save, and a later edit to the party's rate would
+            // silently reprice an order that had already been approved.
             basicPrice: valueToString(item.basic_price),
-            priceListBasic: computeLandingPrice(item.basic_price, item.tax_rate),
+            priceListBasic: valueToString(item.price_list_basic),
             tax: valueToString(item.tax_rate),
             amount: valueToString(item.total),
             confirmed: true,
@@ -1520,16 +1517,22 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
         row.type = match ? `${match[1]} ${match[2].toUpperCase()}` : "Others";
         row.pcs = String(partyProduct.sal_factor2 ?? "");
         row.tax = String(getProductTaxRate(partyProduct));
-        // Basic Price = the product's basic rate (pre-tax). Landing Price is that
-        // rate plus tax. Both must fill on select — the Basic column was blank
-        // before because only Landing (priceListBasic) was being set.
+        // Both columns start from the party's AGREED RATE (pre-tax). Basic Price
+        // is then editable — that is the discount; Price List keeps the agreed
+        // rate so it stays the benchmark the line is measured against. It must
+        // NOT be derived from `row.basicPrice`: see the note in
+        // `recalculateRowTotals`.
         row.basicPrice =
           isFocOrder || partyProduct.basic_rate == null
             ? isFocOrder
               ? FOC_TOKEN_BASIC_PRICE
               : ""
             : String(partyProduct.basic_rate);
-        row.priceListBasic = isFocOrder ? "0" : computeLandingPrice(row.basicPrice, row.tax);
+        row.priceListBasic = isFocOrder
+          ? "0"
+          : partyProduct.basic_rate == null
+            ? ""
+            : String(partyProduct.basic_rate);
         void fetchSchemesForRow(row.uid, true);
       } else {
         void fetchSchemesForRow(row.uid, false);
@@ -2109,7 +2112,6 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
     isFocOrder,
     poField,
     canEditPoNumber,
-    useWizard,
     getProductType,
     fetchSchemesForRow,
     validateBeforeSave,

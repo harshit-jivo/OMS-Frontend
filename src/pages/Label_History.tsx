@@ -12,9 +12,9 @@ import {
   ruleErrorMessage,
   type LabelCheckSummary,
 } from "../services/legalService";
-import { API_ORIGIN } from "../services/apiPaths";
 import FindingsChecklist from "../components/legal/FindingsChecklist";
 import LabelImage from "../components/legal/LabelImage";
+import useLabelPreview from "../components/legal/useLabelPreview";
 import MarkdownReport from "../components/legal/MarkdownReport";
 import {
   buildReportMarkdown,
@@ -70,13 +70,6 @@ import { cn } from "@/lib/utils";
  * `MarkdownReport` unchanged. A past report and a fresh one are the same
  * thing; rendering them with different code would let them drift.
  */
-
-const mediaUrl = (path: string): string =>
-  !path
-    ? ""
-    : /^https?:\/\//i.test(path)
-      ? path
-      : `${API_ORIGIN}${path.startsWith("/") ? "" : "/"}${path}`;
 
 const formatWhen = (iso: string): string => {
   const date = new Date(iso);
@@ -171,6 +164,10 @@ export default function LabelHistory() {
   const locatedPasses = findings.filter(
     (finding) => finding.status === "PASS" && finding.regions?.length,
   ).length;
+  // The artwork arrives as a blob rather than as an <img src>: the endpoint
+  // that serves it is behind the legal gate, and a browser fetch carries no
+  // bearer token. See `useLabelPreview`.
+  const preview = useLabelPreview(detail?.image_url);
 
   /* ── Detail ───────────────────────────────────────────────────────────── */
 
@@ -281,17 +278,35 @@ export default function LabelHistory() {
                       Show passed
                     </label>
                   </div>
-                  <LabelImage
-                    src={mediaUrl(detail.image_url)}
-                    alt={`Label: ${detail.file_name ?? "check"}`}
-                    findings={findings}
-                    activeId={activeId}
-                    showPasses={showPasses}
-                    onSelect={(ruleId) => {
-                      setActiveId(ruleId);
-                      setView("report");
-                    }}
-                  />
+                  {preview.src ? (
+                    <LabelImage
+                      src={preview.src}
+                      alt={`Label: ${detail.file_name ?? "check"}`}
+                      findings={findings}
+                      activeId={activeId}
+                      showPasses={showPasses}
+                      onSelect={(ruleId) => {
+                        setActiveId(ruleId);
+                        setView("report");
+                      }}
+                    />
+                  ) : preview.error ? (
+                    /* The report is the record; the artwork is how it is read.
+                       Saying which one failed keeps a reviewer from doubting
+                       the findings they can still see. */
+                    <Notice tone="hold">{preview.error}</Notice>
+                  ) : (
+                    <div
+                      className="flex items-center justify-center rounded-[9px] bg-surface px-4 py-10"
+                      role="status"
+                      aria-label="Loading the label"
+                    >
+                      <i
+                        aria-hidden="true"
+                        className="size-[26px] rounded-full border-[3px] border-line-strong border-t-brand motion-safe:animate-spin"
+                      />
+                    </div>
+                  )}
                 </>
               ) : (
                 <div className="flex flex-col items-center gap-2 rounded-[9px] bg-surface px-4 py-10 text-center text-[14px] leading-relaxed text-body">

@@ -27,10 +27,10 @@ const RESULT_LINE = "mt-1 text-[12.5px] text-body";
 
 export default function VendorCheck({
   itemOptions,
-  itemNameOf,
+  itemNameIn,
 }: {
   itemOptions: SearchSelectOption<string>[];
-  itemNameOf: (itemCode: string) => string;
+  itemNameIn: (category?: string | null) => (itemCode: string) => string;
 }) {
   const [cardCode, setCardCode] = useState("");
   const [category, setCategory] = useState("");
@@ -169,10 +169,10 @@ export default function VendorCheck({
                       </Badge>
                     </div>
                     <div className={RESULT_LINE}>
-                      {scheme.triggers.map((t) => describeTrigger(t, itemNameOf)).join(" · ")}
+                      {scheme.triggers.map((t) => describeTrigger(t, itemNameIn(scheme.category))).join(" · ")}
                     </div>
                     <div className={`${RESULT_LINE} font-semibold text-ok`}>
-                      {scheme.benefits.map((b) => describeBenefit(b, itemNameOf)).join(" · ")}
+                      {scheme.benefits.map((b) => describeBenefit(b, itemNameIn(scheme.category))).join(" · ")}
                     </div>
                   </div>
                 ))}
@@ -276,7 +276,7 @@ export default function VendorCheck({
                           On {proposal.qualifying_qty} ordered →{" "}
                           <strong className="font-semibold text-ok">
                             {proposal.qty} {proposal.free_uom.toLowerCase()} of{" "}
-                            {itemNameOf(proposal.benefit_item_code)}
+                            {itemNameIn(category)(proposal.benefit_item_code)}
                           </strong>{" "}
                           free
                         </>

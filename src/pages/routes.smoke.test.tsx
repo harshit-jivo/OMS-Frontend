@@ -119,6 +119,7 @@ const PAGES: Array<SmokeEntry<any>> = [
   page("/Rate_Approver_orders", () => import("./Rate_Approver_Order")),
     ["/Auditor_status_tracking", () => import("./Order_Status_Tracking"), { mode: "auditor" }] as SmokeEntry<{ mode: "auditor" }>,
   page("/Order_Tracking", () => import("./Order_Tracking")),
+  page("/Order_Master", () => import("./Order_Master")),
   page("/Invoice_Report", () => import("./Invoice_Report")),
   page("/Daily_Report", () => import("./Daily_Report")),
   page("/PersonWise_Report", () => import("./PersonWise_Report")),
