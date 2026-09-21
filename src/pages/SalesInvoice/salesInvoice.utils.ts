@@ -199,7 +199,7 @@ export const buildInvoicePayload = (
     ShipToCode: form.shipTo,
     PayToCode: form.payTo,
     ...(firstLine?.BPL_Id ? { BPL_IDAssignedToInvoice: firstLine.BPL_Id } : {}),
-    DocumentLines: lines.map((line) => {
+    DocumentLines: lines.map((line, index) => {
       const batchNumbers = (line.BatchNumbers || [])
         .map((batch) => ({
           ...(batch.BatchNumber ? { BatchNumber: batch.BatchNumber } : {}),
@@ -222,7 +222,14 @@ export const buildInvoicePayload = (
       }
 
       return {
-        LineNum: line.LineNum,
+        // Position in THIS invoice, not in the sales order it came from.
+        // LineNum has to be unique across the document: an invoice drawn from
+        // two orders gets 0,1,2 from the first and 0,1 from the second, and SAP
+        // then cannot tell which line each BatchNumbers block belongs to --
+        // "Cannot add row without complete selection of batch/serial numbers".
+        // BaseLine below still carries the source order's line number, which is
+        // what links the invoice back to the order.
+        LineNum: index,
         BaseType: 17,
         BaseEntry: line.DocEntry,
         BaseLine: line.LineNum,
