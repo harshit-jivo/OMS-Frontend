@@ -265,22 +265,29 @@ const STAT_TONES = {
   neutral: {
     chip: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
     value: "text-ink",
+    // The plain card. A tone nobody chose must not look like one they did.
+    surface: "border-line bg-card",
   },
   brand: {
     chip: "bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400",
     value: "text-ink",
+    surface: "border-blue-200/70 bg-blue-50/40 dark:border-blue-900/50 dark:bg-blue-950/20",
   },
   ok: {
     chip: "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400",
     value: "text-ok",
+    surface:
+      "border-emerald-200/70 bg-emerald-50/40 dark:border-emerald-900/50 dark:bg-emerald-950/20",
   },
   bad: {
     chip: "bg-red-50 text-red-600 dark:bg-red-950/60 dark:text-red-400",
     value: "text-bad",
+    surface: "border-red-200/70 bg-red-50/40 dark:border-red-900/50 dark:bg-red-950/20",
   },
   hold: {
     chip: "bg-amber-50 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400",
     value: "text-hold",
+    surface: "border-amber-200/70 bg-amber-50/40 dark:border-amber-900/50 dark:bg-amber-950/20",
   },
 } as const;
 
@@ -326,10 +333,23 @@ export function Stat({
       data-slot="stat"
       data-tone={tone}
       className={cn(
-        "rounded-card border border-line bg-card px-4 py-3.5",
+        "rounded-card border px-4 py-3.5",
         "shadow-card transition-shadow duration-150",
         "hover:shadow-card-hover",
-        "dark:border-white/10",
+        /*
+         * The card carries a wash of its own tone, not just the icon chip.
+         *
+         * A row of five white cards distinguished only by a 40px square asks
+         * the eye to find the square first and read the colour second; the
+         * wash makes "three rejected" legible from across the desk. It is
+         * deliberately faint — 40% of a 50-level tint — because these sit
+         * above the page's real content and a row of saturated panels would
+         * outrank it.
+         *
+         * `neutral` keeps the plain card: most pages pass no tone, and they
+         * must not all acquire a colour nobody chose.
+         */
+        tones.surface,
         className,
       )}
       {...props}

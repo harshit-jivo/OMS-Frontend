@@ -34,6 +34,7 @@ import {
   HiOutlineInbox,
   HiOutlinePencilSquare,
   HiOutlinePresentationChartLine,
+  HiOutlineMapPin,
 } from "react-icons/hi2";
 import {
   Table,
@@ -848,7 +849,7 @@ export default function Order_Tracking() {
                               variant="ghost"
                               onClick={() => void handleTrack(order)}
                             >
-                              <HiOutlineArrowPath aria-hidden="true" /> Track
+                              <HiOutlineMapPin aria-hidden="true" /> Track
                             </Button>
                             {/* Only a REJECTED order can be edited — it has
                                 come back to its author to be fixed and
