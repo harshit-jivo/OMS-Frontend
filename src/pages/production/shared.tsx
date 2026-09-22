@@ -9,8 +9,11 @@
  * Components only. The formatting helpers live in `./format` because a file
  * exporting both breaks Fast Refresh.
  */
+import { HiOutlineBuildingOffice2, HiOutlineFunnel } from "react-icons/hi2";
+
 import { Badge, type BadgeTone } from "../../components/ui/badge";
-import { cn } from "../../lib/utils";
+import { FilterSelect } from "../../components/ui/filter-bar";
+import { TableCell } from "../../components/ui/table";
 import {
   PRODUCTION_COMPANIES,
   SAP_ORDER_STATUS_LABEL,
@@ -19,6 +22,7 @@ import {
   type ProductionFlowStatus,
   type ProductionOrder,
 } from "../../services/productionService";
+import { fmtQty } from "./format";
 
 /** `""` is every company — not a fourth company. */
 export type CompanyFilter = "" | ProductionCompany;
@@ -34,18 +38,16 @@ const STATUSES: { value: StatusFilter; label: string }[] = [
 ];
 
 /**
- * Sized to sit at the right of a tab strip rather than in a filter card of
- * its own. `h-control-xs` is the token the Workflows header filter uses, so
- * these line up with the tabs beside them.
+ * Both filters are `FilterSelect`s now — the labelled field the Approver Queue
+ * and every other list in the app uses.
+ *
+ * They were bare `<select>`s sized to perch at the end of a tab strip, which
+ * made these two pages the only lists in the module whose filters were
+ * unlabelled grey boxes. `filter-bar.tsx` documents why the visible caption
+ * matters: "All companies" reads as a label only until something is selected,
+ * after which a row of identical selects is nameless to everyone, not just to
+ * a screen reader.
  */
-const SELECT_CLASS = cn(
-  "h-control-xs min-w-0 cursor-pointer rounded-sm",
-  "border border-line bg-surface px-2.5",
-  "[font-family:inherit] text-[12.5px] text-ink",
-  "transition-colors hover:border-line-strong",
-  "focus-visible:border-brand focus-visible:bg-card focus-visible:shadow-focus focus-visible:outline-none",
-);
-
 export function CompanyFilterSelect({
   value,
   onChange,
@@ -54,11 +56,11 @@ export function CompanyFilterSelect({
   onChange: (v: CompanyFilter) => void;
 }) {
   return (
-    <select
-      aria-label="Filter production orders by company"
+    <FilterSelect
+      label="Company"
+      icon={HiOutlineBuildingOffice2}
       value={value}
       onChange={(e) => onChange(e.target.value as CompanyFilter)}
-      className={SELECT_CLASS}
     >
       <option value="">All companies</option>
       {PRODUCTION_COMPANIES.map((c) => (
@@ -66,7 +68,7 @@ export function CompanyFilterSelect({
           {c}
         </option>
       ))}
-    </select>
+    </FilterSelect>
   );
 }
 
@@ -78,18 +80,69 @@ export function StatusFilterSelect({
   onChange: (v: StatusFilter) => void;
 }) {
   return (
-    <select
-      aria-label="Filter production orders by status"
+    <FilterSelect
+      label="Status"
+      icon={HiOutlineFunnel}
       value={value}
       onChange={(e) => onChange(e.target.value as StatusFilter)}
-      className={SELECT_CLASS}
     >
       {STATUSES.map((s) => (
         <option key={s.value} value={s.value}>
           {s.label}
         </option>
       ))}
-    </select>
+    </FilterSelect>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * Row cells
+ * ------------------------------------------------------------------ *
+ * The three cells both tables render identically. They were duplicated, and
+ * the duplication had already started to cost: `planned_boxes` is rendered
+ * with a falsy check that hides a legitimate "0", in both copies, so a fix
+ * had to be made twice or not at all.
+ */
+
+/** Item code over item name. */
+export function ItemCell({ order }: { order: ProductionOrder }) {
+  return (
+    <TableCell className="min-w-[240px]">
+      <div className="font-medium text-ink">{order.item_code}</div>
+      <div className="text-[12px] text-subtle">{order.item_name}</div>
+    </TableCell>
+  );
+}
+
+/** Planned pieces, with the box equivalent beneath when the pack size is known. */
+export function PlannedCell({ order }: { order: ProductionOrder }) {
+  return (
+    <TableCell className="whitespace-nowrap text-right tabular-nums">
+      <div>{fmtQty(order.planned_qty)} pcs</div>
+      {/* `!= null` rather than truthy: "0" is a real answer and was being
+          swallowed along with null. */}
+      {order.planned_boxes != null && order.planned_boxes !== "" && (
+        <div className="text-[12px] text-subtle">{fmtQty(order.planned_boxes)} box</div>
+      )}
+    </TableCell>
+  );
+}
+
+/** Flow status plus the qualifiers that change what the status MEANS. */
+export function StatusCell({ order }: { order: ProductionOrder }) {
+  return (
+    <TableCell>
+      <div className="flex flex-wrap items-center gap-1">
+        <FlowStatusBadge status={order.flow?.status} />
+        <OrderTypeBadge order={order} />
+        <GateExemptBadge order={order} />
+        {order.flow?.sap_status === "FAILED" && (
+          <Badge tone="bad" outlined>
+            SAP write failed
+          </Badge>
+        )}
+      </div>
+    </TableCell>
   );
 }
 

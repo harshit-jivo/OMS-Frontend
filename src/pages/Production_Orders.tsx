@@ -14,9 +14,21 @@
  * work?" has to be answerable without opening Task Scheduler.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { HiArrowPath, HiExclamationTriangle } from "react-icons/hi2";
+import {
+  HiArrowPath,
+  HiExclamationTriangle,
+  HiOutlineCheckCircle,
+  HiOutlineClipboardDocumentList,
+  HiOutlineClock,
+  HiOutlineExclamationTriangle,
+  HiOutlineEye,
+  HiOutlineInbox,
+  HiOutlineXCircle,
+  HiOutlineXMark,
+} from "react-icons/hi2";
 
-import { Badge } from "../components/ui/badge";
+import { cn } from "../lib/utils";
+import { Breadcrumbs } from "../components/ui/breadcrumbs";
 import { Button } from "../components/ui/button";
 import {
   Dialog,
@@ -27,9 +39,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../components/ui/dialog";
-import { Input } from "../components/ui/form";
+import {
+  FilterBar,
+  FilterCount,
+  FilterSearch,
+  FilterSpacer,
+} from "../components/ui/filter-bar";
 import { Card, EmptyState, Page, PageHeader, Stat, StatRow } from "../components/ui/page";
-import { Skeleton } from "../components/ui/skeleton";
+import { Pagination } from "../components/ui/pagination";
+import { Skeleton, TableSkeleton } from "../components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -41,6 +59,7 @@ import {
 import {
   productionError,
   productionService,
+  type ItemLocationStock,
   type ProductionActionLog,
   type ProductionHealth,
   type ProductionInsights,
@@ -51,8 +70,11 @@ import {
   CompanyFilterSelect,
   FlowStatusBadge,
   GateExemptBadge,
+  ItemCell,
   OrderTypeBadge,
+  PlannedCell,
   SapStatusBadge,
+  StatusCell,
   StatusFilterSelect,
   type CompanyFilter,
   type StatusFilter,
@@ -60,6 +82,8 @@ import {
 
 /** A sync older than this is called out. Matches the command's default. */
 const STALE_HOURS = 24;
+
+const PAGE_SIZE = 15;
 
 export default function ProductionOrders() {
   const [orders, setOrders] = useState<ProductionOrder[]>([]);
@@ -71,6 +95,7 @@ export default function ProductionOrders() {
   const [company, setCompany] = useState<CompanyFilter>("");
   const [status, setStatus] = useState<StatusFilter>("");
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
 
   const [detail, setDetail] = useState<ProductionOrder | null>(null);
 
@@ -101,6 +126,14 @@ export default function ProductionOrders() {
     void load();
   }, [load]);
 
+  // Narrowing the list invalidates the page number: page 4 of every order is
+  // past the end of page 4 of one company's.
+  useEffect(() => setPage(1), [company, status, search]);
+
+  const totalPages = Math.max(1, Math.ceil(orders.length / PAGE_SIZE));
+  const pageNumber = Math.min(page, totalPages);
+  const paginated = orders.slice((pageNumber - 1) * PAGE_SIZE, pageNumber * PAGE_SIZE);
+
   /**
    * Companies whose feed has not reported in over a day.
    *
@@ -120,12 +153,14 @@ export default function ProductionOrders() {
 
   return (
     <Page>
+      <Breadcrumbs items={[{ label: "Production" }, { label: "Production Orders" }]} />
+
       <PageHeader
         title="Production Orders"
         description="Planned orders synced from SAP, and where each one is for approval."
         actions={
-          <Button variant="secondary" size="sm" onClick={() => void load()}>
-            <HiArrowPath aria-hidden /> Refresh
+          <Button variant="ghost" onClick={() => void load()}>
+            <HiArrowPath aria-hidden="true" /> Refresh
           </Button>
         }
       />
@@ -153,19 +188,41 @@ export default function ProductionOrders() {
 
       {insights && (
         <StatRow>
-          <Stat label="Total" value={insights.total} />
-          <Stat label="Pending" value={insights.by_status.PENDING ?? 0} />
-          <Stat label="Approved" value={insights.approved_total} />
-          <Stat label="Rejected" value={insights.by_status.REJECTED ?? 0} />
           <Stat
+            icon={HiOutlineClipboardDocumentList}
+            tone="brand"
+            label="Total"
+            value={insights.total}
+          />
+          <Stat
+            icon={HiOutlineClock}
+            tone={insights.by_status.PENDING ? "hold" : "neutral"}
+            label="Pending"
+            value={insights.by_status.PENDING ?? 0}
+          />
+          <Stat
+            icon={HiOutlineCheckCircle}
+            tone="ok"
+            label="Approved"
+            value={insights.approved_total}
+          />
+          <Stat
+            icon={HiOutlineXCircle}
+            tone={insights.by_status.REJECTED ? "bad" : "neutral"}
+            label="Rejected"
+            value={insights.by_status.REJECTED ?? 0}
+          />
+          <Stat
+            icon={HiOutlineInbox}
             label="No longer planned"
             value={insights.by_status.OBSOLETE ?? 0}
             hint="SAP moved these on before anyone decided them."
           />
           <Stat
+            icon={HiOutlineExclamationTriangle}
             label="SAP write failed"
             value={insights.sap_write_failed}
-            tone={insights.sap_write_failed ? "bad" : undefined}
+            tone={insights.sap_write_failed ? "bad" : "neutral"}
             hint="Approved in OMS, but SAP did not accept it. Retryable from the approval desk."
           />
         </StatRow>
@@ -185,93 +242,92 @@ export default function ProductionOrders() {
         </Card>
       )}
 
-      <Card>
-        <div className="flex flex-wrap items-center gap-2 border-b border-line p-3">
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Filter by item code…"
-            className="h-control-xs max-w-[220px]"
-            aria-label="Filter by item code"
-          />
-          <CompanyFilterSelect value={company} onChange={setCompany} />
-          <StatusFilterSelect value={status} onChange={setStatus} />
-          <span className="ml-auto text-[12.5px] text-subtle">
-            {loading ? "loading…" : `${orders.length} order(s)`}
-          </span>
-        </div>
+      <FilterBar>
+        <FilterSearch
+          label="Item code"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Filter by item code…"
+          fieldClassName="max-w-[220px] flex-none"
+        />
+        <CompanyFilterSelect value={company} onChange={setCompany} />
+        <StatusFilterSelect value={status} onChange={setStatus} />
+        {(company || status || search) && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setCompany("");
+              setStatus("");
+              setSearch("");
+            }}
+          >
+            <HiOutlineXMark aria-hidden="true" /> Clear
+          </Button>
+        )}
+        <FilterSpacer />
+        <FilterCount>Total: {loading ? "—" : orders.length}</FilterCount>
+      </FilterBar>
 
-        {error && (
+      {error && (
+        <Card className="border-bad/40 bg-bad/5">
           <div className="p-3 text-[13px] text-bad" role="alert">
             {error}
           </div>
-        )}
+        </Card>
+      )}
 
-        {loading ? (
-          <div className="space-y-2 p-3">
-            <Skeleton className="h-8 w-full" />
-            <Skeleton className="h-8 w-full" />
-            <Skeleton className="h-8 w-full" />
-          </div>
-        ) : orders.length === 0 ? (
+      {loading ? (
+        <TableSkeleton columns={10} label="Loading production orders" />
+      ) : orders.length === 0 ? (
+        <Card>
           <EmptyState
+            icon={HiOutlineInbox}
             title="No production orders"
-            hint="Orders appear here once the SAP sync has run."
-            className="py-10"
+            hint={
+              company || status || search
+                ? "Nothing matches these filters."
+                : "Orders appear here once the SAP sync has run."
+            }
           />
-        ) : (
+        </Card>
+      ) : (
+        <Card className="overflow-hidden p-0">
           <div className="overflow-x-auto">
             <Table density="compact">
               <TableHeader>
-                <TableRow>
+                <TableRow className="bg-surface hover:bg-surface">
                   <TableHead>PO</TableHead>
                   <TableHead>Company</TableHead>
                   <TableHead className="min-w-[240px]">Item</TableHead>
                   <TableHead>Warehouse</TableHead>
                   <TableHead className="text-right">Planned</TableHead>
-                  <TableHead>Due</TableHead>
+                  {/* Was "Due". Same change as the approval queue, for the same
+                      reason: how long an order has been sitting here is the
+                      question this list answers, and when SAP wants it finished
+                      is on the detail dialog. */}
+                  <TableHead>Created</TableHead>
                   <TableHead>Raised in SAP by</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Waiting on</TableHead>
-                  <TableHead />
+                  <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {orders.map((row) => (
+                {paginated.map((row) => (
                   <TableRow key={row.id}>
-                    <TableCell className="whitespace-nowrap font-medium text-ink">
+                    <TableCell className="whitespace-nowrap font-semibold text-brand">
                       {orderNumber(row)}
                     </TableCell>
                     <TableCell>{row.company}</TableCell>
-                    <TableCell className="min-w-[240px]">
-                      <div className="font-medium text-ink">{row.item_code}</div>
-                      <div className="text-[12px] text-subtle">{row.item_name}</div>
-                    </TableCell>
+                    <ItemCell order={row} />
                     <TableCell>{row.warehouse || "—"}</TableCell>
-                    <TableCell className="whitespace-nowrap text-right">
-                      <div>{fmtQty(row.planned_qty)} pcs</div>
-                      {row.planned_boxes && (
-                        <div className="text-[12px] text-subtle">
-                          {fmtQty(row.planned_boxes)} box
-                        </div>
-                      )}
-                    </TableCell>
+                    <PlannedCell order={row} />
                     <TableCell className="whitespace-nowrap">
-                      {fmtDate(row.due_date)}
+                      {fmtDateTime(row.created_at)}
                     </TableCell>
                     <TableCell>{row.sap_created_by || "—"}</TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap items-center gap-1">
-                        <FlowStatusBadge status={row.flow?.status} />
-                        <OrderTypeBadge order={row} />
-                        <GateExemptBadge order={row} />
-                        {row.flow?.sap_status === "FAILED" && (
-                          <Badge tone="bad" outlined>
-                            SAP write failed
-                          </Badge>
-                        )}
-                      </div>
-                    </TableCell>
+                    <StatusCell order={row} />
                     <TableCell>
                       {row.flow?.current_stage ? (
                         <>
@@ -286,13 +342,15 @@ export default function ProductionOrders() {
                         <span className="text-subtle">—</span>
                       )}
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell>
                       <Button
-                        variant="secondary"
-                        size="sm"
+                        variant="ghost"
+                        size="icon"
                         onClick={() => setDetail(row)}
+                        aria-label={`View production order ${orderNumber(row)}`}
+                        title="View order"
                       >
-                        Details
+                        <HiOutlineEye aria-hidden="true" />
                       </Button>
                     </TableCell>
                   </TableRow>
@@ -300,8 +358,20 @@ export default function ProductionOrders() {
               </TableBody>
             </Table>
           </div>
-        )}
-      </Card>
+        </Card>
+      )}
+
+      {orders.length > PAGE_SIZE && (
+        <Pagination
+          page={pageNumber}
+          totalPages={totalPages}
+          onPageChange={setPage}
+          summary={`Showing ${(pageNumber - 1) * PAGE_SIZE + 1}–${Math.min(
+            pageNumber * PAGE_SIZE,
+            orders.length,
+          )} of ${orders.length}`}
+        />
+      )}
 
       <OrderDetailDialog order={detail} onClose={() => setDetail(null)} />
     </Page>
@@ -322,15 +392,31 @@ export function OrderDetailDialog({
   const [full, setFull] = useState<ProductionOrder | null>(null);
   const [logs, setLogs] = useState<ProductionActionLog[]>([]);
   const [loading, setLoading] = useState(false);
+  /* Stock is loaded separately from the order and the history.
+   *
+   * It is a live HANA read against OWHS/OITW, so it is the one call here that
+   * can fail on its own — SAP unreachable answers 503 while the order and its
+   * history come from Postgres and are fine. Folded into the same
+   * `Promise.all`, one HANA hiccup would blank the whole dialog; on its own it
+   * degrades to a line of text under a panel that still shows everything else.
+   */
+  const [stock, setStock] = useState<ItemLocationStock | null>(null);
+  const [stockLoading, setStockLoading] = useState(false);
+  const [stockError, setStockError] = useState("");
 
   useEffect(() => {
     if (!order) {
       setFull(null);
       setLogs([]);
+      setStock(null);
+      setStockError("");
       return;
     }
     let cancelled = false;
     setLoading(true);
+    setStockLoading(true);
+    setStockError("");
+    setStock(null);
     void (async () => {
       try {
         // The detail endpoint adds `gate_exemption_reason`, which the list
@@ -347,6 +433,16 @@ export function OrderDetailDialog({
         if (!cancelled) setFull(order);
       } finally {
         if (!cancelled) setLoading(false);
+      }
+    })();
+    void (async () => {
+      try {
+        const data = await productionService.stock(order.id);
+        if (!cancelled) setStock(data);
+      } catch (err) {
+        if (!cancelled) setStockError(productionError(err));
+      } finally {
+        if (!cancelled) setStockLoading(false);
       }
     })();
     return () => {
@@ -390,7 +486,11 @@ export function OrderDetailDialog({
               <Detail label="Boxes" value={fmtQty(row.planned_boxes)} />
               <Detail label="Litres" value={fmtQty(row.planned_litres)} />
               <Detail label="Warehouse" value={row.warehouse || "—"} />
-              <Detail label="Sub group" value={row.item_group || "—"} />
+              {/* `OITM.U_Sub_Group` in SAP, but everyone here calls it the
+                  variety — and correction C-0003 is explicit that the variety
+                  is this field, never the item name. The API field keeps SAP's
+                  name; only the label is ours. */}
+              <Detail label="Variety" value={row.item_group || "—"} />
               <Detail label="Series" value={row.item_series ?? "—"} />
               <Detail label="Posted" value={fmtDate(row.post_date)} />
               <Detail label="Due" value={fmtDate(row.due_date)} />
@@ -402,6 +502,13 @@ export function OrderDetailDialog({
               <Detail label="SAP DocEntry" value={row.sap_doc_entry} />
               <Detail label="Last synced" value={fmtDateTime(row.synced_at)} />
             </dl>
+
+            <StockPanel
+              stock={stock}
+              loading={stockLoading}
+              error={stockError}
+              warehouse={row.warehouse}
+            />
 
             {row.remarks && (
               <div className="text-[13px]">
@@ -472,6 +579,115 @@ export function OrderDetailDialog({
         </DialogContent>
       )}
     </Dialog>
+  );
+}
+
+/**
+ * Where the item actually is — the warehouses at this site that hold some.
+ *
+ * The question an approver has before releasing a production order is whether
+ * the material is already standing in the next shed. `OWHS.Location` groups
+ * warehouses into a physical site, so the order's own warehouse names the site
+ * rather than limiting the answer to itself.
+ *
+ * A LIST, NOT A TABLE. The first cut was a four-column table of all 35
+ * warehouses at the site — on hand, committed, on order — which is 35 rows of
+ * mostly zeros and two numbers nobody asked for, inside a dialog that already
+ * has fifteen fields and a history above it. What is left is the warehouses
+ * that hold some, plus the order's own whatever it holds, and one quantity.
+ * The "3 of 35" line keeps the ones that were dropped accounted for.
+ */
+function StockPanel({
+  stock,
+  loading,
+  error,
+  warehouse,
+}: {
+  stock: ItemLocationStock | null;
+  loading: boolean;
+  error: string;
+  warehouse: string;
+}) {
+  const rows = stock?.results ?? [];
+  // A number for the total line only. The per-row values stay strings — they
+  // are numeric(19,6), and putting them through Number() to render is exactly
+  // the precision loss the API went to trouble to avoid.
+  const total = rows.reduce((sum, r) => sum + Number(r.on_hand || 0), 0);
+
+  return (
+    <div>
+      <div className="mb-1.5 text-[12.5px] font-medium text-ink">
+        Stock at this site
+        {stock && stock.site_warehouses > 0 && (
+          <span className="ml-2 font-normal text-subtle">
+            {stock.holding} of {stock.site_warehouses} warehouses
+          </span>
+        )}
+      </div>
+
+      {loading ? (
+        <Skeleton className="h-12 w-full" />
+      ) : error ? (
+        // Text, not an alert box: the order and its history above are fine and
+        // only this panel could not be read.
+        <div className="text-[12.5px] text-bad">{error}</div>
+      ) : rows.length === 0 ? (
+        <div className="text-[12.5px] text-subtle">
+          {/* The one case that legitimately has no rows: the order's warehouse
+              is not in OWHS, so there is no site to report on. */}
+          {warehouse
+            ? `No warehouse ${warehouse} in SAP, so there is no site to total.`
+            : "The order names no warehouse."}
+        </div>
+      ) : (
+        <div className="rounded-sm border border-line">
+          <ul className="divide-y divide-line">
+            {rows.map((r) => (
+              <li
+                key={r.warehouse}
+                className={cn(
+                  "flex items-baseline justify-between gap-3 px-2.5 py-1.5 text-[12.5px]",
+                  // The order's own row is the one the reader is looking for,
+                  // so it should not have to match codes by eye.
+                  r.is_order_warehouse && "bg-brand/5",
+                )}
+              >
+                <span className="min-w-0">
+                  <span
+                    className={
+                      r.is_order_warehouse ? "font-semibold text-brand" : "text-ink"
+                    }
+                  >
+                    {r.warehouse}
+                  </span>
+                  <span className="ml-1.5 text-subtle">{r.warehouse_name}</span>
+                  {r.is_order_warehouse && (
+                    <span className="ml-1.5 text-[11px] text-subtle">this order</span>
+                  )}
+                  {r.inactive && (
+                    <span className="ml-1.5 text-[11px] text-subtle">inactive</span>
+                  )}
+                </span>
+                <span
+                  className={cn(
+                    "shrink-0 tabular-nums",
+                    Number(r.on_hand || 0) === 0
+                      ? "text-subtle"
+                      : "font-medium text-ink",
+                  )}
+                >
+                  {fmtQty(r.on_hand)}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <div className="border-t border-line px-2.5 py-1.5 text-[12px] text-subtle">
+            {total.toLocaleString("en-IN", { maximumFractionDigits: 2 })} at this site ·
+            live from SAP
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
