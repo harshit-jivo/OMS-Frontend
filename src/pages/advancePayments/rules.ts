@@ -18,6 +18,15 @@
  * It is also the part the backend will have to agree with, so it is written
  * to be read as a specification, and `rules.test.ts` pins every case.
  *
+ * WHERE THE DATA COMES FROM is decided here too, per case (`partnerSource`,
+ * `REFERENCE_KINDS[kind].live`): SAP's vendors and open invoices and its
+ * employee advance accounts for the connected cases, sample data for the
+ * rest. The rules never fetch — a live list is loaded by the page — so a
+ * SAP-sourced partner cannot be checked against a list here; it is kept
+ * until something above it changes, and the documents chosen for it are held
+ * as SNAPSHOTS in the form, so every figure computed below is computed from
+ * exactly what the requester saw.
+ *
  * THE ONE INVARIANT: state never holds a value that is not on screen. A hidden
  * field with a value in it is one the requester cannot see or correct, and it
  * would be submitted all the same. `sanitize` enforces it after every change,
@@ -25,9 +34,7 @@
  * `sanitize` is the net under them.
  */
 import {
-  EMPLOYEES,
   PAYMENT_AGAINST_OPTIONS,
-  VENDOR_BILLS,
   VENDOR_OTHER_DOCUMENTS,
   VENDOR_POS,
   VENDORS,
@@ -63,13 +70,24 @@ export interface RequestForm {
    * choosing "Other" did, and the text says what the other thing is.
    */
   paymentAgainstOther: string;
+  /** The partner's key — a CardCode, an employee's GL account, or a sample id. */
   partner: string;
   /**
-   * The chosen documents (`OpenDocument.id`) — several bills or several POs.
-   * One request can settle part of three bills; they are still one payment
-   * to one partner, decided once.
+   * The partner's display name, held beside the key because a SAP-sourced
+   * partner is picked from a searched page of results: once the search moves
+   * on, the page no longer holds them, and the picker would otherwise show a
+   * bare code.
    */
-  references: string[];
+  partnerName: string;
+  /**
+   * The chosen documents — several bills or several POs — as SNAPSHOTS.
+   *
+   * Whole documents rather than ids, because a live SAP list is fetched by the
+   * page and cannot be looked up from here; the snapshot is also what the
+   * requester saw, which is what an approver should be shown. One request can
+   * settle part of three bills; they are still one payment to one partner.
+   */
+  selected: OpenDocument[];
   /**
    * One payment line per chosen document, keyed by its id. Each line has its
    * own mode, because "clear this bill, pay a quarter of that one" is the
@@ -102,7 +120,8 @@ export const EMPTY_FORM: RequestForm = {
   paymentAgainst: "",
   paymentAgainstOther: "",
   partner: "",
-  references: [],
+  partnerName: "",
+  selected: [],
   allocations: {},
   amount: "",
   expectedDate: "",
@@ -139,6 +158,12 @@ interface ReferenceKindDef {
   paidLabel: string;
   /** A sentence under the section title, when the list needs explaining. */
   intro?: string;
+  /**
+   * Read live from SAP by the page. `documents` is then empty: the rules
+   * never hold a live list, only the snapshots the requester chose.
+   */
+  live: boolean;
+  /** The SAMPLE documents, for a kind that is not live. */
   documents: OpenDocument[];
 }
 
@@ -160,7 +185,9 @@ export const REFERENCE_KINDS: Record<ReferenceKind, ReferenceKindDef> = {
     dateLabel: "Bill Date",
     originalLabel: "Original Amount",
     paidLabel: "Paid Amount",
-    documents: VENDOR_BILLS,
+    // Live: `GET /advance-payments/open-invoices/?party_type=vendor`.
+    live: true,
+    documents: [],
   },
   VENDOR_PO: {
     label: "PO",
@@ -171,6 +198,8 @@ export const REFERENCE_KINDS: Record<ReferenceKind, ReferenceKindDef> = {
     dateLabel: "PO Date",
     originalLabel: "PO Amount",
     paidLabel: "Already Paid / Advanced",
+    // Sample data until "open amount" for a PO is agreed with the server.
+    live: false,
     documents: VENDOR_POS,
   },
   VENDOR_OTHER: {
@@ -185,6 +214,8 @@ export const REFERENCE_KINDS: Record<ReferenceKind, ReferenceKindDef> = {
     intro:
       "Every other open document for this vendor — goods receipts, work orders, " +
       "journal vouchers and contracts. Bills and POs have their own options.",
+    // Sample data: the server has no GRN / JV / contract lookups yet.
+    live: false,
     documents: VENDOR_OTHER_DOCUMENTS,
   },
 };
@@ -240,6 +271,50 @@ export const CASE_RULES: Record<PartnerType, Partial<Record<PaymentAgainst, Case
 
 /* ── What the current answers make visible ───────────────────────────────── */
 
+/**
+ * Where a case's partner list comes from.
+ *
+ *   SAP_VENDORS     `GET /advance-payments/vendors/`, codes starting VENDA —
+ *                   every vendor case except the two on sample documents
+ *   SAP_IMPREST     the SAME lookup, codes starting ORGV — Employee Imprest
+ *   SAP_EMPLOYEES   `GET /advance-payments/employees/` — Employee Advance
+ *   SAMPLE_VENDORS  the sample vendors that own the sample POs / documents
+ */
+export type PartnerSource = "SAP_VENDORS" | "SAP_IMPREST" | "SAP_EMPLOYEES" | "SAMPLE_VENDORS";
+
+/**
+ * The CardCode prefix that marks each kind of business partner in SAP.
+ *
+ * SAP's supplier list (OCRD, CardType S) holds BOTH real vendors and the
+ * per-employee imprest accounts, told apart only by their code series:
+ * `VENDA000526  10M ANALYTICS` is a vendor, `ORGV000066  ABDUL KHATIB IMPREST
+ * JWPL0108` is an employee's imprest account. Read off the live data in all
+ * three companies (Sept 2026: OIL 500+ / 477, MART 170 / 53, BEVERAGES
+ * 500+ / 245). A vendor picker that showed ORGV rows would offer to pay a
+ * vendor advance into an employee's imprest, and vice versa.
+ */
+export const PARTNER_CODE_PREFIX: Partial<Record<PartnerSource, string>> = {
+  SAP_VENDORS: "VENDA",
+  SAP_IMPREST: "ORGV",
+};
+
+export function partnerSourceFor(
+  type: PartnerType | "",
+  reference: ReferenceKind | null,
+): PartnerSource | null {
+  if (type === "VENDOR") {
+    // A vendor case paid against sample documents must list the sample
+    // vendors that own them — a real SAP vendor has no sample PO to pick.
+    return reference && !REFERENCE_KINDS[reference].live ? "SAMPLE_VENDORS" : "SAP_VENDORS";
+  }
+  if (type === "EMPLOYEE_ADVANCE") return "SAP_EMPLOYEES";
+  if (type === "EMPLOYEE_IMPREST") return "SAP_IMPREST";
+  return null;
+}
+
+export const isLiveSource = (source: PartnerSource | null) =>
+  source === "SAP_VENDORS" || source === "SAP_IMPREST" || source === "SAP_EMPLOYEES";
+
 export interface ResolvedCase {
   paymentAgainstOptions: ReadonlyArray<{ value: PaymentAgainst; label: string }>;
   /** The document kind this case is paid against, once it is known. */
@@ -253,11 +328,20 @@ export interface ResolvedCase {
   expectedBillDate: boolean;
   /** "Business Partner" for a vendor, "Employee" for either employee type. */
   partnerLabel: string;
-  /** The partners this case may pick — already narrowed to those with documents. */
+  /** Where the partner list comes from — see `PartnerSource`. */
+  partnerSource: PartnerSource | null;
+  /** The partner list is read from SAP by the page, and `partners` is empty. */
+  livePartners: boolean;
+  /** The documents are read from SAP by the page, and `documents` is empty. */
+  liveDocuments: boolean;
+  /**
+   * The SAMPLE partners this case may pick — already narrowed to those with
+   * documents. Empty for a live source: the page fetches that list.
+   */
   partners: Partner[];
-  /** The chosen partner's open documents of the case's kind. */
+  /** The chosen partner's SAMPLE documents. Empty for a live kind. */
   documents: OpenDocument[];
-  /** The chosen ones, in the partner's document order. */
+  /** The chosen documents — the snapshots held in the form. */
   selectedDocuments: OpenDocument[];
   /** Every question above the partner is answered, so the partner can be picked. */
   decided: boolean;
@@ -265,10 +349,8 @@ export interface ResolvedCase {
   plainAmount: boolean;
 }
 
-function basePartners(type: PartnerType | ""): Partner[] {
-  if (type === "VENDOR") return VENDORS;
-  if (type === "EMPLOYEE_ADVANCE" || type === "EMPLOYEE_IMPREST") return EMPLOYEES;
-  return [];
+function samplePartners(source: PartnerSource | null): Partner[] {
+  return source === "SAMPLE_VENDORS" ? VENDORS : [];
 }
 
 /** The documents of `kind` belonging to `partner`. */
@@ -286,16 +368,27 @@ export function resolveCase(form: RequestForm): ResolvedCase {
   const reference: ReferenceKind | null = rule?.reference ?? null;
   const decided = Boolean(rule);
 
-  // Only partners that HAVE a document of this kind. Offering a vendor with no
-  // open bill under "Against Bill" is offering a dead end: the next dropdown
-  // would be empty and the requester would have to back out and guess again.
-  const base = basePartners(form.type);
-  const partners = reference
-    ? base.filter((partner) => documentsFor(reference, partner.value).length > 0)
-    : base;
+  const partnerSource = rule ? partnerSourceFor(form.type, reference) : null;
+  const livePartners = isLiveSource(partnerSource);
+  const liveDocuments = Boolean(reference && REFERENCE_KINDS[reference].live);
 
-  const documents = reference && form.partner ? documentsFor(reference, form.partner) : [];
-  const selectedDocuments = documents.filter((doc) => form.references.includes(doc.id));
+  // Only sample partners that HAVE a document of this kind. Offering a vendor
+  // with no open PO under "Against PO" is offering a dead end: the next
+  // dropdown would be empty and the requester would have to back out and
+  // guess again. A live list cannot be narrowed like this — SAP's vendor
+  // lookup does not say who has open invoices — so the invoice picker says
+  // "none" for a vendor without any instead.
+  const base = samplePartners(partnerSource);
+  const partners =
+    reference && !liveDocuments
+      ? base.filter((partner) => documentsFor(reference, partner.value).length > 0)
+      : base;
+
+  const documents =
+    reference && !liveDocuments && form.partner ? documentsFor(reference, form.partner) : [];
+  const selectedDocuments = reference
+    ? form.selected.filter((doc) => doc.partner === form.partner)
+    : [];
 
   return {
     paymentAgainstOptions,
@@ -305,6 +398,9 @@ export function resolveCase(form: RequestForm): ResolvedCase {
     installments: Boolean(rule?.repayment) && form.returnMethod === "EMI",
     expectedBillDate: Boolean(rule?.expectedBillDate),
     partnerLabel: form.type === "VENDOR" || form.type === "" ? "Business Partner" : "Employee",
+    partnerSource,
+    livePartners,
+    liveDocuments,
     partners,
     documents,
     selectedDocuments,
@@ -315,7 +411,8 @@ export function resolveCase(form: RequestForm): ResolvedCase {
 
 /* ── Changing an answer, and what it invalidates ─────────────────────────── */
 
-const CLEARED_DOCUMENTS = { references: [] as string[], allocations: {} } as const;
+const CLEARED_DOCUMENTS = { selected: [] as OpenDocument[], allocations: {} } as const;
+const CLEARED_PARTNER = { partner: "", partnerName: "" } as const;
 const CLEARED_REPAYMENT = {
   returnMethod: "",
   returnMethodOther: "",
@@ -346,18 +443,25 @@ export function sanitize(form: RequestForm): RequestForm {
     next.paymentAgainst = "";
   }
   c = resolveCase(next);
-  if (!c.decided || !c.partners.some((partner) => partner.value === next.partner)) {
-    next.partner = "";
-  }
+  // A SAMPLE partner must be one the case offers. A LIVE one cannot be
+  // checked here (the list is SAP's, searched by the page), so it is kept —
+  // `applyChange` clears it whenever the company, type or source changes.
+  const partnerOffered = c.livePartners
+    ? true
+    : c.partners.some((partner) => partner.value === next.partner);
+  if (!c.decided || !partnerOffered) Object.assign(next, CLEARED_PARTNER);
+  if (!next.partner) next.partnerName = "";
 
   c = resolveCase(next);
-  // Keep only documents this partner actually has, and exactly one payment
-  // line per kept document: an existing line survives (so ticking a second
-  // bill does not wipe what was typed against the first), a new one starts
-  // empty, and a line for a document no longer chosen is dropped.
-  next.references = c.selectedDocuments.map((doc) => doc.id);
+  // Keep only documents of THIS partner — and, for a sample kind, only ones
+  // that kind actually holds — with exactly one payment line each: an existing
+  // line survives (so ticking a second bill does not wipe what was typed
+  // against the first), a new one starts empty, and a line for a document no
+  // longer chosen is dropped.
+  const sampleIds = c.liveDocuments ? null : new Set(c.documents.map((doc) => doc.id));
+  next.selected = c.selectedDocuments.filter((doc) => !sampleIds || sampleIds.has(doc.id));
   next.allocations = Object.fromEntries(
-    next.references.map((id) => [id, tidyAllocation(next.allocations[id] ?? EMPTY_ALLOCATION)]),
+    next.selected.map((doc) => [doc.id, tidyAllocation(next.allocations[doc.id] ?? EMPTY_ALLOCATION)]),
   );
 
   if (!c.plainAmount) next.amount = "";
@@ -392,11 +496,17 @@ export function applyChange(form: RequestForm, patch: Partial<RequestForm>): Req
   const changed = (key: keyof RequestForm) => key in patch && patch[key] !== form[key];
   let next: RequestForm = { ...form, ...patch };
 
+  // A company is a separate SAP database: its vendors, employees and invoices
+  // are not the other companies', and a CardCode chosen under OIL may name
+  // someone else — or no one — under MART.
+  if (changed("company")) {
+    next = { ...next, ...CLEARED_PARTNER, ...CLEARED_DOCUMENTS };
+  }
   if (changed("type")) {
     next = {
       ...next,
       paymentAgainst: "",
-      partner: "",
+      ...CLEARED_PARTNER,
       ...CLEARED_DOCUMENTS,
       amount: "",
       expectedDate: "",
@@ -415,6 +525,12 @@ export function applyChange(form: RequestForm, patch: Partial<RequestForm>): Req
       expectedDate: "",
       ...CLEARED_REPAYMENT,
     };
+    // The partner survives only while it comes from the SAME list: a SAP
+    // vendor picked under Advance is still a SAP vendor under Against Bill,
+    // but it is not one of the sample vendors Against PO lists.
+    const before = resolveCase(form).partnerSource;
+    const after = resolveCase(next).partnerSource;
+    if (before !== after) next = { ...next, ...CLEARED_PARTNER };
   }
   if (changed("returnMethod")) {
     next = { ...next, installments: "" };
@@ -629,7 +745,7 @@ export function validate(form: RequestForm): Validation {
   if (c.expectedDate && !form.expectedDate) missing.push("Expected Date");
 
   if (c.reference) {
-    if (form.partner && form.references.length === 0) {
+    if (form.partner && form.selected.length === 0) {
       missing.push(REFERENCE_KINDS[c.reference].pluralLabel);
     }
     // Every line must carry a payment. Named by document, because "Payment

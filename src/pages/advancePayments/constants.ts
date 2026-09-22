@@ -1,10 +1,15 @@
 /**
- * Advance Payments — MOCK FRONTEND DATA ONLY.
+ * Advance Payments — option lists, and the SAMPLE data for the cases not yet
+ * connected to SAP.
  *
- * Every list below is a hard-coded constant. Nothing here is fetched, and
- * nothing on the Advance Payment Request screen writes anywhere: the module
- * exists so the UI can be reviewed and clicked through before the backend,
- * the approval route and the SAP posting are designed.
+ * LIVE FROM SAP (see `services/advancePaymentService.ts`): the vendor list
+ * (VENDA codes), Employee Imprest's accounts (ORGV codes), Vendor → Against
+ * Bill's open invoices, and the Employee Advance employee list.
+ *
+ * STILL SAMPLE DATA, BY DECISION: Against PO (the server's "open amount" means
+ * something different — see the service header) and "All" (the server has no
+ * GRN/JV/contract lookups yet). The vendors below exist only to own those
+ * sample documents; they never appear in a case that reads SAP.
  *
  * THE RELATIONSHIPS ARE REAL EVEN THOUGH THE DATA IS NOT. Every vendor bill,
  * PO and other open document names the partner it belongs to by `partner`, and the form filters on
@@ -67,15 +72,18 @@ export interface Partner {
 /**
  * Dummy vendors. `code` stands in for the SAP CardCode.
  *
+ * SAMPLE vendors — used ONLY by the two cases still on sample data (Against
+ * PO and All). Every other vendor case lists SAP's real vendors instead.
+ *
  * Who has what, which is what the partner filters are tested against:
  *
- *                      bills   POs   other documents ("All")
- *   ABC Technologies     ✓      ✓      ✓  GRN
- *   XYZ Traders          ✓      ✓      ✓  journal voucher
- *   PQR Suppliers        ✓      ✗      ✗
- *   Metro Print          ✗      ✓      ✗
- *   Shree Packaging      ✗      ✗      ✓  GRN, contract
- *   Gupta Transport      ✗      ✗      ✓  work order, journal voucher
+ *                      POs   other documents ("All")
+ *   ABC Technologies    ✓      ✓  GRN
+ *   XYZ Traders         ✓      ✓  journal voucher
+ *   PQR Suppliers       ✗      ✗
+ *   Metro Print         ✓      ✗
+ *   Shree Packaging     ✗      ✓  GRN, contract
+ *   Gupta Transport     ✗      ✓  work order, journal voucher
  */
 export const VENDORS: Partner[] = [
   { value: "V-1001", label: "ABC Technologies", code: "SUPPA001001" },
@@ -84,15 +92,6 @@ export const VENDORS: Partner[] = [
   { value: "V-1004", label: "Metro Print & Labels", code: "SUPPA001004" },
   { value: "V-1005", label: "Shree Packaging Industries", code: "SUPPA001005" },
   { value: "V-1006", label: "Gupta Transport Carriers", code: "SUPPA001006" },
-];
-
-/** Dummy employees. `code` stands in for the employee code. */
-export const EMPLOYEES: Partner[] = [
-  { value: "E-2001", label: "Rahul Sharma", code: "EMP2001" },
-  { value: "E-2002", label: "Amit Verma", code: "EMP2002" },
-  { value: "E-2003", label: "Neha Singh", code: "EMP2003" },
-  { value: "E-2004", label: "Priya Menon", code: "EMP2004" },
-  { value: "E-2005", label: "Vikram Singh", code: "EMP2005" },
 ];
 
 /* ── Open documents ──────────────────────────────────────────────────────── */
@@ -128,16 +127,12 @@ export interface OpenDocument {
    * side; a list of bills does not need to say each one is a bill.
    */
   docType?: string;
+  /** The partner's own number for it — a vendor's invoice no. (`NumAtCard`). */
+  reference?: string;
+  /** ISO date the document falls due, where SAP has one. */
+  dueDate?: string;
+  currency?: string;
 }
-
-/** Dummy open A/P invoices, keyed to vendors. */
-export const VENDOR_BILLS: OpenDocument[] = [
-  { id: "B-1", number: "AP-INV-10256", date: "2026-08-04", partner: "V-1001", original: 250000, paid: 100000, open: 150000 },
-  { id: "B-2", number: "AP-INV-10271", date: "2026-08-19", partner: "V-1001", original: 84000, paid: 0, open: 84000 },
-  { id: "B-3", number: "AP-INV-10263", date: "2026-08-11", partner: "V-1002", original: 120000, paid: 45000, open: 75000 },
-  { id: "B-4", number: "AP-INV-10288", date: "2026-08-27", partner: "V-1003", original: 310000, paid: 210000, open: 100000 },
-  { id: "B-5", number: "AP-INV-10295", date: "2026-09-02", partner: "V-1003", original: 56500, paid: 0, open: 56500 },
-];
 
 /** Dummy open purchase orders, keyed to vendors. `paid` = already advanced. */
 export const VENDOR_POS: OpenDocument[] = [
@@ -174,16 +169,33 @@ export const VENDOR_OTHER_DOCUMENTS: OpenDocument[] = [
 /* ── Everything else ─────────────────────────────────────────────────────── */
 
 /**
- * Priority, with the dot colour each one carries.
+ * Priority, with the colour it carries WHEN CHOSEN.
  *
- * The tones are the app's own semantic tokens (`--color-ok`, `--color-warning`,
- * `--color-danger`) rather than raw greens and reds, so the selector stays in
- * step with badges and notices elsewhere.
+ * Unchosen options are deliberately colourless — a grey ring and grey text —
+ * so the one that is chosen is the only coloured thing in the row. With a
+ * coloured dot on all three, the chosen card differed from the others only by
+ * a faint border, and the choice did not read at a glance.
+ *
+ * The tones are the app's semantic tokens, and the same ones the priority
+ * BADGES use on the lists (ok / hold / bad), so "High" is the same red on the
+ * form as on the approval desk.
  */
 export const PRIORITIES = [
-  { value: "LOW", label: "Low", dot: "text-ok" },
-  { value: "MEDIUM", label: "Medium", dot: "text-warning" },
-  { value: "HIGH", label: "High", dot: "text-danger" },
+  {
+    value: "LOW",
+    label: "Low",
+    active: "border-ok bg-ok-soft text-ok ring-ok/20",
+  },
+  {
+    value: "MEDIUM",
+    label: "Medium",
+    active: "border-hold bg-hold-soft text-hold ring-hold/20",
+  },
+  {
+    value: "HIGH",
+    label: "High",
+    active: "border-danger bg-danger-soft text-danger ring-danger/20",
+  },
 ] as const;
 export type Priority = (typeof PRIORITIES)[number]["value"];
 
