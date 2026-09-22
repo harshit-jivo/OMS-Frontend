@@ -1,0 +1,212 @@
+/**
+ * Advance Payments — MOCK FRONTEND DATA ONLY.
+ *
+ * Every list below is a hard-coded constant. Nothing here is fetched, and
+ * nothing on the Advance Payment Request screen writes anywhere: the module
+ * exists so the UI can be reviewed and clicked through before the backend,
+ * the approval route and the SAP posting are designed.
+ *
+ * THE RELATIONSHIPS ARE REAL EVEN THOUGH THE DATA IS NOT. Every vendor bill,
+ * PO and other open document names the partner it belongs to by `partner`, and the form filters on
+ * that — so picking a vendor shows that vendor's documents and no one else's,
+ * exactly as it will when these arrays become endpoints. The set is also
+ * chosen so the filters visibly DO something: some vendors have bills and no
+ * PO, one has a PO and no bills, and two have neither, so each partner list
+ * is a different subset of the vendors.
+ *
+ * The rules that decide which of these a case uses live in `rules.ts`.
+ */
+
+/** The three operating companies, as the rest of OMS names them. */
+export const COMPANIES = ["OIL", "MART", "BEVERAGES"] as const;
+export type Company = (typeof COMPANIES)[number];
+
+/* ── Types and what each is against ──────────────────────────────────────── */
+
+/**
+ * Who the money goes to, and on what footing.
+ *
+ * Employee Advance and Employee Imprest pay the same people and are still two
+ * types: an imprest is a standing float, an advance is money ahead of one
+ * expense, and the form will treat them differently once those rules are
+ * settled (see `CASE_RULES` in `rules.ts`).
+ */
+export const PARTNER_TYPES = [
+  { value: "VENDOR", label: "Vendor" },
+  { value: "EMPLOYEE_ADVANCE", label: "Employee Advance" },
+  { value: "EMPLOYEE_IMPREST", label: "Employee Imprest" },
+] as const;
+export type PartnerType = (typeof PARTNER_TYPES)[number]["value"];
+
+/**
+ * Every answer Payment Against can have. Which of them a TYPE offers is
+ * decided in `CASE_RULES` (rules.ts) — Against PO is a vendor-only answer,
+ * because employees have no purchase orders.
+ */
+export const PAYMENT_AGAINST_OPTIONS = [
+  { value: "ADVANCE", label: "Advance" },
+  { value: "AGAINST_BILL", label: "Against Bill" },
+  { value: "AGAINST_PO", label: "Against PO" },
+  // Every OTHER open vendor document — GRNs, work orders, journal vouchers,
+  // contracts. Deliberately NOT bills or POs: those have their own answers
+  // above, and listing them twice would let one bill be paid from two places.
+  { value: "ALL", label: "All" },
+  { value: "OTHER", label: "Other" },
+] as const;
+export type PaymentAgainst = (typeof PAYMENT_AGAINST_OPTIONS)[number]["value"];
+
+/* ── Partners ────────────────────────────────────────────────────────────── */
+
+export interface Partner {
+  value: string;
+  label: string;
+  /** Card code / employee code — shown beside the name and searchable. */
+  code: string;
+}
+
+/**
+ * Dummy vendors. `code` stands in for the SAP CardCode.
+ *
+ * Who has what, which is what the partner filters are tested against:
+ *
+ *                      bills   POs   other documents ("All")
+ *   ABC Technologies     ✓      ✓      ✓  GRN
+ *   XYZ Traders          ✓      ✓      ✓  journal voucher
+ *   PQR Suppliers        ✓      ✗      ✗
+ *   Metro Print          ✗      ✓      ✗
+ *   Shree Packaging      ✗      ✗      ✓  GRN, contract
+ *   Gupta Transport      ✗      ✗      ✓  work order, journal voucher
+ */
+export const VENDORS: Partner[] = [
+  { value: "V-1001", label: "ABC Technologies", code: "SUPPA001001" },
+  { value: "V-1002", label: "XYZ Traders", code: "SUPPA001002" },
+  { value: "V-1003", label: "PQR Suppliers", code: "SUPPA001003" },
+  { value: "V-1004", label: "Metro Print & Labels", code: "SUPPA001004" },
+  { value: "V-1005", label: "Shree Packaging Industries", code: "SUPPA001005" },
+  { value: "V-1006", label: "Gupta Transport Carriers", code: "SUPPA001006" },
+];
+
+/** Dummy employees. `code` stands in for the employee code. */
+export const EMPLOYEES: Partner[] = [
+  { value: "E-2001", label: "Rahul Sharma", code: "EMP2001" },
+  { value: "E-2002", label: "Amit Verma", code: "EMP2002" },
+  { value: "E-2003", label: "Neha Singh", code: "EMP2003" },
+  { value: "E-2004", label: "Priya Menon", code: "EMP2004" },
+  { value: "E-2005", label: "Vikram Singh", code: "EMP2005" },
+];
+
+/* ── Open documents ──────────────────────────────────────────────────────── */
+
+/**
+ * One open document a payment can be made against — a bill, a PO, or one of
+ * the other vendor documents under "All".
+ *
+ * One shape for all three because the form does the same thing with each:
+ * pick one, read its open amount, pay some or all of it. Only the words
+ * differ, and those live in `REFERENCE_KINDS`.
+ *
+ * `open` is stored rather than derived from `original - paid` so the data
+ * reads like the document it imitates; `rules.test.ts` checks the three agree.
+ */
+export interface OpenDocument {
+  id: string;
+  /** The document number the requester recognises. */
+  number: string;
+  /** ISO date. */
+  date: string;
+  /** The partner (`Partner.value`) this document belongs to. */
+  partner: string;
+  original: number;
+  /** Paid, or advanced, against it so far. */
+  paid: number;
+  open: number;
+  /** A line of context, where the number alone says nothing. */
+  note?: string;
+  /**
+   * What KIND of document it is — "Goods Receipt", "Work Order". Only the
+   * "All" list carries it, because only there do different kinds sit side by
+   * side; a list of bills does not need to say each one is a bill.
+   */
+  docType?: string;
+}
+
+/** Dummy open A/P invoices, keyed to vendors. */
+export const VENDOR_BILLS: OpenDocument[] = [
+  { id: "B-1", number: "AP-INV-10256", date: "2026-08-04", partner: "V-1001", original: 250000, paid: 100000, open: 150000 },
+  { id: "B-2", number: "AP-INV-10271", date: "2026-08-19", partner: "V-1001", original: 84000, paid: 0, open: 84000 },
+  { id: "B-3", number: "AP-INV-10263", date: "2026-08-11", partner: "V-1002", original: 120000, paid: 45000, open: 75000 },
+  { id: "B-4", number: "AP-INV-10288", date: "2026-08-27", partner: "V-1003", original: 310000, paid: 210000, open: 100000 },
+  { id: "B-5", number: "AP-INV-10295", date: "2026-09-02", partner: "V-1003", original: 56500, paid: 0, open: 56500 },
+];
+
+/** Dummy open purchase orders, keyed to vendors. `paid` = already advanced. */
+export const VENDOR_POS: OpenDocument[] = [
+  { id: "P-1", number: "PO-4501", date: "2026-07-22", partner: "V-1001", original: 500000, paid: 150000, open: 350000 },
+  { id: "P-2", number: "PO-4512", date: "2026-08-08", partner: "V-1002", original: 180000, paid: 0, open: 180000 },
+  { id: "P-3", number: "PO-4519", date: "2026-08-21", partner: "V-1002", original: 95000, paid: 30000, open: 65000 },
+  { id: "P-4", number: "PO-4527", date: "2026-09-05", partner: "V-1004", original: 72000, paid: 0, open: 72000 },
+];
+
+/**
+ * Dummy OTHER open vendor documents — the "All" list.
+ *
+ * Everything a vendor can be paid against that is neither a bill nor a PO,
+ * using the document kinds an Indian A/P desk (and SAP B1) actually carries:
+ *
+ *   * Goods Receipt (GRN) — goods are in, the invoice is not yet;
+ *   * Work Order          — services ordered and running, billed in stages;
+ *   * Journal Voucher     — a general-ledger credit to the vendor: a rate
+ *                           difference, detention, a settlement;
+ *   * Contract            — an agreement paid by milestone.
+ *
+ * Credit and debit notes are deliberately NOT here: they carry negative open
+ * amounts, and netting them against these is a rule nobody has agreed yet.
+ */
+export const VENDOR_OTHER_DOCUMENTS: OpenDocument[] = [
+  { id: "D-1", number: "GRN-2201", docType: "Goods Receipt", date: "2026-08-12", partner: "V-1001", original: 64000, paid: 0, open: 64000, note: "Received against PO-4501 — invoice awaited" },
+  { id: "D-2", number: "JV-5520", docType: "Journal Voucher", date: "2026-08-30", partner: "V-1002", original: 15000, paid: 0, open: 15000, note: "Rate difference — July supplies" },
+  { id: "D-3", number: "GRN-2214", docType: "Goods Receipt", date: "2026-09-03", partner: "V-1005", original: 38500, paid: 0, open: 38500, note: "Corrugated boxes — 5,000 pcs" },
+  { id: "D-4", number: "CT-0412", docType: "Contract", date: "2026-04-01", partner: "V-1005", original: 200000, paid: 150000, open: 50000, note: "Annual packaging supply — milestone 3" },
+  { id: "D-5", number: "WO-3107", docType: "Work Order", date: "2026-09-01", partner: "V-1006", original: 120000, paid: 40000, open: 80000, note: "Monthly freight — September" },
+  { id: "D-6", number: "JV-5534", docType: "Journal Voucher", date: "2026-09-08", partner: "V-1006", original: 8200, paid: 0, open: 8200, note: "Detention charges — 2 trucks" },
+];
+
+/* ── Everything else ─────────────────────────────────────────────────────── */
+
+/**
+ * Priority, with the dot colour each one carries.
+ *
+ * The tones are the app's own semantic tokens (`--color-ok`, `--color-warning`,
+ * `--color-danger`) rather than raw greens and reds, so the selector stays in
+ * step with badges and notices elsewhere.
+ */
+export const PRIORITIES = [
+  { value: "LOW", label: "Low", dot: "text-ok" },
+  { value: "MEDIUM", label: "Medium", dot: "text-warning" },
+  { value: "HIGH", label: "High", dot: "text-danger" },
+] as const;
+export type Priority = (typeof PRIORITIES)[number]["value"];
+
+export const PAYMENT_MODES = [
+  { value: "FIXED", label: "Fixed Amount" },
+  { value: "PERCENT", label: "Percentage" },
+] as const;
+export type PaymentMode = (typeof PAYMENT_MODES)[number]["value"];
+
+/**
+ * How an employee advance comes back. Only EMI asks anything further (how
+ * many installments); the repayment schedule itself is not modelled yet.
+ */
+export const RETURN_METHODS = [
+  { value: "ONE_TIME", label: "One Time" },
+  { value: "EMI", label: "EMI" },
+  { value: "CUSTOM", label: "Other / Custom" },
+] as const;
+export type ReturnMethod = (typeof RETURN_METHODS)[number]["value"];
+
+/** The one-click percentages. Any other value can still be typed. */
+export const QUICK_PERCENTAGES = [10, 25, 50, 75, 100] as const;
+
+/** What the attachment strip says it takes. Enforced in the browser only. */
+export const ACCEPTED_FILE_TYPES = ".pdf,.jpg,.jpeg,.png,.doc,.docx";
+export const MAX_FILE_SIZE_MB = 10;

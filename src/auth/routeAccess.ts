@@ -197,6 +197,24 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   },
   "/Mart_Approval": { permissions: ["Mart_Approval"], roles: ["mart_approval"] },
   "/Payments_Dashboard": { permissions: ["Payments_Dashboard"] },
+  /*
+   * Advance Payments — new request form.
+   *
+   * Its own grant key, like every other module, rather than `anyUser`.
+   *
+   * `anyUser` was the first instinct — the page is a frontend preview with
+   * mock data, so there is nothing behind it to protect. But visibility here
+   * is what `/Home` builds its tiles from, and a route open to everyone put a
+   * tile in front of a user with no grants at all, which is the one case Home
+   * is supposed to answer with "nothing assigned yet" (Home.test.tsx caught
+   * it). A screen nobody has been given should not be the first thing a
+   * brand-new account sees.
+   *
+   * Administrators pass any permission check, so the screen stays reviewable
+   * without the key existing yet — which is all it needs while it is a
+   * preview. The key becomes real when the module does.
+   */
+  "/Advance_Payment_Request": { permissions: ["Advance_Payments"] },
 
   // --- Document tracker ---------------------------------------------------
   // Gated centrally by role, mirroring tracker/permissions.py.
