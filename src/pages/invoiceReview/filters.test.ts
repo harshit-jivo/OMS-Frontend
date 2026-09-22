@@ -10,6 +10,7 @@ import {
   warehouseOptionsOf,
   type InvoiceFilters,
 } from "./filters";
+import { isBatchOrStockError } from "../SalesInvoice/sapErrorTranslator";
 import type { InvoiceRecord } from "./types";
 
 /**
@@ -259,5 +260,43 @@ describe("combining everything", () => {
         ),
       ),
     ).toEqual(["HIT"]);
+  });
+});
+
+describe("spotting a failure a re-allocation could fix", () => {
+  // The predicate lives in `sapErrorTranslator`, which also writes the message
+  // the reviewer reads, so the button offered and the text explaining it
+  // cannot disagree. These pin the wordings SAP actually sends.
+  it("matches SAP's batch complaints", () => {
+    for (const message of [
+      "Batch not found",
+      "No matching records found (ODBC -2028) — batch",
+      "Serial number missing for item FG001",
+    ]) {
+      expect(isBatchOrStockError(message), message).toBe(true);
+    }
+  });
+
+  it("matches negative inventory, which says neither 'stock' nor 'insufficient'", () => {
+    // The block that most often needs a re-allocation was the one the old
+    // stock pattern did not catch.
+    expect(isBatchOrStockError("Quantity falls into negative inventory")).toBe(true);
+    expect(isBatchOrStockError("This entry would cause negative inventory")).toBe(true);
+  });
+
+  it("matches plain shortages", () => {
+    expect(isBatchOrStockError("Insufficient quantity in warehouse")).toBe(true);
+    expect(isBatchOrStockError("Item is out of stock")).toBe(true);
+  });
+
+  it("does not offer it for failures fresh batches cannot fix", () => {
+    for (const message of [
+      "Customer credit limit exceeded",
+      "Posting period is closed",
+      "Business partner not found",
+      "",
+    ]) {
+      expect(isBatchOrStockError(message), message).toBe(false);
+    }
   });
 });

@@ -32,6 +32,7 @@ import {
   HiOutlineCheckCircle,
   HiOutlineClock,
   HiOutlineDocumentText,
+  HiOutlineExclamationTriangle,
   HiOutlineEye,
   HiOutlineInbox,
   HiOutlinePaperAirplane,
@@ -54,6 +55,7 @@ import {
   normalizeStatus,
   openReport,
 } from "../helpers";
+import { isBatchOrStockError } from "../../SalesInvoice/sapErrorTranslator";
 import type { UseInvoiceReviewResult } from "../useInvoiceReview";
 
 // SO #, Party, Amount, Submitted, Actions. (Status is commented out below, as
@@ -68,6 +70,8 @@ export default function InvoiceTable({ view }: { view: UseInvoiceReviewResult })
     allRecords,
     filtersEnabled,
     actionId,
+    recheckingId,
+    repostWithFreshBatches,
     canApproveReject,
     canApproveWarehouse,
     canPostToSap,
@@ -129,6 +133,7 @@ export default function InvoiceTable({ view }: { view: UseInvoiceReviewResult })
           {records.map((record, index) => {
             const status = normalizeStatus(record.status);
             const busy = actionId === record.id;
+            const rechecking = recheckingId === record.id;
             const reportRef = invoiceReportRef(record);
             // The backend decides which statuses may be removed and says so
             // per row; older responses without the flag simply show no
@@ -265,6 +270,25 @@ export default function InvoiceTable({ view }: { view: UseInvoiceReviewResult })
                         <HiOutlineBanknotes aria-hidden="true" /> Show Flow
                       </Button>
                     )}
+                    {/* A batch or negative-inventory refusal, from an attempt
+                        made earlier. "Repost to SAP" above would send the same
+                        dead batch numbers back and fail identically, so this
+                        re-reads the warehouse and allocates again first.
+                        Danger-styled: it posts against stock the reviewer has
+                        not seen. */}
+                    {status === "ERROR" &&
+                      canPostToSap &&
+                      isBatchOrStockError(record.error_message) && (
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          disabled={busy || rechecking}
+                          onClick={() => void repostWithFreshBatches(record)}
+                        >
+                          <HiOutlineExclamationTriangle aria-hidden="true" />
+                          {rechecking ? "Re-checking…" : "Re-check batches & repost"}
+                        </Button>
+                      )}
                     {status === "ERROR" && canPostToSap && isCreditLimitError(record) && (
                       <Button
                         size="sm"

@@ -90,8 +90,10 @@ export default function InvoiceReview() {
     sapPost,
     postingRecord,
     sapErrorIsCreditLimit,
+    sapErrorIsBatchOrStock,
     closeSapLoader,
     raiseClFromLoader,
+    recheckBatchesFromLoader,
     openLoaderReport,
   } = view;
 
@@ -210,6 +212,13 @@ export default function InvoiceReview() {
         onRetry={sapPost.retry}
         onRaiseCl={
           canPostToSap && sapErrorIsCreditLimit && postingRecord ? raiseClFromLoader : undefined
+        }
+        /* Only for the desk that posts, and only for the failures a fresh
+           allocation could actually fix. */
+        onRecheckBatches={
+          canPostToSap && sapErrorIsBatchOrStock && postingRecord
+            ? recheckBatchesFromLoader
+            : undefined
         }
         onOpenReport={openLoaderReport}
       />

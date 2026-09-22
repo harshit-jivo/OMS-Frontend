@@ -15,6 +15,8 @@ import { useCallback, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 
+import { isBatchOrStockError } from "../SalesInvoice/sapErrorTranslator";
+import { reallocateInvoiceBatches } from "./reallocateBatches";
 import {
   EMPTY_INVOICE_FILTERS,
   applyInvoiceFilters,
@@ -151,6 +153,8 @@ export function useInvoiceReview({
   // The record currently being posted to SAP, kept so a credit-limit failure can
   // offer "Raise CL" for the right invoice straight from the loader modal.
   const [postingRecord, setPostingRecord] = useState<InvoiceRecord | null>(null);
+  // The row whose batches are being re-read from SAP, so its button can say so.
+  const [recheckingId, setRecheckingId] = useState<InvoiceRecord["id"] | null>(null);
   const sapPost = useSapPost();
   const navigate = useNavigate();
 
@@ -683,6 +687,89 @@ export function useInvoiceReview({
     void openCreditLimitRequest(record);
   };
 
+  /**
+   * Re-read the warehouse, allocate again, and post.
+   *
+   * The answer to a batch or negative-inventory refusal, which a plain Retry
+   * cannot fix: an invoice picks its batches when it is built and posts when
+   * it is approved, and stock moves in between. Retry sends the same dead
+   * batch numbers back and fails identically.
+   *
+   * Nothing is written unless EVERY line can be filled from current stock. A
+   * partial allocation would be refused by SAP anyway, and overwriting the
+   * approved batches with a short set would lose what the invoice was
+   * approved against — so a shortage reports itself and leaves the record
+   * exactly as it was.
+   *
+   * The corrected payload is PERSISTED before posting, through the endpoint
+   * that writes a history entry: the stored payload is the record of what
+   * went to SAP, and a repost that changed the batches without saving them
+   * would leave the log describing an invoice that no longer exists.
+   */
+  const repostWithFreshBatches = async (record: InvoiceRecord) => {
+    if (record.id === undefined || record.id === null) {
+      setActionError("This invoice has no identifier and cannot be reposted.");
+      return;
+    }
+    setRecheckingId(record.id);
+    setActionError("");
+    setActionMessage("");
+    try {
+      const result = await reallocateInvoiceBatches(record);
+
+      if (!result.ok) {
+        setActionError(
+          `Current stock still cannot fill this invoice. ${result.problem}. ` +
+            "Nothing was changed.",
+        );
+        return;
+      }
+
+      const corrected = { ...record, invoice_payload: result.payload };
+      await apiFetch(`/api/invoice/log/${record.id}/`, {
+        method: "PATCH",
+        body: JSON.stringify({ invoice_payload: result.payload }),
+      });
+
+      if (!result.changed) {
+        // Worth saying: the batches it already held are still the right ones,
+        // so this repost is a genuine retry rather than a fix, and if SAP
+        // refuses it again the reason is not the batches.
+        setActionMessage(
+          "Stock re-checked — the batches on this invoice are still available. Reposting.",
+        );
+      }
+      runPostToSap(corrected);
+    } catch (error) {
+      setActionError(
+        extractMessage(error, "Unable to re-check batches for this invoice."),
+      );
+    } finally {
+      setRecheckingId(null);
+    }
+  };
+
+  /**
+   * The same thing from the failure dialog: close it, then re-check and post
+   * the invoice that was being posted when it failed.
+   */
+  const recheckBatchesFromLoader = () => {
+    const record = postingRecord;
+    if (!record) return;
+    closeSapLoader();
+    void repostWithFreshBatches(record);
+  };
+
+  /**
+   * True when the current SAP failure is one a fresh look at the warehouse
+   * could fix — a batch problem or negative inventory. The patterns belong to
+   * `sapErrorTranslator`, which also writes the message the reviewer reads, so
+   * the button offered and the text explaining it cannot disagree.
+   */
+  const sapErrorIsBatchOrStock =
+    sapPost.state.status === "error" &&
+    isBatchOrStockError(sapPost.state.rawError || sapPost.state.errorMessage || "");
+
   // True when the current SAP failure is specifically about the credit limit, so
   // the loader can offer a "Raise CL" shortcut.
   const sapErrorIsCreditLimit =
@@ -817,6 +904,10 @@ export function useInvoiceReview({
     closeSapLoader,
     raiseClFromLoader,
     sapErrorIsCreditLimit,
+    repostWithFreshBatches,
+    recheckBatchesFromLoader,
+    sapErrorIsBatchOrStock,
+    recheckingId,
   };
 }
 
