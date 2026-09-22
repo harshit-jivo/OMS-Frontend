@@ -24,11 +24,39 @@
  * is announced from, rather than one per card.
  */
 import { useEffect, useState } from "react";
-import { HiOutlineBell, HiOutlineXMark } from "react-icons/hi2";
+import {
+  HiOutlineBell,
+  HiOutlineCheckCircle,
+  HiOutlineXCircle,
+  HiOutlineXMark,
+} from "react-icons/hi2";
 
 import { Button } from "@/components/ui/button";
 import { AUTO_DISMISS_MS, dismissToast, subscribeToToasts } from "@/lib/toastStore";
-import type { ToastData } from "@/lib/toastStore";
+import type { ToastData, ToastTone } from "@/lib/toastStore";
+import { cn } from "@/lib/utils";
+
+/**
+ * Colour, icon and left edge per tone.
+ *
+ * The accent is a 3px left border rather than a tinted card: a fully green
+ * panel sitting over the page is louder than a confirmation needs to be, and
+ * at four stacked toasts it becomes the brightest thing on screen. The border
+ * plus the chip is enough to read green-or-red from across the desk, which is
+ * the whole requirement.
+ */
+const TONES: Record<ToastTone, { edge: string; chip: string; Icon: typeof HiOutlineBell }> = {
+  ok: {
+    edge: "border-l-[3px] border-l-ok",
+    chip: "bg-ok-soft text-ok",
+    Icon: HiOutlineCheckCircle,
+  },
+  bad: {
+    edge: "border-l-[3px] border-l-bad",
+    chip: "bg-bad-soft text-bad",
+    Icon: HiOutlineXCircle,
+  },
+};
 
 function ToastCard({ toast }: { toast: ToastData }) {
   useEffect(() => {
@@ -36,19 +64,27 @@ function ToastCard({ toast }: { toast: ToastData }) {
     return () => clearTimeout(timer);
   }, [toast.id]);
 
+  const tone = toast.tone ? TONES[toast.tone] : null;
+  const Icon = tone?.Icon ?? HiOutlineBell;
+
   return (
     <div
       data-slot="toast"
-      className={
-        "pointer-events-auto flex w-[min(92vw,360px)] gap-2.5 rounded-card border border-line " +
-        "bg-card p-3 shadow-panel motion-safe:animate-[oms-fade-slide-up_0.18s_ease-out]"
-      }
+      data-tone={toast.tone}
+      className={cn(
+        "pointer-events-auto flex w-[min(92vw,360px)] gap-2.5 rounded-card border border-line",
+        "bg-card p-3 shadow-panel motion-safe:animate-[oms-fade-slide-up_0.18s_ease-out]",
+        tone?.edge,
+      )}
     >
       <span
         aria-hidden="true"
-        className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-brand-soft text-brand"
+        className={cn(
+          "mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full",
+          tone?.chip ?? "bg-brand-soft text-brand",
+        )}
       >
-        <HiOutlineBell />
+        <Icon />
       </span>
 
       <div className="min-w-0 flex-1">
