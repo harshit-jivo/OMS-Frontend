@@ -36,6 +36,8 @@ export type SalesOrderLine = {
   WhsCode?: string;
   OcrCode?: string;
   ShipDate?: string;
+  /** Scheme Against (OPRC profit-centre code) for the invoice line, resolved by the API. */
+  U_SchemeAgst?: string;
   [key: string]: unknown;
 };
 
@@ -479,6 +481,7 @@ const normalizeLine = (line: SalesOrderLine, index: number): SalesOrderLine => (
   WhsCode: String(pick(line, ["WhsCode", "WarehouseCode", "Warehouse_Code"], "")),
   OcrCode: String(pick(line, ["OcrCode", "CostingCode"], "")),
   ShipDate: String(pick(line, ["ShipDate", "Ship_Date", "ship_date"], "")),
+  U_SchemeAgst: String(pick(line, ["U_SchemeAgst", "SchemeAgst"], "")),
 });
 
 const getRawOrderLines = (order: SalesOrder) => {
@@ -904,6 +907,7 @@ export function useSalesInvoice() {
       SalesOrderWhsCode: salesOrderWhsCode,
       OcrCode: line.OcrCode || "",
       ShipDate: line.ShipDate || "",
+      U_SchemeAgst: line.U_SchemeAgst || "",
       invoiceQty: toNumber(line.OpenQty),
     };
   };

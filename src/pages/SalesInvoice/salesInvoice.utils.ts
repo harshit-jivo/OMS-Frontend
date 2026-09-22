@@ -47,6 +47,14 @@ export type SelectedLine = {
   SalesOrderWhsCode?: string;
   OcrCode?: string;
   ShipDate?: string;
+  /**
+   * SAP's line UDF "Scheme Against": the OPRC profit-centre code (SUNFLOWR,
+   * WATER), the same value as the line's costing code. Its transaction
+   * validation rejects an A/R invoice line with it blank ("Please Select the
+   * SchemeAgst Column"), so every line sent to SAP must carry one. The API
+   * resolves it: /api/hana/so/ per order line, /api/hana/fg-items/ per item.
+   */
+  U_SchemeAgst?: string;
   invoiceQty: number;
   BatchNumbers?: Array<{
     BatchNumber?: string;
@@ -208,6 +216,7 @@ export const buildInvoicePayload = (
         .filter((batch) => batch.BatchNumber && batch.Quantity > 0);
       const batchQuantity = batchNumbers.reduce((sum, batch) => sum + toNumber(batch.Quantity), 0);
       const invoiceQuantity = toNumber(line.invoiceQty) || batchQuantity;
+      const schemeAgainst = String(line.U_SchemeAgst || "").trim();
 
       if (line.SourceType === "items") {
         return {
@@ -217,6 +226,7 @@ export const buildInvoicePayload = (
           Quantity: invoiceQuantity,
           ...(line.Price ? { UnitPrice: toNumber(line.Price) } : {}),
           ...(line.TaxCode ? { TaxCode: line.TaxCode } : {}),
+          ...(schemeAgainst ? { U_SchemeAgst: schemeAgainst } : {}),
           ...(batchNumbers.length ? { BatchNumbers: batchNumbers } : {}),
         };
       }
@@ -238,6 +248,7 @@ export const buildInvoicePayload = (
         WarehouseCode: line.WhsCode,
         ...(line.TaxCode ? { TaxCode: line.TaxCode } : {}),
         ...(line.ShipDate ? { ShipDate: normalizeDateInput(line.ShipDate) } : {}),
+        ...(schemeAgainst ? { U_SchemeAgst: schemeAgainst } : {}),
         BatchNumbers: batchNumbers,
       };
     }),
