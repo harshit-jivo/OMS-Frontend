@@ -23,11 +23,30 @@
  * Rejecting does NOT cancel it — it records that OMS will not approve it, and
  * the planner cancels or re-raises in SAP. The rejection dialog says so,
  * because an approver who believes "Reject" stops production would be wrong.
+ *
+ * LAID OUT LIKE THE APPROVER QUEUE, DELIBERATELY
+ * Breadcrumbs, a labelled filter bar, icon buttons for the passive actions and
+ * a filled Approve / Reject pair for the decision — the same furniture as
+ * `Rate_Approver_Order`, because this is the same job. An approver who works
+ * both queues should not have to learn two screens.
+ *
+ * There is no KPI row. One `Stat` card holding one number ("Waiting on you")
+ * took the full width of the page to say something the filter bar's count says
+ * in four characters, so the count moved there.
  */
-import { useCallback, useEffect, useState } from "react";
-import { HiArrowPath, HiCheckCircle, HiExclamationCircle } from "react-icons/hi2";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  HiArrowPath,
+  HiCheckCircle,
+  HiExclamationCircle,
+  HiOutlineCheckCircle,
+  HiOutlineEye,
+  HiOutlineInbox,
+  HiOutlineXCircle,
+  HiOutlineXMark,
+} from "react-icons/hi2";
 
-import { Badge } from "../components/ui/badge";
+import { Breadcrumbs } from "../components/ui/breadcrumbs";
 import { Button } from "../components/ui/button";
 import {
   Dialog,
@@ -38,9 +57,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../components/ui/dialog";
+import { FilterBar, FilterCount, FilterSpacer } from "../components/ui/filter-bar";
 import { Field, Textarea } from "../components/ui/form";
-import { Card, EmptyState, Page, PageHeader, Stat, StatRow } from "../components/ui/page";
-import { Skeleton } from "../components/ui/skeleton";
+import { Card, EmptyState, Page, PageHeader } from "../components/ui/page";
+import { Pagination } from "../components/ui/pagination";
+import { TableSkeleton } from "../components/ui/skeleton";
 import { Tab, TabList } from "../components/ui/tabs";
 import {
   Table,
@@ -56,20 +77,26 @@ import {
   type ProductionOrder,
 } from "../services/productionService";
 import { OrderDetailDialog } from "./Production_Orders";
-import { fmtDate, fmtQty, orderNumber } from "./production/format";
+import { fmtDateTime, fmtQty, orderNumber } from "./production/format";
 import {
   CompanyFilterSelect,
-  FlowStatusBadge,
-  GateExemptBadge,
-  OrderTypeBadge,
+  ItemCell,
+  PlannedCell,
+  StatusCell,
+  StatusFilterSelect,
   type CompanyFilter,
+  type StatusFilter,
 } from "./production/shared";
 
 type TabKey = "queue" | "decided";
 
+const PAGE_SIZE = 10;
+
 export default function ProductionApproval() {
   const [tab, setTab] = useState<TabKey>("queue");
   const [company, setCompany] = useState<CompanyFilter>("");
+  const [status, setStatus] = useState<StatusFilter>("");
+  const [page, setPage] = useState(1);
 
   const [rows, setRows] = useState<ProductionOrder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -87,19 +114,40 @@ export default function ProductionApproval() {
     try {
       const data =
         tab === "queue"
-          ? await productionService.approvalQueue({ company: company || undefined })
-          : await productionService.approvalHistory({ company: company || undefined });
+          ? // The queue endpoint takes no status: everything in it is PENDING
+            // by definition, because it is the set of orders whose workflow
+            // stage currently names this user. The filter still applies below,
+            // client-side, so picking "Rejected" here correctly shows nothing
+            // rather than quietly ignoring the choice.
+            await productionService.approvalQueue({ company: company || undefined })
+          : await productionService.approvalHistory({
+              company: company || undefined,
+              status: status || undefined,
+            });
       setRows(data);
     } catch (err) {
       setError(productionError(err));
     } finally {
       setLoading(false);
     }
-  }, [tab, company]);
+  }, [tab, company, status]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Page 3 of the queue is not page 3 of the decided list, and landing past
+  // the end of a shorter one shows an empty table that reads as "nothing here".
+  useEffect(() => setPage(1), [tab, company, status]);
+
+  const filtered = useMemo(
+    () => (status ? rows.filter((r) => r.flow?.status === status) : rows),
+    [rows, status],
+  );
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const pageNumber = Math.min(page, totalPages);
+  const paginated = filtered.slice((pageNumber - 1) * PAGE_SIZE, pageNumber * PAGE_SIZE);
 
   const flash = (message: string) => {
     setNotice(message);
@@ -121,12 +169,14 @@ export default function ProductionApproval() {
 
   return (
     <Page>
+      <Breadcrumbs items={[{ label: "Production" }, { label: "Production Approval" }]} />
+
       <PageHeader
         title="Production Approval"
         description="Orders SAP has planned and is waiting on you to release."
         actions={
-          <Button variant="secondary" size="sm" onClick={() => void load()}>
-            <HiArrowPath aria-hidden /> Refresh
+          <Button variant="ghost" onClick={() => void load()}>
+            <HiArrowPath aria-hidden="true" /> Refresh
           </Button>
         }
       />
@@ -140,125 +190,126 @@ export default function ProductionApproval() {
         </Card>
       )}
 
-      <StatRow>
-        <Stat
-          label={tab === "queue" ? "Waiting on you" : "Decided by you"}
-          value={loading ? "—" : rows.length}
-        />
-      </StatRow>
+      <TabList label="Production approval views">
+        <Tab selected={tab === "queue"} onClick={() => setTab("queue")}>
+          My queue
+        </Tab>
+        <Tab selected={tab === "decided"} onClick={() => setTab("decided")}>
+          Decided
+        </Tab>
+      </TabList>
 
-      <Card>
-        <div className="flex flex-wrap items-center gap-2 border-b border-line p-3">
-          <TabList label="Production approval views">
-            <Tab selected={tab === "queue"} onClick={() => setTab("queue")}>
-              My queue
-            </Tab>
-            <Tab selected={tab === "decided"} onClick={() => setTab("decided")}>
-              Decided
-            </Tab>
-          </TabList>
-          <div className="ml-auto">
-            <CompanyFilterSelect value={company} onChange={setCompany} />
-          </div>
-        </div>
+      <FilterBar>
+        <CompanyFilterSelect value={company} onChange={setCompany} />
+        <StatusFilterSelect value={status} onChange={setStatus} />
+        {(company || status) && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setCompany("");
+              setStatus("");
+            }}
+          >
+            <HiOutlineXMark aria-hidden="true" /> Clear
+          </Button>
+        )}
+        <FilterSpacer />
+        {/* Where the "Waiting on you" card went. Same number, one line. */}
+        <FilterCount>
+          {tab === "queue" ? "Waiting on you" : "Decided by you"}:{" "}
+          {loading ? "—" : filtered.length}
+        </FilterCount>
+      </FilterBar>
 
-        {error && (
+      {error && (
+        <Card className="border-bad/40 bg-bad/5">
           <div className="flex items-start gap-2 p-3 text-[13px] text-bad" role="alert">
             <HiExclamationCircle className="mt-0.5 shrink-0" aria-hidden />
             <span className="whitespace-pre-line">{error}</span>
           </div>
-        )}
+        </Card>
+      )}
 
-        {loading ? (
-          <div className="space-y-2 p-3">
-            <Skeleton className="h-8 w-full" />
-            <Skeleton className="h-8 w-full" />
-          </div>
-        ) : rows.length === 0 ? (
+      {loading ? (
+        <TableSkeleton columns={9} label="Loading production orders" />
+      ) : filtered.length === 0 ? (
+        <Card>
           <EmptyState
+            icon={HiOutlineInbox}
             title={tab === "queue" ? "Nothing waiting on you" : "You have not decided any yet"}
             hint={
               tab === "queue"
                 ? "Orders appear here only when a workflow stage names you — or names someone you are standing in for."
-                : undefined
+                : "Nothing matches these filters."
             }
-            className="py-10"
           />
-        ) : (
+        </Card>
+      ) : (
+        <Card className="overflow-hidden p-0">
           <div className="overflow-x-auto">
             <Table density="compact">
               <TableHeader>
-                <TableRow>
+                <TableRow className="bg-surface hover:bg-surface">
                   <TableHead>PO</TableHead>
                   <TableHead>Company</TableHead>
                   <TableHead className="min-w-[240px]">Item</TableHead>
                   <TableHead>Warehouse</TableHead>
                   <TableHead className="text-right">Planned</TableHead>
-                  <TableHead>Due</TableHead>
+                  {/* Was "Due". The date an approver wants is how long this has
+                      been sitting in front of them, not when SAP wants it
+                      finished — the due date is still on the detail dialog. */}
+                  <TableHead>Created</TableHead>
                   <TableHead>Raised by</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead />
+                  <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {rows.map((row) => (
+                {paginated.map((row) => (
                   <TableRow key={row.id}>
-                    <TableCell className="whitespace-nowrap font-medium text-ink">
+                    <TableCell className="whitespace-nowrap font-semibold text-brand">
                       {orderNumber(row)}
                     </TableCell>
                     <TableCell>{row.company}</TableCell>
-                    <TableCell className="min-w-[240px]">
-                      <div className="font-medium text-ink">{row.item_code}</div>
-                      <div className="text-[12px] text-subtle">{row.item_name}</div>
-                    </TableCell>
+                    <ItemCell order={row} />
                     <TableCell>{row.warehouse || "—"}</TableCell>
-                    <TableCell className="whitespace-nowrap text-right">
-                      <div>{fmtQty(row.planned_qty)} pcs</div>
-                      {row.planned_boxes && (
-                        <div className="text-[12px] text-subtle">
-                          {fmtQty(row.planned_boxes)} box
-                        </div>
-                      )}
-                    </TableCell>
+                    <PlannedCell order={row} />
                     <TableCell className="whitespace-nowrap">
-                      {fmtDate(row.due_date)}
+                      {fmtDateTime(row.created_at)}
                     </TableCell>
                     <TableCell>{row.sap_created_by || "—"}</TableCell>
+                    <StatusCell order={row} />
                     <TableCell>
-                      <div className="flex flex-wrap items-center gap-1">
-                        <FlowStatusBadge status={row.flow?.status} />
-                        <OrderTypeBadge order={row} />
-                        <GateExemptBadge order={row} />
-                        {row.flow?.sap_status === "FAILED" && (
-                          <Badge tone="bad" outlined>
-                            SAP write failed
-                          </Badge>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center justify-end gap-1.5">
-                        <Button variant="secondary" size="sm" onClick={() => setDetail(row)}>
-                          Details
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => setDetail(row)}
+                          aria-label={`View production order ${orderNumber(row)}`}
+                          title="View order"
+                        >
+                          <HiOutlineEye aria-hidden="true" />
                         </Button>
                         {/* Only ever shown in the queue: that list IS the set the
                             server says this user may act on, so there is no
                             second permission check to duplicate here. */}
                         {tab === "queue" && row.flow?.current_stage && (
                           <>
+                            <span aria-hidden="true" className="mx-1 h-5 w-px bg-line" />
                             <Button
-                              variant="secondary"
                               size="sm"
-                              onClick={() => setDeciding({ order: row, approve: false })}
-                            >
-                              Reject
-                            </Button>
-                            <Button
-                              variant="primary"
-                              size="sm"
+                              variant="success"
                               onClick={() => setDeciding({ order: row, approve: true })}
                             >
-                              Approve
+                              <HiOutlineCheckCircle aria-hidden="true" /> Approve
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="danger"
+                              onClick={() => setDeciding({ order: row, approve: false })}
+                            >
+                              <HiOutlineXCircle aria-hidden="true" /> Reject
                             </Button>
                           </>
                         )}
@@ -279,8 +330,20 @@ export default function ProductionApproval() {
               </TableBody>
             </Table>
           </div>
-        )}
-      </Card>
+        </Card>
+      )}
+
+      {filtered.length > PAGE_SIZE && (
+        <Pagination
+          page={pageNumber}
+          totalPages={totalPages}
+          onPageChange={setPage}
+          summary={`Showing ${(pageNumber - 1) * PAGE_SIZE + 1}–${Math.min(
+            pageNumber * PAGE_SIZE,
+            filtered.length,
+          )} of ${filtered.length}`}
+        />
+      )}
 
       <OrderDetailDialog order={detail} onClose={() => setDetail(null)} />
 
