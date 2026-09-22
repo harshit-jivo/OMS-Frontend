@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { VENDOR_BILLS, VENDOR_OTHER_DOCUMENTS, VENDOR_POS } from "./constants";
+import { VENDOR_OTHER_DOCUMENTS, VENDOR_POS } from "./constants";
 import {
   EMPTY_FORM,
   allocationRows,
@@ -11,10 +11,13 @@ import {
   changeAllocation,
   expectedPeriodError,
   formatINR,
+  PARTNER_CODE_PREFIX,
+  partnerSourceFor,
   resolveCase,
   validate,
   type RequestForm,
 } from "./rules";
+import { BILL_10256, BILL_10263, BILL_10271 } from "./testData";
 
 /** Build a form by applying answers in order, the way a user would. */
 function answer(...patches: Partial<RequestForm>[]): RequestForm {
@@ -23,21 +26,20 @@ function answer(...patches: Partial<RequestForm>[]): RequestForm {
 
 const partnerNames = (form: RequestForm) => resolveCase(form).partners.map((p) => p.label);
 const docNumbers = (form: RequestForm) => resolveCase(form).documents.map((d) => d.number);
+const ids = (form: RequestForm) => form.selected.map((doc) => doc.id);
 
-const BILL_10256 = VENDOR_BILLS.find((b) => b.number === "AP-INV-10256")!;
-
-/** ABC Technologies, Against Bill, with both of ABC's bills ticked. */
+/** ABC Technologies (a SAP vendor), Against Bill, with both of ABC's bills ticked. */
 const abcBothBills = () =>
   answer(
     { company: "OIL", type: "VENDOR" },
     { paymentAgainst: "AGAINST_BILL" },
-    { partner: "V-1001" },
-    { references: ["B-1", "B-2"] },
+    { partner: "VENDA000101", partnerName: "ABC Technologies" },
+    { selected: [BILL_10256, BILL_10271] },
   );
 
-describe("mock data", () => {
-  it("keeps every document's open amount equal to original minus paid", () => {
-    for (const doc of [...VENDOR_BILLS, ...VENDOR_POS, ...VENDOR_OTHER_DOCUMENTS]) {
+describe("sample data", () => {
+  it("keeps every sample document's open amount equal to original minus paid", () => {
+    for (const doc of [...VENDOR_POS, ...VENDOR_OTHER_DOCUMENTS]) {
       expect(doc.open, doc.number).toBe(doc.original - doc.paid);
     }
   });
@@ -76,6 +78,13 @@ describe("the case table", () => {
     expect(c.plainAmount).toBe(false);
   });
 
+  it("Vendor + All pays against the other open documents", () => {
+    const c = resolveCase(answer({ type: "VENDOR" }, { paymentAgainst: "ALL" }));
+    expect(c.reference).toBe("VENDOR_OTHER");
+    expect(c.expectedDate).toBe(false);
+    expect(c.plainAmount).toBe(false);
+  });
+
   it("Vendor + Other is a plain amount with no documents", () => {
     const c = resolveCase(answer({ type: "VENDOR" }, { paymentAgainst: "OTHER" }));
     expect(c.reference).toBeNull();
@@ -105,13 +114,6 @@ describe("the case table", () => {
     expect(resolveCase(form).reference).toBeNull();
   });
 
-  it("Vendor + All pays against the other open documents", () => {
-    const c = resolveCase(answer({ type: "VENDOR" }, { paymentAgainst: "ALL" }));
-    expect(c.reference).toBe("VENDOR_OTHER");
-    expect(c.expectedDate).toBe(false);
-    expect(c.plainAmount).toBe(false);
-  });
-
   it("Employee Advance + Other is a plain amount and nothing else", () => {
     const c = resolveCase(answer({ type: "EMPLOYEE_ADVANCE" }, { paymentAgainst: "OTHER" }));
     expect(c.plainAmount).toBe(true);
@@ -132,22 +134,47 @@ describe("the case table", () => {
   });
 });
 
-describe("partner and document filtering", () => {
-  it("Vendor + Against Bill offers only vendors with open bills", () => {
-    const form = answer({ type: "VENDOR" }, { paymentAgainst: "AGAINST_BILL" });
-    expect(partnerNames(form)).toEqual(["ABC Technologies", "XYZ Traders", "PQR Suppliers"]);
+describe("where each case's data comes from", () => {
+  it("names the code series each SAP partner list is narrowed to", () => {
+    expect(PARTNER_CODE_PREFIX).toEqual({ SAP_VENDORS: "VENDA", SAP_IMPREST: "ORGV" });
   });
 
-  it("Vendor + Against PO offers only vendors with open POs", () => {
+  it("reads SAP for vendors, bills, imprest accounts and Employee Advance; sample data for the rest", () => {
+    expect(partnerSourceFor("VENDOR", null)).toBe("SAP_VENDORS");
+    expect(partnerSourceFor("VENDOR", "VENDOR_BILL")).toBe("SAP_VENDORS");
+    expect(partnerSourceFor("VENDOR", "VENDOR_PO")).toBe("SAMPLE_VENDORS");
+    expect(partnerSourceFor("VENDOR", "VENDOR_OTHER")).toBe("SAMPLE_VENDORS");
+    expect(partnerSourceFor("EMPLOYEE_ADVANCE", null)).toBe("SAP_EMPLOYEES");
+    expect(partnerSourceFor("EMPLOYEE_IMPREST", null)).toBe("SAP_IMPREST");
+  });
+
+  it("says when the page must fetch the partner list and the documents", () => {
+    const bills = resolveCase(answer({ type: "VENDOR" }, { paymentAgainst: "AGAINST_BILL" }));
+    expect(bills).toMatchObject({ livePartners: true, liveDocuments: true, partners: [] });
+
+    const pos = resolveCase(answer({ type: "VENDOR" }, { paymentAgainst: "AGAINST_PO" }));
+    expect(pos.livePartners).toBe(false);
+    expect(pos.liveDocuments).toBe(false);
+    expect(pos.partners.length).toBeGreaterThan(0);
+  });
+
+  it("keeps a SAP partner it cannot check against a list", () => {
+    const form = answer(
+      { company: "OIL", type: "VENDOR" },
+      { paymentAgainst: "ADVANCE" },
+      { partner: "VENDA000999", partnerName: "Any SAP Vendor" },
+    );
+    expect(form).toMatchObject({ partner: "VENDA000999", partnerName: "Any SAP Vendor" });
+  });
+});
+
+describe("partner and document filtering (sample data)", () => {
+  it("Vendor + Against PO offers only sample vendors with open POs", () => {
     const form = answer({ type: "VENDOR" }, { paymentAgainst: "AGAINST_PO" });
     expect(partnerNames(form)).toEqual(["ABC Technologies", "XYZ Traders", "Metro Print & Labels"]);
   });
 
-  it("a plain-amount vendor case offers every vendor", () => {
-    expect(partnerNames(answer({ type: "VENDOR" }, { paymentAgainst: "OTHER" }))).toHaveLength(6);
-  });
-
-  it("Vendor + All offers only vendors with other open documents", () => {
+  it("Vendor + All offers only sample vendors with other open documents", () => {
     const form = answer({ type: "VENDOR" }, { paymentAgainst: "ALL" });
     expect(partnerNames(form)).toEqual([
       "ABC Technologies",
@@ -157,12 +184,7 @@ describe("partner and document filtering", () => {
     ]);
   });
 
-  it("shows only the selected partner's bills and POs", () => {
-    const bills = answer({ type: "VENDOR" }, { paymentAgainst: "AGAINST_BILL" });
-    expect(docNumbers(applyChange(bills, { partner: "V-1001" }))).toEqual([
-      "AP-INV-10256",
-      "AP-INV-10271",
-    ]);
+  it("shows only the selected sample vendor's POs and documents", () => {
     const pos = answer({ type: "VENDOR" }, { paymentAgainst: "AGAINST_PO" });
     expect(docNumbers(applyChange(pos, { partner: "V-1002" }))).toEqual(["PO-4512", "PO-4519"]);
     const all = answer({ type: "VENDOR" }, { paymentAgainst: "ALL" });
@@ -170,7 +192,6 @@ describe("partner and document filtering", () => {
   });
 
   it("never lists a bill or a PO under All", () => {
-    // ABC has two bills, a PO and a GRN — All shows the GRN only.
     const all = answer({ type: "VENDOR" }, { paymentAgainst: "ALL" }, { partner: "V-1001" });
     expect(docNumbers(all)).toEqual(["GRN-2201"]);
     const numbers = VENDOR_OTHER_DOCUMENTS.map((d) => d.number).join(" ");
@@ -181,43 +202,55 @@ describe("partner and document filtering", () => {
     for (const doc of VENDOR_OTHER_DOCUMENTS) expect(doc.docType, doc.number).toBeTruthy();
   });
 
-  it("will not hold a partner the case does not offer", () => {
+  it("will not hold a sample partner the case does not offer", () => {
     const form = answer(
       { type: "VENDOR" },
-      { paymentAgainst: "AGAINST_BILL" },
-      { partner: "V-1005" }, // Shree Packaging — no open bills
+      { paymentAgainst: "AGAINST_PO" },
+      { partner: "V-1005" }, // Shree Packaging — no open POs
     );
     expect(form.partner).toBe("");
+  });
+
+  it("will not hold a sample document the case does not list", () => {
+    const po = answer(
+      { type: "VENDOR" },
+      { paymentAgainst: "AGAINST_PO" },
+      { partner: "V-1002" },
+    );
+    const withForeign = applyChange(po, {
+      selected: [VENDOR_POS.find((d) => d.id === "P-2")!, { ...BILL_10263, partner: "V-1002" }],
+    });
+    expect(ids(withForeign)).toEqual(["P-2"]);
   });
 });
 
 describe("selecting several documents", () => {
   it("gives every ticked document its own empty payment line", () => {
     const form = abcBothBills();
-    expect(form.references).toEqual(["B-1", "B-2"]);
-    expect(Object.keys(form.allocations)).toEqual(["B-1", "B-2"]);
-    expect(form.allocations["B-1"]).toEqual({ mode: "FIXED", amount: "", percentage: "" });
+    expect(ids(form)).toEqual(["PCH-10256", "PCH-10271"]);
+    expect(Object.keys(form.allocations)).toEqual(["PCH-10256", "PCH-10271"]);
+    expect(form.allocations["PCH-10256"]).toEqual({ mode: "FIXED", amount: "", percentage: "" });
   });
 
   it("keeps a line's entry when another document is ticked or unticked", () => {
     let form = answer(
-      { type: "VENDOR" },
+      { company: "OIL", type: "VENDOR" },
       { paymentAgainst: "AGAINST_BILL" },
-      { partner: "V-1001" },
-      { references: ["B-1"] },
+      { partner: "VENDA000101" },
+      { selected: [BILL_10256] },
     );
-    form = changeAllocation(form, "B-1", { amount: "50000" });
-    form = applyChange(form, { references: ["B-1", "B-2"] });
-    expect(form.allocations["B-1"].amount).toBe("50000");
+    form = changeAllocation(form, "PCH-10256", { amount: "50000" });
+    form = applyChange(form, { selected: [BILL_10256, BILL_10271] });
+    expect(form.allocations["PCH-10256"].amount).toBe("50000");
 
-    form = applyChange(form, { references: ["B-1"] });
-    expect(Object.keys(form.allocations)).toEqual(["B-1"]);
-    expect(form.allocations["B-1"].amount).toBe("50000");
+    form = applyChange(form, { selected: [BILL_10256] });
+    expect(Object.keys(form.allocations)).toEqual(["PCH-10256"]);
+    expect(form.allocations["PCH-10256"].amount).toBe("50000");
   });
 
   it("refuses a document that belongs to another partner", () => {
-    const form = applyChange(abcBothBills(), { references: ["B-1", "B-3"] }); // B-3 is XYZ's
-    expect(form.references).toEqual(["B-1"]);
+    const form = applyChange(abcBothBills(), { selected: [BILL_10256, BILL_10263] }); // 10263 is XYZ's
+    expect(ids(form)).toEqual(["PCH-10256"]);
   });
 });
 
@@ -264,7 +297,7 @@ describe("the payment calculation", () => {
 
   it("calculates a part-paid contract from its OPEN amount — 50% of ₹50,000 is ₹25,000", () => {
     const contract = VENDOR_OTHER_DOCUMENTS.find((d) => d.number === "CT-0412")!;
-    expect(contract.open).toBe(50000); // ₹2,00,000 less ₹1,50,000 already paid
+    expect(contract.open).toBe(50000);
     expect(calculatePayment(contract, "PERCENT", "", "50").payment).toBe(25000);
     expect(calculatePayment(contract, "FIXED", "60000", "").error).toMatch(/Cannot exceed/);
   });
@@ -283,8 +316,8 @@ describe("the payment calculation", () => {
 describe("payment lines and the total", () => {
   it("totals every line — 65% of ₹1,50,000 plus a fixed ₹40,000 is ₹1,37,500", () => {
     let form = abcBothBills();
-    form = changeAllocation(form, "B-1", { mode: "PERCENT", percentage: "65" });
-    form = changeAllocation(form, "B-2", { amount: "40000" });
+    form = changeAllocation(form, "PCH-10256", { mode: "PERCENT", percentage: "65" });
+    form = changeAllocation(form, "PCH-10271", { amount: "40000" });
 
     const rows = allocationRows(form);
     expect(rows.map((r) => r.calc.payment)).toEqual([97500, 40000]);
@@ -292,43 +325,55 @@ describe("payment lines and the total", () => {
   });
 
   it("reports an incomplete total while any line is blank or invalid", () => {
-    let form = changeAllocation(abcBothBills(), "B-1", { amount: "10000" });
+    let form = changeAllocation(abcBothBills(), "PCH-10256", { amount: "10000" });
     expect(allocationTotals(allocationRows(form))).toMatchObject({ payment: 10000, complete: false });
 
-    form = changeAllocation(form, "B-2", { amount: "999999" }); // over B-2's ₹84,000
+    form = changeAllocation(form, "PCH-10271", { amount: "999999" }); // over ₹84,000
     expect(allocationTotals(allocationRows(form))).toMatchObject({ payment: 10000, complete: false });
   });
 
   it("adds paise exactly, with no floating-point drift", () => {
     let form = abcBothBills();
-    form = changeAllocation(form, "B-1", { amount: "0.1" });
-    form = changeAllocation(form, "B-2", { amount: "0.2" });
+    form = changeAllocation(form, "PCH-10256", { amount: "0.1" });
+    form = changeAllocation(form, "PCH-10271", { amount: "0.2" });
     expect(allocationTotals(allocationRows(form)).payment).toBe(0.3);
   });
 
   it("a mode switch clears only that line", () => {
     let form = abcBothBills();
-    form = changeAllocation(form, "B-1", { amount: "50000" });
-    form = changeAllocation(form, "B-2", { amount: "20000" });
-    form = changeAllocation(form, "B-1", { mode: "PERCENT" });
+    form = changeAllocation(form, "PCH-10256", { amount: "50000" });
+    form = changeAllocation(form, "PCH-10271", { amount: "20000" });
+    form = changeAllocation(form, "PCH-10256", { mode: "PERCENT" });
 
-    expect(form.allocations["B-1"]).toEqual({ mode: "PERCENT", amount: "", percentage: "" });
-    expect(form.allocations["B-2"].amount).toBe("20000");
+    expect(form.allocations["PCH-10256"]).toEqual({ mode: "PERCENT", amount: "", percentage: "" });
+    expect(form.allocations["PCH-10271"].amount).toBe("20000");
   });
 
   it("a quick percentage that also switches the mode lands, rather than being wiped", () => {
-    const form = changeAllocation(abcBothBills(), "B-1", { mode: "PERCENT", percentage: "50" });
-    expect(form.allocations["B-1"]).toEqual({ mode: "PERCENT", amount: "", percentage: "50" });
+    const form = changeAllocation(abcBothBills(), "PCH-10256", { mode: "PERCENT", percentage: "50" });
+    expect(form.allocations["PCH-10256"]).toEqual({ mode: "PERCENT", amount: "", percentage: "50" });
   });
 
   it("ignores an edit to a line that does not exist", () => {
     const form = abcBothBills();
-    expect(changeAllocation(form, "B-9", { amount: "1" })).toBe(form);
+    expect(changeAllocation(form, "PCH-1", { amount: "1" })).toBe(form);
   });
 });
 
 describe("clearing dependent fields", () => {
-  const billsFilled = () => changeAllocation(abcBothBills(), "B-1", { amount: "50000" });
+  const billsFilled = () => changeAllocation(abcBothBills(), "PCH-10256", { amount: "50000" });
+
+  it("a new company clears the partner and the documents — each company is its own SAP", () => {
+    const form = applyChange(billsFilled(), { company: "MART" });
+    expect(form).toMatchObject({
+      type: "VENDOR",
+      paymentAgainst: "AGAINST_BILL",
+      partner: "",
+      partnerName: "",
+      selected: [],
+      allocations: {},
+    });
+  });
 
   it("a new Type clears everything below it", () => {
     const form = applyChange(billsFilled(), { type: "EMPLOYEE_ADVANCE" });
@@ -336,7 +381,8 @@ describe("clearing dependent fields", () => {
       company: "OIL", // above Type — kept
       paymentAgainst: "",
       partner: "",
-      references: [],
+      partnerName: "",
+      selected: [],
       allocations: {},
       amount: "",
       expectedDate: "",
@@ -345,17 +391,21 @@ describe("clearing dependent fields", () => {
 
   it("a new Payment Against clears the documents and their lines", () => {
     const form = applyChange(billsFilled(), { paymentAgainst: "OTHER" });
-    expect(form).toMatchObject({ references: [], allocations: {} });
+    expect(form).toMatchObject({ selected: [], allocations: {} });
   });
 
-  it("keeps a partner who still qualifies after Payment Against changes", () => {
-    expect(applyChange(billsFilled(), { paymentAgainst: "OTHER" }).partner).toBe("V-1001");
+  it("keeps a SAP partner across a Payment Against change that still lists SAP vendors", () => {
+    const form = applyChange(billsFilled(), { paymentAgainst: "ADVANCE" });
+    expect(form).toMatchObject({ partner: "VENDA000101", partnerName: "ABC Technologies" });
   });
 
-  it("drops a partner who no longer qualifies", () => {
-    const shree = answer({ type: "VENDOR" }, { paymentAgainst: "OTHER" }, { partner: "V-1005" });
-    expect(shree.partner).toBe("V-1005");
-    expect(applyChange(shree, { paymentAgainst: "AGAINST_BILL" }).partner).toBe("");
+  it("drops the partner when the case switches between SAP and sample vendors", () => {
+    const toSample = applyChange(billsFilled(), { paymentAgainst: "AGAINST_PO" });
+    expect(toSample).toMatchObject({ partner: "", partnerName: "" });
+
+    const po = answer({ type: "VENDOR" }, { paymentAgainst: "AGAINST_PO" }, { partner: "V-1001" });
+    expect(po.partner).toBe("V-1001");
+    expect(applyChange(po, { paymentAgainst: "ADVANCE" }).partner).toBe("");
   });
 
   it("leaving Against PO clears the POs, their lines and the Expected Date", () => {
@@ -363,18 +413,13 @@ describe("clearing dependent fields", () => {
       { type: "VENDOR" },
       { paymentAgainst: "AGAINST_PO" },
       { partner: "V-1001", expectedDate: "2026-10-20" },
-      { references: ["P-1"] },
+      { selected: [VENDOR_POS.find((d) => d.id === "P-1")!] },
     );
     po = changeAllocation(po, "P-1", { amount: "20000" });
     expect(po.expectedDate).toBe("2026-10-20");
 
     const advance = applyChange(po, { paymentAgainst: "ADVANCE" });
-    expect(advance).toMatchObject({
-      references: [],
-      allocations: {},
-      expectedDate: "",
-      partner: "V-1001", // ABC still qualifies for a plain advance
-    });
+    expect(advance).toMatchObject({ selected: [], allocations: {}, expectedDate: "" });
   });
 
   it("never stores an Expected Date outside Vendor → Against PO", () => {
@@ -383,18 +428,18 @@ describe("clearing dependent fields", () => {
   });
 
   it("a new partner clears the documents and their lines", () => {
-    const form = applyChange(billsFilled(), { partner: "V-1002" });
-    expect(form).toMatchObject({ references: [], allocations: {} });
+    const form = applyChange(billsFilled(), { partner: "VENDA000102" });
+    expect(form).toMatchObject({ selected: [], allocations: {} });
   });
 
   it("keeps a plain amount when only the partner changes", () => {
     const plain = answer(
-      { type: "VENDOR" },
-      { paymentAgainst: "OTHER" },
-      { partner: "V-1005" },
+      { company: "OIL", type: "VENDOR" },
+      { paymentAgainst: "OTHER", paymentAgainstOther: "Freight" },
+      { partner: "VENDA000104" },
       { amount: "12000" },
     );
-    expect(applyChange(plain, { partner: "V-1006" }).amount).toBe("12000");
+    expect(applyChange(plain, { partner: "VENDA000103" }).amount).toBe("12000");
   });
 
   it("never holds a plain amount in a document case", () => {
@@ -404,9 +449,9 @@ describe("clearing dependent fields", () => {
 
   const emiAdvance = () =>
     answer(
-      { type: "EMPLOYEE_ADVANCE" },
+      { company: "OIL", type: "EMPLOYEE_ADVANCE" },
       { paymentAgainst: "ADVANCE" },
-      { partner: "E-2001", amount: "20000" },
+      { partner: "1113035", amount: "20000" },
       { returnMethod: "EMI" },
       { installments: "4" },
       { expectedFromDate: "2026-10-01", expectedToDate: "2026-10-15" },
@@ -485,7 +530,6 @@ describe("validation", () => {
   it("never asks for a field the case does not show", () => {
     const { missing } = validate(answer({ type: "VENDOR" }, { paymentAgainst: "OTHER" }));
     expect(missing).not.toContain("Bills");
-    expect(missing).not.toContain("Advance Against");
     expect(missing).not.toContain("Expected Date");
     expect(missing).not.toContain("Expected Bill Date");
     expect(missing).not.toContain("Return Method");
@@ -493,21 +537,25 @@ describe("validation", () => {
   });
 
   it("asks for at least one bill once the vendor is chosen", () => {
-    const form = answer({ type: "VENDOR" }, { paymentAgainst: "AGAINST_BILL" }, { partner: "V-1001" });
+    const form = answer(
+      { company: "OIL", type: "VENDOR" },
+      { paymentAgainst: "AGAINST_BILL" },
+      { partner: "VENDA000101" },
+    );
     expect(validate(form).missing).toContain("Bills");
   });
 
   it("names the document whose payment line is blank", () => {
-    const form = changeAllocation(abcBothBills(), "B-1", { amount: "10000" });
-    expect(validate(form).missing).toContain("Payment for AP-INV-10271");
-    expect(validate(form).missing).not.toContain("Payment for AP-INV-10256");
+    const form = changeAllocation(abcBothBills(), "PCH-10256", { amount: "10000" });
+    expect(validate(form).missing).toContain("Payment for 10271");
+    expect(validate(form).missing).not.toContain("Payment for 10256");
   });
 
   it("names the document whose amount exceeds its open balance", () => {
-    let form = changeAllocation(abcBothBills(), "B-1", { amount: "180000" });
-    form = changeAllocation(form, "B-2", { amount: "1000" });
+    let form = changeAllocation(abcBothBills(), "PCH-10256", { amount: "180000" });
+    form = changeAllocation(form, "PCH-10271", { amount: "1000" });
     expect(validate(form).problems).toEqual([
-      `AP-INV-10256: Cannot exceed the open amount of ${formatINR(150000)}.`,
+      `10256: Cannot exceed the open amount of ${formatINR(150000)}.`,
     ]);
   });
 
@@ -524,8 +572,8 @@ describe("validation", () => {
 
   it("passes a complete multi-bill Vendor + Against Bill request", () => {
     let form = applyChange(abcBothBills(), COMMON);
-    form = changeAllocation(form, "B-1", { mode: "PERCENT", percentage: "65" });
-    form = changeAllocation(form, "B-2", { amount: "40000" });
+    form = changeAllocation(form, "PCH-10256", { mode: "PERCENT", percentage: "65" });
+    form = changeAllocation(form, "PCH-10271", { amount: "40000" });
     expect(validate(form)).toEqual({ missing: [], problems: [] });
   });
 
@@ -578,12 +626,12 @@ describe("typed answers in place of Other", () => {
 
   it("changing only the typed text does not clear what sits below it", () => {
     const form = answer(
-      { type: "VENDOR" },
+      { company: "OIL", type: "VENDOR" },
       { paymentAgainst: "OTHER", paymentAgainstOther: "Rent" },
-      { partner: "V-1005", amount: "12000" },
+      { partner: "VENDA000104", amount: "12000" },
     );
     const renamed = applyChange(form, { paymentAgainstOther: "Office rent" });
-    expect(renamed).toMatchObject({ partner: "V-1005", amount: "12000" });
+    expect(renamed).toMatchObject({ partner: "VENDA000104", amount: "12000" });
   });
 
   it("never holds typed text for an answer that is not Other", () => {
@@ -613,7 +661,7 @@ function emiAdvanceForValidation(): RequestForm {
   return answer(
     { company: "OIL", type: "EMPLOYEE_ADVANCE" },
     { paymentAgainst: "ADVANCE" },
-    { partner: "E-2001", amount: "20000" },
+    { partner: "1113035", partnerName: "RAVINDER SINGH SHUNTY", amount: "20000" },
     { returnMethod: "EMI" },
     { installments: "4" },
     { expectedFromDate: "2026-10-01", expectedToDate: "2026-10-15" },
