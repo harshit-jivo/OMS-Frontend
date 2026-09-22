@@ -227,6 +227,21 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
     pageNumber * itemsPerPage,
   );
 
+  /*
+   * Does this detail view have a progress trail to show beside the order?
+   *
+   * Every desk, not just billing. All three are looking at an order they
+   * already acted on and asking the same question — where did it go after me
+   * — and the log is the answer, so there was no reason for two of them to
+   * have it hidden behind a dialog while the third had it on the page.
+   *
+   * Still a condition rather than always-on: the logs are loaded per order
+   * and can legitimately come back empty (a fresh order, or the call failing,
+   * which `fetchOrderDetails` swallows to an empty list). Gridding an empty
+   * right-hand column would be worse than the single column it replaces.
+   */
+  const showTrail = orderLogs.length > 0;
+
   const detailTotals = useMemo(() => orderTotals(selectedItems), [selectedItems]);
   const detailVarieties = useMemo(() => varietyCosts(orderDetails), [orderDetails]);
 
@@ -537,59 +552,76 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
 
           <VarietyCostCards costs={detailVarieties} />
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Party &amp; delivery</CardTitle>
-            </CardHeader>
-            <DetailGrid>
-              <DetailField label="Party state" value={orderDetails.party_state} />
-              <DetailField label="Delivery date" value={orderDetails.delivery_date} />
-              <DetailField label="PO number" value={orderDetails.po_number} />
-              {/* Who raised it, not the SAP quotation number that used to sit
-                  here: on a tracking screen the reviewer is following up a
-                  decision they made, and the person to follow up WITH is the
-                  salesperson. The quotation number is still in the Excel
-                  export for anyone reconciling against SAP. */}
-              <DetailField label="Created by" value={orderDetails.created_by_name} />
-              <DetailField label="Bill to" value={orderDetails.bill_to_address} />
-              <DetailField label="Ship to" value={orderDetails.ship_to_address} />
-              <DetailField
-                label="Remark"
-                value={orderDetails.remarks?.trim() ? orderDetails.remarks : ""}
-                span="full"
-                hideWhenEmpty
-              />
-            </DetailGrid>
-          </Card>
+          {/* The order on the left, its progress trail on the right.
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Items</CardTitle>
-              <Badge tone="neutral">{selectedItems.length}</Badge>
-            </CardHeader>
-            <OrderItemsTable items={selectedItems} variety={false} />
-          </Card>
+              These are the two halves of the one question every tracking desk
+              opens a row to ask — what was this, and where did it go after me
+              — so they are read together rather than a scroll apart. Same
+              two-column shape as the Order Tracker detail, and the same
+              timeline component as the track dialog.
 
-          {/* The progress trail, inline.
-              Billing is the desk that has to answer "why is this not billed
-              yet", so its detail view carries the trail on the page rather
-              than behind the track button. Same component as the dialog. */}
-          {mode === "billing" && orderLogs.length > 0 && (
+              `showTrail` collapses this to a plain single column when an
+              order has no log, rather than gridding an empty half. The
+              left-hand cards are written once either way. */}
+          <div
+            className={
+              showTrail
+                ? "grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,400px)] lg:items-start"
+                : "space-y-4"
+            }
+          >
+            <div className="space-y-4">
             <Card>
               <CardHeader>
-                <CardTitle>Order log</CardTitle>
-                <Badge tone="neutral">
-                  {buildOrderTimelineLogs(orderLogs, orderDetails).length}
-                </Badge>
+                <CardTitle>Party &amp; delivery</CardTitle>
               </CardHeader>
-              <OrderTimeline
-                order={orderDetails}
-                logs={orderLogs}
-                formatDateTime={formatCreatedDateTime}
-                pendingNote={pendingNote}
-              />
+              <DetailGrid>
+                <DetailField label="Party state" value={orderDetails.party_state} />
+                <DetailField label="Delivery date" value={orderDetails.delivery_date} />
+                <DetailField label="PO number" value={orderDetails.po_number} />
+                {/* Who raised it, not the SAP quotation number that used to sit
+                    here: on a tracking screen the reviewer is following up a
+                    decision they made, and the person to follow up WITH is the
+                    salesperson. The quotation number is still in the Excel
+                    export for anyone reconciling against SAP. */}
+                <DetailField label="Created by" value={orderDetails.created_by_name} />
+                <DetailField label="Bill to" value={orderDetails.bill_to_address} />
+                <DetailField label="Ship to" value={orderDetails.ship_to_address} />
+                <DetailField
+                  label="Remark"
+                  value={orderDetails.remarks?.trim() ? orderDetails.remarks : ""}
+                  span="full"
+                  hideWhenEmpty
+                />
+              </DetailGrid>
             </Card>
-          )}
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Items</CardTitle>
+                <Badge tone="neutral">{selectedItems.length}</Badge>
+              </CardHeader>
+              <OrderItemsTable items={selectedItems} variety={false} />
+            </Card>
+            </div>
+
+            {showTrail ? (
+              <Card className="lg:sticky lg:top-4">
+                <CardHeader>
+                  <CardTitle>Order log</CardTitle>
+                  <Badge tone="neutral">
+                    {buildOrderTimelineLogs(orderLogs, orderDetails).length}
+                  </Badge>
+                </CardHeader>
+                <OrderTimeline
+                  order={orderDetails}
+                  logs={orderLogs}
+                  formatDateTime={formatCreatedDateTime}
+                  pendingNote={pendingNote}
+                />
+              </Card>
+            ) : null}
+          </div>
         </>
       )}
 
