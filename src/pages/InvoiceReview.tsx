@@ -37,6 +37,7 @@ import ConfirmActionDialog from "./invoiceReview/components/ConfirmActionDialog"
 import CreditLimitFlowDialog from "./invoiceReview/components/CreditLimitFlowDialog";
 import CreditLimitRequestDialog from "./invoiceReview/components/CreditLimitRequestDialog";
 import InvoiceDetailDialog from "./invoiceReview/components/InvoiceDetailDialog";
+import InvoiceFilters from "./invoiceReview/components/InvoiceFilters";
 import InvoiceHistoryDialog from "./invoiceReview/components/InvoiceHistoryDialog";
 import InvoiceTable from "./invoiceReview/components/InvoiceTable";
 import { useInvoiceReview } from "./invoiceReview/useInvoiceReview";
@@ -74,6 +75,11 @@ export default function InvoiceReview() {
     counts,
     statusFilter,
     setStatusFilter,
+    allRecords,
+    records,
+    filters,
+    setFilters,
+    filtersEnabled,
     actionMessage,
     actionError,
     error,
@@ -132,6 +138,19 @@ export default function InvoiceReview() {
           })}
         </TabList>
       </div>
+
+      {/* The archive tabs — "Posted to SAP" and "All" — get a search and
+          filter row. The five work queues do not: they are opened to be
+          cleared, not searched. See `invoiceReview/filters.ts`. */}
+      {filtersEnabled && !loading ? (
+        <InvoiceFilters
+          tab={statusFilter}
+          records={allRecords}
+          filters={filters}
+          onChange={setFilters}
+          shownCount={records.length}
+        />
+      ) : null}
 
       {/* Outcomes of the last action, and the load failure. `Notice` carries
           `role="status"`, so a screen reader hears the result of a decision it

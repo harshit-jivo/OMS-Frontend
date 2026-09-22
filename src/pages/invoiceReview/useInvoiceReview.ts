@@ -15,6 +15,12 @@ import { useCallback, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 
+import {
+  EMPTY_INVOICE_FILTERS,
+  applyInvoiceFilters,
+  tabSupportsFilters,
+  type InvoiceFilters,
+} from "./filters";
 import { apiFetch, apiUpload, EDIT_RESTORE_STORAGE_KEY } from "../SalesInvoice/useSalesInvoice";
 import { useSapPost } from "../SalesInvoice/useSapPost";
 import { toNumber } from "../SalesInvoice/salesInvoice.utils";
@@ -85,7 +91,21 @@ export function useInvoiceReview({
   canPostToSap,
   canApproveWarehouse = () => true,
 }: UseInvoiceReviewOptions) {
-  const [statusFilter, setStatusFilter] = useState<FilterKey>("PENDING");
+  const [statusFilter, setStatusFilterState] = useState<FilterKey>("PENDING");
+  /*
+   * The archive tabs' search and filters (see `filters.ts`).
+   *
+   * Cleared BY the tab switch rather than by an effect watching it: a status
+   * chosen on "All" is hidden on "Posted to SAP", where the tab has already
+   * fixed the status — left set, it would silently keep narrowing a list whose
+   * control is no longer on screen. Wrapping the setter is also one render
+   * instead of the two an effect would cost.
+   */
+  const [filters, setFilters] = useState<InvoiceFilters>(EMPTY_INVOICE_FILTERS);
+  const setStatusFilter = useCallback((next: FilterKey) => {
+    setStatusFilterState(next);
+    setFilters(EMPTY_INVOICE_FILTERS);
+  }, []);
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<InvoiceRecord | null>(null);
   const [actionId, setActionId] = useState<InvoiceRecord["id"] | null>(null);
@@ -164,6 +184,20 @@ export function useInvoiceReview({
       );
     },
   });
+
+  /*
+   * What the table actually draws.
+   *
+   * `records` is the tab's slice as the server returned it; `visibleRecords`
+   * is that narrowed by the filter bar. The filters are applied ONLY on the
+   * tabs that show the bar, so a queue tab can never be silently narrowed by
+   * a control the reviewer cannot see.
+   */
+  const filtersEnabled = tabSupportsFilters(statusFilter);
+  const visibleRecords = useMemo(
+    () => (filtersEnabled ? applyInvoiceFilters(records, filters) : records),
+    [filtersEnabled, records, filters],
+  );
 
   /* The list failure. `actionError` below is a separate banner for approve /
      reject / delete failures, and the two must not overwrite each other — the
@@ -653,7 +687,13 @@ export function useInvoiceReview({
     setStatusFilter,
     visibleFilters,
     counts,
-    records,
+    /** The tab's rows, narrowed by the filter bar — what the table draws. */
+    records: visibleRecords,
+    /** The same rows BEFORE the filter bar: the pickers' options, and the total. */
+    allRecords: records,
+    filters,
+    setFilters,
+    filtersEnabled,
     loading,
     error,
     loadInvoices,

@@ -92,6 +92,8 @@ export default function InvoiceTable({ view }: { view: UseInvoiceReviewResult })
   const {
     loading,
     records,
+    allRecords,
+    filtersEnabled,
     actionId,
     canApproveReject,
     canApproveWarehouse,
@@ -137,11 +139,23 @@ export default function InvoiceTable({ view }: { view: UseInvoiceReviewResult })
   }
 
   if (records.length === 0) {
+    // An empty tab and a tab emptied BY the filter bar are different problems
+    // with different fixes, and "pick another status" is unhelpful advice to
+    // someone who has just typed a search.
+    const narrowedToNothing = filtersEnabled && allRecords.length > 0;
     return (
       <EmptyState
         icon={HiOutlineInbox}
-        title="No invoices found for this status"
-        hint="Pick another status above, or refresh if you are expecting something new."
+        title={
+          narrowedToNothing
+            ? "No invoice matches these filters"
+            : "No invoices found for this status"
+        }
+        hint={
+          narrowedToNothing
+            ? "Try a shorter search, a wider date range, or clear the filters above."
+            : "Pick another status above, or refresh if you are expecting something new."
+        }
       />
     );
   }
