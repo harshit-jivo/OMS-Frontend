@@ -32,6 +32,7 @@ import { Badge } from "@/components/ui/badge";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { Button } from "@/components/ui/button";
 import { Card, Notice, Page, PageHeader } from "@/components/ui/page";
+import { Pagination } from "@/components/ui/pagination";
 import { Tab, TabList } from "@/components/ui/tabs";
 import ConfirmActionDialog from "./invoiceReview/components/ConfirmActionDialog";
 import CreditLimitFlowDialog from "./invoiceReview/components/CreditLimitFlowDialog";
@@ -40,7 +41,7 @@ import InvoiceDetailDialog from "./invoiceReview/components/InvoiceDetailDialog"
 import InvoiceFilters from "./invoiceReview/components/InvoiceFilters";
 import InvoiceHistoryDialog from "./invoiceReview/components/InvoiceHistoryDialog";
 import InvoiceTable from "./invoiceReview/components/InvoiceTable";
-import { useInvoiceReview } from "./invoiceReview/useInvoiceReview";
+import { INVOICE_PAGE_SIZE, useInvoiceReview } from "./invoiceReview/useInvoiceReview";
 
 export default function InvoiceReview() {
   // Two desks share this screen and do opposite halves of the job: the factory
@@ -76,10 +77,13 @@ export default function InvoiceReview() {
     statusFilter,
     setStatusFilter,
     allRecords,
-    records,
+    filteredRecords,
     filters,
     setFilters,
     filtersEnabled,
+    page,
+    setPage,
+    pageCount,
     actionMessage,
     actionError,
     error,
@@ -148,7 +152,7 @@ export default function InvoiceReview() {
           records={allRecords}
           filters={filters}
           onChange={setFilters}
-          shownCount={records.length}
+          shownCount={filteredRecords.length}
         />
       ) : null}
 
@@ -171,6 +175,20 @@ export default function InvoiceReview() {
       >
         <InvoiceTable view={view} />
       </Card>
+
+      {/* Only once there is more than one page. A pager reading "1" under a
+          list that fits is furniture. */}
+      {!loading && pageCount > 1 ? (
+        <Pagination
+          page={page}
+          totalPages={pageCount}
+          onPageChange={setPage}
+          summary={`Showing ${(page - 1) * INVOICE_PAGE_SIZE + 1}–${Math.min(
+            page * INVOICE_PAGE_SIZE,
+            filteredRecords.length,
+          )} of ${filteredRecords.length}`}
+        />
+      ) : null}
 
       {/* The one question every verb asks. Was five `window.confirm`s and a
           `window.prompt` for the rejection reason. */}

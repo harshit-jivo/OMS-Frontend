@@ -2,37 +2,18 @@
  * The main invoice list — Phase 4 split, plus Phase 5.5 row virtualization.
  *
  * ─────────────────────────────────────────────────────────────────────────
- * THE SCROLL CONTAINER IS THE WINDOW
+ * ONE PAGE AT A TIME, NOT A VIRTUAL WINDOW
  * ─────────────────────────────────────────────────────────────────────────
- * This page has no inner vertical scrollbar — the wrapper only ever set
- * `overflow-x: auto` (for narrow viewports) and the table grows with the page.
- * So it virtualises against the window, and `scrollMargin` is where the list
- * starts in the document.
+ * This drew a moving window of the whole list (`useWindowVirtualizer`), with
+ * two spacer rows standing in for what was not mounted. It is paginated now
+ * and the virtualizer is gone: the hook hands over one page of 25 rows, and
+ * there is nothing in 25 rows worth virtualizing.
  *
- * This has been round once already. For a while `index.css` gave `body`
- * `height: 100%` and `overflow-x: hidden`, which made BODY the scrolling box
- * and left `window.scrollY` at 0 — so `useWindowVirtualizer` mounted
- * twenty-eight rows of a 300-row list and the rest was blank. The fix then was
- * `useVirtualizer` against `document.body`. The shell has since gone back to
- * a single window scroller (see the note at the top of `index.css`: the body
- * scroller doubled up with the window's under the wide-screen zoom), so this
- * is the window virtualizer again. `e2e/virtualization.spec.ts` keeps a
- * long-list case, because nothing shorter than ~30 rows can tell the two apart.
- *
- * ─────────────────────────────────────────────────────────────────────────
- * WHY A FIXED `estimateSize`, NOT DYNAMIC MEASUREMENT
- * ─────────────────────────────────────────────────────────────────────────
- * Dynamic per-row measurement needs a DOM ref on every rendered row, fed back
- * into the virtualizer via `measureElement`. The shared `TableRow` primitive
- * (`components/ui/table.tsx`) is a plain function component with no
- * `forwardRef`, and it belongs to every table in the app — not this page's to
- * change. A fixed estimate plus a generous `overscan` keeps the two spacer
- * rows' heights close enough that scroll position never visibly jumps, without
- * touching a shared file.
- *
- * The two spacer `<tr>` elements stand in for however many rows are skipped
- * above/below the rendered window, so the table's total height (and the
- * page's scrollbar) stays right even though most rows are unmounted.
+ * That also retires a genuinely awkward dependency. The virtualizer needed
+ * this table's document offset, read as `offsetTop` from the body — so a
+ * `position: relative` added to `Page`, `Card` or `.content-area` by anyone,
+ * for any reason, would have silently landed every row in the wrong place.
+ * Nothing here measures the document any more.
  *
  * ─────────────────────────────────────────────────────────────────────────
  * THE ACTION COLUMN
@@ -44,8 +25,6 @@
  * read as six equally urgent choices. Delete stays last, so it never lands
  * where Approve or Post used to be and gets hit by muscle memory.
  */
-import { useState } from "react";
-import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import {
   HiOutlineArrowPath,
   HiOutlineArrowUturnLeft,
@@ -81,17 +60,11 @@ import type { UseInvoiceReviewResult } from "../useInvoiceReview";
 // it was in the original — see the badge-conversion note on this page.)
 const COLUMN_COUNT = 5;
 
-// A reasonable average row height for the comfortable-density table: enough
-// that the spacer rows keep the scrollbar close to accurate without needing
-// to measure every row. Real visible rows always render at their true height
-// regardless of this estimate — only the space standing in for UNRENDERED
-// rows depends on it.
-const ESTIMATED_ROW_HEIGHT = 64;
-
 export default function InvoiceTable({ view }: { view: UseInvoiceReviewResult }) {
   const {
     loading,
     records,
+    filteredRecords,
     allRecords,
     filtersEnabled,
     actionId,
@@ -109,27 +82,6 @@ export default function InvoiceTable({ view }: { view: UseInvoiceReviewResult })
     openCreditLimitRequest,
   } = view;
 
-  // Where the table starts inside the scrolling box, so the virtualizer can
-  // translate its own (list-relative) offsets into real scroll positions. A
-  // ref callback rather than a measuring effect: React calls it once the div
-  // is actually in the document, so `offsetTop` is read straight off the live
-  // node on every render from then on — no extra render pass to converge on.
-  //
-  // `offsetTop` is measured from the offsetParent, which is `body` here: no
-  // ancestor between this div and the body is positioned, so it is also the
-  // document offset the window virtualizer needs. If a `position: relative`
-  // is ever added to `Page`, `Card` or `.content-area`, this becomes an offset
-  // within THAT box instead and the rows will start landing in the wrong place.
-  const [wrapNode, setWrapNode] = useState<HTMLDivElement | null>(null);
-  const scrollMargin = wrapNode?.offsetTop ?? 0;
-
-  const rowVirtualizer = useWindowVirtualizer({
-    count: records.length,
-    estimateSize: () => ESTIMATED_ROW_HEIGHT,
-    overscan: 12,
-    scrollMargin,
-  });
-
   if (loading) {
     return (
       <div className="p-4">
@@ -138,7 +90,7 @@ export default function InvoiceTable({ view }: { view: UseInvoiceReviewResult })
     );
   }
 
-  if (records.length === 0) {
+  if (filteredRecords.length === 0) {
     // An empty tab and a tab emptied BY the filter bar are different problems
     // with different fixes, and "pick another status" is unhelpful advice to
     // someone who has just typed a search.
@@ -160,15 +112,8 @@ export default function InvoiceTable({ view }: { view: UseInvoiceReviewResult })
     );
   }
 
-  const virtualRows = rowVirtualizer.getVirtualItems();
-  const paddingTop = virtualRows.length > 0 ? virtualRows[0].start - scrollMargin : 0;
-  const paddingBottom =
-    virtualRows.length > 0
-      ? rowVirtualizer.getTotalSize() - virtualRows[virtualRows.length - 1].end
-      : 0;
-
   return (
-    <div className="overflow-x-auto" ref={setWrapNode}>
+    <div className="overflow-x-auto">
       <Table>
         <TableHeader>
           <TableRow className="bg-surface hover:bg-surface">
@@ -181,13 +126,7 @@ export default function InvoiceTable({ view }: { view: UseInvoiceReviewResult })
           </TableRow>
         </TableHeader>
         <TableBody>
-          {paddingTop > 0 && (
-            <tr aria-hidden="true">
-              <td colSpan={COLUMN_COUNT} style={{ height: paddingTop, padding: 0, border: 0 }} />
-            </tr>
-          )}
-          {virtualRows.map((virtualRow) => {
-            const record = records[virtualRow.index];
+          {records.map((record, index) => {
             const status = normalizeStatus(record.status);
             const busy = actionId === record.id;
             const reportRef = invoiceReportRef(record);
@@ -196,7 +135,7 @@ export default function InvoiceTable({ view }: { view: UseInvoiceReviewResult })
             // Delete button rather than offering one that would be refused.
             const canDelete = Boolean(record.can_delete);
             return (
-              <TableRow key={record.id ?? virtualRow.index}>
+              <TableRow key={record.id ?? index}>
                 <TableCell className="align-top">
                   <span className="font-semibold text-ink">{record.so_number || "—"}</span>
                   {/* Lineage: this row is either a rework of a rejected
@@ -368,11 +307,6 @@ export default function InvoiceTable({ view }: { view: UseInvoiceReviewResult })
               </TableRow>
             );
           })}
-          {paddingBottom > 0 && (
-            <tr aria-hidden="true">
-              <td colSpan={COLUMN_COUNT} style={{ height: paddingBottom, padding: 0, border: 0 }} />
-            </tr>
-          )}
         </TableBody>
       </Table>
     </div>

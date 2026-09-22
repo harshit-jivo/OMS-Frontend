@@ -68,6 +68,13 @@ import type {
  * One shape for all five verbs so the page renders one Dialog rather than
  * five, and so a second question cannot open over the first.
  */
+/**
+ * Rows per page. 25, like `Order_Master` — the other screen that is an
+ * archive rather than a queue. The approval queues use 10, but those are
+ * short by nature and this list runs to thousands.
+ */
+export const INVOICE_PAGE_SIZE = 25;
+
 export type PendingAction = {
   kind: "approve" | "reject" | "delete" | "edit" | "post";
   record: InvoiceRecord;
@@ -101,10 +108,23 @@ export function useInvoiceReview({
    * control is no longer on screen. Wrapping the setter is also one render
    * instead of the two an effect would cost.
    */
-  const [filters, setFilters] = useState<InvoiceFilters>(EMPTY_INVOICE_FILTERS);
+  const [filters, setFiltersState] = useState<InvoiceFilters>(EMPTY_INVOICE_FILTERS);
+  const [page, setPage] = useState(1);
   const setStatusFilter = useCallback((next: FilterKey) => {
     setStatusFilterState(next);
-    setFilters(EMPTY_INVOICE_FILTERS);
+    setFiltersState(EMPTY_INVOICE_FILTERS);
+    setPage(1);
+  }, []);
+  /*
+   * Narrowing the list sends you back to page 1.
+   *
+   * Left alone, a search run from page 5 of the archive lands on page 5 of
+   * four results — an empty table under a pager that says there is nothing
+   * wrong, which reads as "no matches" for a search that in fact found some.
+   */
+  const setFilters = useCallback((next: InvoiceFilters) => {
+    setFiltersState(next);
+    setPage(1);
   }, []);
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<InvoiceRecord | null>(null);
@@ -194,9 +214,36 @@ export function useInvoiceReview({
    * a control the reviewer cannot see.
    */
   const filtersEnabled = tabSupportsFilters(statusFilter);
-  const visibleRecords = useMemo(
+  const filteredRecords = useMemo(
     () => (filtersEnabled ? applyInvoiceFilters(records, filters) : records),
     [filtersEnabled, records, filters],
+  );
+
+  /*
+   * One page at a time.
+   *
+   * This list used to virtualize instead: it drew a moving window of a list
+   * that could be thousands long. Pagination replaces that rather than joining
+   * it — a bounded page of 25 rows has nothing to virtualize, and keeping both
+   * would be two mechanisms for one problem, with the virtualizer's document
+   * offset to keep correct for no gain.
+   *
+   * What the virtualizer was protecting is protected here instead, and the
+   * e2e case that pinned it now pins this: with a long list, the DOM stays
+   * small AND the last invoice is still reachable.
+   */
+  const pageCount = Math.max(1, Math.ceil(filteredRecords.length / INVOICE_PAGE_SIZE));
+  // Clamped rather than trusted: deleting the last row of the last page, or a
+  // refetch returning fewer rows, would otherwise leave the table blank with
+  // no clue that the fix is to go back a page.
+  const safePage = Math.min(Math.max(1, page), pageCount);
+  const visibleRecords = useMemo(
+    () =>
+      filteredRecords.slice(
+        (safePage - 1) * INVOICE_PAGE_SIZE,
+        safePage * INVOICE_PAGE_SIZE,
+      ),
+    [filteredRecords, safePage],
   );
 
   /* The list failure. `actionError` below is a separate banner for approve /
@@ -687,13 +734,18 @@ export function useInvoiceReview({
     setStatusFilter,
     visibleFilters,
     counts,
-    /** The tab's rows, narrowed by the filter bar — what the table draws. */
+    /** The current PAGE of the narrowed rows — what the table draws. */
     records: visibleRecords,
+    /** Everything the filter bar left, across all pages. */
+    filteredRecords,
     /** The same rows BEFORE the filter bar: the pickers' options, and the total. */
     allRecords: records,
     filters,
     setFilters,
     filtersEnabled,
+    page: safePage,
+    setPage,
+    pageCount,
     loading,
     error,
     loadInvoices,
