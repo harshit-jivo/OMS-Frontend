@@ -156,7 +156,11 @@ export const SIDEBAR_SECTIONS: SidebarSectionDef[] = [
   },
   {
     label: "Payments",
-    links: [{ to: "/Payments_Dashboard", label: "Payments Dashboard", icon: HiOutlineChartPie }],
+    links: [
+      { to: "/Payments_Dashboard", label: "Payments Dashboard", icon: HiOutlineChartPie },
+      // The request form is a frontend preview for now (mock data, no API).
+      { to: "/Advance_Payment_Request", label: "Advance Payments", icon: HiOutlineBanknotes },
+    ],
   },
   {
     label: "Reports",

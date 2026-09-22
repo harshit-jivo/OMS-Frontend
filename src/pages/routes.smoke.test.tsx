@@ -99,6 +99,7 @@ const PAGES: Array<SmokeEntry<any>> = [
   page("/Distributor_Order_Tracking", () => import("./Distributor/Order_Tracking")),
   page("/Mart_Approval", () => import("./MartApproval")),
   page("/Payments_Dashboard", () => import("./Payments/ApprovalManagement")),
+  page("/Advance_Payment_Request", () => import("./Advance_Payment_Request")),
   page("/Tracker_Entry", () => import("./Tracker_Entry")),
   page("/Tracker_Queue", () => import("./Tracker_Queue")),
   page("/Tracker_Invoices", () => import("./Tracker_Invoices")),

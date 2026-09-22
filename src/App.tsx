@@ -94,6 +94,9 @@ const Distributor = lazy(() => import("./pages/Distributor"));
 const Distributor_Order_Tracking = lazy(() => import("./pages/Distributor/Order_Tracking"));
 const MartApproval = lazy(() => import("./pages/MartApproval"));
 const Ap_Invoice_Entry = lazy(() => import("./pages/Ap_Invoice_Entry"));
+// Advance Payments — the request FORM only, and it is UI with mock data:
+// no endpoint, no model, no approval route. See the page header comment.
+const AdvancePaymentRequest = lazy(() => import("./pages/Advance_Payment_Request"));
 
 import { AuthProvider } from "./auth";
 
@@ -599,6 +602,16 @@ function App() {
         <Route
           path="/Approval_Management"
           element={<Navigate to="/Payments_Dashboard" replace />}
+        />
+
+        {/* Advance Payments — new request. Frontend preview only. */}
+        <Route
+          path="/Advance_Payment_Request"
+          element={
+            <ProtectedPage>
+              <AdvancePaymentRequest />
+            </ProtectedPage>
+          }
         />
 
         {/* AP (vendor) invoice entry — copy from GRPO */}
