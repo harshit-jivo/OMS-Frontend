@@ -68,7 +68,15 @@ export function Page({ className, ...props }: React.ComponentProps<"div">) {
          * by hand. Putting it here is what makes the instruction unnecessary.
          */
         "tw-page",
-        "min-h-[calc(100svh-64px)] w-full overflow-x-clip",
+        // Divided by the zoom `index.css` applies on wide screens: `100svh` is
+        // measured on the unzoomed window and then scaled, so without this a
+        // page that fitted still rendered 12% too tall at 1920px and scrolled
+        // into a blank strip. `--app-zoom` is 1 wherever the zoom is off.
+        //
+        // 75px is `.content-area`'s `padding-top` (Sidebar.css), the space the
+        // fixed header takes above this element. It was 64px, which left every
+        // page 11px taller than the window and gave each one a hairline scroll.
+        "min-h-[calc(100svh/var(--app-zoom)-75px)] w-full overflow-x-clip",
         // Transparent, like every other page in the app: `.content-area`
         // paints the background (see the `:has()` rule in styles/tailwind.css).
         // A page that paints its own leaves the shell's 75px navbar padding

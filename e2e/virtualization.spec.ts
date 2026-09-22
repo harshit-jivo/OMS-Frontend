@@ -7,16 +7,16 @@ import { test, expect, gotoStable, settle } from "./harness";
  * ─────────────────────────────────────────────────────────────────────────
  * WHY THIS EXISTS
  * ─────────────────────────────────────────────────────────────────────────
- * Invoice Review virtualizes its rows. It did so with `useWindowVirtualizer`,
- * which reads `window.scrollY` — and `window.scrollY` is always 0 in this app,
- * because `index.css` gives `html, body, #root` `height: 100%` and
- * `overflow-x: hidden`, which makes BODY the scrolling box rather than the
- * viewport.
+ * Invoice Review virtualizes its rows against whatever scrolls the page, and
+ * the virtualizer has to agree with the stylesheet about what that is. It did
+ * not, once: `index.css` made BODY the scrolling box (`height: 100%` +
+ * `overflow-x: hidden`) while the list read `window.scrollY`, which sat at 0.
+ * Measured against 300 rows: scrolled to the very bottom, twenty-eight rows
+ * were mounted and row 300 was not in the DOM.
  *
- * So the virtualizer's idea of "where am I in the list" never moved. Measured
- * against 300 rows: scrolled to the very bottom, twenty-eight rows were
- * mounted and row 300 was not in the DOM. Every invoice past the first
- * screenful was unreachable.
+ * The shell scrolls the WINDOW now (see the top of `index.css`), and the list
+ * uses `useWindowVirtualizer`. This test scrolls the window, so if either side
+ * moves without the other, row 300 goes missing again and this goes red.
  *
  * No shorter fixture can catch that — with the seven invoices the rest of the
  * suite uses, the whole list fits inside the overscan and everything looks
@@ -62,10 +62,10 @@ test.describe("Invoice Review row virtualization", () => {
 
     await expect(appPage.getByText("SO-90000", { exact: true })).toBeVisible();
 
-    // `document.body`, not `window` — see the note above. Scrolling the thing
-    // that does not scroll is exactly the bug this guards.
+    // The window, because the window is what scrolls — see the note above.
+    // Scrolling the thing that does not scroll is exactly the bug this guards.
     await appPage.evaluate(() => {
-      document.body.scrollTop = document.body.scrollHeight;
+      window.scrollTo(0, document.documentElement.scrollHeight);
     });
     await appPage.waitForTimeout(500);
 

@@ -36,7 +36,9 @@
 .dm-page,
 .da-page,
 .ot-page {
-  min-height: calc(100svh - 64px);
+  /* Divided by the wide-screen body zoom, as `ui/page.tsx` does; see index.css.
+     75px is `.content-area`'s padding-top, the room the fixed header takes. */
+  min-height: calc(100svh / var(--app-zoom) - 75px);
   background:
     transparent;
   border-radius: 26px 0 0 0;

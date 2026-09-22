@@ -2,30 +2,22 @@
  * The main invoice list — Phase 4 split, plus Phase 5.5 row virtualization.
  *
  * ─────────────────────────────────────────────────────────────────────────
- * THE SCROLL CONTAINER IS `document.body`, AND THAT WAS A BUG
+ * THE SCROLL CONTAINER IS THE WINDOW
  * ─────────────────────────────────────────────────────────────────────────
  * This page has no inner vertical scrollbar — the wrapper only ever set
  * `overflow-x: auto` (for narrow viewports) and the table grows with the page.
- * So this used `useWindowVirtualizer`, which reads `window.scrollY`.
+ * So it virtualises against the window, and `scrollMargin` is where the list
+ * starts in the document.
  *
- * `window.scrollY` is ALWAYS 0 in this app. `index.css` sets
- * `html, body, #root { height: 100% }` and `overflow-x: hidden` on both html
- * and body, which makes BODY the scrolling box rather than the viewport — so
- * the document never scrolls and neither does the window.
- *
- * The consequence was not subtle. Measured against a 300-row list: scrolled
- * to the very bottom (`document.body.scrollTop` 18825), twenty-eight rows were
- * mounted and row 300 was not in the DOM at all. Every invoice past the first
- * screenful was unreachable — the user saw a tall blank area where the rest of
- * the list should be.
- *
- * `useVirtualizer` with an explicit `getScrollElement` fixes it by measuring
- * the box that actually scrolls. Nothing about the LAYOUT changes: still no
- * nested scrollbar, still the same two spacer rows.
- *
- * If the shell's scrolling ever moves back to the window, this is the line to
- * change — and `e2e` should keep a long-list case, because nothing shorter
- * than ~30 rows can tell the two apart.
+ * This has been round once already. For a while `index.css` gave `body`
+ * `height: 100%` and `overflow-x: hidden`, which made BODY the scrolling box
+ * and left `window.scrollY` at 0 — so `useWindowVirtualizer` mounted
+ * twenty-eight rows of a 300-row list and the rest was blank. The fix then was
+ * `useVirtualizer` against `document.body`. The shell has since gone back to
+ * a single window scroller (see the note at the top of `index.css`: the body
+ * scroller doubled up with the window's under the wide-screen zoom), so this
+ * is the window virtualizer again. `e2e/virtualization.spec.ts` keeps a
+ * long-list case, because nothing shorter than ~30 rows can tell the two apart.
  *
  * ─────────────────────────────────────────────────────────────────────────
  * WHY A FIXED `estimateSize`, NOT DYNAMIC MEASUREMENT
@@ -53,7 +45,7 @@
  * where Approve or Post used to be and gets hit by muscle memory.
  */
 import { useState } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import {
   HiOutlineArrowPath,
   HiOutlineArrowUturnLeft,
@@ -122,16 +114,15 @@ export default function InvoiceTable({ view }: { view: UseInvoiceReviewResult })
   // node on every render from then on — no extra render pass to converge on.
   //
   // `offsetTop` is measured from the offsetParent, which is `body` here: no
-  // ancestor between this div and the body is positioned, and body is the
-  // scroller. If a `position: relative` is ever added to `Page`, `Card` or
-  // `.content-area`, this becomes an offset within THAT box instead and the
-  // rows will start landing in the wrong place.
+  // ancestor between this div and the body is positioned, so it is also the
+  // document offset the window virtualizer needs. If a `position: relative`
+  // is ever added to `Page`, `Card` or `.content-area`, this becomes an offset
+  // within THAT box instead and the rows will start landing in the wrong place.
   const [wrapNode, setWrapNode] = useState<HTMLDivElement | null>(null);
   const scrollMargin = wrapNode?.offsetTop ?? 0;
 
-  const rowVirtualizer = useVirtualizer({
+  const rowVirtualizer = useWindowVirtualizer({
     count: records.length,
-    getScrollElement: () => (typeof document === "undefined" ? null : document.body),
     estimateSize: () => ESTIMATED_ROW_HEIGHT,
     overscan: 12,
     scrollMargin,
