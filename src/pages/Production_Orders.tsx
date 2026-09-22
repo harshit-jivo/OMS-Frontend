@@ -391,7 +391,10 @@ export function OrderDetailDialog({
 }) {
   const [full, setFull] = useState<ProductionOrder | null>(null);
   const [logs, setLogs] = useState<ProductionActionLog[]>([]);
-  const [loading, setLoading] = useState(false);
+  // No `loading` flag here any more: the only thing that read it was the
+  // History skeleton, and History now renders only when it has something to
+  // show. The order and its history fill in behind the fields that are
+  // already on screen from the list row.
   /* Stock is loaded separately from the order and the history.
    *
    * It is a live HANA read against OWHS/OITW, so it is the one call here that
@@ -413,7 +416,6 @@ export function OrderDetailDialog({
       return;
     }
     let cancelled = false;
-    setLoading(true);
     setStockLoading(true);
     setStockError("");
     setStock(null);
@@ -430,9 +432,10 @@ export function OrderDetailDialog({
         setFull(one);
         setLogs(history);
       } catch {
+        // Fall back to the row the list already has. Every field the dialog
+        // shows is on it except `gate_exemption_reason`, so a failed detail
+        // fetch costs one line rather than the whole dialog.
         if (!cancelled) setFull(order);
-      } finally {
-        if (!cancelled) setLoading(false);
       }
     })();
     void (async () => {
@@ -451,6 +454,24 @@ export function OrderDetailDialog({
   }, [order]);
 
   const row = full ?? order;
+
+  /*
+   * History, minus the row every order has.
+   *
+   * `SYNC · system · "Synced from SAP and routed to PRDO_FG"` is written once
+   * for every order that has ever existed, so it carries no information: it is
+   * on screen precisely when there is nothing to say. It also sits at the top,
+   * which is where the eye goes first.
+   *
+   * A SYNC that recorded a CHANGE is kept — `action_data` holds the field-level
+   * old/new from a refresh, and "planned qty 100 -> 150, after you approved it"
+   * is the single most important line this dialog can show. Filtering on the
+   * action alone would have thrown those away with the noise.
+   */
+  const shownLogs = useMemo(
+    () => logs.filter((entry) => entry.action !== "SYNC" || entry.action_data),
+    [logs],
+  );
 
   return (
     <Dialog open={Boolean(order)} onOpenChange={(next) => !next && onClose()}>
@@ -539,15 +560,20 @@ export function OrderDetailDialog({
               </div>
             )}
 
-            <div>
-              <div className="mb-1.5 text-[12.5px] font-medium text-ink">History</div>
-              {loading ? (
-                <Skeleton className="h-16 w-full" />
-              ) : logs.length === 0 ? (
-                <div className="text-[12.5px] text-subtle">Nothing recorded yet.</div>
-              ) : (
+            {/* Only when there IS a history.
+                Since the routing SYNC row is filtered out above, an order
+                nobody has decided yet has an empty one — so "History / Nothing
+                recorded yet" was a heading and a disclaimer occupying two lines
+                to say that nothing happened. The absence says it.
+
+                No skeleton either: it would resolve to nothing on exactly those
+                orders, which is a worse flicker than the section appearing a
+                beat late on the ones that have something. */}
+            {shownLogs.length > 0 && (
+              <div>
+                <div className="mb-1.5 text-[12.5px] font-medium text-ink">History</div>
                 <ol className="space-y-1.5">
-                  {logs.map((entry) => (
+                  {shownLogs.map((entry) => (
                     <li key={entry.id} className="text-[12.5px]">
                       <span className="font-medium text-ink">{entry.action}</span>
                       {entry.stage_name ? ` · ${entry.stage_name}` : ""}
@@ -569,8 +595,8 @@ export function OrderDetailDialog({
                     </li>
                   ))}
                 </ol>
-              )}
-            </div>
+              </div>
+            )}
           </DialogBody>
 
           <DialogFooter>
@@ -609,10 +635,6 @@ function StockPanel({
   warehouse: string;
 }) {
   const rows = stock?.results ?? [];
-  // A number for the total line only. The per-row values stay strings — they
-  // are numeric(19,6), and putting them through Number() to render is exactly
-  // the precision loss the API went to trouble to avoid.
-  const total = rows.reduce((sum, r) => sum + Number(r.on_hand || 0), 0);
 
   return (
     <div>
@@ -681,10 +703,6 @@ function StockPanel({
               </li>
             ))}
           </ul>
-          <div className="border-t border-line px-2.5 py-1.5 text-[12px] text-subtle">
-            {total.toLocaleString("en-IN", { maximumFractionDigits: 2 })} at this site ·
-            live from SAP
-          </div>
         </div>
       )}
     </div>
