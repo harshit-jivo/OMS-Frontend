@@ -2,7 +2,6 @@ import { useState, useEffect, useMemo } from "react";
 import { startExcelExport } from "../utils/excelExport";
 import {
   getOrderItemSchemeNames,
-  getOrderItemSchemes,
   getOrderItemSchemeQtyText,
   getOrderItemTotalLtrs,
   ordersService,
@@ -17,7 +16,7 @@ import type {
 import { useQueryClient } from "@tanstack/react-query";
 
 import { useAssignedParties, useCurrentUserOrders, useOrderStatuses } from "../lib/orderQueries";
-import { useUILabels } from "../services/uiConfig";
+import { OrderItemsTable } from "@/components/orders/OrderItemsTable";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   HiEye, // View
@@ -123,15 +122,6 @@ const VARIETY_TONE: Record<string, "info" | "note" | "neutral"> = {
   Other: "neutral",
 };
 
-/** `item.variety_type` arrives as SAP's uppercase key (PREMIUM / COMMODITY). */
-const titleCaseVariety = (value: string): string => {
-  const text = String(value).trim().toLowerCase();
-  return text ? text.charAt(0).toUpperCase() + text.slice(1) : "";
-};
-
-const varietyBadgeTone = (value: string): "info" | "note" | "neutral" =>
-  VARIETY_TONE[titleCaseVariety(value)] ?? "neutral";
-
 const isRejectedOrder = (order: Pick<Order, "status_display">) =>
   String(order.status_display || "")
     .toLowerCase()
@@ -163,7 +153,6 @@ const getRejectedByFromLogs = (logs: OrderLog[]) => {
 };
 
 export default function View_Orders() {
-  const { t } = useUILabels();
   const location = useLocation();
   const navigate = useNavigate();
   // Shared with both Order_Tracking pages — one key, so moving between them
@@ -930,112 +919,12 @@ export default function View_Orders() {
               <CardTitle>Items</CardTitle>
               <Badge tone="neutral">{selectedItems.length}</Badge>
             </CardHeader>
-            {/* The table IS the item list now. `ItemSection` rendered the
-                same items a second time above it, as collapsible Premium /
-                Commodity / Others accordions of cards — so every line appeared
-                twice on the page. The variety it grouped by is a column here
-                instead. It stays in use on five other order screens. */}
-            <div className="overflow-x-auto">
-              <Table density="compact">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>#</TableHead>
-                    <TableHead>Item Code</TableHead>
-                    <TableHead className="min-w-[250px]">Item Name</TableHead>
-                    <TableHead>Category</TableHead>
-                    <TableHead>Variety</TableHead>
-                    <TableHead>Scheme</TableHead>
-                    <TableHead>Scheme Qty</TableHead>
-                    <TableHead>Qty</TableHead>
-                    <TableHead>Pcs</TableHead>
-                    <TableHead>Boxes</TableHead>
-                    <TableHead>Ltrs</TableHead>
-                    {/* <TableHead>Scheme Ltrs</TableHead> */}
-                    <TableHead>Total Ltrs</TableHead>
-                    <TableHead>{t("price_list", "Price List (Basic)")}</TableHead>
-                    <TableHead>Basic Price</TableHead>
-                    <TableHead>Tax %</TableHead>
-                    <TableHead className="text-right">Amount</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {selectedItems.length > 0 ? (
-                    selectedItems.map((item, i) => {
-                      const schemes = getOrderItemSchemes(item);
-
-                      return (
-                        <TableRow key={i}>
-                          <TableCell className="text-center text-subtle">
-                            {i + 1}
-                          </TableCell>
-                          <TableCell>
-                            <span className="font-medium whitespace-nowrap text-ink">{item.item_code}</span>
-                          </TableCell>
-                          <TableCell className="min-w-[250px] font-medium text-ink">
-                            {item.item_name}
-                          </TableCell>
-                          <TableCell>{item.category}</TableCell>
-                          <TableCell>
-                            {item.variety_type ? (
-                              <Badge tone={varietyBadgeTone(item.variety_type)}>
-                                {titleCaseVariety(item.variety_type)}
-                              </Badge>
-                            ) : (
-                              <span className="text-subtle">-</span>
-                            )}
-                          </TableCell>
-                          <TableCell colSpan={2}>
-                            {schemes.length > 0 ? (
-                              <div className="flex flex-col gap-1" aria-label="Applied schemes">
-                                {schemes.map((scheme, schemeIndex) => (
-                                  <div
-                                    className="flex items-baseline gap-1.5 text-[12px]"
-                                    key={`${item.item_code}-scheme-${schemeIndex}`}
-                                  >
-                                    <span className="text-ink">{scheme.name || "-"}</span>
-                                    <span className="text-subtle">Qty {scheme.qty || 0}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (
-                              <span className="text-[12px] text-subtle">No scheme</span>
-                            )}
-                          </TableCell>
-                          <TableCell className="text-center">{item.qty}</TableCell>
-                          <TableCell className="text-center">{item.pcs}</TableCell>
-                          <TableCell className="text-center">
-                            {Number(item.boxes).toFixed(2)}
-                          </TableCell>
-                          <TableCell className="text-center">{item.ltrs}</TableCell>
-                          {/* <TableCell style={{textAlign:'center'}}>{item.scheme_name ? ((item as any).scheme_ltrs || 0) : "—"}</TableCell> */}
-                          <TableCell className="text-center">
-                            {getOrderItemTotalLtrs(item).toFixed(2)}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {Number(item.price_list_basic).toFixed(2)}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {Number(item.basic_price).toFixed(2)}
-                          </TableCell>
-                          <TableCell className="text-center">
-                            {Number(item.tax_rate).toFixed(2)}
-                          </TableCell>
-                          <TableCell className="text-right font-semibold text-ink">
-                            {Number(item.total).toFixed(2)}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })
-                  ) : (
-                    <TableRow>
-                      <TableCell colSpan={15} className="py-8 text-center text-subtle">
-                        No items found
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </div>
+            {/* The shared line-item cards — the same ones every approval
+                screen draws. `ItemSection` used to render the same items a
+                second time above this as collapsible Premium / Commodity /
+                Others accordions; the variety-cost cards above state that
+                split now, so the per-line chip is off while they show. */}
+            <OrderItemsTable items={selectedItems} variety={varietyCosts.length === 0} />
           </Card>
 
         </>

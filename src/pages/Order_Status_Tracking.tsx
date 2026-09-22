@@ -545,10 +545,12 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
               <DetailField label="Party state" value={orderDetails.party_state} />
               <DetailField label="Delivery date" value={orderDetails.delivery_date} />
               <DetailField label="PO number" value={orderDetails.po_number} />
-              {/* Only ever present once an order has actually reached SAP, so
-                  it is worth showing HERE — unlike on the approval queues,
-                  where it is blank by definition. */}
-              <DetailField label="Quotation no" value={orderDetails.sap_doc_number} />
+              {/* Who raised it, not the SAP quotation number that used to sit
+                  here: on a tracking screen the reviewer is following up a
+                  decision they made, and the person to follow up WITH is the
+                  salesperson. The quotation number is still in the Excel
+                  export for anyone reconciling against SAP. */}
+              <DetailField label="Created by" value={orderDetails.created_by_name} />
               <DetailField label="Bill to" value={orderDetails.bill_to_address} />
               <DetailField label="Ship to" value={orderDetails.ship_to_address} />
               <DetailField
