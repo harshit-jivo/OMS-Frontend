@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/page";
 import { Skeleton } from "@/components/ui/skeleton";
 import { OrderTimeline } from "@/components/orders/OrderTimelineDialog";
+import { OrderItemsTable } from "@/components/orders/OrderItemsTable";
 import { toneForStatus } from "@/components/ui/statusTone";
 import {
   HiOutlineArrowPath,
@@ -923,27 +924,71 @@ export default function Order_Tracking() {
             }
           />
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Order</CardTitle>
-            </CardHeader>
-            <DetailGrid>
-              <DetailField label="Card code" value={selectedOrder.card_code} />
-              <DetailField label="Created at" value={formatCreatedDateTime(selectedOrder.created_at)} />
-              <DetailField label="Delivery date" value={selectedOrder.delivery_date} />
-              <DetailField label="PO number" value={selectedOrder.po_number} />
-              <DetailField
-                label="Comment"
-                value={selectedOrder.remarks?.trim() ? selectedOrder.remarks : ""}
-                span="full"
-                hideWhenEmpty
-              />
-            </DetailGrid>
-          </Card>
+          {/* Two columns: the order on the left, its trail on the right.
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Order log</CardTitle>
+              A tracker is read two ways at once — "what did I order" and
+              "where has it got to" — and stacked cards made the second a
+              scroll away from the first. The trail is the narrower column
+              because a timeline is one line per step; the order gets the
+              room because addresses and items need it. Below `lg` the two
+              stack again, order first. */}
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,400px)] lg:items-start">
+            <div className="space-y-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Order</CardTitle>
+                  {selectedOrder.total_amount !== undefined ? (
+                    <span className="text-[15px] font-semibold tabular-nums text-ink">
+                      {Number(selectedOrder.total_amount).toFixed(2)}
+                    </span>
+                  ) : null}
+                </CardHeader>
+                <DetailGrid>
+                  <DetailField label="Party" value={selectedOrder.card_name} />
+                  <DetailField label="Card code" value={selectedOrder.card_code} />
+                  <DetailField label="Party state" value={selectedOrder.party_state} hideWhenEmpty />
+                  <DetailField label="Created by" value={selectedOrder.created_by_name} hideWhenEmpty />
+                  <DetailField label="Created at" value={formatCreatedDateTime(selectedOrder.created_at)} />
+                  <DetailField label="Delivery date" value={selectedOrder.delivery_date} />
+                  <DetailField label="PO number" value={selectedOrder.po_number} />
+                  <DetailField label="Dispatch from" value={selectedOrder.dispatch_from_name} hideWhenEmpty />
+                  <DetailField label="Bill to" value={selectedOrder.bill_to_address} hideWhenEmpty />
+                  <DetailField label="Ship to" value={selectedOrder.ship_to_address} hideWhenEmpty />
+                  <DetailField
+                    label="Comment"
+                    value={selectedOrder.remarks?.trim() ? selectedOrder.remarks : ""}
+                    span="full"
+                    hideWhenEmpty
+                  />
+                </DetailGrid>
+              </Card>
+
+              {/* The lines, the same cards every order screen draws. The
+                  list rows are summary-only, so until the detail fetch lands
+                  there are no items to draw and the card waits. */}
+              <Card className="overflow-hidden p-0">
+                <CardHeader className="mb-0 border-b border-line px-4 py-3">
+                  <CardTitle>Items</CardTitle>
+                  <Badge tone="neutral">
+                    {selectedOrder.items?.length ?? selectedOrder.items_count ?? 0}
+                  </Badge>
+                </CardHeader>
+                {logsLoading && !selectedOrder.items?.length ? (
+                  <div className="space-y-3 p-4" role="status" aria-live="polite">
+                    <span className="sr-only">Loading order items</span>
+                    {[0, 1].map((row) => (
+                      <Skeleton key={row} className="h-16 w-full" />
+                    ))}
+                  </div>
+                ) : (
+                  <OrderItemsTable items={selectedOrder.items ?? []} />
+                )}
+              </Card>
+            </div>
+
+            <Card className="lg:sticky lg:top-4">
+              <CardHeader>
+                <CardTitle>Order log</CardTitle>
               {!logsLoading ? <Badge tone="neutral">{timelineLogs.length}</Badge> : null}
             </CardHeader>
 
@@ -1038,6 +1083,7 @@ export default function Order_Tracking() {
               />
             )}
           </Card>
+          </div>
         </>
       ) : null}
     </Page>
