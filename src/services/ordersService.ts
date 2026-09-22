@@ -995,6 +995,13 @@ export const ordersService = {
     return response.data;
   },
 
+  /** What a new order starts with — the per-category default warehouse, from the server's env. */
+  getOrderDefaults: async () => {
+    const response = await api.get("/orders/defaults/");
+    const data = (response.data ?? {}) as { warehouse_code?: Record<string, string> };
+    return { warehouse_code: data.warehouse_code ?? {} };
+  },
+
   UpdateStatus: async (orderId: number, status: number, reason?: string) => {
     const response = await api.post(`/orders/${orderId}/update-status/`, {
       status,

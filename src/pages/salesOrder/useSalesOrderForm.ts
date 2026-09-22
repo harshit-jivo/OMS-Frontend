@@ -27,6 +27,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 
 import { getCurrentUser } from "@/services/authService";
 import { ordersService } from "@/services/ordersService";
+import { sapService } from "@/services/sapService";
 import type {
   CreateOrder,
   Order,
@@ -201,6 +202,10 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
   const [companyDropdownOpen, setCompanyDropdownOpen] = useState(false);
   const [openRowDropdown, setOpenRowDropdown] = useState<string | null>(null);
   const [branch, setBranch] = useState<BranchOption[]>([]);
+  // The warehouses HANA lists for the order's category, and the default the
+  // server reads from its environment per category (`/orders/defaults/`).
+  const [warehouses, setWarehouses] = useState<{ code: string; name: string }[]>([]);
+  const [defaultWarehouses, setDefaultWarehouses] = useState<Record<string, string>>({});
   const [billAddress, setBillAddress] = useState<AddressOption[]>([]);
   const [shipAddress, setShipAddress] = useState<AddressOption[]>([]);
   const [category, setCategory] = useState<string[]>([]);
@@ -252,9 +257,9 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
     poNumber: "",
     company: "",
     comment: "",
-    // Company-3 (Mart) orders pick a dispatch warehouse, sent as
-    // `warehouse_code` on submit. Defaults to GP-FGM.
-    warehouse: "GP-FGM",
+    // One warehouse for the whole order, sent as `warehouse_code`. Filled in
+    // from the server's per-category default once `/orders/defaults/` lands.
+    warehouse: "",
   });
 
   /**
@@ -360,7 +365,51 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
     fetchProducts();
     fetchCompany();
     fetchCurrentUserProfile();
+    ordersService
+      .getOrderDefaults()
+      .then((defaults) => setDefaultWarehouses(defaults.warehouse_code))
+      .catch((error) => console.log("Error fetching order defaults:", error));
   }, []);
+
+  /**
+   * The category this order ships as — the party's, else the user's own.
+   * Drives which HANA schema lists the warehouses and which env default
+   * applies. "BEVERAGE" (singular) is the HANA endpoint's spelling.
+   */
+  const orderCategory = normalizeOptionText(selectedPartyCategory || userDefaultCategory);
+  const warehouseBranch: "OIL" | "BEVERAGE" | "MART" =
+    orderCategory === "beverages" || orderCategory === "beverage"
+      ? "BEVERAGE"
+      : orderCategory === "mart"
+        ? "MART"
+        : "OIL";
+  const defaultWarehouse =
+    defaultWarehouses[
+      warehouseBranch === "BEVERAGE" ? "BEVERAGES" : warehouseBranch
+    ] || defaultWarehouses.OIL || "";
+
+  useEffect(() => {
+    let cancelled = false;
+    sapService
+      .getWarehouses(warehouseBranch)
+      .then((rows) => {
+        if (!cancelled) setWarehouses(rows);
+      })
+      .catch((error) => {
+        console.log("Error fetching warehouses:", error);
+        if (!cancelled) setWarehouses([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [warehouseBranch]);
+
+  // Start on the env default the moment it is known. A saved order keeps its
+  // own warehouse: the edit loader sets `formData.warehouse` before this runs.
+  useEffect(() => {
+    if (!defaultWarehouse || formData.warehouse) return;
+    setFormData((prev) => (prev.warehouse ? prev : { ...prev, warehouse: defaultWarehouse }));
+  }, [defaultWarehouse, formData.warehouse]);
 
   useEffect(() => {
     if (!isLoadingFromOrder) {
@@ -383,11 +432,14 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
     }
   };
 
+  // Every active branch is offered; the factory is where orders ship from
+  // unless someone says otherwise, so it is the default when present.
   useEffect(() => {
     if (isLoadingFromOrder || formData.dispatch || branch.length === 0) return;
+    const factory = branch.find((d) => normalizeOptionText(d.bpl_name).includes("factory"));
     setFormData((prev) => ({
       ...prev,
-      dispatch: prev.dispatch || String(branch[0]?.bpl_id || ""),
+      dispatch: prev.dispatch || String((factory ?? branch[0])?.bpl_id || ""),
     }));
   }, [branch, formData.dispatch, isLoadingFromOrder]);
 
@@ -762,9 +814,9 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
           Deliverydate: isDuplicateMode ? getDefaultDeliveryDate() : order.delivery_date || "",
           poNumber: isDuplicateMode ? "" : order.po_number || "",
           company: order.company ? String(order.company) : "",
-          // Pick the warehouse straight from the saved order; default to GP-FGM
-          // for orders placed before the picker existed.
-          warehouse: order.warehouse_code || "GP-FGM",
+          // The saved order's warehouse. Blank on orders placed before the
+          // picker existed; the default effect fills it from the env then.
+          warehouse: order.warehouse_code || "",
           comment: isDuplicateMode ? "" : order.remarks || "",
         });
         const orderStateCode = order.party_state || "";
@@ -885,7 +937,7 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
         company.find((item) => normalizeOptionText(item?.name).includes("jivo wellness"))?.id || "",
       ),
       comment: "",
-      warehouse: "GP-FGM",
+      warehouse: defaultWarehouse,
     });
 
     setSelectedPartyCategory(userDefaultCategory);
@@ -982,9 +1034,7 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
 
       delivery_date: formData.Deliverydate,
       ...(canEditPoNumber ? { po_number: formData.poNumber.trim() } : {}),
-      // Warehouse is only chosen on Mart orders; others send "" so SAP sync
-      // falls back to the per-category default.
-      warehouse_code: isMartOrder ? formData.warehouse : "",
+      warehouse_code: formData.warehouse,
       remarks: formData.comment.trim(),
       is_foc: isFocOrder,
       company: Number(formData.company),
@@ -1139,7 +1189,7 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
         branch.find((d) => String(d.bpl_id) === String(formData.dispatch))?.bpl_name || "",
       delivery_date: formData.Deliverydate || null,
       ...(canEditPoNumber ? { po_number: formData.poNumber.trim() } : {}),
-      warehouse_code: isMartOrder ? formData.warehouse : "",
+      warehouse_code: formData.warehouse,
       remarks: formData.comment.trim(),
       is_foc: isFocOrder,
       company: Number(formData.company) || 0,
@@ -2067,6 +2117,7 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
     openRowDropdown,
     setOpenRowDropdown,
     branch,
+    warehouses,
     billAddress,
     shipAddress,
     category,

@@ -2170,6 +2170,18 @@ export const FIXTURES: Array<[pattern: RegExp, body: Body]> = [
     ],
   ],
 
+  // What a new order starts with. The form fills its Warehouse field from
+  // this rather than a hardcoded code, so without it the field sits blank.
+  [/\/orders\/defaults\//, { warehouse_code: { OIL: "GP-FG", BEVERAGES: "BV-FG", MART: "GP-FGM" } }],
+  [
+    /\/hana\/warehouses\//,
+    [
+      { WhsCode: "GP-FG", WhsName: "Gurgaon Plant FG" },
+      { WhsCode: "GP-FGM", WhsName: "Gurgaon Plant FG Mart" },
+      { WhsCode: "DL-MP", WhsName: "Delhi Mart" },
+    ],
+  ],
+
   /*
    * Addresses. `fetchPartyAddresses` falls back to the OTHER list only when one
    * is empty (Add_Sales.tsx:384-393), and choosing a party deliberately blanks

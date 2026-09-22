@@ -189,7 +189,6 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
     filteredShipAddresses,
     selectedPartyLabel,
     selectedDispatch,
-    isMartOrder,
     isSchemePanelHidden,
     selectedBillAddressLabel,
     selectedShipAddressLabel,
@@ -336,9 +335,6 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
     return [...counts.entries()].map(([value, count]) => ({ value, count }));
   };
 
-  // `isMartOrder` is defined above (near selectedCompanyLabel).
-  // Company-3 (Mart) orders also choose a dispatch warehouse. Display-only for
-  // now — the value is not persisted.
   const renderSchemePanel = (row: SalesRow, index: number) => {
     if (isSchemePanelHidden(row)) return null;
     return (
@@ -1301,6 +1297,10 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
             />
           )}
         </Field>
+
+        {/* Beside Dispatch From, where the shipping decision is made — not on
+            the summary step, where it used to hide behind the Mart gate. */}
+        <WarehouseField form={form} />
       </div>
     </div>
   );
@@ -1376,7 +1376,6 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
             )}
           </Field>
         )}
-        {isMartOrder && <WarehouseField form={form} />}
         <Field label="Company">
           {(control) =>
             renderTriggerSelect({
