@@ -140,6 +140,9 @@ export function ReferenceDetails({
   onChange,
   hasPartner,
   partnerLabel,
+  live = false,
+  loading = false,
+  error,
   rows,
   totals,
   onAllocationChange,
@@ -150,6 +153,11 @@ export function ReferenceDetails({
   onChange: (ids: string[]) => void;
   hasPartner: boolean;
   partnerLabel: string;
+  /** The list is read from SAP — said under the section title. */
+  live?: boolean;
+  loading?: boolean;
+  /** SAP could not be read; replaces the hint and marks the field. */
+  error?: string;
   rows: AllocationRow[];
   totals: AllocationTotals;
   onAllocationChange: (id: string, patch: Partial<Allocation>) => void;
@@ -161,23 +169,37 @@ export function ReferenceDetails({
     <FormSection
       title="Reference Details"
       description={
-        def.intro ??
-        `Tick every ${def.noun} this payment covers, then enter how much of each is being paid.`
+        <>
+          {def.intro ??
+            `Tick every ${def.noun} this payment covers, then enter how much of each is being paid.`}{" "}
+          <span className={live ? "font-medium text-ok" : "font-medium text-hold"}>
+            {live ? "Live from SAP." : "Sample data — not yet connected to SAP."}
+          </span>
+        </>
       }
     >
       <FormGrid className="md:grid-cols-3">
         <Field
           label={def.pluralLabel}
           required
-          hint={hasPartner ? undefined : `Pick the ${partnerLabel.toLowerCase()} first.`}
+          error={error}
+          hint={
+            error
+              ? undefined
+              : !hasPartner
+                ? `Pick the ${partnerLabel.toLowerCase()} first.`
+                : loading
+                  ? `Loading ${noun} from SAP…`
+                  : undefined
+          }
         >
           {(c) => (
             <MultiSelect<string>
               id={c.id}
               value={value}
               onChange={onChange}
-              disabled={!hasPartner}
-              placeholder={def.placeholder}
+              disabled={!hasPartner || loading}
+              placeholder={loading ? "Loading…" : def.placeholder}
               searchable
               searchPlaceholder={`Search ${def.numberLabel.toLowerCase()}…`}
               emptyText={`No open ${noun} for this ${partnerLabel.toLowerCase()}`}
@@ -186,9 +208,7 @@ export function ReferenceDetails({
               options={documents.map((doc) => ({
                 value: doc.id,
                 label: doc.number,
-                hint: doc.docType
-                  ? `${doc.docType} · ${formatDate(doc.date)}`
-                  : formatDate(doc.date),
+                hint: documentSubtitle(doc),
                 meta: `Open ${formatINR(doc.open)}`,
               }))}
             />
@@ -207,6 +227,16 @@ export function ReferenceDetails({
       ) : null}
     </FormSection>
   );
+}
+
+/**
+ * The small line under a document number: what kind it is (under "All"), the
+ * vendor's own reference (on a SAP bill), and its date.
+ */
+function documentSubtitle(doc: OpenDocument): string {
+  return [doc.docType, doc.reference ? `Ref ${doc.reference}` : null, formatDate(doc.date)]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 /* ── The selected documents, one payment line each ───────────────────────── */
@@ -318,10 +348,7 @@ function SelectedDocuments({
                 />
                 <span>
                   <span className="block text-[13px] font-semibold text-brand">{doc.number}</span>
-                  <span className="block text-[11px] text-subtle">
-                    {doc.docType ? `${doc.docType} · ` : ""}
-                    {formatDate(doc.date)}
-                  </span>
+                  <span className="block text-[11px] text-subtle">{documentSubtitle(doc)}</span>
                 </span>
               </button>
 
@@ -375,6 +402,12 @@ function SelectedDocuments({
                       <DetailField label={def.numberLabel} value={doc.number} />
                       {doc.docType ? <DetailField label="Document Type" value={doc.docType} /> : null}
                       <DetailField label={def.dateLabel} value={formatDate(doc.date)} />
+                      {doc.reference ? (
+                        <DetailField label="Vendor Ref." value={doc.reference} />
+                      ) : null}
+                      {doc.dueDate ? (
+                        <DetailField label="Due Date" value={formatDate(doc.dueDate)} />
+                      ) : null}
                       <DetailField label={def.originalLabel} value={formatINR(doc.original)} />
                       <DetailField label={def.paidLabel} value={formatINR(doc.paid)} />
                       <DetailField label="Open Amount" value={formatINR(doc.open)} strong />

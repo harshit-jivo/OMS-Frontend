@@ -200,21 +200,25 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   /*
    * Advance Payments — new request form.
    *
-   * Its own grant key, like every other module, rather than `anyUser`.
-   *
-   * `anyUser` was the first instinct — the page is a frontend preview with
-   * mock data, so there is nothing behind it to protect. But visibility here
-   * is what `/Home` builds its tiles from, and a route open to everyone put a
-   * tile in front of a user with no grants at all, which is the one case Home
-   * is supposed to answer with "nothing assigned yet" (Home.test.tsx caught
-   * it). A screen nobody has been given should not be the first thing a
-   * brand-new account sees.
-   *
-   * Administrators pass any permission check, so the screen stays reviewable
-   * without the key existing yet — which is all it needs while it is a
-   * preview. The key becomes real when the module does.
+   * `Advance_Payment` — EXACTLY the backend's key
+   * (`advance_payment/permissions.py`, registered in
+   * `core/permission_registry.py`). The form reads that app's SAP lookups, and
+   * each of them requires this key; a route gated on any other spelling would
+   * open a page whose every lookup then answers 403. It was `Advance_Payments`
+   * while the page was a mock, before the backend module existed.
    */
-  "/Advance_Payment_Request": { permissions: ["Advance_Payments"] },
+  "/Advance_Payment_Request": { permissions: ["Advance_Payment"] },
+  /*
+   * Advance Payments — approval desk. UI ONLY, on sample requests.
+   *
+   * Its own key, because deciding a payment and asking for one are different
+   * jobs — the same split as BackDate / BackDate_Approval. The backend does
+   * not register `Advance_Payment_Approval` yet (there are no requests to
+   * approve until the create endpoint exists), so today only administrators,
+   * who pass every check, can open it. The key must be added to the backend's
+   * permission registry when the approval endpoints land.
+   */
+  "/Advance_Payment_Approval": { permissions: ["Advance_Payment_Approval"] },
 
   // --- Document tracker ---------------------------------------------------
   // Gated centrally by role, mirroring tracker/permissions.py.

@@ -371,6 +371,8 @@ export function SearchSelect<T extends string | number>({
   disabled = false,
   size = "md",
   className,
+  onQueryChange,
+  loading = false,
 }: {
   id?: string;
   /** `""` is "nothing chosen". */
@@ -391,12 +393,34 @@ export function SearchSelect<T extends string | number>({
   disabled?: boolean;
   size?: Size;
   className?: string;
+  /**
+   * Told what is typed into the search box, for a list searched on the SERVER.
+   *
+   * For lists too long to ship whole — SAP's business partners run to
+   * thousands and the API caps a page — the caller fetches matches for the
+   * term and passes them back as `options`. The local filter still runs over
+   * what comes back, so a caller that ignores this prop changes nothing.
+   */
+  onQueryChange?: (query: string) => void;
+  /** Rows are being fetched: say so instead of "No matches". */
+  loading?: boolean;
 }) {
   const rootRef = React.useRef<HTMLDivElement>(null);
   const searchRef = React.useRef<HTMLInputElement>(null);
   const [open, setOpen] = useOpenState(rootRef);
   const [query, setQuery] = React.useState("");
   const listId = React.useId();
+
+  // Through a ref, so a caller passing a fresh arrow each render does not
+  // re-fire this for a query that has not changed. Refreshed in an effect —
+  // declared first, so it runs before the one below reads it.
+  const onQueryChangeRef = React.useRef(onQueryChange);
+  React.useEffect(() => {
+    onQueryChangeRef.current = onQueryChange;
+  });
+  React.useEffect(() => {
+    onQueryChangeRef.current?.(query);
+  }, [query]);
 
   // The search box takes focus as the panel opens: the whole reason this is
   // not a native select is that the list needs typing into.
@@ -490,7 +514,9 @@ export function SearchSelect<T extends string | number>({
               </button>
             ) : null}
             {shown.length === 0 ? (
-              <p className="m-0 px-2.5 py-3 text-center text-[12px] text-subtle">{emptyText}</p>
+              <p className="m-0 px-2.5 py-3 text-center text-[12px] text-subtle">
+                {loading ? "Loading…" : emptyText}
+              </p>
             ) : (
               shown.map((option) => {
                 const selected = option.value === value;
