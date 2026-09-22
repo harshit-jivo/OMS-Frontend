@@ -3,14 +3,18 @@
  * basic rate.
  *
  * One party selected shows and edits that party's catalogue; several selected
- * is a bulk mode, because the common jobs are "give these forty parties the new
- * SKU" and "put Haryana's mustard up ₹4" — neither of which is forty trips
- * through a one-party screen.
+ * is a bulk ASSIGN mode, because "give these forty parties the new SKU" is still
+ * a question about who buys what.
  *
  * Which forty is the other half of it: the picker is filtered by state, group
  * and category, so "all Haryana distributors" is three clicks rather than forty
- * recognitions of a name in a dropdown. Re-pricing itself lives in
- * `partyProducts/BulkRateEditor`.
+ * recognitions of a name in a dropdown.
+ *
+ * Re-pricing, turning products off and copying a catalogue USED to live here
+ * too, under the same selection. They are on `Bulk_Product_Assignment` now —
+ * they answer "what should these parties pay", which needs the product-first
+ * view this page has no room for, and the two jobs were only ever sharing a
+ * party picker.
  */
 import { useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -37,6 +41,7 @@ import { MultiSelect, type MultiSelectOption } from "@/components/ui/dropdown";
 import {
   FilterActions,
   FilterBar,
+  FilterSearchSelect,
   FilterCount,
   FilterMultiSelect,
   FilterSearch,
@@ -66,6 +71,7 @@ import type { Party } from "../services/sapService";
 import { userService } from "../services/userService";
 import api from "../services/api";
 import BulkRateEditor, { type PartySelection } from "./partyProducts/BulkRateEditor";
+import { useAssignableUsers, useUserPartyCodes } from "./partyProducts/userParties";
 
 interface PartyProduct {
   id: number;
@@ -116,6 +122,9 @@ const getPartySelectionKey = (party: SearchableParty) =>
   getPartyCode(party) + "||" + normalizeCategory(getPartyCategory(party));
 const getPartyKey = (party: SearchableParty) =>
   [getPartyCode(party), asText(party.category), asText(party.id)].filter(Boolean).join("-");
+
+/** Party chips drawn before the row collapses to a count. */
+const CHIPS_SHOWN = 24;
 
 const getSelectionFromKey = (key: string) => {
   const [cardCode, category = ""] = key.split("||");
@@ -184,6 +193,7 @@ export default function Party_Product_Assignment() {
    */
   const { items: rawParties } = useSapParties();
   const partyOptions = useMemo(() => mergeParties(rawParties), [rawParties]);
+  const { users: assignableUsers } = useAssignableUsers();
 
   /* Shared ["sap","products"] key. The old code did `setProducts(await
      sapService.getProducts())` with NO Array.isArray guard — the only consumer
@@ -239,6 +249,7 @@ export default function Party_Product_Assignment() {
   const [categoryFilter, setCategoryFilter] = useState<string>("ALL");
 
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showAllChips, setShowAllChips] = useState(false);
   const [modalSearch, setModalSearch] = useState("");
   const [selectedNewProducts, setSelectedNewProducts] = useState<Product[]>([]);
   const [newProductRates, setNewProductRates] = useState<Record<string, string>>({});
@@ -718,19 +729,62 @@ export default function Party_Product_Assignment() {
   const selectAllMatching = () =>
     setSelectedParties((prev) => [...new Set([...prev, ...matchingKeys])]);
 
+  /**
+   * Select everyone a salesperson sells to.
+   *
+   * `user_party_assignments` and `party_product_assignments` both key on
+   * (card_code, category), so a salesperson's book maps straight onto this
+   * page's selection with no join table to invent. It matters at the real
+   * sizes: one user carries 531 parties, which is the difference between a
+   * click and an afternoon of ticking.
+   *
+   * It ADDS to the selection rather than replacing it, so two books can be
+   * pulled in together, and it reports what it could not take — a code in
+   * their book that this page has no party for (synced away, or filtered to a
+   * category it does not carry) would otherwise go missing in silence.
+   */
+  const userParties = useUserPartyCodes();
+  const [userPick, setUserPick] = useState<number | "">("");
+  const [userNote, setUserNote] = useState("");
+
+  const selectUsersParties = (userId: number | "") => {
+    setUserPick(userId);
+    setUserNote("");
+    if (userId === "") return;
+    userParties.mutate(userId, {
+      onSuccess: (codes) => {
+        const wanted = new Set(codes);
+        const keys = partyOptions
+          .filter((party) => wanted.has(getPartyCode(party)))
+          .map(getPartySelectionKey);
+        setSelectedParties((prev) => [...new Set([...prev, ...keys])]);
+        const found = new Set(keys.map((key) => getSelectionFromKey(key).card_code));
+        const missing = codes.length - found.size;
+        setUserNote(
+          keys.length === 0
+            ? "None of their parties are on this page."
+            : `Added ${keys.length}` + (missing > 0 ? ` · ${missing} not on this page` : ""),
+        );
+      },
+      onError: () => setUserNote("Could not read their parties."),
+    });
+  };
+
   const clearPartyFilters = () => {
     setStateFilter([]);
     setGroupFilter([]);
     setPartyCategoryFilter([]);
+    setUserPick("");
+    setUserNote("");
   };
 
+  const isSingleParty = selectedParties.length === 1;
   /** What the bulk endpoints are addressed with — one entry per selected party. */
   const partySelections = useMemo<PartySelection[]>(
     () => selectedParties.map(getSelectionFromKey),
     [selectedParties],
   );
 
-  const isSingleParty = selectedParties.length === 1;
   const selectedPartyDetails = isSingleParty
     ? partyOptions.find((p) => getPartySelectionKey(p) === selectedParties[0])
     : null;
@@ -826,6 +880,28 @@ export default function Party_Product_Assignment() {
             "every Haryana distributor" is a description, not forty names to
             recognise one at a time in a dropdown. */}
         <FilterBar className="mb-3">
+          {/* Not a filter of the list below, unlike its three neighbours — it
+              SELECTS. It sits here because "which parties" is the question
+              this whole row answers, and a user's book is the commonest way
+              to answer it. See `useAssignableUsers` for why only managers and
+              billing appear, and why the roster is scoped to the viewer's own
+              categories. */}
+          <FilterSearchSelect
+            label="Assigned to"
+            value={userPick}
+            onChange={selectUsersParties}
+            options={assignableUsers.map((user) => ({
+              value: user.id,
+              label: user.name,
+              hint: [user.category, user.username].filter(Boolean).join(" · "),
+            }))}
+            placeholder="Any user"
+            searchPlaceholder="Search users…"
+            clearLabel="Any user"
+            maxShown={60}
+            disabled={userParties.isPending}
+            fieldClassName="min-w-[210px]"
+          />
           <FilterMultiSelect
             label="State"
             value={stateFilter}
@@ -855,7 +931,9 @@ export default function Party_Product_Assignment() {
             emptyText="No categories loaded"
           />
           <FilterCount>
-            {matchingParties.length} of {partyOptions.length} parties match
+            {userParties.isPending
+              ? "Reading their parties…"
+              : userNote || `${matchingParties.length} of ${partyOptions.length} parties match`}
           </FilterCount>
           <FilterActions>
             <Button
@@ -908,9 +986,16 @@ export default function Party_Product_Assignment() {
           )}
         </Field>
 
+        {/* The chips are capped.
+            "Select 4 matching" is one click and this page is used with whole
+            states selected, so an uncapped row was several hundred chips —
+            taller than the table it sits above, and a wall to scroll past on
+            every visit. The first `CHIPS_SHOWN` are enough to see WHICH
+            parties these are; the count says how many more, and the whole set
+            is one click away when someone actually needs to remove one. */}
         {selectedParties.length > 0 && (
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            {selectedParties.map((partyKey) => {
+          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+            {(showAllChips ? selectedParties : selectedParties.slice(0, CHIPS_SHOWN)).map((partyKey) => {
               const p = partyOptions.find((x) => getPartySelectionKey(x) === partyKey);
               const fallback = getSelectionFromKey(partyKey);
               return (
@@ -936,6 +1021,17 @@ export default function Party_Product_Assignment() {
                 </span>
               );
             })}
+            {selectedParties.length > CHIPS_SHOWN ? (
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={() => setShowAllChips((prev) => !prev)}
+              >
+                {showAllChips
+                  ? "Show fewer"
+                  : `and ${selectedParties.length - CHIPS_SHOWN} more`}
+              </Button>
+            ) : null}
           </div>
         )}
       </Card>
@@ -957,34 +1053,24 @@ export default function Party_Product_Assignment() {
             </Button>
           </CardHeader>
 
-          <ul className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2 p-0">
-            {selectedParties.map((partyKey) => {
-              const p = partyOptions.find((x) => getPartySelectionKey(x) === partyKey);
-              const fallback = getSelectionFromKey(partyKey);
-              return (
-                <li
-                  key={partyKey}
-                  className="rounded-sm border border-line bg-surface px-3 py-2 text-[13px]"
-                >
-                  <span className="block truncate font-semibold text-ink">
-                    {p ? getPartyName(p) || fallback.card_code : fallback.card_code}
-                  </span>
-                  <span className="text-[11.5px] text-subtle">
-                    {p
-                      ? getPartyMetaLine(p)
-                      : [fallback.card_code, fallback.category].filter(Boolean).join(" · ")}
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
+          {/* The parties themselves are NOT listed again here. They are already
+              above, as chips with a remove button on each — and at the sizes
+              this page actually sees (several hundred selected) a second copy
+              as cards was the single tallest thing on the screen, listing what
+              the reader had just finished reading. */}
         </Card>
       )}
 
-      {/* ── Re-pricing the whole selection ──
-          Below the assignment card because it answers the question that comes
-          AFTER "who": these parties hold these products — at what, and what
-          should they hold them at now. */}
+      {/* ── Several parties: what they hold, and re-pricing it ──
+          `BulkRateEditor` is the same component Bulk Product Assignment's "By
+          party" tab renders, so both screens answer a multi-party selection
+          identically — one definition of what re-pricing looks like, reached
+          from either direction. Turning products off and on, and copying a
+          catalogue, come with it.
+
+          That page keeps its own reason to exist: the PRODUCT-first view
+          ("which parties hold this item, turn it off for all of them"), which
+          is a different question and not one this page asks. */}
       {selectedParties.length > 1 && <BulkRateEditor selections={partySelections} />}
 
       {/* ── One party's catalogue ── */}
@@ -993,7 +1079,7 @@ export default function Party_Product_Assignment() {
           <EmptyState
             icon={HiOutlineCube}
             title="No party selected"
-            hint="Pick one party to see what it is assigned, or several to bulk-assign."
+            hint="Pick one party to see what it is assigned, or several to assign and re-price them together."
           />
         </Card>
       ) : selectedPartyDetails ? (

@@ -44,6 +44,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Pagination } from "@/components/ui/pagination";
 import { showToast } from "@/lib/toastStore";
 import api from "../../services/api";
 
@@ -152,6 +153,15 @@ export default function BulkRateEditor({ selections }: { selections: PartySelect
 
   const [mode, setMode] = useState<RateMode>("set");
   const [applyTo, setApplyTo] = useState<ApplyTo>("existing");
+  /**
+   * Rows per page.
+   *
+   * The selection can hold every product several hundred parties buy between
+   * them, and this table drew all of them: measured at 30,000px tall, which is
+   * a page nobody reads and a scrollbar nobody can aim. 25, matching the other
+   * archive tables in the app.
+   */
+  const PAGE_SIZE = 25;
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("ALL");
   const [varietyFilter, setVarietyFilter] = useState("ALL");
@@ -215,6 +225,37 @@ export default function BulkRateEditor({ selections }: { selections: PartySelect
       );
     });
   }, [rows, search, categoryFilter, effectiveVariety]);
+
+  /*
+   * ONE PAGE IS DRAWN. "Visible" still means every row the filters leave.
+   *
+   * That distinction is load-bearing: the tick-all box, the two Fill buttons
+   * and the counts below all read `visibleRows`, so they go on meaning "every
+   * product this filter shows" rather than quietly shrinking to whatever
+   * twenty-five rows happen to be under the cursor. Pagination here is what
+   * the table DRAWS, not what the bulk actions reach — the opposite would
+   * change what a re-price does without saying so.
+   *
+   * The page is stamped with the filters it was turned to, because narrowing
+   * the list has to send you back to page 1: a search run from page 6 would
+   * otherwise land past the end of its own results and draw nothing. Stamping
+   * is how the rest of this app does that (see `Product_Rates`); an effect
+   * calling `setPage` would be a second render and the lint rule that forbids
+   * cascading renders, both for a value that can simply be derived.
+   */
+  const pageStamp = [search, categoryFilter, effectiveVariety, selectionKey].join("|");
+  const [paging, setPaging] = useState({ stamp: pageStamp, page: 1 });
+  const setPage = (next: number) => setPaging({ stamp: pageStamp, page: next });
+
+  const pageCount = Math.max(1, Math.ceil(visibleRows.length / PAGE_SIZE));
+  const safePage = Math.min(
+    Math.max(1, paging.stamp === pageStamp ? paging.page : 1),
+    pageCount,
+  );
+  const pageRows = useMemo(
+    () => visibleRows.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
+    [visibleRows, safePage],
+  );
 
   /*
    * Ticks that no longer name a listed product — the selection changed under
@@ -524,7 +565,7 @@ export default function BulkRateEditor({ selections }: { selections: PartySelect
                     : "No product matches these filters."}
                 </TableEmpty>
               ) : (
-                visibleRows.map((row) => {
+                pageRows.map((row) => {
                   const key = rowKey(row);
                   const isTicked = tickedSet.has(key);
                   const raw = values[key] ?? "";
@@ -621,6 +662,19 @@ export default function BulkRateEditor({ selections }: { selections: PartySelect
               )}
             </TableBody>
           </Table>
+
+          {pageCount > 1 ? (
+            <Pagination
+              className="border-t border-line pt-3"
+              page={safePage}
+              totalPages={pageCount}
+              onPageChange={setPage}
+              summary={`Showing ${(safePage - 1) * PAGE_SIZE + 1}–${Math.min(
+                safePage * PAGE_SIZE,
+                visibleRows.length,
+              )} of ${visibleRows.length}`}
+            />
+          ) : null}
 
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
             <p className="m-0 text-[12px] text-subtle">
