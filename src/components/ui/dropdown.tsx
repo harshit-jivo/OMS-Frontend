@@ -147,6 +147,12 @@ export function MultiSelect<T extends string | number>({
   searchable = false,
   searchPlaceholder = "Search…",
   emptyText = "Nothing to choose",
+  /**
+   * Name the chosen options in the closed trigger while there are at most
+   * this many. Above it, and by default, the trigger says "N selected" — so
+   * no existing caller changes.
+   */
+  namedUpTo = 1,
   maxShown,
   disabled = false,
   size = "md",
@@ -169,6 +175,15 @@ export function MultiSelect<T extends string | number>({
   searchable?: boolean;
   searchPlaceholder?: string;
   emptyText?: string;
+  /**
+   * Name the chosen options in the closed trigger while there are at most
+   * this many; above it the trigger says "N selected".
+   *
+   * Defaults to 1, which is today's behaviour for every caller. Raise it for
+   * a genuinely short list — three company codes read better than
+   * "2 selected", four thousand party names would not.
+   */
+  namedUpTo?: number;
   /** Rows rendered at once — see `SearchSelect`'s. Omit for lists that fit. */
   maxShown?: number;
   disabled?: boolean;
@@ -219,14 +234,25 @@ export function MultiSelect<T extends string | number>({
   };
 
   const allChosen = options.length > 0 && value.length === options.length;
+  /*
+   * "N selected" is right for a long list — naming four thousand parties in a
+   * trigger is not a summary. A SHORT list is better read back: three company
+   * codes fit, and "OIL, MART" answers what was chosen without reopening the
+   * panel. `namedUpTo` is how a caller says its list is short enough.
+   */
+  const chosenLabels = options
+    .filter((option) => value.includes(option.value))
+    .map((option) => option.label);
   const summary =
     value.length === 0
       ? placeholder
       : value.length === 1
         ? options.find((option) => option.value === value[0])?.label ?? "1 selected"
-        : allChosen
-          ? `All (${value.length})`
-          : `${value.length} selected`;
+        : value.length <= namedUpTo
+          ? chosenLabels.join(", ")
+          : allChosen
+            ? `All (${value.length})`
+            : `${value.length} selected`;
 
   const toggle = (option: T) =>
     onChange(value.includes(option) ? value.filter((v) => v !== option) : [...value, option]);

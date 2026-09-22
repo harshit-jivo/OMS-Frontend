@@ -65,6 +65,7 @@ import {
   TableRow,
 } from "../components/ui/table";
 import { Tab, TabList } from "../components/ui/tabs";
+import { newestFirst } from "./backdate/ordering";
 import { useDeepLinkedRequest } from "./backdate/useDeepLinkedRequest";
 import { cn } from "../lib/utils";
 import {
@@ -100,16 +101,25 @@ const ACTIONS: { value: BackDateAction; label: string }[] = [
 /**
  * What the create form holds.
  *
- * `companies` and `actions` are LISTS, and a submission raises one request per
- * combination — OIL+BEVERAGES with Add+Update is four requests. The API takes
- * one company and one action per request and that stays true: each request
- * gets its own approval chain and its own SAP write, so a failure in one
- * company cannot half-grant another. The JSAP predecessor looped branches
- * inside a single untransacted request, which is exactly the bug this avoids.
+ * `companies` and `actions` are both LISTS and neither fans out here: the
+ * whole selection is ONE request, submitted once, with one approval chain.
+ * OIL+MART with Add+Update is a single request carrying `"OIL,MART"` and
+ * `"A,U"` — see the header above for why each of those is singular.
+ *
+ * The companies separate at the SAP write and nowhere earlier: one
+ * `OPEN_BKDT` call each after final approval, each with its own recorded
+ * payload and its own recorded answer. That record is what makes a partial
+ * failure visible, which is the part JSAP got wrong — it looped branches with
+ * no per-branch result, so a half-failed submission reported success.
  */
 type FormState = {
-  /** ONE company. A request is for one company; two is two requests. */
-  company: BackDateCompany;
+  /**
+   * ONE OR MORE companies, still ONE request.
+   *
+   * The same rights in two SAP databases are one decision, so they are one
+   * request with one approval chain. The fan-out is at the SAP write.
+   */
+  companies: BackDateCompany[];
   actions: BackDateAction[];
   sap_username: string;
   /** The SAP object NAME. There is no numeric type on a request any more. */
@@ -122,7 +132,7 @@ type FormState = {
 };
 
 const EMPTY_FORM: FormState = {
-  company: "OIL",
+  companies: ["OIL"],
   actions: ["A"],
   sap_username: "",
   document_type_name: "",
@@ -473,7 +483,10 @@ export default function BackDate() {
         ),
         backdateService.insights(scope),
       ]);
-      setRows(list);
+      // Latest first. The endpoint orders by `-created_at`, which is the
+      // same thing today, but the list and the approval desk beside it now
+      // answer "which is newest" the same way.
+      setRows(newestFirst(list));
       setInsights(counts);
     } catch (e) {
       setError(backdateError(e));
@@ -698,10 +711,19 @@ function NewRequestForm({
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
 
-  // SAP users and object types are per company, so the lists follow the one
-  // that is picked.
+  /**
+   * SAP users and object types come from ONE company's masters, so the lists
+   * follow the first company picked.
+   *
+   * The document types are safe to read from any of them: the same 75 objects
+   * with the same names exist in all three schemas. SAP USERS are not — a
+   * login that exists in OIL may not exist in MART — so the form says so
+   * below rather than pretending the list is authoritative for every company.
+   * A user SAP does not know fails that company's call with SAP's own message
+   * recorded against it, which is visible on the request.
+   */
   const { userOptions, typeOptions, loadingMasters, mastersError } =
-    useSapMasters(form.company);
+    useSapMasters(form.companies[0]);
 
   /**
    * Both actions ticked is the single combined value, never two requests —
@@ -713,8 +735,8 @@ function NewRequestForm({
     : form.actions[0];
 
   const save = async () => {
-    if (!form.company || !actionValue) {
-      setFormError("Pick a company and at least one action.");
+    if (form.companies.length === 0 || !actionValue) {
+      setFormError("Pick at least one company and at least one action.");
       return;
     }
     if (!form.time_limit) {
@@ -729,13 +751,15 @@ function NewRequestForm({
     setFormError("");
 
     try {
-      // ONE COMPANY, ONE REQUEST. Each company's grant is approved on its own
-      // and written to its own SAP schema, so they are never bundled.
+      // ONE POST, whatever was ticked. Several companies are one request with
+      // one approval chain — the same rights in each database, decided once —
+      // and the server stores them as one canonical value. They separate only
+      // at the SAP write, one `OPEN_BKDT` call each after final approval.
       //
-      // The ACTION never splits either — both ticked is one request carrying
+      // The ACTION never splits either: both ticked is one request carrying
       // "A,U", because SAP is never told the action at all.
       await backdateService.createRequest({
-        company: form.company,
+        company: form.companies,
         sap_username: form.sap_username.trim(),
         document_type_name: form.document_type_name,
         from_date: form.from_date,
@@ -782,26 +806,32 @@ function NewRequestForm({
         )}
 
         <FormGrid>
-          {/* ONE at a time. A request belongs to one company: it is routed by
-              that company and written to that company's SAP schema, so there
-              is no such thing as a half-picked pair. */}
+          {/* SEVERAL AT ONCE, AND STILL ONE REQUEST. Asking for the same
+              rights in OIL and MART is one decision by the same approvers, so
+              it is one request with one approval chain — not two of each that
+              could disagree. The companies separate at the SAP write, where
+              each gets its own `OPEN_BKDT` call into its own schema. */}
           <Field label="Company" required>
             {(c) => (
-              <SearchSelect<BackDateCompany>
+              <MultiSelect<BackDateCompany>
                 id={c.id}
-                value={form.company}
+                value={form.companies}
                 onChange={(next) =>
                   setForm({
                     ...form,
-                    company: next as BackDateCompany,
-                    // Cleared on purpose: the SAP user and document lists are
-                    // per company, so last company's pick may not exist here.
+                    companies: next as BackDateCompany[],
+                    // Cleared on purpose: the SAP user and document lists come
+                    // from the first company picked, so an earlier selection's
+                    // pick may not exist in the new one.
                     sap_username: "",
                     document_type_name: "",
                   })
                 }
                 options={BACKDATE_COMPANIES.map((co) => ({ value: co, label: co }))}
-                placeholder="Select company"
+                placeholder="Select companies"
+                // Three codes fit in the trigger, and reading them back beats
+                // "2 selected" when the set is the whole point of the field.
+                namedUpTo={BACKDATE_COMPANIES.length}
               />
             )}
           </Field>
@@ -825,7 +855,32 @@ function NewRequestForm({
         </FormGrid>
 
         <FormGrid>
-          <Field label="SAP User" required>
+          {/* THE ONE THING A MULTI-COMPANY REQUEST CANNOT CHECK FOR YOU.
+              The list below comes from the first company picked, and a SAP
+              login that exists in OIL need not exist in MART. Said plainly
+              here, because the alternative is finding out at the SAP call
+              after the approvers have already said yes — that company's call
+              fails with SAP's own message and the others still land. */}
+
+          {/*
+            The caveat the comment on `useSapMasters` above promises.
+            ─────────────────────────────────────────────────────────
+            The list is read from the FIRST company's masters, and a login
+            that exists in OIL need not exist in MART. The form cannot check
+            the others — there is no call that would — so it says so at the
+            moment the question arises, which is when a second company is
+            ticked and not before. Staying silent here means the mismatch
+            surfaces at the SAP write after every approver has signed it off.
+          */}
+          <Field
+            label="SAP User"
+            required
+            hint={
+              form.companies.length > 1
+                ? `SAP users are listed from ${form.companies[0]} only — check this login also exists in ${form.companies.slice(1).join(", ")}.`
+                : undefined
+            }
+          >
             {(c) =>
               userOptions.length > 0 ? (
                 <SearchSelect<string>
@@ -955,6 +1010,12 @@ export function EntryTableHead() {
       <TableHead>To Date</TableHead>
       <TableHead>Time Limit</TableHead>
       <TableHead>Created By</TableHead>
+      {/* WHERE THE REQUEST IS, on every row.
+          Without it a list told you nothing about outcomes: under "All" a
+          rejected request, one awaiting its second approver and one whose SAP
+          write failed were three identical rows, and the only way to tell
+          them apart was to open each one. */}
+      <TableHead>Status</TableHead>
       <TableHead className="text-right">Action</TableHead>
     </TableRow>
   );
@@ -1004,6 +1065,15 @@ export function EntryTableRow({
         </div>
       </TableCell>
       <TableCell>
+        {/* The SAME chip the detail and progress dialogs use, so a row and the
+            dialog it opens can never disagree about a request's state. It
+            reports the REQUEST's position — which on an approver's "Approved"
+            tab may still read Pending, because that tab lists what THEY
+            decided and the request can be moving through the stages above
+            them. */}
+        <StatusBadge request={request} />
+      </TableCell>
+      <TableCell>
         <div className="flex items-center justify-end gap-1.5">
           <Button variant="secondary" size="sm" onClick={onDetails}>
             Details
@@ -1045,12 +1115,16 @@ function EditRequestForm({
    * has never heard of: accepted by the form, then refused at the last stage
    * by the SAP call, with the request stuck and nobody the wiser about why.
    *
-   * `company` is the one exception and it is not an oversight: it decides
-   * which workflow applies and the request has already been routed by it. A
-   * different company is a different request.
+   * `company` is the one exception and it is not an oversight: the SET of
+   * companies decides which workflow applies and the request has already been
+   * routed by it. Changing it would either leave the flow pointing at a
+   * workflow chosen for a different set, or move the request to different
+   * approvers mid-decision. A different set is a different request.
    */
   const { userOptions, typeOptions, loadingMasters, mastersError } =
-    useSapMasters(request.company);
+    // The first of the request's companies — `company` is the canonical set
+    // (`"OIL,MART"`), which is not a company a masters endpoint can answer for.
+    useSapMasters(request.companies[0]);
 
   const [form, setForm] = useState({
     sap_username: request.sap_username,

@@ -71,6 +71,7 @@ import {
   type StatusFilter,
   StatusFilterSelect,
 } from "./backdate/filters";
+import { newestFirst } from "./backdate/ordering";
 import { useDeepLinkedRequest } from "./backdate/useDeepLinkedRequest";
 
 function formatDate(value: string | null | undefined) {
@@ -136,7 +137,14 @@ export default function BackDateApproval() {
       setActionable(queueIds);
       // History can repeat a queued request when "All" is selected; the queue
       // copy wins because only it carries the right to act.
-      setRows([...queue, ...history.filter((r) => !queueIds.has(r.id))]);
+      //
+      // Then sorted as ONE list. Concatenating the two ordered each part and
+      // the whole thing not at all: every pending request sat above every
+      // decided one whatever its age, so under "All" the newest entry could
+      // be halfway down the page.
+      setRows(
+        newestFirst([...queue, ...history.filter((r) => !queueIds.has(r.id))]),
+      );
       setCounts(insights);
     } catch (e) {
       setError(backdateError(e));
@@ -187,6 +195,20 @@ export default function BackDateApproval() {
         <StatRow className="mb-4">
           <KpiFilterRow counts={counts} status={status} onSelect={setStatus} />
         </StatRow>
+      )}
+
+      {/* WHY A ROW CAN SAY "PENDING" UNDER "APPROVED".
+          These two views list the stages THIS user decided, and a request
+          carries on to the approvers above them afterwards — so the tab is
+          about their decision and the Status column is about where the
+          request has got to. Said out loud, because the two together look
+          like a contradiction until you know which question each answers. */}
+      {(status === "APPROVED" || status === "REJECTED") && (
+        <p className="mb-3 text-[12.5px] text-subtle">
+          Requests you {status === "APPROVED" ? "approved" : "rejected"} at
+          your stage. The Status column shows where each one has got to since —
+          it can still be pending with a later approver.
+        </p>
       )}
 
       <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
