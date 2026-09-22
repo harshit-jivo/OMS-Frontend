@@ -37,7 +37,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   HiArrowPath,
-  HiCheckCircle,
   HiExclamationCircle,
   HiOutlineCheckCircle,
   HiOutlineEye,
@@ -46,6 +45,8 @@ import {
   HiOutlineXMark,
 } from "react-icons/hi2";
 
+import { showToast } from "@/lib/toastStore";
+import type { ToastTone } from "@/lib/toastStore";
 import { Breadcrumbs } from "../components/ui/breadcrumbs";
 import { Button } from "../components/ui/button";
 import {
@@ -101,7 +102,6 @@ export default function ProductionApproval() {
   const [rows, setRows] = useState<ProductionOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
 
   const [detail, setDetail] = useState<ProductionOrder | null>(null);
   const [deciding, setDeciding] =
@@ -149,16 +149,27 @@ export default function ProductionApproval() {
   const pageNumber = Math.min(page, totalPages);
   const paginated = filtered.slice((pageNumber - 1) * PAGE_SIZE, pageNumber * PAGE_SIZE);
 
-  const flash = (message: string) => {
-    setNotice(message);
-    window.setTimeout(() => setNotice(""), 6000);
-  };
+  /**
+   * Confirm a decision in the corner rather than in the page.
+   *
+   * It was an in-page card above the table, which meant the confirmation for
+   * an action taken in a dialog appeared behind that dialog and was scrolled
+   * away by the time the list reloaded. It was also styled `bg-good/5
+   * text-good` — and there is no `--color-good` token, so the "green" card had
+   * never been green.
+   *
+   * `tone` is what makes approve and reject tell themselves apart at a glance:
+   * the two buttons are a centimetre apart and the only other difference is a
+   * sentence on a toast that dismisses itself in six seconds.
+   */
+  const flash = (message: string, tone: ToastTone = "ok") =>
+    showToast({ title: tone === "ok" ? "Approved" : "Rejected", message, tone });
 
   const retrySap = async (order: ProductionOrder) => {
     setRetrying(order.id);
     try {
       await productionService.retrySap(order.id);
-      flash(`SAP accepted the approval for PO ${orderNumber(order)}.`);
+      flash(`SAP accepted the approval for PO ${orderNumber(order)}.`, "ok");
       void load();
     } catch (err) {
       setError(productionError(err));
@@ -180,15 +191,6 @@ export default function ProductionApproval() {
           </Button>
         }
       />
-
-      {notice && (
-        <Card className="border-good/40 bg-good/5">
-          <div className="flex items-center gap-2 p-3 text-[13px]" role="status">
-            <HiCheckCircle className="shrink-0 text-good" aria-hidden />
-            {notice}
-          </div>
-        </Card>
-      )}
 
       <TabList label="Production approval views">
         <Tab selected={tab === "queue"} onClick={() => setTab("queue")}>
@@ -350,8 +352,8 @@ export default function ProductionApproval() {
       <DecisionDialog
         pending={deciding}
         onClose={() => setDeciding(null)}
-        onDone={(message) => {
-          flash(message);
+        onDone={(message, tone) => {
+          flash(message, tone);
           void load();
         }}
       />
@@ -370,7 +372,7 @@ function DecisionDialog({
 }: {
   pending: { order: ProductionOrder; approve: boolean } | null;
   onClose: () => void;
-  onDone: (message: string) => void;
+  onDone: (message: string, tone: ToastTone) => void;
 }) {
   const [remarks, setRemarks] = useState("");
   const [saving, setSaving] = useState(false);
@@ -413,7 +415,7 @@ function DecisionDialog({
       } else {
         message = `PO ${orderNumber(order)} approved. SAP will now allow it to be released.`;
       }
-      onDone(message);
+      onDone(message, approve ? "ok" : "bad");
       onClose();
     } catch (err) {
       setFormError(productionError(err));

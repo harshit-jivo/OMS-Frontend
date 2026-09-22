@@ -18,10 +18,21 @@
  * inside the React tree at all.
  */
 
+/**
+ * How the toast reads at a glance, before the words are.
+ *
+ * Omitted is the neutral bell — an FYI. `ok` and `bad` are for a DECISION the
+ * user just took and wants confirmed: approving and rejecting are one click
+ * apart and the only difference afterwards is the sentence, which is exactly
+ * the thing nobody reads on a toast that is about to disappear.
+ */
+export type ToastTone = "ok" | "bad";
+
 export type ToastData = {
   id: number;
   title: string;
   message: string;
+  tone?: ToastTone;
   orderNumber?: string | null;
   onAction?: () => void;
   actionLabel?: string;
