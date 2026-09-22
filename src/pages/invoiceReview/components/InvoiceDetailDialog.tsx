@@ -21,6 +21,7 @@ import {
   HiOutlineBanknotes,
   HiOutlineCheckCircle,
   HiOutlineDocumentText,
+  HiOutlineExclamationTriangle,
   HiOutlinePaperAirplane,
   HiOutlinePencilSquare,
   HiOutlineXCircle,
@@ -41,6 +42,7 @@ import {
 import { Notice, SectionHeading } from "@/components/ui/page";
 import { toneForStatus } from "@/components/ui/statusTone";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { isBatchOrStockError } from "../../SalesInvoice/sapErrorTranslator";
 import { toNumber } from "../../SalesInvoice/salesInvoice.utils";
 import {
   formatAmount,
@@ -71,10 +73,13 @@ export default function InvoiceDetailDialog({ view }: { view: UseInvoiceReviewRe
     openCreditLimitRequest,
     openCreditLimitFlow,
     openHistory,
+    recheckingId,
+    repostWithFreshBatches,
   } = view;
 
   const status = selected ? normalizeStatus(selected.status) : "PENDING";
   const busy = Boolean(selected) && actionId === selected?.id;
+  const rechecking = Boolean(selected) && recheckingId === selected?.id;
   const lines = selectedPayload.DocumentLines || [];
 
   return (
@@ -321,6 +326,21 @@ export default function InvoiceDetailDialog({ view }: { view: UseInvoiceReviewRe
               {status === "CL_RAISED" && (
                 <Button disabled={busy} onClick={() => openCreditLimitFlow(selected)}>
                   <HiOutlineBanknotes aria-hidden="true" /> Show Flow
+                </Button>
+              )}
+              {/* The same offer the table row makes, and for the same reason:
+                  this dialog is where the reviewer actually READS the batch
+                  error, so sending them back to the row to act on it is the
+                  one place the shortcut was missing. "Repost to SAP" beside it
+                  would return the identical dead batch numbers. */}
+              {status === "ERROR" && isBatchOrStockError(selected.error_message) && (
+                <Button
+                  variant="danger"
+                  disabled={busy || rechecking}
+                  onClick={() => void repostWithFreshBatches(selected)}
+                >
+                  <HiOutlineExclamationTriangle aria-hidden="true" />
+                  {rechecking ? "Re-checking…" : "Re-check batches & repost"}
                 </Button>
               )}
               <Button variant="primary" disabled={busy} onClick={() => handlePostToSap(selected)}>
