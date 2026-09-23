@@ -1724,6 +1724,75 @@ export const FIXTURES: Array<[pattern: RegExp, body: Body]> = [
       { CardCode: "C000456", CardName: "Southern Supply Co", Num_of_Open_SalesOrder: 1 },
     ],
   ],
+  // The Sales Invoice party picker reads this one, not `open-parties`.
+  [
+    /\/hana\/all-customers\//,
+    [
+      { CardCode: "C000123", CardName: "Northern Traders", State1: "DL" },
+      { CardCode: "C000456", CardName: "Southern Supply Co", State1: "KL" },
+    ],
+  ],
+  /*
+   * Open sales orders for the Sales Invoice picker, grouped the way
+   * `group_sales_orders` returns them: header fields on the order, open lines
+   * underneath. Two orders, because the (i) on the draft has to show a list.
+   *
+   * The header carries `PayToCode`, `ShipToCode`, `NumAtCard` and `Comments`
+   * deliberately — they are what the SO info popover draws, and a fixture
+   * without them would let the panel silently render nothing but dashes. Both
+   * orders share one bill-to and ship-to because `selectedOrderAddressError`
+   * refuses a draft whose orders disagree on either.
+   */
+  [
+    /\/hana\/so\//,
+    [
+      {
+        DocEntry: 31614, DocNum: 1726096764, DocDate: "2026-06-10", DocDueDate: "2026-06-14",
+        CardCode: "C000123", CardName: "Northern Traders", NumAtCard: "PO-9912", DocStatus: "O",
+        DocTotal: 363636, VatSum: 17316, DiscSum: 0, Comments: "Dispatch before the weekend",
+        SlpCode: 20, ShipToCode: "KALGIDHAR SOCIETY RAJOURI GARDEN",
+        PayToCode: "NORTHERN TRADERS NEW DELHI", BPL_Id: 2,
+        lines: [
+          {
+            LineNum: 0, ItemCode: "FG0000386", Dscription: "CHAI 250 GMS 40 PCS", Quantity: 4000,
+            OpenQty: 4000, Price: 90.9, PriceBefDi: 90.9, DiscPrcnt: 0, LineTotal: 363600,
+            VatPrcnt: 5, VatGroup: "IGST@5", WhsCode: "BH-SC", TaxCode: "IGST@5",
+            ShipDate: "2026-06-14", LineStatus: "O", U_SchemeAgst: "CHAI",
+          },
+        ],
+      },
+      {
+        DocEntry: 31615, DocNum: 1726096801, DocDate: "2026-06-11", DocDueDate: "2026-06-15",
+        CardCode: "C000123", CardName: "Northern Traders", NumAtCard: "", DocStatus: "O",
+        DocTotal: 12000, VatSum: 571, DiscSum: 0, Comments: null,
+        SlpCode: 20, ShipToCode: "KALGIDHAR SOCIETY RAJOURI GARDEN",
+        PayToCode: "NORTHERN TRADERS NEW DELHI", BPL_Id: 2,
+        lines: [
+          {
+            LineNum: 0, ItemCode: "FG0000082", Dscription: "MUSTARD OIL 1 LTR", Quantity: 120,
+            OpenQty: 120, Price: 100, PriceBefDi: 100, DiscPrcnt: 0, LineTotal: 12000,
+            VatPrcnt: 5, VatGroup: "IGST@5", WhsCode: "BH-SC", TaxCode: "IGST@5",
+            ShipDate: "2026-06-15", LineStatus: "O", U_SchemeAgst: "MUSTARD",
+          },
+        ],
+      },
+    ],
+  ],
+  // CRD1 addresses for that party — what turns a bare Bill To / Ship To code
+  // in the popover into a city, a state and a GSTIN.
+  [
+    /\/hana\/address\//,
+    [
+      {
+        Address: "NORTHERN TRADERS NEW DELHI", AdresType: "B", CardCode: "C000123",
+        City: "New Delhi", State: "DL", Country: "IN", GSTRegnNo: "07AABCN1234M1ZQ", GSTType: 1,
+      },
+      {
+        Address: "KALGIDHAR SOCIETY RAJOURI GARDEN", AdresType: "S", CardCode: "C000123",
+        City: "Rajouri Garden", State: "DL", Country: "IN", GSTRegnNo: null, GSTType: 1,
+      },
+    ],
+  ],
   // `PendingDispatchResponse`. Two orders, one per `status`, so both
   // `sovi-badge` variants land in the image.
   [

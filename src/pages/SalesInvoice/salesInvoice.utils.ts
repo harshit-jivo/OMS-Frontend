@@ -125,6 +125,26 @@ export type PartyAddress = {
   GSTType?: number | null;
 };
 
+/**
+ * The address behind a Bill To / Ship To code, as much of it as CRD1 knows.
+ *
+ * `ShipToCode` on a sales order is SAP's address NAME, not a key to something
+ * richer, so the code alone is already meaningful and is what SAP itself
+ * prints on the document. The matching CRD1 row adds city, state and GSTIN.
+ * When there is no matching row the code stands on its own rather than being
+ * replaced by "unknown" — the order really does ship there.
+ */
+export const describeAddress = (code: string, addresses: PartyAddress[]) => {
+  const wanted = String(code ?? "").trim();
+  if (!wanted) return null;
+
+  const match = addresses.find((address) => String(address.Address ?? "").trim() === wanted);
+  const part = (value: unknown) => String(value ?? "").trim();
+  const place = [part(match?.City), part(match?.State)].filter(Boolean).join(", ");
+
+  return { code: wanted, place, gstin: part(match?.GSTRegnNo) };
+};
+
 export type SalespersonDetails = {
   SlpCode: number;
   SlpName: string;
