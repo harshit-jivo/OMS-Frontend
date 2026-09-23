@@ -93,11 +93,11 @@ const SO_Invoice_Report = lazy(() => import("./pages/SO_Invoice_Report"));
 const Distributor_Report = lazy(() => import("./pages/Distributor_Report"));
 const Distributor = lazy(() => import("./pages/Distributor"));
 const Distributor_Edit_Order = lazy(() => import("./pages/Distributor/Edit_Order"));
-// The distributor's "Order Tracking" reuses the shared View Orders page — it
-// already lists the SIGNED-IN user's own orders and hides the create actions
-// for anyone without /Add_Sales access, so a distributor sees their orders
-// read-only. Kept on the distributor-scoped /Distributor_Order_Tracking route
-// so /View_Orders' billing/manager gate stays untouched.
+// The distributor's "Order Tracking" now uses its own dedicated page under
+// pages/Distributor, so it can diverge from the shared View Orders page.
+const Distributor_Order_Tracking = lazy(
+  () => import("./pages/Distributor/Order_Tracking"),
+);
 const MartApproval = lazy(() => import("./pages/Distributor/Mart_Approval"));
 const Mart_Cancel = lazy(() => import("./pages/Distributor/Mart_Cancel"));
 const Ap_Invoice_Entry = lazy(() => import("./pages/Ap_Invoice_Entry"));
@@ -437,7 +437,7 @@ function App() {
           path="/Distributor_Order_Tracking"
           element={
             <ProtectedPage>
-              <View_Orders distributor />
+              <Distributor_Order_Tracking />
             </ProtectedPage>
           }
         />
