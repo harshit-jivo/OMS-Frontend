@@ -95,6 +95,28 @@ type AddressOption = {
   full_address?: string | null;
 };
 
+/**
+ * The street to print under an address label, or "" when there is nothing to
+ * add.
+ *
+ * The label an address is shown by is `address_name || full_address ||
+ * address_id`, so for an address with NO name the label already IS the street
+ * — repeating it underneath would be the same line twice in two sizes. Some
+ * CRD1 rows also carry the street as the Address name itself, which is the
+ * same case arriving by a different route.
+ */
+export const addressStreet = (address?: {
+  address_name?: string | null;
+  full_address?: string | null;
+}) => {
+  const street = String(address?.full_address ?? "").trim();
+  const name = String(address?.address_name ?? "").trim();
+  // No name means the label FELL BACK to the street, so there is nothing left
+  // to add under it.
+  if (!street || !name) return "";
+  return street === name ? "" : street;
+};
+
 const normalizeOptionText = (value: unknown) =>
   String(value ?? "")
     .trim()
@@ -2054,6 +2076,8 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
     Number(formData.company) === 3 ||
     (!!martCompany && String(formData.company) === String(martCompany.id)) ||
     normalizeOptionText(selectedPartyCategory) === "mart";
+  const selectedBillAddressStreet = addressStreet(selectedBillAddress);
+  const selectedShipAddressStreet = addressStreet(selectedShipAddress);
   const selectedBillAddressLabel =
     selectedBillAddress?.address_name ||
     selectedBillAddress?.full_address ||
@@ -2216,6 +2240,9 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
     // martCompany,
     selectedBillAddressLabel,
     selectedShipAddressLabel,
+    selectedBillAddressStreet,
+    selectedShipAddressStreet,
+    addressStreet,
     selectedDispatchLabel,
     selectedCompanyLabel,
   };

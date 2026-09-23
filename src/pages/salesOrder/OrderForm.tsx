@@ -192,6 +192,9 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
     isSchemePanelHidden,
     selectedBillAddressLabel,
     selectedShipAddressLabel,
+    selectedBillAddressStreet,
+    selectedShipAddressStreet,
+    addressStreet,
     selectedDispatchLabel,
     selectedCompanyLabel,
     // Edit-mode flags. This form was create-only until edit moved onto it.
@@ -1131,7 +1134,17 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
           }
         </Field>
 
-        <Field label="Bill To Address" error={problems.header.billAddress}>
+        {/* The street goes in the Field's own `hint`, not beside the Field.
+            A sibling paragraph becomes its own cell in this grid and shunts
+            every following control one place along. `hint` also wires the
+            street into `aria-describedby`, so it is read with the control
+            rather than orphaned after it. An `error` correctly takes its
+            place: a wrong address matters more than where the right one is. */}
+        <Field
+          label="Bill To Address"
+          error={problems.header.billAddress}
+          hint={selectedBillAddressStreet || undefined}
+        >
           {(control) =>
             renderCombo({
               refEl: billDropdownRef,
@@ -1154,6 +1167,13 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
                       <span className="text-[13px] font-medium text-ink">
                         {b.address_name || b.full_address || b.address_id}
                       </span>
+                      {/* The street, so two addresses named "Head Office" and
+                          "Head Office 2" can be told apart before choosing. */}
+                      {addressStreet(b) ? (
+                        <span className="mt-0.5 block text-[11px] leading-snug text-subtle">
+                          {addressStreet(b)}
+                        </span>
+                      ) : null}
                     </button>
                   ))
                 ) : (
@@ -1163,7 +1183,11 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
           }
         </Field>
 
-        <Field label="Ship To Address" error={problems.header.shipAddress}>
+        <Field
+          label="Ship To Address"
+          error={problems.header.shipAddress}
+          hint={selectedShipAddressStreet || undefined}
+        >
           {(control) =>
             renderCombo({
               refEl: shipDropdownRef,
@@ -1186,6 +1210,11 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
                       <span className="text-[13px] font-medium text-ink">
                         {s.address_name || s.full_address || s.address_id}
                       </span>
+                      {addressStreet(s) ? (
+                        <span className="mt-0.5 block text-[11px] leading-snug text-subtle">
+                          {addressStreet(s)}
+                        </span>
+                      ) : null}
                     </button>
                   ))
                 ) : (
@@ -1461,10 +1490,10 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {[
-            { label: "Bill To", value: selectedBillAddressLabel },
-            { label: "Ship To", value: selectedShipAddressLabel },
-            { label: "Dispatch", value: selectedDispatchLabel },
-            { label: "Delivery Date", value: formData.Deliverydate },
+            { label: "Bill To", value: selectedBillAddressLabel, street: selectedBillAddressStreet },
+            { label: "Ship To", value: selectedShipAddressLabel, street: selectedShipAddressStreet },
+            { label: "Dispatch", value: selectedDispatchLabel, street: "" },
+            { label: "Delivery Date", value: formData.Deliverydate, street: "" },
           ].map((entry) => (
             <div className="flex flex-col gap-0.5" key={entry.label}>
               <span className="text-[11px] font-semibold uppercase tracking-[0.02em] text-subtle">
@@ -1473,6 +1502,12 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
               <em className="text-[13px] font-medium not-italic text-ink-soft">
                 {entry.value || "—"}
               </em>
+              {/* The street under the name, on the last screen before the
+                  order is placed — this is where a wrong branch of the right
+                  customer is still cheap to catch. */}
+              {entry.street ? (
+                <span className="text-[11px] leading-snug text-subtle">{entry.street}</span>
+              ) : null}
             </div>
           ))}
         </div>
