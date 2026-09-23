@@ -295,19 +295,6 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
         item: product.item_name,
         pcs: String(product.sal_factor2 ?? ""),
         tax: String(getProductTaxRate(product)),
-<<<<<<< HEAD:src/pages/salesOrder/OrderWizard.tsx
-        // Basic Price starts empty on the wizard — the operator types the
-        // actual selling rate themselves. (FOC still needs its token rate.)
-        basicPrice: isFocOrder ? FOC_TOKEN_BASIC_PRICE : "",
-        // Price List shows the item's set rate AS-IS (the party's basic_rate,
-        // pre-tax), not the tax-inclusive landing figure, so the operator sees
-        // the configured price to bill against.
-        priceListBasic: isFocOrder
-          ? "0"
-          : product.basic_rate != null
-            ? String(product.basic_rate)
-            : "",
-=======
         // Both columns start from the party's agreed rate (pre-tax). Basic Price
         // is then editable — that is the discount. Price List keeps the agreed
         // rate so the two can be compared, and so the SAP fallback reads a
@@ -323,7 +310,6 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
           : product.basic_rate == null
             ? ""
             : String(product.basic_rate),
->>>>>>> 1d3821eae042b230ad54b9b527614034880d5d60:src/pages/salesOrder/OrderForm.tsx
         qty: "",
         ltrs: "",
         boxes: "",
