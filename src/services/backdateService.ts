@@ -98,6 +98,16 @@ export interface BackDateFlow {
   current_stage_sequence: number | null;
   /** Stages the chosen workflow had at submission — "stage 2 of 3". */
   total_stage: number;
+  /**
+   * Whether approving the CURRENT stage is the one that calls SAP.
+   *
+   * Decided by the server with the same rule its approve uses. Do not derive
+   * it from `current_stage_sequence === total_stage`: `total_stage` is the
+   * count at SUBMISSION, so a stage added or deactivated since then makes that
+   * comparison say the wrong thing — live data has a request reading "stage 2
+   * of 1" that IS final, and one reading "stage 1 of 1" that is not.
+   */
+  is_final_stage: boolean;
   created_at: string;
   updated_at: string;
 }
