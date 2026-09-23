@@ -98,14 +98,30 @@ export interface BackDateFlow {
   current_stage_sequence: number | null;
   /** Stages the chosen workflow had at submission — "stage 2 of 3". */
   total_stage: number;
+  /**
+   * Whether approving the CURRENT stage is the one that calls SAP.
+   *
+   * Decided by the server with the same rule its approve uses. Do not derive
+   * it from `current_stage_sequence === total_stage`: `total_stage` is the
+   * count at SUBMISSION, so a stage added or deactivated since then makes that
+   * comparison say the wrong thing — live data has a request reading "stage 2
+   * of 1" that IS final, and one reading "stage 1 of 1" that is not.
+   */
+  is_final_stage: boolean;
   created_at: string;
   updated_at: string;
 }
 
 export interface BackDateRequest {
   id: number;
-  /** ONE company. Two companies is two requests — see `NewBackDateRequest`. */
-  company: BackDateCompany;
+  /**
+   * The canonical stored value: `"OIL"`, or `"OIL,MART"`.
+   *
+   * Read `companies` to render one badge each and `company_label` for the
+   * readable form — three views of one fact, so no screen splits the string
+   * itself.
+   */
+  company: string;
   company_label: string;
   /** The same company as a one-element list, for a renderer that maps. */
   companies: BackDateCompany[];
@@ -233,13 +249,18 @@ export interface DecisionResult {
 
 export interface NewBackDateRequest {
   /**
-   * ONE company.
+   * ONE OR MORE companies, and always ONE request.
    *
-   * Each company's grant is approved on its own and written to its own SAP
-   * schema, so a refusal in one cannot half-grant another. Ticking two
-   * companies in the form raises two requests.
+   * The rights asked for are the same rights in each named SAP database,
+   * decided once by the same approvers — so a multi-company selection is one
+   * POST, one row, one flow and one approval chain. The server normalises the
+   * list to its canonical stored form (`"OIL,MART"`), so order and duplicates
+   * do not matter here.
+   *
+   * The companies separate only at the SAP write: one `OPEN_BKDT` call each,
+   * after the final approval.
    */
-  company: BackDateCompany;
+  company: BackDateCompany[];
   /** THE document identity — the SAP object name, e.g. "A/R Invoice". */
   document_type_name: string;
   sap_username: string;

@@ -161,18 +161,21 @@ describe("BackDate", () => {
     expect(screen.queryByLabelText(/filter requests by status/i)).toBeNull();
   });
 
-  it("raises ONE request for ONE company, and never one per action", async () => {
+  it("raises ONE request for SEVERAL companies, and one POST", async () => {
+    // THE WHOLE POINT. Asking for the same rights in OIL and MART is one
+    // decision by the same approvers, so it is one request with one approval
+    // chain — never two requests, and never two POSTs. The companies separate
+    // only at the SAP write, one `OPEN_BKDT` call each after final approval.
     const user = userEvent.setup();
     render(<BackDate />);
     await screen.findByRole("tab", { name: /entries/i });
     await user.click(screen.getByRole("tab", { name: /new request/i }));
 
-    // One company at a time: a request is routed by its company and written
-    // to that company's SAP schema, so there is no half-picked pair.
     const company = screen.getByLabelText(/company/i);
     expect(company.textContent).toContain("OIL");
     await user.click(company);
-    await user.click(await screen.findByRole("option", { name: "BEVERAGES" }));
+    await user.click(await screen.findByRole("checkbox", { name: "MART" }));
+    await user.keyboard("{Escape}");
 
     // The ACTION still takes both, and both stay on the ONE request: SAP is
     // never told the action, so splitting the pair would write twins.
@@ -186,12 +189,52 @@ describe("BackDate", () => {
     );
     await user.click(screen.getByRole("button", { name: "Submit Request" }));
 
+    // ONE call, not one per company.
     await waitFor(() =>
       expect(backdateService.createRequest).toHaveBeenCalledTimes(1),
     );
     const [body] = vi.mocked(backdateService.createRequest).mock.calls[0];
-    expect(body.company).toBe("BEVERAGES");
+    expect(body.company).toEqual(["OIL", "MART"]);
     expect(body.action).toBe("A,U");
+  });
+
+  it("says the SAP user list covers only the first company", async () => {
+    // A login that exists in OIL need not exist in MART, and the form cannot
+    // check it — so it says so rather than letting the approvers find out at
+    // the SAP call.
+    const user = userEvent.setup();
+    render(<BackDate />);
+    await screen.findByRole("tab", { name: /entries/i });
+    await user.click(screen.getByRole("tab", { name: /new request/i }));
+
+    expect(screen.queryByText(/SAP users are listed from/i)).toBeNull();
+
+    await user.click(screen.getByLabelText(/company/i));
+    await user.click(await screen.findByRole("checkbox", { name: "MART" }));
+    await user.keyboard("{Escape}");
+
+    expect(screen.getByText(/SAP users are listed from/i)).toBeTruthy();
+  });
+
+  it("refuses to submit with no company ticked", async () => {
+    const user = userEvent.setup();
+    render(<BackDate />);
+    await screen.findByRole("tab", { name: /entries/i });
+    await user.click(screen.getByRole("tab", { name: /new request/i }));
+
+    await user.click(screen.getByLabelText(/company/i));
+    // Untick the default, leaving none.
+    await user.click(await screen.findByRole("checkbox", { name: "OIL" }));
+    await user.keyboard("{Escape}");
+
+    await user.type(
+      screen.getByLabelText(/rights expire/i),
+      "2026-12-31T18:30",
+    );
+    await user.click(screen.getByRole("button", { name: "Submit Request" }));
+
+    expect(backdateService.createRequest).not.toHaveBeenCalled();
+    expect(screen.getByText(/at least one company/i)).toBeTruthy();
   });
 
   it("sends the expiry as the instant the user actually picked", async () => {
@@ -252,8 +295,9 @@ describe("BackDate", () => {
     );
     const [body] = vi.mocked(backdateService.createRequest).mock.calls[0];
     expect(body.action).toBe("A");
-    // ONE company, not a list of one.
-    expect(body.company).toBe("OIL");
+    // The default single tick, sent as the list the API takes. A one-company
+    // request is the same shape as a three-company one — no second code path.
+    expect(body.company).toEqual(["OIL"]);
     // The expiry travels as an instant; see the test above.
     expect(body.time_limit).toBe(new Date("2026-12-31T18:30").toISOString());
   });
@@ -610,13 +654,20 @@ describe("BackDate", () => {
     render(<BackDate />);
     await screen.findByRole("tab", { name: /entries/i });
 
+    // STATUS EARNS ITS COLUMN, the rest do not.
+    //
+    // It was deliberately left out here once, on the grounds that the table
+    // stays scannable and the state is in Details and Progress. In use that
+    // did not hold: under "All" a rejected request, one awaiting its second
+    // approver and one whose SAP write failed were three identical rows, and
+    // telling them apart meant opening each. One chip answers that at a
+    // glance, which is worth the width — the others still are not.
     for (const heading of ["ID", "Company", "From Date", "To Date",
-                           "Time Limit", "Created By"]) {
+                           "Time Limit", "Created By", "Status"]) {
       expect(screen.getByRole("columnheader", { name: heading })).toBeTruthy();
     }
     // Everything else is in Details or Progress, so the table stays scannable.
-    for (const gone of ["SAP User", "Document Type", "Status", "Waiting On",
-                        "Window"]) {
+    for (const gone of ["SAP User", "Document Type", "Waiting On", "Window"]) {
       expect(screen.queryByRole("columnheader", { name: gone })).toBeNull();
     }
   });
