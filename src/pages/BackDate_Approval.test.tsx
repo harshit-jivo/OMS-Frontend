@@ -59,6 +59,8 @@ function request(id: number, company: string, withStage = true) {
       current_stage_name: withStage ? "stage1" : "",
       current_stage_sequence: withStage ? 1 : null,
       total_stage: 1,
+      // A one-stage workflow, so the pending stage IS the last one.
+      is_final_stage: withStage,
       created_at: "2026-09-15T10:00:00Z",
       updated_at: "2026-09-15T10:00:00Z",
     },
@@ -312,5 +314,228 @@ describe("BackDateApproval", () => {
     await waitFor(() =>
       expect(screen.queryByText(/OPEN_BKDT accepted/)).toBeNull(),
     );
+  });
+
+  /**
+   * EVERY DECISION ENDS ON A RESULT, AND THE DETAIL DIALOG CLOSES.
+   *
+   * An intermediate approval and a rejection used to close onto a banner
+   * behind the still-open detail dialog — which went on showing PENDING with
+   * Approve and Reject beside it. The approver could not tell their decision
+   * had registered, and the buttons invited them to make it twice.
+   */
+  describe("after a decision", () => {
+    const openAndApprove = async (user: ReturnType<typeof userEvent.setup>) => {
+      render(<BackDateApproval />);
+      await user.click(await screen.findByRole("button", { name: /^details$/i }));
+      // Detail dialog's Approve, then the decision dialog's Approve.
+      await user.click(await screen.findByRole("button", { name: /^approve$/i }));
+      await user.click(await screen.findByRole("button", { name: /^approve$/i }));
+    };
+
+    it("shows Approved and forwards it, at an intermediate stage", async () => {
+      vi.spyOn(backdateService, "approve").mockResolvedValue({
+        flow_id: 1, flow_status: "PENDING", current_stage: 2,
+      } as never);
+      const user = userEvent.setup();
+      await openAndApprove(user);
+
+      expect(await screen.findByText(/forwarded to the next approver/i))
+        .toBeTruthy();
+      expect(screen.getByText(/waits for the next approver/i)).toBeTruthy();
+      // No SAP result: nothing was written to SAP at this stage.
+      expect(screen.queryByText(/SAP accepted the grant/i)).toBeNull();
+    });
+
+    it("closes the detail dialog, so there is nothing left to decide twice", async () => {
+      vi.spyOn(backdateService, "approve").mockResolvedValue({
+        flow_id: 1, flow_status: "PENDING", current_stage: 2,
+      } as never);
+      const user = userEvent.setup();
+      await openAndApprove(user);
+
+      await screen.findByText(/forwarded to the next approver/i);
+      // THE BUG. These were still on screen, on a request already decided.
+      expect(screen.queryByRole("button", { name: /^approve$/i })).toBeNull();
+      expect(screen.queryByRole("button", { name: /^reject$/i })).toBeNull();
+      expect(screen.queryByRole("button", { name: /^edit$/i })).toBeNull();
+    });
+
+    it("closes the detail dialog on a FINAL approval too", async () => {
+      vi.spyOn(backdateService, "approve").mockResolvedValue({
+        flow_id: 1, flow_status: "APPROVED", hana_status: "SUCCESS",
+        hana_status_text: JSON.stringify({
+          results: [{ branch: "OIL", status: "SUCCESS",
+                      response: "OPEN_BKDT accepted." }],
+        }),
+      } as never);
+      const user = userEvent.setup();
+      await openAndApprove(user);
+
+      expect(await screen.findByText(/SAP accepted the grant/i)).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /^approve$/i })).toBeNull();
+    });
+
+    it("refreshes the list as soon as the decision lands", async () => {
+      vi.spyOn(backdateService, "approve").mockResolvedValue({
+        flow_id: 1, flow_status: "PENDING", current_stage: 2,
+      } as never);
+      const user = userEvent.setup();
+      await openAndApprove(user);
+      await screen.findByText(/forwarded to the next approver/i);
+
+      // Once on mount, once for the decision — before Done is pressed, so the
+      // list under the result dialog is already current.
+      expect(vi.mocked(backdateService.approvalQueue).mock.calls.length)
+        .toBeGreaterThanOrEqual(2);
+    });
+
+    it("shows Rejected after a rejection, and closes the detail dialog", async () => {
+      vi.spyOn(backdateService, "reject").mockResolvedValue({
+        flow_id: 1, flow_status: "REJECTED",
+      } as never);
+      const user = userEvent.setup();
+      render(<BackDateApproval />);
+      await user.click(await screen.findByRole("button", { name: /^details$/i }));
+      await user.click(await screen.findByRole("button", { name: /^reject$/i }));
+      await user.type(
+        await screen.findByLabelText(/reason for rejection/i),
+        "Window too far back",
+      );
+      await user.click(screen.getByRole("button", { name: /^reject$/i }));
+
+      expect(await screen.findByText(/requester has been told why/i))
+        .toBeTruthy();
+      expect(screen.getByText(/this ends the request/i)).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /^reject$/i })).toBeNull();
+      expect(backdateService.reject).toHaveBeenCalledWith(
+        expect.any(Number), "Window too far back");
+    });
+
+    it("stays until Done, then leaves the confirmation on the page", async () => {
+      vi.spyOn(backdateService, "approve").mockResolvedValue({
+        flow_id: 1, flow_status: "PENDING", current_stage: 2,
+      } as never);
+      const user = userEvent.setup();
+      await openAndApprove(user);
+      await screen.findByText(/forwarded to the next approver/i);
+
+      await user.click(screen.getByRole("button", { name: /^done$/i }));
+
+      await waitFor(() =>
+        expect(screen.queryByText(/forwarded to the next approver/i))
+          .toBeNull(),
+      );
+      expect(await screen.findByText(/approved and moved to the next stage/i))
+        .toBeTruthy();
+    });
+
+    it("keeps the decision dialog open on a SAP refusal — nothing was decided", async () => {
+      // The shape the web client actually throws — `backdateError` reads the
+      // axios `response`, so a bare Error would never surface SAP's words.
+      vi.spyOn(backdateService, "approve").mockRejectedValue({
+        response: {
+          status: 502,
+          data: { success: false, message: "SAP refused the rights for OIL." },
+        },
+      });
+      const user = userEvent.setup();
+      await openAndApprove(user);
+
+      // No result dialog: a refusal is not a decision.
+      expect(await screen.findByText(/SAP refused/i)).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /^done$/i })).toBeNull();
+      // The decision dialog is still there to try again from.
+      expect(screen.getByRole("button", { name: /^approve$/i })).toBeTruthy();
+    });
+  });
+
+  /**
+   * THE SAP BOX IS FOR THE LAST APPROVER ONLY.
+   *
+   * Only the final stage writes to SAP. Telling a first-stage approver
+   * "Sending the grant to SAP" described something that was not happening,
+   * and made the one approval that really does call SAP look like the rest.
+   */
+  describe("the SAP notice", () => {
+    /** Queue one request, pending at a stage that is — or is not — the last. */
+    const queueWith = (isFinal: boolean) => {
+      const queued = request(13, "BEVERAGES") as unknown as {
+        flow: Record<string, unknown>;
+      };
+      queued.flow = {
+        ...queued.flow,
+        is_final_stage: isFinal,
+        current_stage_sequence: 1,
+        total_stage: 2,
+      };
+      vi.spyOn(backdateService, "approvalQueue")
+        .mockResolvedValue([queued] as never);
+    };
+
+    const openApprove = async (user: ReturnType<typeof userEvent.setup>) => {
+      render(<BackDateApproval />);
+      await user.click(await screen.findByRole("button", { name: /^details$/i }));
+      await user.click(await screen.findByRole("button", { name: /^approve$/i }));
+      return screen.findByRole("dialog", { name: /approve backdate request/i });
+    };
+
+    it("is shown to the final approver, before and while SAP is called", async () => {
+      queueWith(true);
+      // Never resolves, so the dialog stays in its busy state.
+      vi.spyOn(backdateService, "approve")
+        .mockReturnValue(new Promise(() => undefined) as never);
+      const user = userEvent.setup();
+      const dialog = await openApprove(user);
+
+      expect(within(dialog).getByText(/this is the final approval/i))
+        .toBeTruthy();
+
+      await user.click(within(dialog).getByRole("button", { name: /^approve$/i }));
+
+      expect(await within(dialog).findByText(/sending the grant to sap/i))
+        .toBeTruthy();
+      expect(within(dialog).getByRole("button", { name: /calling sap/i }))
+        .toBeTruthy();
+    });
+
+    it("is NOT shown to an approver whose stage is not the last", async () => {
+      queueWith(false);
+      vi.spyOn(backdateService, "approve")
+        .mockReturnValue(new Promise(() => undefined) as never);
+      const user = userEvent.setup();
+      const dialog = await openApprove(user);
+
+      // Said instead: what actually happens next.
+      expect(within(dialog).getByText(/moves to the next approver/i))
+        .toBeTruthy();
+      // THE BUG. No mention of SAP anywhere in this dialog.
+      expect(within(dialog).queryByText(/SAP/)).toBeNull();
+
+      await user.click(within(dialog).getByRole("button", { name: /^approve$/i }));
+
+      // Busy, but still not claiming to call SAP.
+      expect(await within(dialog).findByRole("button", { name: /approving/i }))
+        .toBeTruthy();
+      expect(within(dialog).queryByText(/sending the grant to sap/i)).toBeNull();
+      expect(within(dialog).queryByRole("button", { name: /calling sap/i }))
+        .toBeNull();
+    });
+
+    it("is not shown when rejecting, even at the final stage", async () => {
+      queueWith(true);
+      const user = userEvent.setup();
+      render(<BackDateApproval />);
+      await user.click(await screen.findByRole("button", { name: /^details$/i }));
+      await user.click(await screen.findByRole("button", { name: /^reject$/i }));
+      const dialog = await screen.findByRole("dialog", {
+        name: /reject backdate request/i,
+      });
+
+      expect(within(dialog).getByText(/rejecting ends this request/i))
+        .toBeTruthy();
+      expect(within(dialog).queryByText(/sending the grant to sap/i)).toBeNull();
+      expect(within(dialog).queryByText(/final approval/i)).toBeNull();
+    });
   });
 });
