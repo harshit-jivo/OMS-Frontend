@@ -12,6 +12,7 @@ import {
   HiOutlinePencilSquare,
   HiOutlineQueueList,
   HiOutlineShoppingCart,
+  HiOutlineBuildingStorefront,
   HiOutlineXCircle,
   HiCube,
   HiInboxStack,
@@ -54,6 +55,7 @@ import {
   Stat,
   StatRow,
 } from "@/components/ui/page";
+import { FilterSelect } from "@/components/ui/filter-bar";
 import { TableSkeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { Pagination } from "@/components/ui/pagination";
@@ -190,19 +192,39 @@ function MartApproval() {
   const isApprovedSuccess = (o: { status_display?: string }) =>
     tab === "approved" && isCompletedStatus(o.status_display);
 
+  // Party-name filter — narrows the current tab's orders to a single Mart
+  // distributor. The options are the parties actually present in the loaded
+  // list, so the dropdown never offers a party that isn't in this tab.
+  const [partyFilter, setPartyFilter] = useState("");
+  const partyOptions = Array.from(
+    orders
+      .reduce((map, o) => {
+        const name = String(o.card_name || "").trim();
+        if (name && !map.has(name)) map.set(name, o.card_code || name);
+        return map;
+      }, new Map<string, string>())
+      .entries(),
+  ).sort((a, b) => a[0].localeCompare(b[0]));
+  const filteredOrders = partyFilter
+    ? orders.filter((o) => o.card_name === partyFilter || o.card_code === partyFilter)
+    : orders;
+
   // Client-side pagination, 10 rows a page. Clamp the page rather than track it
   // with an effect, so switching tabs (fewer rows) can't strand an empty page.
   const [page, setPage] = useState(1);
   const itemsPerPage = 10;
-  const totalPages = Math.max(1, Math.ceil(orders.length / itemsPerPage));
+  const totalPages = Math.max(1, Math.ceil(filteredOrders.length / itemsPerPage));
   const pageNumber = Math.min(page, totalPages);
-  const pageOrders = orders.slice((pageNumber - 1) * itemsPerPage, pageNumber * itemsPerPage);
+  const pageOrders = filteredOrders.slice(
+    (pageNumber - 1) * itemsPerPage,
+    pageNumber * itemsPerPage,
+  );
 
   const isPendingTab = tab === "pending";
-  const sapFailedCount = orders.filter((o) => isSapFailed(o.id)).length;
+  const sapFailedCount = filteredOrders.filter((o) => isSapFailed(o.id)).length;
   // How much work is in the queue, as against how many orders — a queue of
   // three 40-line orders is not the same job as three single-line ones.
-  const lineCount = orders.reduce((sum, o) => sum + Number(o.items_count || 0), 0);
+  const lineCount = filteredOrders.reduce((sum, o) => sum + Number(o.items_count || 0), 0);
 
   /** Re-read the current tab. */
   const loadList = async () => queryClient.invalidateQueries({ queryKey: ["orders", "mart"] });
@@ -732,7 +754,7 @@ function MartApproval() {
           icon={HiOutlineShoppingCart}
           tone="brand"
           label={`${TABS.find((t) => t.key === tab)?.label} orders`}
-          value={orders.length}
+          value={filteredOrders.length}
           loading={loading}
           className="border-sky-200 bg-sky-50"
         />
@@ -780,7 +802,25 @@ function MartApproval() {
             </Tab>
           ))}
         </TabList>
-        <span className="text-[11.5px] text-subtle">Total: {orders.length}</span>
+        <div className="flex flex-wrap items-center gap-3">
+          <FilterSelect
+            label="Party"
+            icon={HiOutlineBuildingStorefront}
+            value={partyFilter}
+            onChange={(e) => {
+              setPartyFilter(e.target.value);
+              setPage(1);
+            }}
+          >
+            <option value="">All Parties</option>
+            {partyOptions.map(([name, code]) => (
+              <option key={code} value={name}>
+                {name}
+              </option>
+            ))}
+          </FilterSelect>
+          <span className="text-[11.5px] text-subtle">Total: {filteredOrders.length}</span>
+        </div>
       </Card>
 
       {loading ? (
@@ -793,12 +833,16 @@ function MartApproval() {
             hint={error}
           />
         </Card>
-      ) : orders.length === 0 ? (
+      ) : filteredOrders.length === 0 ? (
         <Card>
           <EmptyState
             icon={HiOutlineInbox}
             title={`No ${tab} orders`}
-            hint="Nothing in this state right now."
+            hint={
+              partyFilter
+                ? "No orders for that party in this state. Clear the filter to see them all."
+                : "Nothing in this state right now."
+            }
           />
         </Card>
       ) : (
@@ -885,7 +929,7 @@ function MartApproval() {
                                 onClick={() => onEdit({ id: o.id, order_number: o.order_number })}
                                 aria-label={`Edit order ${o.order_number}`}
                                 title="Edit order"
-                                className="text-amber-600 hover:bg-amber-50 hover:text-amber-700"
+                                className="[&_svg]:text-amber-600 hover:bg-amber-50 hover:[&_svg]:text-amber-700"
                               >
                                 <HiOutlinePencilSquare aria-hidden="true" />
                               </Button>
@@ -896,7 +940,7 @@ function MartApproval() {
                               onClick={() => onDownload(o.id, o.order_number)}
                               aria-label={`Download order ${o.order_number}`}
                               title="Download order"
-                              className="text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700"
+                              className="[&_svg]:text-emerald-600 hover:bg-emerald-50 hover:[&_svg]:text-emerald-700"
                             >
                               <HiOutlineArrowDownTray aria-hidden="true" />
                             </Button>
@@ -952,7 +996,7 @@ function MartApproval() {
         </Card>
       )}
 
-      {!loading && !error && orders.length > itemsPerPage ? (
+      {!loading && !error && filteredOrders.length > itemsPerPage ? (
         <Pagination page={pageNumber} totalPages={totalPages} onPageChange={setPage} />
       ) : null}
 
