@@ -80,8 +80,23 @@ const buttonVariants = cva(
         /** The default. A bordered surface — legible without competing. */
         secondary:
           "border-line bg-white text-ink hover:bg-surface hover:border-line-strong",
-        /** Tertiary: no border until hovered. For toolbars and row actions. */
-        ghost: "text-body hover:bg-surface hover:text-ink",
+        /**
+         * Tertiary: no border until hovered. For toolbars and row actions.
+         *
+         * The ICON is tinted and the label is not. A row of six ghost actions
+         * — View, History, Track, Report, Show Flow, Raise CL — was six
+         * identical grey shapes, and the glyph is the part people aim at, so
+         * it is the part worth colouring. Tinting the text as well would turn
+         * every table row into a row of links competing with the primary
+         * action beside them.
+         *
+         * `text-brand/80` rather than full brand: these are secondary by
+         * definition, and at full strength a column of ten pulled harder than
+         * the one blue button the screen is actually for. On hover the whole
+         * button resolves to `text-ink`, icon included, so the tint never
+         * fights the hover state.
+         */
+        ghost: "text-body [&_svg]:text-brand/80 hover:bg-surface hover:text-ink hover:[&_svg]:text-ink",
         /**
          * Destructive.
          *

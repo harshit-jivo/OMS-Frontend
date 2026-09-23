@@ -1,15 +1,29 @@
+/* ONE SCROLLBAR: THE WINDOW'S.
+
+   `body` used to be `height: 100%` with `overflow-x: hidden`, which makes it
+   a scroll container of its own — the page scrolled inside the body, not the
+   window. Under the wide-screen `zoom` below, the body's box then rendered
+   taller than the window, so the window scrolled too, and every page on a
+   1920px monitor carried two vertical scrollbars and a blank strip. With no
+   height and `overflow-x: clip` (clip does NOT create a scroll container) the
+   body is an ordinary block, the viewport does the scrolling, and
+   `window.scrollY` means what it says again. */
 html, body, #root {
   width: 100%;
-  height: 100%;
   margin: 0;
   padding: 0;
 }
 
 html {
+  height: 100%;
   overflow-x: hidden;
 }
 
 :root {
+  /* The body zoom in force (see the media blocks below). 1 everywhere the
+     zoom is off, so `calc(... / var(--app-zoom))` is a plain identity there
+     and the same rule serves every screen size. */
+  --app-zoom: 1;
   --text: #475569;
   --text-h: #0f172a;
   --bg: #f4f7fb;
@@ -122,7 +136,12 @@ html {
 
 
 #root {
-  min-height: 100svh;
+  /* `100svh` is measured on the unzoomed window and then scaled by the body
+     zoom, so on a 1920px screen the root was 12% taller than the window: a
+     page that fitted still scrolled, into a blank strip. Dividing by the zoom
+     makes it exactly one screen tall. (Sidebar.css used to repeat this rule
+     as `100vh`; it no longer sizes #root at all.) */
+  min-height: calc(100svh / var(--app-zoom));
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
@@ -133,7 +152,7 @@ html {
 body {
   margin: 0;
   min-width: 320px;
-  overflow-x: hidden;
+  overflow-x: clip;
 }
 
 img,

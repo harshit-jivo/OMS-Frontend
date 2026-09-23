@@ -37,6 +37,7 @@ import {
   HiOutlineInformationCircle,
   HiOutlinePencilSquare,
   HiOutlinePresentationChartLine,
+  HiOutlineMapPin,
 } from "react-icons/hi2";
 import {
   Dialog,
@@ -950,7 +951,7 @@ export default function Distributor_Order_Tracking() {
                             variant="ghost"
                             onClick={() => void handleTrack(order)}
                           >
-                            <HiOutlineArrowPath aria-hidden="true" /> Track
+                            <HiOutlineMapPin aria-hidden="true" /> Track
                           </Button>
                         </TableCell>
                       </TableRow>

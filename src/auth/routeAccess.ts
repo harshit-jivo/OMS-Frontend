@@ -236,6 +236,14 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   "/Rate_Approver_orders": { roles: RATE_APPROVER_ROLES },
   "/Rate_Approver_status_tracking": { roles: RATE_APPROVER_ROLES },
   "/Order_Tracking": { roles: BILLING_OR_MANAGER },
+  // Its OWN key, not `orders.sales.view_all`.
+  //
+  // It was gated on that one, since it already meant "see every order". But
+  // `_get_base_orders` reads the same key, so granting it to open this page
+  // also unscoped the holder's queue, tracker and dashboards — a BEVERAGES
+  // billing user started seeing OIL orders everywhere. The page narrows to the
+  // holder's own categories server-side; see `_master_orders_for`.
+  "/Order_Master": { permissions: ["orders.master.view"] },
   "/Invoice_Report": { permissions: ["invoices.report.view"], roles: ["billing"] },
 
   // --- Reports ------------------------------------------------------------

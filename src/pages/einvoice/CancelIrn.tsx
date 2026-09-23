@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { HiXCircle } from "react-icons/hi2";
 import { einvoiceService } from "../../services/einvoiceService";
 import { NicField, KeyValues, JsonView, ErrorAlert, SuccessAlert } from "../../components/NicUI";
@@ -6,6 +6,8 @@ import { messageFrom } from "@/lib/apiError";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/form";
 import { Card, CardHeader, CardTitle } from "@/components/ui/page";
+import EntityToggle from "./EntityToggle";
+import { useDefaultEntity } from "./useNicEntity";
 
 const REASONS = [
   { code: "1", label: "1 — Duplicate" },
@@ -16,6 +18,15 @@ const REASONS = [
 
 export default function CancelIrn() {
   const [irn, setIrn] = useState("");
+  /* Cancel authenticates as the GSTIN that owns the IRN. For an IRN OMS did
+     not generate there is no local record to read that from, so the entity
+     has to be chosen — otherwise a Mart IRN is cancelled as Wellness and NIC
+     refuses. */
+  const defaultEntity = useDefaultEntity();
+  const [entity, setEntity] = useState("");
+  const [gstin, setGstin] = useState("");
+  useEffect(() => { if (!entity && defaultEntity) setEntity(defaultEntity); },
+            [entity, defaultEntity]);
   const [reason, setReason] = useState("2");
   const [remarks, setRemarks] = useState("");
   const [busy, setBusy] = useState(false);
@@ -29,7 +40,7 @@ export default function CancelIrn() {
     setResult(null);
     setBusy(true);
     try {
-      const resp = await einvoiceService.cancel(irn.trim(), reason, remarks.trim());
+      const resp = await einvoiceService.cancel(irn.trim(), reason, remarks.trim(), entity || undefined, gstin || undefined);
       // NIC returns HTTP 200 even for business failures, so inspect the body.
       const failMsg = nicErrorMessage(resp);
       if (failMsg) {
@@ -55,6 +66,11 @@ export default function CancelIrn() {
         An IRN can be cancelled within <strong>24 hours</strong> of generation and only if no active
         e-Way Bill exists against it. The stored record is marked <code>CANCELLED</code>.
       </p>
+
+      <div className="mt-3.5">
+        <EntityToggle value={entity} onChange={setEntity} gstin={gstin} onGstinChange={setGstin}
+          hint="Only the GSTIN that owns the IRN can cancel it. Leave on Any to try each state of this PAN." />
+      </div>
 
       <div className="mt-3.5 grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-x-5 gap-y-4">
         <NicField label="IRN" full hint="The 64-character IRN hash">

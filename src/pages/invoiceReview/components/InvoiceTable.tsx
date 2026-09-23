@@ -2,45 +2,18 @@
  * The main invoice list — Phase 4 split, plus Phase 5.5 row virtualization.
  *
  * ─────────────────────────────────────────────────────────────────────────
- * THE SCROLL CONTAINER IS `document.body`, AND THAT WAS A BUG
+ * ONE PAGE AT A TIME, NOT A VIRTUAL WINDOW
  * ─────────────────────────────────────────────────────────────────────────
- * This page has no inner vertical scrollbar — the wrapper only ever set
- * `overflow-x: auto` (for narrow viewports) and the table grows with the page.
- * So this used `useWindowVirtualizer`, which reads `window.scrollY`.
+ * This drew a moving window of the whole list (`useWindowVirtualizer`), with
+ * two spacer rows standing in for what was not mounted. It is paginated now
+ * and the virtualizer is gone: the hook hands over one page of 25 rows, and
+ * there is nothing in 25 rows worth virtualizing.
  *
- * `window.scrollY` is ALWAYS 0 in this app. `index.css` sets
- * `html, body, #root { height: 100% }` and `overflow-x: hidden` on both html
- * and body, which makes BODY the scrolling box rather than the viewport — so
- * the document never scrolls and neither does the window.
- *
- * The consequence was not subtle. Measured against a 300-row list: scrolled
- * to the very bottom (`document.body.scrollTop` 18825), twenty-eight rows were
- * mounted and row 300 was not in the DOM at all. Every invoice past the first
- * screenful was unreachable — the user saw a tall blank area where the rest of
- * the list should be.
- *
- * `useVirtualizer` with an explicit `getScrollElement` fixes it by measuring
- * the box that actually scrolls. Nothing about the LAYOUT changes: still no
- * nested scrollbar, still the same two spacer rows.
- *
- * If the shell's scrolling ever moves back to the window, this is the line to
- * change — and `e2e` should keep a long-list case, because nothing shorter
- * than ~30 rows can tell the two apart.
- *
- * ─────────────────────────────────────────────────────────────────────────
- * WHY A FIXED `estimateSize`, NOT DYNAMIC MEASUREMENT
- * ─────────────────────────────────────────────────────────────────────────
- * Dynamic per-row measurement needs a DOM ref on every rendered row, fed back
- * into the virtualizer via `measureElement`. The shared `TableRow` primitive
- * (`components/ui/table.tsx`) is a plain function component with no
- * `forwardRef`, and it belongs to every table in the app — not this page's to
- * change. A fixed estimate plus a generous `overscan` keeps the two spacer
- * rows' heights close enough that scroll position never visibly jumps, without
- * touching a shared file.
- *
- * The two spacer `<tr>` elements stand in for however many rows are skipped
- * above/below the rendered window, so the table's total height (and the
- * page's scrollbar) stays right even though most rows are unmounted.
+ * That also retires a genuinely awkward dependency. The virtualizer needed
+ * this table's document offset, read as `offsetTop` from the body — so a
+ * `position: relative` added to `Page`, `Card` or `.content-area` by anyone,
+ * for any reason, would have silently landed every row in the wrong place.
+ * Nothing here measures the document any more.
  *
  * ─────────────────────────────────────────────────────────────────────────
  * THE ACTION COLUMN
@@ -52,8 +25,6 @@
  * read as six equally urgent choices. Delete stays last, so it never lands
  * where Approve or Post used to be and gets hit by muscle memory.
  */
-import { useState } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   HiOutlineArrowPath,
   HiOutlineArrowUturnLeft,
@@ -61,6 +32,7 @@ import {
   HiOutlineCheckCircle,
   HiOutlineClock,
   HiOutlineDocumentText,
+  HiOutlineExclamationTriangle,
   HiOutlineEye,
   HiOutlineInbox,
   HiOutlinePaperAirplane,
@@ -83,24 +55,23 @@ import {
   normalizeStatus,
   openReport,
 } from "../helpers";
+import { isBatchOrStockError } from "../../SalesInvoice/sapErrorTranslator";
 import type { UseInvoiceReviewResult } from "../useInvoiceReview";
 
 // SO #, Party, Amount, Submitted, Actions. (Status is commented out below, as
 // it was in the original — see the badge-conversion note on this page.)
 const COLUMN_COUNT = 5;
 
-// A reasonable average row height for the comfortable-density table: enough
-// that the spacer rows keep the scrollbar close to accurate without needing
-// to measure every row. Real visible rows always render at their true height
-// regardless of this estimate — only the space standing in for UNRENDERED
-// rows depends on it.
-const ESTIMATED_ROW_HEIGHT = 64;
-
 export default function InvoiceTable({ view }: { view: UseInvoiceReviewResult }) {
   const {
     loading,
     records,
+    filteredRecords,
+    allRecords,
+    filtersEnabled,
     actionId,
+    recheckingId,
+    repostWithFreshBatches,
     canApproveReject,
     canApproveWarehouse,
     canPostToSap,
@@ -115,28 +86,6 @@ export default function InvoiceTable({ view }: { view: UseInvoiceReviewResult })
     openCreditLimitRequest,
   } = view;
 
-  // Where the table starts inside the scrolling box, so the virtualizer can
-  // translate its own (list-relative) offsets into real scroll positions. A
-  // ref callback rather than a measuring effect: React calls it once the div
-  // is actually in the document, so `offsetTop` is read straight off the live
-  // node on every render from then on — no extra render pass to converge on.
-  //
-  // `offsetTop` is measured from the offsetParent, which is `body` here: no
-  // ancestor between this div and the body is positioned, and body is the
-  // scroller. If a `position: relative` is ever added to `Page`, `Card` or
-  // `.content-area`, this becomes an offset within THAT box instead and the
-  // rows will start landing in the wrong place.
-  const [wrapNode, setWrapNode] = useState<HTMLDivElement | null>(null);
-  const scrollMargin = wrapNode?.offsetTop ?? 0;
-
-  const rowVirtualizer = useVirtualizer({
-    count: records.length,
-    getScrollElement: () => (typeof document === "undefined" ? null : document.body),
-    estimateSize: () => ESTIMATED_ROW_HEIGHT,
-    overscan: 12,
-    scrollMargin,
-  });
-
   if (loading) {
     return (
       <div className="p-4">
@@ -145,25 +94,30 @@ export default function InvoiceTable({ view }: { view: UseInvoiceReviewResult })
     );
   }
 
-  if (records.length === 0) {
+  if (filteredRecords.length === 0) {
+    // An empty tab and a tab emptied BY the filter bar are different problems
+    // with different fixes, and "pick another status" is unhelpful advice to
+    // someone who has just typed a search.
+    const narrowedToNothing = filtersEnabled && allRecords.length > 0;
     return (
       <EmptyState
         icon={HiOutlineInbox}
-        title="No invoices found for this status"
-        hint="Pick another status above, or refresh if you are expecting something new."
+        title={
+          narrowedToNothing
+            ? "No invoice matches these filters"
+            : "No invoices found for this status"
+        }
+        hint={
+          narrowedToNothing
+            ? "Try a shorter search, a wider date range, or clear the filters above."
+            : "Pick another status above, or refresh if you are expecting something new."
+        }
       />
     );
   }
 
-  const virtualRows = rowVirtualizer.getVirtualItems();
-  const paddingTop = virtualRows.length > 0 ? virtualRows[0].start - scrollMargin : 0;
-  const paddingBottom =
-    virtualRows.length > 0
-      ? rowVirtualizer.getTotalSize() - virtualRows[virtualRows.length - 1].end
-      : 0;
-
   return (
-    <div className="overflow-x-auto" ref={setWrapNode}>
+    <div className="overflow-x-auto">
       <Table>
         <TableHeader>
           <TableRow className="bg-surface hover:bg-surface">
@@ -176,22 +130,17 @@ export default function InvoiceTable({ view }: { view: UseInvoiceReviewResult })
           </TableRow>
         </TableHeader>
         <TableBody>
-          {paddingTop > 0 && (
-            <tr aria-hidden="true">
-              <td colSpan={COLUMN_COUNT} style={{ height: paddingTop, padding: 0, border: 0 }} />
-            </tr>
-          )}
-          {virtualRows.map((virtualRow) => {
-            const record = records[virtualRow.index];
+          {records.map((record, index) => {
             const status = normalizeStatus(record.status);
             const busy = actionId === record.id;
+            const rechecking = recheckingId === record.id;
             const reportRef = invoiceReportRef(record);
             // The backend decides which statuses may be removed and says so
             // per row; older responses without the flag simply show no
             // Delete button rather than offering one that would be refused.
             const canDelete = Boolean(record.can_delete);
             return (
-              <TableRow key={record.id ?? virtualRow.index}>
+              <TableRow key={record.id ?? index}>
                 <TableCell className="align-top">
                   <span className="font-semibold text-ink">{record.so_number || "—"}</span>
                   {/* Lineage: this row is either a rework of a rejected
@@ -300,6 +249,21 @@ export default function InvoiceTable({ view }: { view: UseInvoiceReviewResult })
                           <HiOutlineDocumentText aria-hidden="true" /> Generate Report
                         </Button>
                       ))}
+                    {/* SAP never answered this invoice's post. The server
+                        looks the invoice up in SAP first and only sends it
+                        again if it is not there. */}
+                    {status === "POSTING" && canPostToSap && (
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        disabled={busy}
+                        onClick={() => handlePostToSap(record)}
+                        title="SAP did not answer the last post. This checks SAP first and posts again only if the invoice is not there."
+                      >
+                        <HiOutlineArrowPath aria-hidden="true" />
+                        {busy ? "…" : "Check SAP"}
+                      </Button>
+                    )}
                     {(status === "ERROR" || status === "CL_RAISED") && canPostToSap && (
                       <Button
                         size="sm"
@@ -321,6 +285,25 @@ export default function InvoiceTable({ view }: { view: UseInvoiceReviewResult })
                         <HiOutlineBanknotes aria-hidden="true" /> Show Flow
                       </Button>
                     )}
+                    {/* A batch or negative-inventory refusal, from an attempt
+                        made earlier. "Repost to SAP" above would send the same
+                        dead batch numbers back and fail identically, so this
+                        re-reads the warehouse and allocates again first.
+                        Danger-styled: it posts against stock the reviewer has
+                        not seen. */}
+                    {status === "ERROR" &&
+                      canPostToSap &&
+                      isBatchOrStockError(record.error_message) && (
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          disabled={busy || rechecking}
+                          onClick={() => void repostWithFreshBatches(record)}
+                        >
+                          <HiOutlineExclamationTriangle aria-hidden="true" />
+                          {rechecking ? "Re-checking…" : "Re-check batches & repost"}
+                        </Button>
+                      )}
                     {status === "ERROR" && canPostToSap && isCreditLimitError(record) && (
                       <Button
                         size="sm"
@@ -363,11 +346,6 @@ export default function InvoiceTable({ view }: { view: UseInvoiceReviewResult })
               </TableRow>
             );
           })}
-          {paddingBottom > 0 && (
-            <tr aria-hidden="true">
-              <td colSpan={COLUMN_COUNT} style={{ height: paddingBottom, padding: 0, border: 0 }} />
-            </tr>
-          )}
         </TableBody>
       </Table>
     </div>

@@ -32,14 +32,16 @@ import { Badge } from "@/components/ui/badge";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { Button } from "@/components/ui/button";
 import { Card, Notice, Page, PageHeader } from "@/components/ui/page";
+import { Pagination } from "@/components/ui/pagination";
 import { Tab, TabList } from "@/components/ui/tabs";
 import ConfirmActionDialog from "./invoiceReview/components/ConfirmActionDialog";
 import CreditLimitFlowDialog from "./invoiceReview/components/CreditLimitFlowDialog";
 import CreditLimitRequestDialog from "./invoiceReview/components/CreditLimitRequestDialog";
 import InvoiceDetailDialog from "./invoiceReview/components/InvoiceDetailDialog";
+import InvoiceFilters from "./invoiceReview/components/InvoiceFilters";
 import InvoiceHistoryDialog from "./invoiceReview/components/InvoiceHistoryDialog";
 import InvoiceTable from "./invoiceReview/components/InvoiceTable";
-import { useInvoiceReview } from "./invoiceReview/useInvoiceReview";
+import { INVOICE_PAGE_SIZE, useInvoiceReview } from "./invoiceReview/useInvoiceReview";
 
 export default function InvoiceReview() {
   // Two desks share this screen and do opposite halves of the job: the factory
@@ -74,14 +76,24 @@ export default function InvoiceReview() {
     counts,
     statusFilter,
     setStatusFilter,
+    allRecords,
+    filteredRecords,
+    filters,
+    setFilters,
+    filtersEnabled,
+    page,
+    setPage,
+    pageCount,
     actionMessage,
     actionError,
     error,
     sapPost,
     postingRecord,
     sapErrorIsCreditLimit,
+    sapErrorIsBatchOrStock,
     closeSapLoader,
     raiseClFromLoader,
+    recheckBatchesFromLoader,
     openLoaderReport,
   } = view;
 
@@ -133,6 +145,19 @@ export default function InvoiceReview() {
         </TabList>
       </div>
 
+      {/* The archive tabs — "Posted to SAP" and "All" — get a search and
+          filter row. The five work queues do not: they are opened to be
+          cleared, not searched. See `invoiceReview/filters.ts`. */}
+      {filtersEnabled && !loading ? (
+        <InvoiceFilters
+          tab={statusFilter}
+          records={allRecords}
+          filters={filters}
+          onChange={setFilters}
+          shownCount={filteredRecords.length}
+        />
+      ) : null}
+
       {/* Outcomes of the last action, and the load failure. `Notice` carries
           `role="status"`, so a screen reader hears the result of a decision it
           could not otherwise know had landed. */}
@@ -152,6 +177,20 @@ export default function InvoiceReview() {
       >
         <InvoiceTable view={view} />
       </Card>
+
+      {/* Only once there is more than one page. A pager reading "1" under a
+          list that fits is furniture. */}
+      {!loading && pageCount > 1 ? (
+        <Pagination
+          page={page}
+          totalPages={pageCount}
+          onPageChange={setPage}
+          summary={`Showing ${(page - 1) * INVOICE_PAGE_SIZE + 1}–${Math.min(
+            page * INVOICE_PAGE_SIZE,
+            filteredRecords.length,
+          )} of ${filteredRecords.length}`}
+        />
+      ) : null}
 
       {/* The one question every verb asks. Was five `window.confirm`s and a
           `window.prompt` for the rejection reason. */}
@@ -173,6 +212,13 @@ export default function InvoiceReview() {
         onRetry={sapPost.retry}
         onRaiseCl={
           canPostToSap && sapErrorIsCreditLimit && postingRecord ? raiseClFromLoader : undefined
+        }
+        /* Only for the desk that posts, and only for the failures a fresh
+           allocation could actually fix. */
+        onRecheckBatches={
+          canPostToSap && sapErrorIsBatchOrStock && postingRecord
+            ? recheckBatchesFromLoader
+            : undefined
         }
         onOpenReport={openLoaderReport}
       />

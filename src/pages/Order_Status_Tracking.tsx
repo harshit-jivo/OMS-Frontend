@@ -7,14 +7,8 @@ import {
   HiOutlineEye,
   HiOutlineFunnel,
   HiOutlineInbox,
-  HiOutlineInformationCircle,
   HiOutlineMagnifyingGlass,
   HiOutlineXCircle,
-  HiCube,
-  HiInboxStack,
-  HiBeaker,
-  HiBanknotes,
-  HiCurrencyRupee,
 } from "react-icons/hi2";
 
 import { exportToExcel } from "../utils/excelExport";
@@ -25,13 +19,6 @@ import { Badge } from "@/components/ui/badge";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { Button } from "@/components/ui/button";
 import { DetailField, DetailGrid } from "@/components/ui/detail";
-import {
-  Dialog,
-  DialogBody,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import {
   FilterBar,
   FilterCount,
@@ -45,7 +32,6 @@ import {
   CardHeader,
   CardTitle,
   EmptyState,
-  Notice,
   Page,
   PageHeader,
   Stat,
@@ -62,14 +48,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { toneForStatus } from "@/components/ui/statusTone";
-import { OrderItemCards } from "@/components/orders/OrderItemCards";
 import { OrderItemsTable } from "@/components/orders/OrderItemsTable";
 import {
   OrderTimeline,
   OrderTimelineDialog,
 } from "@/components/orders/OrderTimelineDialog";
-import { OrderTotalsRow, VarietyCostCards } from "@/components/orders/OrderTotals";
-import { orderTotals, varietyCosts } from "@/components/orders/orderDetail";
 import {
   RATE_APPROVER_TRACKING_FALLBACK_STATUS,
   getDecisionType,
@@ -158,7 +141,6 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
   const [orderDetails, setOrderDetails] = useState<Order | null>(null);
   const [selectedItems, setSelectedItems] = useState<OrderItem[]>([]);
   const [orderLogs, setOrderLogs] = useState<OrderLog[]>([]);
-  const [infoOpen, setInfoOpen] = useState(false);
 
   // The rate approver's tracking screen gets the richer, colour-coded layout
   // (card list + Mart-style detail); auditor and billing keep the table.
@@ -247,16 +229,20 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
     pageNumber * itemsPerPage,
   );
 
-  const detailTotals = useMemo(() => orderTotals(selectedItems), [selectedItems]);
-  const detailVarieties = useMemo(() => varietyCosts(orderDetails), [orderDetails]);
-  const detailQty = useMemo(
-    () => selectedItems.reduce((sum, item) => sum + (Number(item.qty) || 0), 0),
-    [selectedItems],
-  );
-  const detailBoxes = useMemo(
-    () => selectedItems.reduce((sum, item) => sum + (Number(item.boxes) || 0), 0),
-    [selectedItems],
-  );
+  /*
+   * Does this detail view have a progress trail to show beside the order?
+   *
+   * Every desk, not just billing. All three are looking at an order they
+   * already acted on and asking the same question — where did it go after me
+   * — and the log is the answer, so there was no reason for two of them to
+   * have it hidden behind a dialog while the third had it on the page.
+   *
+   * Still a condition rather than always-on: the logs are loaded per order
+   * and can legitimately come back empty (a fresh order, or the call failing,
+   * which `fetchOrderDetails` swallows to an empty list). Gridding an empty
+   * right-hand column would be worse than the single column it replaces.
+   */
+  const showTrail = orderLogs.length > 0;
 
   const fetchOrderDetails = async (orderId: number) => {
     try {
@@ -560,22 +546,13 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
             }
             actions={
               isRateApprover ? (
-                <>
-                  <Button
-                    variant="secondary"
-                    className="border-sky-300 text-sky-700 hover:border-sky-400 hover:bg-sky-50"
-                    onClick={() => setInfoOpen(true)}
-                  >
-                    <HiOutlineInformationCircle aria-hidden="true" /> Info
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    className="border-emerald-600 bg-emerald-600 text-white hover:border-emerald-700 hover:bg-emerald-700"
-                    onClick={() => downloadExcel(orderDetails)}
-                  >
-                    <HiOutlineArrowDownTray aria-hidden="true" /> Export Excel
-                  </Button>
-                </>
+                <Button
+                  variant="secondary"
+                  className="border-emerald-600 bg-emerald-600 text-white hover:border-emerald-700 hover:bg-emerald-700"
+                  onClick={() => downloadExcel(orderDetails)}
+                >
+                  <HiOutlineArrowDownTray aria-hidden="true" /> Export Excel
+                </Button>
               ) : (
                 <Button variant="ghost" onClick={() => downloadExcel(orderDetails)}>
                   <HiOutlineArrowDownTray aria-hidden="true" /> Export Excel
@@ -584,196 +561,76 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
             }
           />
 
-          {isRateApprover ? (
-            /* Rate approver: the Mart / View Orders detail layout — coloured
-               KPI cards, item cards and the party facts behind an "i" dialog. */
-            <>
-              <StatRow>
-                <Stat
-                  icon={HiCube}
-                  tone="neutral"
-                  label="Total QTY"
-                  value={detailQty.toLocaleString("en-IN")}
-                  className="border-sky-200 bg-sky-50"
-                />
-                <Stat
-                  icon={HiInboxStack}
-                  tone="neutral"
-                  label="Total Boxes"
-                  value={detailBoxes.toLocaleString("en-IN")}
-                  className="border-amber-200 bg-amber-50"
-                />
-                <Stat
-                  icon={HiBeaker}
-                  tone="neutral"
-                  label="Total Ltrs"
-                  value={detailTotals.litres.toFixed(2)}
-                  className="border-teal-200 bg-teal-50"
-                />
-                <Stat
-                  icon={HiBanknotes}
-                  tone="neutral"
-                  label="Total Amount"
-                  value={detailTotals.subtotal.toFixed(2)}
-                  className="border-violet-200 bg-violet-50"
-                />
-                <Stat
-                  icon={HiCurrencyRupee}
-                  tone="brand"
-                  label="Grand Total (incl. tax)"
-                  value={detailTotals.grand.toFixed(2)}
-                  hint={`${selectedItems.length} item${selectedItems.length === 1 ? "" : "s"}`}
-                  className="border-brand/30 bg-brand/[0.08]"
-                />
-              </StatRow>
+          {/* The order on the left, its progress trail on the right.
 
-              <Card>
-                <CardHeader>
-                  <CardTitle>Items</CardTitle>
-                  <Badge tone="neutral">{selectedItems.length}</Badge>
-                </CardHeader>
-                <OrderItemCards items={selectedItems} showSchemes />
-              </Card>
+              These are the two halves of the one question every tracking desk
+              opens a row to ask — what was this, and where did it go after me
+              — so they are read together rather than a scroll apart. Same
+              two-column shape as the Order Tracker detail, and the same
+              timeline component as the track dialog.
 
-              <Dialog open={infoOpen} onOpenChange={setInfoOpen}>
-                <DialogContent
-                  title={`Order ${orderDetails.order_number} information`}
-                  size="md"
-                >
-                  <DialogHeader>
-                    <DialogTitle>Order information</DialogTitle>
-                    {orderDetails.status_display ? (
-                      <Badge tone={toneForStatus(orderDetails.status_display)}>
-                        {orderDetails.status_display}
-                      </Badge>
-                    ) : null}
-                  </DialogHeader>
-                  <DialogBody className="space-y-4">
-                    <DetailGrid>
-                      <DetailField
-                        label="Party name"
-                        value={`${orderDetails.card_name}${
-                          orderDetails.card_code ? ` (${orderDetails.card_code})` : ""
-                        }`}
-                        span="full"
-                      />
-                      <DetailField
-                        label="Punched by"
-                        value={
-                          orderDetails.created_by_name || String(orderDetails.created_by ?? "")
-                        }
-                      />
-                      <DetailField
-                        label="Punched at"
-                        value={formatCreatedDateTime(orderDetails.created_at)}
-                      />
-                      <DetailField label="Current stage" value={orderDetails.status_display} />
-                      <DetailField label="Party state" value={orderDetails.party_state} />
-                      <DetailField label="Delivery date" value={orderDetails.delivery_date} />
-                      <DetailField label="PO number" value={orderDetails.po_number} hideWhenEmpty />
-                      <DetailField
-                        label="Quotation no"
-                        value={orderDetails.sap_doc_number}
-                        hideWhenEmpty
-                      />
-                      <DetailField
-                        label="Warehouse"
-                        value={orderDetails.warehouse_code}
-                        hideWhenEmpty
-                      />
-                      <DetailField
-                        label="Dispatch from"
-                        value={orderDetails.dispatch_from_name}
-                        hideWhenEmpty
-                      />
-                      <DetailField
-                        label="Bill to"
-                        value={orderDetails.bill_to_address}
-                        span="full"
-                        hideWhenEmpty
-                      />
-                      <DetailField
-                        label="Ship to"
-                        value={orderDetails.ship_to_address}
-                        span="full"
-                        hideWhenEmpty
-                      />
-                      <DetailField
-                        label="Remark"
-                        value={orderDetails.remarks?.trim() ? orderDetails.remarks : ""}
-                        span="full"
-                        hideWhenEmpty
-                      />
-                    </DetailGrid>
-
-                    {orderDetails.rejection_reason ? (
-                      <Notice tone="bad" title="Rejection reason">
-                        {orderDetails.rejection_reason}
-                      </Notice>
-                    ) : null}
-                  </DialogBody>
-                </DialogContent>
-              </Dialog>
-            </>
-          ) : (
-            <>
-              <OrderTotalsRow totals={detailTotals} itemCount={selectedItems.length} />
-
-              <VarietyCostCards costs={detailVarieties} />
-
-              <Card>
-                <CardHeader>
-                  <CardTitle>Party &amp; delivery</CardTitle>
-                </CardHeader>
-                <DetailGrid>
-                  <DetailField label="Party state" value={orderDetails.party_state} />
-                  <DetailField label="Delivery date" value={orderDetails.delivery_date} />
-                  <DetailField label="PO number" value={orderDetails.po_number} />
-                  {/* Only ever present once an order has actually reached SAP, so
-                      it is worth showing HERE — unlike on the approval queues,
-                      where it is blank by definition. */}
-                  <DetailField label="Quotation no" value={orderDetails.sap_doc_number} />
-                  <DetailField label="Bill to" value={orderDetails.bill_to_address} />
-                  <DetailField label="Ship to" value={orderDetails.ship_to_address} />
-                  <DetailField
-                    label="Remark"
-                    value={orderDetails.remarks?.trim() ? orderDetails.remarks : ""}
-                    span="full"
-                    hideWhenEmpty
-                  />
-                </DetailGrid>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle>Items</CardTitle>
-                  <Badge tone="neutral">{selectedItems.length}</Badge>
-                </CardHeader>
-                <OrderItemsTable items={selectedItems} variety={false} />
-              </Card>
-            </>
-          )}
-
-          {/* The progress trail, inline.
-              Billing is the desk that has to answer "why is this not billed
-              yet", so its detail view carries the trail on the page rather
-              than behind the track button. Same component as the dialog. */}
-          {mode === "billing" && orderLogs.length > 0 && (
+              `showTrail` collapses this to a plain single column when an
+              order has no log, rather than gridding an empty half. The
+              left-hand cards are written once either way. */}
+          <div
+            className={
+              showTrail
+                ? "grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,400px)] lg:items-start"
+                : "space-y-4"
+            }
+          >
+            <div className="space-y-4">
             <Card>
               <CardHeader>
-                <CardTitle>Order log</CardTitle>
-                <Badge tone="neutral">
-                  {buildOrderTimelineLogs(orderLogs, orderDetails).length}
-                </Badge>
+                <CardTitle>Party &amp; delivery</CardTitle>
               </CardHeader>
-              <OrderTimeline
-                order={orderDetails}
-                logs={orderLogs}
-                formatDateTime={formatCreatedDateTime}
-                pendingNote={pendingNote}
-              />
+              <DetailGrid>
+                <DetailField label="Party state" value={orderDetails.party_state} />
+                <DetailField label="Delivery date" value={orderDetails.delivery_date} />
+                <DetailField label="PO number" value={orderDetails.po_number} />
+                {/* Who raised it, not the SAP quotation number that used to sit
+                    here: on a tracking screen the reviewer is following up a
+                    decision they made, and the person to follow up WITH is the
+                    salesperson. The quotation number is still in the Excel
+                    export for anyone reconciling against SAP. */}
+                <DetailField label="Created by" value={orderDetails.created_by_name} />
+                <DetailField label="Bill to" value={orderDetails.bill_to_address} />
+                <DetailField label="Ship to" value={orderDetails.ship_to_address} />
+                <DetailField
+                  label="Remark"
+                  value={orderDetails.remarks?.trim() ? orderDetails.remarks : ""}
+                  span="full"
+                  hideWhenEmpty
+                />
+              </DetailGrid>
             </Card>
-          )}
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Items</CardTitle>
+                <Badge tone="neutral">{selectedItems.length}</Badge>
+              </CardHeader>
+              <OrderItemsTable items={selectedItems} variety={false} />
+            </Card>
+            </div>
+
+            {showTrail ? (
+              <Card className="lg:sticky lg:top-4">
+                <CardHeader>
+                  <CardTitle>Order log</CardTitle>
+                  <Badge tone="neutral">
+                    {buildOrderTimelineLogs(orderLogs, orderDetails).length}
+                  </Badge>
+                </CardHeader>
+                <OrderTimeline
+                  order={orderDetails}
+                  logs={orderLogs}
+                  formatDateTime={formatCreatedDateTime}
+                  pendingNote={pendingNote}
+                />
+              </Card>
+            ) : null}
+          </div>
         </>
       )}
 

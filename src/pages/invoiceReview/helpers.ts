@@ -18,10 +18,6 @@ import type {
   StatusCounts,
 } from "./types";
 
-// Exact status string the backend stores after a successful SAP post.
-// Change this single constant if the backend expects a different value.
-export const POSTED_TO_SAP_STATUS: InvoiceStatus = "POSTED_TO_SAP";
-
 export const STATUS_FILTERS: Array<{ key: FilterKey; label: string }> = [
   { key: "PENDING", label: "Pending" },
   { key: "APPROVED", label: "Approved" },
@@ -30,6 +26,8 @@ export const STATUS_FILTERS: Array<{ key: FilterKey; label: string }> = [
   { key: "EDITED", label: "Edited" },
   { key: "ERROR", label: "Error" },
   { key: "CL_RAISED", label: "CL Raised" },
+  // Sent to SAP with no answer recorded yet; posting it again checks SAP first.
+  { key: "POSTING", label: "Posting" },
   { key: "ALL", label: "All" },
 ];
 
@@ -67,6 +65,7 @@ export const createEmptyCounts = (): StatusCounts => ({
   EDITED: 0,
   ERROR: 0,
   CL_RAISED: 0,
+  POSTING: 0,
   ALL: 0,
 });
 
@@ -98,6 +97,7 @@ export const normalizeStatus = (status?: string): InvoiceStatus => {
     upper === "EDITED" ||
     upper === "ERROR" ||
     upper === "POSTED_TO_SAP" ||
+    upper === "POSTING" ||
     upper === "CL_RAISED"
   ) {
     return upper;
@@ -163,23 +163,6 @@ export const extractMessage = (value: unknown, fallback: string) => {
     if (typeof errorText === "string" && errorText.trim()) return errorText;
   }
   return fallback;
-};
-
-// Pull the deepest human-readable SAP message out of a raw error string (for UI).
-export const readableSapError = (raw: string): string => {
-  try {
-    const parsed = JSON.parse(raw);
-    const deep =
-      (parsed?.details?.error?.message && String(parsed.details.error.message)) ||
-      (parsed?.error?.message && String(parsed.error.message)) ||
-      (typeof parsed?.error === "string" && parsed.error) ||
-      (typeof parsed?.message === "string" && parsed.message) ||
-      (typeof parsed?.detail === "string" && parsed.detail);
-    if (typeof deep === "string" && deep.trim()) return deep;
-  } catch {
-    /* not JSON — fall through to raw */
-  }
-  return raw;
 };
 
 /* ── Credit-limit request (external DSR service) ─────────────────────────
@@ -259,23 +242,6 @@ export const isCreditLimitError = (record: InvoiceRecord) => {
   );
 };
 
-/**
- * The status to record when a post to SAP fails.
- *
- * ERROR for everything — EXCEPT a record that already has a credit-limit
- * request in flight. That request is not withdrawn just because this attempt
- * failed, and until JSAP clears it a repost keeps failing the same check, so
- * the invoice genuinely still belongs on the CL Raised tab. Demoting it to
- * ERROR takes away "Show Flow" — the only way back to the approval stages of
- * the request the reviewer already raised — and offers "Raise CL" again,
- * which the backend refuses with a 409 because a request for that log exists.
- *
- * The backend stores the latest SAP message either way, so keeping the status
- * costs nothing: the reviewer still sees what SAP said on this attempt.
- */
-export const statusAfterFailedPost = (record: InvoiceRecord): InvoiceStatus =>
-  normalizeStatus(record.status) === "CL_RAISED" ? "CL_RAISED" : "ERROR";
-
 // A value is a usable lineage reference (log id) — 0 is not a valid pk here.
 export const hasRef = (value: unknown) => value !== undefined && value !== null && value !== "";
 
@@ -335,8 +301,6 @@ export const updateInvoiceStatus = (
   extra?: {
     rejection_reason?: string;
     error_message?: string;
-    sap_doc_num?: string;
-    sap_doc_entry?: string;
   },
 ) =>
   apiFetch<ApiMessageResponse>(`/api/invoice/${id}/update-status/`, {

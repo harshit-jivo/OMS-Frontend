@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { startExcelExport } from "../utils/excelExport";
 import {
+  getOrderItemSchemes,
   getOrderItemTotalLtrs,
   ordersService,
 } from "../services/ordersService";
@@ -13,6 +14,7 @@ import type {
 import { useQueryClient } from "@tanstack/react-query";
 
 import { useAssignedParties, useCurrentUserOrders, useOrderStatuses } from "../lib/orderQueries";
+import { useUILabels } from "../services/uiConfig";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   HiOutlineEye, // View
@@ -79,7 +81,7 @@ import {
 } from "@/components/ui/dialog";
 import { Pagination } from "@/components/ui/pagination";
 import { OrderTimelineDialog } from "@/components/orders/OrderTimelineDialog";
-import { OrderItemCards } from "@/components/orders/OrderItemCards";
+import { titleCaseVariety, varietyBadgeTone } from "@/components/orders/orderDetail";
 import { TableSkeleton } from "@/components/ui/skeleton";
 import { messageFrom } from "@/lib/apiError";
 
@@ -155,6 +157,7 @@ export default function View_Orders({
 }: {
   distributor?: boolean;
 } = {}) {
+  const { t } = useUILabels();
   const location = useLocation();
   const navigate = useNavigate();
   // Shared with both Order_Tracking pages — one key, so moving between them
@@ -1008,18 +1011,113 @@ export default function View_Orders({
                 Commodity / Others accordions of cards — so every line appeared
                 twice on the page. The variety it grouped by is a column here
                 instead. It stays in use on five other order screens. */}
-            {/* One CARD per line item, with full details, for every viewer.
-                Distributor / Mart keep their leaner card (schemes hidden); the
-                staff view shows schemes too so nothing from the old wide table
-                is lost. */}
-            <OrderItemCards items={selectedItems} showSchemes={!distributor} />
+            <div className="overflow-x-auto">
+              <Table density="compact">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>#</TableHead>
+                    <TableHead>Item Code</TableHead>
+                    <TableHead className="min-w-[250px]">Item Name</TableHead>
+                    <TableHead>Category</TableHead>
+                    <TableHead>Variety</TableHead>
+                    <TableHead>Scheme</TableHead>
+                    <TableHead>Scheme Qty</TableHead>
+                    <TableHead>Qty</TableHead>
+                    <TableHead>Pcs</TableHead>
+                    <TableHead>Boxes</TableHead>
+                    <TableHead>Ltrs</TableHead>
+                    {/* <TableHead>Scheme Ltrs</TableHead> */}
+                    <TableHead>Total Ltrs</TableHead>
+                    <TableHead>{t("price_list", "Price List (Basic)")}</TableHead>
+                    <TableHead>Basic Price</TableHead>
+                    <TableHead>Tax %</TableHead>
+                    <TableHead className="text-right">Amount</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {selectedItems.length > 0 ? (
+                    selectedItems.map((item, i) => {
+                      const schemes = getOrderItemSchemes(item);
+
+                      return (
+                        <TableRow key={i}>
+                          <TableCell className="text-center text-subtle">
+                            {i + 1}
+                          </TableCell>
+                          <TableCell>
+                            <span className="font-medium whitespace-nowrap text-ink">{item.item_code}</span>
+                          </TableCell>
+                          <TableCell className="min-w-[250px] font-medium text-ink">
+                            {item.item_name}
+                          </TableCell>
+                          <TableCell>{item.category}</TableCell>
+                          <TableCell>
+                            {item.variety_type ? (
+                              <Badge tone={varietyBadgeTone(item.variety_type)}>
+                                {titleCaseVariety(item.variety_type)}
+                              </Badge>
+                            ) : (
+                              <span className="text-subtle">-</span>
+                            )}
+                          </TableCell>
+                          <TableCell colSpan={2}>
+                            {schemes.length > 0 ? (
+                              <div className="flex flex-col gap-1" aria-label="Applied schemes">
+                                {schemes.map((scheme, schemeIndex) => (
+                                  <div
+                                    className="flex items-baseline gap-1.5 text-[12px]"
+                                    key={`${item.item_code}-scheme-${schemeIndex}`}
+                                  >
+                                    <span className="text-ink">{scheme.name || "-"}</span>
+                                    <span className="text-subtle">Qty {scheme.qty || 0}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-[12px] text-subtle">No scheme</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-center">{item.qty}</TableCell>
+                          <TableCell className="text-center">{item.pcs}</TableCell>
+                          <TableCell className="text-center">
+                            {Number(item.boxes).toFixed(2)}
+                          </TableCell>
+                          <TableCell className="text-center">{item.ltrs}</TableCell>
+                          {/* <TableCell style={{textAlign:'center'}}>{item.scheme_name ? ((item as any).scheme_ltrs || 0) : "—"}</TableCell> */}
+                          <TableCell className="text-center">
+                            {getOrderItemTotalLtrs(item).toFixed(2)}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {Number(item.price_list_basic).toFixed(2)}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {Number(item.basic_price).toFixed(2)}
+                          </TableCell>
+                          <TableCell className="text-center">
+                            {Number(item.tax_rate).toFixed(2)}
+                          </TableCell>
+                          <TableCell className="text-right font-semibold text-ink">
+                            {Number(item.total).toFixed(2)}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
+                  ) : (
+                    <TableRow>
+                      <TableCell colSpan={15} className="py-8 text-center text-subtle">
+                        No items found
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
           </Card>
 
-          {/* The "i" order-information dialog: addresses, creator, current
-              stage and any rejection reason — everything about the order that
-              is not a line item, in one place. */}
+          {/* The "i" order-information dialog — addresses, creator, current
+              stage and any rejection reason, in one place. */}
           <Dialog open={infoOpen} onOpenChange={setInfoOpen}>
-            <DialogContent title={`Order ${orderDetails.order_number} information`} size="md">
+            <DialogContent title="Order information" size="md">
               <DialogHeader>
                 <DialogTitle>Order information</DialogTitle>
                 {orderDetails.status_display ? (
@@ -1028,91 +1126,56 @@ export default function View_Orders({
                   </Badge>
                 ) : null}
               </DialogHeader>
-
-              <DialogBody className="space-y-4">
+              <DialogBody>
                 <div className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
-                  {[
-                    {
-                      label: "Party name",
-                      value: `${orderDetails.card_name}${
-                        orderDetails.card_code ? ` (${orderDetails.card_code})` : ""
-                      }`,
-                      full: true,
-                    },
-                    {
-                      label: "Punched by",
-                      value:
+                  {(
+                    [
+                      [
+                        "Party",
+                        orderDetails.card_code
+                          ? `${orderDetails.card_name} (${orderDetails.card_code})`
+                          : orderDetails.card_name,
+                      ],
+                      [
+                        "Punched by",
                         orderDetails.created_by_name ||
-                        String(orderDetails.created_by ?? ""),
-                    },
-                    {
-                      label: "Created at",
-                      value: formatCreatedDateTime(orderDetails.created_at),
-                    },
-                    {
-                      label: "Current stage",
-                      value: orderDetails.status_display,
-                      hint: "Where the order has reached in the workflow.",
-                    },
-                    { label: "Delivery date", value: orderDetails.delivery_date },
-                    { label: "Warehouse", value: orderDetails.warehouse_code },
-                    { label: "Dispatch from", value: orderDetails.dispatch_from_name },
-                    { label: "PO number", value: orderDetails.po_number },
-                    {
-                      label: "Bill to",
-                      value: orderDetails.bill_to_address,
-                      full: true,
-                    },
-                    {
-                      label: "Ship to",
-                      value: orderDetails.ship_to_address,
-                      full: true,
-                    },
-                  ].map((field) => (
-                    <div
-                      key={field.label}
-                      className={field.full ? "sm:col-span-2" : undefined}
-                    >
-                      <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-subtle">
-                        {field.label}
+                          String(orderDetails.created_by ?? ""),
+                      ],
+                      ["Punched at", formatCreatedDateTime(orderDetails.created_at)],
+                      ["Current stage", orderDetails.status_display],
+                      ["Party state", orderDetails.party_state],
+                      ["Delivery date", orderDetails.delivery_date],
+                      ["PO number", orderDetails.po_number],
+                      ["Quotation no", orderDetails.sap_doc_number],
+                      ["Warehouse", orderDetails.warehouse_code],
+                      ["Dispatch from", orderDetails.dispatch_from_name],
+                      ["Bill to", orderDetails.bill_to_address],
+                      ["Ship to", orderDetails.ship_to_address],
+                      [
+                        "Remark",
+                        orderDetails.remarks?.trim() ? orderDetails.remarks : "",
+                      ],
+                    ] as Array<[string, string | null | undefined]>
+                  ).map(([label, value]) => (
+                    <div key={label}>
+                      <p className="m-0 text-[10.5px] font-semibold uppercase tracking-wide text-subtle">
+                        {label}
                       </p>
-                      <p className="m-0 mt-0.5 text-[13.5px] font-semibold text-ink">
-                        {field.value ? field.value : <span className="font-normal text-subtle">—</span>}
+                      <p className="m-0 mt-0.5 text-[13px] font-medium text-ink">
+                        {value || "—"}
                       </p>
-                      {field.hint ? (
-                        <p className="m-0 mt-0.5 text-[10px] text-subtle">{field.hint}</p>
-                      ) : null}
                     </div>
                   ))}
                 </div>
-
-                {/* Rejection — who rejected it and why. Shown only when the
-                    order is rejected. */}
-                {isRejectedOrder(orderDetails) ||
-                orderDetails.rejection_reason ||
-                rejectedByByOrderId[orderDetails.id] ? (
-                  <div className="rounded-xl border border-danger/40 bg-danger/5 p-3">
-                    <p className="m-0 text-[12px] font-bold uppercase tracking-wide text-danger">
-                      Order rejected
-                    </p>
-                    {(rejectedByByOrderId[orderDetails.id] || orderDetails.rejected_by) ? (
-                      <p className="m-0 mt-1.5 text-[13px] text-ink">
-                        <span className="font-semibold">Rejected by:</span>{" "}
-                        {rejectedByByOrderId[orderDetails.id] || orderDetails.rejected_by}
-                      </p>
-                    ) : null}
-                    {orderDetails.rejection_reason ? (
-                      <p className="m-0 mt-1 text-[13px] text-ink">
-                        <span className="font-semibold">Reason:</span>{" "}
-                        {orderDetails.rejection_reason}
-                      </p>
-                    ) : null}
+                {orderDetails.rejection_reason ? (
+                  <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-[13px] text-rose-800">
+                    <p className="m-0 font-semibold">Rejection reason</p>
+                    <p className="m-0 mt-1">{orderDetails.rejection_reason}</p>
                   </div>
                 ) : null}
               </DialogBody>
             </DialogContent>
           </Dialog>
-
         </>
       )}
 
