@@ -39,9 +39,6 @@ import {
   normalizeStatus,
   openReport,
   parsePayload,
-  POSTED_TO_SAP_STATUS,
-  readableSapError,
-  statusAfterFailedPost,
   trimmed,
   updateInvoiceStatus,
   deleteInvoice,
@@ -559,10 +556,9 @@ export function useInvoiceReview({
   };
 
   // Post an approved (or error/retry) invoice to SAP HANA through the Mission
-  // Control loader. The loader owns the live progress and shows any SAP error
-  // (translated, with technical details) inside itself; here we only record the
-  // outcome on the local record: POSTED_TO_SAP on success, ERROR with the
-  // readable SAP message on failure.
+  // Control loader. The server posts the payload stored on the log and records
+  // the outcome there (POSTED_TO_SAP, ERROR/CL_RAISED, or POSTING when SAP did
+  // not answer); the loader shows it, and closing the loader reloads the list.
   const handlePostToSap = (record: InvoiceRecord) => {
     if (record.id === undefined || record.id === null) {
       setActionError("This invoice has no identifier and cannot be posted.");
@@ -572,18 +568,18 @@ export function useInvoiceReview({
   };
 
   const runPostToSap = (record: InvoiceRecord) => {
-    const label = `SO #${record.so_number || record.id}`;
+    const logId = record.id;
+    if (logId === undefined || logId === null) return;
+    const label = `SO #${record.so_number || logId}`;
     setPending(null);
     setActionError("");
     setActionMessage("");
     setSelected(null);
     setPostingRecord(record);
 
-
     const payload = parsePayload(record.invoice_payload);
     sapPost.run({
-      payload,
-      branch: record.branch,
+      logId,
       doc: {
         draftNo: String(record.so_number || record.id),
         customer: record.party_name || "",
@@ -591,34 +587,12 @@ export function useInvoiceReview({
         total: toNumber(record.total_amount),
         branch: record.branch || "",
       },
-      onSuccess: async ({ invoiceNumber, docNum, docEntry }) => {
+      onSuccess: ({ invoiceNumber }) => {
         setActionMessage(
           invoiceNumber
             ? `${label} posted to SAP HANA successfully as invoice #${invoiceNumber}.`
             : `${label} posted to SAP HANA successfully.`,
         );
-        try {
-          // Keep SAP's identifiers on the log so the row can print the bill
-          // later without anyone having to look the invoice up in SAP.
-          await updateInvoiceStatus(record.id, POSTED_TO_SAP_STATUS, {
-            ...(docNum ? { sap_doc_num: docNum } : {}),
-            ...(docEntry ? { sap_doc_entry: docEntry } : {}),
-          });
-        } catch (logErr) {
-          console.error("Unable to record SAP post success:", logErr);
-        }
-      },
-      onError: async (message, rawError) => {
-        // Save the readable SAP message (e.g. the "Credit Limit Exceeded!" text)
-        // in the log, overwriting any previous error.
-        const readable = readableSapError(rawError || message);
-        try {
-          await updateInvoiceStatus(record.id, statusAfterFailedPost(record), {
-            error_message: readable,
-          });
-        } catch (logErr) {
-          console.error("Unable to log SAP post error:", logErr);
-        }
       },
     });
   };

@@ -316,6 +316,14 @@ export default function InvoiceDetailDialog({ view }: { view: UseInvoiceReviewRe
             </DialogFooter>
           )}
 
+          {status === "POSTING" && canPostToSap && (
+            <DialogFooter>
+              <Button variant="primary" disabled={busy} onClick={() => handlePostToSap(selected)}>
+                <HiOutlineArrowPath aria-hidden="true" /> Check SAP
+              </Button>
+            </DialogFooter>
+          )}
+
           {["ERROR", "CL_RAISED"].includes(status) && canPostToSap && (
             <DialogFooter>
               {status === "ERROR" && isCreditLimitError(selected) && (

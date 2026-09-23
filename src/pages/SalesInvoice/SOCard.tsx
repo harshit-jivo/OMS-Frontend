@@ -23,6 +23,7 @@ const USED_STATUS_LABELS: Record<string, string> = {
   EDITED: "Being reworked",
   ERROR: "Failed, in a log",
   CL_RAISED: "Credit limit raised",
+  POSTING: "Being posted to SAP",
   POSTED_TO_SAP: "Already invoiced",
 };
 

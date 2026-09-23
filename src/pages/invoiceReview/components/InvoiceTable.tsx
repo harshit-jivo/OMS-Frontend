@@ -249,6 +249,21 @@ export default function InvoiceTable({ view }: { view: UseInvoiceReviewResult })
                           <HiOutlineDocumentText aria-hidden="true" /> Generate Report
                         </Button>
                       ))}
+                    {/* SAP never answered this invoice's post. The server
+                        looks the invoice up in SAP first and only sends it
+                        again if it is not there. */}
+                    {status === "POSTING" && canPostToSap && (
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        disabled={busy}
+                        onClick={() => handlePostToSap(record)}
+                        title="SAP did not answer the last post. This checks SAP first and posts again only if the invoice is not there."
+                      >
+                        <HiOutlineArrowPath aria-hidden="true" />
+                        {busy ? "…" : "Check SAP"}
+                      </Button>
+                    )}
                     {(status === "ERROR" || status === "CL_RAISED") && canPostToSap && (
                       <Button
                         size="sm"
