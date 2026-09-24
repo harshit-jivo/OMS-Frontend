@@ -56,6 +56,7 @@ import {
   applyFreePricingToRow,
   recalculateRowTotals as recalculateRowTotalsFor,
 } from "./rowTotals";
+import { defaultWarehouseFor, warehouseBranchFor } from "./warehouseDefaults";
 
 export type RowDropdownOption = {
   value: string;
@@ -229,6 +230,13 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
   // server reads from its environment per category (`/orders/defaults/`).
   const [warehouses, setWarehouses] = useState<{ code: string; name: string }[]>([]);
   const [defaultWarehouses, setDefaultWarehouses] = useState<Record<string, string>>({});
+  /**
+   * Whether the warehouse on the form was put there by a PERSON — chosen in the
+   * field, or carried in by a saved order — as opposed to auto-filled from the
+   * category's env default. A ref, not state: nothing renders from it, and the
+   * effect below must read it in the same tick it is set.
+   */
+  const warehouseChosenByUser = useRef(false);
   const [billAddress, setBillAddress] = useState<AddressOption[]>([]);
   const [shipAddress, setShipAddress] = useState<AddressOption[]>([]);
   const [category, setCategory] = useState<string[]>([]);
@@ -400,16 +408,12 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
    * applies. "BEVERAGE" (singular) is the HANA endpoint's spelling.
    */
   const orderCategory = normalizeOptionText(selectedPartyCategory || userDefaultCategory);
-  const warehouseBranch: "OIL" | "BEVERAGE" | "MART" =
-    orderCategory === "beverages" || orderCategory === "beverage"
-      ? "BEVERAGE"
-      : orderCategory === "mart"
-        ? "MART"
-        : "OIL";
-  const defaultWarehouse =
-    defaultWarehouses[
-      warehouseBranch === "BEVERAGE" ? "BEVERAGES" : warehouseBranch
-    ] || defaultWarehouses.OIL || "";
+  const warehouseBranch = warehouseBranchFor(orderCategory);
+  // Deliberately EMPTY until the category is known. `warehouseBranch` falls
+  // back to OIL so the warehouse LIST has something to fetch, but applying
+  // OIL's default before the signed-in user's category has arrived is how a
+  // BEVERAGES user got pinned to BH-BT. No category yet means no default yet.
+  const defaultWarehouse = defaultWarehouseFor(orderCategory, defaultWarehouses);
 
   useEffect(() => {
     let cancelled = false;
@@ -427,12 +431,30 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
     };
   }, [warehouseBranch]);
 
-  // Start on the env default the moment it is known. A saved order keeps its
-  // own warehouse: the edit loader sets `formData.warehouse` before this runs.
+  /*
+   * Track the env default until someone actually chooses a warehouse.
+   *
+   * This used to bail out on `formData.warehouse` being set at all, which froze
+   * the FIRST value written and never corrected it. That lost the race it did
+   * not look like it was in: `/orders/defaults/` and `/auth/profile/` are
+   * fetched in parallel on mount, and the defaults call is a plain settings
+   * read while the profile call hits the database — so the defaults land first
+   * essentially every time. At that moment `userDefaultCategory` is still "",
+   * `warehouseBranch` falls through to its OIL default, and a BEVERAGES user
+   * was pinned to the OIL warehouse (BH-BT) a beat before their own category
+   * arrived to say BH-FG.
+   *
+   * `warehouseChosenByUser` is what the old guard was reaching for: not "is
+   * there a value" but "did a person put it there". While it is false the field
+   * follows the category; once a person picks a warehouse — or an edit loads a
+   * saved order, whose stored warehouse must never be overwritten — it stops.
+   */
   useEffect(() => {
-    if (!defaultWarehouse || formData.warehouse) return;
-    setFormData((prev) => (prev.warehouse ? prev : { ...prev, warehouse: defaultWarehouse }));
-  }, [defaultWarehouse, formData.warehouse]);
+    if (warehouseChosenByUser.current || !defaultWarehouse) return;
+    setFormData((prev) =>
+      prev.warehouse === defaultWarehouse ? prev : { ...prev, warehouse: defaultWarehouse },
+    );
+  }, [defaultWarehouse]);
 
   useEffect(() => {
     if (!isLoadingFromOrder) {
@@ -840,10 +862,16 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
           poNumber: isDuplicateMode ? "" : order.po_number || "",
           company: order.company ? String(order.company) : "",
           // The saved order's warehouse. Blank on orders placed before the
-          // picker existed; the default effect fills it from the env then.
+          // picker existed; the default effect fills it from the env then —
+          // which is why `warehouseChosenByUser` is only latched below when
+          // there is actually a stored value to protect.
           warehouse: order.warehouse_code || "",
           comment: isDuplicateMode ? "" : order.remarks || "",
         });
+        // An order that shipped from a chosen warehouse keeps it, whatever the
+        // category default now says. One that never had one stays on the
+        // default so it is filled rather than left blank.
+        warehouseChosenByUser.current = Boolean(order.warehouse_code);
         const orderStateCode = order.party_state || "";
         setStateCode(orderStateCode || null);
 
@@ -1810,6 +1838,9 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>,
   ) => {
     const { name, value } = e.target;
+
+    // A person picked this one: stop tracking the category's default.
+    if (name === "warehouse") warehouseChosenByUser.current = true;
 
     setFormData((prev) => ({
       ...prev,
