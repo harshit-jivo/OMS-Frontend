@@ -471,6 +471,38 @@ test.describe("add sales wizard", () => {
     expect(item.is_scheme).toBe(false);
   });
 
+  test("a removed engine scheme stays removed and is not posted", async ({ appPage }) => {
+    const bodies = await capturePost(appPage);
+    await gotoStable(appPage, "/Add_Sales");
+    await completeStepOne(appPage);
+    await appPage.getByRole("button", { name: "Continue" }).click();
+    await addConfirmedItem(appPage);
+
+    const remove = appPage.getByRole("button", { name: /^Remove scheme / });
+    await expect(remove).toBeVisible();
+    await remove.click();
+    await expect(remove).toHaveCount(0);
+
+    // Changing the line re-runs the preview, and the fixture proposes the same
+    // scheme again. It must not come back.
+    await appPage.getByRole("button", { name: "Edit item" }).click();
+    await appPage.getByLabel("Boxes").fill("6");
+    await appPage.getByRole("button", { name: "Save Changes" }).click();
+    await appPage.waitForTimeout(1200);
+    await expect(remove).toHaveCount(0);
+
+    await appPage.getByRole("button", { name: "Continue" }).click();
+    await appPage.getByRole("button", { name: "Continue" }).click();
+    await expect(appPage.getByText("1 box (24 pcs)")).toHaveCount(0);
+    await appPage.getByRole("button", { name: "Save Order" }).click();
+    await appPage.getByRole("button", { name: "Yes, create" }).click();
+
+    await expect.poll(() => bodies.length).toBe(1);
+    const item = bodies[0].items![0];
+    expect((item.schemes as WireItem[]).some((s) => s.scheme_v2_id)).toBe(false);
+    expect(item.is_scheme).toBe(false);
+  });
+
   test("a row that cannot be confirmed says so in the modal", async ({ appPage }) => {
     // No dialog is stubbed here on purpose. If this were still `alert()`, the
     // click would open a browser dialog Playwright auto-dismisses and the
