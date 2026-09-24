@@ -49,10 +49,10 @@ import { Fragment } from "react";
 import {
   HiChevronDown,
   HiMagnifyingGlass,
-  HiMinus,
+  // HiMinus, // legacy scheme panel, see renderSchemePanel
   HiOutlinePencil,
   HiOutlineTrash,
-  HiPlus,
+  // HiPlus, // legacy scheme panel, see renderSchemePanel
 } from "react-icons/hi2";
 
 import { Button } from "@/components/ui/button";
@@ -64,7 +64,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Field, Input, Select, Textarea } from "@/components/ui/form";
+import { Field, Input, /* Select, (legacy scheme panel) */ Textarea } from "@/components/ui/form";
 import { cn } from "@/lib/utils";
 import type { PartyProduct } from "@/services/ordersService";
 
@@ -120,7 +120,7 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
     branch,
     company,
     partyProducts,
-    schemeOptions,
+    // schemeOptions, // legacy scheme panel, see renderSchemePanel
     setRowSchemeOptions,
     setShowSaveConfirm,
     isSaving,
@@ -158,12 +158,12 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
     validateBeforeSave,
     handleSaveDraft,
     handleClearForm,
-    handleRowSchemeToggle,
+    // handleRowSchemeToggle, // legacy scheme panel, see renderSchemePanel
     handleRowFreeToggle,
     handleRowFreeReason,
-    handleAddScheme,
-    handleSchemeChange,
-    handleRemoveScheme,
+    // handleAddScheme, // legacy scheme panel, see renderSchemePanel
+    // handleSchemeChange,
+    // handleRemoveScheme,
     getDerivedLines,
     getProductTaxRate,
     applyFocPricing,
@@ -191,7 +191,7 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
     filteredShipAddresses,
     selectedPartyLabel,
     selectedDispatch,
-    isSchemePanelHidden,
+    // isSchemePanelHidden, // legacy scheme panel, see renderSchemePanel
     selectedBillAddressLabel,
     selectedShipAddressLabel,
     selectedBillAddressStreet,
@@ -377,143 +377,147 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
     </div>
   );
 
-  const renderSchemePanel = (row: SalesRow, index: number) => {
-    if (isSchemePanelHidden(row)) return null;
-    return (
-      <div
-        className={cn(
-          "mt-4 overflow-hidden rounded-md border bg-card shadow-card",
-          row.isScheme ? "border-line-strong" : "border-line",
-        )}
-      >
-        <div className="flex flex-col items-stretch justify-between gap-3.5 border-b border-line bg-surface p-3.5 sm:flex-row sm:items-center">
-          <div>
-            <div className="text-[10px] font-extrabold uppercase tracking-[0.08em] text-subtle">
-              Optional promotion
-            </div>
-            <div className="mt-0.5 text-[13px] font-bold text-ink">
-              Add scheme to this item
-            </div>
-          </div>
-          {/*
-            A real checkbox in a label, so the switch has an accessible name
-            and answers the space bar. It was a bare input inside a label with
-            no text, and a `<span>` doing the drawing.
-          */}
-          <label className="flex h-[34px] min-w-[132px] cursor-pointer items-center justify-between gap-2 rounded-full border border-line-strong bg-card px-2.5">
-            <span className="text-[11px] font-extrabold text-ink-soft">
-              {row.isScheme ? "Enabled" : "Disabled"}
-            </span>
-            <span className="relative inline-block h-5 w-9 shrink-0">
-              <input
-                type="checkbox"
-                className="peer absolute inset-0 z-10 m-0 size-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
-                checked={row.isScheme}
-                onChange={(e) => handleRowSchemeToggle(index, e.target.checked)}
-                disabled={row.confirmed}
-                aria-label="Add scheme to this item"
-              />
-              <span
-                aria-hidden="true"
-                className="absolute inset-0 rounded-full bg-line-strong transition-colors peer-checked:bg-[#0f766e] peer-focus-visible:shadow-focus"
-              />
-              <span
-                aria-hidden="true"
-                className="absolute left-[3px] top-[3px] size-4 rounded-full bg-white shadow-[0_1px_2px_rgba(15,23,42,0.2)] transition-transform peer-checked:translate-x-[18px]"
-              />
-            </span>
-          </label>
-        </div>
-
-        {row.isScheme && (
-          <div className="grid items-start gap-3 p-3.5 lg:grid-cols-[minmax(0,560px)_160px]">
-            <div className="flex min-w-0 flex-col gap-2">
-              <div className="grid grid-cols-[1fr_80px_48px] items-center gap-2 px-0.5 text-[11px] font-extrabold uppercase tracking-[0.04em] text-subtle sm:grid-cols-[minmax(220px,360px)_90px_56px]">
-                <span>Scheme</span>
-                <span>Qty</span>
-                <span>Action</span>
-              </div>
-              {(row.schemes.length ? row.schemes : [{ scheme: "", schemeQty: "" }]).map(
-                (schemeRow, schemeIndex) => (
-                  <div
-                    className="grid grid-cols-[1fr_80px_48px] items-center gap-2 rounded-md border border-line bg-surface p-2 sm:grid-cols-[minmax(220px,360px)_90px_56px]"
-                    key={`${index}-${schemeIndex}`}
-                  >
-                    <Select
-                      aria-label="Scheme"
-                      value={schemeRow.scheme}
-                      onChange={(e) =>
-                        handleSchemeChange(index, schemeIndex, "scheme", e.target.value)
-                      }
-                      disabled={row.confirmed || !(schemeOptions[row.uid] || []).length}
-                    >
-                      <option value="">Select Scheme...</option>
-                      {(schemeOptions[row.uid] || []).map((scheme) => (
-                        <option key={scheme.scheme_id} value={scheme.scheme_id}>
-                          {scheme.scheme_name}
-                        </option>
-                      ))}
-                    </Select>
-                    <Input
-                      type="text"
-                      aria-label="Scheme quantity"
-                      value={schemeRow.schemeQty}
-                      placeholder="0"
-                      onChange={(e) =>
-                        handleSchemeChange(index, schemeIndex, "schemeQty", e.target.value)
-                      }
-                      disabled={row.confirmed}
-                    />
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => handleRemoveScheme(index, schemeIndex)}
-                      disabled={row.confirmed}
-                      aria-label="Remove scheme"
-                      title="Remove scheme"
-                    >
-                      <HiMinus aria-hidden="true" />
-                    </Button>
-                  </div>
-                ),
-              )}
-              <Button
-                variant="ghost"
-                size="sm"
-                className="self-start"
-                onClick={() => handleAddScheme(index)}
-                disabled={row.confirmed}
-              >
-                <HiPlus aria-hidden="true" /> Add Scheme
-              </Button>
-            </div>
-
-            <div className="flex flex-col gap-1.5 rounded-md border border-line bg-surface p-3">
-              <span className="text-[11px] font-extrabold text-ink-soft">Total Ltrs</span>
-              <Input
-                type="text"
-                name="totalLtrs"
-                aria-label="Total Ltrs"
-                className="bg-white font-extrabold text-ink"
-                value={
-                  row.schemes.length
-                    ? (
-                        Number(row.ltrs) +
-                        row.schemes.reduce((sum, scheme) => sum + Number(scheme.schemeQty || 0), 0)
-                      ).toFixed(2)
-                    : Number(row.ltrs).toFixed(2)
-                }
-                readOnly
-              />
-              <small className="text-[11px] leading-snug text-subtle">
-                Base ltrs plus selected scheme quantity
-              </small>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  };
+  // The legacy "Optional promotion" scheme picker, commented out now that the
+  // v2 scheme engine proposes giveaways by itself (Review step). Its render
+  // call below and the two names it alone used are commented out with it;
+  // `useSalesOrderForm` still returns them, so restoring is uncommenting.
+  // const renderSchemePanel = (row: SalesRow, index: number) => {
+  //   if (isSchemePanelHidden(row)) return null;
+  //   return (
+  //     <div
+  //       className={cn(
+  //         "mt-4 overflow-hidden rounded-md border bg-card shadow-card",
+  //         row.isScheme ? "border-line-strong" : "border-line",
+  //       )}
+  //     >
+  //       <div className="flex flex-col items-stretch justify-between gap-3.5 border-b border-line bg-surface p-3.5 sm:flex-row sm:items-center">
+  //         <div>
+  //           <div className="text-[10px] font-extrabold uppercase tracking-[0.08em] text-subtle">
+  //             Optional promotion
+  //           </div>
+  //           <div className="mt-0.5 text-[13px] font-bold text-ink">
+  //             Add scheme to this item
+  //           </div>
+  //         </div>
+  //         {/*
+  //           A real checkbox in a label, so the switch has an accessible name
+  //           and answers the space bar. It was a bare input inside a label with
+  //           no text, and a `<span>` doing the drawing.
+  //         */}
+  //         <label className="flex h-[34px] min-w-[132px] cursor-pointer items-center justify-between gap-2 rounded-full border border-line-strong bg-card px-2.5">
+  //           <span className="text-[11px] font-extrabold text-ink-soft">
+  //             {row.isScheme ? "Enabled" : "Disabled"}
+  //           </span>
+  //           <span className="relative inline-block h-5 w-9 shrink-0">
+  //             <input
+  //               type="checkbox"
+  //               className="peer absolute inset-0 z-10 m-0 size-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
+  //               checked={row.isScheme}
+  //               onChange={(e) => handleRowSchemeToggle(index, e.target.checked)}
+  //               disabled={row.confirmed}
+  //               aria-label="Add scheme to this item"
+  //             />
+  //             <span
+  //               aria-hidden="true"
+  //               className="absolute inset-0 rounded-full bg-line-strong transition-colors peer-checked:bg-[#0f766e] peer-focus-visible:shadow-focus"
+  //             />
+  //             <span
+  //               aria-hidden="true"
+  //               className="absolute left-[3px] top-[3px] size-4 rounded-full bg-white shadow-[0_1px_2px_rgba(15,23,42,0.2)] transition-transform peer-checked:translate-x-[18px]"
+  //             />
+  //           </span>
+  //         </label>
+  //       </div>
+  //
+  //       {row.isScheme && (
+  //         <div className="grid items-start gap-3 p-3.5 lg:grid-cols-[minmax(0,560px)_160px]">
+  //           <div className="flex min-w-0 flex-col gap-2">
+  //             <div className="grid grid-cols-[1fr_80px_48px] items-center gap-2 px-0.5 text-[11px] font-extrabold uppercase tracking-[0.04em] text-subtle sm:grid-cols-[minmax(220px,360px)_90px_56px]">
+  //               <span>Scheme</span>
+  //               <span>Qty</span>
+  //               <span>Action</span>
+  //             </div>
+  //             {(row.schemes.length ? row.schemes : [{ scheme: "", schemeQty: "" }]).map(
+  //               (schemeRow, schemeIndex) => (
+  //                 <div
+  //                   className="grid grid-cols-[1fr_80px_48px] items-center gap-2 rounded-md border border-line bg-surface p-2 sm:grid-cols-[minmax(220px,360px)_90px_56px]"
+  //                   key={`${index}-${schemeIndex}`}
+  //                 >
+  //                   <Select
+  //                     aria-label="Scheme"
+  //                     value={schemeRow.scheme}
+  //                     onChange={(e) =>
+  //                       handleSchemeChange(index, schemeIndex, "scheme", e.target.value)
+  //                     }
+  //                     disabled={row.confirmed || !(schemeOptions[row.uid] || []).length}
+  //                   >
+  //                     <option value="">Select Scheme...</option>
+  //                     {(schemeOptions[row.uid] || []).map((scheme) => (
+  //                       <option key={scheme.scheme_id} value={scheme.scheme_id}>
+  //                         {scheme.scheme_name}
+  //                       </option>
+  //                     ))}
+  //                   </Select>
+  //                   <Input
+  //                     type="text"
+  //                     aria-label="Scheme quantity"
+  //                     value={schemeRow.schemeQty}
+  //                     placeholder="0"
+  //                     onChange={(e) =>
+  //                       handleSchemeChange(index, schemeIndex, "schemeQty", e.target.value)
+  //                     }
+  //                     disabled={row.confirmed}
+  //                   />
+  //                   <Button
+  //                     variant="ghost"
+  //                     size="icon"
+  //                     onClick={() => handleRemoveScheme(index, schemeIndex)}
+  //                     disabled={row.confirmed}
+  //                     aria-label="Remove scheme"
+  //                     title="Remove scheme"
+  //                   >
+  //                     <HiMinus aria-hidden="true" />
+  //                   </Button>
+  //                 </div>
+  //               ),
+  //             )}
+  //             <Button
+  //               variant="ghost"
+  //               size="sm"
+  //               className="self-start"
+  //               onClick={() => handleAddScheme(index)}
+  //               disabled={row.confirmed}
+  //             >
+  //               <HiPlus aria-hidden="true" /> Add Scheme
+  //             </Button>
+  //           </div>
+  //
+  //           <div className="flex flex-col gap-1.5 rounded-md border border-line bg-surface p-3">
+  //             <span className="text-[11px] font-extrabold text-ink-soft">Total Ltrs</span>
+  //             <Input
+  //               type="text"
+  //               name="totalLtrs"
+  //               aria-label="Total Ltrs"
+  //               className="bg-white font-extrabold text-ink"
+  //               value={
+  //                 row.schemes.length
+  //                   ? (
+  //                       Number(row.ltrs) +
+  //                       row.schemes.reduce((sum, scheme) => sum + Number(scheme.schemeQty || 0), 0)
+  //                     ).toFixed(2)
+  //                   : Number(row.ltrs).toFixed(2)
+  //               }
+  //               readOnly
+  //             />
+  //             <small className="text-[11px] leading-snug text-subtle">
+  //               Base ltrs plus selected scheme quantity
+  //             </small>
+  //           </div>
+  //         </div>
+  //       )}
+  //     </div>
+  //   );
+  // };
 
   const openAddItem = () => {
     setItemSearch("");
@@ -901,7 +905,8 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
                     </Field>
                   </div>
 
-                  {row.item && !isFocOrder && !row.isFree && renderSchemePanel(row, itemModalIndex)}
+                  {/* Legacy scheme panel, replaced by the v2 engine:
+                  {row.item && !isFocOrder && !row.isFree && renderSchemePanel(row, itemModalIndex)} */}
                   {row.item && !isFocOrder && renderFreeOption(row, itemModalIndex)}
 
                   {/* The reason this row will not confirm. It was an `alert()`,
