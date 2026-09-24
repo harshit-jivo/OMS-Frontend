@@ -1,6 +1,7 @@
 import axios from "axios";
 import type { AxiosRequestConfig } from "axios";
 
+import { requestSettled, requestStarted } from "../lib/requestActivity";
 import { newRequestId, REQUEST_ID_HEADER } from "./requestId";
 
 // Where the API lives, and how a path becomes a URL — see services/apiPaths.ts.
@@ -72,6 +73,11 @@ export const setAuthenticatedHandler = (fn: (() => void) | null) => {
  * token refreshed in this (or another) tab is picked up automatically.
  * ------------------------------------------------------------------ */
 api.interceptors.request.use((config) => {
+  // Count it, so the app-wide loading cover can show that SOMETHING is in
+  // flight without 280 call sites each remembering to say so. Released in
+  // both response handlers below — see lib/requestActivity.ts.
+  requestStarted();
+
   // Attach device/version metadata to every request from this one place.
   // Applied BEFORE the token so a provider can never clobber Authorization,
   // and guarded so metadata can never break a real request.
@@ -320,10 +326,16 @@ const warnIfDeprecated = (response: unknown) => {
  * ------------------------------------------------------------------ */
 api.interceptors.response.use(
   (response) => {
+    requestSettled();
     warnIfDeprecated(response);
     return response;
   },
   async (error) => {
+    // Released FIRST, before the refresh-and-retry below. That retry calls
+    // `api(config)`, which runs the request interceptor again and counts
+    // itself — so releasing here keeps one count per attempt in flight
+    // rather than leaking the failed attempt's.
+    requestSettled();
     warnIfDeprecated(error?.response);
     const response = error?.response;
     const config = error?.config as

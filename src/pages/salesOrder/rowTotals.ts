@@ -57,6 +57,24 @@ export const computeLandingPrice = (
 export const FOC_TOKEN_BASIC_PRICE = "0.001";
 
 /**
+ * Pricing for a line marked free.
+ *
+ * Unlike FOC, a rate the operator typed is NOT kept: a free line is the
+ * token rate by definition, and the backend enforces the same. The agreed
+ * `priceListBasic` stays on screen so un-marking the line can restore it.
+ */
+export const applyFreePricingToRow = (row: SalesRow): SalesRow => ({
+  ...row,
+  isScheme: false,
+  scheme: "",
+  schemeQty: "",
+  schemes: [],
+  basicPrice: FOC_TOKEN_BASIC_PRICE,
+  amount:
+    Number(row.qty) > 0 ? (Number(row.qty) * Number(FOC_TOKEN_BASIC_PRICE)).toFixed(2) : "",
+});
+
+/**
  * FOC pricing for one row.
  *
  * A rate the operator typed themselves is KEPT — only a blank or zero falls
@@ -94,23 +112,35 @@ export const recalculateRowTotals = (
   product: PartyProduct | Product | undefined,
   isFocOrder: boolean,
 ): SalesRow => {
-  const withFoc = (next: SalesRow) => (isFocOrder ? applyFocPricingToRow(next) : next);
+  const withFoc = (next: SalesRow) =>
+    next.isFree
+      ? applyFreePricingToRow(next)
+      : isFocOrder
+        ? applyFocPricingToRow(next)
+        : next;
 
   if (!product) return withFoc(row);
 
   const factor = Number(product.sal_factor2) || 1;
   const packUnit = Number(product.sal_pack_unit) || 0;
   const qty = source === "boxes" ? (Number(row.boxes) || 0) * factor : Number(row.qty) || 0;
-  // Priced off the Basic rate so the amount stays pre-tax; Landing is kept in
-  // step with it rather than driving it.
+  // Priced off the Basic rate so the amount stays pre-tax.
   const price = Number(row.basicPrice) || 0;
 
+  // `priceListBasic` is deliberately NOT recomputed here. It holds the party's
+  // AGREED RATE from `party_product_assignments.basic_rate` (pre-tax), stamped
+  // once when the product is picked — it is the list the line is measured
+  // against, not a figure derived from what the line is being sold at. Deriving
+  // it from `basicPrice` (a tax-inclusive landing price, between 24 Aug and
+  // 17 Sep 2026) meant a discount dragged the "Price List" column down with it,
+  // and `sap_sync._get_sap_unit_price` — which falls back to this field as a
+  // PRE-TAX UnitPrice when Basic Price is blank — then invoiced tax on tax.
+  // Only the FOC path below may overwrite it.
   return withFoc({
     ...row,
     qty: source === "boxes" ? (qty > 0 ? String(qty) : "") : row.qty,
     boxes: source === "qty" ? (qty > 0 && factor > 0 ? String(qty / factor) : "") : row.boxes,
     ltrs: qty > 0 ? String(packUnit * qty) : "",
-    priceListBasic: computeLandingPrice(price, row.tax),
     amount: qty > 0 && price > 0 ? (price * qty).toFixed(2) : "",
   });
 };

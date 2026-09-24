@@ -65,6 +65,8 @@ type FinishedGoodItem = {
   U_Brand?: string | null;
   U_Variety?: string | null;
   U_Sub_Group?: string | null;
+  /** OPRC profit-centre code for the sub-group; what the invoice line's U_SchemeAgst must be. */
+  SchemeAgst?: string | null;
   U_SKU?: string | null;
   Quantity?: number | string | null;
   OnHand?: number | string | null;
@@ -1630,6 +1632,7 @@ const itemRowsToSelectedLines = (rows: ItemInvoiceRow[]): SelectedLine[] =>
         VatPrcnt: pickItemNumber(row.item, ["VatPrcnt", "TaxPercent"], 0),
         TaxCode: taxCode,
         WhsCode: row.batch.warehouseCode,
+        U_SchemeAgst: String(row.item.SchemeAgst || "").trim(),
         invoiceQty,
         BatchNumbers: row.batch.batches
           .map(({ batch, quantity }) => {

@@ -541,6 +541,40 @@
 }
 
 /*
+ * The info popover's fade, in and back out.
+ *
+ * `translate`, not `transform`, for the reason spelled out above `dialog-pop`:
+ * the popover's positioned shell already carries an inline `transform` from
+ * `useAnchoredPanel` — `translateY(-100%)` when it flips above its trigger,
+ * `translateX(-100%)` when it is right-aligned — and animating `transform`
+ * here would replace it, snapping the panel across the screen as it faded.
+ * `translate` is an independent property, so the two compose.
+ *
+ * Keyframes rather than a transition because a transition needs the element to
+ * render once in its start state and then be changed, which is a second render
+ * and a `setState` inside an effect. An animation just runs on mount.
+ */
+@keyframes info-popover-in {
+  from { opacity: 0; translate: 0 -4px; }
+  to   { opacity: 1; translate: 0 0; }
+}
+
+@keyframes info-popover-out {
+  from { opacity: 1; translate: 0 0; }
+  to   { opacity: 0; translate: 0 -4px; }
+}
+
+.info-popover[data-state="open"] {
+  animation: info-popover-in 140ms ease-out;
+}
+
+/* `forwards` holds it invisible for the few ms between the animation ending
+   and React unmounting it, so there is no flash back to full opacity. */
+.info-popover[data-state="closed"] {
+  animation: info-popover-out 120ms ease-in forwards;
+}
+
+/*
  * The skeleton shimmer. A keyframe rather than `animate-pulse`, because
  * Tailwind's own pulse goes to opacity 0.5 and back — on `--color-surface-strong`
  * over a white card that is nearly invisible. This moves the background
@@ -710,6 +744,17 @@
   .animate-page,
   .shimmer-hover:hover::after {
     animation: none;
+  }
+
+  /* The panel still appears and still goes away — it just stops sliding and
+     fading to get there. `opacity: 1` because the closed keyframe's
+     `forwards` would otherwise leave a cancelled animation's element
+     invisible for the instant before it unmounts. */
+  .info-popover[data-state="open"],
+  .info-popover[data-state="closed"] {
+    animation: none;
+    opacity: 1;
+    translate: none;
   }
 
   .card-hover:hover {

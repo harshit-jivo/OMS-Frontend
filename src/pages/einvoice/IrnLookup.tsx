@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { HiMagnifyingGlass } from "react-icons/hi2";
 import { einvoiceService } from "../../services/einvoiceService";
 import { NicField, JsonView, DetailsView, ErrorAlert } from "../../components/NicUI";
@@ -8,11 +8,22 @@ import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/form";
 import { Card, CardHeader, CardTitle } from "@/components/ui/page";
 import { Tab, TabList } from "@/components/ui/tabs";
+import EntityToggle from "./EntityToggle";
+import { useDefaultEntity } from "./useNicEntity";
 
 type Mode = "irn" | "doc" | "rejected";
 
 export default function IrnLookup() {
   const [mode, setMode] = useState<Mode>("irn");
+  /* A NIC lookup is scoped to the GSTIN you authenticate as, so asking as the
+     wrong entity returns 2154 "not found" for an IRN that plainly exists. */
+  const defaultEntity = useDefaultEntity();
+  const [entity, setEntity] = useState("");
+  /* Rejected-IRN lists are returned per authenticated GSTIN, so "which state"
+     is a real question there, not just "which PAN". */
+  const [gstin, setGstin] = useState("");
+  useEffect(() => { if (!entity && defaultEntity) setEntity(defaultEntity); },
+            [entity, defaultEntity]);
   const [irn, setIrn] = useState("");
   const [doctype, setDoctype] = useState("INV");
   const [docnum, setDocnum] = useState("");
@@ -29,13 +40,13 @@ export default function IrnLookup() {
     try {
       if (mode === "irn") {
         if (!irn.trim()) throw new Error("IRN is required.");
-        setData(await einvoiceService.getByIrn(irn.trim()));
+        setData(await einvoiceService.getByIrn(irn.trim(), entity || undefined, gstin || undefined));
       } else if (mode === "doc") {
         if (!docnum.trim() || !docdate.trim()) throw new Error("Doc number and date are required.");
-        setData(await einvoiceService.getByDoc(doctype, docnum.trim(), docdate.trim()));
+        setData(await einvoiceService.getByDoc(doctype, docnum.trim(), docdate.trim(), entity || undefined, gstin || undefined));
       } else {
         if (!rejDate.trim()) throw new Error("Date is required.");
-        setData(await einvoiceService.getRejected(rejDate.trim()));
+        setData(await einvoiceService.getRejected(rejDate.trim(), entity || undefined, gstin || undefined));
       }
     } catch (err) {
       setError(messageFrom(err, "Request failed"));
@@ -49,6 +60,9 @@ export default function IrnLookup() {
       <CardHeader>
         <CardTitle>Lookup</CardTitle>
       </CardHeader>
+
+      <EntityToggle value={entity} onChange={setEntity} gstin={gstin} onGstinChange={setGstin}
+        hint="NIC scopes a lookup to the seller you authenticate as. Leave GSTIN on Any to search every state of this PAN." />
 
       <TabList label="Lookup by" className="mb-4">
         {([["irn", "By IRN"], ["doc", "By Document"], ["rejected", "Rejected IRNs"]] as [Mode, string][]).map(

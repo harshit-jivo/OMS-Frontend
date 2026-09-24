@@ -17,9 +17,9 @@
  * destructure what they need, and `SalesOrderForm` is its inferred type, so a
  * value added here needs no second declaration to reach a consumer.
  *
- * `useWizard` is decided from `location.state` and never changes for the life
- * of a mount, which is what makes one hook safe for both forms: only ever one
- * of them is rendered against it.
+ * There is one form. `OrderWizard` / `LegacyOrderForm` were the same job done
+ * twice — this hook fed both, and `useWizard` chose between them from
+ * `location.state`. Every mode now renders the single-page `OrderForm`.
  */
 import { useState, useEffect, useRef } from "react";
 import { useFieldArray, useForm } from "react-hook-form";
@@ -27,6 +27,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 
 import { getCurrentUser } from "@/services/authService";
 import { ordersService } from "@/services/ordersService";
+import { sapService } from "@/services/sapService";
 import type {
   CreateOrder,
   Order,
@@ -52,9 +53,10 @@ import { NO_PROBLEMS, hasProblems, orderProblems } from "./orderProblems";
 import {
   FOC_TOKEN_BASIC_PRICE,
   applyFocPricingToRow,
-  computeLandingPrice,
+  applyFreePricingToRow,
   recalculateRowTotals as recalculateRowTotalsFor,
 } from "./rowTotals";
+import { defaultWarehouseFor, warehouseBranchFor } from "./warehouseDefaults";
 
 export type RowDropdownOption = {
   value: string;
@@ -95,6 +97,28 @@ type AddressOption = {
   address_id?: string | number | null;
   address_name?: string | null;
   full_address?: string | null;
+};
+
+/**
+ * The street to print under an address label, or "" when there is nothing to
+ * add.
+ *
+ * The label an address is shown by is `address_name || full_address ||
+ * address_id`, so for an address with NO name the label already IS the street
+ * — repeating it underneath would be the same line twice in two sizes. Some
+ * CRD1 rows also carry the street as the Address name itself, which is the
+ * same case arriving by a different route.
+ */
+export const addressStreet = (address?: {
+  address_name?: string | null;
+  full_address?: string | null;
+}) => {
+  const street = String(address?.full_address ?? "").trim();
+  const name = String(address?.address_name ?? "").trim();
+  // No name means the label FELL BACK to the street, so there is nothing left
+  // to add under it.
+  if (!street || !name) return "";
+  return street === name ? "" : street;
 };
 
 const normalizeOptionText = (value: unknown) =>
@@ -177,6 +201,10 @@ const getDefaultDeliveryDate = () => {
   return formatDateInput(date);
 };
 
+/** One engine giveaway on one line: the scheme and benefit it came from. */
+const schemeDismissKey = (rowUid: string, proposal: SchemeProposal) =>
+  `${rowUid}:${proposal.scheme_id}:${proposal.benefit_id}`;
+
 export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
   const { t } = useUILabels();
   const { field } = useFieldConfig();
@@ -204,6 +232,17 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
   const [companyDropdownOpen, setCompanyDropdownOpen] = useState(false);
   const [openRowDropdown, setOpenRowDropdown] = useState<string | null>(null);
   const [branch, setBranch] = useState<BranchOption[]>([]);
+  // The warehouses HANA lists for the order's category, and the default the
+  // server reads from its environment per category (`/orders/defaults/`).
+  const [warehouses, setWarehouses] = useState<{ code: string; name: string }[]>([]);
+  const [defaultWarehouses, setDefaultWarehouses] = useState<Record<string, string>>({});
+  /**
+   * Whether the warehouse on the form was put there by a PERSON — chosen in the
+   * field, or carried in by a saved order — as opposed to auto-filled from the
+   * category's env default. A ref, not state: nothing renders from it, and the
+   * effect below must read it in the same tick it is set.
+   */
+  const warehouseChosenByUser = useRef(false);
   const [billAddress, setBillAddress] = useState<AddressOption[]>([]);
   const [shipAddress, setShipAddress] = useState<AddressOption[]>([]);
   const [category, setCategory] = useState<string[]>([]);
@@ -217,6 +256,10 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
   // v2 engine proposals, keyed by `row.uid`. Resolved from the party's targeting
   // (vendor / state / main group), not chosen by the user. See schemeService.
   const [schemeProposals, setSchemeProposals] = useState<Record<string, SchemeProposal[]>>({});
+  // Engine giveaways the salesperson removed, by `schemeDismissKey`. A ref,
+  // not state: the debounced preview below re-proposes them on every line
+  // change, and its callback must see a removal made while it was in flight.
+  const dismissedSchemesRef = useRef<Set<string>>(new Set());
   const [editOrderFallback, setEditOrderFallback] =
     useState<EditOrderFallback>(emptyEditOrderFallback);
   /**
@@ -255,9 +298,9 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
     poNumber: "",
     company: "",
     comment: "",
-    // Company-3 (Mart) orders pick a dispatch warehouse, sent as
-    // `warehouse_code` on submit. Defaults to GP-FGM.
-    warehouse: "GP-FGM",
+    // One warehouse for the whole order, sent as `warehouse_code`. Filled in
+    // from the server's per-category default once `/orders/defaults/` lands.
+    warehouse: "",
   });
 
   /**
@@ -355,11 +398,6 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
   // `allowPoNumber` guard is preserved so editing an existing order doesn't
   // newly expose PO where it wasn't intended.
   const canEditPoNumber = poField.enabled && (!isEditMode || locationState?.allowPoNumber === true);
-  // The guided 4-step wizard is used for both the standard create flow and the
-  // FOC create flow, so Add Sales and Add FOC share the same UI. FOC-specific
-  // behaviour (price forced to 0, no scheme panel) is handled via `isFocOrder`.
-  // Edit and Duplicate modes keep the original single-page form.
-  const useWizard = mode === "create" && !isLoadingFromOrder;
 
   // Use Effects
   useEffect(() => {
@@ -367,6 +405,10 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
     fetchProducts();
     fetchCompany();
     fetchCurrentUserProfile();
+    ordersService
+      .getOrderDefaults()
+      .then((defaults) => setDefaultWarehouses(defaults.warehouse_code))
+      .catch((error) => console.log("Error fetching order defaults:", error));
   }, []);
 
   // Dispatch branches belong to a business line, so they are re-fetched
@@ -377,6 +419,60 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
   useEffect(() => {
     fetchBranch(selectedPartyCategory);
   }, [selectedPartyCategory]);
+
+  /**
+   * The category this order ships as — the party's, else the user's own.
+   * Drives which HANA schema lists the warehouses and which env default
+   * applies. "BEVERAGE" (singular) is the HANA endpoint's spelling.
+   */
+  const orderCategory = normalizeOptionText(selectedPartyCategory || userDefaultCategory);
+  const warehouseBranch = warehouseBranchFor(orderCategory);
+  // Deliberately EMPTY until the category is known. `warehouseBranch` falls
+  // back to OIL so the warehouse LIST has something to fetch, but applying
+  // OIL's default before the signed-in user's category has arrived is how a
+  // BEVERAGES user got pinned to BH-BT. No category yet means no default yet.
+  const defaultWarehouse = defaultWarehouseFor(orderCategory, defaultWarehouses);
+
+  useEffect(() => {
+    let cancelled = false;
+    sapService
+      .getWarehouses(warehouseBranch)
+      .then((rows) => {
+        if (!cancelled) setWarehouses(rows);
+      })
+      .catch((error) => {
+        console.log("Error fetching warehouses:", error);
+        if (!cancelled) setWarehouses([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [warehouseBranch]);
+
+  /*
+   * Track the env default until someone actually chooses a warehouse.
+   *
+   * This used to bail out on `formData.warehouse` being set at all, which froze
+   * the FIRST value written and never corrected it. That lost the race it did
+   * not look like it was in: `/orders/defaults/` and `/auth/profile/` are
+   * fetched in parallel on mount, and the defaults call is a plain settings
+   * read while the profile call hits the database — so the defaults land first
+   * essentially every time. At that moment `userDefaultCategory` is still "",
+   * `warehouseBranch` falls through to its OIL default, and a BEVERAGES user
+   * was pinned to the OIL warehouse (BH-BT) a beat before their own category
+   * arrived to say BH-FG.
+   *
+   * `warehouseChosenByUser` is what the old guard was reaching for: not "is
+   * there a value" but "did a person put it there". While it is false the field
+   * follows the category; once a person picks a warehouse — or an edit loads a
+   * saved order, whose stored warehouse must never be overwritten — it stops.
+   */
+  useEffect(() => {
+    if (warehouseChosenByUser.current || !defaultWarehouse) return;
+    setFormData((prev) =>
+      prev.warehouse === defaultWarehouse ? prev : { ...prev, warehouse: defaultWarehouse },
+    );
+  }, [defaultWarehouse]);
 
   useEffect(() => {
     if (!isLoadingFromOrder) {
@@ -399,20 +495,28 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
     }
   };
 
-  // Keep `dispatch` pointing at a branch the current list actually contains.
+  // Keep `dispatch` pointing at a branch the current list actually contains,
+  // and prefer the factory when it does.
   //
-  // The list changes under this field when the party's category changes, and
-  // `bpl_id` is unique only within a category — id 2 is FACTORY under OIL and
-  // HARYANA under MART. So a held-over id is not a harmless stale value; it
-  // silently renames itself into a different place. Anything not in the new
-  // list is dropped and replaced with that list's first entry.
+  // Two separate intents, both kept. `live` wanted the factory as the default
+  // rather than whatever sorted first, since that is where orders ship from
+  // unless someone says otherwise. This branch wanted the selection dropped
+  // when it is no longer on offer: the list changes under this field when the
+  // party's category changes, and `bpl_id` is unique only WITHIN a category --
+  // id 2 is FACTORY under OIL but HARYANA under MART. A held-over id is not a
+  // harmless stale value, it silently renames itself into a different place.
+  //
+  // So the guard is "is the current value still offered", not "is there a
+  // value" -- and what replaces it is the factory if this category has one
+  // (MART does not), else the first entry.
   useEffect(() => {
     if (isLoadingFromOrder || branch.length === 0) return;
     const stillOffered = branch.some((d) => String(d.bpl_id) === formData.dispatch);
     if (formData.dispatch && stillOffered) return;
+    const factory = branch.find((d) => normalizeOptionText(d.bpl_name).includes("factory"));
     setFormData((prev) => ({
       ...prev,
-      dispatch: String(branch[0]?.bpl_id || ""),
+      dispatch: String((factory ?? branch[0])?.bpl_id || ""),
     }));
   }, [branch, formData.dispatch, isLoadingFromOrder]);
 
@@ -674,13 +778,18 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
             qty: valueToString(item.qty),
             ltrs: valueToString(item.ltrs),
             boxes: valueToString(item.boxes),
-            // Landing is always basic + tax% (recomputed, not the stored value)
-            // so the edit side shows the same figure the create side does.
+            // Show the Price List the order was actually saved with rather than
+            // recomputing one. This line's agreed rate is a fact about the day
+            // it was placed; re-deriving it here would overwrite it on any
+            // subsequent save, and a later edit to the party's rate would
+            // silently reprice an order that had already been approved.
             basicPrice: valueToString(item.basic_price),
-            priceListBasic: computeLandingPrice(item.basic_price, item.tax_rate),
+            priceListBasic: valueToString(item.price_list_basic),
             tax: valueToString(item.tax_rate),
             amount: valueToString(item.total),
             confirmed: true,
+            isFree: Boolean(item.is_free),
+            freeReason: item.free_reason || "",
           };
         })
       : [createEmptyRow()];
@@ -785,11 +894,17 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
           Deliverydate: isDuplicateMode ? getDefaultDeliveryDate() : order.delivery_date || "",
           poNumber: isDuplicateMode ? "" : order.po_number || "",
           company: order.company ? String(order.company) : "",
-          // Pick the warehouse straight from the saved order; default to GP-FGM
-          // for orders placed before the picker existed.
-          warehouse: order.warehouse_code || "GP-FGM",
+          // The saved order's warehouse. Blank on orders placed before the
+          // picker existed; the default effect fills it from the env then —
+          // which is why `warehouseChosenByUser` is only latched below when
+          // there is actually a stored value to protect.
+          warehouse: order.warehouse_code || "",
           comment: isDuplicateMode ? "" : order.remarks || "",
         });
+        // An order that shipped from a chosen warehouse keeps it, whatever the
+        // category default now says. One that never had one stays on the
+        // default so it is filled rather than left blank.
+        warehouseChosenByUser.current = Boolean(order.warehouse_code);
         const orderStateCode = order.party_state || "";
         setStateCode(orderStateCode || null);
 
@@ -908,7 +1023,7 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
         company.find((item) => normalizeOptionText(item?.name).includes("jivo wellness"))?.id || "",
       ),
       comment: "",
-      warehouse: "GP-FGM",
+      warehouse: defaultWarehouse,
     });
 
     setSelectedPartyCategory(userDefaultCategory);
@@ -960,6 +1075,10 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
 
           is_auto_free: true,
           combo_source_code: parent?.item_code || "",
+          // The combo's free half is a scheme-style companion, not a line the
+          // salesperson chose to give away, so it does not go to approval.
+          is_free: false,
+          free_reason: "",
         }));
     });
 
@@ -1005,9 +1124,7 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
 
       delivery_date: formData.Deliverydate,
       ...(canEditPoNumber ? { po_number: formData.poNumber.trim() } : {}),
-      // Warehouse is only chosen on Mart orders; others send "" so SAP sync
-      // falls back to the per-category default.
-      warehouse_code: isMartOrder ? formData.warehouse : "",
+      warehouse_code: formData.warehouse,
       remarks: formData.comment.trim(),
       is_foc: isFocOrder,
       company: Number(formData.company),
@@ -1043,10 +1160,12 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
           boxes: Number(row.boxes),
           ltrs: Number(row.ltrs),
 
-          price_list_basic: isFocOrder ? 0 : Number(row.priceListBasic),
+          price_list_basic: isFocOrder || row.isFree ? 0 : Number(row.priceListBasic),
           basic_price: Number(row.basicPrice),
           tax_rate: Number(row.tax),
           total: Number(row.amount || 0),
+          is_free: Boolean(row.isFree),
+          free_reason: row.isFree ? String(row.freeReason || "").trim() : "",
           scheme_id:
             row.isScheme && row.schemes[0]?.scheme ? Number(row.schemes[0].scheme) : undefined,
           scheme_qty: row.isScheme
@@ -1162,7 +1281,7 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
         branch.find((d) => String(d.bpl_id) === String(formData.dispatch))?.bpl_name || "",
       delivery_date: formData.Deliverydate || null,
       ...(canEditPoNumber ? { po_number: formData.poNumber.trim() } : {}),
-      warehouse_code: isMartOrder ? formData.warehouse : "",
+      warehouse_code: formData.warehouse,
       remarks: formData.comment.trim(),
       is_foc: isFocOrder,
       company: Number(formData.company) || 0,
@@ -1187,8 +1306,10 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
         pcs: Number(row.pcs) || 0,
         boxes: Number(row.boxes) || 0,
         ltrs: Number(row.ltrs) || 0,
-        price_list_basic: isFocOrder ? 0 : Number(row.priceListBasic) || 0,
+        price_list_basic: isFocOrder || row.isFree ? 0 : Number(row.priceListBasic) || 0,
         basic_price: Number(row.basicPrice) || 0,
+        is_free: Boolean(row.isFree),
+        free_reason: row.isFree ? String(row.freeReason || "").trim() : "",
         tax_rate: Number(row.tax) || 0,
         total: Number(row.amount) || 0,
         scheme_id:
@@ -1353,6 +1474,8 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
   type DerivedLine = {
     kind: "combo" | "scheme";
     key: string;
+    /** Set on an engine-proposed giveaway only: what removing it records. */
+    dismissKey?: string;
     itemCode: string;
     itemName: string;
     qty: number;
@@ -1411,6 +1534,7 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
       lines.push({
         kind: "scheme",
         key: `v2-${index}-${proposal.scheme_id}-${proposal.benefit_id}`,
+        dismissKey: schemeDismissKey(row.uid, proposal),
         itemCode: proposal.benefit_item_code,
         // The engine's own name first. The two catalogue lookups below only
         // hold items the PARTY is assigned, and a STATE- or VENDOR-scoped
@@ -1488,8 +1612,28 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
   };
 
   const applyFocPricing = (row: SalesRow) => {
+    if (row.isFree) return applyFreePricingToRow(row);
     if (!isFocOrder) return row;
     return applyFocPricingToRow(row);
+  };
+
+  /** Mark a line free (token rate, no scheme) or put it back on its agreed rate. */
+  const handleRowFreeToggle = (index: number, isFree: boolean) => {
+    const current = rows[index];
+    if (!current) return;
+    const next = isFree
+      ? applyFreePricingToRow({ ...current, isFree: true })
+      : recalculateRowTotals(
+          { ...current, isFree: false, freeReason: "", basicPrice: current.priceListBasic || "" },
+          "price",
+        );
+    rowArray.update(index, next);
+  };
+
+  const handleRowFreeReason = (index: number, freeReason: string) => {
+    const current = rows[index];
+    if (!current) return;
+    rowArray.update(index, { ...current, freeReason });
   };
 
   /** `rowTotals.recalculateRowTotals`, with the product and the FOC flag this
@@ -1540,16 +1684,22 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
         row.type = match ? `${match[1]} ${match[2].toUpperCase()}` : "Others";
         row.pcs = String(partyProduct.sal_factor2 ?? "");
         row.tax = String(getProductTaxRate(partyProduct));
-        // Basic Price = the product's basic rate (pre-tax). Landing Price is that
-        // rate plus tax. Both must fill on select — the Basic column was blank
-        // before because only Landing (priceListBasic) was being set.
+        // Both columns start from the party's AGREED RATE (pre-tax). Basic Price
+        // is then editable — that is the discount; Price List keeps the agreed
+        // rate so it stays the benchmark the line is measured against. It must
+        // NOT be derived from `row.basicPrice`: see the note in
+        // `recalculateRowTotals`.
         row.basicPrice =
           isFocOrder || partyProduct.basic_rate == null
             ? isFocOrder
               ? FOC_TOKEN_BASIC_PRICE
               : ""
             : String(partyProduct.basic_rate);
-        row.priceListBasic = isFocOrder ? "0" : computeLandingPrice(row.basicPrice, row.tax);
+        row.priceListBasic = isFocOrder
+          ? "0"
+          : partyProduct.basic_rate == null
+            ? ""
+            : String(partyProduct.basic_rate);
         void fetchSchemesForRow(row.uid, true);
       } else {
         void fetchSchemesForRow(row.uid, false);
@@ -1693,6 +1843,22 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
     setSchemeProposals(dropUid);
   };
 
+  /**
+   * Take an engine-proposed giveaway off this order. It is simply not sent:
+   * nothing server-side re-adds engine schemes, so the order saves and posts
+   * to SAP without it. Undone by deleting and re-adding the item.
+   */
+  const handleRemoveSchemeProposal = (dismissKey: string) => {
+    dismissedSchemesRef.current.add(dismissKey);
+    setSchemeProposals((prev) => {
+      const next: Record<string, SchemeProposal[]> = {};
+      Object.entries(prev).forEach(([rowUid, proposals]) => {
+        next[rowUid] = proposals.filter((p) => schemeDismissKey(rowUid, p) !== dismissKey);
+      });
+      return next;
+    });
+  };
+
   const handlePartySelect = (value: string, partyCategory = "") => {
     const nextStateCode = getPartyStateCode(value, partyCategory);
     setEditOrderFallback(emptyEditOrderFallback);
@@ -1724,6 +1890,9 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>,
   ) => {
     const { name, value } = e.target;
+
+    // A person picked this one: stop tracking the category's default.
+    if (name === "warehouse") warehouseChosenByUser.current = true;
 
     setFormData((prev) => ({
       ...prev,
@@ -1899,6 +2068,8 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
           // A scheme with no rule leaves the quantity to the user; there is
           // nothing to show as a line until someone types one.
           if (proposal.qty_is_user_supplied || Number(proposal.qty) <= 0) return;
+          // Removed by the salesperson: stays removed while the page is open.
+          if (dismissedSchemesRef.current.has(schemeDismissKey(rowUid, proposal))) return;
           (byRow[rowUid] = byRow[rowUid] || []).push(proposal);
         });
         setSchemeProposals(byRow);
@@ -2021,6 +2192,8 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
     Number(formData.company) === 3 ||
     (!!martCompany && String(formData.company) === String(martCompany.id)) ||
     normalizeOptionText(selectedPartyCategory) === "mart";
+  const selectedBillAddressStreet = addressStreet(selectedBillAddress);
+  const selectedShipAddressStreet = addressStreet(selectedShipAddress);
   const selectedBillAddressLabel =
     selectedBillAddress?.address_name ||
     selectedBillAddress?.full_address ||
@@ -2094,6 +2267,7 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
     openRowDropdown,
     setOpenRowDropdown,
     branch,
+    warehouses,
     billAddress,
     shipAddress,
     category,
@@ -2139,7 +2313,6 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
     isFocOrder,
     poField,
     canEditPoNumber,
-    useWizard,
     getProductType,
     fetchSchemesForRow,
     validateBeforeSave,
@@ -2150,6 +2323,9 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
     handleClearForm,
     handleAddRow,
     handleRowSchemeToggle,
+    handleRowFreeToggle,
+    handleRowFreeReason,
+    handleRemoveSchemeProposal,
     handleAddScheme,
     handleSchemeChange,
     handleRemoveScheme,
@@ -2193,6 +2369,9 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
     // martCompany,
     selectedBillAddressLabel,
     selectedShipAddressLabel,
+    selectedBillAddressStreet,
+    selectedShipAddressStreet,
+    addressStreet,
     selectedDispatchLabel,
     selectedCompanyLabel,
   };

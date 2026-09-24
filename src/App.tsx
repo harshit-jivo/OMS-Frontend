@@ -38,6 +38,7 @@ const PersonWise_Report = lazy(() => import("./pages/PersonWise_Report"));
 const Sales_Report = lazy(() => import("./pages/Sales_Report"));
 const StateWise_Report = lazy(() => import("./pages/StateWise_Report"));
 const Order_Tracking = lazy(() => import("./pages/Order_Tracking"));
+const Order_Master = lazy(() => import("./pages/Order_Master"));
 import "./styles/AppShell.css";
 import "./styles/UIConsistency.css";
 const Party_Assignment = lazy(() => import("./pages/Party_Assignment"));
@@ -406,6 +407,14 @@ function App() {
             </ProtectedPage>
           }
         />
+        <Route
+          path="/Order_Master"
+          element={
+            <ProtectedPage>
+              <Order_Master />
+            </ProtectedPage>
+          }
+        />
 
         <Route
           path="/Distributor_Order_Tracking"
@@ -433,6 +442,7 @@ function App() {
             </ProtectedPage>
           }
         />
+
 
         <Route
           path="/Add_Scheme"

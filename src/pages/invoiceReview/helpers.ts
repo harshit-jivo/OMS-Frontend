@@ -18,10 +18,6 @@ import type {
   StatusCounts,
 } from "./types";
 
-// Exact status string the backend stores after a successful SAP post.
-// Change this single constant if the backend expects a different value.
-export const POSTED_TO_SAP_STATUS: InvoiceStatus = "POSTED_TO_SAP";
-
 export const STATUS_FILTERS: Array<{ key: FilterKey; label: string }> = [
   { key: "PENDING", label: "Pending" },
   { key: "APPROVED", label: "Approved" },
@@ -30,8 +26,33 @@ export const STATUS_FILTERS: Array<{ key: FilterKey; label: string }> = [
   { key: "EDITED", label: "Edited" },
   { key: "ERROR", label: "Error" },
   { key: "CL_RAISED", label: "CL Raised" },
+  // Sent to SAP with no answer recorded yet; posting it again checks SAP first.
+  { key: "POSTING", label: "Posting" },
   { key: "ALL", label: "All" },
 ];
+
+/**
+ * Which status tabs to render. Every one of them, for everybody.
+ *
+ * There WAS a rule here: an approver saw only the decision tabs, because
+ * "the approver's workflow ends at the decision, so the SAP-side statuses
+ * would only ever be empty for them". That premise was wrong twice over.
+ *
+ * It was wrong about the data — POSTED_TO_SAP is 152 of 158 live rows and
+ * every ERROR row sits in DL-MP, the warehouse whose approver was the one
+ * person being shown neither. And it was wrong about the people: it keyed off
+ * `canApproveReject`, which for most of this app's life was true only for
+ * admins, so nobody noticed. The moment real users were granted approval
+ * (KP, whose PRIMARY role is `billing`, and Preshit on Billing Admin), the
+ * rule started hiding billing's own tabs from the billing desk.
+ *
+ * Approving a bill is not a different job from billing one here — the same
+ * people do both — so the tab strip does not split by desk. Actions still do:
+ * Approve/Reject is gated on `canApproveReject` (and the warehouse, see
+ * `auth/invoiceWarehouses.ts`), Post to SAP on `canPostToSap`. A tab is a
+ * view, and hiding a view only hid the work.
+ */
+export const visibleStatusFilters = (): typeof STATUS_FILTERS => STATUS_FILTERS;
 
 // Human-readable label for a status (e.g. POSTED_TO_SAP -> "POSTED TO SAP").
 export const statusLabel = (status: InvoiceStatus) => status.replace(/_/g, " ");
@@ -44,6 +65,7 @@ export const createEmptyCounts = (): StatusCounts => ({
   EDITED: 0,
   ERROR: 0,
   CL_RAISED: 0,
+  POSTING: 0,
   ALL: 0,
 });
 
@@ -75,6 +97,7 @@ export const normalizeStatus = (status?: string): InvoiceStatus => {
     upper === "EDITED" ||
     upper === "ERROR" ||
     upper === "POSTED_TO_SAP" ||
+    upper === "POSTING" ||
     upper === "CL_RAISED"
   ) {
     return upper;
@@ -140,23 +163,6 @@ export const extractMessage = (value: unknown, fallback: string) => {
     if (typeof errorText === "string" && errorText.trim()) return errorText;
   }
   return fallback;
-};
-
-// Pull the deepest human-readable SAP message out of a raw error string (for UI).
-export const readableSapError = (raw: string): string => {
-  try {
-    const parsed = JSON.parse(raw);
-    const deep =
-      (parsed?.details?.error?.message && String(parsed.details.error.message)) ||
-      (parsed?.error?.message && String(parsed.error.message)) ||
-      (typeof parsed?.error === "string" && parsed.error) ||
-      (typeof parsed?.message === "string" && parsed.message) ||
-      (typeof parsed?.detail === "string" && parsed.detail);
-    if (typeof deep === "string" && deep.trim()) return deep;
-  } catch {
-    /* not JSON — fall through to raw */
-  }
-  return raw;
 };
 
 /* ── Credit-limit request (external DSR service) ─────────────────────────
@@ -236,23 +242,6 @@ export const isCreditLimitError = (record: InvoiceRecord) => {
   );
 };
 
-/**
- * The status to record when a post to SAP fails.
- *
- * ERROR for everything — EXCEPT a record that already has a credit-limit
- * request in flight. That request is not withdrawn just because this attempt
- * failed, and until JSAP clears it a repost keeps failing the same check, so
- * the invoice genuinely still belongs on the CL Raised tab. Demoting it to
- * ERROR takes away "Show Flow" — the only way back to the approval stages of
- * the request the reviewer already raised — and offers "Raise CL" again,
- * which the backend refuses with a 409 because a request for that log exists.
- *
- * The backend stores the latest SAP message either way, so keeping the status
- * costs nothing: the reviewer still sees what SAP said on this attempt.
- */
-export const statusAfterFailedPost = (record: InvoiceRecord): InvoiceStatus =>
-  normalizeStatus(record.status) === "CL_RAISED" ? "CL_RAISED" : "ERROR";
-
 // A value is a usable lineage reference (log id) — 0 is not a valid pk here.
 export const hasRef = (value: unknown) => value !== undefined && value !== null && value !== "";
 
@@ -312,8 +301,6 @@ export const updateInvoiceStatus = (
   extra?: {
     rejection_reason?: string;
     error_message?: string;
-    sap_doc_num?: string;
-    sap_doc_entry?: string;
   },
 ) =>
   apiFetch<ApiMessageResponse>(`/api/invoice/${id}/update-status/`, {

@@ -179,11 +179,15 @@ describe("View Orders — detail", () => {
     expect(labels).toContain("Premium");
   });
 
-  it("carries the variety as a column on the items table", async () => {
+  it("draws each item as a card with its code and figures", async () => {
     await openDetail();
 
-    expect(screen.getByRole("columnheader", { name: "Variety" })).toBeInTheDocument();
-    // SAP sends COMMODITY / PREMIUM uppercase; the column title-cases them.
+    // The variety-cost cards above already state the split, so the line
+    // itself carries code and category but no variety chip.
+    const line = screen.getByText("Mustard Oil 1L").closest("li") as HTMLElement;
+    expect(line).toHaveTextContent("Amount");
+    expect(line.querySelector("[data-slot='badge']")).toBeNull();
+    // SAP sends COMMODITY / PREMIUM uppercase; nothing shows them raw.
     expect(screen.queryByText("COMMODITY")).not.toBeInTheDocument();
   });
 

@@ -11,6 +11,7 @@ import {
   HiOutlineInbox,
   HiOutlineXCircle,
   HiOutlineXMark,
+  HiOutlineMapPin,
 } from "react-icons/hi2";
 
 import {
@@ -613,7 +614,7 @@ export default function Auditor_orders() {
                     exists for keeps a filled button; everything else is
                     available without competing for the eye. */}
                 <Button variant="ghost" onClick={() => handleTrack(orderDetails)}>
-                  <HiOutlineArrowPath aria-hidden="true" /> Track
+                  <HiOutlineMapPin aria-hidden="true" /> Track
                 </Button>
                 <Button variant="ghost" onClick={() => downloadExcel(orderDetails)}>
                   <HiOutlineArrowDownTray aria-hidden="true" /> Export Excel
@@ -639,9 +640,11 @@ export default function Auditor_orders() {
               It listed eleven at first, which is what `PartyHeader`'s modal
               showed. Card code duplicates the party name in the header;
               quotation number is blank until AFTER approval; created-at and
-              created-by are provenance, not something being checked; dispatch
-              point is a logistics decision made elsewhere. Eleven fields to
-              carry five is how a reference panel turns into wallpaper.
+              created-by are provenance, not something being checked. Eleven
+              fields to carry five is how a reference panel turns into
+              wallpaper. Dispatch-from was left out at first as a logistics
+              decision made elsewhere, and added back: the auditor checks where
+              the order ships from before it becomes a Sales Order.
 
               REMARK is the exception and is `hideWhenEmpty`: most orders have
               none, and the ones that do are usually saying why a previous
@@ -662,6 +665,7 @@ export default function Auditor_orders() {
               <DetailField label="PO number" value={orderDetails.po_number} />
               <DetailField label="Bill to" value={orderDetails.bill_to_address} />
               <DetailField label="Ship to" value={orderDetails.ship_to_address} />
+              <DetailField label="Dispatch from" value={orderDetails.dispatch_from_name} />
               <DetailField
                 label="Remark"
                 value={orderDetails.remarks?.trim() ? orderDetails.remarks : ""}

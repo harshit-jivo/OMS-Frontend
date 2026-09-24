@@ -1,27 +1,35 @@
 /**
- * The one field both forms draw.
+ * The warehouse the whole order ships from.
  *
- * A Mart order (company 3) also picks a dispatch warehouse. It is display-only
- * today — the value is not persisted — and it is the ONLY piece of markup the
- * wizard and the legacy form genuinely share, which is why the rest of the
- * split could be a clean cut rather than a shared-components layer.
+ * Every order picks one now, not only Mart. The options are the warehouses
+ * HANA lists for the order's category, and the field starts on the default
+ * the server reads from its environment — the same one the SAP push would
+ * apply if the order carried none, so what is on screen is what ships.
+ *
+ * If the list has not arrived (or HANA is down) the current value is still
+ * offered, so the form never shows a blank where a choice was made.
  */
 import { Field, Select } from "@/components/ui/form";
 
 import type { SalesOrderForm } from "./useSalesOrderForm";
 
-const WAREHOUSE_OPTIONS = ["DL-MP", "GP-FGM"];
-
 export default function WarehouseField({ form }: { form: SalesOrderForm }) {
-  const { formData, handleChange } = form;
+  const { formData, handleChange, warehouses } = form;
+  const options =
+    formData.warehouse && !warehouses.some((w) => w.code === formData.warehouse)
+      ? [{ code: formData.warehouse, name: formData.warehouse }, ...warehouses]
+      : warehouses;
 
   return (
-    <Field label="Warehouse">
+    <Field label="Warehouse" hint="">
       {(control) => (
         <Select {...control} name="warehouse" value={formData.warehouse} onChange={handleChange}>
-          {WAREHOUSE_OPTIONS.map((code) => (
-            <option key={code} value={code}>
-              {code}
+          {options.length === 0 ? <option value="">Loading warehouses…</option> : null}
+          {options.map((warehouse) => (
+            <option key={warehouse.code} value={warehouse.code}>
+              {warehouse.name && warehouse.name !== warehouse.code
+                ? `${warehouse.code} — ${warehouse.name}`
+                : warehouse.code}
             </option>
           ))}
         </Select>

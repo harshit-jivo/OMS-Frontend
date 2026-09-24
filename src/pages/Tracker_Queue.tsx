@@ -9,7 +9,6 @@ import {
   HiOutlineBellSlash,
   HiOutlineClock,
   HiOutlineEye,
-  HiOutlineForward,
   HiOutlineMapPin,
   HiOutlinePaperAirplane,
   HiOutlinePauseCircle,
@@ -185,6 +184,14 @@ export default function Tracker_Queue() {
   const [statusPick, setStatusPick] = useState("");
   const [holdType, setHoldType] = useState(""); // FULL | PARTIAL
   const [amount, setAmount] = useState(""); // hold / debit amount
+  /**
+   * Transport Approval's debit box — the invoice's TOTAL debit, restated.
+   *
+   * Carries the invoice id it was typed for, so selecting a different row
+   * shows that row's own figure instead of the last thing typed. Null means
+   * untouched, and the box falls back to whatever the invoice already has.
+   */
+  const [debitEdit, setDebitEdit] = useState<{ id: number; value: string } | null>(null);
   const [subTab, setSubTab] = useState<
     | "current"
     | "returned"
@@ -296,6 +303,12 @@ export default function Tracker_Queue() {
 
   const isEntry = activeStage === "entry";
   const isSapApproval = activeStage === "sap_approval";
+  /**
+   * Transport Approval is the desk that knows what the transporter actually
+   * owes, and it sees the invoice AFTER Pre-Audit has put a figure on it, so
+   * it is the one desk allowed to restate the debit rather than add another.
+   */
+  const isTransportApproval = activeStage === "transport_approval";
   // Which decision tabs this desk offers — driven by its configured statuses,
   // so a retuned stage picks them up without a code change.
   const decisionChoices = stageCfg?.status_choices ?? [];
@@ -355,6 +368,25 @@ export default function Tracker_Queue() {
   }, [decisionRows, search]);
 
   /**
+   * The one invoice the debit box applies to.
+   *
+   * A restated debit is an absolute figure for a specific invoice, so it is
+   * offered only with exactly one row ticked — applied across a selection it
+   * would give every invoice the same deduction, which is never what the
+   * number means. The server refuses a bulk edit for the same reason.
+   */
+  const debitTarget = useMemo(() => {
+    if (!isTransportApproval || selected.size !== 1) return null;
+    const [id] = [...selected];
+    return rows.find((i) => i.id === id) ?? null;
+  }, [isTransportApproval, selected, rows]);
+  const debitValue = !debitTarget
+    ? ""
+    : debitEdit && debitEdit.id === debitTarget.id
+      ? debitEdit.value
+      : (debitTarget.debit_amount ?? "0");
+
+  /**
    * Hold / Debit split into "still on this desk" vs "has moved on".
    *
    * A DEBIT and a PARTIAL hold both ADVANCE the invoice — only a FULL hold
@@ -383,6 +415,7 @@ export default function Tracker_Queue() {
     setStatusPick("");
     setHoldType("");
     setAmount("");
+    setDebitEdit(null);
     setSubTab("current");
     setShowMovedOn(false);
   }, [activeStage]);
@@ -499,6 +532,7 @@ export default function Tracker_Queue() {
     remarks?: string;
     hold_type?: string;
     amount?: string;
+    debit_amount?: string;
   }) => {
     if (selected.size === 0) {
       flash("Select at least one invoice");
@@ -514,6 +548,7 @@ export default function Tracker_Queue() {
       setStatusPick("");
       setHoldType("");
       setAmount("");
+      setDebitEdit(null);
       setSelected(new Set());
       void load();
       if (isDecisionTab) loadDecisions(); // the log the action just changed
@@ -533,39 +568,9 @@ export default function Tracker_Queue() {
 
   const onAdvance = () => runBulk({ action: "ADVANCE", remarks });
 
-  /**
-   * Fast-track: Invoice Entry straight to SAP Approval, skipping Pre-Audit and
-   * Data Entry (and Bilty/GRPO for transport). Offered only at the entry desk
-   * and only on the Current tab.
-   *
-   * Remarks are checked here as well as server-side. The server is the
-   * authority, but this bypasses the desk where holds and debits are captured,
-   * so the user should be told what is missing before the request rather than
-   * after it — and told what they are about to skip.
-   */
-  const canFastTrack = activeStage === "entry" && subTab === "current";
-  const onFastTrack = async () => {
-    if (selected.size === 0) {
-      flash("Select at least one invoice");
-      return;
-    }
-    if (!remarks.trim()) {
-      flash("A reason is required to skip Pre-Audit and Data Entry");
-      return;
-    }
-    try {
-      const res = await trackerService.fastTrack([...selected], remarks);
-      flash(
-        `${res.processed_count} sent to SAP Approval`,
-        res.errors.length ? `${res.errors.length} failed` : "",
-      );
-      setRemarks("");
-      setSelected(new Set());
-      void load();
-    } catch (err) {
-      flash("Fast-track failed", messageFrom(err, "The server refused the request."));
-    }
-  };
+  /* Fast-track (Invoice Entry straight to SAP Approval) used to live here. It
+     moved to the Invoice Entry page — see `fastTrack` in Tracker_Entry.tsx. */
+
   /**
    * The "no alert email" tick.
    *
@@ -703,6 +708,10 @@ export default function Tracker_Queue() {
       remarks,
       ...(statusPick === "HOLD" ? { hold_type: holdType } : {}),
       ...(amount.trim() ? { amount } : {}),
+      // Rides along with the verdict so the approver corrects the figure and
+      // decides in one action. Sent even when unchanged — the server treats a
+      // matching figure as a no-op and writes nothing.
+      ...(debitTarget ? { debit_amount: debitValue.trim() || "0" } : {}),
     });
   };
 
@@ -804,7 +813,12 @@ export default function Tracker_Queue() {
     // already advanced, so these read the event history, not the live queue.
     ...(decisionChoices.includes("HOLD") ? [{ key: "hold" as const, label: "Hold" }] : []),
     ...(decisionChoices.includes("OK") ? [{ key: "ok" as const, label: "OK" }] : []),
-    ...(decisionChoices.includes("DEBIT") ? [{ key: "debit" as const, label: "Debit" }] : []),
+    // Transport Approval has no DEBIT status — it restates the figure
+    // alongside its verdict — but it does write debit rows, so it needs the
+    // tab that shows them.
+    ...(decisionChoices.includes("DEBIT") || isTransportApproval
+      ? [{ key: "debit" as const, label: "Debit" }]
+      : []),
     ...(decisionChoices.includes("APPROVED") ? [{ key: "approved" as const, label: "Approved" }] : []),
     ...(decisionChoices.includes("REJECTED")
       ? [{ key: "rejected_log" as const, label: "Rejected" }]
@@ -817,7 +831,9 @@ export default function Tracker_Queue() {
     subTab === "hold"
       ? "Every hold recorded at this desk. A full hold keeps the invoice here; a partial hold advances it with the amount withheld."
       : subTab === "debit"
-        ? "Every debit recorded at this desk, with the amount debited. Debits accumulate on the invoice."
+        ? isTransportApproval
+          ? "Every time this desk restated an invoice's debit, with the figure it was changed to. Each row replaces the previous total rather than adding to it."
+          : "Every debit recorded at this desk, with the amount debited. Debits accumulate on the invoice."
         : subTab === "approved"
           ? "Every invoice this desk approved and passed on."
           : SENT_BACK_TABS.has(subTab)
@@ -1083,6 +1099,31 @@ export default function Tracker_Queue() {
                       onChange={(e) => setAmount(e.target.value)}
                     />
                   )}
+                  {/* Transport Approval: restate the invoice's TOTAL debit.
+                      Not the DEBIT disposition above — that one adds another
+                      deduction, this replaces the figure Pre-Audit put on the
+                      invoice, which is what a transport approver is actually
+                      doing when they disagree with it. */}
+                  {isTransportApproval && debitTarget && (
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      className="w-44"
+                      placeholder="Debit amount"
+                      aria-label="Total debit amount for this invoice"
+                      title={`Total debit on ${debitTarget.invoice_number} — currently ₹${money(debitTarget.debit_amount)} of ₹${money(debitTarget.invoice_value)}`}
+                      value={debitValue}
+                      onChange={(e) =>
+                        setDebitEdit({ id: debitTarget.id, value: e.target.value })
+                      }
+                    />
+                  )}
+                  {isTransportApproval && !debitTarget && selected.size > 1 && (
+                    <span className={BAR_NOTE}>
+                      Tick one invoice to edit its debit amount.
+                    </span>
+                  )}
                   <Input
                     className="min-w-[220px] flex-1"
                     placeholder={
@@ -1124,11 +1165,7 @@ export default function Tracker_Queue() {
                 <>
                   <Input
                     className="min-w-[220px] flex-1"
-                    placeholder={
-                      canFastTrack
-                        ? "Remarks (optional to advance, required to fast-track)"
-                        : "Remarks (optional for advance)"
-                    }
+                    placeholder="Remarks (optional for advance)"
                     aria-label="Remarks"
                     value={remarks}
                     onChange={(e) => setRemarks(e.target.value)}
@@ -1136,19 +1173,12 @@ export default function Tracker_Queue() {
                   <Button variant="primary" onClick={onAdvance} disabled={selected.size === 0}>
                     <HiOutlineArrowRight aria-hidden="true" /> Advance
                   </Button>
-                  {/* Deliberately NOT the primary action: this skips the desks
-                      that capture holds and debits, so it should read as the
-                      exception, not the default way out of entry. */}
-                  {canFastTrack && (
-                    <Button
-                      variant="ghost"
-                      onClick={() => void onFastTrack()}
-                      disabled={selected.size === 0}
-                      title="Skip Pre-Audit and Data Entry — a reason is required"
-                    >
-                      <HiOutlineForward aria-hidden="true" /> Send to SAP Approval
-                    </Button>
-                  )}
+                  {/* "Send to SAP Approval" used to sit here, shown only when
+                      the active stage was entry. It now lives on the Invoice
+                      Entry page beside its own Advance button — the entry desk
+                      is the audience, and `IsTrackerEntry` is what the server
+                      gates the endpoint on, so the queue was offering it to
+                      desks that could never use it. */}
                   {canSyncSap && (
                     <Button
                       variant="ghost"
@@ -1257,7 +1287,15 @@ export default function Tracker_Queue() {
                         <TableHead>Inv. date</TableHead>
                         <TableHead className="text-right">Value</TableHead>
                         <TableHead>Decision</TableHead>
-                        {AMOUNT_TABS.has(subTab) && <TableHead className="text-right">Amount</TableHead>}
+                        {/* "Amount" means the amount ADDED on a Pre-Audit
+                            debit, but the NEW TOTAL on a Transport Approval
+                            one — the same column, two different quantities.
+                            Name it for whichever desk is being looked at. */}
+                        {AMOUNT_TABS.has(subTab) && (
+                          <TableHead className="text-right">
+                            {subTab === "debit" && isTransportApproval ? "New total" : "Amount"}
+                          </TableHead>
+                        )}
                         <TableHead>Remarks</TableHead>
                         <TableHead>By</TableHead>
                         <TableHead>Decided</TableHead>

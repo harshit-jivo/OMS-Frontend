@@ -440,6 +440,69 @@ test.describe("add sales wizard", () => {
     expect(body.items![0].schemes).toEqual([]);
   });
 
+  test("a line marked free posts at the token rate with its reason", async ({ appPage }) => {
+    const bodies = await capturePost(appPage);
+    await gotoStable(appPage, "/Add_Sales");
+    await completeStepOne(appPage);
+    await appPage.getByRole("button", { name: "Continue" }).click();
+    await appPage.getByRole("button", { name: "+ Add Item" }).click();
+    await appPage.getByRole("button", { name: /JIVO CANOLA OIL 1 LTR/ }).click();
+    await appPage.getByLabel("Boxes").fill("5");
+
+    // No reason, no confirm: the approver would have nothing to read.
+    await appPage.getByLabel(/Free item/).check();
+    await appPage.getByRole("button", { name: "Add Item", exact: true }).click();
+    await expect(appPage.getByRole("alert")).toHaveText("Give a reason for making this line free.");
+
+    await appPage.getByLabel("Reason for giving this free").fill("Launch sample");
+    await appPage.getByRole("button", { name: "Add Item", exact: true }).click();
+    await appPage.getByRole("button", { name: "Continue" }).click();
+    await appPage.getByRole("button", { name: "Continue" }).click();
+    await appPage.getByRole("button", { name: "Save Order" }).click();
+    await appPage.getByRole("button", { name: "Yes, create" }).click();
+
+    await expect.poll(() => bodies.length).toBe(1);
+    const item = bodies[0].items![0];
+    expect(item.is_free).toBe(true);
+    expect(item.free_reason).toBe("Launch sample");
+    // The token rate, never the agreed rate still showing in Price List.
+    expect(item.basic_price).toBe(0.001);
+    expect(item.price_list_basic).toBe(0);
+    expect(item.is_scheme).toBe(false);
+  });
+
+  test("a removed engine scheme stays removed and is not posted", async ({ appPage }) => {
+    const bodies = await capturePost(appPage);
+    await gotoStable(appPage, "/Add_Sales");
+    await completeStepOne(appPage);
+    await appPage.getByRole("button", { name: "Continue" }).click();
+    await addConfirmedItem(appPage);
+
+    const remove = appPage.getByRole("button", { name: /^Remove scheme / });
+    await expect(remove).toBeVisible();
+    await remove.click();
+    await expect(remove).toHaveCount(0);
+
+    // Changing the line re-runs the preview, and the fixture proposes the same
+    // scheme again. It must not come back.
+    await appPage.getByRole("button", { name: "Edit item" }).click();
+    await appPage.getByLabel("Boxes").fill("6");
+    await appPage.getByRole("button", { name: "Save Changes" }).click();
+    await appPage.waitForTimeout(1200);
+    await expect(remove).toHaveCount(0);
+
+    await appPage.getByRole("button", { name: "Continue" }).click();
+    await appPage.getByRole("button", { name: "Continue" }).click();
+    await expect(appPage.getByText("1 box (24 pcs)")).toHaveCount(0);
+    await appPage.getByRole("button", { name: "Save Order" }).click();
+    await appPage.getByRole("button", { name: "Yes, create" }).click();
+
+    await expect.poll(() => bodies.length).toBe(1);
+    const item = bodies[0].items![0];
+    expect((item.schemes as WireItem[]).some((s) => s.scheme_v2_id)).toBe(false);
+    expect(item.is_scheme).toBe(false);
+  });
+
   test("a row that cannot be confirmed says so in the modal", async ({ appPage }) => {
     // No dialog is stubbed here on purpose. If this were still `alert()`, the
     // click would open a browser dialog Playwright auto-dismisses and the
@@ -494,17 +557,22 @@ test.describe("add sales wizard", () => {
   });
 
   /* ---------------------------------------------------------------------
-   * The OTHER form.
+   * EDITING an order, which is a different layout from creating one.
    *
-   * Line 3318 of Add_Sales.tsx is a ternary: the wizard, or an 850-line legacy
-   * `<form>`. They never coexist, they have different party controls and
-   * different item entry, and `useWizard` picks the legacy one only for edit /
-   * duplicate / FOC — modes that arrive on `location.state`, which
-   * `page.goto()` cannot supply. So half this page has never been rendered by
-   * any test, and the only way in is to click through from a page that
-   * navigates there.
+   * Creating is a 4-step wizard; editing renders every section on ONE page
+   * with a single action row. Both are `OrderForm` — the sections are the same
+   * render functions, only the assembly differs — and the switch is
+   * `stepped = !isLoadingFromOrder`.
+   *
+   * `LegacyOrderForm`, the 850-line second form that used to serve edit, is
+   * gone. It had drifted: a 14-column item row measuring 1468px inside a
+   * 1330px container (delete column off-screen, Amount clipped mid-number),
+   * and a grand total printed to one decimal beside a raw tax.
+   *
+   * Edit mode arrives on `location.state`, which `page.goto()` cannot supply,
+   * so the only way in is to click through from a page that navigates there.
    * ------------------------------------------------------------------ */
-  test("the legacy edit form, reached the only way it can be", async ({ appPage }) => {
+  test("editing renders one page, not the wizard", async ({ appPage }) => {
     await gotoStable(appPage, "/Order_Tracking");
 
     // Edit renders only for a REJECTED order (Order_Tracking.tsx:823), so this
@@ -512,49 +580,71 @@ test.describe("add sales wizard", () => {
     await appPage.getByRole("button", { name: "Edit", exact: true }).first().click();
     await settle(appPage);
 
-    // The wizard's stepper must be absent — otherwise this is the create flow
-    // again and every assertion below would be testing the wrong branch.
+    // No stepper, and every section present at once.
     await expect(appPage.getByRole("button", { name: "1 Party" })).toHaveCount(0);
+    await expect(appPage.getByText("Party Information")).toBeVisible();
+    await expect(appPage.getByText("Order Summary")).toBeVisible();
     await expect(appPage.getByRole("button", { name: "Update Order" })).toBeVisible();
 
     // Loaded from the order rather than typed: the party is injected into
     // `parties` by the edit loader because C000789 is not in the party list at
-    // all (Add_Sales.tsx:586-604).
-    await expect(appPage.getByText("Eastern Foods Ltd").first()).toBeVisible();
+    // all. It is an input VALUE, not text — the single-page form uses the same
+    // combobox the wizard does, which the legacy form did not.
+    await expect(appPage.getByPlaceholder("Search party...")).toHaveValue(
+      /Eastern Foods Ltd/,
+    );
     await expect(appPage.locator("input[name='Deliverydate']")).toHaveValue("2026-06-20");
     await expect(appPage.getByText("JIVO CANOLA OIL 1 LTR").first()).toBeVisible();
 
-    // The first pixel ever captured of this branch. ~850 lines — the whole
-    // legacy item table, its scheme panel and its totals block — have been
-    // invisible to the visual suite, which is exactly the code Phase 4 is
-    // about to decompose. Taken only after the assertions above, so it is a
-    // photograph of a LOADED order rather than of an empty form.
-    await expect(appPage).toHaveScreenshot("add-sales-edit-form.png", { fullPage: true });
+    // Items are summary cards with the search/filter modal behind them, not an
+    // inline 14-column table.
+    await expect(appPage.getByRole("button", { name: "+ Add Item" })).toBeVisible();
   });
 
-  test("the legacy form's native validation is live, and mostly inert", async ({ appPage }) => {
+  /**
+   * Save as Draft must NOT be offered while editing a live order.
+   *
+   * `handleSaveDraft` passes `draftOrderId` only when the loaded order is
+   * itself a draft, so on a live order the click would create a SECOND, new
+   * draft beside it rather than parking the edit. The legacy form gated this
+   * with `(!isEditMode || editOrderIsDraft)`; that guard was vacuous on the
+   * wizard (create-only) and became load-bearing when edit moved onto it.
+   */
+  test("editing a live order does not offer Save as Draft", async ({ appPage }) => {
     await gotoStable(appPage, "/Order_Tracking");
     await appPage.getByRole("button", { name: "Edit", exact: true }).first().click();
     await settle(appPage);
 
-    // THE HAZARD FOR STEP 6. This branch is inside a real `<form>`, so its
-    // `required` attributes participate in constraint validation — the
-    // wizard's copies do not, because `renderWizard()` renders outside any
-    // form. An RHF migration naturally wraps the wizard in a `<form>`, and the
-    // moment it does, these attributes go live on a path where they never have
-    // been. This test is what makes that change visible instead of silent.
-    await expect(appPage.locator("input[name='Deliverydate']")).toHaveAttribute("required", "");
-    await expect(appPage.locator("input[name='boxes']").first()).toHaveAttribute("required", "");
+    await expect(appPage.getByRole("button", { name: "Update Order" })).toBeVisible();
+    await expect(appPage.getByRole("button", { name: "Save as Draft" })).toHaveCount(0);
+    // And the way out is reachable without walking back through steps.
+    await expect(appPage.getByRole("button", { name: "Cancel" })).toBeVisible();
+  });
 
-    // And the part that is NOT protection: dispatch, both addresses and company
-    // are `required` on `type="hidden"` inputs (:3452, :3522, :3582, :4102).
-    // A hidden input is barred from constraint validation by the HTML spec, so
-    // the browser never checks any of them — `validateBeforeSave` is the only
-    // thing actually guarding those four fields, and re-creating these
-    // attributes during the migration would re-create four no-ops.
-    const hiddenRequired = appPage.locator("input[type='hidden'][required]");
-    await expect(hiddenRequired).toHaveCount(4);
-    await expect(hiddenRequired.first()).not.toBeVisible();
+  /**
+   * What guards the form now that the legacy `<form>` is gone.
+   *
+   * That branch was a real `<form>`, so its `required` attributes participated
+   * in constraint validation — and four of them sat on `type="hidden"` inputs,
+   * where the HTML spec bars them from doing anything at all. `OrderForm`
+   * renders outside any form, so none of that applies and `validateBeforeSave`
+   * + `ProblemSummary` are the whole guard. This pins that the guard is real
+   * rather than merely absent.
+   */
+  test("the edit form is guarded by validateBeforeSave, not the browser", async ({
+    appPage,
+  }) => {
+    await gotoStable(appPage, "/Order_Tracking");
+    await appPage.getByRole("button", { name: "Edit", exact: true }).first().click();
+    await settle(appPage);
+
+    await expect(appPage.locator("input[type='hidden'][required]")).toHaveCount(0);
+
+    // Clearing a required field and saving surfaces a problem instead of
+    // posting: the browser is not stopping this, `validateBeforeSave` is.
+    await appPage.locator("input[name='Deliverydate']").fill("");
+    await appPage.getByRole("button", { name: "Update Order" }).click();
+    await expect(appPage.getByText(/delivery date/i).first()).toBeVisible();
   });
 });
 

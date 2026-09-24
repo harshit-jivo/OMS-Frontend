@@ -35,6 +35,13 @@ export type SalesRow = RowType & {
   // schemeLtrs?: string;
   schemeItemCode?: string;
   schemes: SalesRowScheme[];
+  /**
+   * A line deliberately given away on a paid order. Priced at the FOC token
+   * rate, never the price list, and always sent to Rate Approval with
+   * `freeReason` shown to the approver.
+   */
+  isFree?: boolean;
+  freeReason?: string;
 };
 
 /**
@@ -69,6 +76,8 @@ export const createEmptyRow = (): SalesRow => ({
   amount: "",
   confirmed: false,
   schemes: [],
+  isFree: false,
+  freeReason: "",
 });
 
 /*
@@ -99,6 +108,9 @@ export const rowProblem = (row: SalesRow): string | null => {
   }
   if (Number(row.boxes) <= 0 || Number(row.qty) <= 0) {
     return "Enter boxes and quantity greater than 0.";
+  }
+  if (row.isFree && !String(row.freeReason || "").trim()) {
+    return "Give a reason for making this line free.";
   }
   if (
     row.isScheme &&

@@ -49,11 +49,17 @@ html, body {
   background:
     radial-gradient(circle at top left, rgba(37, 99, 235, 0.14), transparent 24%),
     linear-gradient(180deg, #f4f7fb 0%, #eef3f8 100%);
+}
+
+/* Only html carries a height (index.css). A `min-height: 100%` on body is
+   scaled by the wide-screen zoom and made the window scroll into blank. */
+html {
   min-height: 100%;
 }
 
+/* No `min-height` here: index.css sizes #root, zoom-aware. A second `100vh`
+   rule silently reintroduced the 12% overshoot on wide screens. */
 #root {
-  min-height: 100vh;
   background: transparent;
 }
 
@@ -124,7 +130,11 @@ html, body {
   margin-left: 220px;
   padding-top: 75px;
   box-sizing: border-box;
-  min-height: calc(100vh - 58px);
+  /* Divided by the zoom: `100vh` is measured on the unzoomed window and then
+     scaled by `body { zoom }`, so on a 1920px screen a bare `100vh - 58px`
+     rendered 12% taller than the space it had and every page — even one that
+     fitted — grew a scrollbar and a blank strip beneath it. */
+  min-height: calc(100svh / var(--app-zoom) - 58px);
   background: white;
   transition: margin-left .28s ease, padding .28s ease;
 }

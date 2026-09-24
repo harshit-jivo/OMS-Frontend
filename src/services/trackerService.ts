@@ -462,6 +462,12 @@ export const trackerService = {
     remarks?: string;
     hold_type?: string;   // FULL | PARTIAL (HOLD only)
     amount?: string;      // hold / debit amount
+    /**
+     * RESTATES the invoice's total debit — not the same thing as `amount`,
+     * which ADDS one. Transport Approval only, and one invoice at a time,
+     * because it is an absolute figure for a specific invoice.
+     */
+    debit_amount?: string;
   }): Promise<BulkResult> {
     const { data } = await api.post("/tracker/actions/bulk/", payload);
     return data;
