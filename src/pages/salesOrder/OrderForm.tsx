@@ -161,6 +161,7 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
     // handleRowSchemeToggle, // legacy scheme panel, see renderSchemePanel
     handleRowFreeToggle,
     handleRowFreeReason,
+    handleRemoveSchemeProposal,
     // handleAddScheme, // legacy scheme panel, see renderSchemePanel
     // handleSchemeChange,
     // handleRemoveScheme,
@@ -974,10 +975,11 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
         </div>
       </div>
 
-      {/* Free lines belonging to the item above. No edit/delete: they follow the
-          parent, so you change them by changing it. They are indented, tinted
-          and dashed so they read as part of the line above rather than as
-          another thing that was ordered. */}
+      {/* Free lines belonging to the item above. They follow the parent, so
+          you change them by changing it; the one exception is a scheme the
+          engine added by itself, which can be removed from this order. They
+          are indented, tinted and dashed so they read as part of the line
+          above rather than as another thing that was ordered. */}
       {getDerivedLines(row, index).map((line) => (
         <div
           className="ml-6 flex items-center gap-3.5 rounded-md border border-dashed border-line bg-surface px-4 py-2"
@@ -1004,8 +1006,22 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
             </span>
           </div>
           <span className="whitespace-nowrap text-[15px] font-semibold text-body">₹ 0.00</span>
-          {/* Keeps the amount column aligned with the paid rows above. */}
-          <div className="w-control-sm flex-none" aria-hidden="true" />
+          {line.dismissKey ? (
+            <div className="flex w-control-sm flex-none justify-end">
+              <Button
+                variant="danger"
+                size="icon"
+                onClick={() => handleRemoveSchemeProposal(line.dismissKey!)}
+                aria-label={`Remove scheme ${line.itemName}`}
+                title="Remove this scheme from the order"
+              >
+                <HiOutlineTrash aria-hidden="true" />
+              </Button>
+            </div>
+          ) : (
+            /* Keeps the amount column aligned with the paid rows above. */
+            <div className="w-control-sm flex-none" aria-hidden="true" />
+          )}
         </div>
       ))}
     </Fragment>

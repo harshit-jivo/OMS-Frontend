@@ -199,6 +199,10 @@ const getDefaultDeliveryDate = () => {
   return formatDateInput(date);
 };
 
+/** One engine giveaway on one line: the scheme and benefit it came from. */
+const schemeDismissKey = (rowUid: string, proposal: SchemeProposal) =>
+  `${rowUid}:${proposal.scheme_id}:${proposal.benefit_id}`;
+
 export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
   const { t } = useUILabels();
   const { field } = useFieldConfig();
@@ -250,6 +254,10 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
   // v2 engine proposals, keyed by `row.uid`. Resolved from the party's targeting
   // (vendor / state / main group), not chosen by the user. See schemeService.
   const [schemeProposals, setSchemeProposals] = useState<Record<string, SchemeProposal[]>>({});
+  // Engine giveaways the salesperson removed, by `schemeDismissKey`. A ref,
+  // not state: the debounced preview below re-proposes them on every line
+  // change, and its callback must see a removal made while it was in flight.
+  const dismissedSchemesRef = useRef<Set<string>>(new Set());
   const [editOrderFallback, setEditOrderFallback] =
     useState<EditOrderFallback>(emptyEditOrderFallback);
   /**
@@ -1441,6 +1449,8 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
   type DerivedLine = {
     kind: "combo" | "scheme";
     key: string;
+    /** Set on an engine-proposed giveaway only: what removing it records. */
+    dismissKey?: string;
     itemCode: string;
     itemName: string;
     qty: number;
@@ -1499,6 +1509,7 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
       lines.push({
         kind: "scheme",
         key: `v2-${index}-${proposal.scheme_id}-${proposal.benefit_id}`,
+        dismissKey: schemeDismissKey(row.uid, proposal),
         itemCode: proposal.benefit_item_code,
         // The engine's own name first. The two catalogue lookups below only
         // hold items the PARTY is assigned, and a STATE- or VENDOR-scoped
@@ -1807,6 +1818,22 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
     setSchemeProposals(dropUid);
   };
 
+  /**
+   * Take an engine-proposed giveaway off this order. It is simply not sent:
+   * nothing server-side re-adds engine schemes, so the order saves and posts
+   * to SAP without it. Undone by deleting and re-adding the item.
+   */
+  const handleRemoveSchemeProposal = (dismissKey: string) => {
+    dismissedSchemesRef.current.add(dismissKey);
+    setSchemeProposals((prev) => {
+      const next: Record<string, SchemeProposal[]> = {};
+      Object.entries(prev).forEach(([rowUid, proposals]) => {
+        next[rowUid] = proposals.filter((p) => schemeDismissKey(rowUid, p) !== dismissKey);
+      });
+      return next;
+    });
+  };
+
   const handlePartySelect = (value: string, partyCategory = "") => {
     const nextStateCode = getPartyStateCode(value, partyCategory);
     setEditOrderFallback(emptyEditOrderFallback);
@@ -2016,6 +2043,8 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
           // A scheme with no rule leaves the quantity to the user; there is
           // nothing to show as a line until someone types one.
           if (proposal.qty_is_user_supplied || Number(proposal.qty) <= 0) return;
+          // Removed by the salesperson: stays removed while the page is open.
+          if (dismissedSchemesRef.current.has(schemeDismissKey(rowUid, proposal))) return;
           (byRow[rowUid] = byRow[rowUid] || []).push(proposal);
         });
         setSchemeProposals(byRow);
@@ -2261,6 +2290,7 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
     handleRowSchemeToggle,
     handleRowFreeToggle,
     handleRowFreeReason,
+    handleRemoveSchemeProposal,
     handleAddScheme,
     handleSchemeChange,
     handleRemoveScheme,
