@@ -101,3 +101,10 @@ describe("row identity", () => {
     expect(edited.uid).toBe(row.uid);
   });
 });
+
+describe("rowProblem on a free line", () => {
+  it("wants the reason the approver will read", () => {
+    expect(rowProblem(goodRow({ isFree: true, freeReason: " " }))).toMatch(/reason/);
+    expect(rowProblem(goodRow({ isFree: true, freeReason: "Launch sample" }))).toBeNull();
+  });
+});

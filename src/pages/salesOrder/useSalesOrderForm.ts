@@ -53,6 +53,7 @@ import { NO_PROBLEMS, hasProblems, orderProblems } from "./orderProblems";
 import {
   FOC_TOKEN_BASIC_PRICE,
   applyFocPricingToRow,
+  applyFreePricingToRow,
   recalculateRowTotals as recalculateRowTotalsFor,
 } from "./rowTotals";
 
@@ -732,6 +733,8 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
             tax: valueToString(item.tax_rate),
             amount: valueToString(item.total),
             confirmed: true,
+            isFree: Boolean(item.is_free),
+            freeReason: item.free_reason || "",
           };
         })
       : [createEmptyRow()];
@@ -1011,6 +1014,10 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
 
           is_auto_free: true,
           combo_source_code: parent?.item_code || "",
+          // The combo's free half is a scheme-style companion, not a line the
+          // salesperson chose to give away, so it does not go to approval.
+          is_free: false,
+          free_reason: "",
         }));
     });
 
@@ -1092,10 +1099,12 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
           boxes: Number(row.boxes),
           ltrs: Number(row.ltrs),
 
-          price_list_basic: isFocOrder ? 0 : Number(row.priceListBasic),
+          price_list_basic: isFocOrder || row.isFree ? 0 : Number(row.priceListBasic),
           basic_price: Number(row.basicPrice),
           tax_rate: Number(row.tax),
           total: Number(row.amount || 0),
+          is_free: Boolean(row.isFree),
+          free_reason: row.isFree ? String(row.freeReason || "").trim() : "",
           scheme_id:
             row.isScheme && row.schemes[0]?.scheme ? Number(row.schemes[0].scheme) : undefined,
           scheme_qty: row.isScheme
@@ -1236,8 +1245,10 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
         pcs: Number(row.pcs) || 0,
         boxes: Number(row.boxes) || 0,
         ltrs: Number(row.ltrs) || 0,
-        price_list_basic: isFocOrder ? 0 : Number(row.priceListBasic) || 0,
+        price_list_basic: isFocOrder || row.isFree ? 0 : Number(row.priceListBasic) || 0,
         basic_price: Number(row.basicPrice) || 0,
+        is_free: Boolean(row.isFree),
+        free_reason: row.isFree ? String(row.freeReason || "").trim() : "",
         tax_rate: Number(row.tax) || 0,
         total: Number(row.amount) || 0,
         scheme_id:
@@ -1537,8 +1548,28 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
   };
 
   const applyFocPricing = (row: SalesRow) => {
+    if (row.isFree) return applyFreePricingToRow(row);
     if (!isFocOrder) return row;
     return applyFocPricingToRow(row);
+  };
+
+  /** Mark a line free (token rate, no scheme) or put it back on its agreed rate. */
+  const handleRowFreeToggle = (index: number, isFree: boolean) => {
+    const current = rows[index];
+    if (!current) return;
+    const next = isFree
+      ? applyFreePricingToRow({ ...current, isFree: true })
+      : recalculateRowTotals(
+          { ...current, isFree: false, freeReason: "", basicPrice: current.priceListBasic || "" },
+          "price",
+        );
+    rowArray.update(index, next);
+  };
+
+  const handleRowFreeReason = (index: number, freeReason: string) => {
+    const current = rows[index];
+    if (!current) return;
+    rowArray.update(index, { ...current, freeReason });
   };
 
   /** `rowTotals.recalculateRowTotals`, with the product and the FOC flag this
@@ -2197,6 +2228,8 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
     handleClearForm,
     handleAddRow,
     handleRowSchemeToggle,
+    handleRowFreeToggle,
+    handleRowFreeReason,
     handleAddScheme,
     handleSchemeChange,
     handleRemoveScheme,

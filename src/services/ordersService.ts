@@ -222,6 +222,9 @@ export interface OrderItem {
   // Zero-priced line auto-added for the free half of a combo pack.
   is_auto_free?: boolean;
   combo_source_code?: string | null;
+  /** A line deliberately given away; `free_reason` goes to the rate approver. */
+  is_free?: boolean;
+  free_reason?: string;
   /**
    * The paid product a mapped combo actually bills as.
    *

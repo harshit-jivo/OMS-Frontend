@@ -57,6 +57,24 @@ export const computeLandingPrice = (
 export const FOC_TOKEN_BASIC_PRICE = "0.001";
 
 /**
+ * Pricing for a line marked free.
+ *
+ * Unlike FOC, a rate the operator typed is NOT kept: a free line is the
+ * token rate by definition, and the backend enforces the same. The agreed
+ * `priceListBasic` stays on screen so un-marking the line can restore it.
+ */
+export const applyFreePricingToRow = (row: SalesRow): SalesRow => ({
+  ...row,
+  isScheme: false,
+  scheme: "",
+  schemeQty: "",
+  schemes: [],
+  basicPrice: FOC_TOKEN_BASIC_PRICE,
+  amount:
+    Number(row.qty) > 0 ? (Number(row.qty) * Number(FOC_TOKEN_BASIC_PRICE)).toFixed(2) : "",
+});
+
+/**
  * FOC pricing for one row.
  *
  * A rate the operator typed themselves is KEPT — only a blank or zero falls
@@ -94,7 +112,12 @@ export const recalculateRowTotals = (
   product: PartyProduct | Product | undefined,
   isFocOrder: boolean,
 ): SalesRow => {
-  const withFoc = (next: SalesRow) => (isFocOrder ? applyFocPricingToRow(next) : next);
+  const withFoc = (next: SalesRow) =>
+    next.isFree
+      ? applyFreePricingToRow(next)
+      : isFocOrder
+        ? applyFocPricingToRow(next)
+        : next;
 
   if (!product) return withFoc(row);
 

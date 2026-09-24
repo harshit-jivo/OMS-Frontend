@@ -244,7 +244,11 @@ export function OrderItemsTable({ items, variety = true }: OrderItemsTableProps)
             category={item.category}
             variety={variety ? item.variety_type : null}
             badge={
-              isCombo ? (
+              item.is_free ? (
+                <Badge tone="hold" title="Given away on purpose; needs rate approval">
+                  Free
+                </Badge>
+              ) : isCombo ? (
                 <Badge
                   tone="ok"
                   title={
@@ -260,7 +264,11 @@ export function OrderItemsTable({ items, variety = true }: OrderItemsTableProps)
               ) : null
             }
             note={
-              schemes.length > 0
+              item.is_free ? (
+                <span className="block text-hold">
+                  Free: {item.free_reason || "no reason given"}
+                </span>
+              ) : schemes.length > 0
                 ? schemes.map((scheme, schemeIndex) => (
                     <span key={`${item.item_code}-scheme-${schemeIndex}`} className="block text-brand">
                       {scheme.name || "Scheme"}

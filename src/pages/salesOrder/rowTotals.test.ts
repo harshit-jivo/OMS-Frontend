@@ -15,6 +15,7 @@ import { createEmptyRow, type SalesRow } from "../salesOrderRow";
 import {
   FOC_TOKEN_BASIC_PRICE,
   applyFocPricingToRow,
+  applyFreePricingToRow,
   computeLandingPrice,
   recalculateRowTotals,
 } from "./rowTotals";
@@ -199,5 +200,25 @@ describe("applyFocPricingToRow", () => {
 
     expect(result.priceListBasic).toBe("0");
     expect(Number(result.amount)).toBeGreaterThan(0.06);
+  });
+});
+
+describe("a line marked free", () => {
+  it("goes at the token rate, never what was typed, and drops its scheme", () => {
+    const free = applyFreePricingToRow(
+      row({ qty: "400", basicPrice: "426", isScheme: true, schemes: [{ scheme: "7", schemeQty: "2" }] }),
+    );
+    expect(free.basicPrice).toBe(FOC_TOKEN_BASIC_PRICE);
+    expect(free.amount).toBe("0.40");
+    expect(free.isScheme).toBe(false);
+    expect(free.schemes).toEqual([]);
+    // Kept so un-marking the line can put it back on the agreed rate.
+    expect(free.priceListBasic).toBe("107");
+  });
+
+  it("stays on the token rate when its quantity changes", () => {
+    const next = recalculateRowTotals(row({ isFree: true, qty: "120" }), "qty", PRODUCT, false);
+    expect(next.basicPrice).toBe(FOC_TOKEN_BASIC_PRICE);
+    expect(next.amount).toBe("0.12");
   });
 });

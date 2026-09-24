@@ -159,6 +159,8 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
     handleSaveDraft,
     handleClearForm,
     handleRowSchemeToggle,
+    handleRowFreeToggle,
+    handleRowFreeReason,
     handleAddScheme,
     handleSchemeChange,
     handleRemoveScheme,
@@ -337,6 +339,43 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
     });
     return [...counts.entries()].map(([value, count]) => ({ value, count }));
   };
+
+  /*
+   * Give this line away. No card: a checkbox, and the reason field only once it
+   * is ticked. The line then goes at the FOC token rate and to Rate Approval,
+   * where the reason is what the approver reads.
+   */
+  const renderFreeOption = (row: SalesRow, index: number) => (
+    <div className="mt-4 flex flex-col gap-2">
+      <label className="flex w-fit cursor-pointer items-center gap-2 text-[13px] font-bold text-ink">
+        <input
+          type="checkbox"
+          className="size-4 cursor-pointer accent-[#0f766e] disabled:cursor-not-allowed"
+          checked={Boolean(row.isFree)}
+          onChange={(e) => handleRowFreeToggle(index, e.target.checked)}
+          disabled={row.confirmed}
+        />
+        Free item
+        <span className="text-[12px] font-normal text-subtle">
+          billed at ₹{FOC_TOKEN_BASIC_PRICE}, needs rate approval
+        </span>
+      </label>
+      {row.isFree && (
+        <Field label="Reason for giving this free">
+          {(control) => (
+            <Input
+              {...control}
+              value={row.freeReason || ""}
+              maxLength={255}
+              placeholder="e.g. sample, replacement, launch offer"
+              onChange={(e) => handleRowFreeReason(index, e.target.value)}
+              disabled={row.confirmed}
+            />
+          )}
+        </Field>
+      )}
+    </div>
+  );
 
   const renderSchemePanel = (row: SalesRow, index: number) => {
     if (isSchemePanelHidden(row)) return null;
@@ -862,7 +901,8 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
                     </Field>
                   </div>
 
-                  {row.item && !isFocOrder && renderSchemePanel(row, itemModalIndex)}
+                  {row.item && !isFocOrder && !row.isFree && renderSchemePanel(row, itemModalIndex)}
+                  {row.item && !isFocOrder && renderFreeOption(row, itemModalIndex)}
 
                   {/* The reason this row will not confirm. It was an `alert()`,
                       which covers the fields it is talking about and has to be

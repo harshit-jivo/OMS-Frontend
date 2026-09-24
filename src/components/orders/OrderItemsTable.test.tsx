@@ -312,3 +312,16 @@ describe("card order", () => {
     expect(screen.getByText("JV-CAN-1L")).not.toHaveAttribute("title");
   });
 });
+
+describe("a line given away on purpose", () => {
+  it("shows the approver it is free, and why", () => {
+    render(
+      <OrderItemsTable
+        items={[item({ item_name: "Extra Light Olive 1 Ltr", is_free: true, free_reason: "Launch sample" })]}
+      />,
+    );
+    const card = cardOf("Extra Light Olive 1 Ltr");
+    expect(within(card).getByText("Free", { selector: '[data-slot="badge"]' })).toBeInTheDocument();
+    expect(within(card).getByText("Free: Launch sample")).toBeInTheDocument();
+  });
+});

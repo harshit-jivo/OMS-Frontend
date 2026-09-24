@@ -440,6 +440,37 @@ test.describe("add sales wizard", () => {
     expect(body.items![0].schemes).toEqual([]);
   });
 
+  test("a line marked free posts at the token rate with its reason", async ({ appPage }) => {
+    const bodies = await capturePost(appPage);
+    await gotoStable(appPage, "/Add_Sales");
+    await completeStepOne(appPage);
+    await appPage.getByRole("button", { name: "Continue" }).click();
+    await appPage.getByRole("button", { name: "+ Add Item" }).click();
+    await appPage.getByRole("button", { name: /JIVO CANOLA OIL 1 LTR/ }).click();
+    await appPage.getByLabel("Boxes").fill("5");
+
+    // No reason, no confirm: the approver would have nothing to read.
+    await appPage.getByLabel(/Free item/).check();
+    await appPage.getByRole("button", { name: "Add Item", exact: true }).click();
+    await expect(appPage.getByRole("alert")).toHaveText("Give a reason for making this line free.");
+
+    await appPage.getByLabel("Reason for giving this free").fill("Launch sample");
+    await appPage.getByRole("button", { name: "Add Item", exact: true }).click();
+    await appPage.getByRole("button", { name: "Continue" }).click();
+    await appPage.getByRole("button", { name: "Continue" }).click();
+    await appPage.getByRole("button", { name: "Save Order" }).click();
+    await appPage.getByRole("button", { name: "Yes, create" }).click();
+
+    await expect.poll(() => bodies.length).toBe(1);
+    const item = bodies[0].items![0];
+    expect(item.is_free).toBe(true);
+    expect(item.free_reason).toBe("Launch sample");
+    // The token rate, never the agreed rate still showing in Price List.
+    expect(item.basic_price).toBe(0.001);
+    expect(item.price_list_basic).toBe(0);
+    expect(item.is_scheme).toBe(false);
+  });
+
   test("a row that cannot be confirmed says so in the modal", async ({ appPage }) => {
     // No dialog is stubbed here on purpose. If this were still `alert()`, the
     // click would open a browser dialog Playwright auto-dismisses and the
