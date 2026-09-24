@@ -187,10 +187,15 @@ export const deviceAdminService = {
   },
 
   /** Upsert one platform's policy. Returns the saved row. */
+  /**
+   * `required_build: null` switches the gate off for that platform — every app
+   * version is then allowed through. That is the escape hatch for a policy
+   * that is locking users out, so it must stay expressible.
+   */
   async saveVersionPolicy(payload: {
     platform: MobilePlatform;
     required_version: string;
-    required_build: number;
+    required_build: number | null;
     store_url: string;
   }): Promise<VersionPolicy> {
     const res = await api.put("/admin/version-policy/", payload);
