@@ -639,9 +639,13 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
       const data = await ordersService.getPartyAdd(card_code, partyCategory);
       const billTo = Array.isArray(data.bill_to) ? data.bill_to : [];
       const shipTo = Array.isArray(data.ship_to) ? data.ship_to : [];
-      setBillAddress(billTo.length > 0 ? billTo : shipTo);
-      setShipAddress(shipTo.length > 0 ? shipTo : billTo);
-      return data;
+      // Each list falls back to the other, so a party with only one kind of
+      // address still gets both fields.
+      const bill: AddressOption[] = billTo.length > 0 ? billTo : shipTo;
+      const ship: AddressOption[] = shipTo.length > 0 ? shipTo : billTo;
+      setBillAddress(bill);
+      setShipAddress(ship);
+      return { bill, ship };
     } catch (error) {
       console.log("Error fetching addresses:", error);
       return null;
@@ -1882,7 +1886,22 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
     setRows([{ ...createEmptyRow(), category: partyCategory || userDefaultCategory }]);
     setSchemeOptions({});
     setStateCode(nextStateCode || null);
-    fetchPartyAddresses(value, partyCategory);
+    // Bill To and Ship To start on the top address of each list (the lists are
+    // ordered by address name). Only while this party is still the one chosen
+    // and the field is still empty: a quick switch to another party, or an
+    // address picked before the lookup returned, is never overwritten.
+    void fetchPartyAddresses(value, partyCategory).then((lists) => {
+      if (!lists) return;
+      setFormData((prev) =>
+        prev.parties !== value
+          ? prev
+          : {
+              ...prev,
+              billAddress: prev.billAddress || (lists.bill[0] ? String(lists.bill[0].id) : ""),
+              shipAddress: prev.shipAddress || (lists.ship[0] ? String(lists.ship[0].id) : ""),
+            },
+      );
+    });
     fetchPartyCategories(value, partyCategory);
   };
 

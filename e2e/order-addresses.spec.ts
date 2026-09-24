@@ -53,3 +53,22 @@ test("Add Sales shows the street under the chosen Bill To and Ship To", async ({
   expect(Math.abs(billBox.y - shipBox.y)).toBeLessThan(4);
   expect(shipBox.x).toBeGreaterThan(billBox.x);
 });
+
+test("choosing a party fills Bill To and Ship To with the top address", async ({
+  appPage: page,
+}) => {
+  await gotoStable(page, "/Add_Sales");
+
+  const party = page.getByRole("combobox", { name: /Search part/i }).first();
+  await party.click();
+  await page.getByText("Northern Traders").first().click();
+  await settle(page);
+
+  // No address clicked: the first of each list is already chosen, street and all.
+  const billField = page.locator('[data-slot="field"]', { hasText: "Bill To Address" }).first();
+  const shipField = page.locator('[data-slot="field"]', { hasText: "Ship To Address" }).first();
+  await expect(billField.getByText("12 Mall Road, Ludhiana, Punjab 141001")).toBeVisible();
+  await expect(shipField.getByText("Plot 9, Focal Point, Ludhiana, Punjab 141010")).toBeVisible();
+  // So step 1 can be continued straight away.
+  await expect(page.getByRole("button", { name: "Continue" })).toBeEnabled();
+});
