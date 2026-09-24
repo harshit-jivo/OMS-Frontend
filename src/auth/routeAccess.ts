@@ -207,9 +207,7 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   "/Drafts": {
     permissions: ["orders.sales.create"],
     roles: BILLING_OR_MANAGER,
-    note:
-      "The sidebar link is commented out, but Add_Sales still navigates here " +
-      "after saving a draft, so it must stay reachable for the same people.",
+    note: "Drafts are saved from Add_Sales, so the same people reach both.",
   },
   "/Sales_Invoice": { permissions: ["invoices.sales.create"], roles: ["billing"] },
   "/Sales_Invoice/SKU_Images": {

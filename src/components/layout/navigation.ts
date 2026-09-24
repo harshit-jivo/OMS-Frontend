@@ -120,6 +120,7 @@ export const SIDEBAR_SECTIONS: SidebarSectionDef[] = [
     label: "Orders",
     links: [
       { to: "/Add_Sales", label: "Add Sales", icon: HiOutlinePlusCircle },
+      { to: "/Drafts", label: "Drafts", icon: HiOutlineFolderOpen },
       { to: "/FOC", label: "FOC", icon: HiOutlineGift },
       { to: "/View_Orders", label: "View Orders", icon: HiOutlineEye },
       { to: "/Order_Tracking", label: "Order Tracker", icon: HiOutlinePresentationChartLine },
