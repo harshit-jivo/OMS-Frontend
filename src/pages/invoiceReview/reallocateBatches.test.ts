@@ -130,6 +130,28 @@ describe("re-allocating against current stock", () => {
     expect(result.ok).toBe(false);
     expect(result.problem).toContain("only 20 of 30");
   });
+
+  it("does not give two lines of the same item the same batch stock", async () => {
+    // The live failure: three FG0000005 lines each took the nearest-expiry
+    // batch (843 left) for 300 + 600 + 400, and SAP refused with 10001153.
+    serve([
+      batch("SOONER", 843, "2026-06-01"),
+      batch("LATER", 23040, "2027-06-01"),
+    ]);
+
+    const result = await reallocateInvoiceBatches(record([
+      line({ Quantity: 300 }),
+      line({ Quantity: 600 }),
+      line({ Quantity: 400 }),
+    ]));
+
+    expect(result.ok).toBe(true);
+    expect(linesOf(result.payload).map((l) => l.BatchNumbers?.map((b) => [b.BatchNumber, b.Quantity]))).toEqual([
+      [["SOONER", 300]],
+      [["SOONER", 543], ["LATER", 57]],
+      [["LATER", 400]],
+    ]);
+  });
 });
 
 describe("what it refuses to change", () => {

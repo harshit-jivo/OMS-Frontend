@@ -32,6 +32,7 @@ import {
   allocateNearestExpiryBatches,
   getAllocationQuantity,
   hasEnoughAllocation,
+  holdBatches,
   toSapBatchNumbers,
   type BatchDetail,
 } from "../SalesInvoice/batchAllocation";
@@ -159,7 +160,9 @@ export const reallocateInvoiceBatches = async (
 ): Promise<Reallocation> => {
   const payload = parsePayload(record.invoice_payload);
   const branch = trimmed(record.branch);
-  const reserved = await loadReserved(branch, record.id);
+  // Other drafts' holds, plus each line's allocation as it is made: two lines
+  // of this invoice for the same item draw on the same batches.
+  let reserved = await loadReserved(branch, record.id);
 
   const lines = batchesOf(payload);
   const outcomes: LineOutcome[] = [];
@@ -220,6 +223,7 @@ export const reallocateInvoiceBatches = async (
     }
 
     const next = { ...line, BatchNumbers: toSapBatchNumbers(allocations) };
+    reserved = holdBatches(reserved, [{ itemCode, whsCode, batches: next.BatchNumbers }]);
     if (batchFingerprint(next) !== batchFingerprint(line)) changed = true;
     nextLines.push(next);
   }

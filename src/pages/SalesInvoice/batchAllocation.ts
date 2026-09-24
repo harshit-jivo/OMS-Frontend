@@ -185,6 +185,34 @@ export const availableBatchQty = (
 };
 
 /**
+ * `reserved` plus what `lines` already take, as a new map.
+ *
+ * Other drafts' holds are not the only claim on a batch: two lines of the SAME
+ * invoice for the same item and warehouse draw on the same stock. Allocating
+ * each line against the untouched batch gave every line the same nearest-expiry
+ * batch, and SAP refused the invoice (10001153 "Insufficient quantity ... with
+ * batch") although the warehouse held plenty across other batches.
+ */
+export const holdBatches = (
+  reserved: Map<string, number> | undefined,
+  lines: Array<{
+    itemCode?: string;
+    whsCode?: string;
+    batches?: Array<{ BatchNumber?: string; Quantity?: unknown }>;
+  }>,
+): Map<string, number> => {
+  const held = new Map(reserved);
+  lines.forEach(({ itemCode, whsCode, batches }) => {
+    (batches || []).forEach((batch) => {
+      if (!batch.BatchNumber) return;
+      const key = reservedBatchKey(itemCode, whsCode, batch.BatchNumber);
+      held.set(key, (held.get(key) || 0) + toNumber(batch.Quantity));
+    });
+  });
+  return held;
+};
+
+/**
  * Nearest-expiry-first allocation, over what is actually free in each batch.
  *
  * A batch only drops out when other drafts have taken all of it; a part-held

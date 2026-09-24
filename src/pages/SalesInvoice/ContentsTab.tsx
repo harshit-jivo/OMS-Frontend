@@ -23,6 +23,7 @@ import {
   getAllocationQuantity,
   getBatchNumber,
   hasEnoughAllocation,
+  holdBatches,
   toSapBatchNumbers,
   type BatchAllocation,
   type BatchDetail,
@@ -137,8 +138,8 @@ function BatchPickerModal({
     hasBatches?: boolean,
   ) => void | Promise<void>;
   onQuantityChange: (quantity: number) => void;
-  /** Batches another in-flight log holds; skipped by the auto-suggestion. */
-  /** Held quantity per batch, keyed by item|warehouse|batch. */
+  /** Held quantity per batch, keyed by item|warehouse|batch: other in-flight
+   * logs plus this invoice's other lines. */
   reservedBatchQty: Map<string, number>;
 }) {
   const [warehouses, setWarehouses] = useState<InventoryWarehouse[]>([]);
@@ -567,9 +568,21 @@ export default function ContentsTab({ state }: Props) {
     };
   }, [inventoryItemCodesKey]);
 
+  /** Other drafts' holds plus what `lines` of this invoice already take. */
+  const reservedWith = (lines: SelectedLine[], base = state.reservedBatchQty) =>
+    holdBatches(
+      base,
+      lines.map((line) => ({
+        itemCode: line.ItemCode,
+        whsCode: line.WhsCode || line.SalesOrderWhsCode,
+        batches: line.BatchNumbers,
+      })),
+    );
+
   const loadAllocationsForWarehouse = async (
     line: SelectedLine,
     whsCode: string,
+    reserved: Map<string, number>,
   ): Promise<{ allocations: BatchAllocation[]; failureReason: BatchAllocationFailure["reason"] | null }> => {
     try {
       const data = await apiFetch<BatchDetail[]>(
@@ -579,7 +592,7 @@ export default function ContentsTab({ state }: Props) {
       const allocations = allocateNearestExpiryBatches(batches, toNumber(line.invoiceQty), {
         itemCode: line.ItemCode,
         whsCode,
-        reserved: state.reservedBatchQty,
+        reserved,
       });
       const failureReason = batches.length === 0
         ? "missing"
@@ -621,18 +634,33 @@ export default function ContentsTab({ state }: Props) {
 
     if (pending.length === 0) return;
 
-    pending.forEach(async (line) => {
+    // Mark before awaiting so a missing/failed allocation isn't retried in a loop.
+    const pendingKeys = new Set<string>();
+    pending.forEach((line) => {
       const whsCode = line.WhsCode || line.SalesOrderWhsCode || "";
       const key = lineKey(line.DocEntry, line.LineNum);
-      // Mark before awaiting so a missing/failed allocation isn't retried in a loop.
+      pendingKeys.add(key);
       autoAllocatedRef.current.add(`${key}|${whsCode}|${toNumber(line.invoiceQty)}`);
-      const { allocations } = await loadAllocationsForWarehouse(line, whsCode);
-      if (allocations.length === 0) return;
-      state.updateLine(key, {
-        WhsCode: whsCode,
-        BatchNumbers: toSapBatchNumbers(allocations),
-      });
     });
+
+    // One line at a time, each seeing what the lines before it took: two lines
+    // of the same item otherwise both land on the same nearest-expiry batch.
+    void (async () => {
+      let reserved = reservedWith(
+        state.selectedLineList.filter((line) => !pendingKeys.has(lineKey(line.DocEntry, line.LineNum))),
+      );
+      for (const line of pending) {
+        const whsCode = line.WhsCode || line.SalesOrderWhsCode || "";
+        const { allocations } = await loadAllocationsForWarehouse(line, whsCode, reserved);
+        if (allocations.length === 0) continue;
+        const batchNumbers = toSapBatchNumbers(allocations);
+        reserved = reservedWith([{ ...line, WhsCode: whsCode, BatchNumbers: batchNumbers }], reserved);
+        state.updateLine(lineKey(line.DocEntry, line.LineNum), {
+          WhsCode: whsCode,
+          BatchNumbers: batchNumbers,
+        });
+      }
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoAllocationSignature]);
 
@@ -663,12 +691,19 @@ export default function ContentsTab({ state }: Props) {
 
     if (applyToAll) {
       const otherLines = state.selectedLineList.filter((line) => lineKey(line.DocEntry, line.LineNum) !== batchPickerContext.key);
-      const results = await Promise.all(
-        otherLines.map(async (line) => {
-          const result = await loadAllocationsForWarehouse(line, whsCode);
-          return { line, ...result };
-        }),
-      );
+      // Sequential, each line holding what it took, so lines of the same item
+      // do not all draw on the same batch.
+      let reserved = holdBatches(state.reservedBatchQty, [
+        { itemCode: currentLine?.ItemCode, whsCode, batches: toSapBatchNumbers(allocations) },
+      ]);
+      const results = [];
+      for (const line of otherLines) {
+        const result = await loadAllocationsForWarehouse(line, whsCode, reserved);
+        reserved = holdBatches(reserved, [
+          { itemCode: line.ItemCode, whsCode, batches: toSapBatchNumbers(result.allocations) },
+        ]);
+        results.push({ line, ...result });
+      }
 
       results.forEach(({ line, allocations: lineAllocations, failureReason }) => {
         state.updateLine(lineKey(line.DocEntry, line.LineNum), {
@@ -832,7 +867,11 @@ export default function ContentsTab({ state }: Props) {
 
       {batchPickerContext && (
         <BatchPickerModal
-          reservedBatchQty={state.reservedBatchQty}
+          reservedBatchQty={reservedWith(
+            state.selectedLineList.filter(
+              (line) => lineKey(line.DocEntry, line.LineNum) !== batchPickerContext.key,
+            ),
+          )}
           context={batchPickerContext}
           onClose={() => setBatchPickerContext(null)}
           onAutoSelect={(allocations, whsCode, applyToAll, hasBatches) => {
