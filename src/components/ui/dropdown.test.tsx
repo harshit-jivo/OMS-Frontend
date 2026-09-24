@@ -6,6 +6,12 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { MultiSelect, SearchSelect } from "./dropdown";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+} from "./dialog";
 
 const GROUPS = [
   { value: 1, label: "North" },
@@ -150,9 +156,17 @@ describe("SearchSelect", () => {
     expect(screen.getByText(/25 more/)).toBeInTheDocument();
 
     await user.type(screen.getByRole("searchbox"), "Product 2");
-    // "Product 2", "Product 20".."Product 29" = 11 matches, still capped.
+    // 12 matches, still capped at 5.
+    //
+    // It was 11 while the search was one contiguous `includes`: "Product 2",
+    // then "Product 20".."Product 29". Tokenised matching (lib/optionSearch)
+    // adds "Product 12", whose text does contain a "2" — the cost of letting
+    // tokens match anywhere, which is what makes "canola 1" find "JIVO CANOLA
+    // OIL 1 LTR". Ranking is what keeps it usable: "Product 2" is a
+    // whole-query prefix, so it still sorts first.
     expect(screen.getAllByRole("option")).toHaveLength(5);
-    expect(screen.getByText(/6 more/)).toBeInTheDocument();
+    expect(screen.getAllByRole("option")[0]).toHaveTextContent("Product 2");
+    expect(screen.getByText(/7 more/)).toBeInTheDocument();
   });
 
   it("shows a value the options do not contain rather than the placeholder", () => {
@@ -275,14 +289,21 @@ describe("dropdown width", () => {
     const trigger = screen.getByRole("button");
     expect(trigger.className).not.toContain("max-w-[420px]");
 
-    // The root is the trigger's parent AND the panel's offset parent, so
-    // constraining it constrains both.
     const root = trigger.parentElement!;
     expect(root.className).toContain("max-w-[420px]");
     expect(root.className).toContain("relative");
 
+    // The panel is PORTALLED now, so it is no longer a child of the root —
+    // it has to escape any scrolling ancestor, which is what clipped it inside
+    // dialogs. It takes its width from the measured trigger instead, asserted
+    // in the next test.
     await user.click(trigger);
-    expect(screen.getByRole("listbox").closest("div.absolute")?.parentElement).toBe(root);
+    const panel = screen.getByRole("listbox").parentElement!;
+    expect(root.contains(panel)).toBe(false);
+    // `fixed` on a page — viewport coordinates, so no scroll arithmetic can be
+    // wrong. (Inside a dialog it is `absolute`, because the dialog's transform
+    // makes it the containing block; covered in the dialog suite below.)
+    expect(panel.style.position).toBe("fixed");
   });
 
   it("does the same for MultiSelect", () => {
@@ -301,9 +322,91 @@ describe("dropdown width", () => {
         options={[{ value: "x", label: "A ludicrously long option label ".repeat(6) }]}
       />,
     );
-    await user.click(screen.getByRole("button"));
-    // `w-full` pins it to the root; `min-w-full` alone left it shrink-to-fit.
-    const panel = screen.getByRole("listbox").closest("div.absolute")!;
-    expect(panel.className).toContain("w-full");
+    const trigger = screen.getByRole("button");
+    await user.click(trigger);
+
+    // An explicit pixel width measured off the trigger, rather than `w-full`
+    // against a parent the panel no longer has. jsdom reports 0 for every
+    // rect, so what is asserted is that a width was SET from the measurement,
+    // not the number — the number needs a real layout engine.
+    const panel = screen.getByRole("listbox").parentElement!;
+    expect(panel.style.width).toBe(`${trigger.parentElement!.getBoundingClientRect().width}px`);
+    expect(panel.style.maxHeight).not.toBe("");
+  });
+});
+
+/**
+ * The panel used to be `absolute` inside the trigger's root, so ANY scrolling
+ * ancestor clipped it. `DialogBody` is `overflow-y-auto`, so every picker
+ * opened in a dialog had its list cut off at the dialog's edge with the footer
+ * drawn over what was left — reported as "the dropdown is underneath things",
+ * on the scheme screens among others.
+ *
+ * The fix is a portal, and inside a Radix dialog the naive target is wrong:
+ * a modal marks its `body` siblings `aria-hidden` and kills their pointer
+ * events, so a panel at `body` would be unreadable and unclickable. It goes
+ * into the dialog's own content instead.
+ */
+describe("panel escapes its scroll container", () => {
+  const OPTS = [{ value: "a", label: "Alpha" }];
+
+  function InDialog() {
+    return (
+      <Dialog open>
+        <DialogContent title="Host">
+          <DialogBody>
+            <MultiSelect value={[]} onChange={() => {}} options={OPTS} />
+          </DialogBody>
+          <DialogFooter>
+            <button type="button">Save</button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
+  it("renders into the dialog, not into the scrolling body that clipped it", async () => {
+    const user = userEvent.setup();
+    render(<InDialog />);
+    await user.click(screen.getByRole("button", { name: /Select|chosen|—/ }));
+
+    const panel = screen.getByRole("group").parentElement!;
+    const content = document.querySelector('[data-slot="dialog-content"]')!;
+    const body = document.querySelector('[data-slot="dialog-body"]')!;
+
+    expect(content.contains(panel)).toBe(true);
+    // The clipping ancestor. Being outside it is the whole fix.
+    expect(body.contains(panel)).toBe(false);
+  });
+
+  it("stays clickable — it is not in the inert part of a modal", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <Dialog open>
+        <DialogContent title="Host">
+          <DialogBody>
+            <MultiSelect value={[]} onChange={onChange} options={OPTS} />
+          </DialogBody>
+        </DialogContent>
+      </Dialog>,
+    );
+    await user.click(screen.getByRole("button", { name: /Select|chosen|—/ }));
+    await user.click(screen.getByRole("checkbox", { name: /Alpha/ }));
+
+    expect(onChange).toHaveBeenCalledWith(["a"]);
+  });
+
+  it("Escape closes the picker and leaves the dialog open", async () => {
+    const user = userEvent.setup();
+    render(<InDialog />);
+    await user.click(screen.getByRole("button", { name: /Select|chosen|—/ }));
+    expect(screen.getByRole("group")).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+
+    expect(screen.queryByRole("group")).not.toBeInTheDocument();
+    // Dismissing one layer means the innermost one, not the half-filled form.
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 });

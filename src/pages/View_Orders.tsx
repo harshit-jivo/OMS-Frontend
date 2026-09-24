@@ -43,6 +43,7 @@ import { useAuth } from "../auth/useAuth";
 import { canOpen } from "../auth/routeAccess";
 import { Button } from "@/components/ui/button";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { DetailField, DetailGrid } from "@/components/ui/detail";
 import {
   Card,
   CardHeader,
@@ -855,6 +856,31 @@ export default function View_Orders() {
               </>
             }
           />
+
+          {/* Where the order bills and ships to.
+              The order stores only the address NAME — "Head Office" tells
+              nobody where that is — so the street comes from the detail
+              serializer, which resolves it from the saved address id. It is
+              the `hint`, under the name rather than replacing it: the name is
+              what the order was placed against and what SAP prints. */}
+          {orderDetails.bill_to_address || orderDetails.ship_to_address ? (
+            <Card>
+              <DetailGrid>
+                <DetailField
+                  label="Bill to"
+                  span="full"
+                  value={orderDetails.bill_to_address || "—"}
+                  hint={orderDetails.bill_to_full_address || undefined}
+                />
+                <DetailField
+                  label="Ship to"
+                  span="full"
+                  value={orderDetails.ship_to_address || "—"}
+                  hint={orderDetails.ship_to_full_address || undefined}
+                />
+              </DetailGrid>
+            </Card>
+          ) : null}
 
           {/* The totals, as the same KPI row the list page uses — read before
               the line items rather than after them, which is the order a

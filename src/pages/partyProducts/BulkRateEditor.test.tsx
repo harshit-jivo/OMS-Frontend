@@ -77,11 +77,23 @@ const APPLIED = {
   errors: [] as string[],
 };
 
-/** Answers both endpoints; returns the spy so the payload can be read back. */
+const ACTIVATED = {
+  updated: 2,
+  unchanged: 0,
+  missing: 0,
+  parties: 2,
+  items: 1,
+  errors: [] as string[],
+};
+
+/** Answers every endpoint; returns the spy so the payload can be read back. */
 function mockApi() {
   return vi.spyOn(api, "post").mockImplementation(async (url: string) => {
     if (String(url).includes("update-rates")) {
       return { data: { success: true, data: APPLIED } } as never;
+    }
+    if (String(url).includes("set-active")) {
+      return { data: { success: true, data: ACTIVATED } } as never;
     }
     return { data: { success: true, data: { products: PRODUCTS } } } as never;
   });
@@ -225,5 +237,88 @@ describe("BulkRateEditor", () => {
     expect(await screen.findByText("Rates applied")).toBeInTheDocument();
     const result = screen.getByText(/rates changed/i).closest("span") as HTMLElement;
     expect(within(result).getByText("2")).toBeInTheDocument();
+  });
+
+  /* ── Availability: the same ticks, a different verb ───────────────────── */
+
+  it("turning products off needs only a tick, and offers no rate to type", async () => {
+    const { user } = await renderEditor();
+
+    await user.click(screen.getByRole("radio", { name: /turn off/i }));
+
+    // There is no figure to give here, so the column is absent rather than
+    // present-and-disabled.
+    expect(screen.queryByLabelText(/New rate.*MUSTARD 1 LTR/i)).not.toBeInTheDocument();
+
+    const apply = screen.getByRole("button", { name: /review and turn off/i });
+    expect(apply).toBeDisabled();
+
+    await user.click(within(rowFor("MUSTARD 1 LTR")).getByRole("checkbox"));
+    expect(apply).toBeEnabled();
+  });
+
+  it("posts the ticked rows to set-active with is_active false", async () => {
+    const { user, post } = await renderEditor();
+
+    await user.click(screen.getByRole("radio", { name: /turn off/i }));
+    await user.click(within(rowFor("MUSTARD 1 LTR")).getByRole("checkbox"));
+    await user.click(screen.getByRole("button", { name: /review and turn off/i }));
+    await user.click(screen.getByRole("button", { name: /^Turn off for 2 parties$/i }));
+
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith(
+        "/auth/bulk-party/set-active/",
+        expect.objectContaining({
+          is_active: false,
+          party_selections: SELECTIONS,
+          items: [{ item_code: "FG001", category: "OIL" }],
+        }),
+      ),
+    );
+  });
+
+  it("turning products on sends is_active true", async () => {
+    const { user, post } = await renderEditor();
+
+    await user.click(screen.getByRole("radio", { name: /turn on/i }));
+    await user.click(within(rowFor("CANOLA 1 LTR")).getByRole("checkbox"));
+    await user.click(screen.getByRole("button", { name: /review and turn on/i }));
+    await user.click(screen.getByRole("button", { name: /^Turn on for 2 parties$/i }));
+
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith(
+        "/auth/bulk-party/set-active/",
+        expect.objectContaining({ is_active: true }),
+      ),
+    );
+  });
+
+  it("drops a typed rate when the verb changes, so it cannot be applied later", async () => {
+    // "125" drafted as a rate must not survive into a different verb and then
+    // back again -- it would re-price forty parties nobody asked to re-price.
+    const { user } = await renderEditor();
+
+    await user.click(within(rowFor("MUSTARD 1 LTR")).getByRole("checkbox"));
+    await user.type(screen.getByLabelText(/New rate.*MUSTARD 1 LTR/i), "125");
+
+    await user.click(screen.getByRole("radio", { name: /turn off/i }));
+    await user.click(screen.getByRole("radio", { name: /change rates/i }));
+
+    expect(screen.getByLabelText(/New rate.*MUSTARD 1 LTR/i)).toHaveValue(null);
+    // The tick survives: the products you meant are still the ones you meant.
+    expect(within(rowFor("MUSTARD 1 LTR")).getByRole("checkbox")).toBeChecked();
+  });
+
+  it("reports an availability run in its own words, not as rates", async () => {
+    const { user } = await renderEditor();
+
+    await user.click(screen.getByRole("radio", { name: /turn off/i }));
+    await user.click(within(rowFor("MUSTARD 1 LTR")).getByRole("checkbox"));
+    await user.click(screen.getByRole("button", { name: /review and turn off/i }));
+    await user.click(screen.getByRole("button", { name: /^Turn off for 2 parties$/i }));
+
+    expect(await screen.findByText("Products turned off")).toBeInTheDocument();
+    expect(screen.getByText(/assignments changed/i)).toBeInTheDocument();
+    expect(screen.queryByText(/newly assigned/i)).not.toBeInTheDocument();
   });
 });

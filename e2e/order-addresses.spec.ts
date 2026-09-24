@@ -1,17 +1,49 @@
 /**
- * The street under a Bill To / Ship To on Add Sales.
+ * Where an order bills and ships to, on the two screens that decide it.
  *
- * An address is shown by its NAME — "Head Office" — which is fine as a label
- * and useless as an answer to "where do these goods actually go". That is the
- * question in front of a biller at the moment they pick one.
+ * An order stores the address NAME — "Head Office" — because the sales form
+ * saves `address_name || full_address`. That is fine as a record of what was
+ * chosen and useless as an answer to "where do these goods actually go", which
+ * is the question a biller has in front of them both when placing the order
+ * and when checking it afterwards.
  *
- * In a browser rather than jsdom because the bug this guards is geometric: the
- * section is a CSS grid and each Field is one cell, so a street rendered as a
- * SIBLING of the Field becomes an extra cell and shunts every following
- * control one place along. A visibility assertion passes straight through
- * that — the text is visible, in the wrong column.
+ * In a browser rather than jsdom because the point is that the street is
+ * LEGIBLE and subordinate: present, smaller than the name it sits under, and
+ * not so quiet that it reads as disabled.
  */
 import { expect, gotoStable, settle, test } from "./harness";
+
+test("the order detail shows each address name with its street under it", async ({
+  appPage: page,
+}) => {
+  await gotoStable(page, "/View_Orders");
+  await page.getByRole("button", { name: /View order SO-202603/i }).click();
+  await settle(page);
+
+  await expect(page.getByText("Bill to")).toBeVisible();
+  const name = page.getByText("Head Office", { exact: true });
+  const street = page.getByText("12 Mall Road, Ludhiana, Punjab 141001");
+  await expect(name).toBeVisible();
+  await expect(street).toBeVisible();
+
+  await expect(page.getByText("Main Warehouse", { exact: true })).toBeVisible();
+  await expect(page.getByText("Plot 9, Focal Point, Ludhiana, Punjab 141010")).toBeVisible();
+
+  // Under, not beside.
+  const nameBox = (await name.boundingBox())!;
+  const streetBox = (await street.boundingBox())!;
+  expect(streetBox.y).toBeGreaterThan(nameBox.y);
+
+  // Smaller than the name, which is what makes it read as supporting detail
+  // rather than as a second field.
+  const sizeOf = (locator: typeof name) =>
+    locator.evaluate((el) => Number.parseFloat(getComputedStyle(el).fontSize));
+  const nameSize = await sizeOf(name);
+  const streetSize = await sizeOf(street);
+  expect(streetSize).toBeLessThan(nameSize);
+  // But still readable — a street set at 8px would pass the test above.
+  expect(streetSize).toBeGreaterThanOrEqual(10);
+});
 
 test("Add Sales shows the street under the chosen Bill To and Ship To", async ({
   appPage: page,

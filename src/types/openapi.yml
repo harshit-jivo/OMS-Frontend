@@ -8682,6 +8682,9 @@ components:
         id:
           type: integer
           readOnly: true
+        items_count:
+          type: integer
+          readOnly: true
         order_number:
           type: string
           maxLength: 50
@@ -8728,6 +8731,7 @@ components:
       - created_by
       - created_by_name
       - id
+      - items_count
       - order_number
       - status
       - status_display

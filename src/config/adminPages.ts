@@ -12,6 +12,7 @@ export const GRANTABLE_ADMIN_PAGES: GrantablePage[] = [
   { key: "Sap_Sync", label: "SAP Sync", path: "/Sap_Sync" },
   { key: "Party_Assignment", label: "Party Assignment", path: "/Party_Assignment" },
   { key: "Party_Product_Assignment", label: "Party Product Assignment", path: "/Party_Product_Assignment" },
+  { key: "Bulk_Product_Assignment", label: "Bulk Product Assignment", path: "/Bulk_Product_Assignment" },
   { key: "Add_Scheme", label: "Add Scheme", path: "/Add_Scheme" },
   // Scheme engine v2 — targeting, triggers and benefits. Granted separately from
   // "Add Scheme" (the legacy flat form) so the two can be rolled out apart.

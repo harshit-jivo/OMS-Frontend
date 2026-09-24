@@ -6090,6 +6090,7 @@ export interface components {
         /** @description Schema alias for `OrderListByUserIdSerializer`. */
         OrderListByUserId: {
             readonly id: number;
+            readonly items_count: number;
             order_number: string;
             order_type?: components["schemas"]["OrderTypeEnum"];
             card_code: string;

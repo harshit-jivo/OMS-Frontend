@@ -13,8 +13,9 @@
  * it and the spread of rates they hold it at, because a rate that has drifted
  * apart is the thing you most need to see before overwriting it.
  */
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { HiOutlineChevronDown, HiOutlineChevronRight } from "react-icons/hi2";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -46,9 +47,14 @@ import {
 } from "@/components/ui/table";
 import { Pagination } from "@/components/ui/pagination";
 import { showToast } from "@/lib/toastStore";
+import { useSapParties } from "@/lib/sapQueries";
 import api from "../../services/api";
 
+import CopyCatalogueDialog from "./CopyCatalogueDialog";
+
 export type PartySelection = { card_code: string; category: string | null };
+
+import { RATE_MODES, applyMode, parseValue, type RateMode } from "./rateMath";
 
 /** One product as it is held across the selected parties. */
 type BulkProductRow = {
@@ -64,6 +70,10 @@ type BulkProductRow = {
   /** Selected parties that COULD hold it — an OIL item cannot reach a MART party. */
   eligible_parties: number;
   missing_parties: number;
+  /** Which selected parties hold it, and at what rate each. */
+  holders: { card_code: string; basic_rate: number }[];
+  /** Selected, eligible, and NOT holding it. */
+  missing: string[];
   min_rate: number;
   max_rate: number;
   /** How many different rates the selection holds it at. 1 is agreement. */
@@ -74,22 +84,33 @@ type BulkProductRow = {
 
 type ApplyResult = {
   updated: number;
-  created: number;
+  created?: number;
   unchanged: number;
-  skipped: number;
+  skipped?: number;
+  /** Availability only: ticked rows the party does not hold, so there was
+      nothing to turn on or off. Never a create — assigning is a different verb. */
+  missing?: number;
   parties: number;
   items: number;
   errors: string[];
 };
 
-/** `set` writes the figure; the other two move each party's OWN rate. */
-type RateMode = "set" | "percent" | "amount";
 type ApplyTo = "existing" | "all";
 
-const RATE_MODES: { value: RateMode; label: string }[] = [
-  { value: "set", label: "Set rate" },
-  { value: "percent", label: "Change by %" },
-  { value: "amount", label: "Change by ₹" },
+/**
+ * What the ticked rows are for.
+ *
+ * One selection, several verbs — the same shape `Tracker_Queue` uses. Re-pricing
+ * needs a figure per row; turning an assignment off or on needs only the tick,
+ * so the rate controls and the two rate columns are absent rather than disabled
+ * for those: there is no figure to give, not a figure you may not give.
+ */
+type Operation = "reprice" | "deactivate" | "reactivate";
+
+const OPERATIONS: { value: Operation; label: string }[] = [
+  { value: "reprice", label: "Change rates" },
+  { value: "deactivate", label: "Turn off" },
+  { value: "reactivate", label: "Turn on" },
 ];
 
 const money = (value: number) => "₹" + Number(value || 0).toFixed(2);
@@ -97,28 +118,30 @@ const rowKey = (row: { item_code: string; category: string }) =>
   row.item_code + "||" + row.category;
 
 /**
- * What the typed figure means in each mode, and whether it is usable.
+ * card_code -> party name, from the list the picker upstream already loaded.
  *
- * A percentage or a rupee change may be negative — that is a price CUT, the
- * second most common revision there is. Only an absolute rate cannot be.
+ * The API deliberately returns codes rather than names: joining `Party` there
+ * would cost a third query for something the client is holding anyway, and
+ * this view's two-query budget is pinned by a test.
  */
-const parseValue = (raw: string, mode: RateMode) => {
-  const trimmed = raw.trim();
-  if (trimmed === "") return { ok: false as const, value: NaN };
-  const value = Number(trimmed.replace(/,/g, ""));
-  if (!Number.isFinite(value)) return { ok: false as const, value: NaN };
-  if (mode === "set" && value < 0) return { ok: false as const, value };
-  return { ok: true as const, value };
-};
-
-/** The new rate a base rate lands on. Mirrors `_revised_rate` on the server. */
-const applyMode = (base: number, mode: RateMode, value: number) => {
-  if (mode === "set") return value;
-  if (mode === "percent") return base * (1 + value / 100);
-  return base + value;
-};
+function usePartyNames() {
+  const { items: parties } = useSapParties();
+  return useMemo(() => {
+    const names = new Map<string, string>();
+    parties.forEach((party) => {
+      if (!names.has(party.card_code)) names.set(party.card_code, party.card_name);
+    });
+    return names;
+  }, [parties]);
+}
 
 export default function BulkRateEditor({ selections }: { selections: PartySelection[] }) {
+  // Which product's party breakdown is open. One at a time: the point is to
+  // inspect a row before re-pricing it, not to read six at once.
+  const [openRow, setOpenRow] = useState<string | null>(null);
+  // Names for the codes the API returns. `useSapParties` is already in cache
+  // from the picker that built this selection, so this costs no request.
+  const partyNames = usePartyNames();
   const queryClient = useQueryClient();
 
   /*
@@ -151,6 +174,7 @@ export default function BulkRateEditor({ selections }: { selections: PartySelect
     },
   });
 
+  const [operation, setOperation] = useState<Operation>("reprice");
   const [mode, setMode] = useState<RateMode>("set");
   const [applyTo, setApplyTo] = useState<ApplyTo>("existing");
   /**
@@ -169,6 +193,7 @@ export default function BulkRateEditor({ selections }: { selections: PartySelect
   const [values, setValues] = useState<Record<string, string>>({});
   const [fillValue, setFillValue] = useState("");
   const [confirming, setConfirming] = useState(false);
+  const [copying, setCopying] = useState(false);
   const [result, setResult] = useState<ApplyResult | null>(null);
 
   /*
@@ -184,6 +209,19 @@ export default function BulkRateEditor({ selections }: { selections: PartySelect
     // no existing rate for a percentage to move.
     if (next !== "set") setApplyTo("existing");
   };
+
+  /* Ticks are kept across a verb change — the products you meant are the same
+     ones — but typed figures are not. A rate drafted for "Change rates" means
+     nothing under "Turn off", and leaving it would quietly re-price on the next
+     switch back. Same reasoning as `changeMode`. */
+  const changeOperation = (next: Operation) => {
+    setOperation(next);
+    setValues({});
+    setFillValue("");
+    if (next !== "reprice") setApplyTo("existing");
+  };
+
+  const isReprice = operation === "reprice";
 
   const categories = useMemo(
     () => [...new Set(rows.map((row) => row.category).filter(Boolean))].sort(),
@@ -235,13 +273,15 @@ export default function BulkRateEditor({ selections }: { selections: PartySelect
    * twenty-five rows happen to be under the cursor. Pagination here is what
    * the table DRAWS, not what the bulk actions reach — the opposite would
    * change what a re-price does without saying so.
+   */
+  /*
+   * The page is stamped with the filters it was turned to.
    *
-   * The page is stamped with the filters it was turned to, because narrowing
-   * the list has to send you back to page 1: a search run from page 6 would
-   * otherwise land past the end of its own results and draw nothing. Stamping
-   * is how the rest of this app does that (see `Product_Rates`); an effect
-   * calling `setPage` would be a second render and the lint rule that forbids
-   * cascading renders, both for a value that can simply be derived.
+   * Narrowing the list has to send you back to page 1 — a search run from page
+   * 6 would otherwise land past the end of its own results and draw nothing.
+   * Stamping is how the rest of this app does that (see `Product_Rates`): an
+   * effect calling `setPage` would be a second render and the lint rule that
+   * forbids cascading renders, both for a value that can simply be derived.
    */
   const pageStamp = [search, categoryFilter, effectiveVariety, selectionKey].join("|");
   const [paging, setPaging] = useState({ stamp: pageStamp, page: 1 });
@@ -295,19 +335,36 @@ export default function BulkRateEditor({ selections }: { selections: PartySelect
     [rows, tickedSet, values, mode],
   );
 
+  /**
+   * The rows this run acts on.
+   *
+   * Re-pricing acts on ticked rows that carry a usable figure; turning an
+   * assignment off or on acts on the tick alone, because there is nothing to
+   * type. Everything downstream — the count, the confirm list, the request —
+   * reads this, so the two verbs cannot drift apart.
+   */
+  const targetRows = useMemo(
+    () =>
+      isReprice
+        ? pending.map((entry) => entry.row)
+        : rows.filter((row) => tickedSet.has(rowKey(row))),
+    [isReprice, pending, rows, tickedSet],
+  );
+
   /* Ticked but nothing typed: the row is silently ignored, which on a price
-     change is worth saying out loud rather than reporting "12 updated" for 20. */
-  const tickedWithoutValue = activeTicked.length - pending.length;
+     change is worth saying out loud rather than reporting "12 updated" for 20.
+     Only re-pricing can have such a row. */
+  const tickedWithoutValue = isReprice ? activeTicked.length - pending.length : 0;
 
   /** Parties the run will touch — the reach of the categories in play. */
   const partiesTouched = useMemo(() => {
-    if (pending.length === 0) return 0;
+    if (targetRows.length === 0) return 0;
     const keys = new Set<string>();
-    pending.forEach(({ row }) => keys.add(row.category));
+    targetRows.forEach((row) => keys.add(row.category));
     return selections.filter(
       (selection) => !selection.category || keys.has(selection.category),
     ).length;
-  }, [pending, selections]);
+  }, [targetRows, selections]);
 
   const fillTicked = () => {
     const parsed = parseValue(fillValue, mode);
@@ -336,14 +393,25 @@ export default function BulkRateEditor({ selections }: { selections: PartySelect
 
   const apply = useMutation({
     mutationFn: async () => {
-      const response = await api.post("/auth/bulk-party/update-rates/", {
+      if (isReprice) {
+        const response = await api.post("/auth/bulk-party/update-rates/", {
+          party_selections: selections,
+          rate_mode: mode,
+          apply_to: applyTo,
+          items: pending.map(({ row, value }) => ({
+            item_code: row.item_code,
+            category: row.category,
+            basic_rate: value,
+          })),
+        });
+        return (response.data?.data || {}) as ApplyResult;
+      }
+      const response = await api.post("/auth/bulk-party/set-active/", {
         party_selections: selections,
-        rate_mode: mode,
-        apply_to: applyTo,
-        items: pending.map(({ row, value }) => ({
+        is_active: operation === "reactivate",
+        items: targetRows.map((row) => ({
           item_code: row.item_code,
           category: row.category,
-          basic_rate: value,
         })),
       });
       return (response.data?.data || {}) as ApplyResult;
@@ -357,23 +425,28 @@ export default function BulkRateEditor({ selections }: { selections: PartySelect
       // The single-party catalogue below is showing rates this just changed.
       void queryClient.invalidateQueries({ queryKey: ["party", "products"] });
       showToast({
-        title: "Rates applied",
+        title: isReprice
+          ? "Rates applied"
+          : operation === "deactivate"
+            ? "Products turned off"
+            : "Products turned on",
         message:
           data.updated +
-          " rate" +
-          (data.updated === 1 ? "" : "s") +
-          " updated across " +
+          (isReprice
+            ? " rate" + (data.updated === 1 ? "" : "s") + " updated"
+            : " assignment" + (data.updated === 1 ? "" : "s") + " changed") +
+          " across " +
           data.parties +
           " parties" +
-          (data.created ? ", " + data.created + " newly assigned" : "") +
+          (isReprice && data.created ? ", " + data.created + " newly assigned" : "") +
           ".",
       });
     },
     onError: (error) => {
-      console.error("Error applying bulk rates:", error);
+      console.error("Error applying bulk party-product change:", error);
       setConfirming(false);
       showToast({
-        title: "Could not apply the rates",
+        title: isReprice ? "Could not apply the rates" : "Could not change availability",
         message: "Nothing was changed. Check your connection and try again.",
       });
     },
@@ -381,6 +454,13 @@ export default function BulkRateEditor({ selections }: { selections: PartySelect
 
   const valueLabel =
     mode === "set" ? "New rate (₹)" : mode === "percent" ? "Change (%)" : "Change (₹)";
+
+  /* Derived, not typed: the two rate columns are absent for the availability
+     verbs, and a hardcoded colSpan would straddle the wrong number of them. */
+  const columnCount = isReprice ? 6 : 4;
+
+  const verbLabel =
+    operation === "deactivate" ? "Turn off" : operation === "reactivate" ? "Turn on" : "Apply";
 
   return (
     <>
@@ -393,9 +473,14 @@ export default function BulkRateEditor({ selections }: { selections: PartySelect
               is written to all of them.
             </p>
           </div>
-          <Button variant="ghost" size="xs" onClick={() => void refetch()} disabled={isPending}>
-            {isPending ? "Loading…" : "Refresh"}
-          </Button>
+          <span className="flex flex-none items-center gap-2">
+            <Button variant="ghost" size="xs" onClick={() => setCopying(true)}>
+              Copy catalogue
+            </Button>
+            <Button variant="ghost" size="xs" onClick={() => void refetch()} disabled={isPending}>
+              {isPending ? "Loading…" : "Refresh"}
+            </Button>
+          </span>
         </CardHeader>
 
         <div className="space-y-3 p-4">
@@ -446,26 +531,49 @@ export default function BulkRateEditor({ selections }: { selections: PartySelect
             </FilterCount>
           </FilterBar>
 
-          {/* ── What the figures in the table mean ── */}
+          {/* ── What the ticked rows are for, and what the figures mean ── */}
           <div className="flex flex-wrap items-end gap-x-4 gap-y-2.5 rounded-card border border-line bg-surface px-3 py-2.5">
             <div className="flex flex-none flex-col gap-1">
               <span className="text-[10px] font-semibold uppercase tracking-[0.06em] text-subtle">
-                Revision
+                Do what
               </span>
               <SegmentedControl
                 size="xs"
-                value={mode}
-                onChange={(next) => changeMode(next as RateMode)}
-                options={RATE_MODES}
-                aria-label="How the rate changes"
+                value={operation}
+                onChange={(next) => changeOperation(next as Operation)}
+                options={OPERATIONS}
+                aria-label="What to do with the ticked products"
               />
             </div>
 
-            <div className="flex flex-none flex-col gap-1">
-              <span className="text-[10px] font-semibold uppercase tracking-[0.06em] text-subtle">
-                Apply to
+            {!isReprice ? (
+              <span className="flex h-control-xs items-center text-[12px] text-subtle">
+                {operation === "deactivate"
+                  ? "Ticked products stop being sellable to these parties. Their rates are kept."
+                  : "Ticked products become sellable again, at the rate each party already had."}
               </span>
-              {mode === "set" ? (
+            ) : null}
+
+            {isReprice ? (
+              <>
+                <div className="flex flex-none flex-col gap-1">
+                  <span className="text-[10px] font-semibold uppercase tracking-[0.06em] text-subtle">
+                    Revision
+                  </span>
+                  <SegmentedControl
+                    size="xs"
+                    value={mode}
+                    onChange={(next) => changeMode(next as RateMode)}
+                    options={RATE_MODES}
+                    aria-label="How the rate changes"
+                  />
+                </div>
+
+                <div className="flex flex-none flex-col gap-1">
+                  <span className="text-[10px] font-semibold uppercase tracking-[0.06em] text-subtle">
+                    Apply to
+                  </span>
+                  {mode === "set" ? (
                 <SegmentedControl
                   size="xs"
                   value={applyTo}
@@ -476,59 +584,61 @@ export default function BulkRateEditor({ selections }: { selections: PartySelect
                   ]}
                   aria-label="Which parties to write to"
                 />
-              ) : (
-                // Not a greyed-out control: a percentage has nothing to move
-                // from on a party that does not hold the product yet, so the
-                // choice does not exist here rather than being unavailable.
-                <span className="flex h-control-xs items-center text-[12px] text-subtle">
-                  Parties that have it — a change needs a rate to move from.
-                </span>
-              )}
-            </div>
+                  ) : (
+                    // Not a greyed-out control: a percentage has nothing to move
+                    // from on a party that does not hold the product yet, so the
+                    // choice does not exist here rather than being unavailable.
+                    <span className="flex h-control-xs items-center text-[12px] text-subtle">
+                      Parties that have it — a change needs a rate to move from.
+                    </span>
+                  )}
+                </div>
 
-            <div className="flex min-w-[190px] flex-col gap-1">
-              <label
-                htmlFor="bulk-fill"
-                className="text-[10px] font-semibold uppercase tracking-[0.06em] text-subtle"
-              >
-                {valueLabel} for every ticked row
-              </label>
-              <span className="flex items-center gap-2">
-                <Input
-                  id="bulk-fill"
-                  type="number"
-                  step="0.01"
-                  min={mode === "set" ? "0" : undefined}
-                  placeholder={mode === "percent" ? "e.g. 5 or -2.5" : "0.00"}
-                  value={fillValue}
-                  onChange={(event) => setFillValue(event.target.value)}
-                  className="h-control-xs w-28"
-                />
-                <Button
-                  size="xs"
-                  onClick={fillTicked}
-                  disabled={!parseValue(fillValue, mode).ok || activeTicked.length === 0}
-                  title={
-                    activeTicked.length === 0
-                      ? "Tick the products to change first."
-                      : !parseValue(fillValue, mode).ok
-                        ? "Enter a figure first."
-                        : undefined
-                  }
-                >
-                  Fill {activeTicked.length || ""} ticked
-                </Button>
-              </span>
-            </div>
+                <div className="flex min-w-[190px] flex-col gap-1">
+                  <label
+                    htmlFor="bulk-fill"
+                    className="text-[10px] font-semibold uppercase tracking-[0.06em] text-subtle"
+                  >
+                    {valueLabel} for every ticked row
+                  </label>
+                  <span className="flex items-center gap-2">
+                    <Input
+                      id="bulk-fill"
+                      type="number"
+                      step="0.01"
+                      min={mode === "set" ? "0" : undefined}
+                      placeholder={mode === "percent" ? "e.g. 5 or -2.5" : "0.00"}
+                      value={fillValue}
+                      onChange={(event) => setFillValue(event.target.value)}
+                      className="h-control-xs w-28"
+                    />
+                    <Button
+                      size="xs"
+                      onClick={fillTicked}
+                      disabled={!parseValue(fillValue, mode).ok || activeTicked.length === 0}
+                      title={
+                        activeTicked.length === 0
+                          ? "Tick the products to change first."
+                          : !parseValue(fillValue, mode).ok
+                            ? "Enter a figure first."
+                            : undefined
+                      }
+                    >
+                      Fill {activeTicked.length || ""} ticked
+                    </Button>
+                  </span>
+                </div>
 
-            {mode === "set" && visibleRows.length > 0 ? (
-              <Button size="xs" variant="ghost" onClick={fillWithCommon}>
-                Use each product&rsquo;s commonest rate
-              </Button>
+                {mode === "set" && visibleRows.length > 0 ? (
+                  <Button size="xs" variant="ghost" onClick={fillWithCommon}>
+                    Use each product&rsquo;s commonest rate
+                  </Button>
+                ) : null}
+              </>
             ) : null}
           </div>
 
-          {applyTo === "all" ? (
+          {isReprice && applyTo === "all" ? (
             <Notice tone="hold">
               Products ticked below will be assigned to every selected party that does not have
               them yet — {selections.length} parties, not only the ones already selling them.
@@ -551,15 +661,19 @@ export default function BulkRateEditor({ selections }: { selections: PartySelect
                 <TableHead>Product</TableHead>
                 <TableHead className="text-right">Parties</TableHead>
                 <TableHead className="text-right">Current rate</TableHead>
-                <TableHead className="w-36 text-right">{valueLabel}</TableHead>
-                <TableHead className="text-right">Becomes</TableHead>
+                {isReprice ? (
+                  <>
+                    <TableHead className="w-36 text-right">{valueLabel}</TableHead>
+                    <TableHead className="text-right">Becomes</TableHead>
+                  </>
+                ) : null}
               </TableRow>
             </TableHeader>
             <TableBody>
               {isPending ? (
-                <TableEmpty colSpan={6}>Loading the assigned products…</TableEmpty>
+                <TableEmpty colSpan={columnCount}>Loading the assigned products…</TableEmpty>
               ) : visibleRows.length === 0 ? (
-                <TableEmpty colSpan={6}>
+                <TableEmpty colSpan={columnCount}>
                   {rows.length === 0
                     ? "These parties have no products assigned yet. Use Add products to all above."
                     : "No product matches these filters."}
@@ -572,9 +686,11 @@ export default function BulkRateEditor({ selections }: { selections: PartySelect
                   const parsed = parseValue(raw, mode);
                   const bad = raw.trim() !== "" && !parsed.ok;
                   const varies = row.distinct_rates > 1;
+                  const isOpen = openRow === key;
 
                   return (
-                    <TableRow key={key} className={isTicked ? "bg-brand-soft/40" : undefined}>
+                    <Fragment key={key}>
+                    <TableRow className={isTicked ? "bg-brand-soft/40" : undefined}>
                       <TableCell>
                         <input
                           type="checkbox"
@@ -596,13 +712,29 @@ export default function BulkRateEditor({ selections }: { selections: PartySelect
                       </TableCell>
 
                       <TableCell className="text-right tabular-nums">
-                        {row.party_count}
-                        <span className="text-subtle"> / {row.eligible_parties}</span>
-                        {row.missing_parties > 0 ? (
-                          <Badge tone="hold" className="ml-1.5">
-                            {row.missing_parties} without
-                          </Badge>
-                        ) : null}
+                        {/* The counts said "1 without" and stopped there —
+                            without WHICH, you cannot tell whether the odd one
+                            out matters before overwriting the rest. */}
+                        <button
+                          type="button"
+                          onClick={() => setOpenRow(isOpen ? null : key)}
+                          aria-expanded={isOpen}
+                          className="inline-flex appearance-none items-center gap-1.5 rounded-sm border-0 bg-transparent px-1 py-0 [font-family:inherit] hover:bg-surface"
+                          title={isOpen ? "Hide the parties" : "Show which parties"}
+                        >
+                          <span>
+                            {row.party_count}
+                            <span className="text-subtle"> / {row.eligible_parties}</span>
+                          </span>
+                          {row.missing_parties > 0 ? (
+                            <Badge tone="hold">{row.missing_parties} without</Badge>
+                          ) : null}
+                          {isOpen ? (
+                            <HiOutlineChevronDown className="size-3.5 text-subtle" aria-hidden />
+                          ) : (
+                            <HiOutlineChevronRight className="size-3.5 text-subtle" aria-hidden />
+                          )}
+                        </button>
                       </TableCell>
 
                       <TableCell className="text-right tabular-nums">
@@ -620,43 +752,60 @@ export default function BulkRateEditor({ selections }: { selections: PartySelect
                         )}
                       </TableCell>
 
-                      <TableCell className="text-right">
-                        <Input
-                          type="number"
-                          step="0.01"
-                          min={mode === "set" ? "0" : undefined}
-                          placeholder={mode === "set" ? String(row.common_rate) : "0"}
-                          aria-label={valueLabel + " for " + row.item_name}
-                          aria-invalid={bad || undefined}
-                          value={raw}
-                          onChange={(event) =>
-                            setValues((prev) => ({ ...prev, [key]: event.target.value }))
-                          }
-                          className={
-                            "h-control-xs w-32 text-right " + (bad ? "border-bad" : "")
-                          }
-                        />
-                      </TableCell>
+                      {isReprice ? (
+                        <>
+                          <TableCell className="text-right">
+                            <Input
+                              type="number"
+                              step="0.01"
+                              min={mode === "set" ? "0" : undefined}
+                              placeholder={mode === "set" ? String(row.common_rate) : "0"}
+                              aria-label={valueLabel + " for " + row.item_name}
+                              aria-invalid={bad || undefined}
+                              value={raw}
+                              onChange={(event) =>
+                                setValues((prev) => ({ ...prev, [key]: event.target.value }))
+                              }
+                              className={
+                                "h-control-xs w-32 text-right " + (bad ? "border-bad" : "")
+                              }
+                            />
+                          </TableCell>
 
-                      <TableCell className="text-right tabular-nums">
-                        {parsed.ok ? (
-                          <>
-                            <span className="font-semibold text-ink">
-                              {money(applyMode(row.common_rate, mode, parsed.value))}
-                            </span>
-                            {mode !== "set" && varies ? (
-                              // The figure moves each party's own rate, so a
-                              // single "becomes" is only an illustration here.
-                              <span className="block text-[11px] text-subtle">
-                                from {money(row.common_rate)}
-                              </span>
-                            ) : null}
-                          </>
-                        ) : (
-                          <span className="text-subtle">—</span>
-                        )}
-                      </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {parsed.ok ? (
+                              <>
+                                <span className="font-semibold text-ink">
+                                  {money(applyMode(row.common_rate, mode, parsed.value))}
+                                </span>
+                                {mode !== "set" && varies ? (
+                                  // The figure moves each party's own rate, so a
+                                  // single "becomes" is only an illustration here.
+                                  <span className="block text-[11px] text-subtle">
+                                    from {money(row.common_rate)}
+                                  </span>
+                                ) : null}
+                              </>
+                            ) : (
+                              <span className="text-subtle">—</span>
+                            )}
+                          </TableCell>
+                        </>
+                      ) : null}
                     </TableRow>
+
+                    {isOpen ? (
+                      <TableRow className="hover:bg-surface">
+                        <TableCell colSpan={columnCount} className="bg-surface-subtle">
+                          <PartyBreakdown
+                            row={row}
+                            names={partyNames}
+                            varies={varies}
+                          />
+                        </TableCell>
+                      </TableRow>
+                    ) : null}
+                    </Fragment>
                   );
                 })
               )}
@@ -678,11 +827,14 @@ export default function BulkRateEditor({ selections }: { selections: PartySelect
 
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
             <p className="m-0 text-[12px] text-subtle">
-              {pending.length === 0
-                ? "Tick the products to re-price and enter a figure for each."
-                : pending.length +
+              {targetRows.length === 0
+                ? isReprice
+                  ? "Tick the products to re-price and enter a figure for each."
+                  : "Tick the products to " +
+                    (operation === "deactivate" ? "turn off." : "turn on.")
+                : targetRows.length +
                   " product" +
-                  (pending.length === 1 ? "" : "s") +
+                  (targetRows.length === 1 ? "" : "s") +
                   " · " +
                   partiesTouched +
                   " parties" +
@@ -697,12 +849,16 @@ export default function BulkRateEditor({ selections }: { selections: PartySelect
             <Button
               variant="primary"
               onClick={() => setConfirming(true)}
-              disabled={pending.length === 0 || apply.isPending}
+              disabled={targetRows.length === 0 || apply.isPending}
               title={
-                pending.length === 0 ? "Tick a product and enter a figure first." : undefined
+                targetRows.length === 0
+                  ? isReprice
+                    ? "Tick a product and enter a figure first."
+                    : "Tick a product first."
+                  : undefined
               }
             >
-              Review and apply
+              {isReprice ? "Review and apply" : "Review and " + verbLabel.toLowerCase()}
             </Button>
           </div>
         </div>
@@ -718,15 +874,26 @@ export default function BulkRateEditor({ selections }: { selections: PartySelect
         }}
       >
         {confirming && (
-          <DialogContent title="Apply rates" size="md">
+          <DialogContent
+            title={isReprice ? "Apply rates" : verbLabel + " products"}
+            size="md"
+          >
             <DialogHeader>
               <DialogTitle>
-                Change {pending.length} product{pending.length === 1 ? "" : "s"} across{" "}
-                {partiesTouched} parties?
+                {isReprice ? "Change" : verbLabel} {targetRows.length} product
+                {targetRows.length === 1 ? "" : "s"} across {partiesTouched} parties?
               </DialogTitle>
             </DialogHeader>
             <DialogBody className="space-y-3">
-              {applyTo === "all" ? (
+              {!isReprice ? (
+                <Notice tone={operation === "deactivate" ? "hold" : "info"}>
+                  {operation === "deactivate"
+                    ? "These stop being sellable to the selected parties. The rate each party " +
+                      "negotiated is kept, so turning them back on restores it."
+                    : "These become sellable again at the rate each party already had. A party " +
+                      "that was never assigned the product is left alone."}
+                </Notice>
+              ) : applyTo === "all" ? (
                 <Notice tone="hold">
                   Parties that do not have these products will be given them at the rate below.
                 </Notice>
@@ -737,24 +904,32 @@ export default function BulkRateEditor({ selections }: { selections: PartySelect
                 </Notice>
               )}
               <ul className="m-0 max-h-64 list-none divide-y divide-line overflow-y-auto rounded-sm border border-line p-0 text-[12.5px]">
-                {pending.map(({ row, value }) => (
-                  <li
-                    key={rowKey(row)}
-                    className="flex items-baseline justify-between gap-3 px-3 py-1.5"
-                  >
-                    <span className="min-w-0 truncate text-ink">{row.item_name}</span>
-                    <span className="shrink-0 tabular-nums text-subtle">
-                      {row.party_count} parties ·{" "}
-                      <strong className="text-ink">
-                        {mode === "set"
-                          ? money(value)
-                          : mode === "percent"
-                            ? (value >= 0 ? "+" : "") + value + "%"
-                            : (value >= 0 ? "+" : "") + money(value)}
-                      </strong>
-                    </span>
-                  </li>
-                ))}
+                {targetRows.map((row) => {
+                  const typed = pending.find((entry) => entry.row === row);
+                  return (
+                    <li
+                      key={rowKey(row)}
+                      className="flex items-baseline justify-between gap-3 px-3 py-1.5"
+                    >
+                      <span className="min-w-0 truncate text-ink">{row.item_name}</span>
+                      <span className="shrink-0 tabular-nums text-subtle">
+                        {row.party_count} parties
+                        {isReprice && typed ? (
+                          <>
+                            {" · "}
+                            <strong className="text-ink">
+                              {mode === "set"
+                                ? money(typed.value)
+                                : mode === "percent"
+                                  ? (typed.value >= 0 ? "+" : "") + typed.value + "%"
+                                  : (typed.value >= 0 ? "+" : "") + money(typed.value)}
+                            </strong>
+                          </>
+                        ) : null}
+                      </span>
+                    </li>
+                  );
+                })}
               </ul>
             </DialogBody>
             <DialogFooter>
@@ -762,11 +937,15 @@ export default function BulkRateEditor({ selections }: { selections: PartySelect
                 Cancel
               </Button>
               <Button
-                variant="primary"
+                variant={operation === "deactivate" ? "danger" : "primary"}
                 onClick={() => apply.mutate()}
                 disabled={apply.isPending}
               >
-                {apply.isPending ? "Applying…" : "Apply to " + partiesTouched + " parties"}
+                {apply.isPending
+                  ? "Applying…"
+                  : (isReprice ? "Apply to " : verbLabel + " for ") +
+                    partiesTouched +
+                    " parties"}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -781,30 +960,45 @@ export default function BulkRateEditor({ selections }: { selections: PartySelect
         }}
       >
         {result && (
-          <DialogContent title="Rate update result" size="md">
+          <DialogContent
+            title={isReprice ? "Rate update result" : "Availability result"}
+            size="md"
+          >
             <DialogHeader>
               <DialogTitle>
-                {result.errors.length ? "Applied, with problems" : "Rates applied"}
+                {result.errors.length
+                  ? "Applied, with problems"
+                  : isReprice
+                    ? "Rates applied"
+                    : operation === "deactivate"
+                      ? "Products turned off"
+                      : "Products turned on"}
               </DialogTitle>
             </DialogHeader>
             <DialogBody className="space-y-3">
               <div className="flex flex-wrap gap-4">
                 <span className="text-[13px]">
                   <strong className="block text-[20px] font-bold text-ok">{result.updated}</strong>
-                  rates changed
+                  {isReprice ? "rates changed" : "assignments changed"}
                 </span>
-                <span className="text-[13px]">
-                  <strong className="block text-[20px] font-bold text-ink">{result.created}</strong>
-                  newly assigned
-                </span>
+                {isReprice ? (
+                  <span className="text-[13px]">
+                    <strong className="block text-[20px] font-bold text-ink">
+                      {result.created ?? 0}
+                    </strong>
+                    newly assigned
+                  </span>
+                ) : null}
                 <span className="text-[13px]">
                   <strong className="block text-[20px] font-bold text-ink">
                     {result.unchanged}
                   </strong>
-                  already at that rate
+                  {isReprice ? "already at that rate" : "already like that"}
                 </span>
                 <span className="text-[13px]">
-                  <strong className="block text-[20px] font-bold text-ink">{result.skipped}</strong>
+                  <strong className="block text-[20px] font-bold text-ink">
+                    {isReprice ? (result.skipped ?? 0) : (result.missing ?? 0)}
+                  </strong>
                   not assigned, left alone
                 </span>
                 <span className="text-[13px]">
@@ -843,7 +1037,91 @@ export default function BulkRateEditor({ selections }: { selections: PartySelect
           </DialogContent>
         )}
       </Dialog>
+
+      <CopyCatalogueDialog
+        open={copying}
+        onOpenChange={setCopying}
+        selections={selections}
+      />
     </>
   );
 }
 
+
+/**
+ * Which of the selected parties hold this product, and at what rate each.
+ *
+ * The row above answers "2 / 2" or "1 / 2 · 1 without", which is enough to
+ * spot an inconsistency and not enough to act on one: before overwriting a
+ * rate across a selection you need to know WHOSE rate you are overwriting, and
+ * whether the ones you are about to align were ever aligned.
+ *
+ * Rates that disagree are marked rather than merely listed — an even spread of
+ * numbers reads as noise, and the outlier is the whole reason to look.
+ */
+function PartyBreakdown({
+  row,
+  names,
+  varies,
+}: {
+  row: BulkProductRow;
+  names: Map<string, string>;
+  varies: boolean;
+}) {
+  const nameFor = (code: string) => names.get(code) ?? code;
+  // Against the commonest rate, not the minimum: the majority is the baseline
+  // a reader is checking the others against.
+  const odd = (rate: number) => varies && rate !== row.common_rate;
+
+  return (
+    <div className="space-y-1.5 py-1">
+      <p className="m-0 text-[11.5px] text-subtle">
+        {row.holders.length} hold it
+        {row.missing.length > 0 ? ` · ${row.missing.length} do not` : ""}
+        {varies
+          ? ` · ${row.distinct_rates} rates, commonest ${money(row.common_rate)}`
+          : ` · all on ${money(row.common_rate)}`}
+      </p>
+
+      {/* A plain list, not a nested <Table>. A table inside a table cell brings
+          its own header, padding and rules, which is three kinds of chrome for
+          two columns of data — and it doubled the row height. One line per
+          party: who, and what they are on. */}
+      <ul className="m-0 list-none divide-y divide-line/50 p-0">
+        {row.holders.map((holder) => (
+          <li
+            key={holder.card_code}
+            className="flex items-baseline justify-between gap-3 py-1 text-[12px]"
+          >
+            <span className="min-w-0 truncate text-ink">
+              {nameFor(holder.card_code)}
+              <span className="ml-1.5 font-mono text-[10.5px] text-subtle">
+                {holder.card_code}
+              </span>
+            </span>
+            <span
+              className={
+                "shrink-0 tabular-nums " +
+                (odd(holder.basic_rate) ? "font-semibold text-hold" : "text-ink")
+              }
+            >
+              {money(holder.basic_rate)}
+            </span>
+          </li>
+        ))}
+        {row.missing.map((code) => (
+          <li
+            key={code}
+            className="flex items-baseline justify-between gap-3 py-1 text-[12px]"
+          >
+            <span className="min-w-0 truncate text-subtle">
+              {nameFor(code)}
+              <span className="ml-1.5 font-mono text-[10.5px]">{code}</span>
+            </span>
+            <span className="shrink-0 text-[11px] text-subtle">not assigned</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}

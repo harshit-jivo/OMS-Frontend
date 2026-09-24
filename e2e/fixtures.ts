@@ -1554,10 +1554,17 @@ export const FIXTURES: Array<[pattern: RegExp, body: Body]> = [
       status_display: "Rejected",
       card_code: "C000789",
       card_name: "Eastern Foods Ltd (C000789)",
+      // Shaped the way the API really answers: the ORDER stores the address
+      // NAME (the sales form saves `address_name || full_address`), and the
+      // detail serializer resolves the street from the saved id. A fixture
+      // that put the street in `bill_to_address` would never exercise the
+      // line underneath, which is the thing worth drawing.
       bill_to_id: 11,
-      bill_to_address: "12 Mall Road, Ludhiana, Punjab 141001",
+      bill_to_address: "Head Office",
+      bill_to_full_address: "12 Mall Road, Ludhiana, Punjab 141001",
       ship_to_id: 21,
-      ship_to_address: "Plot 9, Focal Point, Ludhiana, Punjab 141010",
+      ship_to_address: "Main Warehouse",
+      ship_to_full_address: "Plot 9, Focal Point, Ludhiana, Punjab 141010",
       dispatch_from_id: 1,
       dispatch_from_name: "Ludhiana",
       delivery_date: "2026-06-20",

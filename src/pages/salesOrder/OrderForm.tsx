@@ -66,6 +66,7 @@ import {
 } from "@/components/ui/dialog";
 import { Field, Input, /* Select, (legacy scheme panel) */ Textarea } from "@/components/ui/form";
 import { cn } from "@/lib/utils";
+import { rankOptions } from "@/lib/optionSearch";
 import type { PartyProduct } from "@/services/ordersService";
 
 import FieldError from "./FieldError";
@@ -230,20 +231,19 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
   // ---------------------------------------------------------------------------
 
   /** Every typed word must appear somewhere in the product, in any order. */
-  const matchesItemSearch = (product: PartyProduct, term: string) => {
-    if (!term) return true;
-    const haystack = [
-      product.item_name,
-      product.item_code,
-      product.category,
-      product.brand,
-      product.variety,
-    ]
-      .filter(Boolean)
-      .join(" ")
-      .toLowerCase();
-    return term.split(/\s+/).every((word) => haystack.includes(word));
-  };
+  /**
+   * The fields a product can be found by. Shared with `rankOptions`, which is
+   * what every other picker in the app searches with — this modal had solved
+   * word-order matching for itself while `ui/dropdown` had not, and one
+   * definition of "search" is better than two that agree by coincidence.
+   */
+  const itemSearchFields = (product: PartyProduct) => [
+    product.item_name,
+    product.item_code,
+    product.category,
+    product.brand,
+    product.variety,
+  ];
 
   /**
    * Set one facet and drop everything below it. `handleRowChange` only clears
@@ -575,7 +575,9 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
   /** Left 30% facet rail, right 70% result list under one omni-search. */
   const renderItemPicker = (row: SalesRow, index: number) => {
     const term = itemSearch.trim().toLowerCase();
-    const searched = partyProducts.filter((p) => matchesItemSearch(p, term));
+    // Ranked as well as filtered, so the closest name is first rather than
+    // whichever the catalogue happened to list first.
+    const searched = rankOptions(partyProducts, term, itemSearchFields);
 
     // Each facet level offers what is still reachable given the levels above it.
     const afterCategory = searched.filter((p) => !row.category || p.category === row.category);

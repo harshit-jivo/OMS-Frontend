@@ -45,8 +45,10 @@ test.describe("dropdown panels", () => {
     // ---- (1) nothing clips it -------------------------------------------
     // Measured, not assumed: walk up from the panel and assert no ancestor
     // both clips overflow and cuts the panel short.
-    const clipped = await search.evaluate((node) => {
-      const panel = node.closest("div.absolute") as HTMLElement | null;
+    const clipped = await search.evaluate(() => {
+      // The panel is PORTALLED now — out of the trigger's root, so that no
+      // scrolling ancestor can clip it. Found by its slot, not by walking up.
+      const panel = document.querySelector("[data-slot='dropdown-panel']") as HTMLElement | null;
       if (!panel) return "no panel found";
       const box = panel.getBoundingClientRect();
       if (box.height < 8) return "panel has no height";
@@ -69,6 +71,12 @@ test.describe("dropdown panels", () => {
       return "ok";
     });
     expect(clipped).toBe("ok");
+
+    // The panel is portalled OUT of `.tw-page`, where `index.css`'s unlayered
+    // `input, select, button { font: inherit }` reaches it and renders every
+    // control at the 18px root size. Measured at exactly that before the panel
+    // carried `tw-page`; this is the assertion that keeps it.
+    await expect(search).toHaveCSS("font-size", "12.5px");
   });
 
   test("a card does not clip, so the shimmer cannot come back", async ({ appPage: page }) => {
@@ -118,10 +126,14 @@ test.describe("dropdown panels", () => {
     await page.waitForTimeout(400); // the lift transition is 0.2s
 
     const verdict = await page.evaluate(() => {
-      const search = document.querySelector<HTMLElement>("input[type=search]")!;
-      const panel = search.closest("div.absolute") as HTMLElement;
+      const panel = document.querySelector<HTMLElement>("[data-slot='dropdown-panel']")!;
       const cards = [...document.querySelectorAll<HTMLElement>("[data-slot='card']")];
-      const host = cards.find((c) => c.contains(panel))!;
+      // The panel is portalled to the body, so no card CONTAINS it any more —
+      // which is itself most of the fix. Anchor on the card holding the
+      // trigger instead.
+      const trigger = document.querySelector<HTMLElement>("[data-dropdown-trigger]")!;
+      const host = cards.find((c) => c.contains(trigger));
+      if (!host) return "no card around the trigger — test is not exercising anything";
       const next = cards[cards.indexOf(host) + 1];
       if (!next) return "no card below the picker — test is not exercising anything";
 
@@ -139,3 +151,49 @@ test.describe("dropdown panels", () => {
     expect(verdict).toBe("ok");
   });
 });
+
+/**
+ * The panel must track its trigger on a BIG monitor, after scrolling.
+ *
+ * Two things conspire here and neither shows up on a laptop-sized viewport,
+ * which is how both shipped:
+ *
+ *   1. `index.css` scales the whole UI on large screens — `body { zoom: 1.12 }`
+ *      at 1920px, 1.25 at 2560, 1.4 at 3200. `getBoundingClientRect` reports
+ *      post-zoom pixels while CSS `left`/`width` on a descendant of the zoomed
+ *      body are pre-zoom, so a panel placed from measured values came out
+ *      exactly 1.12× too wide and too far right.
+ *   2. `body` is the scroll container (`overflow: hidden auto`), so
+ *      `window.scrollY` is always 0 and document-coordinate maths drifted by
+ *      the scroll offset.
+ *
+ * Both are geometry under conditions the default viewport does not reproduce,
+ * so this test sets the viewport and scrolls before it measures.
+ */
+for (const width of [1920, 1440]) {
+  test(`panel tracks its trigger at ${width}px, scrolled`, async ({ appPage: page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await gotoStable(page, "/Bulk_Product_Assignment");
+    await settle(page);
+
+    await page.evaluate(() => {
+      document.body.scrollTop = 200;
+    });
+    await page.getByRole("button", { name: "Products" }).click();
+    await expect(page.locator("[data-slot='dropdown-panel']")).toBeVisible();
+
+    const offsets = await page.evaluate(() => {
+      const panel = document.querySelector<HTMLElement>("[data-slot='dropdown-panel']")!;
+      const root = document.querySelector<HTMLElement>("[data-dropdown-root]")!;
+      const pb = panel.getBoundingClientRect();
+      const rb = root.getBoundingClientRect();
+      return { dx: pb.x - rb.x, dWidth: pb.width - rb.width, gap: pb.y - rb.bottom };
+    });
+
+    expect(Math.abs(offsets.dx)).toBeLessThan(2);
+    expect(Math.abs(offsets.dWidth)).toBeLessThan(2);
+    // Sits just under the trigger, not adrift from it.
+    expect(offsets.gap).toBeGreaterThan(0);
+    expect(offsets.gap).toBeLessThan(12);
+  });
+}

@@ -72,6 +72,7 @@ import {
   HiOutlineQueueList,
   HiOutlineReceiptPercent,
   HiOutlineRectangleStack,
+  HiOutlineSquares2X2,
   HiOutlineScale,
   HiOutlineShieldCheck,
   HiOutlineShoppingCart,
@@ -248,6 +249,8 @@ export const SIDEBAR_SECTIONS: SidebarSectionDef[] = [
     links: [
       { to: "/Party_Assignment", label: "Party Assignment", icon: HiOutlineUserGroup },
       { to: "/Party_Product_Assignment", label: "Party Products", icon: HiOutlineLink },
+      { to: "/Bulk_Product_Assignment", label: "Bulk Products", icon: HiOutlineSquares2X2 },
+      { to: "/Product_Rates", label: "Product Rates", icon: HiOutlineCurrencyRupee },
       { to: "/Order_Flow_Settings", label: "Order Flow Settings", icon: HiOutlineAdjustmentsHorizontal },
       { to: "/Sap_Sync", label: "SAP Sync", icon: HiOutlineArrowPath },
     ],

@@ -142,6 +142,11 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   "/Sap_Sync": { permissions: ["Sap_Sync"] },
   "/Party_Assignment": { permissions: ["Party_Assignment"] },
   "/Party_Product_Assignment": { permissions: ["Party_Product_Assignment"] },
+  "/Bulk_Product_Assignment": { permissions: ["Bulk_Product_Assignment"] },
+  // The same grant as Party Product Assignment, not a key of its own: every
+  // endpoint behind it is gated by `HasKey('Party_Product_Assignment')`, so a
+  // separate key would open a page whose every button returns 403.
+  "/Product_Rates": { permissions: ["Party_Product_Assignment"] },
   "/Order_Flow_Settings": { permissions: ["Order_Flow_Settings"] },
 
   // --- Schemes ------------------------------------------------------------

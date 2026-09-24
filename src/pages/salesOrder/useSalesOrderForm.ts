@@ -228,6 +228,9 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
   // The warehouses HANA lists for the order's category, and the default the
   // server reads from its environment per category (`/orders/defaults/`).
   const [warehouses, setWarehouses] = useState<{ code: string; name: string }[]>([]);
+  // Which branch `warehouses` was fetched for, so the list is never read as if
+  // it belonged to a branch the user has since switched to.
+  const [loadedWarehouseBranch, setLoadedWarehouseBranch] = useState("");
   const [defaultWarehouses, setDefaultWarehouses] = useState<Record<string, string>>({});
   const [billAddress, setBillAddress] = useState<AddressOption[]>([]);
   const [shipAddress, setShipAddress] = useState<AddressOption[]>([]);
@@ -406,33 +409,51 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
       : orderCategory === "mart"
         ? "MART"
         : "OIL";
+  // No cross-branch fallback: warehouse codes live per company DB, so the OIL
+  // default is not a stand-in for a branch that has none. Falling back to it
+  // put GP-FG on beverage orders, which SAP rejects with "Enter a valid value
+  // in \"Whse\" field". A blank default is the correct answer for a branch with
+  // no configured one — SAP then uses each item's own default warehouse.
   const defaultWarehouse =
     defaultWarehouses[
       warehouseBranch === "BEVERAGE" ? "BEVERAGES" : warehouseBranch
-    ] || defaultWarehouses.OIL || "";
+    ] || "";
 
   useEffect(() => {
     let cancelled = false;
     sapService
       .getWarehouses(warehouseBranch)
       .then((rows) => {
-        if (!cancelled) setWarehouses(rows);
+        if (cancelled) return;
+        setWarehouses(rows);
+        setLoadedWarehouseBranch(warehouseBranch);
       })
       .catch((error) => {
         console.log("Error fetching warehouses:", error);
-        if (!cancelled) setWarehouses([]);
+        if (cancelled) return;
+        setWarehouses([]);
+        setLoadedWarehouseBranch(warehouseBranch);
       });
     return () => {
       cancelled = true;
     };
   }, [warehouseBranch]);
 
-  // Start on the env default the moment it is known. A saved order keeps its
-  // own warehouse: the edit loader sets `formData.warehouse` before this runs.
+  // The warehouse has to belong to THIS order's branch, so the branch's own
+  // list is what decides it: it fills the field on a new order, and it replaces
+  // anything not on the list — a warehouse left over from before the party's
+  // category changed, or one saved on the order back when a different branch's
+  // default could leak in. Waits for the list, so a failed lookup leaves the
+  // field alone rather than clearing a warehouse the user chose.
   useEffect(() => {
-    if (!defaultWarehouse || formData.warehouse) return;
-    setFormData((prev) => (prev.warehouse ? prev : { ...prev, warehouse: defaultWarehouse }));
-  }, [defaultWarehouse, formData.warehouse]);
+    if (loadedWarehouseBranch !== warehouseBranch || warehouses.length === 0) return;
+    const isOnList = (code: string) => warehouses.some((item) => item.code === code);
+    setFormData((prev) => {
+      if (prev.warehouse && isOnList(prev.warehouse)) return prev;
+      const next = isOnList(defaultWarehouse) ? defaultWarehouse : "";
+      return prev.warehouse === next ? prev : { ...prev, warehouse: next };
+    });
+  }, [warehouses, loadedWarehouseBranch, warehouseBranch, defaultWarehouse]);
 
   useEffect(() => {
     if (!isLoadingFromOrder) {

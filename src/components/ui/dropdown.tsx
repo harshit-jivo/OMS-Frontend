@@ -33,9 +33,12 @@
  * every copy was leaking into its component alongside three refs.
  */
 import * as React from "react";
+import * as ReactDOM from "react-dom";
 import { HiOutlineChevronDown, HiOutlineMagnifyingGlass } from "react-icons/hi2";
 
 import { cn } from "@/lib/utils";
+import { rankOptions } from "@/lib/optionSearch";
+import { useAnchoredPanel } from "./anchoredPanel";
 
 /* ── Shared plumbing ─────────────────────────────────────────────────────── */
 
@@ -82,38 +85,62 @@ function rootClass(className?: string) {
 }
 
 /**
- * `w-full`, not just `min-w-full`. With min-width alone an absolutely
- * positioned box is shrink-to-fit, so a long option label could push the
- * panel wider than the control it hangs from.
+ * The panel's own look. Quieter than it was: a hairline instead of a full
+ * border, a smaller radius, and no internal dividers — the rows are separated
+ * by space, not by rules. The old panel wore the same `rounded-card` and solid
+ * `border-line` as a Card, so a list of four options read as a second card
+ * landing on the page rather than as a menu belonging to the control.
+ *
+ * Position, width and height come from `useAnchoredPanel` as inline styles.
  */
 const panelClass =
-  "absolute left-0 top-[calc(100%+4px)] z-30 w-full min-w-full overflow-hidden rounded-card border border-line bg-card shadow-panel";
+  // `tw-page` for the same reason `DialogContent` carries it: this panel is
+  // portalled OUT of the page, and `index.css`'s unlayered
+  // `input, select, button { font: inherit }` then reaches its search box and
+  // renders it at the 18px root size. Measured at exactly that in a browser
+  // before this was added — the panel's geometry was always right, the type
+  // inside it was not, which is what made it look broken.
+  "tw-page z-[1100] overflow-hidden rounded-md border border-line/60 bg-card shadow-lg ring-1 ring-black/[0.03]";
 
 /**
  * Open/close, with the two ways out. One hook for both pickers, so they
  * cannot disagree about what "outside" means.
+ *
+ * `panelRef` is not optional decoration: the panel is portalled out of the
+ * root now, so `root.contains(target)` is false for a click on an option and
+ * the picker would close before the click registered.
  */
-function useOpenState(rootRef: React.RefObject<HTMLDivElement | null>) {
+function useOpenState(
+  rootRef: React.RefObject<HTMLDivElement | null>,
+  panelRef: React.RefObject<HTMLDivElement | null>,
+) {
   const [open, setOpen] = React.useState(false);
 
   React.useEffect(() => {
     if (!open) return;
+    const inside = (target: Node) =>
+      Boolean(rootRef.current?.contains(target) || panelRef.current?.contains(target));
+
     const onPointerDown = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+      if (!inside(event.target as Node)) setOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
+      // CAPTURE phase, stopped here: an open picker inside a dialog used to
+      // close the DIALOG on Escape, losing whatever was half-filled in behind
+      // it. Escape now dismisses one layer — the innermost — as it should.
+      event.stopPropagation();
       setOpen(false);
       // Back to the trigger, so the keyboard user is not dropped at the body.
       rootRef.current?.querySelector<HTMLElement>("[data-dropdown-trigger]")?.focus();
     };
     document.addEventListener("mousedown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("keydown", onKeyDown, true);
     return () => {
       document.removeEventListener("mousedown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("keydown", onKeyDown, true);
     };
-  }, [open, rootRef]);
+  }, [open, rootRef, panelRef]);
 
   return [open, setOpen] as const;
 }
@@ -176,8 +203,10 @@ export function MultiSelect<T extends string | number>({
   className?: string;
 }) {
   const rootRef = React.useRef<HTMLDivElement>(null);
+  const panelRef = React.useRef<HTMLDivElement>(null);
   const searchRef = React.useRef<HTMLInputElement>(null);
-  const [open, setOpen] = useOpenState(rootRef);
+  const [open, setOpen] = useOpenState(rootRef, panelRef);
+  const { host, style } = useAnchoredPanel(rootRef, open);
   const [query, setQuery] = React.useState("");
 
   // Same rule as SearchSelect: if there is a search box, it takes focus as the
@@ -189,15 +218,14 @@ export function MultiSelect<T extends string | number>({
   }, [open, searchable]);
 
   const term = searchable ? query.trim().toLowerCase() : "";
-  const matched = term
-    ? options.filter((option) =>
-        [
-          typeof option.label === "string" ? option.label : "",
-          option.hint ?? "",
-          option.keywords ?? "",
-        ].some((field) => field.toLowerCase().includes(term)),
-      )
-    : options;
+  // Every token, anywhere across the fields, best match first — see
+  // `lib/optionSearch`. This was one contiguous `includes` against a single
+  // field, so "canola 1" could not find "JIVO CANOLA OIL 1 LTR".
+  const matched = rankOptions(options, term, (option) => [
+    typeof option.label === "string" ? option.label : "",
+    option.hint,
+    option.keywords,
+  ]);
   const shown = maxShown !== undefined ? matched.slice(0, maxShown) : matched;
   const hidden = matched.length - shown.length;
 
@@ -232,7 +260,7 @@ export function MultiSelect<T extends string | number>({
     onChange(value.includes(option) ? value.filter((v) => v !== option) : [...value, option]);
 
   return (
-    <div ref={rootRef} className={rootClass(className)}>
+    <div ref={rootRef} data-dropdown-root className={rootClass(className)}>
       <button
         id={id}
         type="button"
@@ -250,75 +278,87 @@ export function MultiSelect<T extends string | number>({
         />
       </button>
 
-      {open ? (
-        <div className={panelClass}>
-          {searchable ? (
-            <div className="relative border-b border-line p-1.5">
-              <HiOutlineMagnifyingGlass
-                aria-hidden="true"
-                className="pointer-events-none absolute left-4 top-1/2 size-3.5 -translate-y-1/2 text-subtle"
-              />
-              <input
-                ref={searchRef}
-                type="search"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder={searchPlaceholder}
-                aria-label={searchPlaceholder}
-                className="h-control-xs w-full rounded-sm border border-line bg-surface pl-8 pr-2.5 text-[12.5px] text-ink [font-family:inherit] placeholder:text-subtle focus-visible:border-brand focus-visible:bg-card focus-visible:outline-none focus-visible:shadow-focus"
-              />
-            </div>
-          ) : null}
-          <div role="group" className="max-h-64 overflow-y-auto p-1">
-            {selectAll && matched.length > 1 ? (
-              <label className="flex cursor-pointer items-center gap-2.5 rounded-sm border-b border-line px-2.5 py-2 text-[12.5px] font-semibold text-ink hover:bg-surface">
-                <input
-                  type="checkbox"
-                  className="size-3.5 accent-brand"
-                  checked={allMatchedChosen}
-                  onChange={toggleAllMatched}
-                />
-                {term ? `Select all ${matched.length} matches` : "Select all"}
-              </label>
-            ) : null}
-            {shown.length === 0 ? (
-              <p className="m-0 px-2.5 py-3 text-center text-[12px] text-subtle">
-                {term ? "No matches" : emptyText}
-              </p>
-            ) : (
-              shown.map((option) => (
-                <label
-                  key={String(option.value)}
-                  className="flex cursor-pointer items-center gap-2.5 rounded-sm px-2.5 py-1.5 text-[12.5px] text-body hover:bg-surface"
-                >
-                  <input
-                    type="checkbox"
-                    className="size-3.5 shrink-0 accent-brand"
-                    checked={value.includes(option.value)}
-                    onChange={() => toggle(option.value)}
+      {open && host
+        ? ReactDOM.createPortal(
+            <div
+              ref={panelRef}
+              data-slot="dropdown-panel"
+              className={cn(panelClass, "flex flex-col")}
+              style={style}
+            >
+              {searchable ? (
+                <div className="relative shrink-0 p-1.5">
+                  <HiOutlineMagnifyingGlass
+                    aria-hidden="true"
+                    className="pointer-events-none absolute left-4 top-1/2 size-3.5 -translate-y-1/2 text-subtle"
                   />
-                  <span className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate">{option.label}</span>
-                    {option.hint ? (
-                      <span className="truncate text-[11px] text-subtle">{option.hint}</span>
-                    ) : null}
-                  </span>
-                  {option.meta !== undefined ? (
-                    <span className="shrink-0 text-[11.5px] tabular-nums text-subtle">
-                      {option.meta}
-                    </span>
-                  ) : null}
-                </label>
-              ))
-            )}
-            {hidden > 0 ? (
-              <p className="m-0 border-t border-line px-2.5 py-2 text-center text-[11.5px] text-subtle">
-                {hidden} more — type to narrow the list
-              </p>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
+                  {/* Borderless on a tinted ground: one box inside another box
+                      was most of what made this panel look heavy. */}
+                  <input
+                    ref={searchRef}
+                    type="search"
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    placeholder={searchPlaceholder}
+                    aria-label={searchPlaceholder}
+                    className="h-control-xs w-full rounded-sm border-0 bg-surface pl-8 pr-2.5 text-[12.5px] text-ink [font-family:inherit] placeholder:text-subtle focus-visible:bg-surface-strong focus-visible:outline-none"
+                  />
+                </div>
+              ) : null}
+              <div role="group" className="min-h-0 flex-1 overflow-y-auto p-1">
+                {selectAll && matched.length > 1 ? (
+                  <label className="flex cursor-pointer items-center gap-2.5 rounded-sm px-2.5 py-1.5 text-[12.5px] font-semibold text-ink hover:bg-surface">
+                    <input
+                      type="checkbox"
+                      className="size-3.5 accent-brand"
+                      checked={allMatchedChosen}
+                      onChange={toggleAllMatched}
+                    />
+                    {term ? `Select all ${matched.length} matches` : "Select all"}
+                  </label>
+                ) : null}
+                {shown.length === 0 ? (
+                  <p className="m-0 px-2.5 py-3 text-center text-[12px] text-subtle">
+                    {term ? "No matches" : emptyText}
+                  </p>
+                ) : (
+                  shown.map((option) => (
+                    <label
+                      key={String(option.value)}
+                      className="flex cursor-pointer items-center gap-2.5 rounded-sm px-2.5 py-1.5 text-[12.5px] text-body hover:bg-surface"
+                    >
+                      <input
+                        type="checkbox"
+                        className="size-3.5 shrink-0 accent-brand"
+                        checked={value.includes(option.value)}
+                        onChange={() => toggle(option.value)}
+                      />
+                      <span className="flex min-w-0 flex-1 flex-col">
+                        <span className="truncate">{option.label}</span>
+                        {option.hint ? (
+                          <span className="truncate text-[11px] text-subtle">
+                            {option.hint}
+                          </span>
+                        ) : null}
+                      </span>
+                      {option.meta !== undefined ? (
+                        <span className="shrink-0 text-[11.5px] tabular-nums text-subtle">
+                          {option.meta}
+                        </span>
+                      ) : null}
+                    </label>
+                  ))
+                )}
+                {hidden > 0 ? (
+                  <p className="m-0 px-2.5 py-2 text-center text-[11.5px] text-subtle">
+                    {hidden} more — type to narrow the list
+                  </p>
+                ) : null}
+              </div>
+            </div>,
+            host,
+          )
+        : null}
     </div>
   );
 }
@@ -367,8 +407,10 @@ export function SearchSelect<T extends string | number>({
   className?: string;
 }) {
   const rootRef = React.useRef<HTMLDivElement>(null);
+  const panelRef = React.useRef<HTMLDivElement>(null);
   const searchRef = React.useRef<HTMLInputElement>(null);
-  const [open, setOpen] = useOpenState(rootRef);
+  const [open, setOpen] = useOpenState(rootRef, panelRef);
+  const { host, style } = useAnchoredPanel(rootRef, open);
   const [query, setQuery] = React.useState("");
   const listId = React.useId();
 
@@ -381,13 +423,9 @@ export function SearchSelect<T extends string | number>({
 
   const chosen = options.find((option) => option.value === value);
   const term = query.trim().toLowerCase();
-  const matched = term
-    ? options.filter(
-        (option) =>
-          option.label.toLowerCase().includes(term) ||
-          (option.hint ?? "").toLowerCase().includes(term),
-      )
-    : options;
+  // Same matcher as MultiSelect, so the two pickers cannot disagree about what
+  // a search means. See `lib/optionSearch`.
+  const matched = rankOptions(options, term, (option) => [option.label, option.hint]);
   const shown = maxShown !== undefined ? matched.slice(0, maxShown) : matched;
   const hidden = matched.length - shown.length;
 
@@ -398,7 +436,7 @@ export function SearchSelect<T extends string | number>({
   };
 
   return (
-    <div ref={rootRef} className={rootClass(className)}>
+    <div ref={rootRef} data-dropdown-root className={rootClass(className)}>
       <button
         id={id}
         type="button"
@@ -431,9 +469,15 @@ export function SearchSelect<T extends string | number>({
         />
       </button>
 
-      {open ? (
-        <div className={panelClass}>
-          <div className="relative border-b border-line p-1.5">
+      {open && host ? (
+        ReactDOM.createPortal(
+        <div
+              ref={panelRef}
+              data-slot="dropdown-panel"
+              className={cn(panelClass, "flex flex-col")}
+              style={style}
+            >
+          <div className="relative shrink-0 p-1.5">
             <HiOutlineMagnifyingGlass
               aria-hidden="true"
               className="pointer-events-none absolute left-4 top-1/2 size-3.5 -translate-y-1/2 text-subtle"
@@ -445,10 +489,10 @@ export function SearchSelect<T extends string | number>({
               onChange={(event) => setQuery(event.target.value)}
               placeholder={searchPlaceholder}
               aria-label={searchPlaceholder}
-              className="h-control-xs w-full rounded-sm border border-line bg-surface pl-8 pr-2.5 text-[12.5px] text-ink [font-family:inherit] placeholder:text-subtle focus-visible:border-brand focus-visible:bg-card focus-visible:outline-none focus-visible:shadow-focus"
+              className="h-control-xs w-full rounded-sm border-0 bg-surface pl-8 pr-2.5 text-[12.5px] text-ink [font-family:inherit] placeholder:text-subtle focus-visible:bg-surface-strong focus-visible:outline-none"
             />
           </div>
-          <div id={listId} role="listbox" className="max-h-64 overflow-y-auto p-1">
+          <div id={listId} role="listbox" className="min-h-0 flex-1 overflow-y-auto p-1">
             {clearLabel ? (
               <button
                 type="button"
@@ -477,7 +521,7 @@ export function SearchSelect<T extends string | number>({
                     onClick={() => choose(option.value)}
                     className={cn(
                       "flex w-full appearance-none items-baseline justify-between gap-2 rounded-sm border-0 bg-transparent px-2.5 py-1.5 text-left text-[12.5px] [font-family:inherit] cursor-pointer hover:bg-surface",
-                      selected ? "bg-brand-soft font-semibold text-brand" : "text-body",
+                      selected ? "font-semibold text-brand" : "text-body",
                     )}
                   >
                     <span className="min-w-0 truncate">{option.label}</span>
@@ -489,12 +533,14 @@ export function SearchSelect<T extends string | number>({
               })
             )}
             {hidden > 0 ? (
-              <p className="m-0 border-t border-line px-2.5 py-2 text-center text-[11.5px] text-subtle">
+              <p className="m-0 px-2.5 py-2 text-center text-[11.5px] text-subtle">
                 {hidden} more — type to narrow the list
               </p>
             ) : null}
           </div>
-        </div>
+        </div>,
+        host,
+        )
       ) : null}
     </div>
   );

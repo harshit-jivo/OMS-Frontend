@@ -380,6 +380,16 @@ export interface Order {
   bill_to_address: string;
   ship_to_id?: number;
   ship_to_address: string;
+  /**
+   * The street behind each address NAME, resolved by the detail serializer
+   * from `bill_to_id` / `ship_to_id` against `sap_party_addresses`.
+   *
+   * Only the DETAIL endpoint sends these; the list serializers do not, which
+   * is why they are optional. Null when the order carries no address id (every
+   * order placed before the picker existed) or when the id no longer resolves.
+   */
+  bill_to_full_address?: string | null;
+  ship_to_full_address?: string | null;
   dispatch_from_id?: number;
   dispatch_from_name?: string;
   po_number: string;

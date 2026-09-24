@@ -43,6 +43,8 @@ import "./styles/AppShell.css";
 import "./styles/UIConsistency.css";
 const Party_Assignment = lazy(() => import("./pages/Party_Assignment"));
 const Party_Product_Assignment = lazy(() => import("./pages/Party_Product_Assignment"));
+const Bulk_Product_Assignment = lazy(() => import("./pages/Bulk_Product_Assignment"));
+const Product_Rates = lazy(() => import("./pages/Product_Rates"));
 const Add_Scheme = lazy(() => import("./pages/Add_Scheme"));
 const Scheme_Manager = lazy(() => import("./pages/Scheme_Manager"));
 const Combo_Mapping = lazy(() => import("./pages/Combo_Mapping"));
@@ -388,6 +390,23 @@ function App() {
           }
         />
 
+        <Route
+          path="/Bulk_Product_Assignment"
+          element={
+            <ProtectedPage>
+              <Bulk_Product_Assignment />
+            </ProtectedPage>
+          }
+        />
+
+        <Route
+          path="/Product_Rates"
+          element={
+            <ProtectedPage>
+              <Product_Rates />
+            </ProtectedPage>
+          }
+        />
 
         <Route
           path="/Add_Scheme"

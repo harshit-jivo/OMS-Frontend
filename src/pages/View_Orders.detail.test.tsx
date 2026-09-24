@@ -41,6 +41,10 @@ const { ORDER, ORDERS, STATUSES, PARTIES } = vi.hoisted(() => {
     is_foc: false,
     quotation_cancelled: false,
     items_count: 2,
+    bill_to_address: "Head Office",
+    bill_to_full_address: "12 Mall Road, Ludhiana, Punjab 141001",
+    ship_to_address: "Main Warehouse",
+    ship_to_full_address: "Plot 9, Focal Point, Ludhiana, Punjab 141010",
     vareity_cost: { commodity_price: 120, other_total: 0, premium_total: 30 },
     items: [
       {
@@ -227,5 +231,49 @@ describe("View Orders — detail", () => {
         screen.getByRole("heading", { level: 1, name: "View Orders" }),
       ).toBeInTheDocument(),
     );
+  });
+});
+
+/**
+ * Where the order bills and ships to.
+ *
+ * The order row stores only the address NAME, because the sales form saves
+ * `address_name or full_address` — so "Head Office" was the whole of what any
+ * screen could show, and it tells nobody where the goods go. The detail
+ * serializer resolves the street from the saved address id; this is what the
+ * reader is meant to see of it.
+ */
+describe("View Orders detail — addresses", () => {
+  it("shows each address name with its street underneath", async () => {
+    await openDetail();
+
+    expect(screen.getByText("Bill to")).toBeInTheDocument();
+    expect(screen.getByText("Head Office")).toBeInTheDocument();
+    expect(
+      screen.getByText("12 Mall Road, Ludhiana, Punjab 141001"),
+    ).toBeInTheDocument();
+
+    expect(screen.getByText("Ship to")).toBeInTheDocument();
+    expect(screen.getByText("Main Warehouse")).toBeInTheDocument();
+    expect(
+      screen.getByText("Plot 9, Focal Point, Ludhiana, Punjab 141010"),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps the name when no street resolved", async () => {
+    // Every order placed before the address picker existed has `bill_to_id`
+    // 0, so the serializer sends null. The name must still be drawn.
+    vi.spyOn(ordersService, "getOrderDetails").mockResolvedValue({
+      ...ORDER,
+      bill_to_full_address: null,
+      ship_to_full_address: null,
+    } as never);
+
+    await openDetail();
+
+    expect(screen.getByText("Head Office")).toBeInTheDocument();
+    expect(
+      screen.queryByText("12 Mall Road, Ludhiana, Punjab 141001"),
+    ).not.toBeInTheDocument();
   });
 });
