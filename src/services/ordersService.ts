@@ -992,9 +992,11 @@ export const ordersService = {
     return Array.isArray(response.data) ? response.data.map(normalizeOrder) : response.data;
   },
 
-  getBranches: async () => {
-    const response = await api.get("/orders/branch/"
-    );
+  /** Dispatch branches; pass the order's category — BPLIds are per company DB. */
+  getBranches: async (category?: string) => {
+    const response = await api.get("/orders/branch/", {
+      params: category ? { category } : undefined,
+    });
     return response.data;
   },
 

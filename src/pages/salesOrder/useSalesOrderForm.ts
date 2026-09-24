@@ -400,7 +400,6 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
   // Use Effects
   useEffect(() => {
     fetchPartyName();
-    fetchBranch();
     fetchProducts();
     fetchCompany();
     fetchCurrentUserProfile();
@@ -437,6 +436,34 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
     return () => {
       cancelled = true;
     };
+  }, [warehouseBranch]);
+
+  // Dispatch branches come from the same company DB as the order: a BPLId is
+  // only valid in its own DB, and SAP rejects a foreign one ("Specify an
+  // active branch"). A choice made under another category is dropped so the
+  // default below re-picks from the right list.
+  useEffect(() => {
+    let cancelled = false;
+    ordersService
+      .getBranches(warehouseBranch)
+      .then((rows: BranchOption[]) => {
+        if (cancelled) return;
+        setBranch(rows);
+        if (isLoadingFromOrder) return;
+        setFormData((prev) =>
+          prev.dispatch && !rows.some((d) => String(d.bpl_id) === prev.dispatch)
+            ? { ...prev, dispatch: "" }
+            : prev,
+        );
+      })
+      .catch((error) => {
+        console.log("Error fetching dispatch data:", error);
+        if (!cancelled) setBranch([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [warehouseBranch]);
 
   /*
@@ -597,15 +624,6 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
       setParties(data);
     } catch (error) {
       console.log("Error fetching parties name:", error);
-    }
-  };
-
-  const fetchBranch = async () => {
-    try {
-      const data = await ordersService.getBranches();
-      setBranch(data);
-    } catch (error) {
-      console.log("Error fetching dispatch data:", error);
     }
   };
 
