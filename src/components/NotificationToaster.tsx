@@ -33,30 +33,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { AUTO_DISMISS_MS, dismissToast, subscribeToToasts } from "@/lib/toastStore";
-import type { ToastData, ToastTone } from "@/lib/toastStore";
-import { cn } from "@/lib/utils";
-
-/**
- * Colour, icon and left edge per tone.
- *
- * The accent is a 3px left border rather than a tinted card: a fully green
- * panel sitting over the page is louder than a confirmation needs to be, and
- * at four stacked toasts it becomes the brightest thing on screen. The border
- * plus the chip is enough to read green-or-red from across the desk, which is
- * the whole requirement.
- */
-const TONES: Record<ToastTone, { edge: string; chip: string; Icon: typeof HiOutlineBell }> = {
-  ok: {
-    edge: "border-l-[3px] border-l-ok",
-    chip: "bg-ok-soft text-ok",
-    Icon: HiOutlineCheckCircle,
-  },
-  bad: {
-    edge: "border-l-[3px] border-l-bad",
-    chip: "bg-bad-soft text-bad",
-    Icon: HiOutlineXCircle,
-  },
-};
+import type { ToastData } from "@/lib/toastStore";
 
 function ToastCard({ toast }: { toast: ToastData }) {
   useEffect(() => {
@@ -64,27 +41,37 @@ function ToastCard({ toast }: { toast: ToastData }) {
     return () => clearTimeout(timer);
   }, [toast.id]);
 
-  const tone = toast.tone ? TONES[toast.tone] : null;
-  const Icon = tone?.Icon ?? HiOutlineBell;
+  const success = toast.tone === "success" || toast.tone === "ok";
+  const error = toast.tone === "error" || toast.tone === "bad";
+
+  const cardTone = success
+    ? "border-green-300 bg-green-50 dark:bg-green-950/30"
+    : error
+      ? "border-red-300 bg-red-50 dark:bg-red-950/30"
+      : "border-line bg-card";
+  const iconTone = success
+    ? "bg-green-100 text-green-600 dark:bg-green-900/50"
+    : error
+      ? "bg-red-100 text-red-600 dark:bg-red-900/50"
+      : "bg-brand-soft text-brand";
 
   return (
     <div
       data-slot="toast"
-      data-tone={toast.tone}
-      className={cn(
-        "pointer-events-auto flex w-[min(92vw,360px)] gap-2.5 rounded-card border border-line",
-        "bg-card p-3 shadow-panel motion-safe:animate-[oms-fade-slide-up_0.18s_ease-out]",
-        tone?.edge,
-      )}
+      data-tone={toast.tone ?? "default"}
+      className={
+        "pointer-events-auto flex w-[min(92vw,360px)] gap-2.5 rounded-card border p-3 " +
+        "shadow-panel motion-safe:animate-[oms-fade-slide-up_0.18s_ease-out] " +
+        cardTone
+      }
     >
       <span
         aria-hidden="true"
-        className={cn(
-          "mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full",
-          tone?.chip ?? "bg-brand-soft text-brand",
-        )}
+        className={
+          "mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full " + iconTone
+        }
       >
-        <Icon />
+        {success ? <HiOutlineCheckCircle /> : error ? <HiOutlineXCircle /> : <HiOutlineBell />}
       </span>
 
       <div className="min-w-0 flex-1">

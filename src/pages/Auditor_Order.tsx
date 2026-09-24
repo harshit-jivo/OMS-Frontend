@@ -11,6 +11,7 @@ import {
   HiOutlineInbox,
   HiOutlineXCircle,
   HiOutlineXMark,
+  HiOutlineMapPin,
 } from "react-icons/hi2";
 
 import {
@@ -613,7 +614,7 @@ export default function Auditor_orders() {
                     exists for keeps a filled button; everything else is
                     available without competing for the eye. */}
                 <Button variant="ghost" onClick={() => handleTrack(orderDetails)}>
-                  <HiOutlineArrowPath aria-hidden="true" /> Track
+                  <HiOutlineMapPin aria-hidden="true" /> Track
                 </Button>
                 <Button variant="ghost" onClick={() => downloadExcel(orderDetails)}>
                   <HiOutlineArrowDownTray aria-hidden="true" /> Export Excel

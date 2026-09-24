@@ -168,7 +168,7 @@ export default function Add_Scheme() {
     });
     // The form is above the list; bring it back into view. `body` is the
     // scroll box in this app (see DESIGN_SYSTEM.md §1.6), not the window.
-    document.body.scrollTo({ top: 0, behavior: "smooth" });
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const cancelEdit = () => {

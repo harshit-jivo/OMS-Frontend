@@ -196,6 +196,12 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
     roles: ["distributor"],
   },
   "/Mart_Approval": { permissions: ["Mart_Approval"], roles: ["mart_approval"] },
+  "/Mart_Edit_Order": { permissions: ["Mart_Approval"], roles: ["mart_approval"] },
+  // Cancelling a completed Mart order (and reversing it in SAP) is gated by the
+  // dedicated `orders.mart.cancel` key — the heavier authority — with the
+  // mart_approval role as the transitional fallback (mirrors the backend
+  // `_can_cancel_mart` gate and the users/0037 role grant).
+  "/Mart_Cancel": { permissions: ["orders.mart.cancel"], roles: ["mart_approval"] },
   "/Payments_Dashboard": { permissions: ["Payments_Dashboard"] },
 
   // --- Document tracker ---------------------------------------------------
@@ -256,6 +262,14 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   "/Rate_Approver_orders": { roles: RATE_APPROVER_ROLES },
   "/Rate_Approver_status_tracking": { roles: RATE_APPROVER_ROLES },
   "/Order_Tracking": { roles: BILLING_OR_MANAGER },
+  // Its OWN key, not `orders.sales.view_all`.
+  //
+  // It was gated on that one, since it already meant "see every order". But
+  // `_get_base_orders` reads the same key, so granting it to open this page
+  // also unscoped the holder's queue, tracker and dashboards — a BEVERAGES
+  // billing user started seeing OIL orders everywhere. The page narrows to the
+  // holder's own categories server-side; see `_master_orders_for`.
+  "/Order_Master": { permissions: ["orders.master.view"] },
   "/Invoice_Report": { permissions: ["invoices.report.view"], roles: ["billing"] },
 
   // --- Reports ------------------------------------------------------------
@@ -263,7 +277,16 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   "/PersonWise_Report": REPORTS,
   "/Sales_Report": REPORTS,
   "/StateWise_Report": REPORTS,
-  "/Inventory_Report": REPORTS,
+  // Split out of the shared REPORTS gate onto its own key so it can be granted
+  // independently of the sales reports (e.g. to a mart_approval user). The
+  // `billing` role is kept as a fallback so billing keeps the page without
+  // needing the new key; every non-billing holder of `Reports` is back-granted
+  // `Inventory_Report` by users/0036 so nobody loses the page on deploy.
+  "/Inventory_Report": { permissions: ["Inventory_Report"], roles: ["billing"] },
+  // A brand-new report gated purely by its own per-user grant — no role
+  // fallback, so access is exactly "who was given the key" (plus admins, who
+  // pass every key). Nobody held it before, so no back-grant migration.
+  "/Distributor_Report": { permissions: ["Distributor_Report"] },
   "/SO_Invoice_Report": REPORTS,
 
   // --- No sidebar link, and nothing navigates here ------------------------

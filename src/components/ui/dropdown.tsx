@@ -33,6 +33,7 @@
  * every copy was leaking into its component alongside three refs.
  */
 import * as React from "react";
+import { createPortal } from "react-dom";
 import { HiOutlineChevronDown, HiOutlineMagnifyingGlass } from "react-icons/hi2";
 
 import { cn } from "@/lib/utils";
@@ -48,14 +49,21 @@ type Size = "xs" | "md";
  * `rootClass` — because the panel is positioned and sized against the root,
  * not against the trigger.
  */
-function triggerClass(size: Size, open: boolean) {
+function triggerClass(size: Size, open: boolean, multiline = false) {
   return cn(
     "appearance-none [font-family:inherit] cursor-pointer text-left",
-    "flex w-full min-w-0 items-center justify-between gap-2 rounded-sm border",
+    "flex w-full min-w-0 justify-between gap-2 rounded-sm border",
     "border-line bg-surface text-ink transition-colors hover:border-line-strong",
     "focus-visible:outline-none focus-visible:border-brand focus-visible:bg-card focus-visible:shadow-focus",
     "disabled:cursor-not-allowed disabled:bg-surface-strong disabled:text-subtle",
-    size === "xs" ? "h-control-xs px-2.5 text-[12.5px]" : "h-control px-3 text-[13px]",
+    // Multiline grows with its content (a long address wraps instead of
+    // truncating); the fixed-height forms stay single-line.
+    multiline
+      ? "min-h-control items-start px-3 py-2 text-[13px]"
+      : cn(
+          "items-center",
+          size === "xs" ? "h-control-xs px-2.5 text-[12.5px]" : "h-control px-3 text-[13px]",
+        ),
     open && "border-brand bg-card",
   );
 }
@@ -90,16 +98,44 @@ const panelClass =
   "absolute left-0 top-[calc(100%+4px)] z-30 w-full min-w-full overflow-hidden rounded-card border border-line bg-card shadow-panel";
 
 /**
+ * The same panel, for the portaled variant: it lives on <body> and is
+ * positioned `fixed` from JS (left/top/width come from the trigger's rect), so
+ * it carries no absolute-position or width utilities — only the surface. A high
+ * z-index so it clears sticky table headers and other in-page stacking; still
+ * below the toast region (z-[2000]).
+ *
+ * The explicit `text-[12.5px]` matters: the panel is portaled to <body>, and
+ * the unlayered `button,input { font: inherit }` reset (src/index.css) makes
+ * every option button inherit its font size from an ANCESTOR rather than obey a
+ * utility class on itself. On <body> that ancestor is :root (~18px), so without
+ * a size on this container the options render oversized. Setting it here — on a
+ * <div>, which the reset does not touch — gives the buttons something correct
+ * to inherit. A call site's `textClassName` is merged after and can override.
+ */
+const portalPanelClass =
+  "z-[1000] overflow-hidden rounded-card border border-line bg-card text-[12.5px] shadow-panel";
+
+/**
  * Open/close, with the two ways out. One hook for both pickers, so they
  * cannot disagree about what "outside" means.
  */
-function useOpenState(rootRef: React.RefObject<HTMLDivElement | null>) {
+function useOpenState(
+  rootRef: React.RefObject<HTMLDivElement | null>,
+  // A second element that also counts as "inside" — used when the panel is
+  // portaled to <body> and so is NOT a DOM descendant of the root. Without it,
+  // a pointer-down on a portaled option reads as "outside" and closes the panel
+  // before the option's click fires, so nothing can be selected.
+  extraRef?: React.RefObject<HTMLElement | null>,
+) {
   const [open, setOpen] = React.useState(false);
 
   React.useEffect(() => {
     if (!open) return;
     const onPointerDown = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+      const target = event.target as Node;
+      if (rootRef.current?.contains(target)) return;
+      if (extraRef?.current?.contains(target)) return;
+      setOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
@@ -113,7 +149,7 @@ function useOpenState(rootRef: React.RefObject<HTMLDivElement | null>) {
       document.removeEventListener("mousedown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [open, rootRef]);
+  }, [open, rootRef, extraRef]);
 
   return [open, setOpen] as const;
 }
@@ -371,6 +407,9 @@ export function SearchSelect<T extends string | number>({
   disabled = false,
   size = "md",
   className,
+  portal = false,
+  multiline = false,
+  textClassName,
 }: {
   id?: string;
   /** `""` is "nothing chosen". */
@@ -383,6 +422,18 @@ export function SearchSelect<T extends string | number>({
   clearLabel?: string;
   emptyText?: string;
   /**
+   * Let the trigger WRAP its chosen label over multiple lines instead of
+   * truncating it — for values too long to read at the control's width, e.g. a
+   * full postal address. The trigger grows to fit.
+   */
+  multiline?: boolean;
+  /**
+   * Font-size (or any text utility) for the search box and the option rows.
+   * A caller can enlarge or shrink the list without touching this component's
+   * defaults; `tailwind-merge` lets the passed class win over them.
+   */
+  textClassName?: string;
+  /**
    * Rows rendered at once. The SAP item catalogue runs to thousands of
    * products, and mounting all of them made the Scheme Manager's picker
    * unusable — it capped at 80 and said so. Omit for lists that fit.
@@ -391,12 +442,50 @@ export function SearchSelect<T extends string | number>({
   disabled?: boolean;
   size?: Size;
   className?: string;
+  /**
+   * Render the panel in a portal on <body>, positioned `fixed` against the
+   * trigger. For call sites inside a scroll container (an overflow-y table),
+   * where the normal absolutely-positioned panel would be clipped by the
+   * container. Off by default — it costs a getBoundingClientRect on open and a
+   * scroll/resize listener while open, which a panel that fits in-flow does not
+   * need.
+   */
+  portal?: boolean;
 }) {
   const rootRef = React.useRef<HTMLDivElement>(null);
+  const panelRef = React.useRef<HTMLDivElement>(null);
   const searchRef = React.useRef<HTMLInputElement>(null);
-  const [open, setOpen] = useOpenState(rootRef);
+  const [open, setOpen] = useOpenState(rootRef, panelRef);
   const [query, setQuery] = React.useState("");
   const listId = React.useId();
+
+  // Fixed-position box for the portaled panel, tracked against the trigger.
+  const [panelBox, setPanelBox] = React.useState<{
+    left: number;
+    top: number;
+    width: number;
+  } | null>(null);
+
+  React.useLayoutEffect(() => {
+    if (!open || !portal) return;
+    const update = () => {
+      const trigger = rootRef.current?.querySelector<HTMLElement>(
+        "[data-dropdown-trigger]",
+      );
+      if (!trigger) return;
+      const r = trigger.getBoundingClientRect();
+      setPanelBox({ left: r.left, top: r.bottom + 4, width: r.width });
+    };
+    update();
+    // `true` = capture, so a scroll on ANY ancestor (the table's own scroll
+    // container included) keeps the panel pinned to the trigger.
+    window.addEventListener("scroll", update, true);
+    window.addEventListener("resize", update);
+    return () => {
+      window.removeEventListener("scroll", update, true);
+      window.removeEventListener("resize", update);
+    };
+  }, [open, portal]);
 
   // The search box takes focus as the panel opens: the whole reason this is
   // not a native select is that the list needs typing into.
@@ -434,15 +523,25 @@ export function SearchSelect<T extends string | number>({
         aria-controls={open ? listId : undefined}
         disabled={disabled}
         onClick={() => setOpen((current) => !current)}
-        className={triggerClass(size, open)}
+        className={triggerClass(size, open, multiline)}
       >
         {chosen ? (
-          <span className="flex min-w-0 items-baseline gap-1.5">
-            <span className="truncate">{chosen.label}</span>
-            {chosen.hint ? (
-              <span className="shrink-0 text-[11px] text-subtle">{chosen.hint}</span>
-            ) : null}
-          </span>
+          multiline ? (
+            // Stacked and wrapping — the whole value stays readable.
+            <span className="flex min-w-0 flex-col gap-0.5 whitespace-normal break-words">
+              <span className="font-medium">{chosen.label}</span>
+              {chosen.hint ? (
+                <span className="text-[11.5px] text-subtle">{chosen.hint}</span>
+              ) : null}
+            </span>
+          ) : (
+            <span className="flex min-w-0 items-baseline gap-1.5">
+              <span className="truncate">{chosen.label}</span>
+              {chosen.hint ? (
+                <span className="shrink-0 text-[11px] text-subtle">{chosen.hint}</span>
+              ) : null}
+            </span>
+          )
         ) : value !== "" ? (
           // A value the list does not know — a product code no longer in the
           // catalogue. Showing the code is more useful than pretending nothing
@@ -453,12 +552,36 @@ export function SearchSelect<T extends string | number>({
         )}
         <HiOutlineChevronDown
           aria-hidden="true"
-          className={cn("size-3.5 shrink-0 text-subtle transition-transform", open && "rotate-180")}
+          className={cn(
+            "size-3.5 shrink-0 text-subtle transition-transform",
+            multiline && "mt-0.5",
+            open && "rotate-180",
+          )}
         />
       </button>
 
-      {open ? (
-        <div className={panelClass}>
+      {open
+        ? (() => {
+            const node = (
+        <div
+          ref={panelRef}
+          // `textClassName` goes on the CONTAINER, not the option buttons: the
+          // unlayered `button { font: inherit }` reset overrides a utility class
+          // on a button, so the size has to be inherited from this div.
+          className={cn(portal ? portalPanelClass : panelClass, textClassName)}
+          // Portaled panels are `fixed` and sized to the trigger; in-flow
+          // panels keep their CSS-driven position (see panelClass).
+          style={
+            portal && panelBox
+              ? {
+                  position: "fixed",
+                  left: panelBox.left,
+                  top: panelBox.top,
+                  width: panelBox.width,
+                }
+              : undefined
+          }
+        >
           <div className="relative border-b border-line p-1.5">
             <HiOutlineMagnifyingGlass
               aria-hidden="true"
@@ -471,7 +594,10 @@ export function SearchSelect<T extends string | number>({
               onChange={(event) => setQuery(event.target.value)}
               placeholder={searchPlaceholder}
               aria-label={searchPlaceholder}
-              className="h-control-xs w-full rounded-sm border border-line bg-surface pl-8 pr-2.5 text-[12.5px] text-ink [font-family:inherit] placeholder:text-subtle focus-visible:border-brand focus-visible:bg-card focus-visible:outline-none focus-visible:shadow-focus"
+              className={cn(
+                "h-control-xs w-full rounded-sm border border-line bg-surface pl-8 pr-2.5 text-[12.5px] text-ink [font-family:inherit] placeholder:text-subtle focus-visible:border-brand focus-visible:bg-card focus-visible:outline-none focus-visible:shadow-focus",
+                textClassName,
+              )}
             />
           </div>
           <div id={listId} role="listbox" className="max-h-64 overflow-y-auto p-1">
@@ -502,14 +628,36 @@ export function SearchSelect<T extends string | number>({
                     aria-selected={selected}
                     onClick={() => choose(option.value)}
                     className={cn(
-                      "flex w-full appearance-none items-baseline justify-between gap-2 rounded-sm border-0 bg-transparent px-2.5 py-1.5 text-left text-[12.5px] [font-family:inherit] cursor-pointer hover:bg-surface",
+                      "flex w-full appearance-none rounded-sm border-0 bg-transparent px-2.5 py-1.5 text-left text-[12.5px] [font-family:inherit] cursor-pointer hover:bg-surface",
+                      // Multiline stacks label over hint and wraps both, so a
+                      // long value (a full address) reads as a paragraph and the
+                      // next option starts on its own line — no sideways scroll.
+                      multiline
+                        ? "flex-col gap-0.5 items-start"
+                        : "items-baseline justify-between gap-2",
                       selected ? "bg-brand-soft font-semibold text-brand" : "text-body",
+                      textClassName,
                     )}
                   >
-                    <span className="min-w-0 truncate">{option.label}</span>
-                    {option.hint ? (
-                      <span className="shrink-0 text-[11px] text-subtle">{option.hint}</span>
-                    ) : null}
+                    {multiline ? (
+                      <>
+                        <span className="whitespace-normal break-words font-medium">
+                          {option.label}
+                        </span>
+                        {option.hint ? (
+                          <span className="whitespace-normal break-words text-[11.5px] text-subtle">
+                            {option.hint}
+                          </span>
+                        ) : null}
+                      </>
+                    ) : (
+                      <>
+                        <span className="min-w-0 truncate">{option.label}</span>
+                        {option.hint ? (
+                          <span className="shrink-0 text-[11px] text-subtle">{option.hint}</span>
+                        ) : null}
+                      </>
+                    )}
                   </button>
                 );
               })
@@ -521,7 +669,12 @@ export function SearchSelect<T extends string | number>({
             ) : null}
           </div>
         </div>
-      ) : null}
+            );
+            // Portaled to <body> so a scroll container the trigger sits in
+            // cannot clip it; otherwise rendered in place.
+            return portal ? createPortal(node, document.body) : node;
+          })()
+        : null}
     </div>
   );
 }

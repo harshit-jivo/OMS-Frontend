@@ -17,9 +17,9 @@
  * destructure what they need, and `SalesOrderForm` is its inferred type, so a
  * value added here needs no second declaration to reach a consumer.
  *
- * `useWizard` is decided from `location.state` and never changes for the life
- * of a mount, which is what makes one hook safe for both forms: only ever one
- * of them is rendered against it.
+ * There is one form. `OrderWizard` / `LegacyOrderForm` were the same job done
+ * twice — this hook fed both, and `useWizard` chose between them from
+ * `location.state`. Every mode now renders the single-page `OrderForm`.
  */
 import { useState, useEffect, useRef } from "react";
 import { useFieldArray, useForm } from "react-hook-form";
@@ -27,6 +27,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 
 import { getCurrentUser } from "@/services/authService";
 import { ordersService } from "@/services/ordersService";
+import { sapService } from "@/services/sapService";
 import type {
   CreateOrder,
   Order,
@@ -52,7 +53,6 @@ import { NO_PROBLEMS, hasProblems, orderProblems } from "./orderProblems";
 import {
   FOC_TOKEN_BASIC_PRICE,
   applyFocPricingToRow,
-  computeLandingPrice,
   recalculateRowTotals as recalculateRowTotalsFor,
 } from "./rowTotals";
 
@@ -95,6 +95,28 @@ type AddressOption = {
   address_id?: string | number | null;
   address_name?: string | null;
   full_address?: string | null;
+};
+
+/**
+ * The street to print under an address label, or "" when there is nothing to
+ * add.
+ *
+ * The label an address is shown by is `address_name || full_address ||
+ * address_id`, so for an address with NO name the label already IS the street
+ * — repeating it underneath would be the same line twice in two sizes. Some
+ * CRD1 rows also carry the street as the Address name itself, which is the
+ * same case arriving by a different route.
+ */
+export const addressStreet = (address?: {
+  address_name?: string | null;
+  full_address?: string | null;
+}) => {
+  const street = String(address?.full_address ?? "").trim();
+  const name = String(address?.address_name ?? "").trim();
+  // No name means the label FELL BACK to the street, so there is nothing left
+  // to add under it.
+  if (!street || !name) return "";
+  return street === name ? "" : street;
 };
 
 const normalizeOptionText = (value: unknown) =>
@@ -204,6 +226,10 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
   const [companyDropdownOpen, setCompanyDropdownOpen] = useState(false);
   const [openRowDropdown, setOpenRowDropdown] = useState<string | null>(null);
   const [branch, setBranch] = useState<BranchOption[]>([]);
+  // The warehouses HANA lists for the order's category, and the default the
+  // server reads from its environment per category (`/orders/defaults/`).
+  const [warehouses, setWarehouses] = useState<{ code: string; name: string }[]>([]);
+  const [defaultWarehouses, setDefaultWarehouses] = useState<Record<string, string>>({});
   const [billAddress, setBillAddress] = useState<AddressOption[]>([]);
   const [shipAddress, setShipAddress] = useState<AddressOption[]>([]);
   const [category, setCategory] = useState<string[]>([]);
@@ -255,9 +281,9 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
     poNumber: "",
     company: "",
     comment: "",
-    // Company-3 (Mart) orders pick a dispatch warehouse, sent as
-    // `warehouse_code` on submit. Defaults to GP-FGM.
-    warehouse: "GP-FGM",
+    // One warehouse for the whole order, sent as `warehouse_code`. Filled in
+    // from the server's per-category default once `/orders/defaults/` lands.
+    warehouse: "",
   });
 
   /**
@@ -355,11 +381,6 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
   // `allowPoNumber` guard is preserved so editing an existing order doesn't
   // newly expose PO where it wasn't intended.
   const canEditPoNumber = poField.enabled && (!isEditMode || locationState?.allowPoNumber === true);
-  // The guided 4-step wizard is used for both the standard create flow and the
-  // FOC create flow, so Add Sales and Add FOC share the same UI. FOC-specific
-  // behaviour (price forced to 0, no scheme panel) is handled via `isFocOrder`.
-  // Edit and Duplicate modes keep the original single-page form.
-  const useWizard = mode === "create" && !isLoadingFromOrder;
 
   // Use Effects
   useEffect(() => {
@@ -367,16 +388,54 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
     fetchProducts();
     fetchCompany();
     fetchCurrentUserProfile();
+    // Dispatch branches are offered as one flat list (no longer re-fetched per
+    // party category), so they are loaded once on mount.
+    fetchBranch();
+    ordersService
+      .getOrderDefaults()
+      .then((defaults) => setDefaultWarehouses(defaults.warehouse_code))
+      .catch((error) => console.log("Error fetching order defaults:", error));
   }, []);
 
-  // Dispatch branches belong to a business line, so they are re-fetched
-  // whenever the party's category changes rather than once on mount. Before
-  // the category is known (the profile default has not landed, no party is
-  // picked) this asks for all of them, which is the honest answer — the
-  // selector is just not narrowed yet.
+  /**
+   * The category this order ships as — the party's, else the user's own.
+   * Drives which HANA schema lists the warehouses and which env default
+   * applies. "BEVERAGE" (singular) is the HANA endpoint's spelling.
+   */
+  const orderCategory = normalizeOptionText(selectedPartyCategory || userDefaultCategory);
+  const warehouseBranch: "OIL" | "BEVERAGE" | "MART" =
+    orderCategory === "beverages" || orderCategory === "beverage"
+      ? "BEVERAGE"
+      : orderCategory === "mart"
+        ? "MART"
+        : "OIL";
+  const defaultWarehouse =
+    defaultWarehouses[
+      warehouseBranch === "BEVERAGE" ? "BEVERAGES" : warehouseBranch
+    ] || defaultWarehouses.OIL || "";
+
   useEffect(() => {
-    fetchBranch(selectedPartyCategory);
-  }, [selectedPartyCategory]);
+    let cancelled = false;
+    sapService
+      .getWarehouses(warehouseBranch)
+      .then((rows) => {
+        if (!cancelled) setWarehouses(rows);
+      })
+      .catch((error) => {
+        console.log("Error fetching warehouses:", error);
+        if (!cancelled) setWarehouses([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [warehouseBranch]);
+
+  // Start on the env default the moment it is known. A saved order keeps its
+  // own warehouse: the edit loader sets `formData.warehouse` before this runs.
+  useEffect(() => {
+    if (!defaultWarehouse || formData.warehouse) return;
+    setFormData((prev) => (prev.warehouse ? prev : { ...prev, warehouse: defaultWarehouse }));
+  }, [defaultWarehouse, formData.warehouse]);
 
   useEffect(() => {
     if (!isLoadingFromOrder) {
@@ -399,20 +458,14 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
     }
   };
 
-  // Keep `dispatch` pointing at a branch the current list actually contains.
-  //
-  // The list changes under this field when the party's category changes, and
-  // `bpl_id` is unique only within a category — id 2 is FACTORY under OIL and
-  // HARYANA under MART. So a held-over id is not a harmless stale value; it
-  // silently renames itself into a different place. Anything not in the new
-  // list is dropped and replaced with that list's first entry.
+  // Every active branch is offered; the factory is where orders ship from
+  // unless someone says otherwise, so it is the default when present.
   useEffect(() => {
-    if (isLoadingFromOrder || branch.length === 0) return;
-    const stillOffered = branch.some((d) => String(d.bpl_id) === formData.dispatch);
-    if (formData.dispatch && stillOffered) return;
+    if (isLoadingFromOrder || formData.dispatch || branch.length === 0) return;
+    const factory = branch.find((d) => normalizeOptionText(d.bpl_name).includes("factory"));
     setFormData((prev) => ({
       ...prev,
-      dispatch: String(branch[0]?.bpl_id || ""),
+      dispatch: prev.dispatch || String((factory ?? branch[0])?.bpl_id || ""),
     }));
   }, [branch, formData.dispatch, isLoadingFromOrder]);
 
@@ -674,10 +727,13 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
             qty: valueToString(item.qty),
             ltrs: valueToString(item.ltrs),
             boxes: valueToString(item.boxes),
-            // Landing is always basic + tax% (recomputed, not the stored value)
-            // so the edit side shows the same figure the create side does.
+            // Show the Price List the order was actually saved with rather than
+            // recomputing one. This line's agreed rate is a fact about the day
+            // it was placed; re-deriving it here would overwrite it on any
+            // subsequent save, and a later edit to the party's rate would
+            // silently reprice an order that had already been approved.
             basicPrice: valueToString(item.basic_price),
-            priceListBasic: computeLandingPrice(item.basic_price, item.tax_rate),
+            priceListBasic: valueToString(item.price_list_basic),
             tax: valueToString(item.tax_rate),
             amount: valueToString(item.total),
             confirmed: true,
@@ -785,9 +841,9 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
           Deliverydate: isDuplicateMode ? getDefaultDeliveryDate() : order.delivery_date || "",
           poNumber: isDuplicateMode ? "" : order.po_number || "",
           company: order.company ? String(order.company) : "",
-          // Pick the warehouse straight from the saved order; default to GP-FGM
-          // for orders placed before the picker existed.
-          warehouse: order.warehouse_code || "GP-FGM",
+          // The saved order's warehouse. Blank on orders placed before the
+          // picker existed; the default effect fills it from the env then.
+          warehouse: order.warehouse_code || "",
           comment: isDuplicateMode ? "" : order.remarks || "",
         });
         const orderStateCode = order.party_state || "";
@@ -908,7 +964,7 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
         company.find((item) => normalizeOptionText(item?.name).includes("jivo wellness"))?.id || "",
       ),
       comment: "",
-      warehouse: "GP-FGM",
+      warehouse: defaultWarehouse,
     });
 
     setSelectedPartyCategory(userDefaultCategory);
@@ -1005,9 +1061,7 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
 
       delivery_date: formData.Deliverydate,
       ...(canEditPoNumber ? { po_number: formData.poNumber.trim() } : {}),
-      // Warehouse is only chosen on Mart orders; others send "" so SAP sync
-      // falls back to the per-category default.
-      warehouse_code: isMartOrder ? formData.warehouse : "",
+      warehouse_code: formData.warehouse,
       remarks: formData.comment.trim(),
       is_foc: isFocOrder,
       company: Number(formData.company),
@@ -1162,7 +1216,7 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
         branch.find((d) => String(d.bpl_id) === String(formData.dispatch))?.bpl_name || "",
       delivery_date: formData.Deliverydate || null,
       ...(canEditPoNumber ? { po_number: formData.poNumber.trim() } : {}),
-      warehouse_code: isMartOrder ? formData.warehouse : "",
+      warehouse_code: formData.warehouse,
       remarks: formData.comment.trim(),
       is_foc: isFocOrder,
       company: Number(formData.company) || 0,
@@ -1494,8 +1548,19 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
 
   /** `rowTotals.recalculateRowTotals`, with the product and the FOC flag this
    *  form already knows filled in. */
-  const recalculateRowTotals = (row: SalesRow, source: "boxes" | "qty" | "price") =>
-    recalculateRowTotalsFor(row, source, getRowProduct(row), isFocOrder);
+  const recalculateRowTotals = (row: SalesRow, source: "boxes" | "qty" | "price") => {
+    const next = recalculateRowTotalsFor(row, source, getRowProduct(row), isFocOrder);
+    // Price List shows the item's set rate AS-IS (the party's pre-tax
+    // basic_rate), so pin it back to that instead of the tax-inclusive
+    // landing figure the shared helper recomputes on every Qty/Basic Price
+    // keystroke. (The legacy form, which kept the landing behaviour, no longer
+    // exists — this form is the wizard, so the pin always applies.)
+    if (!isFocOrder) {
+      const product = getRowProduct(row);
+      if (product?.basic_rate != null) next.priceListBasic = String(product.basic_rate);
+    }
+    return next;
+  };
 
   const handleRowChange = (
     index: number,
@@ -1540,16 +1605,22 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
         row.type = match ? `${match[1]} ${match[2].toUpperCase()}` : "Others";
         row.pcs = String(partyProduct.sal_factor2 ?? "");
         row.tax = String(getProductTaxRate(partyProduct));
-        // Basic Price = the product's basic rate (pre-tax). Landing Price is that
-        // rate plus tax. Both must fill on select — the Basic column was blank
-        // before because only Landing (priceListBasic) was being set.
+        // Both columns start from the party's AGREED RATE (pre-tax). Basic Price
+        // is then editable — that is the discount; Price List keeps the agreed
+        // rate so it stays the benchmark the line is measured against. It must
+        // NOT be derived from `row.basicPrice`: see the note in
+        // `recalculateRowTotals`.
         row.basicPrice =
           isFocOrder || partyProduct.basic_rate == null
             ? isFocOrder
               ? FOC_TOKEN_BASIC_PRICE
               : ""
             : String(partyProduct.basic_rate);
-        row.priceListBasic = isFocOrder ? "0" : computeLandingPrice(row.basicPrice, row.tax);
+        row.priceListBasic = isFocOrder
+          ? "0"
+          : partyProduct.basic_rate == null
+            ? ""
+            : String(partyProduct.basic_rate);
         void fetchSchemesForRow(row.uid, true);
       } else {
         void fetchSchemesForRow(row.uid, false);
@@ -2021,6 +2092,8 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
     Number(formData.company) === 3 ||
     (!!martCompany && String(formData.company) === String(martCompany.id)) ||
     normalizeOptionText(selectedPartyCategory) === "mart";
+  const selectedBillAddressStreet = addressStreet(selectedBillAddress);
+  const selectedShipAddressStreet = addressStreet(selectedShipAddress);
   const selectedBillAddressLabel =
     selectedBillAddress?.address_name ||
     selectedBillAddress?.full_address ||
@@ -2094,6 +2167,7 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
     openRowDropdown,
     setOpenRowDropdown,
     branch,
+    warehouses,
     billAddress,
     shipAddress,
     category,
@@ -2139,7 +2213,6 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
     isFocOrder,
     poField,
     canEditPoNumber,
-    useWizard,
     getProductType,
     fetchSchemesForRow,
     validateBeforeSave,
@@ -2193,6 +2266,9 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
     // martCompany,
     selectedBillAddressLabel,
     selectedShipAddressLabel,
+    selectedBillAddressStreet,
+    selectedShipAddressStreet,
+    addressStreet,
     selectedDispatchLabel,
     selectedCompanyLabel,
   };

@@ -122,7 +122,7 @@ export default function AssetLookup({ onEdit }: Props) {
               <HiOutlineMagnifyingGlass aria-hidden="true" /> {busy ? "Searching…" : "Look up"}
             </Button>
             <Button type="button" onClick={() => setScanning(true)} disabled={busy}>
-              <HiOutlineQrCode aria-hidden="true" /> Scan QR
+              <HiOutlineQrCode className="text-brand" aria-hidden="true" /> Scan QR
             </Button>
           </div>
         </form>
@@ -148,10 +148,10 @@ export default function AssetLookup({ onEdit }: Props) {
               </CardTitle>
               <div className="flex gap-1.5">
                 <Button size="xs" variant="ghost" onClick={() => onEdit?.(asset.asset_id)}>
-                  <HiOutlinePencilSquare aria-hidden="true" /> Edit / update config
+                  <HiOutlinePencilSquare className="text-ok" aria-hidden="true" /> Edit / update config
                 </Button>
                 <Button size="xs" onClick={() => setAction("handover")}>
-                  <HiOutlineUserPlus aria-hidden="true" /> Handover
+                  <HiOutlineUserPlus className="text-brand" aria-hidden="true" /> Handover
                 </Button>
               </div>
             </CardHeader>

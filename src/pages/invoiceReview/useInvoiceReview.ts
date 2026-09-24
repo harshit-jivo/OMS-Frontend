@@ -15,6 +15,14 @@ import { useCallback, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 
+import { isBatchOrStockError } from "../SalesInvoice/sapErrorTranslator";
+import { reallocateInvoiceBatches } from "./reallocateBatches";
+import {
+  EMPTY_INVOICE_FILTERS,
+  applyInvoiceFilters,
+  tabSupportsFilters,
+  type InvoiceFilters,
+} from "./filters";
 import { apiFetch, apiUpload, EDIT_RESTORE_STORAGE_KEY } from "../SalesInvoice/useSalesInvoice";
 import { useSapPost } from "../SalesInvoice/useSapPost";
 import { toNumber } from "../SalesInvoice/salesInvoice.utils";
@@ -31,13 +39,10 @@ import {
   normalizeStatus,
   openReport,
   parsePayload,
-  POSTED_TO_SAP_STATUS,
-  readableSapError,
-  statusAfterFailedPost,
-  STATUS_FILTERS,
   trimmed,
   updateInvoiceStatus,
   deleteInvoice,
+  visibleStatusFilters,
 } from "./helpers";
 import type {
   CreditLimitStage,
@@ -62,6 +67,13 @@ import type {
  * One shape for all five verbs so the page renders one Dialog rather than
  * five, and so a second question cannot open over the first.
  */
+/**
+ * Rows per page. 25, like `Order_Master` — the other screen that is an
+ * archive rather than a queue. The approval queues use 10, but those are
+ * short by nature and this list runs to thousands.
+ */
+export const INVOICE_PAGE_SIZE = 25;
+
 export type PendingAction = {
   kind: "approve" | "reject" | "delete" | "edit" | "post";
   record: InvoiceRecord;
@@ -70,10 +82,49 @@ export type PendingAction = {
 export type UseInvoiceReviewOptions = {
   canApproveReject: boolean;
   canPostToSap: boolean;
+  /**
+   * Per-invoice half of the approve rule: `canApproveReject` says whether this
+   * desk approves at all, this says whether THIS bill's warehouse is theirs.
+   * Decided by the caller for the same reason the two booleans above are.
+   * Defaults to "every warehouse" so a caller that has no warehouse rule to
+   * apply behaves exactly as before.
+   */
+  canApproveWarehouse?: (warehouse: string | null | undefined) => boolean;
 };
 
-export function useInvoiceReview({ canApproveReject, canPostToSap }: UseInvoiceReviewOptions) {
-  const [statusFilter, setStatusFilter] = useState<FilterKey>("PENDING");
+export function useInvoiceReview({
+  canApproveReject,
+  canPostToSap,
+  canApproveWarehouse = () => true,
+}: UseInvoiceReviewOptions) {
+  const [statusFilter, setStatusFilterState] = useState<FilterKey>("PENDING");
+  /*
+   * The archive tabs' search and filters (see `filters.ts`).
+   *
+   * Cleared BY the tab switch rather than by an effect watching it: a status
+   * chosen on "All" is hidden on "Posted to SAP", where the tab has already
+   * fixed the status — left set, it would silently keep narrowing a list whose
+   * control is no longer on screen. Wrapping the setter is also one render
+   * instead of the two an effect would cost.
+   */
+  const [filters, setFiltersState] = useState<InvoiceFilters>(EMPTY_INVOICE_FILTERS);
+  const [page, setPage] = useState(1);
+  const setStatusFilter = useCallback((next: FilterKey) => {
+    setStatusFilterState(next);
+    setFiltersState(EMPTY_INVOICE_FILTERS);
+    setPage(1);
+  }, []);
+  /*
+   * Narrowing the list sends you back to page 1.
+   *
+   * Left alone, a search run from page 5 of the archive lands on page 5 of
+   * four results — an empty table under a pager that says there is nothing
+   * wrong, which reads as "no matches" for a search that in fact found some.
+   */
+  const setFilters = useCallback((next: InvoiceFilters) => {
+    setFiltersState(next);
+    setPage(1);
+  }, []);
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<InvoiceRecord | null>(null);
   const [actionId, setActionId] = useState<InvoiceRecord["id"] | null>(null);
@@ -99,17 +150,14 @@ export function useInvoiceReview({ canApproveReject, canPostToSap }: UseInvoiceR
   // The record currently being posted to SAP, kept so a credit-limit failure can
   // offer "Raise CL" for the right invoice straight from the loader modal.
   const [postingRecord, setPostingRecord] = useState<InvoiceRecord | null>(null);
+  // The row whose batches are being re-read from SAP, so its button can say so.
+  const [recheckingId, setRecheckingId] = useState<InvoiceRecord["id"] | null>(null);
   const sapPost = useSapPost();
   const navigate = useNavigate();
 
-  // Which status tabs to show. The approver's workflow ends at the decision, so
-  // the SAP-side statuses would only ever be empty for them.
-  const visibleFilters = canApproveReject
-    ? STATUS_FILTERS.filter(
-        (f) =>
-          f.key === "PENDING" || f.key === "APPROVED" || f.key === "REJECTED" || f.key === "EDITED",
-      )
-    : STATUS_FILTERS;
+  // Every status tab, for every desk — see `visibleStatusFilters` for why the
+  // approver-only strip that used to be here was removed rather than extended.
+  const visibleFilters = visibleStatusFilters();
 
   // Tally the number of invoices per status for the tab badges. The tab list is
   // server-filtered, so `records` only ever holds the active tab; we fetch the
@@ -157,6 +205,47 @@ export function useInvoiceReview({ canApproveReject, canPostToSap }: UseInvoiceR
       );
     },
   });
+
+  /*
+   * What the table actually draws.
+   *
+   * `records` is the tab's slice as the server returned it; `visibleRecords`
+   * is that narrowed by the filter bar. The filters are applied ONLY on the
+   * tabs that show the bar, so a queue tab can never be silently narrowed by
+   * a control the reviewer cannot see.
+   */
+  const filtersEnabled = tabSupportsFilters(statusFilter);
+  const filteredRecords = useMemo(
+    () => (filtersEnabled ? applyInvoiceFilters(records, filters) : records),
+    [filtersEnabled, records, filters],
+  );
+
+  /*
+   * One page at a time.
+   *
+   * This list used to virtualize instead: it drew a moving window of a list
+   * that could be thousands long. Pagination replaces that rather than joining
+   * it — a bounded page of 25 rows has nothing to virtualize, and keeping both
+   * would be two mechanisms for one problem, with the virtualizer's document
+   * offset to keep correct for no gain.
+   *
+   * What the virtualizer was protecting is protected here instead, and the
+   * e2e case that pinned it now pins this: with a long list, the DOM stays
+   * small AND the last invoice is still reachable.
+   */
+  const pageCount = Math.max(1, Math.ceil(filteredRecords.length / INVOICE_PAGE_SIZE));
+  // Clamped rather than trusted: deleting the last row of the last page, or a
+  // refetch returning fewer rows, would otherwise leave the table blank with
+  // no clue that the fix is to go back a page.
+  const safePage = Math.min(Math.max(1, page), pageCount);
+  const visibleRecords = useMemo(
+    () =>
+      filteredRecords.slice(
+        (safePage - 1) * INVOICE_PAGE_SIZE,
+        safePage * INVOICE_PAGE_SIZE,
+      ),
+    [filteredRecords, safePage],
+  );
 
   /* The list failure. `actionError` below is a separate banner for approve /
      reject / delete failures, and the two must not overwrite each other — the
@@ -467,10 +556,9 @@ export function useInvoiceReview({ canApproveReject, canPostToSap }: UseInvoiceR
   };
 
   // Post an approved (or error/retry) invoice to SAP HANA through the Mission
-  // Control loader. The loader owns the live progress and shows any SAP error
-  // (translated, with technical details) inside itself; here we only record the
-  // outcome on the local record: POSTED_TO_SAP on success, ERROR with the
-  // readable SAP message on failure.
+  // Control loader. The server posts the payload stored on the log and records
+  // the outcome there (POSTED_TO_SAP, ERROR/CL_RAISED, or POSTING when SAP did
+  // not answer); the loader shows it, and closing the loader reloads the list.
   const handlePostToSap = (record: InvoiceRecord) => {
     if (record.id === undefined || record.id === null) {
       setActionError("This invoice has no identifier and cannot be posted.");
@@ -480,18 +568,18 @@ export function useInvoiceReview({ canApproveReject, canPostToSap }: UseInvoiceR
   };
 
   const runPostToSap = (record: InvoiceRecord) => {
-    const label = `SO #${record.so_number || record.id}`;
+    const logId = record.id;
+    if (logId === undefined || logId === null) return;
+    const label = `SO #${record.so_number || logId}`;
     setPending(null);
     setActionError("");
     setActionMessage("");
     setSelected(null);
     setPostingRecord(record);
 
-
     const payload = parsePayload(record.invoice_payload);
     sapPost.run({
-      payload,
-      branch: record.branch,
+      logId,
       doc: {
         draftNo: String(record.so_number || record.id),
         customer: record.party_name || "",
@@ -499,34 +587,12 @@ export function useInvoiceReview({ canApproveReject, canPostToSap }: UseInvoiceR
         total: toNumber(record.total_amount),
         branch: record.branch || "",
       },
-      onSuccess: async ({ invoiceNumber, docNum, docEntry }) => {
+      onSuccess: ({ invoiceNumber }) => {
         setActionMessage(
           invoiceNumber
             ? `${label} posted to SAP HANA successfully as invoice #${invoiceNumber}.`
             : `${label} posted to SAP HANA successfully.`,
         );
-        try {
-          // Keep SAP's identifiers on the log so the row can print the bill
-          // later without anyone having to look the invoice up in SAP.
-          await updateInvoiceStatus(record.id, POSTED_TO_SAP_STATUS, {
-            ...(docNum ? { sap_doc_num: docNum } : {}),
-            ...(docEntry ? { sap_doc_entry: docEntry } : {}),
-          });
-        } catch (logErr) {
-          console.error("Unable to record SAP post success:", logErr);
-        }
-      },
-      onError: async (message, rawError) => {
-        // Save the readable SAP message (e.g. the "Credit Limit Exceeded!" text)
-        // in the log, overwriting any previous error.
-        const readable = readableSapError(rawError || message);
-        try {
-          await updateInvoiceStatus(record.id, statusAfterFailedPost(record), {
-            error_message: readable,
-          });
-        } catch (logErr) {
-          console.error("Unable to log SAP post error:", logErr);
-        }
       },
     });
   };
@@ -595,6 +661,89 @@ export function useInvoiceReview({ canApproveReject, canPostToSap }: UseInvoiceR
     void openCreditLimitRequest(record);
   };
 
+  /**
+   * Re-read the warehouse, allocate again, and post.
+   *
+   * The answer to a batch or negative-inventory refusal, which a plain Retry
+   * cannot fix: an invoice picks its batches when it is built and posts when
+   * it is approved, and stock moves in between. Retry sends the same dead
+   * batch numbers back and fails identically.
+   *
+   * Nothing is written unless EVERY line can be filled from current stock. A
+   * partial allocation would be refused by SAP anyway, and overwriting the
+   * approved batches with a short set would lose what the invoice was
+   * approved against — so a shortage reports itself and leaves the record
+   * exactly as it was.
+   *
+   * The corrected payload is PERSISTED before posting, through the endpoint
+   * that writes a history entry: the stored payload is the record of what
+   * went to SAP, and a repost that changed the batches without saving them
+   * would leave the log describing an invoice that no longer exists.
+   */
+  const repostWithFreshBatches = async (record: InvoiceRecord) => {
+    if (record.id === undefined || record.id === null) {
+      setActionError("This invoice has no identifier and cannot be reposted.");
+      return;
+    }
+    setRecheckingId(record.id);
+    setActionError("");
+    setActionMessage("");
+    try {
+      const result = await reallocateInvoiceBatches(record);
+
+      if (!result.ok) {
+        setActionError(
+          `Current stock still cannot fill this invoice. ${result.problem}. ` +
+            "Nothing was changed.",
+        );
+        return;
+      }
+
+      const corrected = { ...record, invoice_payload: result.payload };
+      await apiFetch(`/api/invoice/log/${record.id}/`, {
+        method: "PATCH",
+        body: JSON.stringify({ invoice_payload: result.payload }),
+      });
+
+      if (!result.changed) {
+        // Worth saying: the batches it already held are still the right ones,
+        // so this repost is a genuine retry rather than a fix, and if SAP
+        // refuses it again the reason is not the batches.
+        setActionMessage(
+          "Stock re-checked — the batches on this invoice are still available. Reposting.",
+        );
+      }
+      runPostToSap(corrected);
+    } catch (error) {
+      setActionError(
+        extractMessage(error, "Unable to re-check batches for this invoice."),
+      );
+    } finally {
+      setRecheckingId(null);
+    }
+  };
+
+  /**
+   * The same thing from the failure dialog: close it, then re-check and post
+   * the invoice that was being posted when it failed.
+   */
+  const recheckBatchesFromLoader = () => {
+    const record = postingRecord;
+    if (!record) return;
+    closeSapLoader();
+    void repostWithFreshBatches(record);
+  };
+
+  /**
+   * True when the current SAP failure is one a fresh look at the warehouse
+   * could fix — a batch problem or negative inventory. The patterns belong to
+   * `sapErrorTranslator`, which also writes the message the reviewer reads, so
+   * the button offered and the text explaining it cannot disagree.
+   */
+  const sapErrorIsBatchOrStock =
+    sapPost.state.status === "error" &&
+    isBatchOrStockError(sapPost.state.rawError || sapPost.state.errorMessage || "");
+
   // True when the current SAP failure is specifically about the credit limit, so
   // the loader can offer a "Raise CL" shortcut.
   const sapErrorIsCreditLimit =
@@ -646,7 +795,18 @@ export function useInvoiceReview({ canApproveReject, canPostToSap }: UseInvoiceR
     setStatusFilter,
     visibleFilters,
     counts,
-    records,
+    /** The current PAGE of the narrowed rows — what the table draws. */
+    records: visibleRecords,
+    /** Everything the filter bar left, across all pages. */
+    filteredRecords,
+    /** The same rows BEFORE the filter bar: the pickers' options, and the total. */
+    allRecords: records,
+    filters,
+    setFilters,
+    filtersEnabled,
+    page: safePage,
+    setPage,
+    pageCount,
     loading,
     error,
     loadInvoices,
@@ -663,6 +823,7 @@ export function useInvoiceReview({ canApproveReject, canPostToSap }: UseInvoiceR
     setActionError,
     actionMessage,
     canApproveReject,
+    canApproveWarehouse,
     canPostToSap,
     handleAction,
     handleDelete,
@@ -717,6 +878,10 @@ export function useInvoiceReview({ canApproveReject, canPostToSap }: UseInvoiceR
     closeSapLoader,
     raiseClFromLoader,
     sapErrorIsCreditLimit,
+    repostWithFreshBatches,
+    recheckBatchesFromLoader,
+    sapErrorIsBatchOrStock,
+    recheckingId,
   };
 }
 

@@ -1,42 +1,66 @@
-import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
-import { ordersService } from "../../services/ordersService";
-import type { Order, OrderLog, SalesOrderSapStatus } from "../../services/ordersService";
+import { useState, useEffect, useMemo } from "react";
+import { startExcelExport } from "../../utils/excelExport";
+import {
+  getOrderItemTotalLtrs,
+  ordersService,
+} from "../../services/ordersService";
+import type {
+  OrderItem,
+  Order,
+  OrderLog,
+  QuotationStatus,
+} from "../../services/ordersService";
 import { useQueryClient } from "@tanstack/react-query";
 
-import { useCurrentUserOrders } from "../../lib/orderQueries";
-import { useAction } from "../../auth/actions";
-import { Badge } from "@/components/ui/badge";
-import { Breadcrumbs } from "@/components/ui/breadcrumbs";
-import { Button } from "@/components/ui/button";
-import { DetailField, DetailGrid } from "@/components/ui/detail";
+import { useAssignedParties, useCurrentUserOrders, useOrderStatuses } from "../../lib/orderQueries";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
-  FilterBar,
-  FilterCount,
-  FilterSelect,
-  FilterSpacer,
-} from "@/components/ui/filter-bar";
+  HiOutlineEye, // View
+  HiOutlineMapPin, // Track
+  HiOutlineArrowDownTray, // Download
+  HiOutlineDocumentDuplicate, // Duplicate
+  HiOutlineInformationCircle, // Order info
+  HiPlus,
+  HiXMark,
+  HiOutlineClipboardDocumentList,
+  HiCheckCircle,
+  HiExclamationTriangle,
+  HiInboxStack,
+  HiBanknotes,
+  HiFunnel,
+  HiBuildingStorefront,
+  HiCube,
+  HiCalendarDays,
+  HiBeaker,
+  HiCurrencyRupee,
+} from "react-icons/hi2";
+import { useAuth } from "../../auth/useAuth";
+// The same helper the router and sidebar use, so "may this user create an
+// order" is answered in ONE place. Duplicating the permission literal here
+// would be a second gate that can silently disagree with the route's.
+import { canOpen } from "../../auth/routeAccess";
+import { Button } from "@/components/ui/button";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import {
   Card,
   CardHeader,
   CardTitle,
   EmptyState,
-  Notice,
   Page,
   PageHeader,
   Stat,
   StatRow,
 } from "@/components/ui/page";
-import { Skeleton } from "@/components/ui/skeleton";
-import { OrderTimeline } from "@/components/orders/OrderTimelineDialog";
-import { toneForStatus } from "@/components/ui/statusTone";
 import {
-  HiOutlineArrowPath,
-  HiOutlineFunnel,
-  HiOutlineInbox,
-  HiOutlinePencilSquare,
-  HiOutlinePresentationChartLine,
-} from "react-icons/hi2";
+  FilterActions,
+  FilterBar,
+  FilterCount,
+  FilterDate,
+  FilterSelect,
+  FilterSpacer,
+} from "@/components/ui/filter-bar";
+import { Badge } from "@/components/ui/badge";
+import { toneForStatus } from "@/components/ui/statusTone";
 import {
   Table,
   TableBody,
@@ -45,17 +69,27 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Pagination } from "@/components/ui/pagination";
+import { OrderTimelineDialog } from "@/components/orders/OrderTimelineDialog";
+import { OrderItemCards } from "@/components/orders/OrderItemCards";
 import { TableSkeleton } from "@/components/ui/skeleton";
 import { messageFrom } from "@/lib/apiError";
 
-// Distributor-facing Order Tracking page.
-//
-// This is a trimmed copy of the staff Order_Tracking page: it reuses the same
-// list + timeline UI but removes the staff-only "Edit order" flow (which routes
-// into /Add_Sales). Distributors can only VIEW and TRACK their own orders.
-// Data is scoped to the logged-in user via loadCurrentUserOrderSummaries(), and
-// the backend additionally enforces created_by == request.user for this role.
+const now = new Date();
+
+// First day of current month
+const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0];
+
+// Last day of current month
+const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString().split("T")[0];
 
 const formatCreatedDateTime = (value?: string | null) => {
   if (!value) return "-";
@@ -70,821 +104,550 @@ const formatCreatedDateTime = (value?: string | null) => {
   });
 };
 
-const getLogTime = (log: Pick<OrderLog, "created_at">) => {
-  const time = new Date(log.created_at || "").getTime();
-  return Number.isNaN(time) ? Number.POSITIVE_INFINITY : time;
+/**
+ * A tone per variety, so the badge means something rather than decorating.
+ *
+ * PREMIUM / COMMODITY / OTHERS is SAP's own product split (`OITM.U_TYPE`), so
+ * these are categories of the same kind a status is — which is why they are
+ * badges and why they get distinct, stable colours.
+ */
+const VARIETY_TONE: Record<string, "info" | "note" | "neutral"> = {
+  Commodity: "info",
+  Premium: "note",
+  Other: "neutral",
 };
 
-const compareLogsByDisplayOrder = (
-  a: Pick<OrderLog, "created_at" | "id">,
-  b: Pick<OrderLog, "created_at" | "id">,
-) => {
-  const timeDifference = getLogTime(a) - getLogTime(b);
+const isRejectedOrder = (order: Pick<Order, "status_display">) =>
+  String(order.status_display || "")
+    .toLowerCase()
+    .includes("reject");
 
-  if (timeDifference !== 0) {
-    return timeDifference;
-  }
+const isCompletedOrder = (order: Pick<Order, "status_display">) =>
+  String(order.status_display || "")
+    .trim()
+    .toLowerCase() === "completed";
 
-  return a.id - b.id;
-};
-
-export default function Distributor_Order_Tracking() {
-  const navigate = useNavigate();
-  const location = useLocation();
-  // Shared with View_Orders and the main Order_Tracking: one key, one fetch.
-  const { orders, isOrdersLoading: loading } = useCurrentUserOrders();
-  const queryClient = useQueryClient();
-  const [logs, setLogs] = useState<OrderLog[]>([]);
-  const [logsLoading, setLogsLoading] = useState(false);
-  const [tracker, setTracker] = useState(false);
-  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
-  const [sapStatus, setSapStatus] = useState<SalesOrderSapStatus | null>(null);
-  const [sapLoading, setSapLoading] = useState(false);
-  const [resending, setResending] = useState(false);
-  const [sapActionMsg, setSapActionMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(
-    null,
-  );
-  const [statusFilter, setStatusFilter] = useState("");
-  const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 10;
-  // Only the Mart approver / admin may edit a failed order or resend it to SAP;
-  // everyone else sees the SAP details read-only. The rule and its server
-  // counterpart (`orders/views/mart.py:_is_mart_approver`) are recorded
-  // together in `auth/actions.ts` — including the fact that the server's own
-  // check accepts `is_staff` but not `is_superuser`, and reads the primary role
-  // only. Previously this file compared a raw `localStorage` role string, which
-  // matched neither.
-  const isSapManager = useAction("mart.manageSap");
-
-  /** Pull the list again — the resend flow can move an order to Completed. */
-  const refreshOrders = () =>
-    queryClient.invalidateQueries({ queryKey: ["orders", "current-user"] });
-
-  useEffect(() => {
-    if (location.state?.openOrderId && orders.length > 0) {
-      const targetOrder = orders.find((o) => o.id === location.state.openOrderId);
-      if (targetOrder) {
-        void handleTrack(targetOrder);
-        navigate(location.pathname, { replace: true, state: {} });
-      }
-    }
-  }, [location.state?.openOrderId, orders, location.pathname, navigate]);
-
-  const uniqueStatuses = useMemo(() => {
-    const statuses = new Set(orders.map((o) => o.status_display).filter(Boolean));
-    return Array.from(statuses).sort() as string[];
-  }, [orders]);
-
-  const filteredOrders = useMemo(() => {
-    return orders
-      .filter((order) => {
-        if (statusFilter) {
-          return order.status_display === statusFilter;
-        }
-        return true;
-      })
-      .sort((a, b) => {
-        const first = new Date(b.created_at || "").getTime();
-        const second = new Date(a.created_at || "").getTime();
-
-        if (Number.isNaN(first) || Number.isNaN(second)) {
-          return String(b.order_number || "").localeCompare(String(a.order_number || ""));
-        }
-
-        return first - second;
-      });
-  }, [orders, statusFilter]);
-
-  const totalPages = Math.max(1, Math.ceil(filteredOrders.length / itemsPerPage));
-  const paginatedOrders = useMemo(
-    () => filteredOrders.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage),
-    [filteredOrders, currentPage],
-  );
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [statusFilter]);
-
-  useEffect(() => {
-    if (currentPage > totalPages) {
-      setCurrentPage(totalPages);
-    }
-  }, [currentPage, totalPages]);
-
-  const orderedLogs = useMemo(() => {
-    return [...logs].sort(compareLogsByDisplayOrder);
-  }, [logs]);
-
-  const visibleLogs = useMemo(() => {
-    const currentStatus = String(selectedOrder?.status_display || "")
+const getRejectedByFromLogs = (logs: OrderLog[]) => {
+  const isRealPerformer = (value: string | null) => {
+    const normalized = String(value || "")
       .trim()
       .toLowerCase();
-    const isCurrentRatePending = currentStatus.includes("rate");
-    const getPerformerKey = (log: OrderLog) =>
-      String(log.performed_by_name || "")
-        .trim()
-        .toLowerCase();
-    const isRealPerformer = (value: string | null | undefined) =>
-      Boolean(value && value !== "pending" && value !== "system");
-    const isRateLog = (log: OrderLog) =>
-      String(log.status_name || "")
-        .toLowerCase()
-        .includes("rate");
-    const isRejectedLog = (log: OrderLog) =>
-      String(log.status_name || "")
-        .toLowerCase()
-        .includes("reject");
-    const isApprovedLog = (log: OrderLog) => {
-      const statusName = String(log.status_name || "").toLowerCase();
-      const remarks = String(log.remarks || "").toLowerCase();
-      return (
-        statusName.includes("approved") ||
-        statusName.includes("accepted") ||
-        remarks.includes("approved") ||
-        remarks.includes("accepted")
-      );
-    };
-    const latestPendingRateLog = isCurrentRatePending
-      ? [...orderedLogs]
-          .reverse()
-          .find((log) => isRateLog(log) && !isRealPerformer(log.performed_by_name))
-      : null;
-    const isWorkflowBoundaryLog = (log: OrderLog) => {
-      const statusName = String(log.status_name || "").toLowerCase();
-      return (
-        statusName.includes("billing") ||
-        statusName.includes("auditor") ||
-        statusName.includes("rate") ||
-        statusName.includes("reject") ||
-        statusName.includes("complete")
-      );
-    };
-    const hasWorkflowBoundaryBetween = (source: OrderLog, target: OrderLog) => {
-      const sourceTime = new Date(source.created_at || "").getTime();
-      const targetTime = new Date(target.created_at || "").getTime();
-
-      return orderedLogs.some((betweenLog) => {
-        const betweenTime = new Date(betweenLog.created_at || "").getTime();
-
-        return (
-          betweenLog.id !== source.id &&
-          betweenLog.id !== target.id &&
-          isWorkflowBoundaryLog(betweenLog) &&
-          (betweenTime > sourceTime || (betweenTime === sourceTime && betweenLog.id > source.id)) &&
-          (betweenTime < targetTime || (betweenTime === targetTime && betweenLog.id < target.id))
-        );
-      });
-    };
-    const hasLaterDuplicateDecision = (log: OrderLog) => {
-      const statusName = String(log.status_name || "")
-        .trim()
-        .toLowerCase();
-      const performer = getPerformerKey(log);
-      const remarks = String(log.remarks || "")
-        .trim()
-        .toLowerCase();
-
-      if (!isRealPerformer(performer) || !isDecisionHistoryLog(log)) {
-        return false;
-      }
-
-      return orderedLogs.some((otherLog) => {
-        const otherStatus = String(otherLog.status_name || "")
-          .trim()
-          .toLowerCase();
-        const otherPerformer = getPerformerKey(otherLog);
-        const otherRemarks = String(otherLog.remarks || "")
-          .trim()
-          .toLowerCase();
-        const logTime = new Date(log.created_at || "").getTime();
-        const otherTime = new Date(otherLog.created_at || "").getTime();
-
-        return (
-          otherLog.id !== log.id &&
-          otherStatus === statusName &&
-          otherPerformer === performer &&
-          otherRemarks === remarks &&
-          !hasWorkflowBoundaryBetween(log, otherLog) &&
-          (otherTime > logTime || (otherTime === logTime && otherLog.id > log.id))
-        );
-      });
-    };
-    const hasLaterSameCycleRateRejection = (log: OrderLog) => {
-      const performer = getPerformerKey(log);
-      const logTime = new Date(log.created_at || "").getTime();
-
-      if (!isRateLog(log) || isRejectedLog(log) || !isRealPerformer(performer)) {
-        return false;
-      }
-
-      return orderedLogs.some((otherLog) => {
-        const otherPerformer = getPerformerKey(otherLog);
-        const otherTime = new Date(otherLog.created_at || "").getTime();
-        const hasStageBoundaryBetween = orderedLogs.some((betweenLog) => {
-          const betweenTime = new Date(betweenLog.created_at || "").getTime();
-          const betweenStatus = String(betweenLog.status_name || "").toLowerCase();
-
-          return (
-            betweenLog.id !== log.id &&
-            betweenLog.id !== otherLog.id &&
-            (betweenTime > logTime || (betweenTime === logTime && betweenLog.id > log.id)) &&
-            (betweenTime < otherTime ||
-              (betweenTime === otherTime && betweenLog.id < otherLog.id)) &&
-            (betweenStatus.includes("billing") ||
-              betweenStatus.includes("auditor") ||
-              betweenStatus.includes("rate"))
-          );
-        });
-
-        return (
-          otherLog.id !== log.id &&
-          otherPerformer === performer &&
-          isRejectedLog(otherLog) &&
-          !hasStageBoundaryBetween &&
-          (otherTime > logTime || (otherTime === logTime && otherLog.id > log.id))
-        );
-      });
-    };
-    const hasLaterSameCycleRateApproval = (log: OrderLog) => {
-      const performer = getPerformerKey(log);
-      const logTime = new Date(log.created_at || "").getTime();
-
-      if (!isRateLog(log) || isRejectedLog(log) || !isRealPerformer(performer)) {
-        return false;
-      }
-
-      return orderedLogs.some((otherLog) => {
-        const otherPerformer = getPerformerKey(otherLog);
-        const otherTime = new Date(otherLog.created_at || "").getTime();
-        const hasStageBoundaryBetween = orderedLogs.some((betweenLog) => {
-          const betweenTime = new Date(betweenLog.created_at || "").getTime();
-          const betweenStatus = String(betweenLog.status_name || "").toLowerCase();
-
-          return (
-            betweenLog.id !== log.id &&
-            betweenLog.id !== otherLog.id &&
-            (betweenTime > logTime || (betweenTime === logTime && betweenLog.id > log.id)) &&
-            (betweenTime < otherTime ||
-              (betweenTime === otherTime && betweenLog.id < otherLog.id)) &&
-            (betweenStatus.includes("billing") ||
-              betweenStatus.includes("auditor") ||
-              betweenStatus.includes("rate"))
-          );
-        });
-
-        return (
-          otherLog.id !== log.id &&
-          otherPerformer === performer &&
-          isApprovedLog(otherLog) &&
-          !hasStageBoundaryBetween &&
-          (otherTime > logTime || (otherTime === logTime && otherLog.id > log.id))
-        );
-      });
-    };
-    const isDecisionHistoryLog = (log: OrderLog) => {
-      const statusName = String(log.status_name || "").toLowerCase();
-      const remarks = String(log.remarks || "").toLowerCase();
-      const performer = getPerformerKey(log);
-      const combined = `${statusName} ${remarks}`;
-      const hasRealPerformer = isRealPerformer(performer);
-
-      return (
-        combined.includes("reject") ||
-        combined.includes("approved") ||
-        combined.includes("accepted") ||
-        combined.includes("complete") ||
-        combined.includes("sent to auditor") ||
-        (hasRealPerformer && statusName.includes("rate"))
-      );
-    };
-    const getStageKey = (log: OrderLog) => {
-      const statusName = String(log.status_name || "").toLowerCase();
-
-      if (statusName.includes("billing")) return "billing";
-      if (statusName.includes("auditor")) return "auditor";
-      if (statusName.includes("rate")) return "rate";
-      if (statusName.includes("approval") || statusName.includes("approve")) return "approval";
-      if (statusName.includes("complete")) return "completed";
-      if (statusName.includes("reject")) return "rejected";
-
-      return statusName.trim();
-    };
-
-    const isOutcomeForPendingStage = (pendingLog: OrderLog, laterLog: OrderLog) => {
-      const pendingStage = getStageKey(pendingLog);
-      const laterStage = getStageKey(laterLog);
-      const laterStatus = String(laterLog.status_name || "").toLowerCase();
-
-      if (laterStage === pendingStage) {
-        return true;
-      }
-
-      const isDecision =
-        laterStatus.includes("reject") ||
-        laterStatus.includes("approved") ||
-        laterStatus.includes("accepted") ||
-        laterStatus.includes("complete");
-
-      return isDecision && (pendingStage === "auditor" || pendingStage === "rate");
-    };
-
-    return orderedLogs.filter((log) => {
-      const performer = getPerformerKey(log);
-      const isPendingLog = !isRealPerformer(performer);
-
-      if (latestPendingRateLog && !isPendingLog && isApprovedLog(log)) {
-        const logTime = new Date(log.created_at || "").getTime();
-        const pendingRateTime = new Date(latestPendingRateLog.created_at || "").getTime();
-        const hasStageBoundaryBetween = orderedLogs.some((betweenLog) => {
-          const betweenTime = new Date(betweenLog.created_at || "").getTime();
-          const betweenStatus = String(betweenLog.status_name || "").toLowerCase();
-
-          return (
-            betweenLog.id !== log.id &&
-            betweenLog.id !== latestPendingRateLog.id &&
-            (betweenTime > pendingRateTime ||
-              (betweenTime === pendingRateTime && betweenLog.id > latestPendingRateLog.id)) &&
-            (betweenTime < logTime || (betweenTime === logTime && betweenLog.id < log.id)) &&
-            (betweenStatus.includes("billing") ||
-              betweenStatus.includes("auditor") ||
-              betweenStatus.includes("rate") ||
-              betweenStatus.includes("reject") ||
-              betweenStatus.includes("complete"))
-          );
-        });
-
-        if (
-          !hasStageBoundaryBetween &&
-          (logTime > pendingRateTime ||
-            (logTime === pendingRateTime && log.id > latestPendingRateLog.id))
-        ) {
-          return false;
-        }
-      }
-
-      if (isPendingLog) {
-        if (isCurrentRatePending && isRateLog(log)) {
-          return true;
-        }
-
-        const logTime = new Date(log.created_at || "").getTime();
-
-        return !orderedLogs.some((otherLog) => {
-          const otherPerformer = getPerformerKey(otherLog);
-          const otherTime = new Date(otherLog.created_at || "").getTime();
-
-          return (
-            isRealPerformer(otherPerformer) &&
-            isOutcomeForPendingStage(log, otherLog) &&
-            (otherTime > logTime || (otherTime === logTime && otherLog.id > log.id))
-          );
-        });
-      }
-
-      if (
-        hasLaterDuplicateDecision(log) ||
-        hasLaterSameCycleRateRejection(log) ||
-        hasLaterSameCycleRateApproval(log)
-      ) {
-        return false;
-      }
-
-      return isDecisionHistoryLog(log);
-    });
-  }, [orderedLogs, selectedOrder?.status_display]);
-
-  const displayLogs = useMemo(() => {
-    const isRealPerformer = (value: string | null | undefined) => {
-      const normalized = String(value || "")
-        .trim()
-        .toLowerCase();
-      return Boolean(normalized && normalized !== "pending" && normalized !== "system");
-    };
-    const isRateLog = (log: OrderLog) =>
-      String(log.status_name || "")
-        .toLowerCase()
-        .includes("rate");
-    const isBillingLog = (log: OrderLog) =>
-      String(log.status_name || "")
-        .toLowerCase()
-        .includes("billing") ||
-      String(log.remarks || "")
-        .toLowerCase()
-        .includes("billing");
-    const isRejectedLog = (log: OrderLog) =>
-      String(log.status_name || "")
-        .toLowerCase()
-        .includes("reject");
-    const isApprovedLog = (log: OrderLog) => {
-      const statusName = String(log.status_name || "").toLowerCase();
-      const remarks = String(log.remarks || "").toLowerCase();
-      return (
-        statusName.includes("approved") ||
-        statusName.includes("accepted") ||
-        remarks.includes("approved") ||
-        remarks.includes("accepted")
-      );
-    };
-    const getPreviousStageName = (log: OrderLog) => {
-      const logTime = new Date(log.created_at || "").getTime();
-      const previousStage = [...orderedLogs]
-        .filter((entry) => {
-          const entryTime = new Date(entry.created_at || "").getTime();
-          return (
-            entry.id !== log.id &&
-            (entryTime < logTime || (entryTime === logTime && entry.id < log.id))
-          );
-        })
-        .reverse()
-        .find((entry) => {
-          const entryStatus = String(entry.status_name || "").toLowerCase();
-          return (
-            entryStatus.includes("rate") ||
-            entryStatus.includes("auditor") ||
-            entryStatus.includes("billing")
-          );
-        });
-
-      return String(previousStage?.status_name || "").toLowerCase();
-    };
-    const isAcceptedRateApprovalLog = (log: OrderLog) => {
-      if (isBillingLog(log) || isRejectedLog(log) || !isRealPerformer(log.performed_by_name)) {
-        return false;
-      }
-
-      if (isRateLog(log) && isApprovedLog(log)) {
-        return true;
-      }
-
-      return isApprovedLog(log) && getPreviousStageName(log).includes("rate");
-    };
-
-    return [...visibleLogs]
-      .sort(compareLogsByDisplayOrder)
-      .reduce<OrderLog[]>((mergedLogs, log) => {
-        if (!isAcceptedRateApprovalLog(log)) {
-          mergedLogs.push(log);
-          return mergedLogs;
-        }
-
-        const previousLog = mergedLogs[mergedLogs.length - 1];
-        if (previousLog && isAcceptedRateApprovalLog(previousLog)) {
-          const names = [
-            ...String(previousLog.performed_by_name || "")
-              .split(",")
-              .map((name) => name.trim())
-              .filter(Boolean),
-            String(log.performed_by_name || "").trim(),
-          ].filter(Boolean);
-
-          const remarks = Array.from(
-            new Set(
-              [previousLog.remarks, log.remarks]
-                .map((remark) => String(remark || "").trim())
-                .filter(Boolean),
-            ),
-          ).join(", ");
-
-          mergedLogs[mergedLogs.length - 1] = {
-            ...previousLog,
-            performed_by_name: Array.from(new Set(names)).join(", "),
-            created_at: log.created_at || previousLog.created_at,
-            remarks,
-          };
-          return mergedLogs;
-        }
-
-        mergedLogs.push({
-          ...log,
-          status_name: "Rate Approval",
-        });
-        return mergedLogs;
-      }, []);
-  }, [orderedLogs, visibleLogs]);
-
-  const timelineLogs = useMemo(() => {
-    const currentStatus = String(selectedOrder?.status_display || "").trim();
-    const normalizedStatus = currentStatus.toLowerCase();
-
-    if (!selectedOrder || !normalizedStatus.includes("billing")) {
-      return displayLogs;
-    }
-
-    const hasBillingStep = displayLogs.some((log) =>
-      String(log.status_name || "")
-        .toLowerCase()
-        .includes("billing"),
-    );
-
-    if (hasBillingStep) {
-      return displayLogs;
-    }
-
-    return [
-      ...displayLogs,
-      {
-        id: -selectedOrder.id,
-        status_name: currentStatus.includes("Pending") ? currentStatus : "Billing Pending",
-        remarks: "",
-        performed_by_name: null,
-        created_at: displayLogs[displayLogs.length - 1]?.created_at || selectedOrder.created_at,
-      },
-    ];
-  }, [selectedOrder, displayLogs]);
-
-  const formatDateTime = (value?: string | null) => {
-    if (!value) return "-";
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) return value;
-    return parsed.toLocaleString("en-IN");
-  };
-
-  const isSentToAuditorLog = (log: OrderLog) => {
-    const statusName = String(log.status_name || "").toLowerCase();
-    const remarks = String(log.remarks || "").toLowerCase();
-
-    return statusName.includes("billing") && remarks.includes("sent to auditor");
-  };
-
-  const isBillingAcceptedLog = (log: OrderLog) => {
-    const statusName = String(log.status_name || "").toLowerCase();
-    const remarks = String(log.remarks || "").toLowerCase();
-
-    return (
-      isSentToAuditorLog(log) ||
-      (statusName.includes("billing") &&
-        (statusName.includes("accepted") ||
-          statusName.includes("approved") ||
-          remarks.includes("accepted") ||
-          remarks.includes("approved"))) ||
-      remarks.includes("accepted by billing") ||
-      remarks.includes("approved by billing")
-    );
-  };
-
-  const getLogDisplayTitle = (log: OrderLog) => {
-    const statusName = String(log.status_name || "").toLowerCase();
-    const remarks = String(log.remarks || "").toLowerCase();
-    const performer = String(log.performed_by_name || "")
-      .trim()
-      .toLowerCase();
-    const hasRealPerformer = performer && performer !== "pending" && performer !== "system";
-    const isRejected = statusName.includes("reject");
-    const isAccepted =
-      statusName === "approved" ||
-      statusName === "accepted" ||
-      statusName.includes("approved") ||
-      statusName.includes("accepted");
-    const logTime = new Date(log.created_at || "").getTime();
-    const lastPreviousStage = [...orderedLogs]
-      .filter((entry) => {
-        const entryTime = new Date(entry.created_at || "").getTime();
-        return (
-          entry.id !== log.id &&
-          (entryTime < logTime || (entryTime === logTime && entry.id < log.id))
-        );
-      })
-      .reverse()
-      .find((entry) => {
-        const entryStatus = String(entry.status_name || "").toLowerCase();
-        return (
-          entryStatus.includes("rate") ||
-          entryStatus.includes("auditor") ||
-          entryStatus.includes("billing")
-        );
-      });
-    const lastPreviousStageName = String(lastPreviousStage?.status_name || "").toLowerCase();
-
-    if (isRejected && lastPreviousStageName.includes("rate")) {
-      return "Rate Approval Rejected";
-    }
-
-    if (isRejected && lastPreviousStageName.includes("billing")) {
-      return "Billing Rejected";
-    }
-
-    if (isRejected && lastPreviousStageName.includes("auditor")) {
-      return "Auditor Rejected";
-    }
-
-    if (isBillingAcceptedLog(log)) {
-      return "Accepted by Billing";
-    }
-
-    if (isAccepted && lastPreviousStageName.includes("rate")) {
-      return "Accepted by Rate Approver";
-    }
-
-    if (isAccepted && lastPreviousStageName.includes("billing")) {
-      return "Accepted by Billing";
-    }
-
-    if (isAccepted && lastPreviousStageName.includes("auditor")) {
-      return "Accepted by Auditor";
-    }
-
-    if (statusName.includes("billing") && !hasRealPerformer) {
-      return "Billing Pending";
-    }
-
-    if (statusName.includes("rate") && hasRealPerformer) {
-      return isRejected ? "Rate Approval Rejected" : "Accepted by Rate Approver";
-    }
-
-    if (statusName.includes("billing") && statusName.includes("reject")) {
-      return "Billing Rejected";
-    }
-
-    if (
-      statusName.includes("billing") &&
-      (remarks.includes("edited") ||
-        remarks.includes("resubmitted") ||
-        remarks.includes("sent back to billing"))
-    ) {
-      return "Order Edited and Sent Back to Billing";
-    }
-
-    return log.status_name;
-  };
-
-
-  /* `getLogTone` was another byte-for-byte copy of `getOrderLogTone`.
-     `OrderTimeline` calls the shared one itself now. */
-
-  const getRateApprovalStatusRows = () =>
-    (selectedOrder?.rate_approvals || [])
-      .map((approval) => ({
-        name: approval.approver_name,
-        status: String(approval.status || "PENDING").toUpperCase(),
-      }))
-      .filter((approval) => approval.name);
-
-  const formatApprovalStatus = (status: string) => {
-    if (status === "APPROVED") return "Approved";
-    if (status === "REJECTED") return "Rejected";
-    return "Pending";
-  };
-
-  const fetchSapStatus = async (orderId: number) => {
-    setSapLoading(true);
-    try {
-      const statuses = await ordersService.getSalesOrderSapStatus([orderId]);
-      setSapStatus(statuses[String(orderId)] ?? null);
-    } catch (error) {
-      console.log("Error fetching SAP status:", error);
-      setSapStatus(null);
-    } finally {
-      setSapLoading(false);
-    }
-  };
-
-  const handleTrack = async (order: Order) => {
-    // Show the summary immediately; fetch full details (po_number, remarks,
-    // rate_approvals) and logs on demand now that the list load is summary-only.
-    setSelectedOrder(order);
-    setTracker(true);
-    setLogs([]);
-    setLogsLoading(true);
-    setSapStatus(null);
-    setSapActionMsg(null);
-    // SAP details are for the Mart approver / admin only — distributors don't see them.
-    if (isSapManager) void fetchSapStatus(order.id);
-
-    try {
-      const [details, response] = await Promise.all([
-        ordersService.getOrderDetails(order.id).catch((error) => {
-          console.log("Error fetching order details:", error);
-          return null;
-        }),
-        ordersService.getOrderLogs(order.id),
-      ]);
-      if (details) setSelectedOrder(details);
-      setLogs(Array.isArray(response) ? response : []);
-    } catch (error) {
-      console.log("Error fetching order logs:", error);
-      setLogs([]);
-    } finally {
-      setLogsLoading(false);
-    }
-  };
-
-  const handleResendToSap = async () => {
-    if (!selectedOrder) return;
-    setResending(true);
-    setSapActionMsg(null);
-    try {
-      const res = await ordersService.resendMartOrderToSap(selectedOrder.id);
-      setSapActionMsg({
-        kind: "ok",
-        text: res?.message || "Order sent to SAP successfully.",
-      });
-      // Refresh the SAP result and the order/logs to reflect the new state.
-      await Promise.all([
-        fetchSapStatus(selectedOrder.id),
-        (async () => {
-          const details = await ordersService.getOrderDetails(selectedOrder.id).catch(() => null);
-          if (details) setSelectedOrder(details);
-          const response = await ordersService.getOrderLogs(selectedOrder.id).catch(() => []);
-          setLogs(Array.isArray(response) ? response : []);
-        })(),
-      ]);
-      // Keep the list in sync (status may have moved to Completed).
-      void refreshOrders();
-    } catch (error) {
-      const detail = messageFrom(error, "Failed to send the order to SAP. Please try again.");
-      setSapActionMsg({ kind: "err", text: detail });
-      void fetchSapStatus(selectedOrder.id);
-    } finally {
-      setResending(false);
-    }
-  };
-
-  const handleEditOrder = () => {
-    if (!selectedOrder) return;
-    // Reuse the full Add Sales edit form (same path Mart Approval uses); return
-    // here afterwards so the approver can resend to SAP.
-    navigate("/Add_Sales", {
-      state: {
-        editOrderId: selectedOrder.id,
-        mode: "edit",
-        returnTo: "/Distributor_Order_Tracking",
-      },
-    });
-  };
-
-  const handleBack = () => {
-    setTracker(false);
-    setSelectedOrder(null);
-    setLogs([]);
-    setSapStatus(null);
-    setSapActionMsg(null);
+    return normalized && normalized !== "pending" && normalized !== "system";
   };
 
   return (
+    [...logs].reverse().find((log) => {
+      const statusName = String(log.status_name || "").toLowerCase();
+      const remarks = String(log.remarks || "").toLowerCase();
+      return (
+        isRealPerformer(log.performed_by_name) &&
+        (statusName.includes("reject") || remarks.includes("reject"))
+      );
+    })?.performed_by_name || null
+  );
+};
+
+export default function Distributor_Order_Tracking() {
+  // This page is the distributor's own "View Orders" — always distributor mode,
+  // so the FOC column is dropped and the row actions include Track/Duplicate.
+  const distributor = true;
+  const location = useLocation();
+  const navigate = useNavigate();
+  // Shared with both Order_Tracking pages — one key, so moving between them
+  // renders from cache instead of refetching the whole history.
+  const { orders, isOrdersLoading } = useCurrentUserOrders();
+  const status = useOrderStatuses();
+  const partyOptions = useAssignedParties();
+  const queryClient = useQueryClient();
+  const { session } = useAuth();
+  // Mirrors the route gate on /Add_Sales rather than restating the permission
+  // key: a view-only user sees the list without the create actions.
+  const canCreateOrder = canOpen(session, "/Add_Sales");
+  const [showDetails, setShowDetails] = useState(false);
+  const [orderDetails, setOrderDetails] = useState<Order | null>(null);
+  // The "i" order-information dialog on the detail view — addresses, creator,
+  // current stage and any rejection reason, in one place.
+  const [infoOpen, setInfoOpen] = useState(false);
+  const [selectedItems, setSelectedItems] = useState<OrderItem[]>([]);
+  // Track-order timeline modal (distributor row action).
+  const [trackOpen, setTrackOpen] = useState(false);
+  const [trackTarget, setTrackTarget] = useState<Order | null>(null);
+  const [trackLogs, setTrackLogs] = useState<OrderLog[]>([]);
+  const [trackLoading, setTrackLoading] = useState(false);
+  const [statusFilter, setStatusFilter] = useState("");
+  const [partyFilter, setPartyFilter] = useState("");
+  const [fromDate, setFromDate] = useState(firstDay);
+  const [toDate, setToDate] = useState(lastDay);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [rejectedByByOrderId, setRejectedByByOrderId] = useState<Record<number, string>>({});
+  const [quotationStatusByOrderId, setQuotationStatusByOrderId] = useState<
+    Record<number, QuotationStatus>
+  >({});
+  const [cancelTarget, setCancelTarget] = useState<Order | null>(null);
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState("");
+  const itemsPerPage = 10;
+
+  useEffect(() => {
+    if (location.state?.openOrderId) {
+      fetchOrderDetails(location.state.openOrderId);
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  }, [location.state?.openOrderId, location.pathname, navigate]);
+
+  const fetchOrderDetails = async (orderId: number) => {
+    try {
+      const data = await ordersService.getOrderDetails(orderId);
+
+      setOrderDetails(data);
+      setSelectedItems(data.items || []);
+      setShowDetails(true);
+    } catch (error) {
+      console.log("Error fetching order details:", error);
+    }
+  };
+
+  // Track an order (distributor row action): open the status-timeline modal and
+  // load the order's logs into it. Reuses the shared OrderTimelineDialog.
+  const trackOrder = async (order: Order) => {
+    setTrackTarget(order);
+    setTrackLogs([]);
+    setTrackOpen(true);
+    setTrackLoading(true);
+    try {
+      const logs = await ordersService.getOrderLogs(order.id);
+      setTrackLogs(Array.isArray(logs) ? logs : []);
+    } catch (error) {
+      console.log("Error fetching order logs:", error);
+      setTrackLogs([]);
+    } finally {
+      setTrackLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    const fetchRejectedByNames = async () => {
+      const rejectedOrders = orders.filter(isRejectedOrder);
+
+      if (rejectedOrders.length === 0) {
+        setRejectedByByOrderId({});
+        return;
+      }
+
+      const entries = await Promise.all(
+        rejectedOrders.map(async (order) => {
+          try {
+            const logs = await ordersService.getOrderLogs(order.id);
+            const rejectedBy = getRejectedByFromLogs(logs);
+            return rejectedBy ? ([order.id, rejectedBy] as const) : null;
+          } catch (error) {
+            console.log(`Error fetching rejected-by log for order ${order.id}:`, error);
+            return null;
+          }
+        }),
+      );
+
+      if (!isCancelled) {
+        setRejectedByByOrderId(
+          Object.fromEntries(
+            entries.filter((entry): entry is readonly [number, string] => entry !== null),
+          ),
+        );
+      }
+    };
+
+    void fetchRejectedByNames();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [orders]);
+
+  // The single switch. False hides every "Cancel Sales Quotation" control, so
+  // the confirm modal can never open and `handleCancelQuotation` below is
+  // unreachable — no call is made to the commented-out backend route.
+  const QUOTATION_FLOW_ENABLED = false;
+
+  const canCancelQuotation = (order: Order) =>
+    QUOTATION_FLOW_ENABLED &&
+    isCompletedOrder(order) &&
+    !order.quotation_cancelled &&
+    Boolean(quotationStatusByOrderId[order.id]?.is_open);
+
+  const handleCancelQuotation = async () => {
+    if (!cancelTarget) return;
+    setIsCancelling(true);
+    setCancelError("");
+    try {
+      const result = await ordersService.cancelSalesQuotation(cancelTarget.id);
+      if (!result?.success) {
+        setCancelError(result?.message || "Failed to cancel sales quotation");
+        return;
+      }
+      // Mirror the cancellation locally so the button disappears immediately.
+      const cancelledId = cancelTarget.id;
+      // Mirrored into the query cache rather than into local state, so the
+      // two Order_Tracking pages reading the same key see it too.
+      queryClient.setQueryData<Order[]>(["orders", "current-user"], (prev) =>
+        (prev ?? []).map((order) =>
+          order.id === cancelledId ? { ...order, quotation_cancelled: true } : order,
+        ),
+      );
+      setOrderDetails((prev) =>
+        prev && prev.id === cancelledId ? { ...prev, quotation_cancelled: true } : prev,
+      );
+      setQuotationStatusByOrderId((prev) => {
+        const next = { ...prev };
+        delete next[cancelledId];
+        return next;
+      });
+      setCancelTarget(null);
+    } catch (error) {
+      const detail = messageFrom(error, "Failed to cancel sales quotation");
+      setCancelError(typeof detail === "string" ? detail : JSON.stringify(detail));
+    } finally {
+      setIsCancelling(false);
+    }
+  };
+
+  const filteredOrders = orders.filter((order) => {
+    const matchStatus = statusFilter ? order.status_display === statusFilter : true;
+    let matchDate = true;
+
+    const matchParty = partyFilter
+      ? order.card_code === partyFilter || order.card_name === partyFilter
+      : true;
+
+    if (fromDate && toDate) {
+      const orderDate = new Date(order.created_at);
+      const from = new Date(`${fromDate}T00:00:00.000`);
+      const to = new Date(`${toDate}T23:59:59.999`);
+
+      matchDate = orderDate >= from && orderDate <= to;
+    }
+
+    return matchStatus && matchDate && matchParty;
+  });
+
+  const totalPages = Math.max(1, Math.ceil(filteredOrders.length / itemsPerPage));
+  const pageNumber = Math.min(currentPage, totalPages);
+  // The detail view's totals. Computed once here rather than inline in the
+  // markup, where subtotal and tax were each summed twice — once for their own
+  // row and again inside the grand total.
+  const detailTotals = useMemo(() => {
+    const pcs = selectedItems.reduce((s, i) => s + (Number(i.qty) || 0), 0);
+    const boxes = selectedItems.reduce((s, i) => s + (Number(i.boxes) || 0), 0);
+    const litres = selectedItems.reduce((s, i) => s + getOrderItemTotalLtrs(i), 0);
+    const subtotal = selectedItems.reduce((s, i) => s + Number(i.total || 0), 0);
+    const tax = selectedItems.reduce(
+      (s, i) => s + (Number(i.total || 0) * Number(i.tax_rate || 0)) / 100,
+      0,
+    );
+    return { pcs, boxes, litres, subtotal, tax, grand: subtotal + tax };
+  }, [selectedItems]);
+
+  // Only the variety costs that are actually present.
+  const varietyCosts = useMemo(
+    () =>
+      [
+        { label: "Commodity", value: orderDetails?.vareity_cost?.commodity_price },
+        { label: "Other", value: orderDetails?.vareity_cost?.other_total },
+        { label: "Premium", value: orderDetails?.vareity_cost?.premium_total },
+      ].filter((entry) => Number(entry.value) > 0),
+    [orderDetails],
+  );
+
+  // KPI counts. Derived from the FILTERED list, not the whole history: the
+  // numbers have to agree with the table under them, or the row count and the
+  // "Orders" tile disagree the moment a filter is applied.
+  const completedCount = filteredOrders.filter(isCompletedOrder).length;
+  const rejectedCount = filteredOrders.filter(isRejectedOrder).length;
+
+  const paginatedOrders = filteredOrders.slice(
+    (pageNumber - 1) * itemsPerPage,
+    pageNumber * itemsPerPage,
+  );
+
+  // Raw values only — exportToExcel infers the Excel type per column, so dates
+  // stay dates and money stays numeric and summable.
+  const buildOrderRows = (order: Order): Record<string, unknown>[] => {
+    // Mart-format sheet: one item-focused row per line, matching the Mart
+    // Approval download so orders export the same way everywhere.
+    const items = order.items ?? [];
+    if (items.length === 0) {
+      return [{ "Order Number": order.order_number }];
+    }
+
+    return items.map((item: OrderItem) => ({
+      "Order Number": order.order_number,
+      "Item Code": item.item_code,
+      Product: item.item_name,
+      Category: item.category,
+      Qty: Number(item.qty),
+      Pcs: Number(item.pcs),
+      Boxes: Number(item.boxes),
+      Ltrs: Number(item.ltrs),
+      "Total Ltrs": getOrderItemTotalLtrs(item),
+      "Basic Price": Number(item.basic_price),
+      "Tax %": Number(item.tax_rate),
+      Amount: Number(item.total),
+    }));
+  };
+
+  // Which company's Crystal layout a SO report renders through. Distributor
+  // orders are always company 3 (Mart) today, but the mapping is company-driven
+  // so oil/beverage light up automatically when those distributors exist.
+  const companyToBranch = (company: string | number | undefined): string => {
+    switch (String(company ?? "").trim()) {
+      case "1":
+        return "OIL";
+      case "2":
+        return "BEVERAGE";
+      case "3":
+        return "MART";
+      default:
+        return "MART"; // distributor default
+    }
+  };
+
+  // "Generate Report" — the SAP sales-order Crystal PDF for this order. Needs
+  // the order to exist in SAP (a DocEntry/DocNum); orders still in the approval
+  // flow have none yet, so we say so rather than hitting a 404.
+  const generateReport = async (order: Order) => {
+    const branch = companyToBranch(order.company);
+    let docEntry: number | string | null | undefined;
+    let docNum: number | string | null | undefined = order.sap_doc_number;
+    try {
+      const statuses = await ordersService.getSalesOrderSapStatus([order.id]);
+      const sap = statuses[String(order.id)];
+      if (sap?.doc_entry != null) docEntry = sap.doc_entry;
+      if (sap?.doc_num != null) docNum = sap.doc_num;
+    } catch {
+      /* fall back to order.sap_doc_number */
+    }
+
+    if (docEntry == null && (docNum == null || docNum === "")) {
+      window.alert(
+        "This order has not been created in SAP yet, so its sales-order report is not available.",
+      );
+      return;
+    }
+
+    try {
+      const blob = await ordersService.getSalesOrderReport({
+        branch,
+        docEntry,
+        docNum,
+        party: order.card_name,
+      });
+      const url = URL.createObjectURL(blob);
+      // Open in a new tab; if the popup is blocked, fall back to a download.
+      const opened = window.open(url, "_blank");
+      if (!opened) {
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `SO_${order.order_number}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch {
+      window.alert("Failed to generate the sales-order report. Please try again.");
+    }
+  };
+
+  // "Duplicate" — open the distributor Create Order page prefilled from this
+  // order. The new order is created fresh; the original is untouched.
+  const duplicateOrder = (order: Order) =>
+    navigate("/Distributor", { state: { duplicateOrderId: order.id } });
+
+  const downloadExcel = async (order: Order) => {
+    // The list row carries only a summary — fetch the full order (with items)
+    // before building the report so a row download is as complete as a detail
+    // download.
+    let full = order;
+    if (!order.items || order.items.length === 0) {
+      const details = await ordersService.getOrderDetails(order.id).catch(() => null);
+      if (details) full = details;
+    }
+
+    // Every download — staff and distributor alike — uses the Mart order
+    // sheet, so an order exports the same way wherever it is opened.
+    startExcelExport(buildOrderRows(full), {
+      fileName: `Order_${full.order_number}.xlsx`,
+      sheetName: "Order",
+    });
+  };
+  return (
     <Page>
-      {!tracker ? (
+      {/* ── LIST VIEW ── */}
+      {!showDetails && (
         <>
-          <Breadcrumbs items={[{ label: "Distributor" }, { label: "Order Tracking" }]} />
+          {/* The trail sits at the very top of the page, above the header
+              card — it locates the PAGE, so it belongs outside the object it
+              is locating. */}
+          <Breadcrumbs items={[{ label: "Orders" }, { label: "View Orders" }]} />
 
           <PageHeader
-            title="Order Tracking"
-            description="Where each order has reached, and who it is waiting on."
+            title="View Orders"
+            description="Browse, review and export your order history."
+            actions={
+              // Gated on the route's own rule, so a view-only user sees the
+              // list without the create actions. FOC is the same form in a
+              // different mode (FOC.tsx renders <Add_Sales focMode />), which
+              // is why it is a second button here and not a separate screen.
+              canCreateOrder ? (
+                <>
+                  <Button variant="ghost" onClick={() => navigate("/FOC")}>New FOC order</Button>
+                  <Button variant="primary" onClick={() => navigate("/Add_Sales")}>
+                    <HiPlus aria-hidden="true" /> New order
+                  </Button>
+                </>
+              ) : null
+            }
           />
 
           <StatRow>
             <Stat
-              icon={HiOutlinePresentationChartLine}
+              icon={HiOutlineClipboardDocumentList}
               tone="brand"
-              label="Orders"
+              label="Total orders"
               value={filteredOrders.length}
-              hint={statusFilter ? `filtered to ${statusFilter}` : "all statuses"}
-              loading={loading}
+              hint="matching filters"
+              loading={isOrdersLoading}
+              className="border-sky-200 bg-sky-50 dark:bg-sky-950/20"
+            />
+            <Stat
+              icon={HiCheckCircle}
+              tone="ok"
+              label="Completed"
+              value={completedCount}
+              loading={isOrdersLoading}
+              className="border-emerald-200 bg-emerald-50 dark:bg-emerald-950/20"
+            />
+            <Stat
+              icon={HiExclamationTriangle}
+              // Neutral at zero: a red chip on "0 rejected" reads as an alert
+              // about good news.
+              tone={rejectedCount ? "bad" : "neutral"}
+              label="Rejected"
+              value={rejectedCount}
+              loading={isOrdersLoading}
+              // Always the light rose tint so the card matches the other two;
+              // the icon/value tone still goes neutral at zero (above).
+              className="border-rose-200 bg-rose-50 dark:bg-rose-950/20"
             />
           </StatRow>
 
           <FilterBar>
             <FilterSelect
               label="Status"
-              icon={HiOutlineFunnel}
-              fieldClassName="max-w-[280px] flex-none"
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-            >
-              <option value="">All Orders</option>
-              {uniqueStatuses.map((status) => (
-                <option key={status} value={status}>
-                  {status}
-                </option>
-              ))}
-            </FilterSelect>
+              icon={HiFunnel}
+                value={statusFilter}
+                onChange={(e) => {
+                  setStatusFilter(e.target.value);
+                  setCurrentPage(1);
+                }}
+              >
+                <option value="">All Statuses</option>
+                {status.map((s) => (
+                  <option key={s.id} value={s.name}>
+                    {s.name}
+                  </option>
+                ))}
+              </FilterSelect>
+
+            <FilterSelect
+              label="Party"
+              icon={HiBuildingStorefront}
+                value={partyFilter}
+                onChange={(e) => {
+                  setPartyFilter(e.target.value);
+                  setCurrentPage(1);
+                }}
+              >
+                <option value="">All Parties</option>
+                {partyOptions.map((party) => (
+                  <option
+                    key={party.cardCode || party.cardName}
+                    value={party.cardCode || party.cardName}
+                  >
+                    {party.cardName}
+                    {party.cardCode ? ` (${party.cardCode})` : ""}
+                  </option>
+                ))}
+              </FilterSelect>
+
+            <FilterDate
+              label="From"
+              icon={HiCalendarDays}
+                value={fromDate}
+                onChange={(e) => {
+                  setFromDate(e.target.value);
+                  setCurrentPage(1);
+                }}
+              />
+
+            <FilterDate
+              label="To"
+                value={toDate}
+                onChange={(e) => {
+                  setToDate(e.target.value);
+                  setCurrentPage(1);
+                }}
+              />
+
+            {(statusFilter || partyFilter) && (
+              <FilterActions>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setStatusFilter("");
+                    setPartyFilter("");
+                    setCurrentPage(1);
+                  }}
+                >
+                  <HiXMark aria-hidden="true" /> Clear
+                </Button>
+              </FilterActions>
+            )}
+
             <FilterSpacer />
             <FilterCount>Total: {filteredOrders.length}</FilterCount>
           </FilterBar>
 
-          {loading ? (
-            <TableSkeleton columns={7} label="Loading orders" />
+          {isOrdersLoading ? (
+            <TableSkeleton columns={8} label="Loading orders" />
           ) : filteredOrders.length > 0 ? (
             <Card className="overflow-hidden p-0">
               <div className="overflow-x-auto">
                 <Table density="compact">
-                  <TableHeader>
-                    <TableRow className="bg-surface hover:bg-surface">
-                      <TableHead>Order ID</TableHead>
-                      <TableHead>Card Name</TableHead>
-                      <TableHead>FOC</TableHead>
-                      <TableHead>Created At</TableHead>
-                      <TableHead>Delivery Date</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {paginatedOrders.map((order) => (
-                      <TableRow key={order.id}>
-                        <TableCell className="whitespace-nowrap font-semibold text-brand">
-                          {order.order_number}
-                        </TableCell>
-                        <TableCell className="text-ink">{order.card_name}</TableCell>
+                <TableHeader>
+                  <TableRow className="bg-surface hover:bg-surface">
+                    <TableHead>Order ID</TableHead>
+                    <TableHead>Card Name</TableHead>
+                    <TableHead>Items</TableHead>
+                    {!distributor ? <TableHead>FOC</TableHead> : null}
+                    <TableHead>Created At</TableHead>
+                    <TableHead>Delivery Date</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Actions</TableHead>
+                    <TableHead>Report</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {paginatedOrders.map((order) => (
+                    <TableRow key={order.id} className={order.is_foc ? "vo-foc-row" : ""}>
+                      <TableCell className="font-semibold whitespace-nowrap text-brand">
+                        {order.order_number}
+                      </TableCell>
+                      <TableCell className="text-ink">{order.card_name}</TableCell>
+                      <TableCell>{order.items_count ?? order.items?.length ?? 0}</TableCell>
+                      {!distributor ? (
                         <TableCell>
                           {order.is_foc ? (
                             <Badge tone="note">FOC</Badge>
@@ -892,268 +655,437 @@ export default function Distributor_Order_Tracking() {
                             <span className="text-subtle">-</span>
                           )}
                         </TableCell>
-                        <TableCell>{formatCreatedDateTime(order.created_at)}</TableCell>
-                        <TableCell>{order.delivery_date}</TableCell>
-                        <TableCell>
+                      ) : null}
+                      <TableCell>{formatCreatedDateTime(order.created_at)}</TableCell>
+                      <TableCell>{order.delivery_date}</TableCell>
+                      <TableCell>
+                        <div className="flex flex-col items-start gap-1">
                           <Badge tone={toneForStatus(order.status_display)}>
                             {order.status_display}
                           </Badge>
-                        </TableCell>
-                        <TableCell>
+                          {isRejectedOrder(order) && rejectedByByOrderId[order.id] ? (
+                            <span className="text-[11px] text-subtle">
+                              By: {rejectedByByOrderId[order.id]}
+                            </span>
+                          ) : null}
+                          {order.quotation_cancelled ? (
+                            <Badge tone="neutral">SQ Cancelled</Badge>
+                          ) : canCancelQuotation(order) ? (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              title="Cancel sales quotation"
+                              onClick={() => {
+                                setCancelError("");
+                                setCancelTarget(order);
+                              }}
+                            >
+                              Cancel SQ
+                            </Button>
+                          ) : null}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => fetchOrderDetails(order.id)}
+                            title="View order"
+                            aria-label={`View order ${order.order_number}`}
+                            className="text-brand hover:bg-brand-soft hover:text-brand"
+                          >
+                            <HiOutlineEye />
+                          </Button>
+                          {distributor ? (
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              onClick={() => trackOrder(order)}
+                              title="Track order"
+                              aria-label={`Track order ${order.order_number}`}
+                              className="[&_svg]:text-red-600 hover:bg-red-50 hover:[&_svg]:text-red-700"
+                            >
+                              <HiOutlineMapPin />
+                            </Button>
+                          ) : null}
+                          {distributor ? (
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              onClick={() => duplicateOrder(order)}
+                              title="Duplicate order"
+                              aria-label={`Duplicate order ${order.order_number}`}
+                              className="[&_svg]:text-blue-600 hover:bg-blue-50 hover:[&_svg]:text-blue-700"
+                            >
+                              <HiOutlineDocumentDuplicate />
+                            </Button>
+                          ) : null}
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => void downloadExcel(order)}
+                            title="Download order"
+                            aria-label={`Download order ${order.order_number}`}
+                            className="[&_svg]:text-green-600 hover:bg-green-50 hover:[&_svg]:text-green-700"
+                          >
+                            <HiOutlineArrowDownTray />
+                          </Button>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        {/* Only a completed order has a posted SAP sales order,
+                            so the report is offered only then. */}
+                        {String(order.status_display || "")
+                          .toLowerCase()
+                          .includes("complete") ? (
                           <Button
                             size="sm"
                             variant="ghost"
-                            onClick={() => void handleTrack(order)}
+                            onClick={() => void generateReport(order)}
+                            title="Generate sales-order report (PDF)"
+                            aria-label={`Generate report for order ${order.order_number}`}
+                            className="whitespace-nowrap text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800"
                           >
-                            <HiOutlineArrowPath aria-hidden="true" /> Track
+                            <HiOutlineClipboardDocumentList aria-hidden="true" /> Generate Report
                           </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
+                        ) : (
+                          <span className="text-subtle">-</span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
                 </Table>
               </div>
             </Card>
           ) : (
             <Card>
               <EmptyState
-                icon={HiOutlineInbox}
+                icon={HiInboxStack}
                 title="No orders found"
-                hint={
-                  statusFilter
-                    ? "Nothing matches that status. Clear the filter to see them all."
-                    : "Orders placed against your account will appear here."
-                }
+                hint="Nothing matches the current filters. Widen the date range or clear a filter to see more."
               />
             </Card>
           )}
 
-          {!loading && filteredOrders.length > itemsPerPage ? (
-            <Pagination
-              page={currentPage}
-              totalPages={totalPages}
-              onPageChange={setCurrentPage}
-            />
-          ) : null}
+          {filteredOrders.length > itemsPerPage && (
+            <Pagination page={pageNumber} totalPages={totalPages} onPageChange={setCurrentPage} />
+          )}
         </>
-      ) : null}
+      )}
 
-      {tracker && selectedOrder ? (
+      {/* ── DETAIL VIEW ── */}
+      {showDetails && orderDetails && (
         <>
           <Breadcrumbs
             items={[
-              { label: "Distributor" },
-              { label: "Order Tracking", onClick: handleBack },
-              { label: selectedOrder.order_number },
+              { label: "Orders" },
+              { label: "View Orders", onClick: () => setShowDetails(false) },
+              { label: orderDetails.order_number },
             ]}
           />
 
           <PageHeader
-            title={selectedOrder.order_number}
-            description={selectedOrder.card_name}
+            title={orderDetails.order_number}
+            description={orderDetails.card_name}
             badges={
               <>
-                <Badge tone={toneForStatus(selectedOrder.status_display)}>
-                  {selectedOrder.status_display}
-                </Badge>
-                {selectedOrder.is_foc ? <Badge tone="note">FOC</Badge> : null}
+                {orderDetails.status_display ? (
+                  <Badge tone={toneForStatus(orderDetails.status_display)}>
+                    {orderDetails.status_display}
+                  </Badge>
+                ) : null}
+                {orderDetails.is_foc ? <Badge tone="note">FOC</Badge> : null}
+                {orderDetails.quotation_cancelled ? (
+                  <Badge tone="neutral">SQ Cancelled</Badge>
+                ) : null}
+                {isRejectedOrder(orderDetails) && rejectedByByOrderId[orderDetails.id] ? (
+                  <span className="text-[11px] text-subtle">
+                    Rejected by {rejectedByByOrderId[orderDetails.id]}
+                  </span>
+                ) : null}
+              </>
+            }
+            actions={
+              <>
+                <Button
+                  variant="ghost"
+                  onClick={() => setInfoOpen(true)}
+                  title="Order information"
+                  className="border border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100 hover:text-sky-800"
+                >
+                  <HiOutlineInformationCircle aria-hidden="true" /> Info
+                </Button>
+                {distributor ? (
+                  <Button
+                    variant="ghost"
+                    onClick={() => duplicateOrder(orderDetails)}
+                    title="Duplicate this order"
+                    className="border border-violet-300 bg-violet-50 text-violet-700 hover:bg-violet-100 hover:text-violet-800"
+                  >
+                    <HiOutlineDocumentDuplicate aria-hidden="true" /> Duplicate
+                  </Button>
+                ) : null}
+                {!orderDetails.quotation_cancelled && canCancelQuotation(orderDetails) ? (
+                  <Button
+                    variant="danger"
+                    onClick={() => {
+                      setCancelError("");
+                      setCancelTarget(orderDetails);
+                    }}
+                  >
+                    <HiXMark aria-hidden="true" /> Cancel sales quotation
+                  </Button>
+                ) : null}
+                <Button
+                  variant="success"
+                  onClick={() => void downloadExcel(orderDetails)}
+                  className="border-transparent bg-emerald-600 text-white shadow-sm hover:bg-emerald-700 hover:text-white"
+                >
+                  <HiOutlineArrowDownTray aria-hidden="true" /> Export Excel
+                </Button>
               </>
             }
           />
 
+          {/* The totals, as the same KPI row the list page uses — read before
+              the line items rather than after them, which is the order a
+              reviewer actually wants: what is this worth, then what is in it. */}
+          <StatRow>
+            <Stat
+              icon={HiCube}
+              tone="neutral"
+              label="Total QTY"
+              value={detailTotals.pcs.toLocaleString("en-IN")}
+              className="border-sky-200 bg-sky-50"
+            />
+            <Stat
+              icon={HiInboxStack}
+              tone="neutral"
+              label="Total Boxes"
+              value={detailTotals.boxes.toLocaleString("en-IN")}
+              className="border-amber-200 bg-amber-50"
+            />
+            <Stat
+              icon={HiBeaker}
+              tone="neutral"
+              label="Total Ltrs"
+              value={detailTotals.litres.toFixed(2)}
+              className="border-teal-200 bg-teal-50"
+            />
+            <Stat
+              icon={HiBanknotes}
+              tone="neutral"
+              label="Total Amount"
+              value={detailTotals.subtotal.toFixed(2)}
+              className="border-violet-200 bg-violet-50"
+            />
+            <Stat
+              icon={HiCurrencyRupee}
+              tone="brand"
+              label="Grand Total (incl. tax)"
+              value={detailTotals.grand.toFixed(2)}
+              hint={`${selectedItems.length} item${selectedItems.length === 1 ? "" : "s"}`}
+              className="border-brand/30 bg-brand/[0.08]"
+            />
+          </StatRow>
+
+          {/* Variety cost — one card per variety, filling the row. */}
+          {varietyCosts.length > 0 && (
+            <div className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(220px,1fr))]">
+              {varietyCosts.map((entry) => (
+                <Card
+                  key={entry.label}
+                  className="flex items-center justify-between gap-3"
+                >
+                  <Badge tone={VARIETY_TONE[entry.label] ?? "neutral"}>
+                    {entry.label}
+                  </Badge>
+                  <span className="text-xl font-bold tabular-nums text-ink">
+                    {Number(entry.value).toFixed(2)}
+                  </span>
+                </Card>
+              ))}
+            </div>
+          )}
+
+          {/* Items */}
           <Card>
             <CardHeader>
-              <CardTitle>Order</CardTitle>
+              <CardTitle>Items</CardTitle>
+              <Badge tone="neutral">{selectedItems.length}</Badge>
             </CardHeader>
-            <DetailGrid>
-              <DetailField label="Card code" value={selectedOrder.card_code} />
-              <DetailField
-                label="Created at"
-                value={formatCreatedDateTime(selectedOrder.created_at)}
-              />
-              <DetailField label="Delivery date" value={selectedOrder.delivery_date} />
-              <DetailField label="PO number" value={selectedOrder.po_number} />
-              <DetailField
-                label="Comment"
-                value={selectedOrder.remarks?.trim() ? selectedOrder.remarks : ""}
-                span="full"
-                hideWhenEmpty
-              />
-            </DetailGrid>
+            {/* Items as cards — the same 2-up card grid the Mart Approval
+                detail uses (shared OrderItemCards component). */}
+            <OrderItemCards items={selectedItems} />
           </Card>
 
-          {/* The SAP result: DocEntry/DocNum on success, SAP's own error on
-              failure. Visible to the Mart approver and admin only — a
-              distributor cannot act on it, and a raw SAP error is not an
-              explanation for them. */}
-          {isSapManager ? (
-            <Card>
-              <CardHeader>
-                <CardTitle>SAP</CardTitle>
-                {sapStatus ? (
-                  <Badge
-                    tone={
-                      sapStatus.status === "SUCCESS"
-                        ? "ok"
-                        : sapStatus.status === "FAILED"
-                          ? "bad"
-                          : "neutral"
-                    }
-                  >
-                    {sapStatus.status === "SUCCESS"
-                      ? "Created in SAP"
-                      : sapStatus.status === "FAILED"
-                        ? "SAP failed"
-                        : sapStatus.status}
+          {/* The "i" order-information dialog — addresses, creator, current
+              stage and any rejection reason, in one place. */}
+          <Dialog open={infoOpen} onOpenChange={setInfoOpen}>
+            <DialogContent title="Order information" size="md">
+              <DialogHeader>
+                <DialogTitle>Order information</DialogTitle>
+                {orderDetails.status_display ? (
+                  <Badge tone={toneForStatus(orderDetails.status_display)}>
+                    {orderDetails.status_display}
                   </Badge>
                 ) : null}
-                {sapStatus?.status === "FAILED" ? (
-                  <span className="ml-auto flex items-center gap-1.5">
-                    <Button size="sm" variant="ghost" onClick={handleEditOrder} disabled={resending}>
-                      <HiOutlinePencilSquare aria-hidden="true" /> Edit order
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="success"
-                      onClick={() => void handleResendToSap()}
-                      disabled={resending}
-                    >
-                      <HiOutlineArrowPath aria-hidden="true" />
-                      {resending ? "Sending…" : "Resend to SAP"}
-                    </Button>
+              </DialogHeader>
+              <DialogBody>
+                <div className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
+                  {(
+                    [
+                      [
+                        "Party",
+                        orderDetails.card_code
+                          ? `${orderDetails.card_name} (${orderDetails.card_code})`
+                          : orderDetails.card_name,
+                      ],
+                      [
+                        "Punched by",
+                        orderDetails.created_by_name ||
+                          String(orderDetails.created_by ?? ""),
+                      ],
+                      ["Punched at", formatCreatedDateTime(orderDetails.created_at)],
+                      ["Current stage", orderDetails.status_display],
+                      ["Party state", orderDetails.party_state],
+                      ["Delivery date", orderDetails.delivery_date],
+                      ["PO number", orderDetails.po_number],
+                      ["Quotation no", orderDetails.sap_doc_number],
+                      ["Warehouse", orderDetails.warehouse_code],
+                      ["Dispatch from", orderDetails.dispatch_from_name],
+                      ["Bill to", orderDetails.bill_to_address],
+                      ["Ship to", orderDetails.ship_to_address],
+                      [
+                        "Remark",
+                        orderDetails.remarks?.trim() ? orderDetails.remarks : "",
+                      ],
+                    ] as Array<[string, string | null | undefined]>
+                  ).map(([label, value]) => (
+                    <div key={label}>
+                      <p className="m-0 text-[10.5px] font-semibold uppercase tracking-wide text-subtle">
+                        {label}
+                      </p>
+                      <p className="m-0 mt-0.5 text-[13px] font-medium text-ink">
+                        {value || "—"}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+                {orderDetails.rejection_reason ? (
+                  <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-[13px] text-rose-800">
+                    <p className="m-0 font-semibold">Rejection reason</p>
+                    <p className="m-0 mt-1">{orderDetails.rejection_reason}</p>
+                  </div>
+                ) : null}
+              </DialogBody>
+            </DialogContent>
+          </Dialog>
+        </>
+      )}
+
+      {/* ── CANCEL SALES QUOTATION CONFIRM MODAL ── */}
+      <Dialog
+        open={Boolean(cancelTarget)}
+        onOpenChange={(next) => {
+          if (!next && !isCancelling) setCancelTarget(null);
+        }}
+      >
+        {cancelTarget && (
+          <DialogContent title="Cancel sales quotation" size="sm" showClose={false}>
+            <DialogHeader>
+              <DialogTitle>Cancel sales quotation</DialogTitle>
+            </DialogHeader>
+            <DialogBody>
+              <p className="m-0 text-[13px] leading-relaxed text-body">
+                Cancel the SAP Sales Quotation
+                {quotationStatusByOrderId[cancelTarget.id]?.doc_num
+                  ? ` (No. ${quotationStatusByOrderId[cancelTarget.id]?.doc_num})`
+                  : ""}{" "}
+                for order <strong className="text-ink">{cancelTarget.order_number}</strong>? This
+                cancels the quotation in SAP and cannot be undone.
+              </p>
+              {cancelError ? (
+                <p
+                  role="alert"
+                  className="mt-3 rounded-sm border border-danger-line bg-danger-soft px-3 py-2 text-[13px] text-danger"
+                >
+                  {cancelError}
+                </p>
+              ) : null}
+            </DialogBody>
+            <DialogFooter>
+              <Button onClick={() => setCancelTarget(null)} disabled={isCancelling}>
+                Keep quotation
+              </Button>
+              <Button variant="danger" onClick={handleCancelQuotation} disabled={isCancelling}>
+                {isCancelling ? "Cancelling..." : "Cancel quotation"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        )}
+      </Dialog>
+
+      {/* Distributor "Track" action — the order's status timeline in a modal,
+          with a summary of who created it, where it has reached, and whether
+          it is completed. */}
+      <OrderTimelineDialog
+        open={trackOpen}
+        onOpenChange={setTrackOpen}
+        order={trackTarget}
+        logs={trackLogs}
+        loading={trackLoading}
+        formatDateTime={formatCreatedDateTime}
+        summary={
+          trackTarget ? (
+            <div className="rounded-xl border border-line bg-surface p-3.5">
+              <div className="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2">
+                <div>
+                  <p className="m-0 text-[10.5px] font-semibold uppercase tracking-wide text-subtle">
+                    Created by
+                  </p>
+                  <p className="m-0 mt-0.5 text-[13px] font-semibold text-ink">
+                    {trackTarget.created_by_name ||
+                      String(trackTarget.created_by ?? "") ||
+                      "—"}
+                  </p>
+                </div>
+                <div>
+                  <p className="m-0 text-[10.5px] font-semibold uppercase tracking-wide text-subtle">
+                    Created at
+                  </p>
+                  <p className="m-0 mt-0.5 text-[13px] font-semibold text-ink">
+                    {formatCreatedDateTime(trackTarget.created_at)}
+                  </p>
+                </div>
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-3">
+                <span className="text-[10.5px] font-semibold uppercase tracking-wide text-subtle">
+                  {String(trackTarget.status_display || "")
+                    .toLowerCase()
+                    .includes("complete")
+                    ? "Status"
+                    : "Currently at"}
+                </span>
+                {trackTarget.status_display ? (
+                  <Badge tone={toneForStatus(trackTarget.status_display)}>
+                    {trackTarget.status_display}
+                  </Badge>
+                ) : null}
+                {String(trackTarget.status_display || "")
+                  .toLowerCase()
+                  .includes("complete") ? (
+                  <span className="text-[12px] font-medium text-ok">
+                    This order is completed.
                   </span>
                 ) : null}
-              </CardHeader>
-
-              {sapLoading ? (
-                <Skeleton className="h-10 w-full" />
-              ) : !sapStatus ? (
-                <p className="text-[13px] text-subtle">
-                  This order has not been sent to SAP yet.
-                </p>
-              ) : sapStatus.status === "SUCCESS" ? (
-                <DetailGrid>
-                  <DetailField label="Doc entry" value={sapStatus.doc_entry} />
-                  <DetailField label="Doc num" value={sapStatus.doc_num} />
-                  <DetailField
-                    label="Created at"
-                    value={
-                      sapStatus.completed_at ? formatDateTime(sapStatus.completed_at) : ""
-                    }
-                    hideWhenEmpty
-                  />
-                </DetailGrid>
-              ) : (
-                <Notice tone="bad" title="Why SAP failed">
-                  {sapStatus.error_message || "SAP did not return an error message."}
-                </Notice>
-              )}
-
-              {sapActionMsg ? (
-                <div className="mt-3">
-                  <Notice tone={sapActionMsg.kind === "err" ? "bad" : "info"}>
-                    {sapActionMsg.text}
-                  </Notice>
-                </div>
-              ) : null}
-            </Card>
-          ) : null}
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Order log</CardTitle>
-              {!logsLoading ? <Badge tone="neutral">{timelineLogs.length}</Badge> : null}
-            </CardHeader>
-
-            {logsLoading ? (
-              <div className="space-y-3" role="status" aria-live="polite">
-                <span className="sr-only">Loading order logs</span>
-                {[0, 1, 2].map((row) => (
-                  <Skeleton key={row} className="h-16 w-full" />
-                ))}
               </div>
-            ) : timelineLogs.length === 0 ? (
-              <EmptyState
-                icon={HiOutlineArrowPath}
-                title="No tracking logs"
-                hint="Nothing has been recorded against this order yet."
-              />
-            ) : (
-              /* Same drawing as `Order_Tracking`; same reason for passing the
-                 entries through rather than rebuilding them. */
-              <OrderTimeline
-                order={selectedOrder}
-                logs={timelineLogs}
-                buildEntries={(entries) => entries}
-                formatDateTime={formatDateTime}
-                title={(log) => getLogDisplayTitle(log)}
-                renderMeta={(log, { isLast }) => {
-                  const displayTitle = getLogDisplayTitle(log);
-                  const statusLower = (log.status_name || "").toLowerCase();
-                  const isTerminal =
-                    statusLower.includes("completed") || statusLower.includes("rejected");
-                  const isPendingLog = isLast && !isTerminal;
-
-                  if (isPendingLog) {
-                    const isRateApprovalStatus =
-                      statusLower.includes("rate") || statusLower.includes("need approval");
-                    const rateApprovalRows = isRateApprovalStatus
-                      ? getRateApprovalStatusRows()
-                      : [];
-                    const holderName = isRateApprovalStatus
-                      ? rateApprovalRows
-                          .filter((ra) => ra.status === "PENDING")
-                          .map((ra) => ra.name)
-                          .join(", ")
-                      : "";
-
-                    if (rateApprovalRows.length > 0) {
-                      return (
-                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                          {rateApprovalRows.map((approval) => (
-                            <span key={`${approval.name}-${approval.status}`}>
-                              {approval.name}: {formatApprovalStatus(approval.status)}
-                            </span>
-                          ))}
-                          {holderName ? <Badge tone="hold">Awaiting action</Badge> : null}
-                        </div>
-                      );
-                    }
-
-                    return holderName ? (
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span>Pending with: {holderName}</span>
-                        <Badge tone="hold">Awaiting action</Badge>
-                      </div>
-                    ) : (
-                      <span>By: {log.performed_by_name || "Pending"}</span>
-                    );
-                  }
-
-                  if (
-                    displayTitle === "Accepted by Rate Approver" &&
-                    String(log.performed_by_name || "").includes(",")
-                  ) {
-                    return (
-                      <div className="flex flex-wrap gap-x-3 gap-y-1">
-                        {String(log.performed_by_name || "")
-                          .split(",")
-                          .map((name) => name.trim())
-                          .filter(Boolean)
-                          .map((name) => (
-                            <span key={name}>{name}: Approved</span>
-                          ))}
-                      </div>
-                    );
-                  }
-
-                  return <span>By: {log.performed_by_name || "—"}</span>;
-                }}
-              />
-            )}
-          </Card>
-        </>
-      ) : null}
+            </div>
+          ) : null
+        }
+      />
     </Page>
   );
 }

@@ -20,6 +20,7 @@ import {
 
 import { sapService } from "../services/sapService";
 import { startExcelExport, exportDateStamp } from "../utils/excelExport";
+import { useAuth } from "@/auth";
 import { useQuery } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { Button } from "@/components/ui/button";
@@ -43,14 +44,34 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 
-// Oil and beverage are separate SAP company databases; stock lives in whichever
-// one the item belongs to, so the branch travels with every request.
-const BRANCHES = [
+// Oil, beverage and mart are separate SAP company databases; stock lives in
+// whichever one the item belongs to, so the branch travels with every request.
+const OIL_BEVERAGE_BRANCHES = [
   { value: "OIL", label: "Oil" },
   { value: "BEVERAGE", label: "Beverage" },
 ] as const;
 
-type Branch = (typeof BRANCHES)[number]["value"];
+// A Mart-only user sees the Mart company and nothing else — mirrored by the
+// server, which forces branch=MART for them and refuses OIL/BEVERAGE. The
+// segmented control still renders, as a single labelled "Mart" chip.
+const MART_BRANCHES = [{ value: "MART", label: "Mart" }] as const;
+
+type Branch = "OIL" | "BEVERAGE" | "MART";
+
+/** A user whose only assigned product category is MART (category_id 3). */
+function isMartOnly(categories: string[] | undefined): boolean {
+  return !!categories && categories.length > 0 && categories.every((c) => c === "MART");
+}
+
+// Mart-only: a soft wash behind each KPI card so the row reads as coloured
+// tiles rather than four white boxes. One tint per card, in stat order; the
+// class overrides the primitive's default `bg-card`/`border-line`.
+const MART_STAT_BG = [
+  "bg-blue-50/70 border-blue-200 dark:bg-blue-950/30 dark:border-blue-900",
+  "bg-violet-50/70 border-violet-200 dark:bg-violet-950/30 dark:border-violet-900",
+  "bg-amber-50/70 border-amber-200 dark:bg-amber-950/30 dark:border-amber-900",
+  "bg-emerald-50/70 border-emerald-200 dark:bg-emerald-950/30 dark:border-emerald-900",
+] as const;
 
 const ITEM_CODE_HEADER = "ItemCode";
 const ITEM_NAME_HEADER = "Item Name";
@@ -62,9 +83,17 @@ const formatQty = (value: number): string =>
   value.toLocaleString("en-IN", { maximumFractionDigits: 2 });
 
 export default function Inventory_Report() {
-  const [branch, setBranch] = useState<Branch>("OIL");
+  const { session } = useAuth();
+  const martOnly = isMartOnly(session?.categories);
+  const branches = martOnly ? MART_BRANCHES : OIL_BEVERAGE_BRANCHES;
+
+  const [branch, setBranch] = useState<Branch>(martOnly ? "MART" : "OIL");
   const [search, setSearch] = useState("");
+  // Oil/Beverage keep the single-choice variety picker. Mart gets a multi-select
+  // (empty = every variety) so a Mart user can look at a handful at once — the
+  // one control that differs between the two variety filters.
   const [subGroup, setSubGroup] = useState("ALL");
+  const [subGroupsSelected, setSubGroupsSelected] = useState<string[]>([]);
   /*
    * Warehouse columns. `null` means "the user has not chosen", which shows all
    * of them — so a warehouse added in SAP appears on its own. It has to be a
@@ -108,7 +137,11 @@ export default function Inventory_Report() {
     const codes = warehouses.map((w) => w.code);
 
     const groups = report.groups
-      .filter((group) => subGroup === "ALL" || group.sub_group === subGroup)
+      .filter((group) =>
+        martOnly
+          ? subGroupsSelected.length === 0 || subGroupsSelected.includes(group.sub_group)
+          : subGroup === "ALL" || group.sub_group === subGroup,
+      )
       .map((group) => {
         const items = group.items
           .filter(
@@ -156,7 +189,7 @@ export default function Inventory_Report() {
       grandTotal: groups.reduce((sum, group) => sum + group.total, 0),
       itemCount: groups.reduce((sum, group) => sum + group.items.length, 0),
     };
-  }, [report, search, subGroup, warehouses]);
+  }, [report, search, subGroup, subGroupsSelected, martOnly, warehouses]);
 
   const handleExport = () => {
     if (!view || view.groups.length === 0) return;
@@ -230,6 +263,32 @@ export default function Inventory_Report() {
   const columnCount = warehouses.length + 4;
   const numCell = "text-right tabular-nums";
 
+  // Mart-only table chrome (requirements 3 & 4): a fixed viewport that shows
+  // ~10 compact rows and scrolls, with the column header pinned so it stays put
+  // while the body scrolls, plus a solid backing behind that pinned header.
+  // `26rem` ≈ header + 10 rows at the compact row height.
+  // `overflow-y-auto` here + the Table container's own `overflow-x-auto` makes
+  // this one element the scroll box for BOTH axes, which is what the sticky
+  // header (top) and the sticky identity columns (left) both anchor to.
+  const martScrollContainer = martOnly
+    ? "max-h-[26rem] overflow-y-auto rounded-card border border-line"
+    : undefined;
+  // Vertical pin for the column header, so it stays visible while the body
+  // scrolls down.
+  const headTop = martOnly ? "sticky top-0 bg-surface-strong border-b border-line" : "";
+  // Horizontal freeze for the three identity columns (ItemCode / Item Name /
+  // SKU), so they stay put while the warehouse columns scroll sideways. Fixed
+  // widths give each a known left offset (0 -> 110 -> 350px). A frozen cell must
+  // carry an OPAQUE background that matches its row, or the scrolling columns
+  // show through it — hence the per-row bg passed at each cell below.
+  const mCol = martOnly
+    ? {
+        code: "sticky left-0 z-10 w-[110px] min-w-[110px]",
+        name: "sticky left-[110px] z-10 w-[240px] min-w-[240px]",
+        sku: "sticky left-[350px] z-10 w-[130px] min-w-[130px] border-r border-line",
+      }
+    : { code: "", name: "", sku: "" };
+
   return (
     <Page>
       <Breadcrumbs items={[{ label: "Reports" }, { label: "Inventory Report" }]} />
@@ -261,7 +320,7 @@ export default function Inventory_Report() {
         <FilterSegmented
           label="Company"
           value={branch}
-          options={BRANCHES}
+          options={branches}
           onChange={(next) => {
             setBranch(next);
             // The other branch has different warehouses, so a choice made
@@ -269,19 +328,32 @@ export default function Inventory_Report() {
             setSelectedWhs(null);
           }}
         />
-        <FilterSelect
-          label="Variety"
-          value={subGroup}
-          onChange={(e) => setSubGroup(e.target.value)}
-          fieldClassName="max-w-[220px]"
-        >
-          <option value="ALL">All varieties</option>
-          {subGroups.map((name) => (
-            <option key={name} value={name}>
-              {name}
-            </option>
-          ))}
-        </FilterSelect>
+        {martOnly ? (
+          <FilterMultiSelect
+            label="Variety"
+            value={subGroupsSelected}
+            // Kept in the report's own variety order, whatever order they were ticked.
+            onChange={(next) => setSubGroupsSelected(subGroups.filter((name) => next.includes(name)))}
+            options={subGroups.map((name) => ({ value: name, label: name }))}
+            placeholder="All varieties"
+            disabled={!report}
+            fieldClassName="max-w-[240px]"
+          />
+        ) : (
+          <FilterSelect
+            label="Variety"
+            value={subGroup}
+            onChange={(e) => setSubGroup(e.target.value)}
+            fieldClassName="max-w-[220px]"
+          >
+            <option value="ALL">All varieties</option>
+            {subGroups.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </FilterSelect>
+        )}
         <FilterMultiSelect
           label="Warehouses"
           value={activeWhs}
@@ -320,10 +392,10 @@ export default function Inventory_Report() {
       ) : null}
 
       <StatRow>
-        <Stat icon={HiOutlineCube} tone="brand" label="Items in stock" value={view?.itemCount ?? 0} loading={loading} />
-        <Stat icon={HiOutlineTag} tone="neutral" label="Varieties" value={view?.groups.length ?? 0} loading={loading} />
-        <Stat icon={HiOutlineBuildingStorefront} tone="neutral" label="Warehouses" value={warehouses.length} loading={loading} />
-        <Stat icon={HiOutlineArchiveBox} tone="brand" label="Total stock" value={view ? formatQty(view.grandTotal) : "0"} loading={loading} />
+        <Stat icon={HiOutlineCube} tone="brand" label="Items in stock" value={view?.itemCount ?? 0} loading={loading} className={martOnly ? MART_STAT_BG[0] : undefined} />
+        <Stat icon={HiOutlineTag} tone="neutral" label="Varieties" value={view?.groups.length ?? 0} loading={loading} className={martOnly ? MART_STAT_BG[1] : undefined} />
+        <Stat icon={HiOutlineBuildingStorefront} tone="neutral" label="Warehouses" value={warehouses.length} loading={loading} className={martOnly ? MART_STAT_BG[2] : undefined} />
+        <Stat icon={HiOutlineArchiveBox} tone="brand" label="Total stock" value={view ? formatQty(view.grandTotal) : "0"} loading={loading} className={martOnly ? MART_STAT_BG[3] : undefined} />
       </StatRow>
 
       <Card className="overflow-hidden p-0">
@@ -338,41 +410,60 @@ export default function Inventory_Report() {
             hint={report ? "Widen the search, or tick more warehouses." : undefined}
           />
         ) : (
-          <div className="overflow-x-auto">
-            <Table density="compact">
+          <Table density="compact" containerClassName={martScrollContainer}>
               <TableHeader>
                 <TableRow className="bg-surface hover:bg-surface">
-                  <TableHead>ItemCode</TableHead>
-                  <TableHead className="min-w-[240px]">Item Name</TableHead>
-                  <TableHead>SKU</TableHead>
+                  {/* z-30 on the frozen header cells: they are corners, sitting
+                      above both the scrolling header (z-20) and the frozen body
+                      columns (z-10). */}
+                  <TableHead className={cn(headTop, mCol.code, martOnly && "z-30")}>ItemCode</TableHead>
+                  <TableHead className={cn("min-w-[240px]", headTop, mCol.name, martOnly && "z-30")}>Item Name</TableHead>
+                  <TableHead className={cn(headTop, mCol.sku, martOnly && "z-30")}>SKU</TableHead>
                   {warehouses.map((w) => (
-                    <TableHead key={w.code} title={w.name} className="text-right">
+                    <TableHead key={w.code} title={w.name} className={cn("text-right", headTop, martOnly && "z-20")}>
                       {w.code}
                     </TableHead>
                   ))}
-                  <TableHead className="text-right">Grand Total</TableHead>
+                  <TableHead className={cn("text-right", headTop, martOnly && "z-20")}>Grand Total</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {view.groups.map((group) => (
                   <Fragment key={group.sub_group}>
                     {/* The variety band: a heading drawn as a row, so it
-                        scrolls with the columns it labels. */}
+                        scrolls with the columns it labels. For Mart it gets a
+                        distinct amber fill with a left accent bar, so a reader
+                        can tell at a glance "this is a variety, the rows under
+                        it are its stock" — and it is pinned to the left so the
+                        variety name stays visible while the warehouse columns
+                        scroll sideways. */}
                     <TableRow className="bg-brand-soft/40 hover:bg-brand-soft/40">
                       <TableCell
                         colSpan={columnCount}
-                        className="text-[11px] font-semibold uppercase tracking-wider text-brand"
+                        className={cn(
+                          "text-[11px] font-semibold uppercase tracking-wider text-brand",
+                          // Uses the page's own brand (blue) tones so it matches
+                          // the rest of the UI, but a solid fill and a left
+                          // accent bar keep it reading as a divider.
+                          martOnly &&
+                            "sticky left-0 z-10 border-y border-brand-line border-l-4 border-l-brand bg-brand-soft text-[12px] text-brand",
+                        )}
                       >
                         {group.sub_group}
                       </TableCell>
                     </TableRow>
-                    {group.items.map((item) => (
-                      <TableRow key={item.item_code}>
-                        <TableCell className="whitespace-nowrap font-mono text-[12px]">
+                    {group.items.map((item, idx) => (
+                      <TableRow
+                        key={item.item_code}
+                        // Mart-only zebra striping, for readability across the
+                        // wide warehouse grid the user called out as hard to read.
+                        className={cn(martOnly && idx % 2 === 1 && "bg-surface/50")}
+                      >
+                        <TableCell className={cn("whitespace-nowrap font-mono text-[12px]", mCol.code, martOnly && "bg-card")}>
                           {item.item_code}
                         </TableCell>
-                        <TableCell className="text-ink">{item.item_name}</TableCell>
-                        <TableCell className="whitespace-nowrap">{item.sku}</TableCell>
+                        <TableCell className={cn("text-ink", mCol.name, martOnly && "bg-card")}>{item.item_name}</TableCell>
+                        <TableCell className={cn("whitespace-nowrap", mCol.sku, martOnly && "bg-card")}>{item.sku}</TableCell>
                         {warehouses.map((w) => (
                           <TableCell
                             key={w.code}
@@ -387,9 +478,9 @@ export default function Inventory_Report() {
                       </TableRow>
                     ))}
                     <TableRow className="bg-surface font-semibold hover:bg-surface">
-                      <TableCell />
-                      <TableCell className="text-ink">{group.sub_group} Total</TableCell>
-                      <TableCell />
+                      <TableCell className={cn(mCol.code, martOnly && "bg-surface")} />
+                      <TableCell className={cn("text-ink", mCol.name, martOnly && "bg-surface")}>{group.sub_group} Total</TableCell>
+                      <TableCell className={cn(mCol.sku, martOnly && "bg-surface")} />
                       {warehouses.map((w) => (
                         <TableCell key={w.code} className={cn(numCell, "text-ink")}>
                           {formatQty(group.totals[w.code])}
@@ -402,9 +493,9 @@ export default function Inventory_Report() {
                   </Fragment>
                 ))}
                 <TableRow className="border-t-2 border-line-strong bg-surface-strong font-bold hover:bg-surface-strong">
-                  <TableCell />
-                  <TableCell className="text-ink">GRAND TOTAL</TableCell>
-                  <TableCell />
+                  <TableCell className={cn(mCol.code, martOnly && "bg-surface-strong")} />
+                  <TableCell className={cn("text-ink", mCol.name, martOnly && "bg-surface-strong")}>GRAND TOTAL</TableCell>
+                  <TableCell className={cn(mCol.sku, martOnly && "bg-surface-strong")} />
                   {warehouses.map((w) => (
                     <TableCell key={w.code} className={cn(numCell, "text-ink")}>
                       {formatQty(view.totals[w.code])}
@@ -416,7 +507,6 @@ export default function Inventory_Report() {
                 </TableRow>
               </TableBody>
             </Table>
-          </div>
         )}
       </Card>
     </Page>
