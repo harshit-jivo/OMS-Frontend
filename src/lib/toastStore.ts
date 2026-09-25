@@ -18,10 +18,27 @@
  * inside the React tree at all.
  */
 
+/**
+ * How the toast reads at a glance, before the words are.
+ *
+ * Omitted is the neutral bell — an FYI. `ok` and `bad` are for a DECISION the
+ * user just took and wants confirmed: approving and rejecting are one click
+ * apart and the only difference afterwards is the sentence, which is exactly
+ * the thing nobody reads on a toast that is about to disappear.
+ */
+// `ok`/`bad` are the original vocabulary; `success`/`error` are the equivalents
+// introduced by the Distributor pages. Both are accepted and styled the same
+// (ok≡success, bad≡error) so callers on either spelling get colored toasts.
+export type ToastTone = "ok" | "bad" | "success" | "error";
+
 export type ToastData = {
   id: number;
   title: string;
   message: string;
+  /** Visual tone. `success`/`ok` render the card green with a check icon,
+   *  `error`/`bad` render it red with an X icon; anything else (or omitted)
+   *  uses the neutral brand styling. */
+  tone?: ToastTone;
   orderNumber?: string | null;
   onAction?: () => void;
   actionLabel?: string;

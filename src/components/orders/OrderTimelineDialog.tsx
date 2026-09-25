@@ -182,6 +182,7 @@ export function OrderTimelineDialog({
   logs,
   loading,
   formatDateTime,
+  summary,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -189,6 +190,13 @@ export function OrderTimelineDialog({
   logs: OrderLog[];
   loading: boolean;
   formatDateTime: (value?: string | null) => string;
+  /**
+   * An optional block shown above the timeline — e.g. who created the order
+   * and when, where it is currently stuck, and whether it is completed. Only
+   * the distributor View Orders passes it; the other five callers leave it
+   * off and the dialog is exactly as it was.
+   */
+  summary?: React.ReactNode;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -202,6 +210,7 @@ export function OrderTimelineDialog({
           </DialogHeader>
 
           <DialogBody>
+            {summary ? <div className="mb-4">{summary}</div> : null}
             {loading ? (
               <div className="space-y-3" role="status" aria-live="polite">
                 <span className="sr-only">Loading tracking history</span>

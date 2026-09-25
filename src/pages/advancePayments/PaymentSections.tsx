@@ -16,7 +16,9 @@ import { Field, FormGrid, Input } from "../../components/ui/form";
 import { SegmentedControl } from "../../components/ui/segmented";
 import { cn } from "@/lib/utils";
 
+import { AttachmentReadingStatus, AttachmentReadingTable } from "./AttachmentReading";
 import { ChoiceOrText } from "./ChoiceOrText";
+import { SapAttachmentLink } from "./SapAttachmentLink";
 
 import {
   PAYMENT_MODES,
@@ -26,11 +28,13 @@ import {
   type ReturnMethod,
 } from "./constants";
 import {
-  REFERENCE_KINDS,
   calculateEmi,
   expectedPeriodError,
   formatDate,
   formatINR,
+  installmentsFromEmi,
+  pastDateError,
+  REFERENCE_KINDS,
   type Allocation,
   type AllocationRow,
   type AllocationTotals,
@@ -234,7 +238,15 @@ export function ReferenceDetails({
  * vendor's own reference (on a SAP bill), and its date.
  */
 function documentSubtitle(doc: OpenDocument): string {
-  return [doc.docType, doc.reference ? `Ref ${doc.reference}` : null, formatDate(doc.date)]
+  // The note is on the picker line, not only in the expanded row: under "All"
+  // it is what marks a credit memo or a payment already made as money owed TO
+  // us, and that has to be seen before it is ticked, not after.
+  return [
+    doc.docType,
+    doc.note,
+    doc.reference ? `Ref ${doc.reference}` : null,
+    formatDate(doc.date),
+  ]
     .filter(Boolean)
     .join(" · ");
 }
@@ -349,6 +361,13 @@ function SelectedDocuments({
                 <span>
                   <span className="block text-[13px] font-semibold text-brand">{doc.number}</span>
                   <span className="block text-[11px] text-subtle">{documentSubtitle(doc)}</span>
+                  {/* Starts reading the SAP attachment as soon as the
+                      document is chosen; the detail below shows the fields. */}
+                  {doc.attachment ? (
+                    <span className="mt-1 block">
+                      <AttachmentReadingStatus attachment={doc.attachment} />
+                    </span>
+                  ) : null}
                 </span>
               </button>
 
@@ -360,13 +379,24 @@ function SelectedDocuments({
               </div>
 
               <div className="order-4 col-span-2 md:order-3 md:col-span-1">
-                <SegmentedControl
-                  size="xs"
-                  aria-label={`Payment mode for ${doc.number}`}
-                  value={allocation.mode}
-                  onChange={(mode) => onAllocationChange(doc.id, { mode })}
-                  options={PAYMENT_MODES}
-                />
+                {/* A choice only where the kind allows more than one mode (a
+                    PO); elsewhere (a bill: amount only) it just names it. */}
+                {def.modes.length > 1 ? (
+                  <SegmentedControl
+                    size="xs"
+                    aria-label={`Payment mode for ${doc.number}`}
+                    value={allocation.mode}
+                    onChange={(mode) => onAllocationChange(doc.id, { mode })}
+                    options={PAYMENT_MODES.filter((m) => def.modes.includes(m.value))}
+                  />
+                ) : (
+                  <span
+                    data-slot="payment-mode"
+                    className="inline-flex h-control-xs items-center rounded-sm bg-surface px-2.5 text-[12px] font-medium text-subtle"
+                  >
+                    {PAYMENT_MODES.find((m) => m.value === allocation.mode)?.label}
+                  </span>
+                )}
               </div>
 
               <div className="order-5 col-span-2 md:order-4 md:col-span-1">
@@ -375,6 +405,7 @@ function SelectedDocuments({
                   allocation={allocation}
                   payment={calc.payment}
                   error={calc.error}
+                  openAmount={doc.open}
                   onChange={(patch) => onAllocationChange(doc.id, patch)}
                 />
               </div>
@@ -412,6 +443,24 @@ function SelectedDocuments({
                       <DetailField label={def.paidLabel} value={formatINR(doc.paid)} />
                       <DetailField label="Open Amount" value={formatINR(doc.open)} strong />
                       {doc.note ? <DetailField label="Description" value={doc.note} /> : null}
+                      <DetailField
+                        label="SAP Attachment"
+                        span="full"
+                        value={
+                          doc.attachment ? (
+                            <SapAttachmentLink attachment={doc.attachment} />
+                          ) : (
+                            <span className="text-subtle">None in SAP</span>
+                          )
+                        }
+                      />
+                      {doc.attachment ? (
+                        <DetailField
+                          label="Read from the attachment"
+                          span="full"
+                          value={<AttachmentReadingTable attachment={doc.attachment} />}
+                        />
+                      ) : null}
                     </DetailGrid>
                   </div>
                 </div>
@@ -473,17 +522,34 @@ function LineAmountInput({
   allocation,
   payment,
   error,
+  openAmount,
   onChange,
 }: {
   documentNumber: string;
   allocation: Allocation;
   payment: number | null;
   error: string | null;
+  /** The most this line may pay. A keystroke that would go past it is refused. */
+  openAmount: number;
   onChange: (patch: Partial<Allocation>) => void;
 }) {
   const errorId = React.useId();
   const noteId = React.useId();
   const percent = allocation.mode === "PERCENT";
+  /*
+   * REFUSE, do not warn. A figure above the document's open amount (or a
+   * percentage above 100, which is the same thing — the percentage is of the
+   * OPEN amount) is never a valid answer, so the keystroke that would make it
+   * is simply not taken: the input keeps its previous value. The error from
+   * `rules.calculateLine` stays as the net for anything that arrives another
+   * way, such as a snapshot whose open amount has since fallen.
+   */
+  const withinOpen = (raw: string) => {
+    if (raw.trim() === "") return true;
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return true; // half-typed: let the number input hold it
+    return percent ? n <= 100 : n <= openAmount;
+  };
   const describedBy =
     [error ? errorId : null, percent && payment !== null ? noteId : null]
       .filter(Boolean)
@@ -513,7 +579,7 @@ function LineAmountInput({
         <input
           type="number"
           min="0"
-          max={percent ? 100 : undefined}
+          max={percent ? 100 : openAmount}
           step="0.01"
           inputMode="decimal"
           aria-label={
@@ -525,9 +591,11 @@ function LineAmountInput({
           aria-describedby={describedBy}
           placeholder={percent ? "Enter %" : "Enter amount"}
           value={percent ? allocation.percentage : allocation.amount}
-          onChange={(event) =>
-            onChange(percent ? { percentage: event.target.value } : { amount: event.target.value })
-          }
+          onChange={(event) => {
+            const next = event.target.value;
+            if (!withinOpen(next)) return;
+            onChange(percent ? { percentage: next } : { amount: next });
+          }}
           className={cn(
             "min-w-[3.5rem] flex-1 border-0 bg-transparent px-3 [font-family:inherit] text-[13px] text-ink",
             "placeholder:text-subtle focus:outline-none",
@@ -592,21 +660,34 @@ function LineAmountInput({
 /* ── Repayment & Settlement ──────────────────────────────────────────────── */
 
 /**
- * How an employee advance comes back, and over what period it is used.
+ * How an employee advance comes back.
  *
- * Only EMI asks anything further. The EMI itself is DERIVED — Amount ÷
- * Installments — and shown read-only, because a typed EMI could disagree with
- * the amount above it and there would be no saying which was meant.
+ * Each method asks for exactly the dates it has:
+ *
+ *   EMI        Number of Installments <-> EMI Amount, linked BOTH ways (type
+ *              either, the other is worked out), an EMI Start Date, and an
+ *              Expected To Date that is DERIVED and read-only.
+ *   One Time   a single Return Date.
+ *   Other      the typed method, with a From / To period.
+ *
+ * The linking itself lives in `rules.applyChange`, not here, so the form and
+ * the approver's copy of it cannot compute it differently.
+ *
+ * `today` is the earliest date the EMI start and the return date accept —
+ * the picker refuses earlier days, and `validate` catches a typed one.
  */
 export function RepaymentDetails({
   amount,
   returnMethod,
   returnMethodOther,
   installments,
+  emiAmount,
   expectedFromDate,
   expectedToDate,
+  today,
   onReturnMethodChange,
   onInstallmentsChange,
+  onEmiAmountChange,
   onExpectedFromChange,
   onExpectedToChange,
 }: {
@@ -614,20 +695,36 @@ export function RepaymentDetails({
   returnMethod: ReturnMethod | "";
   returnMethodOther: string;
   installments: string;
+  emiAmount: string;
   expectedFromDate: string;
   expectedToDate: string;
+  today: string;
   onReturnMethodChange: (method: ReturnMethod | "", other: string) => void;
   onInstallmentsChange: (installments: string) => void;
+  onEmiAmountChange: (emiAmount: string) => void;
   onExpectedFromChange: (date: string) => void;
   onExpectedToChange: (date: string) => void;
 }) {
-  const emi = calculateEmi(amount, installments);
+  const fromCount = calculateEmi(amount, installments);
+  const fromEmi = installmentsFromEmi(amount, emiAmount);
   const periodError = expectedPeriodError(expectedFromDate, expectedToDate);
+  const startError = pastDateError("EMI Start Date", expectedFromDate, today);
+  const returnError = pastDateError("Return Date", expectedToDate, today);
+
+  // What the EMI box says under itself. The short last installment is the
+  // one thing a requester would otherwise work out on a calculator.
+  const emiHint = !amount
+    ? "Enter the amount above first."
+    : fromEmi.lastInstallment !== null
+      ? `Last installment ${formatINR(fromEmi.lastInstallment)}.`
+      : fromCount.rounded
+        ? "Does not divide evenly, rounded to the paisa."
+        : "Type the EMI, or the number of installments.";
 
   return (
     <FormSection
       title="Repayment & Settlement"
-      description="How the advance comes back, and the period in which it is expected to be used and settled."
+      description="How the advance comes back, and when."
     >
       <FormGrid className="md:grid-cols-3">
         <Field label="Return Method" required>
@@ -647,7 +744,11 @@ export function RepaymentDetails({
 
         {returnMethod === "EMI" ? (
           <>
-            <Field label="Number of Installments" required error={emi.error ?? undefined}>
+            <Field
+              label="Number of Installments"
+              required
+              error={fromCount.error ?? undefined}
+            >
               {(c) => (
                 <Input
                   {...c}
@@ -662,24 +763,17 @@ export function RepaymentDetails({
               )}
             </Field>
 
-            <Field
-              label="EMI Amount"
-              hint={
-                !amount
-                  ? "Enter the amount above first."
-                  : emi.rounded
-                    ? "Does not divide evenly — rounded to the paisa."
-                    : "Amount ÷ number of installments."
-              }
-            >
+            <Field label="EMI Amount" required hint={emiHint} error={fromEmi.error ?? undefined}>
               {(c) => (
-                // Read-only and styled as a value: it is worked out, not typed.
                 <Input
                   {...c}
-                  readOnly
-                  value={emi.emi !== null ? formatINR(emi.emi) : ""}
-                  placeholder="Calculated"
-                  className="bg-surface font-semibold"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  inputMode="decimal"
+                  placeholder="e.g. 5000"
+                  value={emiAmount}
+                  onChange={(e) => onEmiAmountChange(e.target.value)}
                 />
               )}
             </Field>
@@ -687,32 +781,82 @@ export function RepaymentDetails({
         ) : null}
       </FormGrid>
 
-      <FormGrid className="md:grid-cols-3">
-        <Field label="Expected From Date" required>
-          {(c) => (
-            <Input
-              {...c}
-              type="date"
-              value={expectedFromDate}
-              onChange={(e) => onExpectedFromChange(e.target.value)}
-            />
-          )}
-        </Field>
+      {returnMethod === "EMI" ? (
+        <FormGrid className="md:grid-cols-3">
+          <Field label="EMI Start Date" required error={startError ?? undefined}>
+            {(c) => (
+              <Input
+                {...c}
+                type="date"
+                min={today}
+                value={expectedFromDate}
+                onChange={(e) => onExpectedFromChange(e.target.value)}
+              />
+            )}
+          </Field>
 
-        <Field label="Expected To Date" required error={periodError ?? undefined}>
-          {(c) => (
-            <Input
-              {...c}
-              type="date"
-              // The browser's own picker refuses earlier dates too; the
-              // error above still covers a typed one.
-              min={expectedFromDate || undefined}
-              value={expectedToDate}
-              onChange={(e) => onExpectedToChange(e.target.value)}
-            />
-          )}
-        </Field>
-      </FormGrid>
+          <Field
+            label="Expected To Date"
+            hint="EMI start date plus one month per installment."
+          >
+            {(c) => (
+              // Read-only and styled as a value: it is worked out, not typed.
+              <Input
+                {...c}
+                type="date"
+                readOnly
+                tabIndex={-1}
+                value={expectedToDate}
+                className="bg-surface font-semibold"
+              />
+            )}
+          </Field>
+        </FormGrid>
+      ) : returnMethod === "ONE_TIME" ? (
+        <FormGrid className="md:grid-cols-3">
+          <Field
+            label="Return Date"
+            required
+            hint="The day the full amount comes back."
+            error={returnError ?? undefined}
+          >
+            {(c) => (
+              <Input
+                {...c}
+                type="date"
+                min={today}
+                value={expectedToDate}
+                onChange={(e) => onExpectedToChange(e.target.value)}
+              />
+            )}
+          </Field>
+        </FormGrid>
+      ) : returnMethod ? (
+        <FormGrid className="md:grid-cols-3">
+          <Field label="Expected From Date" required>
+            {(c) => (
+              <Input
+                {...c}
+                type="date"
+                value={expectedFromDate}
+                onChange={(e) => onExpectedFromChange(e.target.value)}
+              />
+            )}
+          </Field>
+
+          <Field label="Expected To Date" required error={periodError ?? undefined}>
+            {(c) => (
+              <Input
+                {...c}
+                type="date"
+                min={expectedFromDate || undefined}
+                value={expectedToDate}
+                onChange={(e) => onExpectedToChange(e.target.value)}
+              />
+            )}
+          </Field>
+        </FormGrid>
+      ) : null}
     </FormSection>
   );
 }

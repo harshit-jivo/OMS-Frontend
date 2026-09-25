@@ -38,7 +38,10 @@ export type Company = (typeof COMPANIES)[number];
  */
 export const PARTNER_TYPES = [
   { value: "VENDOR", label: "Vendor" },
-  { value: "EMPLOYEE_ADVANCE", label: "Employee Advance" },
+  // Shown as "Employee". The value stays EMPLOYEE_ADVANCE: it is the key the
+  // rules, the tests and any saved request are written against, and a label
+  // is not a reason to rename a key.
+  { value: "EMPLOYEE_ADVANCE", label: "Employee" },
   { value: "EMPLOYEE_IMPREST", label: "Employee Imprest" },
 ] as const;
 export type PartnerType = (typeof PARTNER_TYPES)[number]["value"];
@@ -67,7 +70,20 @@ export interface Partner {
   label: string;
   /** Card code / employee code — shown beside the name and searchable. */
   code: string;
+  /**
+   * An employee from OMS's employee master with NO employee-advance account
+   * in SAP. Offered so the requester can see them, but an advance cannot be
+   * posted until their master is created in SAP.
+   */
+  notInSap?: boolean;
 }
+
+/**
+ * The `value` of a not-in-SAP employee: there is no advance account to use,
+ * so the employee code, prefixed, stands in for it.
+ */
+export const NOT_IN_SAP_PREFIX = "NOSAP:";
+export const isNotInSap = (partner: string) => partner.startsWith(NOT_IN_SAP_PREFIX);
 
 /**
  * Dummy vendors. `code` stands in for the SAP CardCode.
@@ -132,6 +148,22 @@ export interface OpenDocument {
   /** ISO date the document falls due, where SAP has one. */
   dueDate?: string;
   currency?: string;
+  /**
+   * The document's latest SAP attachment, where it has one. Carries what it
+   * takes to fetch it (company, kind, DocEntry), because it travels with the
+   * chosen document onto the approval desk.
+   */
+  attachment?: DocumentAttachment;
+}
+
+export interface DocumentAttachment {
+  company: "OIL" | "MART" | "BEVERAGES";
+  kind: "po" | "bill";
+  docEntry: number;
+  fileName: string;
+  /** How many attachments the document has; the latest is the one shown. */
+  count: number;
+  date: string;
 }
 
 /** Dummy open purchase orders, keyed to vendors. `paid` = already advanced. */

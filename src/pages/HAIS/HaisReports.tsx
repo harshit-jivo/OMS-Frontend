@@ -36,6 +36,7 @@ type ReportKey =
   | "assigned"
   | "attention"
   | "warranty"
+  | "byUser"
   | "byDept"
   | "byCategory"
   | "byStatus";
@@ -45,6 +46,7 @@ const REPORTS: { key: ReportKey; label: string }[] = [
   { key: "assigned", label: "Assigned Devices" },
   { key: "attention", label: "Needs Attention" },
   { key: "warranty", label: "Warranty Expiring / Expired" },
+  { key: "byUser", label: "By User" },
   { key: "byDept", label: "By Department" },
   { key: "byCategory", label: "By Category" },
   { key: "byStatus", label: "By Status" },
@@ -106,6 +108,22 @@ function groupCount(items: Asset[], keyOf: (a: Asset) => string): [string, numbe
   return [...m.entries()].sort((p, q) => q[1] - p[1]);
 }
 
+/** Count devices per holder (dedup by Emp ID, falling back to name). Assigned only. */
+type UserCount = { name: string; empId: string; count: number };
+function groupUsers(items: Asset[]): UserCount[] {
+  const m = new Map<string, UserCount>();
+  items.forEach((a) => {
+    const empId = (a.current_user_id || "").trim();
+    const name = (a.current_user_name || "").trim();
+    const key = (empId || name).toUpperCase();
+    if (!key) return;
+    const prev = m.get(key);
+    if (prev) prev.count += 1;
+    else m.set(key, { name: name || empId, empId, count: 1 });
+  });
+  return [...m.values()].sort((p, q) => q.count - p.count || p.name.localeCompare(q.name));
+}
+
 function toRows(list: Asset[], cols: Column[]): ExcelRow[] {
   return list.map((a) => Object.fromEntries(cols.map(([h, get]) => [h, get(a) ?? ""])));
 }
@@ -164,6 +182,7 @@ export default function HaisReports() {
     .filter((x) => x.days <= WARRANTY_SOON_DAYS)
     .sort((p, q2) => p.days - q2.days);
 
+  const byUser = groupUsers(assigned);
   const byDept = groupCount(visible, (a) => (a.department as string) || "");
   const byCategory = groupCount(visible, (a) => (a.asset_type as string) || "");
   const byStatus = groupCount(visible, (a) => (a.working_status as string) || "");
@@ -186,6 +205,10 @@ export default function HaisReports() {
           "Current User": holderLabel(a),
         }));
         name = "Warranty";
+        break;
+      case "byUser":
+        data = byUser.map((u) => ({ User: u.name, "Emp ID": u.empId, Devices: u.count }));
+        name = "By_User";
         break;
       case "byDept": data = byDept.map(([n, c]) => ({ Department: n, Devices: c })); name = "By_Department"; break;
       case "byCategory": data = byCategory.map(([n, c]) => ({ Category: n, Devices: c })); name = "By_Category"; break;
@@ -216,7 +239,7 @@ export default function HaisReports() {
         />
         <FilterSpacer />
         <Button variant="ghost" onClick={reload} disabled={busy}>
-          <HiOutlineArrowPath aria-hidden="true" /> {busy ? "Loading…" : "Refresh"}
+          <HiOutlineArrowPath className="text-brand" aria-hidden="true" /> {busy ? "Loading…" : "Refresh"}
         </Button>
         <Button onClick={exportExcel} disabled={busy}>
           <HiOutlineArrowDownTray aria-hidden="true" /> Export Excel
@@ -316,6 +339,7 @@ export default function HaisReports() {
                   </Table>
                 )}
 
+                {report === "byUser" && <UserCountTable data={byUser} />}
                 {report === "byDept" && <CountTable title="Department" data={byDept} />}
                 {report === "byCategory" && <CountTable title="Category" data={byCategory} />}
                 {report === "byStatus" && <CountTable title="Working status" data={byStatus} />}
@@ -351,6 +375,41 @@ function DeviceTable({ rows, columns, empty }: { rows: Asset[]; columns: Column[
               ))}
             </TableRow>
           ))
+        )}
+      </TableBody>
+    </Table>
+  );
+}
+
+function UserCountTable({ data }: { data: UserCount[] }) {
+  const total = data.reduce((s, u) => s + u.count, 0);
+  return (
+    <Table density="compact">
+      <TableHeader>
+        <TableRow>
+          <TableHead>User</TableHead>
+          <TableHead>Emp ID</TableHead>
+          <TableHead className="w-32 text-right">Devices</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {data.length === 0 ? (
+          <TableEmpty colSpan={3}>No assigned devices.</TableEmpty>
+        ) : (
+          <>
+            {data.map((u) => (
+              <TableRow key={u.empId || u.name}>
+                <TableCell className="text-ink">{u.name}</TableCell>
+                <TableCell className={MONO}>{u.empId || "—"}</TableCell>
+                <TableCell className="text-right tabular-nums">{u.count}</TableCell>
+              </TableRow>
+            ))}
+            <TableRow className="bg-surface font-semibold text-ink hover:bg-surface">
+              <TableCell>Total</TableCell>
+              <TableCell />
+              <TableCell className="text-right tabular-nums">{total}</TableCell>
+            </TableRow>
+          </>
         )}
       </TableBody>
     </Table>

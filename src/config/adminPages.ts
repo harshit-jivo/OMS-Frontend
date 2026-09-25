@@ -20,6 +20,15 @@ export const GRANTABLE_ADMIN_PAGES: GrantablePage[] = [
   { key: "Order_Flow_Settings", label: "Order Flow Settings", path: "/Order_Flow_Settings" },
   { key: "Product_Stock", label: "Stock", path: "/Product_Stock" },
   { key: "Reports", label: "Reports", path: "/Daily_Report" },
+  // Split out of the umbrella "Reports" key so the warehouse-wise SAP stock
+  // report can be granted on its own — e.g. to a mart_approval user who should
+  // see inventory without the sales reports. "Reports" no longer opens it; see
+  // routeAccess.ts and the users/0036 back-grant migration.
+  { key: "Inventory_Report", label: "Inventory Report", path: "/Inventory_Report" },
+  // Completed distributor (Mart) orders, distributor-wise and SKU-wise. A
+  // standalone per-user grant (not part of the umbrella "Reports" key), the
+  // same way Inventory Report is granted person-by-person.
+  { key: "Distributor_Report", label: "Distributor Report", path: "/Distributor_Report" },
   // The order/revenue analytics screen, formerly the ungated `/Dashboard`.
   // Separate from "Reports": the tabular reports are a billing tool, this is a
   // company-wide sales picture, and the people who need one are not
@@ -47,16 +56,22 @@ export const GRANTABLE_ADMIN_PAGES: GrantablePage[] = [
     path: "/Production_Approval",
   },
   // Registered by the backend's advance_payment app — its SAP lookups (the
-  // request form's vendors, open bills and employees) all require it. The
-  // approval desk's `Advance_Payment_Approval` is NOT offered yet: the server
-  // does not register it, and this list may only offer keys the server knows.
+  // request form's vendors, open bills and employees) and raising a request
+  // all require it.
   {
     key: "Advance_Payment",
-    label: "Advance Payment — raise requests",
+    label: "Payments — raise requests",
     path: "/Advance_Payment_Request",
   },
+  // The approval desk. Opens it; ACTING on a request also needs being the
+  // current stage's user in its workflow, which the server checks.
+  {
+    key: "Advance_Payment_Approval",
+    label: "Payments — approval desk",
+    path: "/Advance_Payment_Approval",
+  },
   { key: "Distributor", label: "Distributor", path: "/Distributor" },
-  { key: "Mart_Approval", label: "Mart Approval", path: "/Mart_Approval" },
+  { key: "Mart_Approval", label: "Orders", path: "/Mart_Approval" },
   // One key for the whole Legal module — unlocks Label Checker AND Nutrition
   // Manager, the way "Distributor" covers both distributor routes. Mirrors
   // the backend gate on legal/views.py (HasKeyOrRole, legal-role fallback).

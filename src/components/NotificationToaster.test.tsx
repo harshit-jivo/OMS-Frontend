@@ -81,4 +81,35 @@ describe("NotificationToaster", () => {
     expect(onAction).toHaveBeenCalledOnce();
     expect(screen.queryByText("SO-4410 moved on.")).not.toBeInTheDocument();
   });
+
+  /*
+   * Approve and reject are one click apart and dismiss themselves in six
+   * seconds, so the colour is doing the work the sentence does not have time
+   * to. `data-tone` is asserted rather than a class: the tone is the contract,
+   * the Tailwind utilities that draw it are not.
+   */
+  it("carries the tone, so approved and rejected do not look identical", () => {
+    render(<NotificationToaster />);
+    act(() => {
+      showToast({ title: "Approved", message: "PO 1025926667 approved.", tone: "ok" });
+      showToast({ title: "Rejected", message: "PO 1025926668 rejected.", tone: "bad" });
+    });
+
+    const toasts = document.querySelectorAll("[data-slot='toast']");
+    expect(toasts).toHaveLength(2);
+    // Newest first — `showToast` unshifts.
+    expect(toasts[0]).toHaveAttribute("data-tone", "bad");
+    expect(toasts[1]).toHaveAttribute("data-tone", "ok");
+  });
+
+  it("leaves an untoned toast neutral, so nothing else in the app changes", () => {
+    render(<NotificationToaster />);
+    act(() => {
+      showToast({ title: "Saved", message: "Assignments saved." });
+    });
+
+    const toast = document.querySelector("[data-slot='toast']");
+    expect(toast).not.toBeNull();
+    expect(toast).not.toHaveAttribute("data-tone");
+  });
 });

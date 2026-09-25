@@ -73,4 +73,18 @@ describe("SAP rows → form data", () => {
   it("leaves out an empty vendor reference", () => {
     expect(invoiceToDocument(SAP_OPEN_INVOICES[1]).reference).toBeUndefined();
   });
+
+  it("carries the latest SAP attachment with what it takes to fetch it", () => {
+    expect(invoiceToDocument(SAP_OPEN_INVOICES[0], "MART").attachment).toEqual({
+      company: "MART",
+      kind: "bill",
+      docEntry: 10256,
+      fileName: "DocScanner Sep 17, 2026 12-39 PM.pdf",
+      count: 3,
+      date: "2026-09-17",
+    });
+    // None in SAP, or no company to fetch it from: nothing to open.
+    expect(invoiceToDocument(SAP_OPEN_INVOICES[1], "MART").attachment).toBeUndefined();
+    expect(invoiceToDocument(SAP_OPEN_INVOICES[0]).attachment).toBeUndefined();
+  });
 });

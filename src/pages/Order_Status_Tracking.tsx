@@ -53,8 +53,6 @@ import {
   OrderTimeline,
   OrderTimelineDialog,
 } from "@/components/orders/OrderTimelineDialog";
-import { OrderTotalsRow, VarietyCostCards } from "@/components/orders/OrderTotals";
-import { orderTotals, varietyCosts } from "@/components/orders/orderDetail";
 import {
   RATE_APPROVER_TRACKING_FALLBACK_STATUS,
   getDecisionType,
@@ -143,6 +141,10 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
   const [orderDetails, setOrderDetails] = useState<Order | null>(null);
   const [selectedItems, setSelectedItems] = useState<OrderItem[]>([]);
   const [orderLogs, setOrderLogs] = useState<OrderLog[]>([]);
+
+  // The rate approver's tracking screen gets the richer, colour-coded layout
+  // (card list + Mart-style detail); auditor and billing keep the table.
+  const isRateApprover = mode === "rate_approver";
 
   const itemsPerPage = 10;
   const [showTrackModal, setShowTrackModal] = useState(false);
@@ -241,9 +243,6 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
    * right-hand column would be worse than the single column it replaces.
    */
   const showTrail = orderLogs.length > 0;
-
-  const detailTotals = useMemo(() => orderTotals(selectedItems), [selectedItems]);
-  const detailVarieties = useMemo(() => varietyCosts(orderDetails), [orderDetails]);
 
   const fetchOrderDetails = async (orderId: number) => {
     try {
@@ -358,6 +357,7 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
               value={acceptedCount}
               hint="in this period"
               loading={isOrdersLoading}
+              className={isRateApprover ? "border-emerald-200 bg-emerald-50" : undefined}
             />
             <Stat
               icon={HiOutlineXCircle}
@@ -368,6 +368,7 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
               value={rejectedCount}
               hint="in this period"
               loading={isOrdersLoading}
+              className={isRateApprover ? "border-rose-200 bg-rose-50" : undefined}
             />
           </StatRow>
 
@@ -466,6 +467,7 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
                               onClick={() => fetchOrderDetails(order.id)}
                               aria-label={`View order ${order.order_number}`}
                               title="View order"
+                              className={isRateApprover ? "text-brand" : undefined}
                             >
                               <HiOutlineEye aria-hidden="true" />
                             </Button>
@@ -486,6 +488,7 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
                               onClick={() => downloadExcel(order)}
                               aria-label={`Download order ${order.order_number}`}
                               title="Download order"
+                              className={isRateApprover ? "text-emerald-600" : undefined}
                             >
                               <HiOutlineArrowDownTray aria-hidden="true" />
                             </Button>
@@ -542,15 +545,21 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
               </>
             }
             actions={
-              <Button variant="ghost" onClick={() => downloadExcel(orderDetails)}>
-                <HiOutlineArrowDownTray aria-hidden="true" /> Export Excel
-              </Button>
+              isRateApprover ? (
+                <Button
+                  variant="secondary"
+                  className="border-emerald-600 bg-emerald-600 text-white hover:border-emerald-700 hover:bg-emerald-700"
+                  onClick={() => downloadExcel(orderDetails)}
+                >
+                  <HiOutlineArrowDownTray aria-hidden="true" /> Export Excel
+                </Button>
+              ) : (
+                <Button variant="ghost" onClick={() => downloadExcel(orderDetails)}>
+                  <HiOutlineArrowDownTray aria-hidden="true" /> Export Excel
+                </Button>
+              )
             }
           />
-
-          <OrderTotalsRow totals={detailTotals} itemCount={selectedItems.length} />
-
-          <VarietyCostCards costs={detailVarieties} />
 
           {/* The order on the left, its progress trail on the right.
 

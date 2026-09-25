@@ -23,12 +23,12 @@ import {
 } from "./approvalData";
 import { formatSize } from "./attachments";
 import { PAYMENT_MODES } from "./constants";
+import { SapAttachmentLink } from "./SapAttachmentLink";
 import { STATUS_LABEL, formatDateTime, priorityLabel } from "./requestLabels";
 import {
   REFERENCE_KINDS,
   allocationRows,
   allocationTotals,
-  calculateEmi,
   formatDate,
   formatINR,
   resolveCase,
@@ -37,7 +37,7 @@ import {
 export function RequestSummary({ entry }: { entry: AdvanceRequestEntry }) {
   const { form } = entry;
   const c = resolveCase(form);
-  const emi = c.installments ? calculateEmi(form.amount, form.installments).emi : null;
+  const emi = c.installments && form.emiAmount ? Number(form.emiAmount) : null;
 
   return (
     <div className="space-y-4">
@@ -54,7 +54,7 @@ export function RequestSummary({ entry }: { entry: AdvanceRequestEntry }) {
           <DetailField label="Amount" value={formatINR(Number(form.amount) || 0)} strong />
         ) : null}
         {c.expectedDate ? (
-          <DetailField label="Expected Date" value={form.expectedDate ? formatDate(form.expectedDate) : ""} />
+          <DetailField label="Expected Bill Date" value={form.expectedDate ? formatDate(form.expectedDate) : ""} />
         ) : null}
         {c.expectedBillDate ? (
           <DetailField
@@ -71,16 +71,37 @@ export function RequestSummary({ entry }: { entry: AdvanceRequestEntry }) {
                 value={emi !== null ? `${form.installments} × ${formatINR(emi)}` : ""}
               />
             ) : null}
-            <DetailField
-              label="Expected Period"
-              value={
-                form.expectedFromDate && form.expectedToDate
-                  ? `${formatDate(form.expectedFromDate)} – ${formatDate(form.expectedToDate)}`
-                  : ""
-              }
-            />
+            {/* The same dates the form asked for, under the same names. */}
+            {form.returnMethod === "EMI" ? (
+              <>
+                <DetailField
+                  label="EMI Start Date"
+                  value={form.expectedFromDate ? formatDate(form.expectedFromDate) : ""}
+                />
+                <DetailField
+                  label="Expected To Date"
+                  value={form.expectedToDate ? formatDate(form.expectedToDate) : ""}
+                />
+              </>
+            ) : form.returnMethod === "ONE_TIME" ? (
+              <DetailField
+                label="Return Date"
+                value={form.expectedToDate ? formatDate(form.expectedToDate) : ""}
+              />
+            ) : (
+              <DetailField
+                label="Expected Period"
+                value={
+                  form.expectedFromDate && form.expectedToDate
+                    ? `${formatDate(form.expectedFromDate)} – ${formatDate(form.expectedToDate)}`
+                    : ""
+                }
+              />
+            )}
           </>
         ) : null}
+        <DetailField label="Department" value={form.departmentName} />
+        <DetailField label="Sub-department" value={form.subDepartmentName} />
         <DetailField label="Ownership" value={form.ownership} />
         <DetailField label="Payment Date" value={form.paymentDate ? formatDate(form.paymentDate) : ""} />
         <DetailField label="Priority" value={priorityLabel(entry)} />
@@ -148,6 +169,11 @@ export function DocumentLines({ entry }: { entry: AdvanceRequestEntry }) {
                 {doc.reference ? (
                   <span className="block text-[11px] font-normal text-subtle">Ref {doc.reference}</span>
                 ) : null}
+                {doc.attachment ? (
+                  <span className="block text-[12px] font-normal">
+                    <SapAttachmentLink attachment={doc.attachment} compact />
+                  </span>
+                ) : null}
               </TableCell>
               <TableCell>{formatDate(doc.date)}</TableCell>
               <TableCell className="text-right tabular-nums">{formatINR(doc.open)}</TableCell>
@@ -178,21 +204,33 @@ export function DocumentLines({ entry }: { entry: AdvanceRequestEntry }) {
   );
 }
 
-/** Where the request stands — who decided it and why, or that it is waiting. */
+/** Where the request stands — who decided it and why, or where it is waiting. */
 export function DecisionSummary({ entry }: { entry: AdvanceRequestEntry }) {
+  const flow = entry.api.flow;
   if (!entry.decision) {
+    const waiting = flow?.current_stage
+      ? `Waiting at ${flow.current_stage}${flow.current_user ? ` (${flow.current_user.name})` : ""}.`
+      : "Waiting for approval.";
     return (
       <p className="m-0 text-[13px] text-body">
-        Waiting for approval. Raised by {entry.requestedBy} on {formatDateTime(entry.requestedOn)}.
+        {waiting} Raised by {entry.requestedBy} on {formatDateTime(entry.requestedOn)}.
       </p>
     );
   }
+  const verb = DECIDED_LABEL[entry.decision.status];
   return (
     <DetailGrid>
       <DetailField label="Status" value={STATUS_LABEL[entry.decision.status]} strong />
-      <DetailField label="Decided By" value={entry.decision.by} />
-      <DetailField label="Decided On" value={formatDateTime(entry.decision.on)} />
-      <DetailField label="Approver Remarks" value={entry.decision.remarks} span="full" />
+      <DetailField label={`${verb} By`} value={entry.decision.by} />
+      <DetailField label={`${verb} On`} value={formatDateTime(entry.decision.on)} />
+      <DetailField label="Remarks" value={entry.decision.remarks} span="full" />
     </DetailGrid>
   );
 }
+
+const DECIDED_LABEL = {
+  APPROVED: "Approved",
+  REJECTED: "Rejected",
+  RETURNED: "Returned",
+  CANCELLED: "Cancelled",
+} as const;

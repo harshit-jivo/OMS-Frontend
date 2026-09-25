@@ -174,6 +174,43 @@ export interface ProductionActionLog {
   acted_at: string;
 }
 
+/**
+ * One warehouse's holding of the order's item.
+ *
+ * `on_hand` is a STRING for the same reason `planned_qty` is: it is
+ * `numeric(19,6)` in HANA and a JSON number loses precision.
+ */
+export interface WarehouseStock {
+  warehouse: string;
+  warehouse_name: string;
+  /** Flagged, not filtered: a closed warehouse can still hold stock. */
+  inactive: boolean;
+  on_hand: string;
+  /** The warehouse this production order will consume from. */
+  is_order_warehouse: boolean;
+}
+
+/**
+ * Where the order's item is, across the order's SITE.
+ *
+ * `results` holds ONLY the warehouses with stock, plus the order's own — the
+ * site runs to 35 warehouses and an item is typically in two or three, so the
+ * rest were rows of zeros. `site_warehouses` and `holding` keep the "3 of 35"
+ * sentence answerable without shipping the other 32.
+ *
+ * Empty `results` means the site genuinely holds none; a failed read is a 503,
+ * so the two cannot be confused.
+ */
+export interface ItemLocationStock {
+  /** The order's own warehouse, which is what selects the site. */
+  warehouse: string;
+  /** `OWHS.Location` — SAP's grouping of warehouses into a physical site. */
+  location: number | null;
+  site_warehouses: number;
+  holding: number;
+  results: WarehouseStock[];
+}
+
 export interface ProductionInsights {
   total: number;
   by_status: Partial<Record<ProductionFlowStatus, number>>;
@@ -281,6 +318,17 @@ export const productionService = {
   history: async (id: number): Promise<ProductionActionLog[]> => {
     const res = await api.get(BASE + "/requests/" + id + "/history/");
     return unwrap<ProductionActionLog[]>(res.data) || [];
+  },
+  /**
+   * Where the order's item actually is, read live from SAP.
+   *
+   * Not part of `getOrder`: it is a HANA round trip against OWHS/OITW and
+   * nothing in the list needs it, so it stays a separate call the detail
+   * dialog makes when it opens.
+   */
+  stock: async (id: number): Promise<ItemLocationStock> => {
+    const res = await api.get(BASE + "/requests/" + id + "/stock/");
+    return unwrap<ItemLocationStock>(res.data);
   },
   insights: async (
     opts: { company?: string } = {},

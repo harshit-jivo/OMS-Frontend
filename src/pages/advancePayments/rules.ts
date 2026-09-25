@@ -35,8 +35,6 @@
  */
 import {
   PAYMENT_AGAINST_OPTIONS,
-  VENDOR_OTHER_DOCUMENTS,
-  VENDOR_POS,
   VENDORS,
   type Company,
   type OpenDocument,
@@ -101,13 +99,38 @@ export interface RequestForm {
   /* Employee Advance + Advance only: how and when it comes back. */
   returnMethod: ReturnMethod | "";
   returnMethodOther: string;
-  /** EMI only. */
+  /**
+   * EMI only, and linked both ways: type the count and the EMI is worked out,
+   * type the EMI and the count is. `applyChange` keeps them in step with each
+   * other and with the amount.
+   */
   installments: string;
+  emiAmount: string;
+  /**
+   * EMI: the EMI Start Date. Other / Custom: Expected From Date. Unused (and
+   * kept empty) for One Time, which has a single date.
+   */
   expectedFromDate: string;
+  /**
+   * When the money is fully back. EMI: DERIVED from the start date and the
+   * installment count, read-only. One Time: the Return Date, typed.
+   * Other / Custom: typed.
+   */
   expectedToDate: string;
   /** Employee Imprest only. */
   expectedBillDate: string;
-  /** Who owns this request. Free text — there is no master list to pick from. */
+  /**
+   * Which department / sub-department the request belongs to: the Workflow
+   * Engine's queries match on these ids to choose the approval route. Ids as
+   * strings, like every other picked value here.
+   */
+  department: string;
+  departmentName: string;
+  subDepartment: string;
+  subDepartmentName: string;
+  /** The chosen department HAS sub-departments, so one must be picked. */
+  hasSubDepartments: boolean;
+  /** Who owns this request: a HOD or Sub-HOD, for information only. */
   ownership: string;
   paymentDate: string;
   priority: Priority;
@@ -128,9 +151,15 @@ export const EMPTY_FORM: RequestForm = {
   returnMethod: "",
   returnMethodOther: "",
   installments: "",
+  emiAmount: "",
   expectedFromDate: "",
   expectedToDate: "",
   expectedBillDate: "",
+  department: "",
+  departmentName: "",
+  subDepartment: "",
+  subDepartmentName: "",
+  hasSubDepartments: false,
   ownership: "",
   paymentDate: "",
   // Medium rather than nothing: a priority is always one of three, and an
@@ -156,6 +185,13 @@ interface ReferenceKindDef {
   dateLabel: string;
   originalLabel: string;
   paidLabel: string;
+  /**
+   * The ways a line against this kind may be paid; the first is where a new
+   * line starts. A PO takes either (a share of what is still to come, or a
+   * rupee figure), a bill or any other document only a rupee figure.
+   * `sanitize` holds every line to these, so no other mode can get in.
+   */
+  modes: readonly PaymentMode[];
   /** A sentence under the section title, when the list needs explaining. */
   intro?: string;
   /**
@@ -185,6 +221,7 @@ export const REFERENCE_KINDS: Record<ReferenceKind, ReferenceKindDef> = {
     dateLabel: "Bill Date",
     originalLabel: "Original Amount",
     paidLabel: "Paid Amount",
+    modes: ["FIXED"],
     // Live: `GET /advance-payments/open-invoices/?party_type=vendor`.
     live: true,
     documents: [],
@@ -197,10 +234,13 @@ export const REFERENCE_KINDS: Record<ReferenceKind, ReferenceKindDef> = {
     numberLabel: "PO Number",
     dateLabel: "PO Date",
     originalLabel: "PO Amount",
-    paidLabel: "Already Paid / Advanced",
-    // Sample data until "open amount" for a PO is agreed with the server.
-    live: false,
-    documents: VENDOR_POS,
+    // What SAP's PaidToDate means on a PO: goods already received. Not
+    // advances — SAP holds none against POs — so it is named for what it is.
+    paidLabel: "Already Received",
+    modes: ["PERCENT", "FIXED"],
+    // Live: `GET /advance-payments/open-purchase-orders/?card_code=`.
+    live: true,
+    documents: [],
   },
   VENDOR_OTHER: {
     label: "Document",
@@ -211,12 +251,14 @@ export const REFERENCE_KINDS: Record<ReferenceKind, ReferenceKindDef> = {
     dateLabel: "Document Date",
     originalLabel: "Original Amount",
     paidLabel: "Paid Amount",
+    modes: ["FIXED"],
     intro:
-      "Every other open document for this vendor — goods receipts, work orders, " +
-      "journal vouchers and contracts. Bills and POs have their own options.",
-    // Sample data: the server has no GRN / JV / contract lookups yet.
-    live: false,
-    documents: VENDOR_OTHER_DOCUMENTS,
+      "Every other open document for this vendor — goods receipts not yet billed, " +
+      "goods returns, credit memos, payments on account and journal entries. " +
+      "Bills and POs have their own options.",
+    // Live: `GET /advance-payments/open-other-documents/?card_code=`.
+    live: true,
+    documents: [],
   },
 };
 
@@ -247,14 +289,16 @@ interface CaseRule {
  * validation all read the table, so the form follows.
  */
 export const CASE_RULES: Record<PartnerType, Partial<Record<PaymentAgainst, CaseRule>>> = {
-  // Against PO was Advance → Advance Against → PO; it is an answer of its own
-  // now, and a vendor Advance is a plain amount like any other advance.
+  // A vendor advance is ALWAYS against a document: a bill or a PO. A bare
+  // "Advance" with no reference is an amount nobody can later match to
+  // anything, so it is not offered. `OTHER`, the free-text escape hatch, is
+  // not offered either.
+  //
+  // "All" (every other open document, `VENDOR_OTHER`) is switched off, not
+  // removed: add `ALL: { reference: "VENDOR_OTHER" }` back here to offer it.
   VENDOR: {
-    ADVANCE: {},
-    AGAINST_BILL: { reference: "VENDOR_BILL" },
     AGAINST_PO: { reference: "VENDOR_PO", expectedDate: true },
-    ALL: { reference: "VENDOR_OTHER" },
-    OTHER: {},
+    AGAINST_BILL: { reference: "VENDOR_BILL" },
   },
   // No Against Bill: an employee advance is paid ahead of expenses, and the
   // bills that follow are settled against the advance, not paid here.
@@ -264,7 +308,9 @@ export const CASE_RULES: Record<PartnerType, Partial<Record<PaymentAgainst, Case
   },
   EMPLOYEE_IMPREST: {
     ADVANCE: { expectedBillDate: true },
-    AGAINST_BILL: { expectedBillDate: true },
+    // The imprest account (an ORGV business partner) has its own open bills
+    // in SAP, and this pays against them, exactly as a vendor's bills are.
+    AGAINST_BILL: { reference: "VENDOR_BILL", expectedBillDate: true },
     OTHER: { expectedBillDate: true },
   },
 };
@@ -417,6 +463,7 @@ const CLEARED_REPAYMENT = {
   returnMethod: "",
   returnMethodOther: "",
   installments: "",
+  emiAmount: "",
   expectedFromDate: "",
   expectedToDate: "",
 } as const;
@@ -460,8 +507,17 @@ export function sanitize(form: RequestForm): RequestForm {
   // longer chosen is dropped.
   const sampleIds = c.liveDocuments ? null : new Set(c.documents.map((doc) => doc.id));
   next.selected = c.selectedDocuments.filter((doc) => !sampleIds || sampleIds.has(doc.id));
+  // Every line in a mode its kind allows (a PO by % or amount, everything
+  // else by amount), a new line in the kind's first; then tidied so only that
+  // mode's input holds a value.
+  const modes = c.reference ? REFERENCE_KINDS[c.reference].modes : (["FIXED"] as const);
   next.allocations = Object.fromEntries(
-    next.selected.map((doc) => [doc.id, tidyAllocation(next.allocations[doc.id] ?? EMPTY_ALLOCATION)]),
+    next.selected.map((doc) => {
+      const line = next.allocations[doc.id] ?? { ...EMPTY_ALLOCATION, mode: modes[0] };
+      // A mode not allowed starts the line afresh: a rupee figure is not a %.
+      const held = modes.includes(line.mode) ? line : { ...EMPTY_ALLOCATION, mode: modes[0] };
+      return [doc.id, tidyAllocation(held)];
+    }),
   );
 
   if (!c.plainAmount) next.amount = "";
@@ -471,10 +527,15 @@ export function sanitize(form: RequestForm): RequestForm {
     next.expectedFromDate = "";
     next.expectedToDate = "";
   }
+  // One Time has one date, the Return Date, held in `expectedToDate`.
+  if (next.returnMethod === "ONE_TIME") next.expectedFromDate = "";
   if (!c.expectedBillDate) next.expectedBillDate = "";
 
   c = resolveCase(next);
-  if (!c.installments) next.installments = "";
+  if (!c.installments) {
+    next.installments = "";
+    next.emiAmount = "";
+  }
 
   // Typed answers live only as long as the "other" choice they describe.
   if (next.paymentAgainst !== "OTHER") next.paymentAgainstOther = "";
@@ -532,9 +593,13 @@ export function applyChange(form: RequestForm, patch: Partial<RequestForm>): Req
     const after = resolveCase(next).partnerSource;
     if (before !== after) next = { ...next, ...CLEARED_PARTNER };
   }
+  // The dates mean something different under each method (a period for
+  // Other, a start and a derived end for EMI, one return date for One Time),
+  // so a date typed under one is not carried into another.
   if (changed("returnMethod")) {
-    next = { ...next, installments: "" };
+    next = { ...next, installments: "", emiAmount: "", expectedFromDate: "", expectedToDate: "" };
   }
+  if (next.returnMethod === "EMI") next = linkEmi(form, next, patch);
   // Documents belong to their partner. For a plain-amount case the partner
   // has no documents, so the typed amount stands.
   if (changed("partner") && resolveCase(next).reference) {
@@ -706,6 +771,127 @@ export function calculateEmi(amount: string, installments: string): Emi {
 }
 
 /**
+ * The EMI a typed installment count gives, as the string the form holds.
+ * Empty while it cannot be worked out, so a stale figure never sits beside a
+ * count it no longer matches.
+ */
+function emiFor(amount: string, installments: string): string {
+  const { emi } = calculateEmi(amount, installments);
+  return emi === null ? "" : String(emi);
+}
+
+export interface InstallmentsFromEmi {
+  installments: number | null;
+  /** What is wrong with the EMI, if anything. */
+  error: string | null;
+  /** The final installment when it is smaller than the rest, else null. */
+  lastInstallment: number | null;
+}
+
+/**
+ * The other direction: how many installments a typed EMI takes.
+ *
+ * ROUNDED UP. Rs 20,000 at Rs 6,000 a month is four installments (three full
+ * and a last one of Rs 2,000), not 3.33 of them, and never three that leave
+ * Rs 2,000 unpaid. The short last one is reported so the form can say so.
+ */
+export function installmentsFromEmi(amount: string, emiAmount: string): InstallmentsFromEmi {
+  const emi = parseNumber(emiAmount);
+  if (emi === null) return { installments: null, error: null, lastInstallment: null };
+  if (Number.isNaN(emi) || emi <= 0) {
+    return { installments: null, error: "EMI must be more than zero.", lastInstallment: null };
+  }
+  const total = parseNumber(amount);
+  if (total === null || Number.isNaN(total) || total <= 0) {
+    return { installments: null, error: null, lastInstallment: null };
+  }
+  if (emi > total) {
+    return { installments: null, error: "EMI cannot be more than the amount.", lastInstallment: null };
+  }
+  // The epsilon keeps 20000 / 5000 at exactly 4 rather than 4.0000000001 -> 5.
+  const count = Math.ceil(total / emi - 1e-9);
+  const last = toPaise(total - emi * (count - 1));
+  return { installments: count, error: null, lastInstallment: last < emi ? last : null };
+}
+
+/**
+ * Keep installments, EMI and the end date in step, from whichever was edited.
+ *
+ *   installments typed  ->  EMI = amount / installments
+ *   EMI typed           ->  installments = ceil(amount / EMI)
+ *   amount changed      ->  the COUNT stands and the EMI follows it, because
+ *                           "over 4 months" is the decision a requester makes
+ *                           and the rupee figure is its consequence
+ *
+ * A typed EMI is kept exactly as typed: replacing 6,000 with the 5,000 that
+ * 4 installments would imply would be rewriting the requester's answer.
+ */
+function linkEmi(before: RequestForm, next: RequestForm, patch: Partial<RequestForm>): RequestForm {
+  const edited = (key: keyof RequestForm) => key in patch && patch[key] !== before[key];
+  let out = next;
+  if (edited("installments")) {
+    out = { ...out, emiAmount: emiFor(out.amount, out.installments) };
+  } else if (edited("emiAmount")) {
+    const { installments } = installmentsFromEmi(out.amount, out.emiAmount);
+    out = { ...out, installments: installments === null ? "" : String(installments) };
+  } else if (edited("amount") && out.installments) {
+    out = { ...out, emiAmount: emiFor(out.amount, out.installments) };
+  }
+  return { ...out, expectedToDate: emiEndDate(out.expectedFromDate, out.installments) };
+}
+
+/**
+ * `isoDate` plus `months` calendar months.
+ *
+ * The day is CLAMPED: 31 January plus one month is 28 (or 29) February, not
+ * 3 March, which is what bumping a JavaScript Date's month would silently
+ * give. Worked on the parts of the ISO string, so no timezone moves the day.
+ */
+export function addMonths(isoDate: string, months: number): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate);
+  if (!m) return "";
+  const monthIndex = Number(m[1]) * 12 + (Number(m[2]) - 1) + months;
+  const year = Math.floor(monthIndex / 12);
+  const month = (monthIndex % 12) + 1;
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const day = Math.min(Number(m[3]), lastDay);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${year}-${pad(month)}-${pad(day)}`;
+}
+
+/**
+ * Expected To Date for EMI: the EMI Start Date plus one month per
+ * installment. Empty until both are valid.
+ *
+ * Start + N months, as specified. Note the last installment of a monthly
+ * plan starting on the 1st falls on start + (N - 1) months; start + N is the
+ * month AFTER it. If "Expected To" should mean the date of the last EMI
+ * itself, this is the one line to change.
+ */
+export function emiEndDate(start: string, installments: string): string {
+  const count = parseNumber(installments);
+  if (!start || count === null || Number.isNaN(count) || !Number.isInteger(count) || count < 1) {
+    return "";
+  }
+  return addMonths(start, count);
+}
+
+/**
+ * Today as `yyyy-mm-dd` in the requester's own timezone, the date on their
+ * calendar, which is what "not before today" means to them. `toISOString`
+ * would give the UTC date: a day behind in India until 05:30.
+ */
+export function todayIso(now: Date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
+/** "{label} cannot be before today." or null when the date is fine or empty. */
+export function pastDateError(label: string, date: string, today: string): string | null {
+  return date && date < today ? `${label} cannot be before today.` : null;
+}
+
+/**
  * Expected To must not be before Expected From. The same day is allowed — an
  * advance used and settled within one day is a real, if short, period.
  *
@@ -730,7 +916,7 @@ export interface Validation {
  * never listed as missing — it cannot be filled, and `sanitize` guarantees
  * it is empty anyway.
  */
-export function validate(form: RequestForm): Validation {
+export function validate(form: RequestForm, today: string = todayIso()): Validation {
   const c = resolveCase(form);
   const missing: string[] = [];
   const problems: string[] = [];
@@ -742,7 +928,13 @@ export function validate(form: RequestForm): Validation {
     missing.push("Payment Against (what it is)");
   }
   if (c.decided && !form.partner) missing.push(c.partnerLabel);
-  if (c.expectedDate && !form.expectedDate) missing.push("Expected Date");
+  if (!form.department) missing.push("Department");
+  else if (form.hasSubDepartments && !form.subDepartment) missing.push("Sub-department");
+  if (c.expectedDate && !form.expectedDate) missing.push("Expected Bill Date");
+  const poDate = c.expectedDate
+    ? pastDateError("Expected Bill Date", form.expectedDate, today)
+    : null;
+  if (poDate) problems.push(poDate);
 
   if (c.reference) {
     if (form.partner && form.selected.length === 0) {
@@ -766,19 +958,37 @@ export function validate(form: RequestForm): Validation {
     else if (form.returnMethod === "CUSTOM" && !form.returnMethodOther.trim()) {
       missing.push("Return Method (what it is)");
     }
-    if (c.installments) {
-      const emi = calculateEmi(form.amount, form.installments);
-      if (emi.error) problems.push(emi.error);
+    if (form.returnMethod === "EMI") {
+      const count = calculateEmi(form.amount, form.installments);
+      const fromEmi = installmentsFromEmi(form.amount, form.emiAmount);
+      if (count.error) problems.push(count.error);
       else if (!form.installments) missing.push("Number of Installments");
+      if (fromEmi.error) problems.push(fromEmi.error);
+      else if (!form.emiAmount) missing.push("EMI Amount");
+      // The end date is derived, so only the start can ever be "missing".
+      if (!form.expectedFromDate) missing.push("EMI Start Date");
+      const start = pastDateError("EMI Start Date", form.expectedFromDate, today);
+      if (start) problems.push(start);
+    } else if (form.returnMethod === "ONE_TIME") {
+      if (!form.expectedToDate) missing.push("Return Date");
+      const back = pastDateError("Return Date", form.expectedToDate, today);
+      if (back) problems.push(back);
+    } else if (form.returnMethod) {
+      if (!form.expectedFromDate) missing.push("Expected From Date");
+      if (!form.expectedToDate) missing.push("Expected To Date");
+      const period = expectedPeriodError(form.expectedFromDate, form.expectedToDate);
+      if (period) problems.push(period);
     }
-    if (!form.expectedFromDate) missing.push("Expected From Date");
-    if (!form.expectedToDate) missing.push("Expected To Date");
-    const period = expectedPeriodError(form.expectedFromDate, form.expectedToDate);
-    if (period) problems.push(period);
   }
   if (c.expectedBillDate && !form.expectedBillDate) missing.push("Expected Bill Date");
+  const billDate = c.expectedBillDate
+    ? pastDateError("Expected Bill Date", form.expectedBillDate, today)
+    : null;
+  if (billDate) problems.push(billDate);
   if (!form.ownership.trim()) missing.push("Ownership");
   if (!form.paymentDate) missing.push("Payment Date");
+  const payDate = pastDateError("Payment Date", form.paymentDate, today);
+  if (payDate) problems.push(payDate);
   if (!form.remarks.trim()) missing.push("Remarks");
 
   return { missing, problems };
@@ -808,6 +1018,27 @@ export function formatINR(value: number): string {
 }
 
 /** 04 Aug 2026. */
+/**
+ * A partner's SAP balance (`OCRD.Balance`, debit minus credit) as a side:
+ * a vendor with a CREDIT balance is owed money by us; a DEBIT balance means
+ * the vendor owes us (usually advances already paid).
+ */
+export function balanceSide(
+  balance: string | number | null | undefined,
+  who = "the vendor",
+): {
+  amount: number;
+  side: "Cr" | "Dr" | "";
+  meaning: string;
+} {
+  const value = Number(balance ?? 0) || 0;
+  const amount = Math.round(Math.abs(value) * 100) / 100;
+  if (amount === 0) return { amount: 0, side: "", meaning: "Nothing outstanding" };
+  return value < 0
+    ? { amount, side: "Cr", meaning: `Payable to ${who}` }
+    : { amount, side: "Dr", meaning: `Receivable from ${who} (e.g. advances paid)` };
+}
+
 export function formatDate(iso: string): string {
   const date = new Date(`${iso}T00:00:00`);
   if (Number.isNaN(date.getTime())) return iso;

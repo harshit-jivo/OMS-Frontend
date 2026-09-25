@@ -909,6 +909,213 @@ const downloadBuffer = async (buffer: ArrayBuffer, fileName: string) => {
   );
 };
 
+/* -------------------------------------------------------------------------- */
+/* Order report — the styled, print-like single-order layout                  */
+/* -------------------------------------------------------------------------- */
+
+/** One line of an order report. Raw values; the sheet formats them. */
+export interface OrderReportItem {
+  item_code: string;
+  item_name: string;
+  scheme?: string;
+  scheme_qty?: string | number;
+  qty: number;
+  boxes: number;
+  liters: number;
+  total_ltrs: number;
+  price_list_basic: number;
+  basic_price: number;
+  total: number;
+  /** Percent as a whole number (5 = 5%). Used only to derive the grand total. */
+  tax_rate?: number;
+}
+
+export interface OrderReportData {
+  order_number: string;
+  card_name: string;
+  card_code?: string;
+  bill_to_address?: string;
+  ship_to_address?: string;
+  items: OrderReportItem[];
+  /** Grand total incl. tax. Derived from the lines' tax_rate when omitted. */
+  grand_total?: number;
+}
+
+const NAVY = "FF203864";
+const GRID = "FFBFBFBF";
+
+/**
+ * Builds the single-order report shown to distributors — a header block (order
+ * number, party, bill-to / ship-to), a navy column header, the line items, and
+ * a totals block at the bottom right — and triggers a browser download.
+ *
+ * This is deliberately NOT the generic {@link exportToExcel} table: it is a
+ * fixed, print-like layout with merged cells and a coloured header, so it uses
+ * ExcelJS directly rather than the inferred-column pipeline.
+ */
+export const exportOrderReport = async (
+  order: OrderReportData,
+  fileName: string,
+): Promise<void> => {
+  const ExcelJS = await loadExcelJS();
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = "OMS";
+  workbook.created = new Date();
+  const ws = workbook.addWorksheet("Order Details");
+
+  const COLS = 11;
+  const thin = { style: "thin" as const, color: { argb: GRID } };
+  const allBorders = { top: thin, left: thin, bottom: thin, right: thin };
+
+  ws.columns = [
+    { width: 16 }, // A Item Code
+    { width: 34 }, // B Item Name
+    { width: 14 }, // C Scheme
+    { width: 12 }, // D Scheme Qty
+    { width: 10 }, // E Qty
+    { width: 10 }, // F Boxes
+    { width: 12 }, // G Liters
+    { width: 12 }, // H Total Ltrs
+    { width: 16 }, // I Price List (Basic)
+    { width: 14 }, // J Basic Price
+    { width: 16 }, // K Total Amount
+  ];
+
+  // Row 2 — order number (left) and party (right).
+  ws.mergeCells("A2:E2");
+  ws.mergeCells("G2:K2");
+  const orderCell = ws.getCell("A2");
+  orderCell.value = `Order Number - ${order.order_number}`;
+  orderCell.font = { bold: true, size: 12 };
+  orderCell.alignment = { horizontal: "center", vertical: "middle" };
+  const partyCell = ws.getCell("G2");
+  partyCell.value = `Party Name - ${order.card_name}${
+    order.card_code ? `(${order.card_code})` : ""
+  }`;
+  partyCell.font = { bold: true, size: 12 };
+  partyCell.alignment = { horizontal: "center", vertical: "middle" };
+
+  // Rows 3 & 4 — bill-to / ship-to, each spanning the full width.
+  ws.mergeCells("A3:K3");
+  const billCell = ws.getCell("A3");
+  billCell.value = `Bill To - ${order.bill_to_address || ""}`;
+  billCell.font = { bold: true, size: 10 };
+  billCell.alignment = { horizontal: "left", vertical: "middle", wrapText: true };
+  ws.mergeCells("A4:K4");
+  const shipCell = ws.getCell("A4");
+  shipCell.value = `Ship To - ${order.ship_to_address || ""}`;
+  shipCell.font = { bold: true, size: 10 };
+  shipCell.alignment = { horizontal: "left", vertical: "middle", wrapText: true };
+
+  // Row 6 — the navy column header.
+  const HEADER_ROW = 6;
+  const headers = [
+    "Item Code",
+    "Item Name",
+    "Scheme",
+    "Scheme Qty",
+    "Qty",
+    "Boxes",
+    "Liters",
+    "Total Ltrs",
+    "Price List (Basic)",
+    "Basic Price",
+    "Total Amount",
+  ];
+  const headerRow = ws.getRow(HEADER_ROW);
+  headers.forEach((h, i) => {
+    const cell = headerRow.getCell(i + 1);
+    cell.value = h;
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } };
+    cell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 11 };
+    cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+    cell.border = allBorders;
+  });
+  headerRow.height = 30;
+
+  const CUR = "₹#,##0.00";
+  const INT = "#,##0";
+  const DEC = "#,##0.00";
+
+  // Item rows.
+  let r = HEADER_ROW + 1;
+  for (const it of order.items) {
+    const row = ws.getRow(r);
+    row.getCell(1).value = it.item_code;
+    row.getCell(2).value = it.item_name;
+    row.getCell(3).value = it.scheme || "";
+    row.getCell(4).value = it.scheme_qty ?? "";
+    row.getCell(5).value = Number(it.qty) || 0;
+    row.getCell(6).value = Number(it.boxes) || 0;
+    row.getCell(7).value = Number(it.liters) || 0;
+    row.getCell(8).value = Number(it.total_ltrs) || 0;
+    row.getCell(9).value = Number(it.price_list_basic) || 0;
+    row.getCell(10).value = Number(it.basic_price) || 0;
+    row.getCell(11).value = Number(it.total) || 0;
+    row.getCell(5).numFmt = INT;
+    row.getCell(6).numFmt = INT;
+    row.getCell(7).numFmt = INT;
+    row.getCell(8).numFmt = INT;
+    row.getCell(9).numFmt = CUR;
+    row.getCell(10).numFmt = CUR;
+    row.getCell(11).numFmt = CUR;
+    for (let c = 1; c <= COLS; c++) {
+      const cell = row.getCell(c);
+      cell.border = allBorders;
+      cell.alignment = {
+        horizontal: c === 1 || c === 2 || c === 3 ? "left" : "right",
+        vertical: "middle",
+        wrapText: c === 2,
+      };
+    }
+    r++;
+  }
+
+  // Totals block, bottom-right (label in J, value in K), a row below the lines.
+  const totalLtrs = order.items.reduce((s, it) => s + (Number(it.total_ltrs) || 0), 0);
+  const totalAmount = order.items.reduce((s, it) => s + (Number(it.total) || 0), 0);
+  const grand =
+    order.grand_total ??
+    totalAmount +
+      order.items.reduce(
+        (s, it) => s + (Number(it.total) || 0) * ((Number(it.tax_rate) || 0) / 100),
+        0,
+      );
+
+  const totalsStart = r + 1;
+  const totals: { label: string; value: number; fmt: string }[] = [
+    { label: "Total Ltrs -", value: totalLtrs, fmt: INT },
+    { label: "Total Amount -", value: totalAmount, fmt: CUR },
+    { label: "Grand Total -", value: grand, fmt: DEC },
+  ];
+  totals.forEach((t, i) => {
+    const idx = totalsStart + i;
+    const labelCell = ws.getCell(`J${idx}`);
+    labelCell.value = t.label;
+    labelCell.font = { bold: true };
+    labelCell.alignment = { horizontal: "right", vertical: "middle" };
+    const valueCell = ws.getCell(`K${idx}`);
+    valueCell.value = t.value;
+    valueCell.numFmt = t.fmt;
+    valueCell.font = { bold: true };
+    valueCell.alignment = { horizontal: "right", vertical: "middle" };
+  });
+
+  const buffer = (await workbook.xlsx.writeBuffer()) as ArrayBuffer;
+  await downloadBuffer(buffer, fileName);
+};
+
+/** Fire-and-forget wrapper for {@link exportOrderReport} in click handlers. */
+export const startOrderReportExport = (
+  order: OrderReportData,
+  fileName: string,
+): void => {
+  exportOrderReport(order, fileName).catch((error: unknown) => {
+    console.error("Order report export failed:", error);
+    window.alert("Sorry, the Excel export failed. Please try again.");
+  });
+};
+
 /**
  * `YYYY-MM-DD` stamp for file names, matching the existing convention.
  *

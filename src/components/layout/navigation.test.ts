@@ -66,7 +66,7 @@ describe("where the pages that have moved now live", () => {
   });
 
   it("leaves Administration holding only what administers the APP", () => {
-    // Users, roles, devices and labels. The moment an order-shaped page lands
+    // Users, roles, devices, labels and the employee master. The moment an order-shaped page lands
     // back in here, the split this section exists to make has been undone.
     const administration = SIDEBAR_SECTIONS.find((s) => s.label === "Administration");
     expect(administration?.links.map((link) => link.to)).toEqual([
@@ -75,6 +75,7 @@ describe("where the pages that have moved now live", () => {
       "/Role_Permissions",
       "/Device_Management",
       "/UI_Labels",
+      "/Add_Employee",
       "/Workflows",
     ]);
   });

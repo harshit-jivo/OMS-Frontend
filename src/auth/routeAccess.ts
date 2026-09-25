@@ -129,6 +129,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   "/Page_Permissions": { adminOnly: true },
   "/Role_Permissions": { adminOnly: true },
   "/UI_Labels": { adminOnly: true },
+  // The employee master (advance_payment). Admin-only here AND on the API
+  // (`IsAdminRole` on /advance-payments/employee-master/).
+  "/Add_Employee": { adminOnly: true },
   //
   // Commented out with the route itself (App.tsx, DISABLED 2026-08-27 — the
   // quotation flow is closed and its backend routes are commented out too).
@@ -196,6 +199,12 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
     roles: ["distributor"],
   },
   "/Mart_Approval": { permissions: ["Mart_Approval"], roles: ["mart_approval"] },
+  "/Mart_Edit_Order": { permissions: ["Mart_Approval"], roles: ["mart_approval"] },
+  // Cancelling a completed Mart order (and reversing it in SAP) is gated by the
+  // dedicated `orders.mart.cancel` key — the heavier authority — with the
+  // mart_approval role as the transitional fallback (mirrors the backend
+  // `_can_cancel_mart` gate and the users/0037 role grant).
+  "/Mart_Cancel": { permissions: ["orders.mart.cancel"], roles: ["mart_approval"] },
   "/Payments_Dashboard": { permissions: ["Payments_Dashboard"] },
   /*
    * Advance Payments — new request form.
@@ -209,14 +218,12 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
    */
   "/Advance_Payment_Request": { permissions: ["Advance_Payment"] },
   /*
-   * Advance Payments — approval desk. UI ONLY, on sample requests.
+   * Advance Payments — approval desk.
    *
    * Its own key, because deciding a payment and asking for one are different
-   * jobs — the same split as BackDate / BackDate_Approval. The backend does
-   * not register `Advance_Payment_Approval` yet (there are no requests to
-   * approve until the create endpoint exists), so today only administrators,
-   * who pass every check, can open it. The key must be added to the backend's
-   * permission registry when the approval endpoints land.
+   * jobs — the same split as BackDate / BackDate_Approval. The key opens the
+   * desk; deciding a request also needs being its current stage's user in the
+   * Workflows page, which the server checks on every action.
    */
   "/Advance_Payment_Approval": { permissions: ["Advance_Payment_Approval"] },
 
@@ -255,7 +262,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   "/Drafts": {
     permissions: ["orders.sales.create"],
     roles: BILLING_OR_MANAGER,
-    note: "Drafts are saved from Add_Sales, so the same people reach both.",
+    note:
+      "The sidebar link is commented out, but Add_Sales still navigates here " +
+      "after saving a draft, so it must stay reachable for the same people.",
   },
   "/Sales_Invoice": { permissions: ["invoices.sales.create"], roles: ["billing"] },
   "/Sales_Invoice/SKU_Images": {
@@ -291,7 +300,16 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   "/PersonWise_Report": REPORTS,
   "/Sales_Report": REPORTS,
   "/StateWise_Report": REPORTS,
-  "/Inventory_Report": REPORTS,
+  // Split out of the shared REPORTS gate onto its own key so it can be granted
+  // independently of the sales reports (e.g. to a mart_approval user). The
+  // `billing` role is kept as a fallback so billing keeps the page without
+  // needing the new key; every non-billing holder of `Reports` is back-granted
+  // `Inventory_Report` by users/0036 so nobody loses the page on deploy.
+  "/Inventory_Report": { permissions: ["Inventory_Report"], roles: ["billing"] },
+  // A brand-new report gated purely by its own per-user grant — no role
+  // fallback, so access is exactly "who was given the key" (plus admins, who
+  // pass every key). Nobody held it before, so no back-grant migration.
+  "/Distributor_Report": { permissions: ["Distributor_Report"] },
   "/SO_Invoice_Report": REPORTS,
 
   // --- No sidebar link, and nothing navigates here ------------------------

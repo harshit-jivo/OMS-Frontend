@@ -125,10 +125,10 @@ export default function AssetDetails({ asset, onClose, onEdit, onHandover, onHis
 
         <DialogFooter>
           <Button variant="ghost" onClick={() => onHistory?.(asset)}>
-            <HiOutlineClipboardDocumentList aria-hidden="true" /> History
+            <HiOutlineClipboardDocumentList className="text-warning" aria-hidden="true" /> History
           </Button>
           <Button variant="ghost" onClick={() => onEdit?.(asset.asset_id)}>
-            <HiOutlinePencilSquare aria-hidden="true" /> Edit / update config
+            <HiOutlinePencilSquare className="text-ok" aria-hidden="true" /> Edit / update config
           </Button>
           <Button variant="primary" onClick={() => onHandover?.(asset)}>
             <HiOutlineUserPlus aria-hidden="true" /> Handover
