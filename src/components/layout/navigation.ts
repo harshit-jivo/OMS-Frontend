@@ -84,6 +84,7 @@ import {
   HiOutlineTruck,
   HiOutlineUserCircle,
   HiOutlineUserGroup,
+  HiOutlineUserPlus,
   HiOutlineUsers,
   HiOutlineWrenchScrewdriver,
 } from "react-icons/hi2";
@@ -159,7 +160,12 @@ export const SIDEBAR_SECTIONS: SidebarSectionDef[] = [
   },
   {
     label: "Payments",
-    links: [{ to: "/Payments_Dashboard", label: "Payments Dashboard", icon: HiOutlineChartPie }],
+    links: [
+      { to: "/Payments_Dashboard", label: "Payments Dashboard", icon: HiOutlineChartPie },
+      // Raise payment requests and follow them; the approval desk decides them.
+      { to: "/Advance_Payment_Request", label: "Payments", icon: HiOutlineBanknotes },
+      { to: "/Advance_Payment_Approval", label: "Payments Approval", icon: HiOutlineCheckBadge },
+    ],
   },
   {
     label: "Reports",
@@ -283,6 +289,7 @@ export const SIDEBAR_SECTIONS: SidebarSectionDef[] = [
       { to: "/Role_Permissions", label: "Role Permissions", icon: HiOutlineKey },
       { to: "/Device_Management", label: "Device Management", icon: HiOutlineDevicePhoneMobile },
       { to: "/UI_Labels", label: "UI Labels", icon: HiOutlineLanguage },
+      { to: "/Add_Employee", label: "Add Employee", icon: HiOutlineUserPlus },
       { to: "/Workflows", label: "Workflows", icon: HiOutlineCog6Tooth },
     ],
   },

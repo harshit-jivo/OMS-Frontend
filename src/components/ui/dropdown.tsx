@@ -275,17 +275,21 @@ export function MultiSelect<T extends string | number>({
    * trigger is not a summary. A SHORT list is better read back: three company
    * codes fit, and "OIL, MART" answers what was chosen without reopening the
    * panel. `namedUpTo` is how a caller says its list is short enough.
+   *
+   * Every chosen value's label, or undefined where the option is not in the
+   * list — which happens while a searched list has moved on. One missing label
+   * drops the summary to the count rather than naming only some of them.
    */
-  const chosenLabels = options
-    .filter((option) => value.includes(option.value))
-    .map((option) => option.label);
+  const names = value.map(
+    (chosen) => options.find((option) => option.value === chosen)?.label,
+  );
   const summary =
     value.length === 0
       ? placeholder
-      : value.length === 1
-        ? options.find((option) => option.value === value[0])?.label ?? "1 selected"
-        : value.length <= namedUpTo
-          ? chosenLabels.join(", ")
+      : value.length <= namedUpTo && names.every(Boolean)
+        ? names.join(", ")
+        : value.length === 1
+          ? "1 selected"
           : allChosen
             ? `All (${value.length})`
             : `${value.length} selected`;
@@ -410,6 +414,8 @@ export function SearchSelect<T extends string | number>({
   portal = false,
   multiline = false,
   textClassName,
+  onQueryChange,
+  loading = false,
 }: {
   id?: string;
   /** `""` is "nothing chosen". */
@@ -451,6 +457,17 @@ export function SearchSelect<T extends string | number>({
    * need.
    */
   portal?: boolean;
+  /**
+   * Told what is typed into the search box, for a list searched on the SERVER.
+   *
+   * For lists too long to ship whole — SAP's business partners run to
+   * thousands and the API caps a page — the caller fetches matches for the
+   * term and passes them back as `options`. The local filter still runs over
+   * what comes back, so a caller that ignores this prop changes nothing.
+   */
+  onQueryChange?: (query: string) => void;
+  /** Rows are being fetched: say so instead of "No matches". */
+  loading?: boolean;
 }) {
   const rootRef = React.useRef<HTMLDivElement>(null);
   const panelRef = React.useRef<HTMLDivElement>(null);
@@ -458,6 +475,17 @@ export function SearchSelect<T extends string | number>({
   const [open, setOpen] = useOpenState(rootRef, panelRef);
   const [query, setQuery] = React.useState("");
   const listId = React.useId();
+
+  // Through a ref, so a caller passing a fresh arrow each render does not
+  // re-fire this for a query that has not changed. Refreshed in an effect —
+  // declared first, so it runs before the one below reads it.
+  const onQueryChangeRef = React.useRef(onQueryChange);
+  React.useEffect(() => {
+    onQueryChangeRef.current = onQueryChange;
+  });
+  React.useEffect(() => {
+    onQueryChangeRef.current?.(query);
+  }, [query]);
 
   // Fixed-position box for the portaled panel, tracked against the trigger.
   const [panelBox, setPanelBox] = React.useState<{
@@ -616,7 +644,9 @@ export function SearchSelect<T extends string | number>({
               </button>
             ) : null}
             {shown.length === 0 ? (
-              <p className="m-0 px-2.5 py-3 text-center text-[12px] text-subtle">{emptyText}</p>
+              <p className="m-0 px-2.5 py-3 text-center text-[12px] text-subtle">
+                {loading ? "Loading…" : emptyText}
+              </p>
             ) : (
               shown.map((option) => {
                 const selected = option.value === value;

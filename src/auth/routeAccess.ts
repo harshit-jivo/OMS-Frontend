@@ -129,6 +129,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   "/Page_Permissions": { adminOnly: true },
   "/Role_Permissions": { adminOnly: true },
   "/UI_Labels": { adminOnly: true },
+  // The employee master (advance_payment). Admin-only here AND on the API
+  // (`IsAdminRole` on /advance-payments/employee-master/).
+  "/Add_Employee": { adminOnly: true },
   //
   // Commented out with the route itself (App.tsx, DISABLED 2026-08-27 — the
   // quotation flow is closed and its backend routes are commented out too).
@@ -203,6 +206,26 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // `_can_cancel_mart` gate and the users/0037 role grant).
   "/Mart_Cancel": { permissions: ["orders.mart.cancel"], roles: ["mart_approval"] },
   "/Payments_Dashboard": { permissions: ["Payments_Dashboard"] },
+  /*
+   * Advance Payments — new request form.
+   *
+   * `Advance_Payment` — EXACTLY the backend's key
+   * (`advance_payment/permissions.py`, registered in
+   * `core/permission_registry.py`). The form reads that app's SAP lookups, and
+   * each of them requires this key; a route gated on any other spelling would
+   * open a page whose every lookup then answers 403. It was `Advance_Payments`
+   * while the page was a mock, before the backend module existed.
+   */
+  "/Advance_Payment_Request": { permissions: ["Advance_Payment"] },
+  /*
+   * Advance Payments — approval desk.
+   *
+   * Its own key, because deciding a payment and asking for one are different
+   * jobs — the same split as BackDate / BackDate_Approval. The key opens the
+   * desk; deciding a request also needs being its current stage's user in the
+   * Workflows page, which the server checks on every action.
+   */
+  "/Advance_Payment_Approval": { permissions: ["Advance_Payment_Approval"] },
 
   // --- Document tracker ---------------------------------------------------
   // Gated centrally by role, mirroring tracker/permissions.py.

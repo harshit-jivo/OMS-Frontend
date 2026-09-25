@@ -101,6 +101,11 @@ const Distributor_Order_Tracking = lazy(
 const MartApproval = lazy(() => import("./pages/Distributor/Mart_Approval"));
 const Mart_Cancel = lazy(() => import("./pages/Distributor/Mart_Cancel"));
 const Ap_Invoice_Entry = lazy(() => import("./pages/Ap_Invoice_Entry"));
+// Payments — raise requests (Advance_Payment_Request) and the approval desk
+// (Advance_Payment_Approval), on `/api/advance-payments/requests/`.
+const AdvancePaymentRequest = lazy(() => import("./pages/Advance_Payment_Request"));
+const AdvancePaymentApproval = lazy(() => import("./pages/Advance_Payment_Approval"));
+const AddEmployee = lazy(() => import("./pages/advancePayments/Add_Employee"));
 
 import { AuthProvider } from "./auth";
 
@@ -615,6 +620,35 @@ function App() {
         <Route
           path="/Approval_Management"
           element={<Navigate to="/Payments_Dashboard" replace />}
+        />
+
+        {/* Payments — raise requests, and the approval desk. */}
+        <Route
+          path="/Advance_Payment_Request"
+          element={
+            <ProtectedPage>
+              <AdvancePaymentRequest />
+            </ProtectedPage>
+          }
+        />
+
+        <Route
+          path="/Advance_Payment_Approval"
+          element={
+            <ProtectedPage>
+              <AdvancePaymentApproval />
+            </ProtectedPage>
+          }
+        />
+
+        {/* Employee master (advance_payment.Employee). Administrators only. */}
+        <Route
+          path="/Add_Employee"
+          element={
+            <ProtectedPage>
+              <AddEmployee />
+            </ProtectedPage>
+          }
         />
 
         {/* AP (vendor) invoice entry — copy from GRPO */}

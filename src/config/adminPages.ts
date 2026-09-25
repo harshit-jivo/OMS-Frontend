@@ -55,6 +55,21 @@ export const GRANTABLE_ADMIN_PAGES: GrantablePage[] = [
     label: "Production Order — approve/reject",
     path: "/Production_Approval",
   },
+  // Registered by the backend's advance_payment app — its SAP lookups (the
+  // request form's vendors, open bills and employees) and raising a request
+  // all require it.
+  {
+    key: "Advance_Payment",
+    label: "Payments — raise requests",
+    path: "/Advance_Payment_Request",
+  },
+  // The approval desk. Opens it; ACTING on a request also needs being the
+  // current stage's user in its workflow, which the server checks.
+  {
+    key: "Advance_Payment_Approval",
+    label: "Payments — approval desk",
+    path: "/Advance_Payment_Approval",
+  },
   { key: "Distributor", label: "Distributor", path: "/Distributor" },
   { key: "Mart_Approval", label: "Orders", path: "/Mart_Approval" },
   // One key for the whole Legal module — unlocks Label Checker AND Nutrition
