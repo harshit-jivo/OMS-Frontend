@@ -103,8 +103,10 @@ const CONTROL = cn(
 const STATUS_OPTIONS: ReadonlyArray<{ value: StatusFilter; label: string }> = [
   { value: "", label: "All requests" },
   { value: "PENDING", label: "Pending" },
+  { value: "RETURNED", label: "Returned" },
   { value: "APPROVED", label: "Approved" },
   { value: "REJECTED", label: "Rejected" },
+  { value: "CANCELLED", label: "Cancelled" },
 ];
 
 /** Search, then company, then status — the order they narrow in. */

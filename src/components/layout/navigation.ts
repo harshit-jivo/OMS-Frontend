@@ -80,6 +80,7 @@ import {
   HiOutlineTruck,
   HiOutlineUserCircle,
   HiOutlineUserGroup,
+  HiOutlineUserPlus,
   HiOutlineUsers,
   HiOutlineWrenchScrewdriver,
 } from "react-icons/hi2";
@@ -157,9 +158,9 @@ export const SIDEBAR_SECTIONS: SidebarSectionDef[] = [
       { to: "/Payments_Dashboard", label: "Payments Dashboard", icon: HiOutlineChartPie },
       // The request form reads SAP for vendors, open bills and employees; it
       // does not submit yet (no create endpoint).
-      { to: "/Advance_Payment_Request", label: "Advance Payments", icon: HiOutlineBanknotes },
+      { to: "/Advance_Payment_Request", label: "Payments", icon: HiOutlineBanknotes },
       // The approval desk — UI only for now, on sample requests.
-      { to: "/Advance_Payment_Approval", label: "Advance Approvals", icon: HiOutlineCheckBadge },
+      { to: "/Advance_Payment_Approval", label: "Payments Approval", icon: HiOutlineCheckBadge },
     ],
   },
   {
@@ -279,6 +280,7 @@ export const SIDEBAR_SECTIONS: SidebarSectionDef[] = [
       { to: "/Role_Permissions", label: "Role Permissions", icon: HiOutlineKey },
       { to: "/Device_Management", label: "Device Management", icon: HiOutlineDevicePhoneMobile },
       { to: "/UI_Labels", label: "UI Labels", icon: HiOutlineLanguage },
+      { to: "/Add_Employee", label: "Add Employee", icon: HiOutlineUserPlus },
       { to: "/Workflows", label: "Workflows", icon: HiOutlineCog6Tooth },
     ],
   },

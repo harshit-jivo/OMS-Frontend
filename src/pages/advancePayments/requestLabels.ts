@@ -12,8 +12,20 @@ import {
 } from "./approvalData";
 import { PRIORITIES, type Company } from "./constants";
 
-export const STATUS_TONE = { PENDING: "hold", APPROVED: "ok", REJECTED: "bad" } as const;
-export const STATUS_LABEL = { PENDING: "Pending", APPROVED: "Approved", REJECTED: "Rejected" } as const;
+export const STATUS_TONE = {
+  PENDING: "hold",
+  RETURNED: "info",
+  APPROVED: "ok",
+  REJECTED: "bad",
+  CANCELLED: "neutral",
+} as const;
+export const STATUS_LABEL = {
+  PENDING: "Pending",
+  RETURNED: "Returned",
+  APPROVED: "Approved",
+  REJECTED: "Rejected",
+  CANCELLED: "Cancelled",
+} as const;
 export const PRIORITY_TONE = { LOW: "ok", MEDIUM: "hold", HIGH: "bad" } as const;
 
 export const priorityLabel = (entry: AdvanceRequestEntry) =>
@@ -60,6 +72,8 @@ function haystack(entry: AdvanceRequestEntry): string {
     typeLabel(form),
     paymentAgainstLabel(form),
     form.ownership,
+    form.departmentName,
+    form.subDepartmentName,
   ]
     .join(" ")
     .toLowerCase();
@@ -100,4 +114,19 @@ export function requestCounts(entries: AdvanceRequestEntry[]): RequestCounts {
     total: entries.length,
     pendingAmount: pending.reduce((sum, e) => sum + requestAmount(e.form), 0),
   };
+}
+
+/* ── The payee's balance ─────────────────────────────────────────────────── */
+
+const BALANCE_ROLES = new Set(["PAYMENT", "AUDIT", "FINAL"]);
+
+/**
+ * Whether the desk shows the payee's SAP balance: at or past Payment (or
+ * completed), and paid to a business partner (Vendor, Employee Imprest).
+ * Never to the requester while they raise it.
+ */
+export function showsBalance(entry: AdvanceRequestEntry): boolean {
+  const partner = entry.form.type === "VENDOR" || entry.form.type === "EMPLOYEE_IMPREST";
+  const reached = BALANCE_ROLES.has(entry.api.flow?.current_role ?? "") || entry.status === "APPROVED";
+  return partner && reached;
 }

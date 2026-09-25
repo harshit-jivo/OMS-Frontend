@@ -10,17 +10,65 @@
  */
 import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { advancePaymentService } from "../services/advancePaymentService";
-import { resetRequests } from "./advancePayments/requestStore";
+import { FakeRequestServer, TESTER, apiRequest, sampleRequests } from "./advancePayments/testRequests";
 import { renderPage } from "../test/renderPage";
 import Advance_Payment_Request from "./Advance_Payment_Request";
 import {
   SAP_EMPLOYEES,
   SAP_OPEN_INVOICES,
+  SAP_OPEN_POS,
+  SAP_OTHER_DOCUMENTS,
   SAP_VENDORS,
 } from "./advancePayments/testData";
+
+// Forward-looking dates are refused before today, and the dates typed below
+// are in October 2026. Pin the calendar so they stay ahead of it — only Date
+// is faked, so userEvent's own timers are untouched.
+beforeAll(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(2026, 8, 23, 10, 0));
+});
+afterAll(() => vi.useRealTimers());
+
+/** What the server read off bill 10256's SAP attachment. */
+const READING = {
+  file_name: "DocScanner Sep 17, 2026 12-39 PM.pdf",
+  attachment_count: 3,
+  source: "ocr",
+  pages: 1,
+  fields: {
+    invoice_number: { value: "ABC/INV/7781", sap: "ABC/INV/7781", match: true },
+    invoice_date: { value: "2026-08-04", sap: "2026-08-04", match: true },
+    amount: { value: 250000, sap: 250000, match: true },
+    party_name: { value: "ABC Technologies Pvt Ltd", sap: "ABC Technologies", match: true },
+    account_number: { value: "50100234567812", sap: "50100234567899", match: false },
+    ifsc: { value: null, sap: null, match: null },
+  },
+};
+
+/** The employee master, as `/employee-directory/` answers the two pickers. */
+// `vi.hoisted`: vi.mock below is hoisted above ordinary constants.
+const { directory, DEPARTMENTS } = vi.hoisted(() => {
+  const DEPARTMENTS = [
+    { id: 40, name: "Cyber Security", sub_departments: [] },
+    { id: 35, name: "Finance", sub_departments: [{ id: 92, name: "AP" }, { id: 88, name: "AR" }] },
+  ];
+  const OWNERS = [
+    { employee_code: "JWPL0115", employee_name: "Arvinder", role: 1 as const, role_label: "HOD", designation: null },
+    { employee_code: "JWPL0030", employee_name: "Preshit Singh", role: 2 as const, role_label: "Sub-HOD", designation: null },
+  ];
+  const NOT_IN_SAP = [
+    { employee_code: "JWPL3100", employee_name: "Asha Rani", role: 3 as const, role_label: "Executive", designation: null },
+  ];
+  return {
+    DEPARTMENTS,
+    directory: async (query: { roles?: number[]; notInSapFor?: string } = {}) =>
+      query.notInSapFor ? NOT_IN_SAP : query.roles ? OWNERS : [...OWNERS, ...NOT_IN_SAP],
+  };
+});
 
 vi.mock("../services/advancePaymentService", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../services/advancePaymentService")>();
@@ -30,21 +78,63 @@ vi.mock("../services/advancePaymentService", async (importOriginal) => {
       vendors: vi.fn(),
       employees: vi.fn(),
       openVendorInvoices: vi.fn(),
+      openVendorPurchaseOrders: vi.fn(),
+      openOtherDocuments: vi.fn(),
+      partnerBankAccounts: vi.fn(async () => []),
+      employeeDirectory: vi.fn(directory),
+      departments: vi.fn(async () => DEPARTMENTS),
+      readDocumentAttachment: vi.fn(),
+      documentAttachment: vi.fn(async () => new Blob(["%PDF-"], { type: "application/pdf" })),
+      // The requests: pointed at a fresh FakeRequestServer before each test.
+      requests: vi.fn(),
+      request: vi.fn(),
+      createRequest: vi.fn(),
+      editRequest: vi.fn(),
+      act: vi.fn(),
+      savePayout: vi.fn(),
+      confirmManualPassword: vi.fn(),
+      recordUtr: vi.fn(),
+      addRequestFile: vi.fn(),
+      removeRequestFile: vi.fn(),
     },
   };
 });
 
+// An approved request shows its payout read-only, which reads the house banks.
+vi.mock("../services/approvalService", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../services/approvalService")>();
+  return { ...actual, default: { ...actual.default, listSapBanks: vi.fn(async () => []) } };
+});
+
 const service = vi.mocked(advancePaymentService);
 
+let server: FakeRequestServer;
+
 beforeEach(() => {
-  // The request list is one in-memory store shared by both pages.
-  resetRequests();
+  // Tester's own requests: the samples, raised by them.
+  server = new FakeRequestServer(
+    sampleRequests().map((r) => ({ ...r, mine: [], api: { ...r.api, created_by: TESTER } })),
+  );
+  const requests = vi.mocked(advancePaymentService) as unknown as Record<string, ReturnType<typeof vi.fn>>;
+  Object.entries(server.methods()).forEach(([name, fn]) => requests[name].mockReset().mockImplementation(fn));
   service.vendors.mockReset().mockImplementation(async (_company, search = "") =>
     SAP_VENDORS.filter((v) =>
       `${v.card_name} ${v.card_code}`.toUpperCase().includes(search.toUpperCase()),
     ),
   );
   service.employees.mockReset().mockImplementation(async () => SAP_EMPLOYEES);
+  service.employeeDirectory.mockReset().mockImplementation(directory);
+  service.readDocumentAttachment.mockReset().mockResolvedValue(READING);
+  service.openVendorPurchaseOrders
+    .mockReset()
+    .mockImplementation(async (_company, cardCode) =>
+      SAP_OPEN_POS.filter((order) => order.card_code === cardCode),
+    );
+  service.openOtherDocuments
+    .mockReset()
+    .mockImplementation(async (_company, cardCode) =>
+      cardCode === "VENDA000104" ? SAP_OTHER_DOCUMENTS : [],
+    );
   service.openVendorInvoices
     .mockReset()
     .mockImplementation(async (_company, cardCode) =>
@@ -119,15 +209,12 @@ async function tick(user: User, label: RegExp, ...documents: RegExp[]) {
 const heading = (name: string | RegExp) => screen.queryByRole("heading", { name });
 const total = () => screen.getByRole("status", { name: "Total payment amount" });
 
-async function usePercent(user: User, doc: string) {
-  const mode = screen.getByRole("radiogroup", { name: `Payment mode for ${doc}` });
-  await user.click(within(mode).getByRole("radio", { name: "Percentage" }));
-}
-
 /** Waits for the bill list to load before ticking — it is fetched per vendor. */
+/** Wait until the chosen kind's picker is ready — its placeholder is showing. */
 async function waitForBills() {
   await screen.findByText("Select Bills");
 }
+const waitForPos = () => screen.findByText("Select Open POs");
 
 describe("Advance Payment Request", () => {
   it("starts with only the sections every case has", async () => {
@@ -144,21 +231,47 @@ describe("Advance Payment Request", () => {
     expect([...type.options].map((o) => o.text)).toEqual([
       "Select Type",
       "Vendor",
-      "Employee Advance",
+      "Employee",
       "Employee Imprest",
     ]);
   });
 
-  it("asks Ownership as free text, and no longer asks Department", async () => {
+  it("picks Ownership from the employee master's HODs and Sub-HODs", async () => {
     const user = await setup();
-    const ownership = field(/^Ownership/);
-    await user.type(ownership, "Finance desk");
-    expect(ownership.value).toBe("Finance desk");
-    expect(screen.queryByLabelText(/^Department/)).toBeNull();
+    const owners = await openOptions(user, /^Ownership/);
+    expect(owners.map((o) => o.replace(/\s+/g, " "))).toEqual([
+      expect.stringMatching(/Arvinder \(JWPL0115\).*HOD/),
+      expect.stringMatching(/Preshit Singh \(JWPL0030\).*Sub-HOD/),
+    ]);
+    expect(service.employeeDirectory).toHaveBeenCalledWith({ roles: [1, 2] });
+    await user.keyboard("{Escape}");
+    await pick(user, /^Ownership/, /Preshit Singh/);
+    expect(field(/^Ownership/).textContent).toMatch(/Preshit Singh \(JWPL0030\)/);
+  });
+
+  it("asks the Department, then that department's Sub-department", async () => {
+    const user = await setup();
+    const sub = () => field(/^Sub-department/) as unknown as HTMLButtonElement;
+    expect(sub().disabled).toBe(true); // nothing to list before a department
+
+    expect(await openOptions(user, /^Department/)).toEqual(["Cyber Security", "Finance"]);
+    await user.keyboard("{Escape}");
+    await pick(user, /^Department/, /Finance/);
+    expect(sub().disabled).toBe(false);
+    expect(await openOptions(user, /^Sub-department/)).toEqual(["AP", "AR"]);
+    await user.keyboard("{Escape}");
+    await pick(user, /^Sub-department/, /^AR$/);
+    expect(sub().textContent).toMatch(/AR/);
+
+    // A new department starts the sub-department afresh; one with none has none to pick.
+    await pick(user, /^Department/, /Cyber Security/);
+    expect(sub().disabled).toBe(true);
+    expect(sub().textContent).not.toMatch(/AR/);
+    expect(screen.getByText("This department has no sub-departments.")).toBeTruthy();
   });
 
   describe("typing your own answer instead of choosing Other", () => {
-    it("offers the listed answers without an Other entry — Against PO and All for vendors only", async () => {
+    it("offers the listed answers without an Other entry — Against PO for vendors only", async () => {
       const user = await setup();
       const listed = async () => {
         await user.click(field(/^Payment Against/));
@@ -170,7 +283,8 @@ describe("Advance Payment Request", () => {
       };
 
       await user.selectOptions(screen.getByLabelText(/^Type/), "VENDOR");
-      expect(await listed()).toEqual(["Advance", "Against Bill", "Against PO", "All"]);
+      // A vendor advance is always against a document — exactly two answers.
+      expect(await listed()).toEqual(["Against Bill", "Against PO"]);
 
       await user.selectOptions(screen.getByLabelText(/^Type/), "EMPLOYEE_ADVANCE");
       expect(await listed()).toEqual(["Advance"]);
@@ -178,7 +292,9 @@ describe("Advance Payment Request", () => {
 
     it("takes a typed Payment Against as the requester's own, with a plain amount", async () => {
       const user = await setup();
-      await start(user, "VENDOR", "Security deposit");
+      // Employee Advance, not Vendor: a vendor's two answers are both
+      // documents, so it no longer takes a typed answer at all.
+      await start(user, "EMPLOYEE_ADVANCE", "Security deposit");
       expect(field(/^Payment Against/).value).toBe("Security deposit");
       expect(screen.getByLabelText(/^Amount/)).toBeTruthy();
       expect(heading("Reference Details")).toBeNull();
@@ -186,7 +302,7 @@ describe("Advance Payment Request", () => {
 
     it("offers the typed text as a choice while it is being typed", async () => {
       const user = await setup();
-      await user.selectOptions(screen.getByLabelText(/^Type/), "VENDOR");
+      await user.selectOptions(screen.getByLabelText(/^Type/), "EMPLOYEE_ADVANCE");
       await user.type(field(/^Payment Against/), "Rent");
       await user.click(await screen.findByRole("option", { name: "Use “Rent”" }));
       expect(field(/^Payment Against/).value).toBe("Rent");
@@ -211,7 +327,7 @@ describe("Advance Payment Request", () => {
   describe("SAP vendors", () => {
     it("asks for a company before it can list SAP's vendors", async () => {
       const user = await setup();
-      await start(user, "VENDOR", "Advance", "");
+      await start(user, "VENDOR", "Against Bill", "");
       expect(screen.getByLabelText(/^Business Partner/).hasAttribute("disabled")).toBe(true);
       expect(screen.getByText(/Pick a company first/)).toBeTruthy();
       expect(service.vendors).not.toHaveBeenCalled();
@@ -219,7 +335,7 @@ describe("Advance Payment Request", () => {
 
     it("lists the company's vendors from SAP", async () => {
       const user = await setup();
-      await start(user, "VENDOR", "Advance");
+      await start(user, "VENDOR", "Against Bill");
       const vendors = await openOptions(user, /^Business Partner/);
       // Vendors only — VENDA codes. The ORGV imprest accounts in the same SAP
       // list are not offered, and a vendor NAMED "ORGV…" still is.
@@ -229,13 +345,14 @@ describe("Advance Payment Request", () => {
       expect(vendors.join(" ")).not.toMatch(/IMPREST/);
       // Nothing typed: search for the prefix, over the server's full page.
       expect(service.vendors).toHaveBeenCalledWith("OIL", "VENDA", 500);
-      expect(screen.getByText(/codes starting VENDA/)).toBeTruthy();
-      expect(screen.getByText(/Live from SAP/)).toBeTruthy();
+      // The partner field's own note. Against Bill also shows "Live from SAP."
+      // on the Reference Details section, so this has to name which one.
+      expect(screen.getByText(/Live from SAP — codes starting VENDA/)).toBeTruthy();
     });
 
     it("searches SAP as the requester types", async () => {
       const user = await setup();
-      await start(user, "VENDOR", "Advance");
+      await start(user, "VENDOR", "Against Bill");
       await user.click(screen.getByLabelText(/^Business Partner/));
       await user.type(await screen.findByPlaceholderText("Search name or code…"), "xyz");
       await vi.waitFor(() => expect(service.vendors).toHaveBeenCalledWith("OIL", "xyz", 500));
@@ -243,7 +360,7 @@ describe("Advance Payment Request", () => {
 
     it("clears the vendor when the company changes — each company is its own SAP", async () => {
       const user = await setup();
-      await start(user, "VENDOR", "Advance");
+      await start(user, "VENDOR", "Against Bill");
       await pick(user, /^Business Partner/, /ABC Technologies/);
       expect(screen.getByLabelText(/^Business Partner/).textContent).toMatch(/ABC Technologies/);
 
@@ -256,7 +373,7 @@ describe("Advance Payment Request", () => {
         response: { status: 503, data: { message: "Could not read vendors for OIL: timeout" } },
       });
       const user = await setup();
-      await start(user, "VENDOR", "Advance");
+      await start(user, "VENDOR", "Against Bill");
       // The form retries a failed lookup once before showing the error.
       expect(
         await screen.findByText("Could not read vendors for OIL: timeout", {}, { timeout: 4000 }),
@@ -282,6 +399,15 @@ describe("Advance Payment Request", () => {
       expect(screen.getByText("Live from SAP.")).toBeTruthy();
     });
 
+    it("does not show the requester the vendor's balance", async () => {
+      const user = await setup();
+      await start(user, "VENDOR", "Against Bill");
+      await pick(user, /^Business Partner/, /ABC Technologies/);
+      await waitForBills();
+      expect(screen.queryByLabelText(/^Current Balance/)).toBeNull();
+      expect(screen.queryByText(/Current Balance/)).toBeNull();
+    });
+
     it("says when a vendor has no open bills", async () => {
       const user = await setup();
       await start(user, "VENDOR", "Against Bill");
@@ -297,34 +423,38 @@ describe("Advance Payment Request", () => {
       await tick(user, /^Bills/, /10256/, /10271/);
       expect(heading("Selected Bills (2)")).not.toBeNull();
 
-      await usePercent(user, "10256");
-      const percent = field(/^Payment percentage for 10256/);
-      await user.type(percent, "65");
-      const noteId = percent.getAttribute("aria-describedby")!;
-      expect(document.getElementById(noteId)?.textContent).toBe("= ₹97,500"); // 65% of OPEN
+      // A bill is paid by amount only — there is no percentage to choose.
+      expect(screen.queryByLabelText(/^Payment percentage for/)).toBeNull();
+      expect(
+        [...document.querySelectorAll('[data-slot="payment-mode"]')].map((el) => el.textContent),
+      ).toEqual(["Fixed Amount", "Fixed Amount"]);
 
+      await user.type(field(/^Payment amount for 10256/), "97500");
       await user.type(field(/^Payment amount for 10271/), "40000");
       expect(within(total()).getByText("₹1,37,500")).toBeTruthy();
     });
 
-    it("refuses a line above its bill's open amount", async () => {
+    it("will not take an amount above the bill's open amount", async () => {
       const user = await setup();
       await toAbcBills(user);
       await tick(user, /^Bills/, /10256/);
+      // Open is 1,50,000. The last 0 would make it 1,80,000, so it is not taken.
       await user.type(field(/^Payment amount for 10256/), "180000");
-      expect(screen.getByText(/Cannot exceed the open amount of ₹1,50,000/)).toBeTruthy();
+      expect(field(/^Payment amount for 10256/).value).toBe("18000");
+      expect(screen.queryByText(/Cannot exceed the open amount/)).toBeNull();
     });
 
-    it("picks a quick percentage from the % sign", async () => {
+    it("takes the open amount itself — the limit is inclusive", async () => {
       const user = await setup();
       await toAbcBills(user);
       await tick(user, /^Bills/, /10256/);
-      await usePercent(user, "10256");
-      await user.selectOptions(screen.getByLabelText("Quick percentage for 10256"), "50");
-      expect(within(total()).getByText("₹75,000")).toBeTruthy(); // half of what is OPEN
+      await user.type(field(/^Payment amount for 10256/), "150000");
+      expect(field(/^Payment amount for 10256/).value).toBe("150000");
     });
 
     it("expands a row to show the bill's SAP details", async () => {
+      // SAP's own figures only: the attachment is still being read.
+      service.readDocumentAttachment.mockReturnValue(new Promise(() => {}));
       const user = await setup();
       await toAbcBills(user);
       await tick(user, /^Bills/, /10256/);
@@ -335,6 +465,65 @@ describe("Advance Payment Request", () => {
       expect(screen.getByText("₹2,50,000")).toBeTruthy(); // original
       expect(screen.getByText("₹1,00,000")).toBeTruthy(); // paid
       expect(screen.getByText("ABC/INV/7781")).toBeTruthy(); // vendor ref
+    });
+
+    it("opens the bill's latest SAP attachment from the expanded row", async () => {
+      const open = vi.spyOn(window, "open").mockReturnValue(null);
+      const createUrl = vi.fn(() => "blob:attachment");
+      const revokeUrl = vi.fn();
+      Object.assign(URL, { createObjectURL: createUrl, revokeObjectURL: revokeUrl });
+      const user = await setup();
+      await toAbcBills(user);
+      await tick(user, /^Bills/, /10256/, /10271/);
+
+      await user.click(screen.getByRole("button", { name: /^10256/ }));
+      const link = screen.getByRole("button", {
+        name: "Open SAP attachment DocScanner Sep 17, 2026 12-39 PM.pdf",
+      });
+      expect(link.textContent).toMatch(/\(latest of 3\)/);
+      await user.click(link);
+      // Fetched by DOCUMENT — the server reads the file name from SAP.
+      expect(service.documentAttachment).toHaveBeenCalledWith("OIL", "bill", 10256);
+      await vi.waitFor(() => expect(createUrl).toHaveBeenCalled());
+      open.mockRestore();
+
+      // A bill with nothing attached in SAP says so.
+      await user.click(screen.getByRole("button", { name: /^10271/ }));
+      expect(screen.getByText("None in SAP")).toBeTruthy();
+    });
+
+    it("reads a chosen bill's SAP attachment and checks it against SAP", async () => {
+      const user = await setup();
+      await toAbcBills(user);
+      await tick(user, /^Bills/, /10256/, /10271/);
+
+      // Only the bill WITH an attachment is read, straight away, by document.
+      expect(service.readDocumentAttachment).toHaveBeenCalledTimes(1);
+      expect(service.readDocumentAttachment).toHaveBeenCalledWith("OIL", "bill", 10256);
+      expect(await screen.findByText("1 differs from SAP")).toBeTruthy();
+
+      await user.click(screen.getByRole("button", { name: /^10256/ }));
+      const table = screen.getByText("On the attachment").closest("table")!;
+      const row = (label: string) => within(table).getByText(label).closest("tr")!.textContent;
+      expect(row("Invoice No.")).toMatch(/ABC\/INV\/7781.*ABC\/INV\/7781/);
+      expect(row("Amount")).toMatch(/₹2,50,000/);
+      expect(row("Party Name")).toMatch(/ABC Technologies Pvt Ltd/);
+      expect(row("Account No.")).toMatch(/50100234567812.*50100234567899/);
+      expect(within(table).getByLabelText("Differs from SAP")).toBeTruthy();
+      expect(within(table).getAllByLabelText("Matches SAP")).toHaveLength(4);
+      expect(screen.getByText(/read by OCR/)).toBeTruthy();
+    });
+
+    it("says so when the attachment cannot be read", async () => {
+      service.readDocumentAttachment.mockRejectedValue({
+        response: { status: 503, data: { message: "The OCR service could not be reached." } },
+      });
+      const user = await setup();
+      await toAbcBills(user);
+      await tick(user, /^Bills/, /10256/);
+      expect(await screen.findByText("Attachment not read")).toBeTruthy();
+      await user.click(screen.getByRole("button", { name: /^10256/ }));
+      expect(screen.getByText(/Could not read the attachment: The OCR service could not be reached/)).toBeTruthy();
     });
 
     it("deletes one row with the trash button and leaves the others as they were", async () => {
@@ -361,68 +550,69 @@ describe("Advance Payment Request", () => {
     });
   });
 
-  it("Vendor → Advance is a plain amount, with no Advance Against question", async () => {
-    const user = await setup();
-    await start(user, "VENDOR", "Advance");
-    expect(screen.queryByLabelText(/^Advance Against/)).toBeNull();
-    expect(screen.getByLabelText(/^Amount/)).toBeTruthy();
-    expect(heading("Reference Details")).toBeNull();
-  });
-
-  describe("Vendor → Against PO (sample data)", () => {
-    it("lists the sample vendors and POs, and asks an Expected Date", async () => {
+  describe("Vendor → Against PO (live from SAP)", () => {
+    it("lists the chosen vendor's open POs from SAP, and asks an Expected Bill Date", async () => {
       const user = await setup();
       await start(user, "VENDOR", "Against PO");
-      expect(screen.getByLabelText(/^Expected Date/)).toBeTruthy();
+      expect(screen.getByLabelText(/^Expected Bill Date/)).toBeTruthy();
+      await pick(user, /^Business Partner/, /XYZ Traders/);
 
-      const vendors = await openOptions(user, /^Business Partner/);
-      expect(vendors.join(" ")).toMatch(/ABC Technologies.*XYZ Traders.*Metro Print/);
-      expect(vendors).toHaveLength(3);
-      // Said under the partner AND on the POs section — both are sample data.
-      expect(screen.getAllByText(/Sample data — not yet connected to SAP/).length).toBeGreaterThan(0);
-      await user.click(await screen.findByRole("option", { name: /XYZ Traders/ }));
-
-      const pos = await openChecklist(user, /^Purchase Orders/);
-      expect(pos.map((p) => p.slice(0, 7))).toEqual(["PO-4512", "PO-4519"]);
-
-      await tick(user, /^Purchase Orders/, /PO-4512/, /PO-4519/);
-      await usePercent(user, "PO-4512");
-      await user.selectOptions(screen.getByLabelText("Quick percentage for PO-4512"), "10");
-      await user.type(field(/^Payment amount for PO-4519/), "6500");
-      expect(within(total()).getByText("₹24,500")).toBeTruthy(); // ₹18,000 + ₹6,500
+      await waitForPos();
+      expect(service.openVendorPurchaseOrders).toHaveBeenCalledWith("OIL", "VENDA000102");
       expect(service.openVendorInvoices).not.toHaveBeenCalled();
+      const pos = await openChecklist(user, /^Purchase Orders/);
+      expect(pos.map((p) => p.slice(0, 4))).toEqual(["4512", "4519"]);
+
+      await tick(user, /^Purchase Orders/, /4512/, /4519/);
+      // A PO line starts on percentage, and can be switched to an amount.
+      await user.selectOptions(screen.getByLabelText("Quick percentage for 4512"), "10");
+      const mode = screen.getByRole("radiogroup", { name: "Payment mode for 4519" });
+      await user.click(within(mode).getByRole("radio", { name: "Fixed Amount" }));
+      await user.type(field(/^Payment amount for 4519/), "6500");
+      expect(within(total()).getByText("₹24,500")).toBeTruthy(); // ₹18,000 + ₹6,500
     });
 
-    it("leaving Against PO clears the POs and the Expected Date", async () => {
+    it("will not take a percentage above 100", async () => {
       const user = await setup();
       await start(user, "VENDOR", "Against PO");
-      await user.type(field(/^Expected Date/), "2026-10-20");
+      await pick(user, /^Business Partner/, /XYZ Traders/);
+      await waitForPos();
+      await tick(user, /^Purchase Orders/, /4512/);
+      await user.type(field(/^Payment percentage for 4512/), "150");
+      // "15" is fine; the "0" making it 150 is refused.
+      expect(field(/^Payment percentage for 4512/).value).toBe("15");
+    });
 
-      await answer(user, /^Payment Against/, "Advance");
-      expect(heading("Reference Details")).toBeNull();
-      expect(screen.queryByLabelText(/^Expected Date/)).toBeNull();
+    it("offers only what is still to be received on a part-received PO", async () => {
+      const user = await setup();
+      await start(user, "VENDOR", "Against PO");
+      await pick(user, /^Business Partner/, /ABC Technologies/);
+      await waitForPos();
+      const pos = await openChecklist(user, /^Purchase Orders/);
+      // PO 4501: ₹5,00,000, ₹1,50,000 received, so ₹3,50,000 open.
+      expect(pos[0]).toMatch(/4501.*Open ₹3,50,000/);
+    });
+
+    it("keeps the vendor when moving from Bill to PO, and loads their POs", async () => {
+      const user = await setup();
+      await start(user, "VENDOR", "Against Bill");
+      await pick(user, /^Business Partner/, /XYZ Traders/);
+      await answer(user, /^Payment Against/, "Against PO");
+      expect(field(/^Business Partner/).textContent).toMatch(/XYZ Traders/);
+      await waitForPos();
+      expect(service.openVendorPurchaseOrders).toHaveBeenCalledWith("OIL", "VENDA000102");
+    });
+
+    it("leaving Against PO clears the POs and the Expected Bill Date", async () => {
+      const user = await setup();
+      await start(user, "VENDOR", "Against PO");
+      await user.type(field(/^Expected Bill Date/), "2026-10-20");
+
+      await answer(user, /^Payment Against/, "Against Bill");
+      expect(screen.queryByLabelText(/^Expected Bill Date/)).toBeNull();
 
       await answer(user, /^Payment Against/, "Against PO");
-      expect(field(/^Expected Date/).value).toBe("");
-    });
-  });
-
-  describe("Vendor → All (sample data)", () => {
-    it("shows the vendor's other documents with their kind, and totals them", async () => {
-      const user = await setup();
-      await start(user, "VENDOR", "All");
-      await pick(user, /^Business Partner/, /Gupta Transport/);
-
-      const docs = await openChecklist(user, /^Documents/);
-      expect(docs[0]).toMatch(/^WO-3107.*Work Order/);
-      expect(docs[1]).toMatch(/^JV-5534.*Journal Voucher/);
-
-      await tick(user, /^Documents/, /WO-3107/, /JV-5534/);
-      await usePercent(user, "WO-3107");
-      await user.selectOptions(screen.getByLabelText("Quick percentage for WO-3107"), "50");
-      await user.type(field(/^Payment amount for JV-5534/), "8200");
-      // 50% of WO-3107's ₹80,000 OPEN + ₹8,200.
-      expect(within(total()).getByText("₹48,200")).toBeTruthy();
+      expect(field(/^Expected Bill Date/).value).toBe("");
     });
   });
 
@@ -439,31 +629,100 @@ describe("Advance Payment Request", () => {
       expect(service.employees).toHaveBeenCalledWith("OIL", "");
     });
 
-    it("shows Amount, Return Method and the expected period — no bill date", async () => {
+    it("also lists the employee master's people with no SAP account, marked Not in SAP", async () => {
+      const user = await setup();
+      await toAdvance(user);
+      const employees = await openOptions(user, /^Employee/);
+      expect(employees.at(-1)).toMatch(/Asha Rani \(Not in SAP\).*JWPL3100 · Not in SAP/);
+      expect(service.employeeDirectory).toHaveBeenCalledWith({ notInSapFor: "OIL", search: "" });
+      expect(screen.queryByText(/has no employee advance account in SAP/)).toBeNull();
+
+      await user.keyboard("{Escape}");
+      await pick(user, /^Employee/, /Asha Rani/);
+      expect(
+        screen.getByText(/Asha Rani has no employee advance account in SAP\. Create their employee master in SAP/),
+      ).toBeTruthy();
+    });
+
+    it("still lists SAP's accounts when the employee master cannot be read", async () => {
+      // Only the not-in-SAP read fails; the Ownership list still loads.
+      service.employeeDirectory.mockImplementation(async (query = {}) => {
+        if (query.notInSapFor) throw new Error("down");
+        return directory(query);
+      });
+      const user = await setup();
+      await toAdvance(user);
+      const employees = await openOptions(user, /^Employee/);
+      expect(employees[0]).toMatch(/RAVINDER SINGH SHUNTY/);
+      expect(employees.join(" ")).not.toMatch(/Not in SAP/);
+    });
+
+    it("shows Amount and Return Method, and no date until a method is chosen", async () => {
       const user = await setup();
       await toAdvance(user);
       expect(screen.getByLabelText(/^Amount/)).toBeTruthy();
       expect(screen.getByLabelText(/^Return Method/)).toBeTruthy();
-      expect(screen.getByLabelText(/^Expected From Date/)).toBeTruthy();
-      expect(screen.getByLabelText(/^Expected To Date/)).toBeTruthy();
+      // Each method asks its own dates, so none are shown before one is picked.
+      expect(screen.queryByLabelText(/^EMI Start Date/)).toBeNull();
+      expect(screen.queryByLabelText(/^Return Date/)).toBeNull();
       expect(screen.queryByLabelText(/^Expected Bill Date/)).toBeNull();
     });
 
-    it("works out the EMI, and hides it for One Time", async () => {
+    it("works out the EMI from the installments", async () => {
       const user = await setup();
       await toAdvance(user);
       await user.type(field(/^Amount/), "20000");
       await answer(user, /^Return Method/, "EMI");
       await user.type(field(/^Number of Installments/), "4");
-      expect(field(/^EMI Amount/).value).toBe("₹5,000");
-
-      await answer(user, /^Return Method/, "One Time");
-      expect(screen.queryByLabelText(/^Number of Installments/)).toBeNull();
+      expect(field(/^EMI Amount/).value).toBe("5000");
     });
 
-    it("refuses an Expected To Date before the From Date", async () => {
+    it("works out the installments from the EMI, and says what the last one is", async () => {
       const user = await setup();
       await toAdvance(user);
+      await user.type(field(/^Amount/), "20000");
+      await answer(user, /^Return Method/, "EMI");
+      await user.type(field(/^EMI Amount/), "6000");
+      expect(field(/^Number of Installments/).value).toBe("4");
+      expect(screen.getByText("Last installment ₹2,000.")).toBeTruthy();
+    });
+
+    it("works out Expected To Date from the EMI Start Date, and does not let it be typed", async () => {
+      const user = await setup();
+      await toAdvance(user);
+      await user.type(field(/^Amount/), "20000");
+      await answer(user, /^Return Method/, "EMI");
+      await user.type(field(/^Number of Installments/), "4");
+      await user.type(field(/^EMI Start Date/), "2026-10-01");
+      const to = field(/^Expected To Date/);
+      expect(to.value).toBe("2027-02-01");
+      expect(to.readOnly).toBe(true);
+    });
+
+    it("will not start an EMI, or take a return date, before today", async () => {
+      const user = await setup();
+      await toAdvance(user);
+      await answer(user, /^Return Method/, "EMI");
+      expect(field(/^EMI Start Date/).min).toBe("2026-09-23");
+
+      await answer(user, /^Return Method/, "One Time");
+      expect(field(/^Return Date/).min).toBe("2026-09-23");
+    });
+
+    it("asks One Time for a single Return Date, and nothing about installments", async () => {
+      const user = await setup();
+      await toAdvance(user);
+      await answer(user, /^Return Method/, "One Time");
+      expect(screen.getByLabelText(/^Return Date/)).toBeTruthy();
+      expect(screen.queryByLabelText(/^Number of Installments/)).toBeNull();
+      expect(screen.queryByLabelText(/^EMI Start Date/)).toBeNull();
+      expect(screen.queryByLabelText(/^Expected To Date/)).toBeNull();
+    });
+
+    it("refuses an Expected To Date before the From Date under a typed method", async () => {
+      const user = await setup();
+      await toAdvance(user);
+      await answer(user, /^Return Method/, "Adjust against bonus");
       await user.type(field(/^Expected From Date/), "2026-10-15");
       await user.type(field(/^Expected To Date/), "2026-10-01");
       expect(screen.getByText("Expected To Date cannot be before Expected From Date.")).toBeTruthy();
@@ -473,15 +732,33 @@ describe("Advance Payment Request", () => {
       const user = await setup();
       await toAdvance(user);
       await answer(user, /^Return Method/, "EMI");
-      await user.type(field(/^Expected From Date/), "2026-10-01");
+      await user.type(field(/^EMI Start Date/), "2026-10-01");
 
       await answer(user, /^Payment Against/, "Uniform allowance");
       expect(screen.queryByLabelText(/^Return Method/)).toBeNull();
 
       await answer(user, /^Payment Against/, "Advance");
       expect(field(/^Return Method/).value).toBe("");
-      expect(field(/^Expected From Date/).value).toBe("");
+      // No method, so no EMI Start Date field at all — let alone a value in it.
+      expect(screen.queryByLabelText(/^EMI Start Date/)).toBeNull();
     });
+  });
+
+  it("will not take a Payment Date before today", async () => {
+    await setup();
+    expect(field(/^Payment Date/).min).toBe("2026-09-23");
+  });
+
+  it("will not take an Expected Bill Date before today on a vendor PO", async () => {
+    const user = await setup();
+    await start(user, "VENDOR", "Against PO");
+    expect(field(/^Expected Bill Date/).min).toBe("2026-09-23");
+  });
+
+  it("will not take an Expected Bill Date before today on an Imprest", async () => {
+    const user = await setup();
+    await start(user, "EMPLOYEE_IMPREST", "Advance");
+    expect(field(/^Expected Bill Date/).min).toBe("2026-09-23");
   });
 
   it("Employee Advance has no Against Bill — typing it is the requester's own answer", async () => {
@@ -512,6 +789,19 @@ describe("Advance Payment Request", () => {
     expect(screen.queryByLabelText(/^Expected Bill Date/)).toBeNull();
   });
 
+  it("Employee Imprest → Against Bill lists that imprest account's open bills from SAP", async () => {
+    const user = await setup();
+    await start(user, "EMPLOYEE_IMPREST", "Against Bill");
+    await pick(user, /^Employee/, /RAHUL SHARMA IMPREST/);
+    await waitForBills();
+    expect(service.openVendorInvoices).toHaveBeenCalledWith("OIL", "ORGV000901");
+    const bills = await openChecklist(user, /^Bills/);
+    expect(bills).toHaveLength(1);
+    expect(bills[0]).toMatch(/^10290/);
+    // …and it still asks when the bill is expected.
+    expect(screen.getByLabelText(/^Expected Bill Date/)).toBeTruthy();
+  });
+
   it("changing Type clears the partner, the bills and every row", async () => {
     const user = await setup();
     await start(user, "VENDOR", "Against Bill");
@@ -530,22 +820,29 @@ describe("Advance Payment Request", () => {
     const rows = () =>
       screen.getAllByRole("row").filter((row) => /AP-2026-/.test(row.textContent ?? ""));
 
-    function open() {
+    async function open() {
       const user = userEvent.setup();
       renderPage(<Advance_Payment_Request />, { route: "/Advance_Payment_Request" });
+      await screen.findByRole("button", { name: "Details AP-2026-0014" });
       return user;
     }
 
-    it("opens on Entries, with every request and the Total card selected", () => {
-      open();
+    async function details(user: User, requestNo: string) {
+      await user.click(screen.getByRole("button", { name: `Details ${requestNo}` }));
+      await screen.findByRole("heading", { name: requestNo });
+    }
+
+    it("opens on Entries, with every request of yours and the Total card selected", async () => {
+      await open();
       expect(screen.getByRole("tab", { name: "Entries" }).getAttribute("aria-selected")).toBe("true");
       expect(rows()).toHaveLength(5);
       const total = screen.getByRole("button", { name: /Total/ });
       expect(total.getAttribute("aria-pressed")).toBe("true");
+      expect(service.requests).toHaveBeenCalledWith("mine");
     });
 
     it("filters by clicking a KPI card", async () => {
-      const user = open();
+      const user = await open();
       const pending = screen.getByRole("button", { name: /Pending/ });
       await user.click(pending);
       expect(pending.getAttribute("aria-pressed")).toBe("true");
@@ -556,7 +853,7 @@ describe("Advance Payment Request", () => {
     });
 
     it("narrows by search, then company, then status", async () => {
-      const user = open();
+      const user = await open();
       await user.type(screen.getByLabelText("Search requests"), "xyz");
       expect(rows()).toHaveLength(1);
       await user.clear(screen.getByLabelText("Search requests"));
@@ -569,7 +866,7 @@ describe("Advance Payment Request", () => {
     });
 
     it("counts the cards over the company filter, but not the status filter", async () => {
-      const user = open();
+      const user = await open();
       await user.selectOptions(screen.getByLabelText("Filter requests by company"), "OIL");
       await user.selectOptions(screen.getByLabelText("Filter requests by status"), "REJECTED");
       // OIL has 2 pending, 0 approved, 1 rejected — still shown while Rejected is selected.
@@ -578,28 +875,156 @@ describe("Advance Payment Request", () => {
     });
 
     it("shows a request's details and where it stands", async () => {
-      const user = open();
-      await user.click(screen.getByRole("button", { name: "Details AP-2026-0010" }));
-      expect(screen.getByRole("heading", { name: "AP-2026-0010" })).toBeTruthy();
-      expect(screen.getByText("Deposit terms not yet signed — resubmit with the agreement.")).toBeTruthy();
+      const user = await open();
+      await details(user, "AP-2026-0010");
+      expect(screen.getAllByText("Deposit terms not yet signed — resubmit with the agreement.").length).toBeGreaterThan(0);
       await user.click(screen.getByRole("button", { name: "Back to entries" }));
       expect(rows()).toHaveLength(5);
     });
 
+    it("says which stage a pending request waits at, and on whom", async () => {
+      const user = await open();
+      await details(user, "AP-2026-0012"); // at HOD
+      expect(screen.getByText(/Waiting at HOD Approval \(Navdeep Singh\)/)).toBeTruthy();
+      // Approved at Sub-HOD already, so it is no longer the creator's to change.
+      expect(screen.queryByRole("button", { name: "Edit Request" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Cancel Request" })).toBeNull();
+    });
+
     it("lists a submitted request as Pending, at the top", async () => {
-      const user = open();
+      const user = await open();
       await user.click(screen.getByRole("tab", { name: /New Request/ }));
-      await start(user, "VENDOR", "Advance");
+      await start(user, "VENDOR", "Against Bill");
       await pick(user, /^Business Partner/, /ABC Technologies/);
-      await user.type(field(/^Amount/), "25000");
-      await user.type(field(/^Ownership/), "Finance desk");
+      // A vendor request has no plain Amount any more — the figure comes from
+      // the bill lines, which is the only way a vendor advance is raised now.
+      await waitForBills();
+      await tick(user, /^Bills/, /10256/);
+      await user.type(field(/^Payment amount for 10256/), "25000");
+      await pick(user, /^Department/, /Finance/);
+      await pick(user, /^Sub-department/, /^AP$/);
+      await pick(user, /^Ownership/, /Arvinder/);
       await user.type(field(/^Payment Date/), "2026-10-01");
       await user.type(field(/^Remarks/), "Mobilisation advance");
       await user.click(screen.getByRole("button", { name: "Submit Request" }));
 
-      expect(screen.getByText(/AP-2026-0015 raised for ₹25,000/)).toBeTruthy();
+      expect(await screen.findByText(/AP-2026-0015 raised for ₹25,000 — it is now waiting at Sub-HOD Approval/)).toBeTruthy();
       expect(screen.getByRole("tab", { name: "Entries" }).getAttribute("aria-selected")).toBe("true");
+      await screen.findByRole("button", { name: "Details AP-2026-0015" });
       expect(rows()[0].textContent).toMatch(/AP-2026-0015.*Tester.*ABC Technologies.*Pending/);
+
+      // What went to the server: the form, in the API's words.
+      const [input] = vi.mocked(advancePaymentService.createRequest).mock.calls[0];
+      expect(input).toMatchObject({
+        company: "OIL",
+        request_type: "VENDOR",
+        payment_against: "AGAINST_BILL",
+        partner_code: "VENDA000101",
+        amount: "25000",
+        department_id: 35,
+        sub_department_id: 92,
+        owner_label: "Arvinder (JWPL0115)",
+        payment_date: "2026-10-01",
+        documents: [expect.objectContaining({ kind: "BILL", sap_doc_entry: 10256, amount: "25000", mode: "FIXED" })],
+      });
+    });
+
+    it("shows the server's refusal above the buttons, and keeps the form", async () => {
+      const user = await open();
+      await user.click(screen.getByRole("tab", { name: /New Request/ }));
+      await start(user, "EMPLOYEE_ADVANCE", "Other");
+      server.refuseNext = {
+        status: 409,
+        message: 'Module "ADVANCE_PAYMENT" is not registered with the workflow engine.',
+      };
+      await answer(user, /^Payment Against/, "Tools");
+      await pick(user, /^Employee/, /RAVINDER SINGH SHUNTY/);
+      await user.type(field(/^Amount/), "5000");
+      await pick(user, /^Department/, /Cyber Security/);
+      await pick(user, /^Ownership/, /Arvinder/);
+      await user.type(field(/^Payment Date/), "2026-10-01");
+      await user.type(field(/^Remarks/), "Tools for the site");
+      await user.click(screen.getByRole("button", { name: "Submit Request" }));
+
+      expect(await screen.findByText(/not registered with the workflow engine/)).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Submit Request" })).toBeTruthy();
+    });
+
+    it("edits a request no one has approved yet", async () => {
+      server.addOwn(apiRequest(20, {
+        request_type: "EMPLOYEE_ADVANCE",
+        payment_against: "OTHER",
+        payment_against_other: "Tools",
+        partner_code: "1113035",
+        partner_name: "RAVINDER SINGH SHUNTY",
+        amount: "5000",
+        department: { id: 40, name: "Cyber Security" },
+        sub_department: null,
+        owner_label: "Arvinder (JWPL0115)",
+        payment_date: "2026-10-01",
+        remarks: "Tools for the site",
+        created_on: "2026-09-23T12:00:00+05:30",
+      }));
+      const user = await open();
+      await details(user, "AP-2026-0020");
+      await user.click(screen.getByRole("button", { name: "Edit Request" }));
+      expect(field(/^Amount/).value).toBe("5000");
+      await user.clear(field(/^Amount/));
+      await user.type(field(/^Amount/), "6000");
+      await user.click(screen.getByRole("button", { name: "Save Changes" }));
+
+      expect(await screen.findByText("Changes saved.")).toBeTruthy();
+      const [id, input, options] = vi.mocked(advancePaymentService.editRequest).mock.calls[0];
+      expect(id).toBe(20);
+      expect(input).toMatchObject({ amount: "6000", department_id: 40, sub_department_id: null });
+      expect(options).toMatchObject({ resubmit: false, removeFileIds: [] });
+    });
+
+    it("a returned request says why, and saving it resubmits it", async () => {
+      server.addOwn(apiRequest(21, {
+        status: "RETURNED",
+        request_type: "EMPLOYEE_ADVANCE",
+        payment_against: "OTHER",
+        payment_against_other: "Tools",
+        partner_code: "1113035",
+        partner_name: "RAVINDER SINGH SHUNTY",
+        amount: "5000",
+        department: { id: 40, name: "Cyber Security" },
+        sub_department: null,
+        owner_label: "Arvinder (JWPL0115)",
+        payment_date: "2026-10-01",
+        remarks: "Tools for the site",
+        created_on: "2026-09-23T12:00:00+05:30",
+        last_decision: {
+          id: 5, action: "RETURNED", label: "Returned to creator", cycle: 1, stage_name: "HOD Approval",
+          actor: { id: 7, name: "Navdeep Singh", username: "navdeep" }, on_behalf_of: null,
+          from_status: "IN_APPROVAL", to_status: "RETURNED", remarks: "Attach the quotation",
+          data: null, created_on: "2026-09-23T13:00:00+05:30",
+        },
+      }), -1);
+      const user = await open();
+      await details(user, "AP-2026-0021");
+      expect(screen.getByText(/Returned to you by Navdeep Singh/)).toBeTruthy();
+      expect(screen.getByText(/Attach the quotation — edit the request and resubmit it/)).toBeTruthy();
+
+      await user.click(screen.getByRole("button", { name: "Edit Request" }));
+      await user.click(screen.getByRole("button", { name: "Save & Resubmit" }));
+      expect(await screen.findByText(/Resubmitted — now waiting at Sub-HOD Approval/)).toBeTruthy();
+      expect(vi.mocked(advancePaymentService.editRequest).mock.calls[0][2]).toMatchObject({ resubmit: true });
+    });
+
+    it("cancels a request no one has approved yet", async () => {
+      server.addOwn(apiRequest(22, { amount: "24500", created_on: "2026-09-23T12:00:00+05:30" }));
+      const user = await open();
+      await details(user, "AP-2026-0022");
+      await user.click(screen.getByRole("button", { name: "Cancel Request" }));
+      await user.type(field(/^Reason/), "Raised twice");
+      const confirm = screen.getAllByRole("button", { name: "Cancel Request" }).at(-1)!;
+      await user.click(confirm);
+      expect(await screen.findByText("Request cancelled.")).toBeTruthy();
+      expect(advancePaymentService.act).toHaveBeenCalledWith(22, "cancel", "Raised twice", expect.any(Number));
+      expect(screen.getAllByText("Cancelled").length).toBeGreaterThan(0);
+      expect(screen.queryByRole("button", { name: "Edit Request" })).toBeNull();
     });
   });
 });

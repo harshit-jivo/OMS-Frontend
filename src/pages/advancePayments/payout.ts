@@ -16,7 +16,6 @@
  *
  *   * one or more METHOD LINES — UPI, Cheque or Cash — each with its amount;
  *   * Cash carries a NOTE BREAKDOWN (₹10…₹500) that must equal the amount;
- *   * UPI carries the transaction reference / UTR (optional, ≤ 50 chars);
  *   * Cheque carries number, bank and date;
  *   * every line names OUR account — a house bank for UPI/cheque, a cash
  *     drawer for cash — which here is the account paid FROM, where receipts
@@ -26,38 +25,91 @@
  * Added for the outgoing side: the PAYEE — name, account number, IFSC — and
  * attachments for those bank details (a cancelled cheque, a bank letter).
  *
- * The house banks and cash drawers below are SAMPLE lists. In the app they are
- * `/payments/banks/` and `/payments/cash-accounts/`; this desk is UI only.
+ * WHERE THE ACCOUNTS COME FROM
+ *   * FROM (ours), per company, from SAP: house banks from
+ *     `GET /advance-payments/house-banks/` (every account, including any SAP
+ *     cannot post from yet), cash accounts from `/advance-payments/cash-accounts/`
+ *     (the chart of accounts under 1105000 CASH IN HAND).
+ *   * TO (the payee's): their bank accounts in SAP,
+ *     `GET /advance-payments/partner-bank-accounts/`, the default pre-filled.
+ *
+ * WHICH METHODS AN AMOUNT MAY USE is `METHOD_LIMITS`, one table: UPI only
+ * below 1 lakh, RTGS only above 2 lakh, IMPS only below 5 lakh, cash only up
+ * to 10,000; NEFT and cheque at any amount.
  */
-import type { MockAttachment } from "./attachments";
+import type { FileAttachment } from "./attachments";
 import { formatINR } from "./rules";
 
-export type PayoutMethod = "UPI" | "CHEQUE" | "CASH";
+export type PayoutMethod = "UPI" | "NEFT" | "RTGS" | "IMPS" | "CHEQUE" | "CASH";
 
 export const PAYOUT_METHODS: ReadonlyArray<{ value: PayoutMethod; label: string }> = [
   { value: "UPI", label: "UPI" },
+  { value: "NEFT", label: "NEFT" },
+  { value: "RTGS", label: "RTGS" },
+  { value: "IMPS", label: "IMPS" },
   { value: "CHEQUE", label: "Cheque" },
   { value: "CASH", label: "Cash" },
 ];
 
+/**
+ * The electronic transfers. They behave alike: they leave from a house bank
+ * and may carry a screenshot or advice as proof, so the form asks the same
+ * things of each. No UTR / reference is asked: it exists only once the
+ * transfer has been made, which is after this approval.
+ */
+export const TRANSFER_METHODS: ReadonlySet<PayoutMethod> = new Set(["UPI", "NEFT", "RTGS", "IMPS"]);
+export const isTransfer = (method: PayoutMethod) => TRANSFER_METHODS.has(method);
+
+/**
+ * Which amounts each method may carry — the ONE place the thresholds live.
+ *
+ * As specified, and exactly as worded: UPI strictly BELOW 1,00,000, RTGS
+ * strictly ABOVE 2,00,000, IMPS strictly BELOW 5,00,000. So at exactly
+ * 1,00,000 UPI is not offered, and at exactly 2,00,000 RTGS is not either.
+ * (The banking rules are inclusive at both: NPCI's UPI cap is 1,00,000 and
+ * RBI's RTGS minimum is 2,00,000. Flip `below`/`above` to `upTo`/`from` if
+ * that is what is wanted.) NEFT, cheque and cash have no limit here.
+ */
+export const METHOD_LIMITS: Partial<
+  Record<PayoutMethod, { below?: number; above?: number; upTo?: number }>
+> = {
+  UPI: { below: 100000 },
+  RTGS: { above: 200000 },
+  IMPS: { below: 500000 },
+  // Up to AND including 10,000: hidden only ABOVE it. Also the Income Tax
+  // Act's line (s.40A(3)): a cash payment over 10,000 in a day is disallowed.
+  CASH: { upTo: 10000 },
+};
+
+/** Why `method` cannot carry `amount`, or null when it can (or there is no amount yet). */
+export function methodAmountError(method: PayoutMethod, amount: number): string | null {
+  const limit = METHOD_LIMITS[method];
+  if (!limit || !(amount > 0)) return null;
+  const label = PAYOUT_METHODS.find((m) => m.value === method)?.label ?? method;
+  if (limit.below !== undefined && !(amount < limit.below)) {
+    return `${label} is only for amounts below ${formatINR(limit.below)}.`;
+  }
+  if (limit.above !== undefined && !(amount > limit.above)) {
+    return `${label} is only for amounts above ${formatINR(limit.above)}.`;
+  }
+  if (limit.upTo !== undefined && amount > limit.upTo) {
+    return `${label} is only for amounts up to ${formatINR(limit.upTo)}.`;
+  }
+  return null;
+}
+
+/** The methods an amount may use, in the list's order. */
+export function methodsFor(amount: number): PayoutMethod[] {
+  return PAYOUT_METHODS.map((m) => m.value).filter((m) => methodAmountError(m, amount) === null);
+}
+
+/** What a new line starts as: UPI when the amount allows it, NEFT otherwise. */
+export function defaultMethodFor(amount: number): PayoutMethod {
+  return methodAmountError("UPI", amount) === null ? "UPI" : "NEFT";
+}
+
 /** The receive-payment screen's notes, unchanged. */
 export const NOTE_DENOMINATIONS = [10, 20, 50, 100, 200, 500] as const;
-
-/** Matches the receive-payment rule (and the server's, in payments/serializers.py). */
-export const UPI_REFERENCE_MAX = 50;
-
-/** SAMPLE house banks — `BANKCODE:GL`, the key shape `/payments/banks/` uses. */
-export const HOUSE_BANKS = [
-  { value: "HDFC:1104106", label: "HDFC Bank — A/c 50200012345678" },
-  { value: "SBI:1104110", label: "State Bank of India — A/c 38912345670" },
-  { value: "ICICI:1104121", label: "ICICI Bank — A/c 002105012345" },
-] as const;
-
-/** SAMPLE cash drawers — the G/L, the key shape `/payments/cash-accounts/` uses. */
-export const CASH_ACCOUNTS = [
-  { value: "1105001", label: "Head Office Cash — 1105001" },
-  { value: "1105004", label: "Factory Cash — 1105004" },
-] as const;
 
 export interface CashNoteRow {
   id: string;
@@ -67,6 +119,8 @@ export interface CashNoteRow {
 
 export interface PayoutLine {
   id: string;
+  /** The server's id, once saved: keeps the line (and its files) across edits. */
+  serverId?: number;
   method: PayoutMethod;
   amount: string;
   /** OUR account the money leaves from — a house bank, or a drawer for cash. */
@@ -78,10 +132,28 @@ export interface PayoutLine {
   /** The bank the cheque is drawn on — ours, since we are paying. */
   chequeBank: string;
   chequeDate: string;
-  /** UPI only — the transaction reference / UTR. */
-  reference: string;
   /** Proof — every method but cash. */
-  attachments: MockAttachment[];
+  attachments: FileAttachment[];
+  /**
+   * The bank's reference for the transfer, recorded after it is made (UPI,
+   * NEFT, RTGS, IMPS only). Absent until then.
+   */
+  utr?: string;
+  /** What the proof the UTR was read from showed, when it came from one. */
+  utrProof?: UtrProof;
+}
+
+/** How a recorded UTR was established. */
+export interface UtrProof {
+  fileName: string;
+  /** How the file was read: pdf-text | ocr | excel | csv ... */
+  source: string;
+  /** The UTR as read, before any correction by hand. */
+  readUtr: string | null;
+  checks: { amount: boolean | null; account: boolean | null; invoice: boolean | null };
+  recordedBy: string;
+  /** ISO date-time. */
+  recordedOn: string;
 }
 
 export interface PayoutDetails {
@@ -89,9 +161,15 @@ export interface PayoutDetails {
   beneficiaryName: string;
   toAccountNumber: string;
   toIfsc: string;
+  /**
+   * The approver chose to TYPE the payee's account rather than use one of the
+   * accounts SAP holds for them. Kept so that an emptied field is not
+   * mistaken for "nothing chosen yet" and silently re-filled with the default.
+   */
+  toAccountManual: boolean;
   lines: PayoutLine[];
   /** Supporting the payee's bank details — a cancelled cheque, a bank letter. */
-  bankAttachments: MockAttachment[];
+  bankAttachments: FileAttachment[];
 }
 
 let lineSeq = 0;
@@ -107,7 +185,6 @@ export function newPayoutLine(method: PayoutMethod = "UPI"): PayoutLine {
     chequeNumber: "",
     chequeBank: "",
     chequeDate: "",
-    reference: "",
     attachments: [],
   };
 }
@@ -116,32 +193,36 @@ export const EMPTY_PAYOUT: PayoutDetails = {
   beneficiaryName: "",
   toAccountNumber: "",
   toIfsc: "",
+  toAccountManual: false,
   lines: [],
   bankAttachments: [],
 };
 
-/** A fresh payout with one line, pre-filled with the whole amount. */
+/**
+ * A fresh payout with one line, pre-filled with the whole amount, by the
+ * first method that amount may use.
+ */
 export function startPayout(amount: number, beneficiaryName = ""): PayoutDetails {
   return {
     ...EMPTY_PAYOUT,
     beneficiaryName,
-    lines: [{ ...newPayoutLine("UPI"), amount: amount > 0 ? String(amount) : "" }],
+    lines: [{ ...newPayoutLine(defaultMethodFor(amount)), amount: amount > 0 ? String(amount) : "" }],
   };
 }
 
-/** Which account list a line picks from. */
-export const accountsFor = (method: PayoutMethod) =>
-  method === "CASH" ? CASH_ACCOUNTS : HOUSE_BANKS;
-
 /**
  * A method change keeps the amount and drops everything that belonged to the
- * old method — including the FROM account, because a cash drawer is not a
- * valid source for a UPI transfer and a house bank is not one for cash. The
- * receive-payment card does the same (`methodChangePatch`).
+ * old method. The FROM account goes only when the move is into or out of cash
+ * (a drawer cannot send a transfer, a house bank does not hold notes); between
+ * UPI, NEFT, RTGS, IMPS and cheque it is the same house bank and it stays.
  */
 export function changeMethod(line: PayoutLine, method: PayoutMethod): PayoutLine {
   if (method === line.method) return line;
-  return { ...newPayoutLine(method), id: line.id, amount: line.amount };
+  const next = { ...newPayoutLine(method), id: line.id, serverId: line.serverId, amount: line.amount };
+  // UPI -> NEFT -> RTGS leaves from the same house bank, and so does a
+  // cheque; only a move into or out of cash changes WHICH list it is from.
+  const sameList = (line.method === "CASH") === (method === "CASH");
+  return sameList ? { ...next, fromAccount: line.fromAccount } : next;
 }
 
 /* ── Money ───────────────────────────────────────────────────────────────── */
@@ -238,9 +319,8 @@ export function validatePayout(payout: PayoutDetails, requestAmount: number): Pa
       if (!line.chequeNumber.trim()) missing.push(`Cheque Number (method ${n})`);
       if (!line.chequeDate) missing.push(`Cheque Date (method ${n})`);
     }
-    if (line.method === "UPI" && line.reference.length > UPI_REFERENCE_MAX) {
-      problems.push(`Method ${n}: the UPI reference is longer than ${UPI_REFERENCE_MAX} characters.`);
-    }
+    const limit = Number.isNaN(amount) ? null : methodAmountError(line.method, amount);
+    if (limit) problems.push(`Method ${n}: ${limit}`);
     const cash = cashBreakdownError(line);
     if (cash) problems.push(`Method ${n}: ${cash}`);
   });

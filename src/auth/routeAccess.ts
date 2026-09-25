@@ -129,6 +129,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   "/Page_Permissions": { adminOnly: true },
   "/Role_Permissions": { adminOnly: true },
   "/UI_Labels": { adminOnly: true },
+  // The employee master (advance_payment). Admin-only here AND on the API
+  // (`IsAdminRole` on /advance-payments/employee-master/).
+  "/Add_Employee": { adminOnly: true },
   //
   // Commented out with the route itself (App.tsx, DISABLED 2026-08-27 — the
   // quotation flow is closed and its backend routes are commented out too).
@@ -209,14 +212,12 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
    */
   "/Advance_Payment_Request": { permissions: ["Advance_Payment"] },
   /*
-   * Advance Payments — approval desk. UI ONLY, on sample requests.
+   * Advance Payments — approval desk.
    *
    * Its own key, because deciding a payment and asking for one are different
-   * jobs — the same split as BackDate / BackDate_Approval. The backend does
-   * not register `Advance_Payment_Approval` yet (there are no requests to
-   * approve until the create endpoint exists), so today only administrators,
-   * who pass every check, can open it. The key must be added to the backend's
-   * permission registry when the approval endpoints land.
+   * jobs — the same split as BackDate / BackDate_Approval. The key opens the
+   * desk; deciding a request also needs being its current stage's user in the
+   * Workflows page, which the server checks on every action.
    */
   "/Advance_Payment_Approval": { permissions: ["Advance_Payment_Approval"] },
 

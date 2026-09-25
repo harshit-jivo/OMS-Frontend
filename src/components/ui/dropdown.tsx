@@ -148,6 +148,7 @@ export function MultiSelect<T extends string | number>({
   searchPlaceholder = "Search…",
   emptyText = "Nothing to choose",
   maxShown,
+  namedUpTo = 1,
   disabled = false,
   size = "md",
   className,
@@ -171,6 +172,16 @@ export function MultiSelect<T extends string | number>({
   emptyText?: string;
   /** Rows rendered at once — see `SearchSelect`'s. Omit for lists that fit. */
   maxShown?: number;
+  /**
+   * Name each chosen option while there are at most this many; above it, show
+   * the count.
+   *
+   * Default 1, which is the long-standing behaviour. Raised where the labels
+   * ARE the content — two bill numbers on a payment screen are what the
+   * approver is checking, and "2 selected" replaces them with a fact they
+   * already know.
+   */
+  namedUpTo?: number;
   disabled?: boolean;
   size?: Size;
   className?: string;
@@ -219,13 +230,19 @@ export function MultiSelect<T extends string | number>({
   };
 
   const allChosen = options.length > 0 && value.length === options.length;
+  // Every chosen value's label, or undefined where the option is not in the
+  // list — which happens while a searched list has moved on. One missing label
+  // drops the whole summary to the count rather than showing a raw id.
+  const names = value.map(
+    (chosen) => options.find((option) => option.value === chosen)?.label,
+  );
   const summary =
     value.length === 0
       ? placeholder
-      : value.length === 1
-        ? options.find((option) => option.value === value[0])?.label ?? "1 selected"
-        : allChosen
-          ? `All (${value.length})`
+      : allChosen && value.length > 1
+        ? `All (${value.length})`
+        : value.length <= namedUpTo && names.every(Boolean)
+          ? names.join(", ")
           : `${value.length} selected`;
 
   const toggle = (option: T) =>
