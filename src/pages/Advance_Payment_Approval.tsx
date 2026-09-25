@@ -33,6 +33,8 @@ import {
   HiOutlineXCircle,
 } from "react-icons/hi2";
 
+import { showToast } from "../lib/toastStore";
+
 import { useAuth } from "../auth";
 import { Badge } from "../components/ui/badge";
 import { Breadcrumbs } from "../components/ui/breadcrumbs";
@@ -54,7 +56,7 @@ import { PartnerBalance } from "./advancePayments/PartnerBalance";
 import { PaymentProofPanel } from "./advancePayments/PaymentProofPanel";
 import { PayoutDetailsForm } from "./advancePayments/PayoutDetailsForm";
 import { startPayout, validatePayout, type PayoutDetails } from "./advancePayments/payout";
-import { DecisionSummary, DocumentLines, RequestSummary } from "./advancePayments/RequestDetails";
+import { DocumentLines, RequestSummary } from "./advancePayments/RequestDetails";
 import {
   PRIORITY_TONE,
   STATUS_LABEL,
@@ -67,7 +69,7 @@ import {
   type RequestFilterState,
 } from "./advancePayments/requestLabels";
 import { RequestFilters, RequestKpis, RequestTable } from "./advancePayments/RequestList";
-import { RequestHistory, RouteTimeline, SapPayment } from "./advancePayments/RequestProgress";
+import { SapPayment } from "./advancePayments/RequestProgress";
 import { payoutFileChanges, payoutToApi } from "./advancePayments/requestApi";
 import { useRequestDetail, useRequestList, useStoreRequest } from "./advancePayments/requestQueries";
 import { formatINR } from "./advancePayments/rules";
@@ -138,6 +140,15 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
   const flow = entry.api.flow;
   const deciding = can.approve || can.reject;
 
+  // Final is the stage where approving POSTS the outgoing payment to SAP, so
+  // the button says what it does. Everywhere before Final, approving only
+  // moves the request on and "Approve" is still the honest word.
+  const hasSapPayment =
+    Boolean(entry.api.voucher) || (entry.api.vouchers ?? []).some((v) => v.status === "FAILED");
+  const postsToSap = flow?.current_role === "FINAL";
+  const approveLabel = postsToSap ? "Post to SAP" : "Approve";
+  const approveDone = postsToSap ? "Posted to SAP." : "Approved.";
+
   /** Save the payout, then send the files it gained and drop the ones it lost. */
   const persistPayout = async (payout: PayoutDetails): Promise<ApiRequest> => {
     let api = await advancePaymentService.savePayout(entry.serverId, payoutToApi(payout), version, manualToken);
@@ -151,20 +162,35 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
     return api;
   };
 
-  const run = async (work: () => Promise<ApiRequest>, done: string) => {
+  const run = async (
+    work: () => Promise<ApiRequest>,
+    done: string,
+    // Run only after the work SUCCEEDS. Decisions pass `onBack` here so the
+    // desk does not sit on a request that is no longer theirs to act on.
+    after?: () => void,
+  ) => {
     setBusy(true);
     try {
       const api = await work();
       store(api);
       setRemarks("");
       setNotice({ tone: "ok", text: done });
+      showToast({ title: done, message: entry.requestNo, tone: "ok" });
+      after?.();
     } catch (err) {
       // The token ran out (or was never asked for): ask again, then retry.
-      if (advancePaymentProblems(err).includes("manual_password")) {
+      // No toast on that path - it is a prompt, not a failure, and saying
+      // "could not" while opening a password box reads as a dead end.
+      const needsPassword = advancePaymentProblems(err).includes("manual_password");
+      if (needsPassword) {
         setManualToken(null);
-        setAfterPassword(() => () => void run(work, done));
+        setAfterPassword(() => () => void run(work, done, after));
       }
-      setNotice({ tone: "bad", text: advancePaymentError(err) });
+      const message = advancePaymentError(err);
+      setNotice({ tone: "bad", text: message });
+      if (!needsPassword) {
+        showToast({ title: "Could not complete that", message, tone: "bad" });
+      }
     } finally {
       setBusy(false);
     }
@@ -231,16 +257,21 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
         </Notice>
       ) : null}
 
-      <Card className="p-4 md:p-5">
-        <CardHeader>
-          <CardTitle>Status</CardTitle>
-        </CardHeader>
-        <div className="space-y-4">
-          <DecisionSummary entry={entry} />
-          <RouteTimeline entry={entry} />
+      {/* The route timeline, the "waiting at ..." line and the history log are
+          deliberately NOT on this page: the approver acts on what is in front
+          of them, and the Request page still carries the full record.
+          What survives is the posted outgoing payment, which is a fact about
+          the money rather than about the workflow. `SapPayment` renders null
+          until something is posted, so the card is guarded to match and no
+          empty shell appears before then. */}
+      {hasSapPayment ? (
+        <Card className="p-4 md:p-5">
+          <CardHeader>
+            <CardTitle>SAP Payment</CardTitle>
+          </CardHeader>
           <SapPayment entry={entry} />
-        </div>
-      </Card>
+        </Card>
+      ) : null}
 
       <Card className="p-4 md:p-5">
         <CardHeader>
@@ -375,21 +406,15 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
                   Send Back to Payment
                 </Button>
               ) : null}
-              <Button variant="primary" onClick={() => decide("approve", "Approved.")} disabled={busy}>
+              <Button variant="primary" onClick={() => decide("approve", approveDone)} disabled={busy}>
                 <HiOutlineCheckCircle className="size-4" aria-hidden="true" />
-                {busy ? "Working…" : "Approve"}
+                {busy ? "Working…" : approveLabel}
               </Button>
             </div>
           </div>
         </Card>
       ) : null}
 
-      <Card className="p-4 md:p-5">
-        <CardHeader>
-          <CardTitle>History</CardTitle>
-        </CardHeader>
-        <RequestHistory entry={entry} />
-      </Card>
     </Page>
   );
 }

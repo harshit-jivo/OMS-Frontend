@@ -152,7 +152,9 @@ function onDesk(id: number, at: number, mine: string[], fields = {}) {
 }
 
 async function approve(user: User) {
-  await user.click(screen.getByRole("button", { name: "Approve" }));
+  // Final labels this button "Post to SAP", because that is what approving
+  // there does; every earlier stage still says "Approve".
+  await user.click(screen.getByRole("button", { name: /^(Approve|Post to SAP)$/ }));
 }
 
 describe("Payments Approval", () => {
@@ -193,20 +195,15 @@ describe("Payments Approval", () => {
     expect(requestRows()[0].textContent).toMatch(/AP-2026-0013/);
   });
 
-  it("shows the request's route, its details and its bills with their payment lines", async () => {
+  it("shows the request's details and its bills with their payment lines", async () => {
     const user = setup();
     await review(user, "AP-2026-0014");
 
     expect(screen.getByText(/Fill in the payment and bank details and save them/)).toBeTruthy();
-    const route = screen.getByRole("list", { name: "Approval route" });
-    expect(within(route).getAllByRole("listitem").map((li) => li.textContent)).toEqual([
-      expect.stringMatching(/^Sub-HOD Approval.*Approved/),
-      expect.stringMatching(/^HOD Approval.*Approved/),
-      expect.stringMatching(/^Director Approval.*Approved/),
-      expect.stringMatching(/^Payment Approval.*Waiting.*Tester/),
-      expect.stringMatching(/^Audit Approval.*To come/),
-      expect.stringMatching(/^Final Approval.*To come/),
-    ]);
+    // The approval route timeline is deliberately not on this page any more -
+    // the approver acts on what is in front of them. It is still on the
+    // Request page, which Advance_Payment_Request.test.tsx covers.
+    expect(screen.queryByRole("list", { name: "Approval route" })).toBeNull();
     expect(screen.getByText("ABC Technologies")).toBeTruthy();
     expect(screen.getByText("Procurement — Rajesh")).toBeTruthy();
     const bills = screen.getByRole("heading", { name: /Bills & Amounts/ }).closest("section")!;
@@ -470,7 +467,8 @@ describe("Payments Approval", () => {
     await user.type(field("Approver Remarks"), "PO not yet released");
     await user.click(screen.getByRole("button", { name: "Reject" }));
     expect(await screen.findByText("Rejected.")).toBeTruthy();
-    expect(screen.getAllByText("PO not yet released").length).toBeGreaterThan(0);
+    expect(advancePaymentService.act).toHaveBeenCalledWith(
+      12, "reject", "PO not yet released", expect.any(Number));
     expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
   });
 
@@ -503,10 +501,10 @@ describe("Payments Approval", () => {
     await review(user, "AP-2026-0016");
     expect(screen.getByText(/Approving posts the outgoing payment to SAP and completes the request/)).toBeTruthy();
     await approve(user);
-    expect(await screen.findByText("Approved.")).toBeTruthy();
+    expect(await screen.findByText("Posted to SAP.")).toBeTruthy();
     expect(screen.getByText("926466971")).toBeTruthy();
     expect(screen.getAllByText("Approved").length).toBeGreaterThan(0);
-    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Post to SAP" })).toBeNull();
   });
 
   it("shows SAP's refusal as it came, and stays at Final", async () => {
@@ -516,7 +514,7 @@ describe("Payments Approval", () => {
     server.refuseNext = { status: 502, message: "Not approved: SAP refused the payment: Balance due exceeded" };
     await approve(user);
     expect(await screen.findByText("Not approved: SAP refused the payment: Balance due exceeded")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Approve" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Post to SAP" })).toBeTruthy();
   });
 
   it("at Final, sends a request back to Payment", async () => {
@@ -537,7 +535,8 @@ describe("Payments Approval", () => {
 
     expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
     expect(field("From Bank Account (method 1)").closest("fieldset")?.disabled).toBe(true);
-    expect(screen.getAllByText("Approved as per imprest policy.").length).toBeGreaterThan(0);
+    // The remark itself lives in the history log, which this page no longer
+    // shows; the Request page still carries it.
     expect(screen.getByText("926466970")).toBeTruthy();
   });
 
