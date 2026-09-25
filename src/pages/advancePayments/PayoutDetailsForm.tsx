@@ -11,7 +11,8 @@
  * would forget.
  */
 import * as React from "react";
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   HiOutlineBanknotes,
   HiOutlineDocumentText,
@@ -24,16 +25,26 @@ import { Button } from "../../components/ui/button";
 import { Field, FormGrid, Input, Select } from "../../components/ui/form";
 import { cn } from "@/lib/utils";
 
-import { formatSize, type MockAttachment } from "./attachments";
+import {
+  advancePaymentError,
+  advancePaymentService,
+  type AdvancePaymentCompany,
+  type SapCashAccount,
+  type SapHouseBank,
+  type SapPartnerBankAccount,
+} from "../../services/advancePaymentService";
+
+import { attachFile, formatSize, type FileAttachment } from "./attachments";
 import { ACCEPTED_FILE_TYPES, MAX_FILE_SIZE_MB } from "./constants";
 import { FormSection, RupeeInput } from "./PaymentSections";
 import {
   NOTE_DENOMINATIONS,
   PAYOUT_METHODS,
-  UPI_REFERENCE_MAX,
-  accountsFor,
   cashBreakdownError,
   changeMethod,
+  defaultMethodFor,
+  methodAmountError,
+  methodsFor,
   newPayoutLine,
   noteRowsTotal,
   payoutTotal,
@@ -53,8 +64,8 @@ function FileList({
   disabled,
 }: {
   label: string;
-  files: MockAttachment[];
-  onChange: (files: MockAttachment[]) => void;
+  files: FileAttachment[];
+  onChange: (files: FileAttachment[]) => void;
   disabled?: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -63,10 +74,10 @@ function FileList({
   const add = (incoming: FileList | null) => {
     if (!incoming) return;
     const tooBig: string[] = [];
-    const accepted: MockAttachment[] = [];
+    const accepted: FileAttachment[] = [];
     Array.from(incoming).forEach((f) => {
       if (f.size > MAX_FILE_SIZE_MB * 1024 * 1024) tooBig.push(f.name);
-      else accepted.push({ id: `${f.name}-${f.size}-${Date.now()}-${Math.random()}`, name: f.name, size: f.size });
+      else accepted.push(attachFile(f));
     });
     if (accepted.length) onChange([...files, ...accepted]);
     setRejected(tooBig.length ? `Over ${MAX_FILE_SIZE_MB} MB, not added: ${tooBig.join(", ")}` : "");
@@ -228,6 +239,10 @@ function MethodCard({
   readOnly,
   onChange,
   onRemove,
+  banks,
+  banksNote,
+  cashAccounts,
+  cashNote,
 }: {
   line: PayoutLine;
   index: number;
@@ -235,12 +250,37 @@ function MethodCard({
   readOnly: boolean;
   onChange: (next: PayoutLine) => void;
   onRemove: () => void;
+  /** The company's SAP house banks — every one, postable or not. */
+  banks: SapHouseBank[];
+  /** Loading / failure / empty, for the From Bank Account hint. */
+  banksNote: string;
+  /** The company's SAP cash accounts. */
+  cashAccounts: SapCashAccount[];
+  cashNote: string;
 }) {
   const n = index + 1;
   const isCash = line.method === "CASH";
-  const accounts = accountsFor(line.method);
+  const accounts: ReadonlyArray<{ value: string; label: string }> = isCash
+    ? cashAccounts.map((acct) => ({
+        value: acct.acct_code,
+        label: `${acct.acct_name} — ${acct.acct_code}`,
+      }))
+    : banks.map((bank) => ({
+        value: bank.key,
+        // The G/L's own name, which carries the bank and account number the
+        // person paying recognises ("ICICI BANK-629305042322"), then the G/L.
+        label: `${bank.gl_name} — ${bank.gl_account}`,
+      }));
   const patch = (p: Partial<PayoutLine>) => onChange({ ...line, ...p });
   const amount = Number(line.amount) || 0;
+  // The methods this line's amount may use. The current one stays listed even
+  // when the amount has moved past it, so the select never goes blank; the
+  // error under it says why it no longer fits.
+  const allowed = methodsFor(amount);
+  const options = PAYOUT_METHODS.filter(
+    (m) => allowed.includes(m.value) || m.value === line.method,
+  );
+  const methodError = methodAmountError(line.method, amount);
 
   return (
     <div className="rounded-card border border-line bg-card">
@@ -276,14 +316,19 @@ function MethodCard({
 
       <div className="space-y-3 p-3">
         <FormGrid className="md:grid-cols-3">
-          <Field label={`Payment Method ${n}`} required>
+          <Field
+            label={`Payment Method ${n}`}
+            required
+            error={methodError ?? undefined}
+            hint="UPI below ₹1,00,000 · RTGS above ₹2,00,000 · IMPS below ₹5,00,000 · Cash up to ₹10,000."
+          >
             {(f) => (
               <Select
                 {...f}
                 value={line.method}
                 onChange={(e) => onChange(changeMethod(line, e.target.value as PayoutMethod))}
               >
-                {PAYOUT_METHODS.map((m) => (
+                {options.map((m) => (
                   <option key={m.value} value={m.value}>
                     {m.label}
                   </option>
@@ -309,7 +354,11 @@ function MethodCard({
           <Field
             label={`${isCash ? "From Cash Account" : "From Bank Account"} (method ${n})`}
             required
-            hint="Sample accounts — the live list comes from /payments/banks/."
+            hint={
+              isCash
+                ? cashNote
+                : banksNote
+            }
           >
             {(f) => (
               <Select
@@ -329,25 +378,6 @@ function MethodCard({
             )}
           </Field>
         </FormGrid>
-
-        {line.method === "UPI" ? (
-          <FormGrid className="md:grid-cols-3">
-            <Field
-              label={`UPI Reference / UTR (method ${n})`}
-              hint="Optional — add it once the transfer is made."
-            >
-              {(f) => (
-                <Input
-                  {...f}
-                  placeholder="Enter UPI Transaction ID"
-                  maxLength={UPI_REFERENCE_MAX}
-                  value={line.reference}
-                  onChange={(e) => patch({ reference: e.target.value.toUpperCase() })}
-                />
-              )}
-            </Field>
-          </FormGrid>
-        ) : null}
 
         {line.method === "CHEQUE" ? (
           <FormGrid className="md:grid-cols-3">
@@ -396,10 +426,18 @@ function MethodCard({
           />
         ) : null}
 
-        {/* Every method but cash has a document behind it. */}
+        {/* Proof, for every method but cash — OPTIONAL. Nothing in
+            `validatePayout` asks for it, and the label says so, so an
+            approver is not left wondering whether it blocks the approval. */}
         {!isCash ? (
           <FileList
-            label={line.method === "CHEQUE" ? "Cheque Image" : "Payment Screenshot"}
+            label={`${
+              line.method === "CHEQUE"
+                ? "Cheque Image"
+                : line.method === "UPI"
+                  ? "Payment Screenshot"
+                  : "Payment Advice / Screenshot"
+            } (optional)`}
             files={line.attachments}
             onChange={(attachments) => patch({ attachments })}
             disabled={readOnly}
@@ -410,6 +448,179 @@ function MethodCard({
   );
 }
 
+/* ── The payee's account, from SAP ───────────────────────────────────────── */
+
+/** Pseudo-value of the To Account picker for "type it in myself". */
+const MANUAL = "__manual__";
+
+/**
+ * To Account Number and IFSC.
+ *
+ * When SAP holds accounts for the payee, the number is PICKED from them. The
+ * default is pre-filled, and the IFSC comes with the account, read-only,
+ * because an IFSC typed against an account SAP already knows is the one way
+ * to send money to the right account at the wrong branch. "Enter another
+ * account" opens both fields for typing, for a payee whose details SAP does
+ * not have or has out of date.
+ *
+ * An Employee is a G/L account, not a business partner, so there is nothing in
+ * SAP to pick from and the fields are typed, as before.
+ *
+ * TYPING IS LOCKED behind `manualEntry` when the page passes it: the typed
+ * fields stay read-only until the user has confirmed their password, and
+ * "Enter another account" asks for it first.
+ */
+function PayToAccount({
+  value,
+  onChange,
+  accounts,
+  loading,
+  error,
+  lookedUp,
+  manualEntry,
+}: {
+  value: PayoutDetails;
+  onChange: (next: PayoutDetails) => void;
+  accounts: SapPartnerBankAccount[];
+  loading: boolean;
+  error: string;
+  /** False for an employee (no SAP partner to ask about). */
+  lookedUp: boolean;
+  manualEntry?: ManualEntry;
+}) {
+  const chosen = value.toAccountManual
+    ? undefined
+    : accounts.find((a) => a.account_number === value.toAccountNumber);
+  const typing = value.toAccountManual || accounts.length === 0;
+  const locked = Boolean(manualEntry && !manualEntry.unlocked);
+
+  const pick = (key: string) => {
+    if (key === MANUAL) {
+      const toManual = () => onChange({ ...value, toAccountManual: true, toAccountNumber: "", toIfsc: "" });
+      if (locked) manualEntry!.unlock(toManual);
+      else toManual();
+      return;
+    }
+    const account = accounts.find((a) => a.account_number === key);
+    if (!account) return;
+    onChange({
+      ...value,
+      toAccountManual: false,
+      toAccountNumber: account.account_number,
+      toIfsc: account.ifsc,
+      // SAP's account holder name IS the name "as per bank records".
+      beneficiaryName: account.account_name
+        ? account.account_name.toUpperCase()
+        : value.beneficiaryName,
+    });
+  };
+
+  const hint = !lookedUp
+    ? "Employee accounts are not held in SAP. Type the payee's details."
+    : loading
+      ? "Reading the payee's accounts from SAP…"
+      : error
+        ? error
+        : accounts.length === 0
+          ? "SAP has no bank account for this payee. Type the details."
+          : typing
+            ? "Typed by hand, not one of the payee's SAP accounts."
+            : chosen?.is_default
+              ? "The payee's default account in SAP."
+              : "One of the payee's accounts in SAP.";
+
+  return (
+    <>
+      <Field label="To Account Number" required hint={hint}>
+        {(f) =>
+          accounts.length > 0 ? (
+            <Select
+              {...f}
+              value={typing ? MANUAL : (chosen?.account_number ?? "")}
+              onChange={(e) => pick(e.target.value)}
+            >
+              <option value="" disabled hidden>
+                Select account
+              </option>
+              {accounts.map((a) => (
+                <option key={`${a.id ?? "dflt"}-${a.account_number}`} value={a.account_number}>
+                  {a.account_number}
+                  {a.bank_name ? ` · ${a.bank_name}` : ""}
+                  {a.is_default ? " (default)" : ""}
+                </option>
+              ))}
+              <option value={MANUAL}>Enter another account…</option>
+            </Select>
+          ) : (
+            <Input
+              {...f}
+              inputMode="numeric"
+              placeholder="Payee's account number"
+              value={value.toAccountNumber}
+              readOnly={locked}
+              onChange={(e) =>
+                onChange({ ...value, toAccountNumber: e.target.value.replace(/[^0-9]/g, "") })
+              }
+            />
+          )
+        }
+      </Field>
+
+      {typing && accounts.length > 0 ? (
+        <Field label="Account Number (typed)" required>
+          {(f) => (
+            <Input
+              {...f}
+              inputMode="numeric"
+              placeholder="Payee's account number"
+              value={value.toAccountNumber}
+              readOnly={locked}
+              onChange={(e) =>
+                onChange({ ...value, toAccountNumber: e.target.value.replace(/[^0-9]/g, "") })
+              }
+            />
+          )}
+        </Field>
+      ) : null}
+
+      <Field
+        label="IFSC"
+        required
+        hint={chosen && !chosen.ifsc_valid ? "SAP's IFSC for this account does not look valid." : undefined}
+      >
+        {(f) => (
+          <Input
+            {...f}
+            placeholder="e.g. HDFC0001234"
+            maxLength={11}
+            value={value.toIfsc}
+            // From SAP with the account: not retyped against a known account.
+            readOnly={!typing || locked}
+            className={!typing ? "bg-surface font-semibold" : undefined}
+            onChange={(e) => onChange({ ...value, toIfsc: e.target.value.toUpperCase() })}
+          />
+        )}
+      </Field>
+
+      {typing && locked ? (
+        <div className="flex items-center gap-2 md:col-span-3">
+          <Button variant="secondary" size="xs" onClick={() => manualEntry!.unlock(() => {})}>
+            Enter bank details by hand
+          </Button>
+          <span className="text-[11.5px] text-subtle">Asks for your password first.</span>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+/** How the page lets the payee's account be typed: after a password check. */
+export interface ManualEntry {
+  unlocked: boolean;
+  /** Ask for the password; `then` runs once it is confirmed. */
+  unlock: (then: () => void) => void;
+}
+
 /* ── The whole box ───────────────────────────────────────────────────────── */
 
 export function PayoutDetailsForm({
@@ -417,13 +628,93 @@ export function PayoutDetailsForm({
   onChange,
   requestAmount,
   readOnly = false,
+  company,
+  payeeCardCode = "",
+  manualEntry,
 }: {
   value: PayoutDetails;
   onChange: (next: PayoutDetails) => void;
   /** What the request asks to pay — the methods must add up to it. */
   requestAmount: number;
   readOnly?: boolean;
+  /**
+   * The request's company. It picks the house banks the money may leave from:
+   * an OIL request leaves from an OIL account and nothing else.
+   */
+  company: AdvancePaymentCompany | "";
+  /**
+   * The payee's SAP card code (a vendor or an imprest account). Empty for an
+   * Employee, who is a G/L account with no bank details in SAP.
+   */
+  payeeCardCode?: string;
+  /** Lock typing the payee's account behind a password (the Payment stage). */
+  manualEntry?: ManualEntry;
 }) {
+  const banksQuery = useQuery({
+    queryKey: ["advance-payments", "house-banks", company],
+    queryFn: () => advancePaymentService.houseBanks(company as AdvancePaymentCompany),
+    enabled: company !== "",
+    staleTime: 5 * 60_000,
+    retry: 1,
+  });
+  const cashQuery = useQuery({
+    queryKey: ["advance-payments", "cash-accounts", company],
+    queryFn: () => advancePaymentService.cashAccounts(company as AdvancePaymentCompany),
+    enabled: company !== "",
+    staleTime: 5 * 60_000,
+    retry: 1,
+  });
+  const cashAccounts = cashQuery.data ?? [];
+  const cashNote = !company
+    ? "Choose a company first."
+    : cashQuery.isFetching && !cashQuery.data
+      ? `Reading ${company}'s cash accounts from SAP…`
+      : cashQuery.isError
+        ? advancePaymentError(cashQuery.error)
+        : cashAccounts.length === 0
+          ? `SAP has no cash account for ${company}.`
+          : `${company}'s cash accounts in SAP.`;
+  const banks = banksQuery.data ?? [];
+  const banksNote = !company
+    ? "Choose a company first."
+    : banksQuery.isFetching && !banksQuery.data
+      ? `Reading ${company}'s bank accounts from SAP…`
+      : banksQuery.isError
+        ? advancePaymentError(banksQuery.error)
+        : banks.length === 0
+          ? `SAP has no house bank for ${company}.`
+          : `${company}'s bank accounts in SAP.`;
+
+  const payeeQuery = useQuery({
+    queryKey: ["advance-payments", "partner-bank-accounts", company, payeeCardCode],
+    queryFn: () =>
+      advancePaymentService.partnerBankAccounts(company as AdvancePaymentCompany, payeeCardCode),
+    enabled: company !== "" && payeeCardCode !== "",
+    staleTime: 5 * 60_000,
+    retry: 1,
+  });
+  const payeeAccounts: SapPartnerBankAccount[] = payeeQuery.data ?? [];
+
+  // Pre-fill the payee's DEFAULT account once it arrives — but only into an
+  // empty payout that the approver has not already typed into or deliberately
+  // cleared, and never on a request that has been decided.
+  const payeeDefault = payeeAccounts.find((a) => a.is_default) ?? payeeAccounts[0];
+  useEffect(() => {
+    if (readOnly || !payeeDefault) return;
+    if (value.toAccountNumber || value.toAccountManual) return;
+    onChange({
+      ...value,
+      toAccountNumber: payeeDefault.account_number,
+      toIfsc: payeeDefault.ifsc,
+      beneficiaryName: payeeDefault.account_name
+        ? payeeDefault.account_name.toUpperCase()
+        : value.beneficiaryName,
+    });
+    // Keyed on the default itself: `value` and `onChange` change on every
+    // keystroke, and re-running on those is exactly what must not happen.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [payeeDefault?.account_number, readOnly]);
+
   const allocated = payoutTotal(value);
   const balanced = Math.round(allocated * 100) === Math.round(requestAmount * 100);
   const setLine = (id: string, next: PayoutLine) =>
@@ -446,30 +737,15 @@ export function PayoutDetailsForm({
               />
             )}
           </Field>
-          <Field label="To Account Number" required hint="Not needed when paying in cash only.">
-            {(f) => (
-              <Input
-                {...f}
-                inputMode="numeric"
-                placeholder="Payee's account number"
-                value={value.toAccountNumber}
-                onChange={(e) =>
-                  onChange({ ...value, toAccountNumber: e.target.value.replace(/[^0-9]/g, "") })
-                }
-              />
-            )}
-          </Field>
-          <Field label="IFSC" required>
-            {(f) => (
-              <Input
-                {...f}
-                placeholder="e.g. HDFC0001234"
-                maxLength={11}
-                value={value.toIfsc}
-                onChange={(e) => onChange({ ...value, toIfsc: e.target.value.toUpperCase() })}
-              />
-            )}
-          </Field>
+          <PayToAccount
+            value={value}
+            onChange={onChange}
+            accounts={payeeAccounts}
+            loading={payeeQuery.isFetching && !payeeQuery.data}
+            error={payeeQuery.isError ? advancePaymentError(payeeQuery.error) : ""}
+            lookedUp={payeeCardCode !== ""}
+            manualEntry={readOnly ? undefined : manualEntry}
+          />
         </FormGrid>
 
         <FileList
@@ -494,6 +770,10 @@ export function PayoutDetailsForm({
               canRemove={value.lines.length > 1}
               onChange={(next) => setLine(line.id, next)}
               onRemove={() => onChange({ ...value, lines: value.lines.filter((l) => l.id !== line.id) })}
+              banks={banks}
+              banksNote={banksNote}
+              cashAccounts={cashAccounts}
+              cashNote={cashNote}
             />
           ))}
         </div>
@@ -503,7 +783,16 @@ export function PayoutDetailsForm({
             <Button
               variant="secondary"
               size="sm"
-              onClick={() => onChange({ ...value, lines: [...value.lines, newPayoutLine("UPI")] })}
+              // A new line starts on the method the UNALLOCATED amount may use.
+              onClick={() =>
+                onChange({
+                  ...value,
+                  lines: [
+                    ...value.lines,
+                    newPayoutLine(defaultMethodFor(Math.max(requestAmount - allocated, 0))),
+                  ],
+                })
+              }
             >
               <HiOutlinePlus className="size-4" aria-hidden="true" />
               Add Payment Method

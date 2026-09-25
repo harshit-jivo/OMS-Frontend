@@ -14,13 +14,15 @@
  * ─────────────────────────────────────────────────────────────────────────
  * Read from SAP (via `services/advancePaymentService`), per company:
  *   * the vendor list — searched on the server, it runs to thousands;
- *   * Vendor → Against Bill's open A/P invoices for the chosen vendor;
- *   * Employee Advance's employees — their advance GL accounts.
- * Still sample data, by decision: Against PO, "All", and Employee Imprest's
- * employees. `rules.ts` (`partnerSourceFor`, `REFERENCE_KINDS[].live`) decides
+ *   * Vendor → Against Bill: the chosen vendor's open A/P invoices;
+ *   * Vendor → Against PO: their open POs, with what is still to receive;
+ *   * Vendor → All: every other open document (receipts, returns, credit
+ *     memos, payments on account, journals);
+ *   * Employee's employees — their advance GL accounts. `rules.ts` (`partnerSourceFor`, `REFERENCE_KINDS[].live`) decides
  * which is which; this file only fetches what it is told is live.
  *
- * Nothing is SUBMITTED anywhere: `onSubmit` hands a validated form to the page.
+ * The form saves nothing itself: `onSubmit` hands a validated form to the page,
+ * which sends it to the server and says how that went.
  */
 import * as React from "react";
 import { useEffect, useRef, useState } from "react";
@@ -56,6 +58,7 @@ import {
   type PartnerType,
   type PaymentAgainst,
   type Priority,
+  isNotInSap,
 } from "./constants";
 import {
   FormSection,
@@ -73,7 +76,9 @@ import {
   changeAllocation,
   documentsFor,
   plainAmountError,
+  pastDateError,
   resolveCase,
+  todayIso,
   validate,
   type Allocation,
   type RequestForm,
@@ -81,10 +86,14 @@ import {
 import {
   employeeToPartner,
   invoiceToDocument,
+  notInSapEmployeeToPartner,
+  ownerLabel,
+  otherToDocument,
+  purchaseOrderToDocument,
   vendorToPartner,
   withCodePrefix,
 } from "./sapMapping";
-import { formatSize, type MockAttachment } from "./attachments";
+import { attachFile, formatSize, type FileAttachment } from "./attachments";
 
 
 /** `value`, once it has stopped changing for `ms` — for search-as-you-type. */
@@ -190,13 +199,19 @@ function PrioritySelector({
 export interface AdvancePaymentFormProps {
   /** Start from an existing entry — the approver's edit. Blank by default. */
   initial?: RequestForm;
-  initialFiles?: MockAttachment[];
+  initialFiles?: FileAttachment[];
   submitLabel?: string;
   /**
-   * Called with a form that has PASSED validation. Return a sentence to show
-   * as a success notice, or nothing (the approval page closes the editor).
+   * Called with a form that has PASSED validation, to save it. Resolve with a
+   * sentence to show as a success notice, or nothing (the page moves on);
+   * throw with the server's message, and it is shown above the buttons.
    */
-  onSubmit: (form: RequestForm, files: MockAttachment[]) => string | void;
+  onSubmit: (form: RequestForm, files: FileAttachment[]) => Promise<string | void> | string | void;
+  /** A second way to save — "Save & Resubmit" on a returned request. */
+  secondarySubmit?: {
+    label: string;
+    onSubmit: (form: RequestForm, files: FileAttachment[]) => Promise<string | void> | string | void;
+  };
   /** Without it, Cancel clears the form back to `initial`. */
   onCancel?: () => void;
   /** Shown above the fields — the request page's "Preview" note. */
@@ -208,14 +223,16 @@ export function AdvancePaymentForm({
   initialFiles = [],
   submitLabel = "Submit Request",
   onSubmit,
+  secondarySubmit,
   onCancel,
   intro,
 }: AdvancePaymentFormProps) {
   const [form, setForm] = useState<RequestForm>(initial);
-  const [files, setFiles] = useState<MockAttachment[]>(initialFiles);
+  const [files, setFiles] = useState<FileAttachment[]>(initialFiles);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [saving, setSaving] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const priorityLabelId = React.useId();
 
@@ -223,6 +240,10 @@ export function AdvancePaymentForm({
   // and deriving it is what keeps it from ever disagreeing with `form`.
   const c = resolveCase(form);
   const kind = c.reference ? REFERENCE_KINDS[c.reference] : null;
+  // The earliest day the forward-looking dates accept: Expected Bill Date (PO),
+  // Expected Bill Date (Imprest), EMI Start Date and Return Date. Per render
+  // rather than once, so a form left open past midnight moves with the day.
+  const today = todayIso();
   const company = (form.company || null) as AdvancePaymentCompany | null;
 
   /**
@@ -251,7 +272,16 @@ export function AdvancePaymentForm({
     queryKey: ["advance-payments", "partners", c.partnerSource, company, search],
     queryFn: async (): Promise<Partner[]> => {
       if (c.partnerSource === "SAP_EMPLOYEES") {
-        return (await advancePaymentService.employees(company!, search)).map(employeeToPartner);
+        // SAP's advance accounts, then the employee master's people who have
+        // none, marked "Not in SAP". The second list failing must not take
+        // the SAP list with it.
+        const [inSap, notInSap] = await Promise.all([
+          advancePaymentService.employees(company!, search),
+          advancePaymentService
+            .employeeDirectory({ notInSapFor: company!, search })
+            .catch(() => []),
+        ]);
+        return [...inSap.map(employeeToPartner), ...notInSap.map(notInSapEmployeeToPartner)];
       }
       // Vendors (VENDA) and imprest accounts (ORGV) share SAP's supplier
       // list. With nothing typed, SEARCH FOR THE PREFIX — the server returns
@@ -283,14 +313,72 @@ export function AdvancePaymentForm({
         ]
       : partnerOptions;
 
-  /* ── Live documents (SAP open A/P invoices) ───────────────────────────── */
+  /* ── Departments: OMS's own list, what the approval route is chosen by ── */
 
+  const departmentsQuery = useQuery({
+    queryKey: ["advance-payments", "departments"],
+    queryFn: () => advancePaymentService.departments(),
+    staleTime: 10 * 60_000,
+    retry: 1,
+  });
+  const departments = departmentsQuery.data ?? [];
+  const chosenDepartment = departments.find((d) => String(d.id) === form.department);
+  const departmentOptions = departments.map((d) => ({ value: String(d.id), label: d.name }));
+  // A request saved with a department no longer in the list keeps showing it.
+  if (form.department && !chosenDepartment) {
+    departmentOptions.unshift({ value: form.department, label: form.departmentName || form.department });
+  }
+  const subDepartmentOptions = (chosenDepartment?.sub_departments ?? []).map((sd) => ({
+    value: String(sd.id),
+    label: sd.name,
+  }));
+  if (form.subDepartment && !subDepartmentOptions.some((o) => o.value === form.subDepartment)) {
+    subDepartmentOptions.unshift({
+      value: form.subDepartment,
+      label: form.subDepartmentName || form.subDepartment,
+    });
+  }
+
+  /* ── Owners: the employee master's HODs and Sub-HODs ─────────────────── */
+
+  const ownersQuery = useQuery({
+    queryKey: ["advance-payments", "owners"],
+    queryFn: () => advancePaymentService.employeeDirectory({ roles: [1, 2] }),
+    staleTime: 5 * 60_000,
+    retry: 1,
+  });
+  const ownerOptions = (ownersQuery.data ?? []).map((employee) => ({
+    value: ownerLabel(employee),
+    label: ownerLabel(employee),
+    hint: employee.role_label,
+  }));
+  // A request saved before owners were picked from the list keeps its owner.
+  if (form.ownership && !ownerOptions.some((o) => o.value === form.ownership)) {
+    ownerOptions.unshift({ value: form.ownership, label: form.ownership, hint: "" });
+  }
+
+  /* ── Live documents: the vendor's bills, POs, or everything else ─────── */
+
+  // One query, keyed on the KIND as well as the vendor, so switching Payment
+  // Against between Bill, PO and All never shows one list under another's
+  // heading while the next one loads.
   const documentsQuery = useQuery({
-    queryKey: ["advance-payments", "open-invoices", company, form.partner],
-    queryFn: async (): Promise<OpenDocument[]> =>
-      (await advancePaymentService.openVendorInvoices(company!, form.partner)).map(
-        invoiceToDocument,
-      ),
+    queryKey: ["advance-payments", "documents", c.reference, company, form.partner],
+    queryFn: async (): Promise<OpenDocument[]> => {
+      if (c.reference === "VENDOR_PO") {
+        return (await advancePaymentService.openVendorPurchaseOrders(company!, form.partner)).map(
+          (po) => purchaseOrderToDocument(po, company!),
+        );
+      }
+      if (c.reference === "VENDOR_OTHER") {
+        return (await advancePaymentService.openOtherDocuments(company!, form.partner)).map(
+          (doc) => otherToDocument(doc, form.partner),
+        );
+      }
+      return (await advancePaymentService.openVendorInvoices(company!, form.partner)).map(
+        (invoice) => invoiceToDocument(invoice, company!),
+      );
+    },
     enabled: c.liveDocuments && company !== null && form.partner !== "",
     staleTime: 60_000,
     retry: 1,
@@ -316,7 +404,7 @@ export function AdvancePaymentForm({
 
   const addFiles = (incoming: FileList | null) => {
     if (!incoming || incoming.length === 0) return;
-    const accepted: MockAttachment[] = [];
+    const accepted: FileAttachment[] = [];
     const rejected: string[] = [];
 
     Array.from(incoming).forEach((file) => {
@@ -324,11 +412,7 @@ export function AdvancePaymentForm({
         rejected.push(file.name);
         return;
       }
-      accepted.push({
-        id: `${file.name}-${file.size}-${Date.now()}-${Math.random()}`,
-        name: file.name,
-        size: file.size,
-      });
+      accepted.push(attachFile(file));
     });
 
     if (accepted.length > 0) setFiles((current) => [...current, ...accepted]);
@@ -352,8 +436,10 @@ export function AdvancePaymentForm({
     setSuccess("");
   };
 
-  const submit = () => {
-    const { missing, problems } = validate(form);
+  const submit = async (
+    save: (form: RequestForm, files: FileAttachment[]) => Promise<string | void> | string | void = onSubmit,
+  ) => {
+    const { missing, problems } = validate(form, today);
     const messages = [
       ...(missing.length > 0 ? [`Still needed: ${missing.join(", ")}.`] : []),
       ...problems,
@@ -366,7 +452,15 @@ export function AdvancePaymentForm({
     }
 
     setError("");
-    setSuccess(onSubmit(form, files) || "");
+    setSaving(true);
+    try {
+      setSuccess((await save(form, files)) || "");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setSuccess("");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const plainError = c.plainAmount ? plainAmountError(form.amount) : null;
@@ -390,6 +484,7 @@ export function AdvancePaymentForm({
   })();
   const partnerError =
     c.livePartners && partnersQuery.isError ? advancePaymentError(partnersQuery.error) : undefined;
+  const partnerNotInSap = form.partner !== "" && isNotInSap(form.partner);
   const documentsError =
     c.liveDocuments && documentsQuery.isError
       ? advancePaymentError(documentsQuery.error)
@@ -507,7 +602,7 @@ export function AdvancePaymentForm({
                 loading={c.livePartners && partnersQuery.isFetching}
                 options={shownPartners.map((partner) => ({
                   value: partner.value,
-                  label: partner.label,
+                  label: partner.notInSap ? `${partner.label} (Not in SAP)` : partner.label,
                   // For sample documents, the count says what the next
                   // dropdown will hold before the requester commits.
                   hint:
@@ -518,6 +613,18 @@ export function AdvancePaymentForm({
               />
             )}
           </Field>
+          {partnerNotInSap ? (
+            <Notice
+              tone="hold"
+              title="Not in SAP"
+              className="md:col-span-3"
+              data-slot="partner-not-in-sap"
+            >
+              {form.partnerName || "This employee"} has no employee advance account in SAP. Create
+              their employee master in SAP (an advance account under 1113000 EMPLOYEES ADVANCES)
+              before this advance can be paid.
+            </Notice>
+          ) : null}
 
           {/* A plain amount only where there is no document to take it
               from. Where there is one, the amount is worked out per
@@ -538,11 +645,12 @@ export function AdvancePaymentForm({
           {/* Vendor → Against PO only: when the payment is expected to be
               adjusted against the PO(s). */}
           {c.expectedDate ? (
-            <Field label="Expected Date" required>
+            <Field label="Expected Bill Date" required>
               {(f) => (
                 <Input
                   {...f}
                   type="date"
+                  min={today}
                   value={form.expectedDate}
                   onChange={(e) => change({ expectedDate: e.target.value })}
                 />
@@ -563,6 +671,7 @@ export function AdvancePaymentForm({
                 <Input
                   {...f}
                   type="date"
+                  min={today}
                   value={form.expectedBillDate}
                   onChange={(e) => change({ expectedBillDate: e.target.value })}
                 />
@@ -579,12 +688,15 @@ export function AdvancePaymentForm({
           returnMethod={form.returnMethod}
           returnMethodOther={form.returnMethodOther}
           installments={form.installments}
+          emiAmount={form.emiAmount}
           expectedFromDate={form.expectedFromDate}
           expectedToDate={form.expectedToDate}
+          today={today}
           onReturnMethodChange={(returnMethod, returnMethodOther) =>
             change({ returnMethod, returnMethodOther })
           }
           onInstallmentsChange={(installments) => change({ installments })}
+          onEmiAmountChange={(emiAmount) => change({ emiAmount })}
           onExpectedFromChange={(expectedFromDate) => change({ expectedFromDate })}
           onExpectedToChange={(expectedToDate) => change({ expectedToDate })}
         />
@@ -611,25 +723,100 @@ export function AdvancePaymentForm({
       {/* ── Additional Information ────────────────────────────────── */}
       <FormSection title="Additional Information">
         <FormGrid className="md:grid-cols-3">
-          {/* Free text: who owns this request. There is no master list of
-              owners to pick from, so a dropdown would only be a guess. */}
-          <Field label="Ownership" required>
+          {/* The department decides the approval route: the workflow queries
+              match on it. */}
+          <Field
+            label="Department"
+            required
+            error={departmentsQuery.isError ? advancePaymentError(departmentsQuery.error) : undefined}
+          >
             {(f) => (
-              <Input
-                {...f}
-                placeholder="Enter ownership"
-                maxLength={120}
-                value={form.ownership}
-                onChange={(e) => change({ ownership: e.target.value })}
+              <SearchSelect<string>
+                id={f.id}
+                value={form.department}
+                onChange={(next) => {
+                  const department = departments.find((d) => String(d.id) === next);
+                  // A new department starts its sub-department afresh.
+                  change({
+                    department: next,
+                    departmentName: department?.name ?? "",
+                    hasSubDepartments: Boolean(department?.sub_departments.length),
+                    subDepartment: "",
+                    subDepartmentName: "",
+                  });
+                }}
+                placeholder="Select department"
+                searchPlaceholder="Search department…"
+                emptyText="No department matches"
+                loading={departmentsQuery.isFetching}
+                options={departmentOptions}
               />
             )}
           </Field>
 
-          <Field label="Payment Date" required>
+          <Field
+            label="Sub-department"
+            required={form.hasSubDepartments}
+            hint={
+              form.department && !form.hasSubDepartments
+                ? "This department has no sub-departments."
+                : !form.department
+                  ? "Pick a department first."
+                  : undefined
+            }
+          >
+            {(f) => (
+              <SearchSelect<string>
+                id={f.id}
+                value={form.subDepartment}
+                onChange={(next) =>
+                  change({
+                    subDepartment: next,
+                    subDepartmentName: subDepartmentOptions.find((o) => o.value === next)?.label ?? "",
+                  })
+                }
+                disabled={!form.department || !form.hasSubDepartments}
+                placeholder="Select sub-department"
+                searchPlaceholder="Search sub-department…"
+                emptyText="No sub-department matches"
+                options={subDepartmentOptions}
+              />
+            )}
+          </Field>
+
+          {/* Who owns this request: a HOD or Sub-HOD from the employee master. */}
+          <Field
+            label="Ownership"
+            required
+            error={ownersQuery.isError ? advancePaymentError(ownersQuery.error) : undefined}
+            hint={ownersQuery.isError ? undefined : "HODs and Sub-HODs from the employee master."}
+          >
+            {(f) => (
+              <SearchSelect<string>
+                id={f.id}
+                value={form.ownership}
+                onChange={(next) => change({ ownership: next })}
+                placeholder="Select owner"
+                searchPlaceholder="Search name or code…"
+                emptyText="No HOD or Sub-HOD matches"
+                loading={ownersQuery.isFetching}
+                options={ownerOptions}
+              />
+            )}
+          </Field>
+
+          <Field
+            label="Payment Date"
+            required
+            error={pastDateError("Payment Date", form.paymentDate, today) ?? undefined}
+          >
             {(f) => (
               <Input
                 {...f}
                 type="date"
+                // No past dates: the picker offers none, and `validate` refuses
+                // a typed one.
+                min={today}
                 value={form.paymentDate}
                 onChange={(e) => change({ paymentDate: e.target.value })}
               />
@@ -754,11 +941,20 @@ export function AdvancePaymentForm({
       </FormSection>
 
       <FormActions>
-        <Button variant="secondary" onClick={cancel}>
+        <Button variant="secondary" onClick={cancel} disabled={saving}>
           Cancel
         </Button>
-        <Button variant="primary" onClick={submit}>
-          {submitLabel}
+        {secondarySubmit ? (
+          <Button
+            variant="secondary"
+            onClick={() => void submit(secondarySubmit.onSubmit)}
+            disabled={saving}
+          >
+            {secondarySubmit.label}
+          </Button>
+        ) : null}
+        <Button variant="primary" onClick={() => void submit()} disabled={saving}>
+          {saving ? "Saving…" : submitLabel}
         </Button>
       </FormActions>
     </div>

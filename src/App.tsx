@@ -99,6 +99,7 @@ const Ap_Invoice_Entry = lazy(() => import("./pages/Ap_Invoice_Entry"));
 const AdvancePaymentRequest = lazy(() => import("./pages/Advance_Payment_Request"));
 // The approval desk — UI only, on sample requests. See the page header.
 const AdvancePaymentApproval = lazy(() => import("./pages/Advance_Payment_Approval"));
+const AddEmployee = lazy(() => import("./pages/advancePayments/Add_Employee"));
 
 import { AuthProvider } from "./auth";
 
@@ -606,7 +607,7 @@ function App() {
           element={<Navigate to="/Payments_Dashboard" replace />}
         />
 
-        {/* Advance Payments — new request. Frontend preview only. */}
+        {/* Payments — raise requests, and the approval desk. */}
         <Route
           path="/Advance_Payment_Request"
           element={
@@ -621,6 +622,16 @@ function App() {
           element={
             <ProtectedPage>
               <AdvancePaymentApproval />
+            </ProtectedPage>
+          }
+        />
+
+        {/* Employee master (advance_payment.Employee). Administrators only. */}
+        <Route
+          path="/Add_Employee"
+          element={
+            <ProtectedPage>
+              <AddEmployee />
             </ProtectedPage>
           }
         />

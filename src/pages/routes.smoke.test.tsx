@@ -84,6 +84,7 @@ const PAGES: Array<SmokeEntry<any>> = [
   page("/Page_Permissions", () => import("./Page_Permissions")),
   page("/Role_Permissions", () => import("./Role_Permissions")),
   page("/UI_Labels", () => import("./UI_Labels")),
+  page("/Add_Employee", () => import("./advancePayments/Add_Employee")),
   page("/Party_Assignment", () => import("./Party_Assignment")),
   page("/Party_Product_Assignment", () => import("./Party_Product_Assignment")),
   page("/Order_Flow_Settings", () => import("./Order_Flow_Settings")),
