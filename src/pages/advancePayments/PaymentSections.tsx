@@ -9,6 +9,7 @@
 import * as React from "react";
 import { HiChevronRight, HiOutlineChevronDown, HiOutlineTrash } from "react-icons/hi2";
 
+import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { DetailField, DetailGrid } from "../../components/ui/detail";
 import { MultiSelect } from "../../components/ui/dropdown";
@@ -16,7 +17,6 @@ import { Field, FormGrid, Input } from "../../components/ui/form";
 import { SegmentedControl } from "../../components/ui/segmented";
 import { cn } from "@/lib/utils";
 
-import { AttachmentReadingStatus, AttachmentReadingTable } from "./AttachmentReading";
 import { ChoiceOrText } from "./ChoiceOrText";
 import { SapAttachmentLink } from "./SapAttachmentLink";
 
@@ -29,6 +29,8 @@ import {
 } from "./constants";
 import {
   calculateEmi,
+  dueFirst,
+  dueLabel,
   expectedPeriodError,
   formatDate,
   formatINR,
@@ -209,12 +211,23 @@ export function ReferenceDetails({
               emptyText={`No open ${noun} for this ${partnerLabel.toLowerCase()}`}
               // Names read better than "2 selected" while they still fit.
               namedUpTo={2}
-              options={documents.map((doc) => ({
-                value: doc.id,
-                label: doc.number,
-                hint: documentSubtitle(doc),
-                meta: `Open ${formatINR(doc.open)}`,
-              }))}
+              // Due ones first, and marked: they are what is most likely owed.
+              options={dueFirst(documents, (doc) => doc).map((doc) => {
+                const due = dueLabel(doc);
+                return {
+                  value: doc.id,
+                  label: doc.number,
+                  hint: documentSubtitle(doc),
+                  keywords: due,
+                  meta: due ? (
+                    <span className="font-semibold text-bad">
+                      {due} · Open {formatINR(doc.open)}
+                    </span>
+                  ) : (
+                    `Open ${formatINR(doc.open)}`
+                  ),
+                };
+              })}
             />
           )}
         </Field>
@@ -326,16 +339,20 @@ function SelectedDocuments({
       </div>
 
       <ul className="m-0 list-none p-0">
-        {rows.map(({ document: doc, allocation, calc }) => {
+        {dueFirst(rows, (row) => row.document).map(({ document: doc, allocation, calc }) => {
           const isOpen = expanded.has(doc.id);
           const detailId = `doc-detail-${doc.id}`;
+          const due = dueLabel(doc);
           return (
             <li
               key={doc.id}
+              data-due={due ? "true" : undefined}
               className={cn(
                 "grid grid-cols-[1fr_auto] items-center gap-x-6 gap-y-2.5 border-b border-line/60 px-3 py-3 last:border-b-0",
                 LINE_GRID,
                 isOpen && "bg-surface",
+                // A due document stands out: a red rule down its left edge.
+                due && "border-l-[3px] border-l-bad bg-bad-soft/40",
               )}
             >
               {/* The number opens the row's detail. */}
@@ -359,15 +376,11 @@ function SelectedDocuments({
                   )}
                 />
                 <span>
-                  <span className="block text-[13px] font-semibold text-brand">{doc.number}</span>
+                  <span className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-[13px] font-semibold text-brand">{doc.number}</span>
+                    {due ? <Badge tone="bad">{due}</Badge> : null}
+                  </span>
                   <span className="block text-[11px] text-subtle">{documentSubtitle(doc)}</span>
-                  {/* Starts reading the SAP attachment as soon as the
-                      document is chosen; the detail below shows the fields. */}
-                  {doc.attachment ? (
-                    <span className="mt-1 block">
-                      <AttachmentReadingStatus attachment={doc.attachment} />
-                    </span>
-                  ) : null}
                 </span>
               </button>
 
@@ -454,13 +467,6 @@ function SelectedDocuments({
                           )
                         }
                       />
-                      {doc.attachment ? (
-                        <DetailField
-                          label="Read from the attachment"
-                          span="full"
-                          value={<AttachmentReadingTable attachment={doc.attachment} />}
-                        />
-                      ) : null}
                     </DetailGrid>
                   </div>
                 </div>

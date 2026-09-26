@@ -6,6 +6,9 @@ import {
   REFERENCE_KINDS,
   balanceSide,
   addMonths,
+  dueFirst,
+  dueLabel,
+  dueState,
   allocationRows,
   allocationTotals,
   applyChange,
@@ -574,6 +577,7 @@ describe("validation", () => {
   const COMMON = {
     department: "35", departmentName: "Finance", subDepartment: "92", subDepartmentName: "AP",
     hasSubDepartments: true,
+    budget: "BackOff", budgetName: "Back Office", subBudget: "Accounts", subBudgetName: "Accounts",
     ownership: "Finance desk", paymentDate: "2026-10-01", remarks: "Part settlement",
   };
 
@@ -739,6 +743,7 @@ function emiAdvanceForValidation(): RequestForm {
     {
       department: "24", departmentName: "HR", subDepartment: "56", subDepartmentName: "HR Payroll",
       hasSubDepartments: true,
+      budget: "BackOff", budgetName: "Back Office", subBudget: "Accounts", subBudgetName: "Accounts",
       ownership: "HR", paymentDate: "2026-09-30", remarks: "Relocation advance",
     },
   );
@@ -955,3 +960,36 @@ describe("a vendor's balance, as SAP holds it (debit minus credit)", () => {
     expect(balanceSide("0.000000")).toEqual({ amount: 0, side: "", meaning: "Nothing outstanding" });
   });
 });
+
+describe("due documents", () => {
+  const doc = (id: string, dueDate?: string): OpenDocument => ({
+    id, number: id, date: "2026-08-01", partner: "V", original: 100, paid: 0, open: 100, dueDate,
+  });
+  const TODAY = "2026-09-23";
+
+  it("calls a document due on or after its due date", () => {
+    expect(dueState(doc("a", "2026-09-01"), TODAY)).toBe("OVERDUE");
+    expect(dueState(doc("b", TODAY), TODAY)).toBe("DUE_TODAY");
+    expect(dueState(doc("c", "2026-10-01"), TODAY)).toBeNull();
+    expect(dueState(doc("d"), TODAY)).toBeNull();
+    expect(dueLabel(doc("a", "2026-09-01"), TODAY)).toBe("Overdue since 01 Sept 2026");
+    expect(dueLabel(doc("b", TODAY), TODAY)).toBe("Due today");
+  });
+
+  it("puts due documents first, the longest overdue at the top, the rest in their order", () => {
+    const docs = [doc("later", "2026-10-01"), doc("today", TODAY), doc("none"), doc("old", "2026-08-15")];
+    expect(dueFirst(docs, (d) => d, TODAY).map((d) => d.id)).toEqual(["old", "today", "later", "none"]);
+  });
+
+  it("asks for the Payment Purpose", () => {
+    const missing = validate(EMPTY_FORM).missing;
+    expect(missing).toContain("Payment Purpose (Budget)");
+    expect(missing).toContain("Payment Purpose (Sub Budget)");
+  });
+
+  it("clears the Payment Purpose when the company changes: each company has its own budgets", () => {
+    const form = applyChange({ ...EMPTY_FORM, company: "OIL", budget: "BackOff", subBudget: "IT" }, { company: "MART" });
+    expect([form.budget, form.subBudget]).toEqual(["", ""]);
+  });
+});
+

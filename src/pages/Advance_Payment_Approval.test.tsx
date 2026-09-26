@@ -24,6 +24,8 @@ import {
   SAP_OTHER_DOCUMENTS,
   SAP_PAYEE_ACCOUNTS,
   SAP_VENDORS,
+  SAP_BUDGETS,
+  LEDGER,
 } from "./advancePayments/testData";
 
 // The sample requests' Payment Dates are 23-25 Sep 2026, and a past one is
@@ -74,6 +76,9 @@ vi.mock("../services/advancePaymentService", async (importOriginal) => {
       readPaymentProof: vi.fn(async () => PROOF_RESULT),
       employeeDirectory: vi.fn(directory),
       departments: vi.fn(async () => DEPARTMENTS),
+      budgets: vi.fn(async () => SAP_BUDGETS),
+      readDocumentAttachment: vi.fn(),
+      partnerLedger: vi.fn(async () => LEDGER),
       // The requests: pointed at a fresh FakeRequestServer before each test.
       requests: vi.fn(),
       request: vi.fn(),
@@ -114,6 +119,7 @@ let server: FakeRequestServer;
 
 beforeEach(() => {
   vi.mocked(advancePaymentService.vendors).mockClear();
+  vi.mocked(advancePaymentService.partnerLedger).mockClear();
   server = new FakeRequestServer();
   const service = vi.mocked(advancePaymentService) as unknown as Record<string, ReturnType<typeof vi.fn>>;
   Object.entries(server.methods()).forEach(([name, fn]) => service[name].mockReset().mockImplementation(fn));
@@ -204,8 +210,10 @@ describe("Payments Approval", () => {
     // the approver acts on what is in front of them. It is still on the
     // Request page, which Advance_Payment_Request.test.tsx covers.
     expect(screen.queryByRole("list", { name: "Approval route" })).toBeNull();
-    expect(screen.getByText("ABC Technologies")).toBeTruthy();
-    expect(screen.getByText("Procurement — Rajesh")).toBeTruthy();
+    const details = within(screen.getByRole("heading", { name: "Request Details" }).closest("section")!);
+    expect(details.getByText("ABC Technologies")).toBeTruthy();
+    expect(details.getByText("Procurement — Rajesh")).toBeTruthy();
+    expect(details.getByText("Back Office / Accounts")).toBeTruthy(); // the Payment Purpose
     const bills = screen.getByRole("heading", { name: /Bills & Amounts/ }).closest("section")!;
     expect(within(bills).getByText("10256")).toBeTruthy();
     expect(within(bills).getByText("₹97,500")).toBeTruthy();
@@ -237,6 +245,43 @@ describe("Payments Approval", () => {
     await review(user, "AP-2026-0011"); // ORGV000901, MART
     expect(await screen.findByText("Current Balance")).toBeTruthy();
     expect(advancePaymentService.vendors).toHaveBeenCalledWith("MART", "ORGV000901", 50);
+  });
+
+  it("at Payment, shows what each document's attachment was read to say, as saved", async () => {
+    const user = setup();
+    await review(user, "AP-2026-0014");
+    const table = screen.getByText("On the attachment").closest("table")!;
+    const row = (label: string) => within(table).getByText(label).closest("tr")!.textContent;
+    expect(row("Invoice No.")).toMatch(/ABC\/INV\/7781.*ABC\/INV\/7781/);
+    expect(row("Account No.")).toMatch(/50100234567812.*50100234567899/);
+    expect(within(table).getByLabelText("Differs from SAP")).toBeTruthy();
+    // Saved with the request: the file is not read again.
+    expect(advancePaymentService.readDocumentAttachment).not.toHaveBeenCalled();
+  });
+
+  it("lists due documents first, marked", async () => {
+    const user = setup();
+    await review(user, "AP-2026-0014");
+    const bills = screen.getByRole("heading", { name: /Bills & Amounts/ }).closest("section")!;
+    const due = within(bills).getAllByRole("row").filter((r) => r.getAttribute("data-due"));
+    expect(due.map((r) => r.textContent)).toEqual([expect.stringMatching(/^10256.*Overdue since 03 Sept 2026/)]);
+  });
+
+  it("at Payment, shows the vendor's open ledger from SAP", async () => {
+    const user = setup();
+    await review(user, "AP-2026-0014");
+    const ledger = await screen.findByRole("table", { name: "Open ledger items" });
+    expect(within(ledger).getByText("A/P Invoice 10256")).toBeTruthy();
+    expect(within(ledger).getByText("20 days overdue")).toBeTruthy();
+    expect(advancePaymentService.partnerLedger).toHaveBeenCalledWith("OIL", "VENDA000101");
+  });
+
+  it("shows neither the ledger nor the attachment readings before Payment", async () => {
+    const user = setup();
+    await review(user, "AP-2026-0012"); // at HOD
+    expect(screen.queryByRole("table", { name: "Open ledger items" })).toBeNull();
+    expect(screen.queryByText("On the attachment")).toBeNull();
+    expect(advancePaymentService.partnerLedger).not.toHaveBeenCalled();
   });
 
   it("starts the payment details with one line for the whole amount, to the partner", async () => {
