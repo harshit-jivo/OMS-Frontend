@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   HiOutlineArrowDownTray,
   HiOutlineArrowPath,
+  HiOutlineClipboardDocumentList,
   HiOutlineCheckCircle,
   HiOutlineExclamationTriangle,
   HiOutlineEye,
@@ -383,6 +384,64 @@ function MartApproval() {
       showToast({
         tone: "error",
         title: "Could not download the order",
+        message: messageFrom(e, "Please try again."),
+      });
+    }
+  };
+
+  // Mart orders are company 3 today, but the mapping is company-driven so
+  // oil/beverage light up automatically once those distributors exist.
+  const companyToBranch = (company: string | number | undefined): string => {
+    switch (String(company ?? "").trim()) {
+      case "1":
+        return "OIL";
+      case "2":
+        return "BEVERAGE";
+      case "3":
+        return "MART";
+      default:
+        return "MART"; // distributor default
+    }
+  };
+
+  // "Generate Report" — the SAP sales-order Crystal PDF for an approved order.
+  // Reuses the SAP status already loaded for the Approved tab (doc_entry /
+  // doc_num); an order with neither has not reached SAP, so there is no report.
+  const generateReport = async (o: MartOrderSummary) => {
+    const sap = sapFor(o.id);
+    const docEntry = sap?.doc_entry ?? undefined;
+    const docNum = sap?.doc_num ?? undefined;
+    if (docEntry == null && docNum == null) {
+      showToast({
+        tone: "error",
+        title: "Report not available",
+        message: "This order has not been created in SAP yet.",
+      });
+      return;
+    }
+    try {
+      const blob = await ordersService.getSalesOrderReport({
+        branch: companyToBranch(o.company),
+        docEntry,
+        docNum,
+        party: o.card_name,
+      });
+      const url = URL.createObjectURL(blob);
+      // Open in a new tab; if the popup is blocked, fall back to a download.
+      const opened = window.open(url, "_blank");
+      if (!opened) {
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `SO_${o.order_number}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (e) {
+      showToast({
+        tone: "error",
+        title: "Could not generate the report",
         message: messageFrom(e, "Please try again."),
       });
     }
@@ -864,6 +923,7 @@ function MartApproval() {
                     <TableHead>Delivery Date</TableHead>
                   )}
                   <TableHead>Actions</TableHead>
+                  {tab === "approved" ? <TableHead>Report</TableHead> : null}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -988,6 +1048,26 @@ function MartApproval() {
                         )}
                       </div>
                     </TableCell>
+                    {tab === "approved" ? (
+                      <TableCell>
+                        {/* Only a successfully-created order has a posted SAP
+                            sales order, so the report is offered only then. */}
+                        {isApprovedSuccess(o) ? (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => void generateReport(o)}
+                            title="Generate sales-order report (PDF)"
+                            aria-label={`Generate report for order ${o.order_number}`}
+                            className="whitespace-nowrap text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800"
+                          >
+                            <HiOutlineClipboardDocumentList aria-hidden="true" /> Generate Report
+                          </Button>
+                        ) : (
+                          <span className="text-subtle">-</span>
+                        )}
+                      </TableCell>
+                    ) : null}
                   </TableRow>
                 ))}
               </TableBody>
