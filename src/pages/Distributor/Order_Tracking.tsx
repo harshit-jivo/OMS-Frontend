@@ -633,7 +633,6 @@ export default function Distributor_Order_Tracking() {
                     <TableHead>Items</TableHead>
                     {!distributor ? <TableHead>FOC</TableHead> : null}
                     <TableHead>Created At</TableHead>
-                    <TableHead>Delivery Date</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Actions</TableHead>
                     <TableHead>Report</TableHead>
@@ -657,7 +656,6 @@ export default function Distributor_Order_Tracking() {
                         </TableCell>
                       ) : null}
                       <TableCell>{formatCreatedDateTime(order.created_at)}</TableCell>
-                      <TableCell>{order.delivery_date}</TableCell>
                       <TableCell>
                         <div className="flex flex-col items-start gap-1">
                           <Badge tone={toneForStatus(order.status_display)}>
@@ -953,7 +951,6 @@ export default function Distributor_Order_Tracking() {
                       ["Party state", orderDetails.party_state],
                       ["Delivery date", orderDetails.delivery_date],
                       ["PO number", orderDetails.po_number],
-                      ["Quotation no", orderDetails.sap_doc_number],
                       ["Warehouse", orderDetails.warehouse_code],
                       ["Dispatch from", orderDetails.dispatch_from_name],
                       ["Bill to", orderDetails.bill_to_address],

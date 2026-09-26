@@ -303,17 +303,33 @@ export default function Distributor_Edit_Order() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [order]);
 
-  // Default the address pick to the first when the loaded id isn't in the list.
+  // Resolve the address pick once the list loads: keep the current choice if it
+  // is valid, otherwise fall back to the address the order was SAVED with, and
+  // only then to the first in the list. A functional updater is used (rather
+  // than reading `billToId` from the closure) because this effect and the
+  // `[order]` init effect above run in the SAME commit — a stale `billToId`
+  // closure here would clobber the just-restored saved id with the first
+  // address, which is exactly the "shows the first address, not the one the
+  // distributor selected" bug on the Mart edit screen.
+  const resolveAddressId = (
+    list: PartyAddress[],
+    current: string,
+    savedId: number | null | undefined,
+  ) => {
+    if (!list.length) return current;
+    if (list.some((a) => String(a.id) === current)) return current;
+    const saved = savedId != null ? String(savedId) : "";
+    if (list.some((a) => String(a.id) === saved)) return saved;
+    return String(list[0].id);
+  };
   useEffect(() => {
-    if (billAddresses.length && !billAddresses.some((a) => String(a.id) === billToId)) {
-      setBillToId(String(billAddresses[0].id));
-    }
-  }, [billAddresses, billToId]);
+    setBillToId((cur) => resolveAddressId(billAddresses, cur, order?.bill_to_id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [billAddresses, order]);
   useEffect(() => {
-    if (shipAddresses.length && !shipAddresses.some((a) => String(a.id) === shipToId)) {
-      setShipToId(String(shipAddresses[0].id));
-    }
-  }, [shipAddresses, shipToId]);
+    setShipToId((cur) => resolveAddressId(shipAddresses, cur, order?.ship_to_id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shipAddresses, order]);
 
   const billTo = billAddresses.find((a) => String(a.id) === billToId) ?? null;
   const shipTo = shipAddresses.find((a) => String(a.id) === shipToId) ?? null;
