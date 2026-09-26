@@ -8,6 +8,7 @@
  * ₹1,00,000 paid, so ₹1,50,000 open — so the examples in the specs still hold.
  */
 import type {
+  SapBudget,
   SapCashAccount,
   SapEmployee,
   SapHouseBank,
@@ -264,3 +265,40 @@ export const BILL_10263: OpenDocument = {
   paid: 45000,
   open: 75000,
 };
+
+/** The company's Budget / Sub Budget cost centres, as `/budgets/` answers. */
+export const SAP_BUDGETS: SapBudget[] = [
+  { kind: "BUDGET", code: "BackOff", name: "Back Office" },
+  { kind: "BUDGET", code: "Factory", name: "Factory" },
+  { kind: "SUB_BUDGET", code: "Accounts", name: "Accounts" },
+  { kind: "SUB_BUDGET", code: "IT", name: "IT" },
+];
+
+/** ABC Technologies' open ledger, as `/open-documents/` answers. */
+export const LEDGER = {
+  summary: {
+    open_count: 2,
+    open_debit: "20000.000000",
+    open_credit: "234000.000000",
+    net_open: "214000.000000",
+    net_open_means: "positive = we owe this vendor",
+    overdue_count: 1,
+  },
+  results: [
+    {
+      trans_id: 9001, doc_type_code: 18, doc_type: "A/P Invoice", doc_entry: 10256, doc_num: "10256",
+      party_ref: "ABC/INV/7781", document_date: "2026-08-04", posting_date: "2026-08-04",
+      due_date: "2026-09-03", direction: "CREDIT" as const, total_amount: "250000.000000",
+      open_amount: "150000.000000", settled_amount: "100000.000000", currency: "", remarks: "",
+      days_overdue: 20,
+    },
+    {
+      trans_id: 9002, doc_type_code: 46, doc_type: "Outgoing Payment", doc_entry: 2201, doc_num: "926466001",
+      party_ref: "", document_date: "2026-08-10", posting_date: "2026-08-10",
+      due_date: "2026-08-10", direction: "DEBIT" as const, total_amount: "20000.000000",
+      open_amount: "20000.000000", settled_amount: "0.000000", currency: "", remarks: "On account",
+      days_overdue: null,
+    },
+  ],
+};
+

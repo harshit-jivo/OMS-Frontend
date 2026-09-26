@@ -17,6 +17,10 @@ const COMMON: Partial<RequestForm> = {
   subDepartment: "92",
   subDepartmentName: "AP",
   hasSubDepartments: true,
+  budget: "BackOff",
+  budgetName: "Back Office",
+  subBudget: "Accounts",
+  subBudgetName: "Accounts",
   ownership: "Preshit Singh (JWPL0030)",
   paymentDate: "2026-10-01",
   priority: "HIGH",
@@ -70,6 +74,8 @@ describe("the request, to the API and back", () => {
       owner_label: "Preshit Singh (JWPL0030)",
       payment_date: "2026-10-01",
       expected_date: null,
+      budget_code: "BackOff",
+      sub_budget_code: "Accounts",
     });
     expect(input.documents.map((d) => [d.sap_doc_entry, d.amount, d.mode])).toEqual([
       [10256, "97500", "FIXED"],
@@ -84,6 +90,14 @@ describe("the request, to the API and back", () => {
     expect(back.selected).toEqual(form.selected);
     expect(back.allocations).toEqual(form.allocations);
     expect({ ...back, selected: [], allocations: {} }).toEqual({ ...form, selected: [], allocations: {} });
+  });
+
+  it("sends each document's attachment reading, and reads it back", () => {
+    const reading = { error: "The OCR service could not be reached." };
+    const form = { ...vendorBills(), selected: vendorBills().selected.map((d, i) => (i === 0 ? { ...d, reading } : d)) };
+    const input = toApiRequest(form);
+    expect(input.documents.map((d) => d.attachment_check)).toEqual([reading, null]);
+    expect(formFromApi(stored(form)).selected[0].reading).toEqual(reading);
   });
 
   it("sends a PO line by its percentage, and reads the percentage back", () => {

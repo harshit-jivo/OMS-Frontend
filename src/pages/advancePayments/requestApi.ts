@@ -86,6 +86,7 @@ export function toApiRequest(form: RequestForm): ApiRequestInput {
         attachment_file: document.attachment?.fileName ?? "",
         attachment_count: document.attachment?.count ?? 0,
         attachment_date: document.attachment?.date || null,
+        attachment_check: document.reading ?? null,
       }))
     : [];
   const total = documents.reduce((sum, d) => sum + Math.round(Number(d.amount) * 100), 0) / 100;
@@ -113,6 +114,8 @@ export function toApiRequest(form: RequestForm): ApiRequestInput {
     priority: form.priority,
     remarks: form.remarks,
     owner_label: form.ownership,
+    budget_code: form.budget,
+    sub_budget_code: form.subBudget,
   };
 }
 
@@ -138,6 +141,7 @@ function documentFromApi(doc: ApiRequestDocument, partner: string, company: Adva
           date: doc.attachment_date ?? "",
         }
       : undefined,
+    reading: doc.attachment_check ?? undefined,
   };
 }
 
@@ -177,6 +181,10 @@ export function formFromApi(api: ApiRequest): RequestForm {
     subDepartment: api.sub_department ? String(api.sub_department.id) : "",
     subDepartmentName: api.sub_department?.name ?? "",
     hasSubDepartments: api.sub_department !== null,
+    budget: api.budget_code ?? "",
+    budgetName: api.budget_name ?? "",
+    subBudget: api.sub_budget_code ?? "",
+    subBudgetName: api.sub_budget_name ?? "",
     ownership: api.owner_label,
     paymentDate: api.payment_date ?? "",
     priority: api.priority,
