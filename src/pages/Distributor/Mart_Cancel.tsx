@@ -5,6 +5,7 @@ import {
   HiOutlineExclamationTriangle,
   HiOutlineEye,
   HiOutlineInbox,
+  HiOutlineInformationCircle,
   HiOutlineNoSymbol,
   HiOutlineQueueList,
   HiOutlineShoppingCart,
@@ -27,7 +28,10 @@ import {
   DialogBody,
   DialogContent,
   DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
+import { DetailField, DetailGrid } from "@/components/ui/detail";
 import {
   Card,
   EmptyState,
@@ -131,6 +135,9 @@ function MartCancel() {
   const [detailOrder, setDetailOrder] = useState<Order | null>(null);
   const [detailItems, setDetailItems] = useState<OrderItem[]>([]);
   const [detailBusy, setDetailBusy] = useState(false);
+  // The "i" order-information dialog on the detail view (same as the Mart
+  // Approval / View Orders detail).
+  const [infoOpen, setInfoOpen] = useState(false);
 
   // Cancel dialog.
   const [cancelTarget, setCancelTarget] = useState<CancelTarget | null>(null);
@@ -292,19 +299,29 @@ function MartCancel() {
             ) : null
           }
           actions={
-            isCancellable ? (
+            <>
               <Button
-                variant="danger"
-                onClick={() =>
-                  setCancelTarget({
-                    id: detailOrder.id,
-                    order_number: detailOrder.order_number,
-                  })
-                }
+                variant="ghost"
+                onClick={() => setInfoOpen(true)}
+                title="Order information"
+                className="border border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100 hover:text-sky-800"
               >
-                <HiOutlineNoSymbol aria-hidden="true" /> Cancel order
+                <HiOutlineInformationCircle aria-hidden="true" /> Info
               </Button>
-            ) : null
+              {isCancellable ? (
+                <Button
+                  variant="danger"
+                  onClick={() =>
+                    setCancelTarget({
+                      id: detailOrder.id,
+                      order_number: detailOrder.order_number,
+                    })
+                  }
+                >
+                  <HiOutlineNoSymbol aria-hidden="true" /> Cancel order
+                </Button>
+              ) : null}
+            </>
           }
         />
         {detailOrder.cancellation_reason ? (
@@ -315,6 +332,68 @@ function MartCancel() {
         <Card>
           <OrderItemCards items={detailItems} />
         </Card>
+
+        {/* The "i" order-information dialog — party, creator, addresses and any
+            cancellation reason, in one place (same as the Mart Approval /
+            View Orders detail). */}
+        <Dialog open={infoOpen} onOpenChange={setInfoOpen}>
+          <DialogContent title={`Order ${detailOrder.order_number} information`} size="md">
+            <DialogHeader>
+              <DialogTitle>Order information</DialogTitle>
+              {detailOrder.status_display ? (
+                <Badge tone={toneForStatus(detailOrder.status_display)}>
+                  {detailOrder.status_display}
+                </Badge>
+              ) : null}
+            </DialogHeader>
+            <DialogBody className="space-y-4">
+              <DetailGrid>
+                <DetailField
+                  label="Party name"
+                  value={`${detailOrder.card_name}${
+                    detailOrder.card_code ? ` (${detailOrder.card_code})` : ""
+                  }`}
+                  span="full"
+                />
+                <DetailField
+                  label="Punched by"
+                  value={detailOrder.created_by_name || String(detailOrder.created_by ?? "")}
+                />
+                <DetailField label="Current stage" value={detailOrder.status_display} />
+                <DetailField label="Party state" value={detailOrder.party_state} />
+                <DetailField label="Delivery date" value={detailOrder.delivery_date} />
+                <DetailField label="Warehouse" value={detailOrder.warehouse_code} />
+                <DetailField label="Dispatch from" value={detailOrder.dispatch_from_name} />
+                <DetailField label="PO number" value={detailOrder.po_number} />
+                <DetailField
+                  label="Bill to"
+                  value={detailOrder.bill_to_address}
+                  span="full"
+                  hideWhenEmpty
+                />
+                <DetailField
+                  label="Ship to"
+                  value={detailOrder.ship_to_address}
+                  span="full"
+                  hideWhenEmpty
+                />
+                <DetailField
+                  label="Comment"
+                  value={detailOrder.remarks?.trim() ? detailOrder.remarks : ""}
+                  span="full"
+                  hideWhenEmpty
+                />
+              </DetailGrid>
+
+              {detailOrder.cancellation_reason ? (
+                <Notice tone="bad" title="Cancellation reason">
+                  {detailOrder.cancellation_reason}
+                </Notice>
+              ) : null}
+            </DialogBody>
+          </DialogContent>
+        </Dialog>
+
         {cancelDialog}
       </Page>
     );
