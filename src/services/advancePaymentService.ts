@@ -174,6 +174,13 @@ export interface AttachmentReading {
   };
 }
 
+/**
+ * A document's attachment reading as saved with the request: what
+ * `/document-attachment/read/` answered when it was raised, or why it could
+ * not be read. Shown to the approvers from Payment on.
+ */
+export type AttachmentCheck = AttachmentReading | { error: string };
+
 /** The document kinds `/document-attachment/` reads. */
 export type SapAttachmentKind = "po" | "bill";
 
@@ -363,6 +370,7 @@ export interface ApiRequestDocument {
   attachment_file: string;
   attachment_count: number;
   attachment_date: string | null;
+  attachment_check?: AttachmentCheck | null;
 }
 
 export interface ApiRequestFile {
@@ -455,6 +463,26 @@ export interface RequestAbilities {
   record_utr: boolean;
 }
 
+/** A Payment Purpose choice: SAP's Budget (dimension 3) or Sub Budget (4) cost centre. */
+export interface SapBudget {
+  kind: "BUDGET" | "SUB_BUDGET";
+  code: string;
+  name: string;
+}
+
+/** A partner's open ledger (`/open-documents/`), with its totals. */
+export interface SapPartnerLedger {
+  summary: {
+    open_count: number;
+    open_debit: string;
+    open_credit: string;
+    net_open: string;
+    net_open_means: string;
+    overdue_count: number;
+  };
+  results: Array<SapLedgerDocument & { days_overdue: number | null }>;
+}
+
 export interface ApiRequestFields {
   company: AdvancePaymentCompany;
   request_type: "VENDOR" | "EMPLOYEE_ADVANCE" | "EMPLOYEE_IMPREST";
@@ -475,6 +503,9 @@ export interface ApiRequestFields {
   priority: "LOW" | "MEDIUM" | "HIGH";
   remarks: string;
   owner_label: string;
+  /** Payment Purpose: SAP's Budget and Sub Budget cost-centre codes. */
+  budget_code: string;
+  sub_budget_code: string;
 }
 
 /** What the form sends to raise or edit a request. */
@@ -492,6 +523,8 @@ export interface ApiRequest extends ApiRequestFields {
   partner_not_in_sap: boolean;
   currency: string;
   owner_employee_id: number | null;
+  budget_name: string;
+  sub_budget_name: string;
   status: ApiRequestStatus;
   created_by: ApiUser;
   created_on: string;
@@ -586,6 +619,20 @@ export const advancePaymentService = {
       params: { company, card_code: cardCode, limit: DOCUMENT_LIMIT },
     });
     return results<SapLedgerDocument>(res.data);
+  },
+
+  /** The company's Budget and Sub Budget cost centres, for Payment Purpose. */
+  async budgets(company: AdvancePaymentCompany): Promise<SapBudget[]> {
+    const res = await api.get(`${BASE}/budgets/`, { params: { company } });
+    return results<SapBudget>(res.data);
+  },
+
+  /** A partner's whole open ledger (JDT1, as SAP's ageing reads it), oldest due first. */
+  async partnerLedger(company: AdvancePaymentCompany, cardCode: string): Promise<SapPartnerLedger> {
+    const res = await api.get(`${BASE}/open-documents/`, {
+      params: { company, card_code: cardCode, limit: DOCUMENT_LIMIT },
+    });
+    return unwrap<SapPartnerLedger>(res.data);
   },
 
   /** Every house bank account of the company, postable or not. */

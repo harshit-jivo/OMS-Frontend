@@ -8,7 +8,12 @@
 import { HiOutlineCheckCircle, HiOutlineXCircle } from "react-icons/hi2";
 
 import { Badge } from "../../components/ui/badge";
-import { advancePaymentError, type AttachmentReading, type ReadField } from "../../services/advancePaymentService";
+import {
+  advancePaymentError,
+  type AttachmentCheck,
+  type AttachmentReading,
+  type ReadField,
+} from "../../services/advancePaymentService";
 
 import { useAttachmentReading, summarise } from "./readingQuery";
 import type { DocumentAttachment } from "./constants";
@@ -65,8 +70,27 @@ export function AttachmentReadingStatus({ attachment }: { attachment: DocumentAt
   );
 }
 
-export function AttachmentReadingTable({ attachment }: { attachment: DocumentAttachment }) {
-  const reading = useAttachmentReading(attachment);
+/**
+ * `stored` is the reading saved with the request when it was raised: shown
+ * as it is, without reading the file again. Without one (a request raised
+ * before readings were saved) the attachment is read now.
+ */
+export function AttachmentReadingTable({
+  attachment,
+  stored,
+}: {
+  attachment: DocumentAttachment;
+  stored?: AttachmentCheck | null;
+}) {
+  const reading = useAttachmentReading(attachment, !stored);
+  if (stored && "error" in stored) {
+    return (
+      <p role="alert" className="text-[12px] text-hold">
+        Could not read the attachment: {stored.error}
+      </p>
+    );
+  }
+  if (stored) return <ReadingFields data={stored} />;
   if (reading.isPending) {
     return (
       <p className="text-[12px] text-subtle">
@@ -81,7 +105,10 @@ export function AttachmentReadingTable({ attachment }: { attachment: DocumentAtt
       </p>
     );
   }
-  const data = reading.data;
+  return <ReadingFields data={reading.data} />;
+}
+
+function ReadingFields({ data }: { data: AttachmentReading }) {
   return (
     <div className="space-y-1.5" data-slot="attachment-reading">
       <p className="text-[11.5px] text-subtle">

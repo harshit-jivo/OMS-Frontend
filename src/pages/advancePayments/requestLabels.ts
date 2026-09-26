@@ -127,6 +127,15 @@ const BALANCE_ROLES = new Set(["PAYMENT", "AUDIT", "FINAL"]);
  */
 export function showsBalance(entry: AdvanceRequestEntry): boolean {
   const partner = entry.form.type === "VENDOR" || entry.form.type === "EMPLOYEE_IMPREST";
-  const reached = BALANCE_ROLES.has(entry.api.flow?.current_role ?? "") || entry.status === "APPROVED";
-  return partner && reached;
+  return partner && reachedPayment(entry);
+}
+
+/**
+ * At or past the Payment stage (or completed). What the approvers from
+ * Payment on weigh a payment against — the payee's balance and ledger, and
+ * what the documents' SAP attachments say — is shown from here, never to the
+ * requester or the approvals before Payment.
+ */
+export function reachedPayment(entry: AdvanceRequestEntry): boolean {
+  return BALANCE_ROLES.has(entry.api.flow?.current_role ?? "") || entry.status === "APPROVED";
 }
