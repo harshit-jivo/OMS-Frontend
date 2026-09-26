@@ -94,6 +94,7 @@ import {
   withCodePrefix,
 } from "./sapMapping";
 import { attachFile, formatSize, type FileAttachment } from "./attachments";
+import { useBackgroundReadings } from "./readingQuery";
 
 
 /** `value`, once it has stopped changing for `ms` — for search-as-you-type. */
@@ -339,6 +340,31 @@ export function AdvancePaymentForm({
     });
   }
 
+  /* ── Payment Purpose: the company's Budget and Sub Budget, from SAP ──── */
+
+  const budgetsQuery = useQuery({
+    queryKey: ["advance-payments", "budgets", company],
+    queryFn: () => advancePaymentService.budgets(company!),
+    enabled: company !== null,
+    staleTime: 10 * 60_000,
+    retry: 1,
+  });
+  const budgetOptions = (kind: "BUDGET" | "SUB_BUDGET", chosen: string, chosenName: string) => {
+    const options = (budgetsQuery.data ?? [])
+      .filter((b) => b.kind === kind)
+      .map((b) => ({ value: b.code, label: b.name, hint: b.code === b.name ? "" : b.code }));
+    // A request saved with a code SAP no longer lists keeps showing it.
+    if (chosen && !options.some((o) => o.value === chosen)) {
+      options.unshift({ value: chosen, label: chosenName || chosen, hint: "" });
+    }
+    return options;
+  };
+  const budgetHint = !company
+    ? "Choose the company first."
+    : budgetsQuery.isError
+      ? undefined
+      : "From SAP's cost centres.";
+
   /* ── Owners: the employee master's HODs and Sub-HODs ─────────────────── */
 
   const ownersQuery = useQuery({
@@ -400,6 +426,11 @@ export function AdvancePaymentForm({
   const rows = allocationRows(form);
   const totals = allocationTotals(rows);
 
+  // The chosen documents' SAP attachments are read in the background: the
+  // requester sees nothing of it and keeps filling the form, and only Submit
+  // waits, so each document is saved with what its attachment says.
+  const background = useBackgroundReadings(c.reference ? form.selected : []);
+
   /* ── Attachments (local only — nothing is uploaded) ────────────────────── */
 
   const addFiles = (incoming: FileList | null) => {
@@ -451,10 +482,18 @@ export function AdvancePaymentForm({
       return;
     }
 
+    if (background.pending) return;
     setError("");
     setSaving(true);
+    // Each document goes with its reading (or why it could not be read).
+    const withReadings: RequestForm = {
+      ...form,
+      selected: form.selected.map((doc) =>
+        background.readings.has(doc.id) ? { ...doc, reading: background.readings.get(doc.id) } : doc,
+      ),
+    };
     try {
-      setSuccess((await save(form, files)) || "");
+      setSuccess((await save(withReadings, files)) || "");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setSuccess("");
@@ -784,6 +823,61 @@ export function AdvancePaymentForm({
             )}
           </Field>
 
+          {/* What the money is for, in SAP's own terms: its Budget and Sub
+              Budget cost centres. */}
+          <Field
+            label="Payment Purpose (Budget)"
+            required
+            hint={budgetHint}
+            error={budgetsQuery.isError ? advancePaymentError(budgetsQuery.error) : undefined}
+          >
+            {(f) => (
+              <SearchSelect<string>
+                id={f.id}
+                value={form.budget}
+                onChange={(next) =>
+                  change({
+                    budget: next,
+                    budgetName: budgetOptions("BUDGET", "", "").find((o) => o.value === next)?.label ?? "",
+                  })
+                }
+                disabled={!company}
+                placeholder="Select budget"
+                searchPlaceholder="Search budget…"
+                emptyText="No budget matches"
+                loading={budgetsQuery.isFetching}
+                options={budgetOptions("BUDGET", form.budget, form.budgetName)}
+              />
+            )}
+          </Field>
+
+          <Field
+            label="Payment Purpose (Sub Budget)"
+            required
+            hint={budgetHint}
+            error={budgetsQuery.isError ? advancePaymentError(budgetsQuery.error) : undefined}
+          >
+            {(f) => (
+              <SearchSelect<string>
+                id={f.id}
+                value={form.subBudget}
+                onChange={(next) =>
+                  change({
+                    subBudget: next,
+                    subBudgetName:
+                      budgetOptions("SUB_BUDGET", "", "").find((o) => o.value === next)?.label ?? "",
+                  })
+                }
+                disabled={!company}
+                placeholder="Select sub budget"
+                searchPlaceholder="Search sub budget…"
+                emptyText="No sub budget matches"
+                loading={budgetsQuery.isFetching}
+                options={budgetOptions("SUB_BUDGET", form.subBudget, form.subBudgetName)}
+              />
+            )}
+          </Field>
+
           {/* Who owns this request: a HOD or Sub-HOD from the employee master. */}
           <Field
             label="Ownership"
@@ -941,6 +1035,11 @@ export function AdvancePaymentForm({
       </FormSection>
 
       <FormActions>
+        {background.pending ? (
+          <span role="status" className="mr-auto self-center text-[12px] text-subtle">
+            Checking the documents&apos; SAP attachments… you can keep filling the form.
+          </span>
+        ) : null}
         <Button variant="secondary" onClick={cancel} disabled={saving}>
           Cancel
         </Button>
@@ -948,13 +1047,13 @@ export function AdvancePaymentForm({
           <Button
             variant="secondary"
             onClick={() => void submit(secondarySubmit.onSubmit)}
-            disabled={saving}
+            disabled={saving || background.pending}
           >
             {secondarySubmit.label}
           </Button>
         ) : null}
-        <Button variant="primary" onClick={() => void submit()} disabled={saving}>
-          {saving ? "Saving…" : submitLabel}
+        <Button variant="primary" onClick={() => void submit()} disabled={saving || background.pending}>
+          {saving ? "Saving…" : background.pending ? "Checking attachments…" : submitLabel}
         </Button>
       </FormActions>
     </div>

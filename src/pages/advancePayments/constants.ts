@@ -21,6 +21,7 @@
  *
  * The rules that decide which of these a case uses live in `rules.ts`.
  */
+import type { AttachmentCheck } from "../../services/advancePaymentService";
 
 /** The three operating companies, as the rest of OMS names them. */
 export const COMPANIES = ["OIL", "MART", "BEVERAGES"] as const;
@@ -154,6 +155,11 @@ export interface OpenDocument {
    * chosen document onto the approval desk.
    */
   attachment?: DocumentAttachment;
+  /**
+   * What reading that attachment found, once it has been read: kept with the
+   * request so the approvers see it without the file being read again.
+   */
+  reading?: AttachmentCheck | null;
 }
 
 export interface DocumentAttachment {

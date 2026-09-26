@@ -53,6 +53,7 @@ import {
 import { requestAmount, type AdvanceRequestEntry } from "./advancePayments/approvalData";
 import { ManualAccountPassword } from "./advancePayments/ManualAccountPassword";
 import { PartnerBalance } from "./advancePayments/PartnerBalance";
+import { PartnerLedger } from "./advancePayments/PartnerLedger";
 import { PaymentProofPanel } from "./advancePayments/PaymentProofPanel";
 import { PayoutDetailsForm } from "./advancePayments/PayoutDetailsForm";
 import { startPayout, validatePayout, type PayoutDetails } from "./advancePayments/payout";
@@ -64,6 +65,7 @@ import {
   filterRequests,
   formatDateTime,
   priorityLabel,
+  reachedPayment,
   requestCounts,
   showsBalance,
   type RequestFilterState,
@@ -286,7 +288,10 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
         ) : null}
       </Card>
 
-      <DocumentLines entry={entry} />
+      <DocumentLines entry={entry} showReading={reachedPayment(entry)} />
+
+      {/* The payee's open ledger in SAP, from Payment on. */}
+      {showsBalance(entry) ? <PartnerLedger entry={entry} /> : null}
 
       {draft ? (
         <Card className="p-4 md:p-5">

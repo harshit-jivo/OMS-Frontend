@@ -22,6 +22,8 @@ import {
   SAP_OPEN_POS,
   SAP_OTHER_DOCUMENTS,
   SAP_VENDORS,
+  SAP_BUDGETS,
+  LEDGER,
 } from "./advancePayments/testData";
 
 // Forward-looking dates are refused before today, and the dates typed below
@@ -83,6 +85,8 @@ vi.mock("../services/advancePaymentService", async (importOriginal) => {
       partnerBankAccounts: vi.fn(async () => []),
       employeeDirectory: vi.fn(directory),
       departments: vi.fn(async () => DEPARTMENTS),
+      budgets: vi.fn(async () => SAP_BUDGETS),
+      partnerLedger: vi.fn(async () => LEDGER),
       readDocumentAttachment: vi.fn(),
       documentAttachment: vi.fn(async () => new Blob(["%PDF-"], { type: "application/pdf" })),
       // The requests: pointed at a fresh FakeRequestServer before each test.
@@ -492,7 +496,11 @@ describe("Advance Payment Request", () => {
       expect(screen.getByText("None in SAP")).toBeTruthy();
     });
 
-    it("reads a chosen bill's SAP attachment and checks it against SAP", async () => {
+    it("reads a chosen bill's SAP attachment in the background, and shows the requester nothing of it", async () => {
+      let finish: (value: typeof READING) => void = () => {};
+      service.readDocumentAttachment.mockImplementation(
+        () => new Promise((resolve) => (finish = resolve as typeof finish)),
+      );
       const user = await setup();
       await toAbcBills(user);
       await tick(user, /^Bills/, /10256/, /10271/);
@@ -500,30 +508,29 @@ describe("Advance Payment Request", () => {
       // Only the bill WITH an attachment is read, straight away, by document.
       expect(service.readDocumentAttachment).toHaveBeenCalledTimes(1);
       expect(service.readDocumentAttachment).toHaveBeenCalledWith("OIL", "bill", 10256);
-      expect(await screen.findByText("1 differs from SAP")).toBeTruthy();
+      // Submit waits for it; the rest of the form does not.
+      const submit = screen.getByRole("button", { name: "Checking attachments…" }) as HTMLButtonElement;
+      expect(submit.disabled).toBe(true);
+      expect(screen.getByText(/you can keep filling the form/)).toBeTruthy();
+      expect(field(/^Remarks/).disabled).toBe(false);
 
+      finish(READING);
+      expect(await screen.findByRole("button", { name: "Submit Request" })).toBeTruthy();
+      // What it found is for the approvers, not the requester.
       await user.click(screen.getByRole("button", { name: /^10256/ }));
-      const table = screen.getByText("On the attachment").closest("table")!;
-      const row = (label: string) => within(table).getByText(label).closest("tr")!.textContent;
-      expect(row("Invoice No.")).toMatch(/ABC\/INV\/7781.*ABC\/INV\/7781/);
-      expect(row("Amount")).toMatch(/₹2,50,000/);
-      expect(row("Party Name")).toMatch(/ABC Technologies Pvt Ltd/);
-      expect(row("Account No.")).toMatch(/50100234567812.*50100234567899/);
-      expect(within(table).getByLabelText("Differs from SAP")).toBeTruthy();
-      expect(within(table).getAllByLabelText("Matches SAP")).toHaveLength(4);
-      expect(screen.getByText(/read by OCR/)).toBeTruthy();
+      expect(screen.queryByText("On the attachment")).toBeNull();
+      expect(screen.queryByText(/differs from SAP/)).toBeNull();
     });
 
-    it("says so when the attachment cannot be read", async () => {
+    it("does not hold the request up when an attachment cannot be read", async () => {
       service.readDocumentAttachment.mockRejectedValue({
         response: { status: 503, data: { message: "The OCR service could not be reached." } },
       });
       const user = await setup();
       await toAbcBills(user);
       await tick(user, /^Bills/, /10256/);
-      expect(await screen.findByText("Attachment not read")).toBeTruthy();
-      await user.click(screen.getByRole("button", { name: /^10256/ }));
-      expect(screen.getByText(/Could not read the attachment: The OCR service could not be reached/)).toBeTruthy();
+      expect(await screen.findByRole("button", { name: "Submit Request" })).toBeTruthy();
+      expect(screen.queryByText(/Could not read the attachment/)).toBeNull();
     });
 
     it("deletes one row with the trash button and leaves the others as they were", async () => {
@@ -903,6 +910,8 @@ describe("Advance Payment Request", () => {
       await user.type(field(/^Payment amount for 10256/), "25000");
       await pick(user, /^Department/, /Finance/);
       await pick(user, /^Sub-department/, /^AP$/);
+      await pick(user, /^Payment Purpose \(Budget\)/, /Back Office/);
+      await pick(user, /^Payment Purpose \(Sub Budget\)/, /^Accounts/);
       await pick(user, /^Ownership/, /Arvinder/);
       await user.type(field(/^Payment Date/), "2026-10-01");
       await user.type(field(/^Remarks/), "Mobilisation advance");
@@ -925,7 +934,14 @@ describe("Advance Payment Request", () => {
         sub_department_id: 92,
         owner_label: "Arvinder (JWPL0115)",
         payment_date: "2026-10-01",
-        documents: [expect.objectContaining({ kind: "BILL", sap_doc_entry: 10256, amount: "25000", mode: "FIXED" })],
+        budget_code: "BackOff",
+        sub_budget_code: "Accounts",
+        // The bill goes with what its attachment was read to say.
+        documents: [
+          expect.objectContaining({
+            kind: "BILL", sap_doc_entry: 10256, amount: "25000", mode: "FIXED", attachment_check: READING,
+          }),
+        ],
       });
     });
 
@@ -941,6 +957,8 @@ describe("Advance Payment Request", () => {
       await pick(user, /^Employee/, /RAVINDER SINGH SHUNTY/);
       await user.type(field(/^Amount/), "5000");
       await pick(user, /^Department/, /Cyber Security/);
+      await pick(user, /^Payment Purpose \(Budget\)/, /Back Office/);
+      await pick(user, /^Payment Purpose \(Sub Budget\)/, /^Accounts/);
       await pick(user, /^Ownership/, /Arvinder/);
       await user.type(field(/^Payment Date/), "2026-10-01");
       await user.type(field(/^Remarks/), "Tools for the site");

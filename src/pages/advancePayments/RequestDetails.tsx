@@ -2,6 +2,7 @@
  * A request, read-only — shown to the approver on the desk and to the
  * requester from their Entries tab, so both see the same record the same way.
  */
+import * as React from "react";
 import { HiOutlineDocumentText } from "react-icons/hi2";
 
 import { DetailField, DetailGrid } from "../../components/ui/detail";
@@ -21,6 +22,8 @@ import {
   typeLabel,
   type AdvanceRequestEntry,
 } from "./approvalData";
+import { Badge } from "../../components/ui/badge";
+import { AttachmentReadingTable } from "./AttachmentReading";
 import { formatSize } from "./attachments";
 import { PAYMENT_MODES } from "./constants";
 import { SapAttachmentLink } from "./SapAttachmentLink";
@@ -29,6 +32,8 @@ import {
   REFERENCE_KINDS,
   allocationRows,
   allocationTotals,
+  dueFirst,
+  dueLabel,
   formatDate,
   formatINR,
   resolveCase,
@@ -102,6 +107,14 @@ export function RequestSummary({ entry }: { entry: AdvanceRequestEntry }) {
         ) : null}
         <DetailField label="Department" value={form.departmentName} />
         <DetailField label="Sub-department" value={form.subDepartmentName} />
+        <DetailField
+          label="Payment Purpose"
+          value={
+            form.budget
+              ? `${form.budgetName || form.budget} / ${form.subBudgetName || form.subBudget}`
+              : ""
+          }
+        />
         <DetailField label="Ownership" value={form.ownership} />
         <DetailField label="Payment Date" value={form.paymentDate ? formatDate(form.paymentDate) : ""} />
         <DetailField label="Priority" value={priorityLabel(entry)} />
@@ -134,7 +147,20 @@ export function RequestSummary({ entry }: { entry: AdvanceRequestEntry }) {
 }
 
 /** The documents and what each line pays — read-only. Nothing for a plain amount. */
-export function DocumentLines({ entry }: { entry: AdvanceRequestEntry }) {
+/**
+ * The request's bills or POs and what each is paid, due ones first.
+ *
+ * `showReading` adds, under each document, what reading its SAP attachment
+ * found and how that compares with SAP: for the Payment stage onwards only,
+ * never for the requester (the reading is an approver's check).
+ */
+export function DocumentLines({
+  entry,
+  showReading = false,
+}: {
+  entry: AdvanceRequestEntry;
+  showReading?: boolean;
+}) {
   const c = resolveCase(entry.form);
   if (!c.reference) return null;
   const def = REFERENCE_KINDS[c.reference];
@@ -162,10 +188,16 @@ export function DocumentLines({ entry }: { entry: AdvanceRequestEntry }) {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.map(({ document: doc, allocation, calc }) => (
-            <TableRow key={doc.id}>
+          {dueFirst(rows, (row) => row.document).map(({ document: doc, allocation, calc }) => (
+            <React.Fragment key={doc.id}>
+            <TableRow data-due={dueLabel(doc) ? "true" : undefined} className={dueLabel(doc) ? "bg-bad-soft/40" : undefined}>
               <TableCell className="font-semibold text-ink">
                 {doc.number}
+                {dueLabel(doc) ? (
+                  <span className="ml-1.5 align-middle">
+                    <Badge tone="bad">{dueLabel(doc)}</Badge>
+                  </span>
+                ) : null}
                 {doc.reference ? (
                   <span className="block text-[11px] font-normal text-subtle">Ref {doc.reference}</span>
                 ) : null}
@@ -187,6 +219,17 @@ export function DocumentLines({ entry }: { entry: AdvanceRequestEntry }) {
                 {calc.payment !== null ? formatINR(calc.payment) : "—"}
               </TableCell>
             </TableRow>
+            {showReading && doc.attachment ? (
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={5} className="bg-surface">
+                  <p className="m-0 mb-1.5 text-[11.5px] font-semibold uppercase tracking-[0.06em] text-subtle">
+                    Read from {doc.number}&apos;s SAP attachment
+                  </p>
+                  <AttachmentReadingTable attachment={doc.attachment} stored={doc.reading} />
+                </TableCell>
+              </TableRow>
+            ) : null}
+            </React.Fragment>
           ))}
           <TableRow className="bg-surface hover:bg-surface">
             <TableCell className="font-semibold text-ink" colSpan={2}>

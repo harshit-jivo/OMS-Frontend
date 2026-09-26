@@ -125,6 +125,10 @@ export function apiRequest(id: number, fields: Partial<ApiRequest> = {}): ApiReq
     remarks: "",
     owner_label: "Procurement — Rajesh",
     owner_employee_id: null,
+    budget_code: "BackOff",
+    budget_name: "Back Office",
+    sub_budget_code: "Accounts",
+    sub_budget_name: "Accounts",
     status: "IN_APPROVAL",
     created_by: OTHER,
     created_on: "2026-09-22T10:42:00+05:30",
@@ -155,7 +159,24 @@ export function sampleRequests(): Array<Omit<Held, "approvedThisRound">> {
         amount: "137500",
         remarks: "Part settlement of August invoices; balance next cycle.",
         documents: [
-          bill(10256, "150000", "97500", { original_amount: "250000", paid_amount: "100000", vendor_ref: "ABC/INV/7781" }),
+          bill(10256, "150000", "97500", {
+            original_amount: "250000", paid_amount: "100000", vendor_ref: "ABC/INV/7781",
+            due_date: "2026-09-03",
+            // Read when it was raised, and saved with it.
+            attachment_file: "DocScanner Sep 17, 2026 12-39 PM.pdf", attachment_count: 3,
+            attachment_date: "2026-09-17",
+            attachment_check: {
+              file_name: "DocScanner Sep 17, 2026 12-39 PM.pdf", attachment_count: 3, source: "ocr", pages: 1,
+              fields: {
+                invoice_number: { value: "ABC/INV/7781", sap: "ABC/INV/7781", match: true },
+                invoice_date: { value: "2026-08-04", sap: "2026-08-04", match: true },
+                amount: { value: 250000, sap: 250000, match: true },
+                party_name: { value: "ABC Technologies Pvt Ltd", sap: "ABC Technologies", match: true },
+                account_number: { value: "50100234567812", sap: "50100234567899", match: false },
+                ifsc: { value: null, sap: null, match: null },
+              },
+            },
+          }),
           bill(10271, "84000", "40000", { doc_date: "2026-08-19" }),
         ],
         files: [{ id: 501, name: "ABC-statement-Sep.pdf", size: 182_000, purpose: "SUPPORTING", payout_line_id: null, uploaded_by: OTHER, uploaded_on: null }],
