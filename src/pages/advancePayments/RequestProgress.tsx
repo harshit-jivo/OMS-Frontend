@@ -4,7 +4,8 @@
  *   RouteTimeline   the workflow's stages, in order: done, waiting (and on
  *                   whom), or still to come — for this round
  *   SapPayment      the outgoing payment Audit posted, or why it failed
- *   RequestHistory  the append-only log, newest last, with each remark
+ *   RequestHistory  the append-only log, newest last, with each remark, and
+ *                   under every edit what it changed: Was → Now
  *
  * All three read the server's record (`entry.api`); nothing here decides
  * anything.
@@ -14,6 +15,7 @@ import { DetailField, DetailGrid } from "../../components/ui/detail";
 import { Timeline, TimelineItem } from "../../components/ui/timeline";
 import type { ApiRequestLog, ApiStage } from "../../services/advancePaymentService";
 import type { AdvanceRequestEntry } from "./approvalData";
+import { editRows } from "./editChanges";
 import { formatDateTime } from "./requestLabels";
 
 const STAGE_STATE: Record<string, { label: string; tone: BadgeTone }> = {
@@ -100,10 +102,6 @@ function logDetail(log: ApiRequestLog): string {
   if (log.action === "SAP_POST_FAILED") return String(data.error ?? "");
   if (log.action === "UTR_RECORDED") return `UTR ${String(data.utr ?? "")} · ${String(data.method ?? "")} ${String(data.amount ?? "")}`;
   if (log.action === "PARTNER_LINKED") return `Linked to ${String(data.account ?? data.new ?? "")}`;
-  if (log.action === "EDITED") {
-    const fields = Object.keys(data).filter((k) => !k.startsWith("files_"));
-    return fields.length ? `Changed: ${fields.join(", ").replace(/_/g, " ")}` : "";
-  }
   if (log.action === "FILE_ADDED" || log.action === "FILE_REMOVED") return String(data.file ?? "");
   return "";
 }
@@ -120,6 +118,35 @@ const LOG_TONE: Record<string, BadgeTone> = {
   SENT_BACK: "note",
   CANCELLED: "neutral",
 };
+
+/** Under an "Edited" or "Payment details updated" row: each change, Was → Now. */
+function EditChanges({ log }: { log: ApiRequestLog }) {
+  const rows = editRows(log.data);
+  if (rows.length === 0) return null;
+  return (
+    <table
+      aria-label={`Changes ${formatDateTime(log.created_on)}`}
+      className="mt-1.5 w-full max-w-2xl border-collapse overflow-hidden rounded-sm border border-line text-[12px]"
+    >
+      <thead className="bg-surface text-left text-subtle">
+        <tr>
+          <th className="px-2 py-1 font-semibold">Field</th>
+          <th className="px-2 py-1 font-semibold">Was</th>
+          <th className="px-2 py-1 font-semibold">Now</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row, i) => (
+          <tr key={`${row.field}-${i}`} className="border-t border-line align-top">
+            <td className="px-2 py-1 font-semibold text-ink">{row.field}</td>
+            <td className="px-2 py-1 text-subtle line-through decoration-subtle/60">{row.was}</td>
+            <td className="px-2 py-1 text-ink">{row.now}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
 
 export function RequestHistory({ entry }: { entry: AdvanceRequestEntry }) {
   const logs = entry.api.logs ?? [];
@@ -140,6 +167,14 @@ export function RequestHistory({ entry }: { entry: AdvanceRequestEntry }) {
             </p>
             {log.remarks ? <p className="m-0 mt-0.5 text-[12.5px] text-body">“{log.remarks}”</p> : null}
             {detail ? <p className="m-0 mt-0.5 text-[12px] text-subtle">{detail}</p> : null}
+            {log.action === "PAYOUT_UPDATED" && log.data?.manual_account ? (
+              <p className="m-0 mt-1">
+                <Badge tone="bad">
+                  {log.data.manual_new ? "Bank account entered manually" : "Bank account is a manual entry"} — not from SAP
+                </Badge>
+              </p>
+            ) : null}
+            {log.action === "EDITED" || log.action === "PAYOUT_UPDATED" ? <EditChanges log={log} /> : null}
           </TimelineItem>
         );
       })}

@@ -49,10 +49,11 @@ export function formatDateTime(iso: string): string {
 export type StatusFilter = "" | ApprovalStatus;
 export type CompanyFilter = "" | Company;
 
-export interface RequestFilterState {
+/** `S` is what the status control selects: a request status, or a desk bucket. */
+export interface RequestFilterState<S extends string = StatusFilter> {
   search: string;
   company: CompanyFilter;
-  status: StatusFilter;
+  status: S;
 }
 
 export const NO_FILTERS: RequestFilterState = { search: "", company: "", status: "" };
@@ -79,14 +80,16 @@ function haystack(entry: AdvanceRequestEntry): string {
     .toLowerCase();
 }
 
-export function filterRequests(
+export function filterRequests<S extends string = StatusFilter>(
   entries: AdvanceRequestEntry[],
-  filters: RequestFilterState,
+  filters: RequestFilterState<S>,
+  /** What the status filter compares against — the desk passes `deskBucket`. */
+  statusOf: (entry: AdvanceRequestEntry) => string = (entry) => entry.status,
 ): AdvanceRequestEntry[] {
   const term = filters.search.trim().toLowerCase();
   return entries.filter(
     (entry) =>
-      (!filters.status || entry.status === filters.status) &&
+      (!filters.status || statusOf(entry) === filters.status) &&
       (!filters.company || entry.form.company === filters.company) &&
       (!term || haystack(entry).includes(term)),
   );
@@ -116,18 +119,96 @@ export function requestCounts(entries: AdvanceRequestEntry[]): RequestCounts {
   };
 }
 
+/* ── The approval desk ───────────────────────────────────────────────────── */
+
+/**
+ * Where a request sits on ONE approver's desk. Filed by what waits on them
+ * and what they themselves decided — never by the request's overall status,
+ * which would show them how the other approvers stand on it.
+ *
+ * Waiting at their stage wins over an earlier decision: a request they
+ * returned that has come round again is pending with them, not "returned".
+ * `""` is a request on the desk for neither reason (an admin's view).
+ */
+export type DeskBucket = "" | "PENDING" | "APPROVED" | "REJECTED" | "RETURNED";
+export type DeskFilter = DeskBucket;
+
+export function deskBucket(entry: AdvanceRequestEntry): DeskBucket {
+  if (entry.api.flow?.awaiting_me) return "PENDING";
+  switch (entry.api.my_decision?.action) {
+    case "APPROVED":
+      return "APPROVED";
+    case "REJECTED":
+      return "REJECTED";
+    case "RETURNED":
+    case "SENT_BACK":
+      return "RETURNED";
+    default:
+      return "";
+  }
+}
+
+/** The desk's choices: by what YOU did, not by the request's overall status. */
+export const DESK_STATUS_OPTIONS: ReadonlyArray<{ value: DeskFilter; label: string }> = [
+  { value: "", label: "All entries" },
+  { value: "PENDING", label: "Pending at your stage" },
+  { value: "APPROVED", label: "Approved by you" },
+  { value: "REJECTED", label: "Rejected by you" },
+  { value: "RETURNED", label: "Returned / sent back by you" },
+];
+
+/** The approver's own decision, as the desk's "Your Decision" column says it. */
+export const MY_DECISION_LABEL: Record<string, string> = {
+  APPROVED: "Approved",
+  REJECTED: "Rejected",
+  RETURNED: "Returned",
+  SENT_BACK: "Sent back",
+};
+export const MY_DECISION_TONE = {
+  APPROVED: "ok",
+  REJECTED: "bad",
+  RETURNED: "info",
+  SENT_BACK: "info",
+} as const;
+
+export interface DeskCounts {
+  pending: number;
+  pendingAmount: number;
+  approved: number;
+  rejected: number;
+  returned: number;
+  total: number;
+}
+
+/** The desk's KPI numbers — over the list as search and company leave it. */
+export function deskCounts(entries: AdvanceRequestEntry[]): DeskCounts {
+  const of = (bucket: DeskBucket) => entries.filter((e) => deskBucket(e) === bucket);
+  const pending = of("PENDING");
+  return {
+    pending: pending.length,
+    pendingAmount: pending.reduce((sum, e) => sum + requestAmount(e.form), 0),
+    approved: of("APPROVED").length,
+    rejected: of("REJECTED").length,
+    returned: of("RETURNED").length,
+    total: entries.length,
+  };
+}
+
 /* ── The payee's balance ─────────────────────────────────────────────────── */
 
 const BALANCE_ROLES = new Set(["PAYMENT", "AUDIT", "FINAL"]);
 
 /**
  * Whether the desk shows the payee's SAP balance: at or past Payment (or
- * completed), and paid to a business partner (Vendor, Employee Imprest).
- * Never to the requester while they raise it.
+ * completed), paid to a business partner (Vendor, Employee Imprest), and to a
+ * viewer who holds Payment or a later stage (`can.see_account`).
+ * Never to the requester while they raise it — and not while the partner has
+ * no account in SAP yet (a new imprest holder): there is no ledger to read
+ * until Payment creates it and approving links the request to it.
  */
 export function showsBalance(entry: AdvanceRequestEntry): boolean {
   const partner = entry.form.type === "VENDOR" || entry.form.type === "EMPLOYEE_IMPREST";
-  return partner && reachedPayment(entry);
+  return partner && !entry.api.partner_not_in_sap && entry.api.can.see_account && reachedPayment(entry);
 }
 
 /**

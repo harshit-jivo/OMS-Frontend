@@ -14,7 +14,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { advancePaymentService } from "../services/advancePaymentService";
 import { renderPage } from "../test/renderPage";
 import Advance_Payment_Approval from "./Advance_Payment_Approval";
-import { FakeRequestServer, apiRequest, bill } from "./advancePayments/testRequests";
+import { FakeRequestServer, apiRequest, bill, logRow } from "./advancePayments/testRequests";
 import {
   SAP_CASH_ACCOUNTS,
   SAP_EMPLOYEES,
@@ -175,17 +175,21 @@ describe("Payments Approval", () => {
     // ₹1,37,500 + ₹20,000 + ₹24,500 pending.
     expect(screen.getByText("₹1,82,000 waiting")).toBeTruthy();
     expect(screen.getByText("3 waiting on you")).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Pending/ }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: /Pending at your stage/ }).getAttribute("aria-pressed")).toBe("true");
     expect(advancePaymentService.requests).toHaveBeenCalledWith("desk");
   });
 
   it("filters by clicking a KPI card", async () => {
     const user = setup();
     await screen.findByRole("button", { name: /Review AP-2026-0014/ });
-    await user.click(screen.getByRole("button", { name: /Total/ }));
+    await user.click(screen.getByRole("button", { name: /All entries/ }));
     expect(requestRows()).toHaveLength(5);
-    await user.click(screen.getByRole("button", { name: /Rejected/ }));
+    await user.click(screen.getByRole("button", { name: /Rejected by you/ }));
     expect(requestRows()).toHaveLength(1);
+    expect(requestRows()[0].textContent).toMatch(/AP-2026-0010/);
+    await user.click(screen.getByRole("button", { name: /Approved by you/ }));
+    expect(requestRows()).toHaveLength(1);
+    expect(requestRows()[0].textContent).toMatch(/AP-2026-0011/);
   });
 
   it("filters by the status dropdown, the company and a search", async () => {
@@ -199,6 +203,55 @@ describe("Payments Approval", () => {
     await user.type(screen.getByLabelText("Search requests"), "ravinder");
     expect(requestRows()).toHaveLength(1);
     expect(requestRows()[0].textContent).toMatch(/AP-2026-0013/);
+  });
+
+  it("lists only what waits at your stage or what you decided — not other approvers' work", async () => {
+    // Waits at Audit, not Tester's, and Tester never touched it: not theirs.
+    onDesk(20, 4, ["HOD Approval"]);
+    const user = setup();
+    await screen.findByRole("button", { name: /Review AP-2026-0014/ });
+    await user.click(screen.getByRole("button", { name: /All entries/ }));
+    expect(screen.queryByText(/AP-2026-0020/)).toBeNull();
+    expect(requestRows()).toHaveLength(5);
+  });
+
+  it("counts what you approved and rejected, and says so per row", async () => {
+    const user = setup();
+    await screen.findByRole("button", { name: /Review AP-2026-0014/ });
+    const card = (name: RegExp) => screen.getByRole("button", { name });
+    expect(card(/Pending at your stage/).textContent).toMatch(/3/);
+    expect(card(/Approved by you/).textContent).toMatch(/1/);
+    expect(card(/Rejected by you/).textContent).toMatch(/1/);
+    expect(card(/All entries/).textContent).toMatch(/5/);
+
+    // The column is your own decision, never the request's overall status.
+    expect(screen.getByRole("columnheader", { name: "Your Decision" })).toBeTruthy();
+    await user.click(card(/All entries/));
+    const row = (no: string) => requestRows().find((r) => r.textContent?.includes(no))!;
+    expect(within(row("AP-2026-0014")).getByText("Waiting on you")).toBeTruthy();
+    expect(within(row("AP-2026-0011")).getByText("Approved")).toBeTruthy();
+    expect(within(row("AP-2026-0010")).getByText("Rejected")).toBeTruthy();
+    // AP-2026-0011 is completed, but that is the route's news, not the desk's.
+    expect(within(row("AP-2026-0011")).queryByText("Completed")).toBeNull();
+  });
+
+  it("moves a request from Pending to Approved by you once you approve it", async () => {
+    const user = setup();
+    await review(user, "AP-2026-0012"); // at HOD, Tester's
+    await approve(user);
+    expect(await screen.findByText("Approved.")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Back to list" }));
+    expect(screen.getByRole("button", { name: /Pending at your stage/ }).textContent).toMatch(/2/);
+    expect(screen.getByRole("button", { name: /Approved by you/ }).textContent).toMatch(/2/);
+  });
+
+  it("does not show the request's status, stage or history on review", async () => {
+    const user = setup();
+    await review(user, "AP-2026-0012");
+    expect(screen.getByText("Waiting on you")).toBeTruthy();
+    expect(screen.queryByText("At HOD Approval")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "History" })).toBeNull();
+    expect(screen.queryByRole("list", { name: "Approval route" })).toBeNull();
   });
 
   it("shows the request's details and its bills with their payment lines", async () => {
@@ -274,6 +327,30 @@ describe("Payments Approval", () => {
     expect(within(ledger).getByText("A/P Invoice 10256")).toBeTruthy();
     expect(within(ledger).getByText("20 days overdue")).toBeTruthy();
     expect(advancePaymentService.partnerLedger).toHaveBeenCalledWith("OIL", "VENDA000101");
+  });
+
+  it("at Payment, shows an Employee Imprest's ledger too", async () => {
+    onDesk(18, 3, ["Payment Approval"], {
+      company: "MART", request_type: "EMPLOYEE_IMPREST", payment_against: "ADVANCE",
+      partner_code: "ORGV000901", partner_name: "RAHUL SHARMA IMPREST JWPL0901", amount: "15000",
+    });
+    const user = setup();
+    await review(user, "AP-2026-0018");
+    expect(await screen.findByText("Current Balance")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: /Ledger in SAP/ })).toBeTruthy();
+    expect(advancePaymentService.partnerLedger).toHaveBeenCalledWith("MART", "ORGV000901");
+  });
+
+  it("reads no balance or ledger for an imprest holder not yet in SAP", async () => {
+    onDesk(18, 3, ["Payment Approval"], {
+      company: "MART", request_type: "EMPLOYEE_IMPREST", payment_against: "ADVANCE",
+      partner_code: "", partner_name: "NEW IMPREST HOLDER", amount: "15000", partner_not_in_sap: true,
+    });
+    const user = setup();
+    await review(user, "AP-2026-0018");
+    expect(screen.queryByText("Current Balance")).toBeNull();
+    expect(screen.queryByRole("heading", { name: /Ledger in SAP/ })).toBeNull();
+    expect(advancePaymentService.partnerLedger).not.toHaveBeenCalled();
   });
 
   it("shows neither the ledger nor the attachment readings before Payment", async () => {
@@ -455,7 +532,9 @@ describe("Payments Approval", () => {
     expect(saved).toBeLessThan(vi.mocked(advancePaymentService.act).mock.invocationCallOrder[0]);
     expect(advancePaymentService.act).toHaveBeenCalledWith(14, "approve", "OK to pay", expect.any(Number));
     // Now at Audit, which is not Tester's: the details are read-only, no buttons.
-    expect(screen.getByText("At Audit Approval")).toBeTruthy();
+    // The page says what Tester did — not where it waits now.
+    expect(screen.getByText("Approved by you")).toBeTruthy();
+    expect(screen.queryByText("At Audit Approval")).toBeNull();
     expect(field("IFSC").closest("fieldset")?.disabled).toBe(true);
     expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
   });
@@ -526,7 +605,7 @@ describe("Payments Approval", () => {
     await user.click(screen.getByRole("button", { name: "Return to Creator" }));
     expect(await screen.findByText("Returned to its creator.")).toBeTruthy();
     expect(advancePaymentService.act).toHaveBeenCalledWith(12, "return", "Attach the signed PO", expect.any(Number));
-    expect(screen.getAllByText("Returned").length).toBeGreaterThan(0);
+    expect(screen.getByText("Returned by you")).toBeTruthy();
   });
 
   it("at Audit, approves it on to Final — nothing goes to SAP yet", async () => {
@@ -536,7 +615,8 @@ describe("Payments Approval", () => {
     expect(screen.getByText(/Nothing is posted to SAP yet/)).toBeTruthy();
     await approve(user);
     expect(await screen.findByText("Approved.")).toBeTruthy();
-    expect(screen.getByText("At Final Approval")).toBeTruthy();
+    expect(screen.getByText("Approved by you")).toBeTruthy();
+    expect(screen.queryByText("At Final Approval")).toBeNull();
     expect(screen.queryByText("SAP Outgoing Payment")).toBeNull();
   });
 
@@ -548,7 +628,7 @@ describe("Payments Approval", () => {
     await approve(user);
     expect(await screen.findByText("Posted to SAP.")).toBeTruthy();
     expect(screen.getByText("926466971")).toBeTruthy();
-    expect(screen.getAllByText("Approved").length).toBeGreaterThan(0);
+    expect(screen.getByText("Approved by you")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Post to SAP" })).toBeNull();
   });
 
@@ -570,7 +650,8 @@ describe("Payments Approval", () => {
     await user.type(field("Approver Remarks"), "Wrong bank account");
     await user.click(screen.getByRole("button", { name: "Send Back to Payment" }));
     expect(await screen.findByText("Sent back to Payment.")).toBeTruthy();
-    expect(screen.getByText("At Payment Approval")).toBeTruthy();
+    expect(screen.getByText("Sent back by you")).toBeTruthy();
+    expect(screen.queryByText("At Payment Approval")).toBeNull();
   });
 
   it("shows a completed request read-only, with its payout and decision", async () => {
@@ -643,6 +724,66 @@ describe("Payments Approval", () => {
 
     expect(await screen.findByText(/the proof shows ₹12,000, not ₹15,000/)).toBeTruthy();
     expect(screen.getByText(/the proof shows 11112222333, another account of this payee/)).toBeTruthy();
+  });
+
+  describe("the payee's account: Payment and later stages only", () => {
+    const PAYOUT = {
+      beneficiary_name: "ABC TECHNOLOGIES",
+      to_account_number: "12345678901",
+      to_ifsc: "SBIN0001234",
+      to_account_manual: true,
+      lines: [
+        { id: 81, method: "NEFT", amount: "24500", from_account: "1104106", cheque_number: "", cheque_bank: "", cheque_date: null, cash_notes: [], utr: "" },
+      ],
+    };
+
+    it("flags to Audit a bank account entered manually", async () => {
+      onDesk(16, 4, ["Audit Approval"], { amount: "24500", documents: [bill(10500, "24500", "24500")], payout: PAYOUT });
+      const user = setup();
+      await review(user, "AP-2026-0016");
+      expect(screen.getByText(/^Bank account entered manually/)).toBeTruthy();
+      expect(screen.getByText(/typed in by hand at Payment, not picked from SAP/)).toBeTruthy();
+    });
+
+    it("says when the bank details were changed, and what they were", async () => {
+      onDesk(16, 5, ["Final Approval"], {
+        amount: "24500",
+        documents: [bill(10500, "24500", "24500")],
+        payout: { ...PAYOUT, to_account_manual: false },
+        logs: [
+          logRow("PAYOUT_UPDATED", "Payment details updated", {
+            actor: { id: 7, name: "Navdeep Singh", username: "navdeep" },
+            data: {
+              to_account: { old: "XXXXXXXXXX7812", new: "XXXXXXX8901" },
+              to_ifsc: { old: "HDFC0001234", new: "SBIN0001234" },
+              manual_account: false,
+            },
+          }),
+        ],
+      });
+      const user = setup();
+      await review(user, "AP-2026-0016");
+      expect(screen.getByText(/Bank details changed by Navdeep Singh/)).toBeTruthy();
+      expect(screen.getByText(/To account: XXXXXXXXXX7812 → XXXXXXX8901 · IFSC: HDFC0001234 → SBIN0001234/)).toBeTruthy();
+      expect(screen.queryByText(/^Bank account entered manually/)).toBeNull();
+    });
+
+    it("shows an approver before Payment none of it, even once it is filled in", async () => {
+      // Tester approved it at HOD; it now waits at Audit with the details filled.
+      onDesk(19, 4, ["HOD Approval"], {
+        amount: "24500",
+        documents: [bill(10500, "24500", "24500")],
+        payout: PAYOUT,
+        logs: [logRow("APPROVED", "Approved", { stage_name: "HOD Approval" })],
+      });
+      const user = setup();
+      await user.click(await screen.findByRole("button", { name: /All entries/ }));
+      await review(user, "AP-2026-0019");
+      expect(screen.queryByRole("heading", { name: "Payment & Bank Details" })).toBeNull();
+      expect(screen.queryByDisplayValue(/12345678901/)).toBeNull();
+      expect(screen.queryByText(/^Bank account entered manually/)).toBeNull();
+      expect(screen.queryByText("Current Balance")).toBeNull();
+    });
   });
 
   it("goes back to the list", async () => {

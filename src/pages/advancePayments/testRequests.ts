@@ -42,6 +42,7 @@ const NO_ABILITIES: RequestAbilities = {
   send_back: false,
   edit_payout: false,
   record_utr: false,
+  see_account: false,
 };
 
 /** A request's own settings in the fake, beside its API shape. */
@@ -77,7 +78,12 @@ export function bill(entry: number, open: string, amount: string, extra: Partial
 
 let nextLogId = 100;
 
-function logRow(action: string, label: string, extra: Partial<ApiRequestLog> = {}): ApiRequestLog {
+const DECISIONS = new Set(["APPROVED", "REJECTED", "RETURNED", "SENT_BACK"]);
+const ACCOUNT_STAGES = new Set(["Payment Approval", "Audit Approval", "Final Approval"]);
+const ACCOUNT_LOGS = new Set(["PAYOUT_UPDATED", "UTR_RECORDED", "PARTNER_LINKED"]);
+const mask = (n: string | null | undefined) => (n ? "X".repeat(Math.max(n.length - 4, 0)) + n.slice(-4) : null);
+
+export function logRow(action: string, label: string, extra: Partial<ApiRequestLog> = {}): ApiRequestLog {
   nextLogId += 1;
   return {
     id: nextLogId,
@@ -148,6 +154,11 @@ export function apiRequest(id: number, fields: Partial<ApiRequest> = {}): ApiReq
 }
 
 /** The requests both pages' tests start from. */
+const REJECTED_10 = logRow("REJECTED", "Rejected", {
+  stage_name: "HOD Approval",
+  remarks: "Deposit terms not yet signed — resubmit with the agreement.",
+});
+
 export function sampleRequests(): Array<Omit<Held, "approvedThisRound">> {
   return [
     {
@@ -244,14 +255,17 @@ export function sampleRequests(): Array<Omit<Held, "approvedThisRound">> {
         },
         logs: [
           logRow("CREATED", "Created", { actor: OTHER }),
+          // Tester approved it at Payment — which is why it is on their desk.
+          logRow("APPROVED", "Approved", { stage_name: "Payment Approval" }),
           logRow("APPROVED", "Approved", { stage_name: "Final Approval", actor: { id: 9, name: "Finance Controller", username: "fc" }, remarks: "Approved as per imprest policy." }),
           logRow("COMPLETED", "Completed", { actor: { id: 9, name: "Finance Controller", username: "fc" } }),
         ],
       }),
     },
     {
+      // Rejected by Tester at HOD.
       at: -1,
-      mine: [],
+      mine: ["HOD Approval"],
       api: apiRequest(10, {
         status: "REJECTED",
         partner_code: "VENDA000104",
@@ -260,11 +274,8 @@ export function sampleRequests(): Array<Omit<Held, "approvedThisRound">> {
         priority: "HIGH",
         documents: [bill(10301, "50000", "50000")],
         created_on: "2026-09-16T14:55:00+05:30",
-        last_decision: logRow("REJECTED", "Rejected", {
-          stage_name: "HOD Approval",
-          actor: { id: 9, name: "Finance Controller", username: "fc" },
-          remarks: "Deposit terms not yet signed — resubmit with the agreement.",
-        }),
+        last_decision: REJECTED_10,
+        logs: [logRow("CREATED", "Created", { actor: OTHER }), REJECTED_10],
       }),
     },
   ];
@@ -351,20 +362,36 @@ export class FakeRequestServer {
       edit_payout: acting && role === "PAYMENT",
       record_utr:
         api.status === "COMPLETED" && held.mine.some((n) => n === "Payment Approval" || n === "Final Approval"),
+      see_account: held.mine.some((n) => ACCOUNT_STAGES.has(n)),
     };
     api.stages = stages;
+    // Tester's own latest decision, as the server reads it from the log.
+    api.my_decision =
+      [...(api.logs ?? [])].reverse().find((l) => DECISIONS.has(l.action) && l.actor?.id === TESTER.id) ?? null;
   }
 
   private answer(held: Held): ApiRequest {
     this.refresh(held);
-    return clone(held.api);
+    const out = clone(held.api);
+    // As the server does: the account reaches Payment and later stages only.
+    if (!out.can.see_account) {
+      out.payout = null;
+      out.logs = out.logs?.map((l) => (ACCOUNT_LOGS.has(l.action) ? { ...l, data: null } : l));
+    }
+    return out;
   }
 
   async requests(scope: "mine" | "desk"): Promise<ApiRequest[]> {
     this.calls.push(["requests", scope]);
     return this.held
-      .filter((h) => (scope === "mine" ? h.api.created_by.id === TESTER.id : h.api.created_by.id !== TESTER.id))
-      .map((h) => this.answer(h))
+      .map((h) => ({ h, api: this.answer(h) }))
+      // The desk: what waits on Tester, and what Tester decided — nothing else.
+      .filter(({ h, api }) =>
+        scope === "mine"
+          ? h.api.created_by.id === TESTER.id
+          : h.api.created_by.id !== TESTER.id && (api.flow?.awaiting_me || api.my_decision),
+      )
+      .map(({ api }) => api)
       .sort((a, b) => b.created_on.localeCompare(a.created_on));
   }
 
@@ -404,12 +431,20 @@ export class FakeRequestServer {
     this.maybeRefuse();
     const held = this.find(id);
     const { department_id, sub_department_id, ...fields } = input;
+    // What the server's EDITED row holds, for the plain fields: {old, new}.
+    const before = held.api as unknown as Record<string, unknown>;
+    const changes: Record<string, { old: unknown; new: unknown }> = {};
+    for (const key of ["amount", "priority", "remarks", "payment_date"] as const) {
+      const was = before[key] ?? null;
+      const now = (fields as Record<string, unknown>)[key] ?? null;
+      if (now !== undefined && String(was ?? "") !== String(now ?? "")) changes[key] = { old: was, new: now };
+    }
     Object.assign(held.api, fields, {
       department: { id: department_id ?? 0, name: held.api.department.name },
       sub_department: sub_department_id ? { id: sub_department_id, name: held.api.sub_department?.name ?? "AP" } : null,
       files: held.api.files.filter((f) => !options.removeFileIds.includes(f.id)),
     });
-    held.api.logs = [...(held.api.logs ?? []), logRow("EDITED", "Edited")];
+    held.api.logs = [...(held.api.logs ?? []), logRow("EDITED", "Edited", { data: changes })];
     if (options.resubmit && held.api.status === "RETURNED") {
       held.api.status = "IN_APPROVAL";
       held.at = 0;
@@ -486,6 +521,14 @@ export class FakeRequestServer {
         },
       });
     }
+    // What the server's PAYOUT_UPDATED row holds for the account.
+    const was = held.api.payout;
+    const data: Record<string, unknown> = { manual_account: typed, manual_new: false };
+    if (mask(was?.to_account_number) !== mask(payout.to_account_number)) {
+      data.to_account = { old: mask(was?.to_account_number), new: mask(payout.to_account_number) };
+      data.manual_new = typed && Boolean(payout.to_account_number);
+    }
+    held.api.logs = [...(held.api.logs ?? []), logRow("PAYOUT_UPDATED", "Payment details updated", { data })];
     let next = 700;
     held.api.payout = {
       ...payout,

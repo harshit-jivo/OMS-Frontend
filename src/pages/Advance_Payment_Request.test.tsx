@@ -898,6 +898,51 @@ describe("Advance Payment Request", () => {
       expect(screen.queryByRole("button", { name: "Cancel Request" })).toBeNull();
     });
 
+    it("keeps each edit in the history: what changed, what it was, what it is now", async () => {
+      server.addOwn(apiRequest(22, {
+        status: "RETURNED",
+        request_type: "EMPLOYEE_ADVANCE",
+        payment_against: "OTHER",
+        payment_against_other: "Tools",
+        partner_code: "1113035",
+        partner_name: "RAVINDER SINGH SHUNTY",
+        amount: "5000",
+        department: { id: 40, name: "Cyber Security" },
+        sub_department: null,
+        owner_label: "Arvinder (JWPL0115)",
+        payment_date: "2026-10-01",
+        remarks: "Tools for the site",
+        created_on: "2026-09-23T12:00:00+05:30",
+      }), -1);
+      const user = await open();
+      await details(user, "AP-2026-0022");
+      await user.click(screen.getByRole("button", { name: "Edit Request" }));
+      await user.clear(field(/^Remarks/));
+      await user.type(field(/^Remarks/), "Tools and safety kit");
+      await user.click(screen.getByRole("button", { name: "Save Only" }));
+      expect(await screen.findByText("Changes saved.")).toBeTruthy();
+
+      const changes = screen.getByRole("table", { name: /^Changes/ });
+      const row = within(changes).getByText("Remarks").closest("tr")!;
+      expect(within(row).getByText("Tools for the site")).toBeTruthy();
+      expect(within(row).getByText("Tools and safety kit")).toBeTruthy();
+    });
+
+    it("keeps the status and the history folded until asked for", async () => {
+      const user = await open();
+      await details(user, "AP-2026-0012");
+      const fold = (title: string) => screen.getByRole("heading", { name: title }).closest("details")!;
+      expect(fold("Status").open).toBe(false);
+      expect(fold("History").open).toBe(false);
+      // Folded, each still says in a line where it stands.
+      expect(within(fold("Status").querySelector("summary")!).getByText("Waiting at HOD Approval")).toBeTruthy();
+
+      await user.click(screen.getByRole("heading", { name: "Status" }));
+      expect(fold("Status").open).toBe(true);
+      await user.click(screen.getByRole("heading", { name: "History" }));
+      expect(fold("History").open).toBe(true);
+    });
+
     it("lists a submitted request as Pending, at the top", async () => {
       const user = await open();
       await user.click(screen.getByRole("tab", { name: /New Request/ }));

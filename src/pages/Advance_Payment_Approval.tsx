@@ -1,9 +1,10 @@
 /**
  * Payments Approval — the desk every stage of a request's route works from.
  *
- * Lists only what is yours to act on: requests waiting at your stage today
- * (or one you stand in for), and completed ones where you hold Payment or
- * Final, to record the UTR. What you may do to an
+ * Lists only what is yours: requests waiting at your stage today (or one you
+ * stand in for), and the ones you approved, rejected, returned or sent back —
+ * counted on the cards by what YOU did. Never the other approvers' status or
+ * the request's history: the requester's page carries those. What you may do to an
  * opened request is the server's answer (`api.can`), which depends on the
  * stage it waits at and whether that stage is yours today:
  *
@@ -59,19 +60,23 @@ import { PayoutDetailsForm } from "./advancePayments/PayoutDetailsForm";
 import { startPayout, validatePayout, type PayoutDetails } from "./advancePayments/payout";
 import { DocumentLines, RequestSummary } from "./advancePayments/RequestDetails";
 import {
+  DESK_STATUS_OPTIONS,
+  MY_DECISION_LABEL,
+  MY_DECISION_TONE,
   PRIORITY_TONE,
-  STATUS_LABEL,
-  STATUS_TONE,
+  deskBucket,
+  deskCounts,
   filterRequests,
   formatDateTime,
   priorityLabel,
   reachedPayment,
-  requestCounts,
   showsBalance,
+  type DeskFilter,
   type RequestFilterState,
 } from "./advancePayments/requestLabels";
-import { RequestFilters, RequestKpis, RequestTable } from "./advancePayments/RequestList";
+import { DeskKpis, RequestFilters, RequestTable } from "./advancePayments/RequestList";
 import { SapPayment } from "./advancePayments/RequestProgress";
+import { editRows } from "./advancePayments/editChanges";
 import { payoutFileChanges, payoutToApi } from "./advancePayments/requestApi";
 import { useRequestDetail, useRequestList, useStoreRequest } from "./advancePayments/requestQueries";
 import { formatINR } from "./advancePayments/rules";
@@ -91,6 +96,52 @@ function stageGuidance(entry: AdvanceRequestEntry): string {
     default:
       return "Approve it, return it to its creator to correct and resubmit, or reject it.";
   }
+}
+
+/**
+ * What Audit and Final must not miss about the payee's account: typed by hand
+ * rather than picked from SAP, and changed after it was first filled in —
+ * with what it was. Read from the server's own record, not the form.
+ */
+function BankDetailFlags({ entry }: { entry: AdvanceRequestEntry }) {
+  const payouts = (entry.api.logs ?? []).filter((l) => l.action === "PAYOUT_UPDATED" && l.data);
+  // The latest save that changed the payee after it had one.
+  const changed = [...payouts].reverse().find((l) =>
+    ["to_account", "to_ifsc", "beneficiary_name"].some((k) => {
+      const c = l.data?.[k] as { old?: unknown } | undefined;
+      return c && c.old !== null && c.old !== undefined;
+    }),
+  );
+  const manual = entry.payout?.toAccountManual && entry.payout.toAccountNumber;
+  if (!manual && !changed) return null;
+  const rows = changed ? editRows(changed.data).filter((r) => /Beneficiary|To account|IFSC|Account/.test(r.field)) : [];
+  return (
+    <>
+      {manual ? (
+        <Notice tone="bad" title="Bank account entered manually">
+          The payee's account was typed in by hand at Payment, not picked from SAP. Check it against
+          the bank proof before approving.
+        </Notice>
+      ) : null}
+      {changed ? (
+        <Notice
+          tone="hold"
+          title={`Bank details changed by ${changed.actor?.name ?? "someone"} on ${formatDateTime(changed.created_on)}`}
+        >
+          {rows.map((r) => `${r.field}: ${r.was} → ${r.now}`).join(" · ")}
+        </Notice>
+      ) : null}
+    </>
+  );
+}
+
+/** Waiting on you, or what you decided — the only status the desk shows. */
+function MyDecisionBadge({ entry }: { entry: AdvanceRequestEntry }) {
+  if (entry.api.flow?.awaiting_me) return <Badge tone="hold">Waiting on you</Badge>;
+  const mine = entry.api.my_decision;
+  if (!mine) return null;
+  const tone = MY_DECISION_TONE[mine.action as keyof typeof MY_DECISION_TONE] ?? "neutral";
+  return <Badge tone={tone}>{MY_DECISION_LABEL[mine.action] ?? mine.label} by you</Badge>;
 }
 
 function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
@@ -234,8 +285,9 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
         title={entry.requestNo}
         badges={
           <>
-            <Badge tone={STATUS_TONE[entry.status]}>{STATUS_LABEL[entry.status]}</Badge>
-            {flow?.current_stage ? <Badge tone="info">At {flow.current_stage}</Badge> : null}
+            {/* No overall status and no "At <stage>": how the other approvers
+                stand is not this desk's to show. Only what is yours. */}
+            <MyDecisionBadge entry={entry} />
             <Badge tone={PRIORITY_TONE[entry.form.priority]}>{priorityLabel(entry)} priority</Badge>
           </>
         }
@@ -288,12 +340,15 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
         ) : null}
       </Card>
 
-      <DocumentLines entry={entry} showReading={reachedPayment(entry)} />
+      <DocumentLines entry={entry} showReading={reachedPayment(entry) && can.see_account} />
 
       {/* The payee's open ledger in SAP, from Payment on. */}
       {showsBalance(entry) ? <PartnerLedger entry={entry} /> : null}
 
-      {draft ? (
+      {/* Account detail from here down: sent to Payment and later stages only. */}
+      {can.see_account ? <BankDetailFlags entry={entry} /> : null}
+
+      {draft && can.see_account ? (
         <Card className="p-4 md:p-5">
           <CardHeader>
             <CardTitle>Payment &amp; Bank Details</CardTitle>
@@ -424,6 +479,22 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
   );
 }
 
+/** The desk's status column: your own decision and when — nothing else. */
+function DecisionCell({ entry }: { entry: AdvanceRequestEntry }) {
+  const mine = entry.api.my_decision;
+  if (entry.api.flow?.awaiting_me) return <Badge tone="hold">Waiting on you</Badge>;
+  if (!mine) return <span className="text-subtle">—</span>;
+  const tone = MY_DECISION_TONE[mine.action as keyof typeof MY_DECISION_TONE] ?? "neutral";
+  return (
+    <>
+      <Badge tone={tone}>{MY_DECISION_LABEL[mine.action] ?? mine.label}</Badge>
+      {mine.created_on ? (
+        <span className="mt-0.5 block text-[11px] text-subtle">{formatDateTime(mine.created_on)}</span>
+      ) : null}
+    </>
+  );
+}
+
 export default function Advance_Payment_Approval() {
   const list = useRequestList("desk");
   // Waiting on you first, then newest first.
@@ -435,7 +506,7 @@ export default function Advance_Payment_Approval() {
     [list.data],
   );
   // Opens on what needs deciding — the desk's first job.
-  const [filters, setFilters] = useState<RequestFilterState>({
+  const [filters, setFilters] = useState<RequestFilterState<DeskFilter>>({
     search: "",
     company: "",
     status: "PENDING",
@@ -445,10 +516,10 @@ export default function Advance_Payment_Approval() {
   // The cards count what the search and company filters leave, whatever the
   // status filter — a card must not read 0 just because it is not selected.
   const counts = useMemo(
-    () => requestCounts(filterRequests(entries, { ...filters, status: "" })),
+    () => deskCounts(filterRequests(entries, { ...filters, status: "" }, deskBucket)),
     [entries, filters],
   );
-  const shown = filterRequests(entries, filters);
+  const shown = filterRequests(entries, filters, deskBucket);
   const awaiting = entries.filter((e) => e.api.flow?.awaiting_me).length;
 
   if (openId !== null) return <ReviewRequest id={openId} onBack={() => setOpenId(null)} />;
@@ -470,7 +541,7 @@ export default function Advance_Payment_Approval() {
       ) : null}
 
       <StatRow>
-        <RequestKpis
+        <DeskKpis
           counts={counts}
           status={filters.status}
           onSelect={(status) => setFilters({ ...filters, status })}
@@ -482,7 +553,7 @@ export default function Advance_Payment_Approval() {
           <CardTitle>
             Requests{awaiting ? <Badge tone="hold" className="ml-2">{awaiting} waiting on you</Badge> : null}
           </CardTitle>
-          <RequestFilters value={filters} onChange={setFilters} />
+          <RequestFilters value={filters} onChange={setFilters} statusOptions={DESK_STATUS_OPTIONS} />
         </CardHeader>
         <RequestTable
           entries={shown}
@@ -492,6 +563,7 @@ export default function Advance_Payment_Approval() {
               ? { label: "Review", variant: "primary" }
               : { label: "View", variant: "secondary" }
           }
+          status={{ header: "Your Decision", cell: (e) => <DecisionCell entry={e} /> }}
           emptyText={list.isLoading ? "Loading…" : "No requests match these filters."}
         />
       </Card>
