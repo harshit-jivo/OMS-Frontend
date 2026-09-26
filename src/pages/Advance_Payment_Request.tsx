@@ -13,8 +13,9 @@
  * is RETURNED to them, when saving can resubmit it; the server enforces the
  * same rule and the buttons only follow `api.can`.
  */
-import { useMemo, useState } from "react";
-import { HiOutlineBanknotes, HiPlus } from "react-icons/hi2";
+import { useMemo, useState, type ReactNode } from "react";
+import { HiChevronRight, HiOutlineBanknotes, HiPlus } from "react-icons/hi2";
+import { cn } from "@/lib/utils";
 
 import { Badge } from "../components/ui/badge";
 import { Breadcrumbs } from "../components/ui/breadcrumbs";
@@ -66,6 +67,46 @@ function rethrow(err: unknown): never {
 const newFiles = (files: FileAttachment[]) => files.flatMap((f) => (f.file ? [f.file] : []));
 
 /** A request as its requester sees it — where it stands, and what they may still do. */
+/**
+ * A card that opens on a click: the route and the log are there when the
+ * requester wants them, without pushing the request itself down the page.
+ * A native `<details>`, as elsewhere in the app — keyboard and screen readers
+ * get the disclosure for free.
+ */
+function CollapsibleCard({ title, summary, children }: { title: string; summary?: string; children: ReactNode }) {
+  return (
+    <Card className="p-0">
+      <details className="group">
+        <summary
+          className={cn(
+            "flex cursor-pointer list-none items-center gap-2 px-4 py-3 md:px-5 [&::-webkit-details-marker]:hidden",
+            "rounded-card hover:bg-surface",
+          )}
+        >
+          <HiChevronRight
+            className="size-4 shrink-0 text-subtle transition-transform group-open:rotate-90"
+            aria-hidden="true"
+          />
+          <h2 className="m-0 text-[14px] font-semibold text-ink">{title}</h2>
+          {summary ? <span className="truncate text-[12.5px] text-subtle">{summary}</span> : null}
+        </summary>
+        <div className="border-t border-line px-4 pb-4 pt-4 md:px-5 md:pb-5">{children}</div>
+      </details>
+    </Card>
+  );
+}
+
+/** One line on the closed Status card: where it stands. */
+function statusSummary(entry: AdvanceRequestEntry): string {
+  const stage = entry.api.flow?.current_stage;
+  return entry.status === "PENDING" && stage ? `Waiting at ${stage}` : STATUS_LABEL[entry.status];
+}
+
+function historySummary(entry: AdvanceRequestEntry): string {
+  const n = entry.api.logs?.length ?? 0;
+  return n ? `${n} ${n === 1 ? "entry" : "entries"}` : "";
+}
+
 function EntryDetails({ id, onBack }: { id: number; onBack: () => void }) {
   const detail = useRequestDetail(id);
   const store = useStoreRequest();
@@ -153,6 +194,12 @@ function EntryDetails({ id, onBack }: { id: number; onBack: () => void }) {
         description={`Raised by ${entry.requestedBy} on ${formatDateTime(entry.requestedOn)} · ${formatINR(amount)}`}
         actions={
           <>
+            {/* In the header, not inside Status: Status opens closed. */}
+            {can.resubmit && !editing ? (
+              <Button variant="primary" onClick={() => void act("resubmit")} disabled={busy}>
+                Resubmit as it is
+              </Button>
+            ) : null}
             {can.edit && !editing ? (
               <Button variant="secondary" onClick={() => setEditing(true)}>
                 Edit Request
@@ -227,21 +274,13 @@ function EntryDetails({ id, onBack }: { id: number; onBack: () => void }) {
         </Card>
       ) : (
         <>
-          <Card className="p-4 md:p-5">
-            <CardHeader>
-              <CardTitle>Status</CardTitle>
-              {can.resubmit ? (
-                <Button variant="primary" size="xs" onClick={() => void act("resubmit")} disabled={busy}>
-                  Resubmit as it is
-                </Button>
-              ) : null}
-            </CardHeader>
+          <CollapsibleCard title="Status" summary={statusSummary(entry)}>
             <div className="space-y-4">
               <DecisionSummary entry={entry} />
               <RouteTimeline entry={entry} />
               <SapPayment entry={entry} />
             </div>
-          </Card>
+          </CollapsibleCard>
 
           <Card className="p-4 md:p-5">
             <CardHeader>
@@ -252,9 +291,10 @@ function EntryDetails({ id, onBack }: { id: number; onBack: () => void }) {
 
           <DocumentLines entry={entry} />
 
-          {/* How it was paid — shown once it is completed, never before:
-              until then the approvers are still deciding it. */}
-          {entry.status === "APPROVED" && entry.payout ? (
+          {/* How it was paid — once completed, and only to someone who holds
+              Payment or a later stage: the server sends the account to no one
+              else, so for the creator this stays empty. */}
+          {entry.status === "APPROVED" && entry.payout && can.see_account ? (
             <Card className="p-4 md:p-5">
               <CardHeader>
                 <CardTitle>Payment &amp; Bank Details</CardTitle>
@@ -270,12 +310,9 @@ function EntryDetails({ id, onBack }: { id: number; onBack: () => void }) {
             </Card>
           ) : null}
 
-          <Card className="p-4 md:p-5">
-            <CardHeader>
-              <CardTitle>History</CardTitle>
-            </CardHeader>
+          <CollapsibleCard title="History" summary={historySummary(entry)}>
             <RequestHistory entry={entry} />
-          </Card>
+          </CollapsibleCard>
         </>
       )}
     </Page>
