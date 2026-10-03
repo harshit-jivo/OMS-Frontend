@@ -34,6 +34,7 @@ import {
   HiOutlineArchiveBox,
   HiOutlineArchiveBoxXMark,
   HiOutlineArrowPath,
+  HiOutlineArrowTrendingUp,
   HiOutlineBanknotes,
   HiOutlineBeaker,
   HiOutlineBellAlert,
@@ -86,8 +87,13 @@ import {
   HiOutlineUserGroup,
   HiOutlineUserPlus,
   HiOutlineUsers,
+  HiOutlineWallet,
   HiOutlineWrenchScrewdriver,
 } from "react-icons/hi2";
+import { controlPanelTabKey } from "../../config/controlPanelAccess";
+
+/** The permission key of a Control Panel inner tab (config/controlPanelAccess.ts). */
+const tabKey = (to: string, tab: string) => controlPanelTabKey(to, tab) ?? to + "#" + tab;
 
 export type SidebarIconComponent = ComponentType<{ className?: string }>;
 
@@ -97,11 +103,37 @@ export interface SidebarLinkDef {
   icon: SidebarIconComponent;
   /** Visibility path when it differs from `to`. */
   gate?: string;
+  /**
+   * An inner tab of the page at `to` (`?tab=<id>`): the Control Panel pages
+   * open that tab directly (pages/controlPanel/tabs.ts).
+   */
+  tab?: string;
+  /**
+   * A permission key the row ALSO needs, on top of `to`'s route rule — for an
+   * inner tab, which has no route of its own to carry a rule.
+   */
+  key?: string;
+}
+
+/** A heading and its rows inside a collapsible section (`tree`). */
+export interface SidebarGroupDef {
+  heading: string;
+  links: SidebarLinkDef[];
 }
 
 export interface SidebarSectionDef {
   label: string;
+  /**
+   * One entry per page. This is what visibility, `/Home`'s tiles and the
+   * route tests read, so it stays flat even when the rail draws a `tree`.
+   */
   links: SidebarLinkDef[];
+  /**
+   * When present, the rail draws the section as ONE collapsible row (`icon`,
+   * `label`, chevron) with these headed groups beneath it — pages and their
+   * inner tabs — instead of a caption over `links`.
+   */
+  tree?: { icon: SidebarIconComponent; groups: SidebarGroupDef[] };
 }
 
 /**
@@ -192,6 +224,75 @@ export const SIDEBAR_SECTIONS: SidebarSectionDef[] = [
       { to: "/SO_Invoice_Report", label: "Open SO", icon: HiOutlineFolderOpen, gate: "/Sales_Invoice" },
       { to: "/Distributor_Report", label: "Distributor Report", icon: HiOutlineUserGroup },
     ],
+  },
+  /*
+   * The Control Panel — C_Panel's production pages, part of OMS (cpanel/).
+   *
+   * `links` is one row per page: what decides visibility (each follows its
+   * own key), what /Home tiles and what /Control_Panel forwards to.
+   *
+   * `tree` is what the rail DRAWS: one collapsible "Control Panel" row with
+   * the pages grouped under headings, and — for the two pages that have inner
+   * tabs — each tab as its own row (`tab`), opening that tab directly. Tab ids
+   * are the page's own (Oils Sale's panes, Inventory's sections); the mapping
+   * to the page's script is pages/controlPanel/tabs.ts.
+   */
+  {
+    label: "Control Panel",
+    links: [
+      { to: "/Control_Panel/Realise", label: "Oils Sale", icon: HiOutlineArrowTrendingUp },
+      { to: "/Control_Panel/Sales_Channel", label: "Sales Channel", icon: HiOutlinePresentationChartLine },
+      { to: "/Control_Panel/Beverages", label: "Beverages Sale", icon: HiOutlineBeaker },
+      { to: "/Control_Panel/Realise_Dashboard", label: "Realise Dashboard", icon: HiOutlineTableCells },
+      { to: "/Control_Panel/Sales", label: "Sales", icon: HiOutlineChartBar },
+      { to: "/Control_Panel/Inventory", label: "Inventory", icon: HiOutlineCube },
+      { to: "/Control_Panel/Expenses", label: "Expenses", icon: HiOutlineWallet },
+      { to: "/Control_Panel/Salaries", label: "Salaries", icon: HiOutlineUserGroup },
+    ],
+    tree: {
+      icon: HiOutlinePresentationChartBar,
+      groups: [
+        {
+          heading: "Oils Sale",
+          links: [
+            { to: "/Control_Panel/Realise", tab: "overview", key: tabKey("/Control_Panel/Realise", "overview"), label: "Overview", icon: HiOutlineArrowTrendingUp },
+            { to: "/Control_Panel/Realise", tab: "map", key: tabKey("/Control_Panel/Realise", "map"), label: "Map", icon: HiOutlineMap },
+            { to: "/Control_Panel/Realise", tab: "realise", key: tabKey("/Control_Panel/Realise", "realise"), label: "Realise", icon: HiOutlineTableCells },
+          ],
+        },
+        {
+          heading: "Sales",
+          links: [
+            { to: "/Control_Panel/Sales_Channel", label: "Sales Channel Dashboard", icon: HiOutlinePresentationChartLine },
+            { to: "/Control_Panel/Beverages", label: "Beverages Sale", icon: HiOutlineBeaker },
+            { to: "/Control_Panel/Realise_Dashboard", label: "Realise Dashboard", icon: HiOutlineTableCells },
+            { to: "/Control_Panel/Sales", label: "Sales", icon: HiOutlineChartBar },
+            { to: "/Control_Panel/Realise/Targets", label: "Targets", icon: HiOutlineAdjustmentsHorizontal },
+          ],
+        },
+        {
+          heading: "Inventory",
+          links: [
+            { to: "/Control_Panel/Inventory", tab: "dash", key: tabKey("/Control_Panel/Inventory", "dash"), label: "Dashboard", icon: HiOutlineCube },
+            { to: "/Control_Panel/Inventory", tab: "stock", key: tabKey("/Control_Panel/Inventory", "stock"), label: "Stock & Warehouses", icon: HiOutlineArchiveBox },
+            { to: "/Control_Panel/Inventory", tab: "move", key: tabKey("/Control_Panel/Inventory", "move"), label: "Stock Movement", icon: HiOutlineArrowPath },
+            { to: "/Control_Panel/Inventory", tab: "movers", key: tabKey("/Control_Panel/Inventory", "movers"), label: "Moving / Non-Moving", icon: HiOutlineTruck },
+            { to: "/Control_Panel/Inventory", tab: "billing", key: tabKey("/Control_Panel/Inventory", "billing"), label: "FG Not Billed", icon: HiOutlineDocumentText },
+            { to: "/Control_Panel/Inventory", tab: "abc", key: tabKey("/Control_Panel/Inventory", "abc"), label: "ABC-XYZ Analysis", icon: HiOutlineTag },
+            { to: "/Control_Panel/Inventory", tab: "aging", key: tabKey("/Control_Panel/Inventory", "aging"), label: "Aging Analysis", icon: HiOutlineClock },
+            { to: "/Control_Panel/Inventory", tab: "trace", key: tabKey("/Control_Panel/Inventory", "trace"), label: "Item Trace", icon: HiOutlineDocumentMagnifyingGlass },
+            { to: "/Control_Panel/Inventory", tab: "planning", key: tabKey("/Control_Panel/Inventory", "planning"), label: "Inventory Planning", icon: HiOutlineCalendarDays },
+          ],
+        },
+        {
+          heading: "Finance",
+          links: [
+            { to: "/Control_Panel/Expenses", label: "Expenses", icon: HiOutlineWallet },
+            { to: "/Control_Panel/Salaries", label: "Salaries", icon: HiOutlineUserGroup },
+          ],
+        },
+      ],
+    },
   },
   {
     label: "Schemes",

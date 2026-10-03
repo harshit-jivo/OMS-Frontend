@@ -819,3 +819,60 @@ html:has(.content-area [data-slot="page"]),
 body:has(.content-area [data-slot="page"]) {
   background: var(--color-canvas);
 }
+
+/*
+ * The Control Panel page frame fills the content region edge to edge.
+ *
+ * Every other page sits in `.content-area`'s padding: 75px on top (17px more
+ * than the 58px navbar, as breathing room) and, below 1024px, a 1rem gutter
+ * with a bottom margin. The Control Panel page (pages/controlPanel/
+ * EmbeddedControlPanel) is a whole application with its own spacing, so here
+ * the shell gives it all of the space right of the rail and below the bar —
+ * exactly the navbar's height on top, nothing else — and the frame is the
+ * viewport less that bar. The document itself never scrolls: the page inside
+ * the frame does.
+ *
+ * Unlayered and (0,2,0), so it beats Sidebar.css's unlayered `.content-area`
+ * (0,1,0) at every breakpoint without `!important`. Scoped with `:has()` like
+ * the rules above, so no other page changes.
+ */
+.content-area:has([data-slot="cp-frame"]) {
+  padding: 58px 0 0;
+  margin-bottom: 0;
+}
+[data-slot="cp-frame"] {
+  height: calc(100svh / var(--app-zoom) - 58px);
+}
+/* The shell offsets content 220px / 70px under a 230px / 72px rail — the rail
+   overlaps by 10px / 2px, invisible behind a padded page but it would hide
+   the edge of one that fills the region. Start exactly at the rail's edge.
+   (The collapsed rail's hover-widen stays an overlay, as on every page.) */
+@media (min-width: 1025px) {
+  .content-area:has([data-slot="cp-frame"]) {
+    margin-left: 230px;
+  }
+  .content-area.sidebar-collapsed:has([data-slot="cp-frame"]) {
+    margin-left: 72px;
+  }
+}
+@media (max-width: 768px) {
+  /* The navbar is 60px here, and the shell adds a 60px top MARGIN instead. */
+  .content-area:has([data-slot="cp-frame"]) {
+    margin-top: 0;
+    padding-top: 60px;
+  }
+  [data-slot="cp-frame"] {
+    height: calc(100svh / var(--app-zoom) - 60px);
+  }
+}
+html:has([data-slot="cp-frame"]),
+body:has([data-slot="cp-frame"]) {
+  overflow: hidden;
+}
+/* Full screen (the frame's own button, F, or F11): the whole screen, white
+   behind the page while it paints. */
+[data-slot="cp-frame"]:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  background: #fff;
+}
