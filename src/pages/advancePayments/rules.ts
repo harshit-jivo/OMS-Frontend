@@ -42,7 +42,6 @@ import {
   type PartnerType,
   type PaymentAgainst,
   type PaymentMode,
-  type Priority,
   type ReturnMethod,
 } from "./constants";
 
@@ -120,29 +119,18 @@ export interface RequestForm {
   /** Employee Imprest only. */
   expectedBillDate: string;
   /**
-   * Which department / sub-department the request belongs to: the Workflow
-   * Engine's queries match on these ids to choose the approval route. Ids as
-   * strings, like every other picked value here.
-   */
-  department: string;
-  departmentName: string;
-  subDepartment: string;
-  subDepartmentName: string;
-  /** The chosen department HAS sub-departments, so one must be picked. */
-  hasSubDepartments: boolean;
-  /**
-   * Payment Purpose: SAP's Budget (cost-centre dimension 3) and Sub Budget
-   * (dimension 4) codes, with their names. Per company, so a company change
-   * clears them.
+   * The Department: SAP's budget head (cost-centre dimension 3) code, with its
+   * name. The Workflow Engine's queries match on it to choose the approval
+   * route. Per company, so a company change clears it.
    */
   budget: string;
   budgetName: string;
-  subBudget: string;
-  subBudgetName: string;
+  /** Payment Purpose: what the money is for, a code of the Payment Desk's list. */
+  purpose: string;
+  purposeLabel: string;
   /** Who owns this request: a HOD or Sub-HOD, for information only. */
   ownership: string;
   paymentDate: string;
-  priority: Priority;
   remarks: string;
 }
 
@@ -164,26 +152,18 @@ export const EMPTY_FORM: RequestForm = {
   expectedFromDate: "",
   expectedToDate: "",
   expectedBillDate: "",
-  department: "",
-  departmentName: "",
-  subDepartment: "",
-  subDepartmentName: "",
-  hasSubDepartments: false,
   budget: "",
   budgetName: "",
-  subBudget: "",
-  subBudgetName: "",
+  purpose: "",
+  purposeLabel: "",
   ownership: "",
   paymentDate: "",
-  // Medium rather than nothing: a priority is always one of three, and an
-  // unset radio group with no safe middle makes every requester choose High.
-  priority: "MEDIUM",
   remarks: "",
 };
 
 /* ── The documents a payment can be made against ─────────────────────────── */
 
-export type ReferenceKind = "VENDOR_BILL" | "VENDOR_PO" | "VENDOR_OTHER";
+export type ReferenceKind = "VENDOR_BILL" | "VENDOR_PO" | "VENDOR_OTHER" | "CUSTOMER_LEDGER";
 
 interface ReferenceKindDef {
   /** One of them — "Bill". The heading form. */
@@ -273,7 +253,30 @@ export const REFERENCE_KINDS: Record<ReferenceKind, ReferenceKindDef> = {
     live: true,
     documents: [],
   },
+  CUSTOMER_LEDGER: {
+    label: "Ledger Item",
+    noun: "ledger item",
+    pluralLabel: "Ledger Items",
+    placeholder: "Select Ledger Items",
+    numberLabel: "Document",
+    dateLabel: "Date",
+    originalLabel: "Original Amount",
+    paidLabel: "Settled",
+    modes: ["FIXED"],
+    intro:
+      "The customer's open items in SAP. Payments received and credit memos are owed to them (Cr); " +
+      "their invoices reduce what is refunded (Dr). The refund is the credits less the debits.",
+    // Live: `GET /advance-payments/open-documents/?card_code=` (the customer's ledger).
+    live: true,
+    documents: [],
+  },
 };
+
+/** A ledger DEBIT counts against the refund; everything else counts for it. */
+export const lineSign = (doc: OpenDocument) => (doc.ledger?.direction === "DEBIT" ? -1 : 1);
+
+/** What a line may still take: SAP's open amount, less what other OMS requests hold. */
+export const availableOf = (doc: OpenDocument) => doc.oms?.available ?? doc.open;
 
 /* ── The case table ──────────────────────────────────────────────────────── */
 
@@ -323,8 +326,15 @@ export const CASE_RULES: Record<PartnerType, Partial<Record<PaymentAgainst, Case
     ADVANCE: { expectedBillDate: true },
     // The imprest account (an ORGV business partner) has its own open bills
     // in SAP, and this pays against them, exactly as a vendor's bills are.
-    AGAINST_BILL: { reference: "VENDOR_BILL", expectedBillDate: true },
+    // The bills are the expense already: there is no bill still to expect.
+    AGAINST_BILL: { reference: "VENDOR_BILL" },
     OTHER: { expectedBillDate: true },
+  },
+  // A REFUND of what the customer is owed: against the open items on their
+  // ledger (picked by hand, never all at once), or a typed amount on account.
+  CUSTOMER: {
+    AGAINST_LEDGER: { reference: "CUSTOMER_LEDGER" },
+    ON_ACCOUNT: {},
   },
 };
 
@@ -339,7 +349,12 @@ export const CASE_RULES: Record<PartnerType, Partial<Record<PaymentAgainst, Case
  *   SAP_EMPLOYEES   `GET /advance-payments/employees/` — Employee Advance
  *   SAMPLE_VENDORS  the sample vendors that own the sample POs / documents
  */
-export type PartnerSource = "SAP_VENDORS" | "SAP_IMPREST" | "SAP_EMPLOYEES" | "SAMPLE_VENDORS";
+export type PartnerSource =
+  | "SAP_VENDORS"
+  | "SAP_IMPREST"
+  | "SAP_EMPLOYEES"
+  | "SAP_CUSTOMERS"
+  | "SAMPLE_VENDORS";
 
 /**
  * The CardCode prefix that marks each kind of business partner in SAP.
@@ -368,11 +383,15 @@ export function partnerSourceFor(
   }
   if (type === "EMPLOYEE_ADVANCE") return "SAP_EMPLOYEES";
   if (type === "EMPLOYEE_IMPREST") return "SAP_IMPREST";
+  if (type === "CUSTOMER") return "SAP_CUSTOMERS";
   return null;
 }
 
 export const isLiveSource = (source: PartnerSource | null) =>
-  source === "SAP_VENDORS" || source === "SAP_IMPREST" || source === "SAP_EMPLOYEES";
+  source === "SAP_VENDORS" ||
+  source === "SAP_IMPREST" ||
+  source === "SAP_EMPLOYEES" ||
+  source === "SAP_CUSTOMERS";
 
 export interface ResolvedCase {
   paymentAgainstOptions: ReadonlyArray<{ value: PaymentAgainst; label: string }>;
@@ -456,7 +475,12 @@ export function resolveCase(form: RequestForm): ResolvedCase {
     repayment: Boolean(rule?.repayment),
     installments: Boolean(rule?.repayment) && form.returnMethod === "EMI",
     expectedBillDate: Boolean(rule?.expectedBillDate),
-    partnerLabel: form.type === "VENDOR" || form.type === "" ? "Business Partner" : "Employee",
+    partnerLabel:
+      form.type === "VENDOR" || form.type === ""
+        ? "Business Partner"
+        : form.type === "CUSTOMER"
+          ? "Customer"
+          : "Employee",
     partnerSource,
     livePartners,
     liveDocuments,
@@ -472,8 +496,8 @@ export function resolveCase(form: RequestForm): ResolvedCase {
 
 const CLEARED_DOCUMENTS = { selected: [] as OpenDocument[], allocations: {} } as const;
 const CLEARED_PARTNER = { partner: "", partnerName: "" } as const;
-/** Budgets are cost centres of ONE company's SAP. */
-const CLEARED_PURPOSE = { budget: "", budgetName: "", subBudget: "", subBudgetName: "" } as const;
+/** Budget heads are cost centres of ONE company's SAP. The purpose is not. */
+const CLEARED_DEPARTMENT = { budget: "", budgetName: "" } as const;
 const CLEARED_REPAYMENT = {
   returnMethod: "",
   returnMethodOther: "",
@@ -576,7 +600,7 @@ export function applyChange(form: RequestForm, patch: Partial<RequestForm>): Req
   // are not the other companies', and a CardCode chosen under OIL may name
   // someone else — or no one — under MART.
   if (changed("company")) {
-    next = { ...next, ...CLEARED_PARTNER, ...CLEARED_DOCUMENTS, ...CLEARED_PURPOSE };
+    next = { ...next, ...CLEARED_PARTNER, ...CLEARED_DOCUMENTS, ...CLEARED_DEPARTMENT };
   }
   if (changed("type")) {
     next = {
@@ -693,6 +717,7 @@ export function calculatePayment(
         error: `Cannot exceed the open amount of ${formatINR(document.open)}.`,
       };
     }
+    if (value > availableOf(document)) return { payment: null, error: heldError(document) };
     return { payment: toPaise(value), error: null };
   }
 
@@ -701,7 +726,18 @@ export function calculatePayment(
   if (Number.isNaN(percent) || percent <= 0 || percent > 100) {
     return { payment: null, error: "Enter a percentage above 0 and up to 100." };
   }
-  return { payment: toPaise((document.open * percent) / 100), error: null };
+  const payment = toPaise((document.open * percent) / 100);
+  if (payment > availableOf(document)) return { payment: null, error: heldError(document) };
+  return { payment, error: null };
+}
+
+/** Other OMS requests already hold part of the document. */
+function heldError(document: OpenDocument): string {
+  const held = document.open - availableOf(document);
+  return (
+    `Only ${formatINR(availableOf(document))} is available: ${formatINR(held)} of it is ` +
+    `already held by other OMS requests.`
+  );
 }
 
 export interface AllocationRow {
@@ -737,9 +773,11 @@ export interface AllocationTotals {
  */
 export function allocationTotals(rows: AllocationRow[]): AllocationTotals {
   const paise = (value: number) => Math.round(value * 100);
+  // A ledger DEBIT (a customer's invoice) is netted off, as SAP nets it.
   return {
-    open: rows.reduce((sum, row) => sum + paise(row.document.open), 0) / 100,
-    payment: rows.reduce((sum, row) => sum + paise(row.calc.payment ?? 0), 0) / 100,
+    open: rows.reduce((sum, row) => sum + lineSign(row.document) * paise(row.document.open), 0) / 100,
+    payment:
+      rows.reduce((sum, row) => sum + lineSign(row.document) * paise(row.calc.payment ?? 0), 0) / 100,
     complete: rows.length > 0 && rows.every((row) => row.calc.payment !== null),
   };
 }
@@ -943,10 +981,8 @@ export function validate(form: RequestForm, today: string = todayIso()): Validat
     missing.push("Payment Against (what it is)");
   }
   if (c.decided && !form.partner) missing.push(c.partnerLabel);
-  if (!form.department) missing.push("Department");
-  else if (form.hasSubDepartments && !form.subDepartment) missing.push("Sub-department");
-  if (!form.budget) missing.push("Payment Purpose (Budget)");
-  if (!form.subBudget) missing.push("Payment Purpose (Sub Budget)");
+  if (!form.budget) missing.push("Department");
+  if (!form.purpose) missing.push("Payment Purpose");
   if (c.expectedDate && !form.expectedDate) missing.push("Expected Bill Date");
   const poDate = c.expectedDate
     ? pastDateError("Expected Bill Date", form.expectedDate, today)
@@ -962,6 +998,12 @@ export function validate(form: RequestForm, today: string = todayIso()): Validat
     for (const row of allocationRows(form)) {
       if (row.calc.error) problems.push(`${row.document.number}: ${row.calc.error}`);
       else if (row.calc.payment === null) missing.push(`Payment for ${row.document.number}`);
+    }
+    const totals = allocationTotals(allocationRows(form));
+    if (c.reference === "CUSTOMER_LEDGER" && totals.complete && totals.payment <= 0) {
+      problems.push(
+        "The credits chosen must come to more than the invoices: the refund is the credits less the debits.",
+      );
     }
   }
   if (c.plainAmount) {

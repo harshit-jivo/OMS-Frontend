@@ -18,7 +18,9 @@ import { SegmentedControl } from "../../components/ui/segmented";
 import { cn } from "@/lib/utils";
 
 import { ChoiceOrText } from "./ChoiceOrText";
-import { SapAttachmentLink } from "./SapAttachmentLink";
+import { DocumentHistory } from "./DocumentHistory";
+import { SapAttachmentLink, SapAttachmentList } from "./SapAttachmentLink";
+import { historyTargetOf, omsSummary, sapDocumentOf } from "./sapMapping";
 
 import {
   PAYMENT_MODES,
@@ -152,6 +154,7 @@ export function ReferenceDetails({
   rows,
   totals,
   onAllocationChange,
+  company,
 }: {
   kind: ReferenceKind;
   documents: OpenDocument[];
@@ -167,6 +170,8 @@ export function ReferenceDetails({
   rows: AllocationRow[];
   totals: AllocationTotals;
   onAllocationChange: (id: string, patch: Partial<Allocation>) => void;
+  /** The request's company: what a chosen document's SAP attachments are read from. */
+  company?: string;
 }) {
   const def = REFERENCE_KINDS[kind];
   const noun = def.pluralLabel.toLowerCase();
@@ -240,6 +245,7 @@ export function ReferenceDetails({
           totals={totals}
           onAllocationChange={onAllocationChange}
           onDelete={(id) => onChange(value.filter((selected) => selected !== id))}
+          company={company}
         />
       ) : null}
     </FormSection>
@@ -259,6 +265,8 @@ function documentSubtitle(doc: OpenDocument): string {
     doc.note,
     doc.reference ? `Ref ${doc.reference}` : null,
     formatDate(doc.date),
+    // What other OMS requests already hold against it, seen before it is ticked.
+    omsSummary(doc) || null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -291,12 +299,14 @@ function SelectedDocuments({
   totals,
   onAllocationChange,
   onDelete,
+  company,
 }: {
   kind: ReferenceKind;
   rows: AllocationRow[];
   totals: AllocationTotals;
   onAllocationChange: (id: string, patch: Partial<Allocation>) => void;
   onDelete: (id: string) => void;
+  company?: string;
 }) {
   const def = REFERENCE_KINDS[kind];
   const one = def.noun;
@@ -378,6 +388,11 @@ function SelectedDocuments({
                 <span>
                   <span className="flex flex-wrap items-center gap-1.5">
                     <span className="text-[13px] font-semibold text-brand">{doc.number}</span>
+                    {doc.ledger ? (
+                      <Badge tone={doc.ledger.direction === "CREDIT" ? "ok" : "hold"}>
+                        {doc.ledger.direction === "CREDIT" ? "Cr" : "Dr"}
+                      </Badge>
+                    ) : null}
                     {due ? <Badge tone="bad">{due}</Badge> : null}
                   </span>
                   <span className="block text-[11px] text-subtle">{documentSubtitle(doc)}</span>
@@ -456,16 +471,30 @@ function SelectedDocuments({
                       <DetailField label={def.paidLabel} value={formatINR(doc.paid)} />
                       <DetailField label="Open Amount" value={formatINR(doc.open)} strong />
                       {doc.note ? <DetailField label="Description" value={doc.note} /> : null}
+                      {(() => {
+                        const target = company ? historyTargetOf(doc, company) : null;
+                        return target ? (
+                          <DetailField
+                            label="OMS Payment History"
+                            span="full"
+                            value={<DocumentHistory target={target} />}
+                          />
+                        ) : null;
+                      })()}
+                      {/* Every attachment: a bill's own, its GRPOs' and their POs'.
+                          Read from SAP only when the row is opened. */}
                       <DetailField
-                        label="SAP Attachment"
+                        label="SAP Attachments"
                         span="full"
-                        value={
-                          doc.attachment ? (
+                        value={(() => {
+                          const source = sapDocumentOf(doc, company);
+                          if (source) return <SapAttachmentList {...source} />;
+                          return doc.attachment ? (
                             <SapAttachmentLink attachment={doc.attachment} />
                           ) : (
                             <span className="text-subtle">None in SAP</span>
-                          )
-                        }
+                          );
+                        })()}
                       />
                     </DetailGrid>
                   </div>
@@ -484,7 +513,7 @@ function SelectedDocuments({
         )}
       >
         <span className="text-[13px] font-semibold text-ink">
-          Total
+          {kind === "CUSTOMER_LEDGER" ? "Refund (credits − debits)" : "Total"}
           <span className="ml-1 font-normal text-subtle">
             ({rows.length} {rows.length === 1 ? one : def.pluralLabel.toLowerCase()})
           </span>

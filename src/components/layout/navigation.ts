@@ -43,6 +43,7 @@ import {
   HiOutlineChartBarSquare,
   HiOutlineChartPie,
   HiOutlineCheckBadge,
+  HiOutlinePaperAirplane,
   HiOutlineCheckCircle,
   HiOutlineClipboardDocumentCheck,
   HiOutlineClipboardDocumentList,
@@ -165,6 +166,7 @@ export const SIDEBAR_SECTIONS: SidebarSectionDef[] = [
       // Raise payment requests and follow them; the approval desk decides them.
       { to: "/Advance_Payment_Request", label: "Payments", icon: HiOutlineBanknotes },
       { to: "/Advance_Payment_Approval", label: "Payments Approval", icon: HiOutlineCheckBadge },
+      { to: "/Advance_Payment_Dispatch", label: "Send Bills & POs", icon: HiOutlinePaperAirplane },
     ],
   },
   {

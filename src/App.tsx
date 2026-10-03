@@ -105,6 +105,7 @@ const Ap_Invoice_Entry = lazy(() => import("./pages/Ap_Invoice_Entry"));
 // (Advance_Payment_Approval), on `/api/advance-payments/requests/`.
 const AdvancePaymentRequest = lazy(() => import("./pages/Advance_Payment_Request"));
 const AdvancePaymentApproval = lazy(() => import("./pages/Advance_Payment_Approval"));
+const AdvancePaymentDispatch = lazy(() => import("./pages/Advance_Payment_Dispatch"));
 const AddEmployee = lazy(() => import("./pages/advancePayments/Add_Employee"));
 
 import { AuthProvider } from "./auth";
@@ -637,6 +638,15 @@ function App() {
           element={
             <ProtectedPage>
               <AdvancePaymentApproval />
+            </ProtectedPage>
+          }
+        />
+
+        <Route
+          path="/Advance_Payment_Dispatch"
+          element={
+            <ProtectedPage>
+              <AdvancePaymentDispatch />
             </ProtectedPage>
           }
         />
