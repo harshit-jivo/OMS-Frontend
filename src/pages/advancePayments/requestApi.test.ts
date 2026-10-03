@@ -12,18 +12,12 @@ import { EMPTY_FORM, applyChange, changeAllocation, type RequestForm } from "./r
 import { apiRequest } from "./testRequests";
 
 const COMMON: Partial<RequestForm> = {
-  department: "35",
-  departmentName: "Finance",
-  subDepartment: "92",
-  subDepartmentName: "AP",
-  hasSubDepartments: true,
   budget: "BackOff",
   budgetName: "Back Office",
-  subBudget: "Accounts",
-  subBudgetName: "Accounts",
+  purpose: "RAW_MATERIAL",
+  purposeLabel: "Raw Material Purchase",
   ownership: "Preshit Singh (JWPL0030)",
   paymentDate: "2026-10-01",
-  priority: "HIGH",
   remarks: "Part settlement",
 };
 
@@ -50,11 +44,13 @@ function vendorBills(): RequestForm {
 
 /** What the server would answer for `input`: the input, stored. */
 function stored(form: RequestForm): ApiRequest {
-  const { department_id, sub_department_id, ...fields } = toApiRequest(form);
+  const fields = toApiRequest(form);
   return apiRequest(30, {
     ...fields,
-    department: { id: department_id!, name: form.departmentName },
-    sub_department: sub_department_id ? { id: sub_department_id, name: form.subDepartmentName } : null,
+    department: null,
+    sub_department: null,
+    budget_name: form.budgetName,
+    purpose_label: form.purposeLabel,
     documents: fields.documents.map((d, i) => ({ ...d, id: i + 1, amount: `${d.amount}.00` })),
     amount: `${fields.amount}.00`,
   });
@@ -69,14 +65,13 @@ describe("the request, to the API and back", () => {
       payment_against: "AGAINST_BILL",
       partner_code: "VENDA000101",
       amount: "137500",
-      department_id: 35,
-      sub_department_id: 92,
       owner_label: "Preshit Singh (JWPL0030)",
       payment_date: "2026-10-01",
       expected_date: null,
       budget_code: "BackOff",
-      sub_budget_code: "Accounts",
+      purpose_code: "RAW_MATERIAL",
     });
+    expect(input).not.toHaveProperty("department_id");
     expect(input.documents.map((d) => [d.sap_doc_entry, d.amount, d.mode])).toEqual([
       [10256, "97500", "FIXED"],
       [10271, "40000", "FIXED"],
@@ -138,6 +133,7 @@ describe("the request, to the API and back", () => {
 
 describe("the payment details, to the API and back", () => {
   const payout: PayoutDetails = {
+    tds: null,
     beneficiaryName: "ABC TECHNOLOGIES",
     toAccountNumber: "50100234567812",
     toIfsc: "HDFC0001234",

@@ -23,6 +23,9 @@ import {
   SAP_OTHER_DOCUMENTS,
   SAP_VENDORS,
   SAP_BUDGETS,
+  PAYMENT_PURPOSES,
+  SAP_CUSTOMERS,
+  CUSTOMER_LEDGER,
   LEDGER,
 } from "./advancePayments/testData";
 
@@ -51,13 +54,23 @@ const READING = {
   },
 };
 
+/** Bill 10256's attachments and its GRPO's, as `/document-attachments/` answers. */
+// `vi.hoisted`: read by the vi.mock factory below.
+const { RELATED_ATTACHMENTS } = vi.hoisted(() => ({
+  RELATED_ATTACHMENTS: [
+    { kind: "bill" as const, kind_label: "A/P invoice", doc_entry: 10256, doc_num: 10256, line: 1,
+      file_name: "DocScanner Sep 17, 2026 12-39 PM.pdf", date: "2026-09-17", note: "" },
+    { kind: "bill" as const, kind_label: "A/P invoice", doc_entry: 10256, doc_num: 10256, line: 2,
+      file_name: "approval mail.msg", date: "2026-09-18", note: "" },
+    { kind: "grpo" as const, kind_label: "Goods receipt PO", doc_entry: 27276, doc_num: 2026096833, line: 1,
+      file_name: "delivery challan.pdf", date: "2026-09-16", note: "" },
+  ],
+}));
+
+
 /** The employee master, as `/employee-directory/` answers the two pickers. */
 // `vi.hoisted`: vi.mock below is hoisted above ordinary constants.
-const { directory, DEPARTMENTS } = vi.hoisted(() => {
-  const DEPARTMENTS = [
-    { id: 40, name: "Cyber Security", sub_departments: [] },
-    { id: 35, name: "Finance", sub_departments: [{ id: 92, name: "AP" }, { id: 88, name: "AR" }] },
-  ];
+const { directory } = vi.hoisted(() => {
   const OWNERS = [
     { employee_code: "JWPL0115", employee_name: "Arvinder", role: 1 as const, role_label: "HOD", designation: null },
     { employee_code: "JWPL0030", employee_name: "Preshit Singh", role: 2 as const, role_label: "Sub-HOD", designation: null },
@@ -66,7 +79,6 @@ const { directory, DEPARTMENTS } = vi.hoisted(() => {
     { employee_code: "JWPL3100", employee_name: "Asha Rani", role: 3 as const, role_label: "Executive", designation: null },
   ];
   return {
-    DEPARTMENTS,
     directory: async (query: { roles?: number[]; notInSapFor?: string } = {}) =>
       query.notInSapFor ? NOT_IN_SAP : query.roles ? OWNERS : [...OWNERS, ...NOT_IN_SAP],
   };
@@ -84,15 +96,23 @@ vi.mock("../services/advancePaymentService", async (importOriginal) => {
       openOtherDocuments: vi.fn(),
       partnerBankAccounts: vi.fn(async () => []),
       employeeDirectory: vi.fn(directory),
-      departments: vi.fn(async () => DEPARTMENTS),
+      paymentPurposes: vi.fn(async () => PAYMENT_PURPOSES),
       budgets: vi.fn(async () => SAP_BUDGETS),
-      partnerLedger: vi.fn(async () => LEDGER),
+      partnerLedger: vi.fn(async (_company: string, cardCode: string) =>
+        cardCode === "CUSTA000846" ? CUSTOMER_LEDGER : LEDGER,
+      ),
+      customers: vi.fn(async () => SAP_CUSTOMERS),
       readDocumentAttachment: vi.fn(),
       documentAttachment: vi.fn(async () => new Blob(["%PDF-"], { type: "application/pdf" })),
+      documentAttachments: vi.fn(async (_company: string, _kind: string, docEntry: number) =>
+        docEntry === 10256 ? RELATED_ATTACHMENTS : [],
+      ),
       // The requests: pointed at a fresh FakeRequestServer before each test.
       requests: vi.fn(),
       request: vi.fn(),
       createRequest: vi.fn(),
+      assignments: vi.fn(async () => []),
+      assignmentAction: vi.fn(),
       editRequest: vi.fn(),
       act: vi.fn(),
       savePayout: vi.fn(),
@@ -229,7 +249,7 @@ describe("Advance Payment Request", () => {
     expect(heading("Reference Details")).toBeNull();
   });
 
-  it("offers the three types", async () => {
+  it("offers the four types", async () => {
     await setup();
     const type = screen.getByLabelText(/^Type/) as HTMLSelectElement;
     expect([...type.options].map((o) => o.text)).toEqual([
@@ -237,7 +257,62 @@ describe("Advance Payment Request", () => {
       "Vendor",
       "Employee",
       "Employee Imprest",
+      "Customer",
     ]);
+  });
+
+  describe("Customer: a refund of what they are owed", () => {
+    it("offers Against Ledger and On Account", async () => {
+      const user = await setup();
+      await user.selectOptions(screen.getByLabelText(/^Type/), "CUSTOMER");
+      await user.click(field(/^Payment Against/));
+      const options = within(await screen.findByRole("listbox"))
+        .getAllByRole("option")
+        .map((o) => o.textContent);
+      expect(options).toEqual(["Against Ledger", "On Account"]);
+    });
+
+    it("lists the customer's refundable ledger items, picked by hand, and nets them", async () => {
+      const user = await setup();
+      await start(user, "CUSTOMER", "Against Ledger");
+      await pick(user, /^Customer/, /ISHWER CHAND/);
+      expect(service.customers).toHaveBeenCalled();
+      await screen.findByText("Select Ledger Items");
+      const items = await openChecklist(user, /^Ledger Items/);
+      // The receipt and the invoice; not the payment made out to them, nor
+      // the receipt another request already holds in full.
+      expect(items).toHaveLength(2);
+      expect(items[0]).toMatch(/^626210827/);
+      expect(items[1]).toMatch(/^626050737/);
+      // Nothing is ticked for them.
+      expect(heading(/^Selected Ledger Items/)).toBeNull();
+
+      await tick(user, /^Ledger Items/, /626210827/, /626050737/);
+      await user.type(field(/^Payment amount for 626210827/), "100");
+      await user.type(field(/^Payment amount for 626050737/), "80");
+      expect(total().textContent).toBe("₹20");
+      expect(screen.getByText("Refund (credits − debits)")).toBeTruthy();
+    });
+
+    it("refuses invoices that outweigh the credits", async () => {
+      const user = await setup();
+      await start(user, "CUSTOMER", "Against Ledger");
+      await pick(user, /^Customer/, /ISHWER CHAND/);
+      await screen.findByText("Select Ledger Items");
+      await tick(user, /^Ledger Items/, /626210827/, /626050737/);
+      await user.type(field(/^Payment amount for 626210827/), "50");
+      await user.type(field(/^Payment amount for 626050737/), "80");
+      await user.click(screen.getByRole("button", { name: "Submit Request" }));
+      expect(await screen.findByText(/credits chosen must come to more than the invoices/)).toBeTruthy();
+    });
+
+    it("On Account takes a typed amount", async () => {
+      const user = await setup();
+      await start(user, "CUSTOMER", "On Account");
+      await pick(user, /^Customer/, /ISHWER CHAND/);
+      expect(field(/^Amount/)).toBeTruthy();
+      expect(screen.queryByLabelText(/^Ledger Items/)).toBeNull();
+    });
   });
 
   it("picks Ownership from the employee master's HODs and Sub-HODs", async () => {
@@ -253,25 +328,31 @@ describe("Advance Payment Request", () => {
     expect(field(/^Ownership/).textContent).toMatch(/Preshit Singh \(JWPL0030\)/);
   });
 
-  it("asks the Department, then that department's Sub-department", async () => {
+  it("asks the Department from SAP's budget heads, and the Payment Purpose from the desk's list", async () => {
     const user = await setup();
-    const sub = () => field(/^Sub-department/) as unknown as HTMLButtonElement;
-    expect(sub().disabled).toBe(true); // nothing to list before a department
+    const department = () => field(/^Department/) as unknown as HTMLButtonElement;
+    expect(department().disabled).toBe(true); // budget heads are per company
+    expect(screen.queryByLabelText(/^Sub-department/)).toBeNull();
+    expect(screen.queryByLabelText(/Sub Budget/)).toBeNull();
 
-    expect(await openOptions(user, /^Department/)).toEqual(["Cyber Security", "Finance"]);
+    await start(user, "VENDOR", "Against Bill");
+    const heads = await openOptions(user, /^Department/);
+    expect(heads).toHaveLength(2); // budget heads only, never a sub budget
+    expect(heads[0]).toMatch(/Back Office/);
+    expect(heads[1]).toMatch(/Factory/);
     await user.keyboard("{Escape}");
-    await pick(user, /^Department/, /Finance/);
-    expect(sub().disabled).toBe(false);
-    expect(await openOptions(user, /^Sub-department/)).toEqual(["AP", "AR"]);
-    await user.keyboard("{Escape}");
-    await pick(user, /^Sub-department/, /^AR$/);
-    expect(sub().textContent).toMatch(/AR/);
+    await pick(user, /^Department/, /Back Office/);
+    expect(department().textContent).toMatch(/Back Office/);
 
-    // A new department starts the sub-department afresh; one with none has none to pick.
-    await pick(user, /^Department/, /Cyber Security/);
-    expect(sub().disabled).toBe(true);
-    expect(sub().textContent).not.toMatch(/AR/);
-    expect(screen.getByText("This department has no sub-departments.")).toBeTruthy();
+    const purposes = await openOptions(user, /^Payment Purpose/);
+    expect(purposes.map((p) => p.replace(/(Goods|Services|People)$/, ""))).toEqual([
+      "Raw Material Purchase",
+      "Rent",
+      "Employee Advance",
+    ]);
+    await user.keyboard("{Escape}");
+    await pick(user, /^Payment Purpose/, /^Rent/);
+    expect(field(/^Payment Purpose/).textContent).toMatch(/Rent/);
   });
 
   describe("typing your own answer instead of choosing Other", () => {
@@ -471,7 +552,7 @@ describe("Advance Payment Request", () => {
       expect(screen.getByText("ABC/INV/7781")).toBeTruthy(); // vendor ref
     });
 
-    it("opens the bill's latest SAP attachment from the expanded row", async () => {
+    it("lists every SAP attachment of the bill, its GRPO's too, and opens one by its line", async () => {
       const open = vi.spyOn(window, "open").mockReturnValue(null);
       const createUrl = vi.fn(() => "blob:attachment");
       const revokeUrl = vi.fn();
@@ -481,19 +562,24 @@ describe("Advance Payment Request", () => {
       await tick(user, /^Bills/, /10256/, /10271/);
 
       await user.click(screen.getByRole("button", { name: /^10256/ }));
-      const link = screen.getByRole("button", {
+      const link = await screen.findByRole("button", {
         name: "Open SAP attachment DocScanner Sep 17, 2026 12-39 PM.pdf",
       });
-      expect(link.textContent).toMatch(/\(latest of 3\)/);
+      expect(service.documentAttachments).toHaveBeenCalledWith("OIL", "bill", 10256);
+      // All of them, grouped by the document each sits on: the bill's two, its GRPO's one.
+      expect(screen.getByText("A/P invoice 10256 (2)")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Open SAP attachment approval mail.msg" })).toBeTruthy();
+      expect(screen.getByText("Goods receipt PO 2026096833 (1)")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Open SAP attachment delivery challan.pdf" })).toBeTruthy();
       await user.click(link);
-      // Fetched by DOCUMENT — the server reads the file name from SAP.
-      expect(service.documentAttachment).toHaveBeenCalledWith("OIL", "bill", 10256);
+      // Fetched by DOCUMENT and LINE — the server reads the file name from SAP.
+      expect(service.documentAttachment).toHaveBeenCalledWith("OIL", "bill", 10256, 1);
       await vi.waitFor(() => expect(createUrl).toHaveBeenCalled());
       open.mockRestore();
 
-      // A bill with nothing attached in SAP says so.
+      // A bill with nothing attached in SAP, here or on its GRPO, says so.
       await user.click(screen.getByRole("button", { name: /^10271/ }));
-      expect(screen.getByText("None in SAP")).toBeTruthy();
+      expect(await screen.findByText("None in SAP")).toBeTruthy();
     });
 
     it("reads a chosen bill's SAP attachment in the background, and shows the requester nothing of it", async () => {
@@ -775,7 +861,7 @@ describe("Advance Payment Request", () => {
     expect(screen.getByLabelText(/^Amount/)).toBeTruthy();
   });
 
-  it("Employee Imprest lists SAP's ORGV imprest accounts and keeps its Expected Bill Date", async () => {
+  it("Employee Imprest lists SAP's ORGV imprest accounts, and asks the Expected Bill Date only without bills", async () => {
     const user = await setup();
     await start(user, "EMPLOYEE_IMPREST", "Advance");
     const employees = await openOptions(user, /^Employee/);
@@ -788,8 +874,11 @@ describe("Advance Payment Request", () => {
     await user.keyboard("{Escape}");
 
     await user.type(field(/^Expected Bill Date/), "2026-10-05");
+    // Against bills there is no bill still to expect.
     await answer(user, /^Payment Against/, "Against Bill");
-    expect(field(/^Expected Bill Date/).value).toBe("2026-10-05");
+    expect(screen.queryByLabelText(/^Expected Bill Date/)).toBeNull();
+    await answer(user, /^Payment Against/, "Advance");
+    expect(field(/^Expected Bill Date/)).toBeTruthy();
 
     await user.selectOptions(screen.getByLabelText(/^Type/), "EMPLOYEE_ADVANCE");
     await answer(user, /^Payment Against/, "Petty cash");
@@ -805,8 +894,8 @@ describe("Advance Payment Request", () => {
     const bills = await openChecklist(user, /^Bills/);
     expect(bills).toHaveLength(1);
     expect(bills[0]).toMatch(/^10290/);
-    // …and it still asks when the bill is expected.
-    expect(screen.getByLabelText(/^Expected Bill Date/)).toBeTruthy();
+    // …and, paying bills it already has, no Expected Bill Date.
+    expect(screen.queryByLabelText(/^Expected Bill Date/)).toBeNull();
   });
 
   it("changing Type clears the partner, the bills and every row", async () => {
@@ -821,6 +910,70 @@ describe("Advance Payment Request", () => {
     expect(field(/^Payment Against/).value).toBe("");
     expect(screen.getByLabelText(/^Employee/).textContent).toMatch(/Select Employee/);
     expect(heading(/^Selected Bills/)).toBeNull();
+  });
+
+  describe("Assigned to Me", () => {
+    const SENT = {
+      id: 5, company: "OIL" as const, kind: "BILL" as const, sap_doc_entry: 10256, sap_doc_num: "10256",
+      card_code: "VENDA000101", card_name: "ABC Technologies", vendor_ref: "ABC/INV/7781",
+      doc_date: "2026-08-04", due_date: "2026-09-03", doc_total: "250000", open_amount: "150000",
+      note: "Please clear this one", status: "OPEN" as const,
+      assigned_to: TESTER, assigned_by: { id: 3, name: "Accounts Desk", username: "acc" },
+      request: null, created_on: "2026-09-30T10:00:00+05:30",
+    };
+
+    it("lists what was sent, and raises a request filled from the bill as SAP has it now", async () => {
+      service.assignments.mockResolvedValue([SENT]);
+      const user = userEvent.setup();
+      renderPage(<Advance_Payment_Request />, { route: "/Advance_Payment_Request" });
+      await user.click(await screen.findByRole("tab", { name: /Assigned to Me/ }));
+      const table = await screen.findByRole("table", { name: "Assigned to me" });
+      expect(within(table).getByText("Please clear this one")).toBeTruthy();
+      expect(within(table).getByText("Accounts Desk")).toBeTruthy();
+
+      await user.click(within(table).getByRole("button", { name: "Raise Request" }));
+      // Re-read live: the vendor's open bills.
+      expect(service.openVendorInvoices).toHaveBeenCalledWith("OIL", "VENDA000101");
+      expect(await screen.findByText(/sent by Accounts Desk/)).toBeTruthy();
+      expect((screen.getByLabelText(/^Company/) as HTMLSelectElement).value).toBe("OIL");
+      expect((screen.getByLabelText(/^Type/) as HTMLSelectElement).value).toBe("VENDOR");
+      expect(field(/^Payment Against/).value).toBe("Against Bill");
+      expect(screen.getByLabelText(/^Business Partner/).textContent).toMatch(/ABC Technologies/);
+      expect(heading("Selected Bills (1)")).not.toBeNull();
+
+      // The rest is the requester's; the request then closes the assignment.
+      await user.type(field(/^Payment amount for 10256/), "25000");
+      await pick(user, /^Department/, /Back Office/);
+      await pick(user, /^Payment Purpose/, /Raw Material Purchase/);
+      await pick(user, /^Ownership/, /Arvinder/);
+      await user.type(field(/^Payment Date/), "2026-10-01");
+      await user.type(field(/^Remarks/), "As sent");
+      service.assignments.mockResolvedValue([]);
+      await user.click(screen.getByRole("button", { name: "Submit Request" }));
+      expect(await screen.findByText(/raised for ₹25,000/)).toBeTruthy();
+      const [input] = vi.mocked(advancePaymentService.createRequest).mock.calls[0];
+      expect(input).toMatchObject({ assignment_id: 5, partner_code: "VENDA000101", payment_against: "AGAINST_BILL" });
+    });
+
+    it("says so when the bill is no longer open", async () => {
+      service.assignments.mockResolvedValue([{ ...SENT, sap_doc_entry: 99999, sap_doc_num: "99999" }]);
+      const user = userEvent.setup();
+      renderPage(<Advance_Payment_Request />, { route: "/Advance_Payment_Request" });
+      await user.click(await screen.findByRole("tab", { name: /Assigned to Me/ }));
+      await user.click(await screen.findByRole("button", { name: "Raise Request" }));
+      expect(await screen.findByText("Bill 99999 is no longer open in SAP, or other OMS requests already hold all of it."))
+        .toBeTruthy();
+    });
+
+    it("can be dismissed", async () => {
+      service.assignments.mockResolvedValue([SENT]);
+      service.assignmentAction.mockResolvedValue({ ...SENT, status: "DISMISSED" });
+      const user = userEvent.setup();
+      renderPage(<Advance_Payment_Request />, { route: "/Advance_Payment_Request" });
+      await user.click(await screen.findByRole("tab", { name: /Assigned to Me/ }));
+      await user.click(await screen.findByRole("button", { name: "Dismiss" }));
+      expect(service.assignmentAction).toHaveBeenCalledWith(5, "dismiss");
+    });
   });
 
   describe("Entries tab", () => {
@@ -953,10 +1106,8 @@ describe("Advance Payment Request", () => {
       await waitForBills();
       await tick(user, /^Bills/, /10256/);
       await user.type(field(/^Payment amount for 10256/), "25000");
-      await pick(user, /^Department/, /Finance/);
-      await pick(user, /^Sub-department/, /^AP$/);
-      await pick(user, /^Payment Purpose \(Budget\)/, /Back Office/);
-      await pick(user, /^Payment Purpose \(Sub Budget\)/, /^Accounts/);
+      await pick(user, /^Department/, /Back Office/);
+      await pick(user, /^Payment Purpose/, /Raw Material Purchase/);
       await pick(user, /^Ownership/, /Arvinder/);
       await user.type(field(/^Payment Date/), "2026-10-01");
       await user.type(field(/^Remarks/), "Mobilisation advance");
@@ -975,12 +1126,10 @@ describe("Advance Payment Request", () => {
         payment_against: "AGAINST_BILL",
         partner_code: "VENDA000101",
         amount: "25000",
-        department_id: 35,
-        sub_department_id: 92,
         owner_label: "Arvinder (JWPL0115)",
         payment_date: "2026-10-01",
         budget_code: "BackOff",
-        sub_budget_code: "Accounts",
+        purpose_code: "RAW_MATERIAL",
         // The bill goes with what its attachment was read to say.
         documents: [
           expect.objectContaining({
@@ -1001,9 +1150,8 @@ describe("Advance Payment Request", () => {
       await answer(user, /^Payment Against/, "Tools");
       await pick(user, /^Employee/, /RAVINDER SINGH SHUNTY/);
       await user.type(field(/^Amount/), "5000");
-      await pick(user, /^Department/, /Cyber Security/);
-      await pick(user, /^Payment Purpose \(Budget\)/, /Back Office/);
-      await pick(user, /^Payment Purpose \(Sub Budget\)/, /^Accounts/);
+      await pick(user, /^Department/, /Back Office/);
+      await pick(user, /^Payment Purpose/, /Employee Advance/);
       await pick(user, /^Ownership/, /Arvinder/);
       await user.type(field(/^Payment Date/), "2026-10-01");
       await user.type(field(/^Remarks/), "Tools for the site");
@@ -1039,7 +1187,10 @@ describe("Advance Payment Request", () => {
       expect(await screen.findByText("Changes saved.")).toBeTruthy();
       const [id, input, options] = vi.mocked(advancePaymentService.editRequest).mock.calls[0];
       expect(id).toBe(20);
-      expect(input).toMatchObject({ amount: "6000", department_id: 40, sub_department_id: null });
+      // A request raised before budget heads keeps its old department on the
+      // server; the form sends only the Department (budget head) and purpose.
+      expect(input).toMatchObject({ amount: "6000", budget_code: "BackOff", purpose_code: "RAW_MATERIAL" });
+      expect(input).not.toHaveProperty("department_id");
       expect(options).toMatchObject({ resubmit: false, removeFileIds: [] });
     });
 

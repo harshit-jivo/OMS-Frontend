@@ -25,6 +25,7 @@ import {
   SAP_PAYEE_ACCOUNTS,
   SAP_VENDORS,
   SAP_BUDGETS,
+  PAYMENT_PURPOSES,
   LEDGER,
 } from "./advancePayments/testData";
 
@@ -38,11 +39,7 @@ afterAll(() => vi.useRealTimers());
 
 /** The employee master, as `/employee-directory/` answers the two pickers. */
 // `vi.hoisted`: vi.mock below is hoisted above ordinary constants.
-const { directory, DEPARTMENTS } = vi.hoisted(() => {
-  const DEPARTMENTS = [
-    { id: 40, name: "Cyber Security", sub_departments: [] },
-    { id: 35, name: "Finance", sub_departments: [{ id: 92, name: "AP" }, { id: 88, name: "AR" }] },
-  ];
+const { directory } = vi.hoisted(() => {
   const OWNERS = [
     { employee_code: "JWPL0115", employee_name: "Arvinder", role: 1 as const, role_label: "HOD", designation: null },
     { employee_code: "JWPL0030", employee_name: "Preshit Singh", role: 2 as const, role_label: "Sub-HOD", designation: null },
@@ -51,7 +48,6 @@ const { directory, DEPARTMENTS } = vi.hoisted(() => {
     { employee_code: "JWPL3100", employee_name: "Asha Rani", role: 3 as const, role_label: "Executive", designation: null },
   ];
   return {
-    DEPARTMENTS,
     directory: async (query: { roles?: number[]; notInSapFor?: string } = {}) =>
       query.notInSapFor ? NOT_IN_SAP : query.roles ? OWNERS : [...OWNERS, ...NOT_IN_SAP],
   };
@@ -75,9 +71,14 @@ vi.mock("../services/advancePaymentService", async (importOriginal) => {
       cashAccounts: vi.fn(async () => SAP_CASH_ACCOUNTS),
       readPaymentProof: vi.fn(async () => PROOF_RESULT),
       employeeDirectory: vi.fn(directory),
-      departments: vi.fn(async () => DEPARTMENTS),
+      paymentPurposes: vi.fn(async () => PAYMENT_PURPOSES),
       budgets: vi.fn(async () => SAP_BUDGETS),
       readDocumentAttachment: vi.fn(),
+      documentAttachments: vi.fn(async () => []),
+      tdsOptions: vi.fn(async () => ({ rates: ["2"], codes: [], bills_with_tds: [] })),
+      purchaseOrder: vi.fn(async () => {
+        throw new Error("not in these tests");
+      }),
       partnerLedger: vi.fn(async () => LEDGER),
       // The requests: pointed at a fresh FakeRequestServer before each test.
       requests: vi.fn(),
@@ -266,7 +267,8 @@ describe("Payments Approval", () => {
     const details = within(screen.getByRole("heading", { name: "Request Details" }).closest("section")!);
     expect(details.getByText("ABC Technologies")).toBeTruthy();
     expect(details.getByText("Procurement — Rajesh")).toBeTruthy();
-    expect(details.getByText("Back Office / Accounts")).toBeTruthy(); // the Payment Purpose
+    expect(details.getByText("Back Office")).toBeTruthy(); // the Department: a budget head
+    expect(details.getByText("Raw Material Purchase")).toBeTruthy(); // the Payment Purpose
     const bills = screen.getByRole("heading", { name: /Bills & Amounts/ }).closest("section")!;
     expect(within(bills).getByText("10256")).toBeTruthy();
     expect(within(bills).getByText("₹97,500")).toBeTruthy();

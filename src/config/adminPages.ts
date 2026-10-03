@@ -72,6 +72,12 @@ export const GRANTABLE_ADMIN_PAGES: GrantablePage[] = [
     label: "Payments — approval desk",
     path: "/Advance_Payment_Approval",
   },
+  // Send SAP bills and POs to Advance Payment Users and Approvers to raise requests from.
+  {
+    key: "Advance_Payment_Dispatch",
+    label: "Payments — send bills & POs to users",
+    path: "/Advance_Payment_Dispatch",
+  },
   { key: "Distributor", label: "Distributor", path: "/Distributor" },
   { key: "Mart_Approval", label: "Orders", path: "/Mart_Approval" },
   // One key for the whole Legal module — unlocks Label Checker AND Nutrition
