@@ -220,6 +220,11 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
    * Workflows page, which the server checks on every action.
    */
   "/Advance_Payment_Approval": { permissions: ["Advance_Payment_Approval"] },
+  /*
+   * Send SAP bills and POs to Advance Payment Users and Approvers, who raise the request
+   * from them. Its own key: sending work out is neither raising nor approving.
+   */
+  "/Advance_Payment_Dispatch": { permissions: ["Advance_Payment_Dispatch"] },
 
   // --- Document tracker ---------------------------------------------------
   // Gated centrally by role, mirroring tracker/permissions.py.

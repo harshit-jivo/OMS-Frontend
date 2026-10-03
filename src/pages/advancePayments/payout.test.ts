@@ -23,6 +23,7 @@ const upi = (amount: string, extra: Partial<PayoutLine> = {}): PayoutLine => ({
 });
 
 const complete = (lines: PayoutLine[]): PayoutDetails => ({
+  tds: null,
   beneficiaryName: "ABC TECHNOLOGIES",
   toAccountNumber: "50100234567812",
   toIfsc: "HDFC0001234",

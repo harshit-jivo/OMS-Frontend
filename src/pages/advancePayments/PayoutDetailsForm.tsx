@@ -37,6 +37,7 @@ import {
 import { attachFile, formatSize, type FileAttachment } from "./attachments";
 import { ACCEPTED_FILE_TYPES, MAX_FILE_SIZE_MB } from "./constants";
 import { FormSection, RupeeInput } from "./PaymentSections";
+import { TdsSection, type TdsContext } from "./TdsSection";
 import {
   NOTE_DENOMINATIONS,
   PAYOUT_METHODS,
@@ -631,6 +632,7 @@ export function PayoutDetailsForm({
   company,
   payeeCardCode = "",
   manualEntry,
+  tds,
 }: {
   value: PayoutDetails;
   onChange: (next: PayoutDetails) => void;
@@ -649,6 +651,8 @@ export function PayoutDetailsForm({
   payeeCardCode?: string;
   /** Lock typing the payee's account behind a password (the Payment stage). */
   manualEntry?: ManualEntry;
+  /** A vendor payment: TDS may be deducted (at the Payment stage). Absent for every other type. */
+  tds?: TdsContext | null;
 }) {
   const banksQuery = useQuery({
     queryKey: ["advance-payments", "house-banks", company],
@@ -716,7 +720,9 @@ export function PayoutDetailsForm({
   }, [payeeDefault?.account_number, readOnly]);
 
   const allocated = payoutTotal(value);
-  const balanced = Math.round(allocated * 100) === Math.round(requestAmount * 100);
+  // With TDS the methods pay the request's amount less it.
+  const payable = requestAmount - (value.tds?.amount ?? 0);
+  const balanced = Math.round(allocated * 100) === Math.round(payable * 100);
   const setLine = (id: string, next: PayoutLine) =>
     onChange({ ...value, lines: value.lines.map((l) => (l.id === id ? next : l)) });
 
@@ -756,6 +762,10 @@ export function PayoutDetailsForm({
         />
       </FormSection>
 
+      {tds ? (
+        <TdsSection value={value} onChange={onChange} requestAmount={requestAmount} context={tds} readOnly={readOnly} />
+      ) : null}
+
       <FormSection
         title="Payment Methods"
         description="How the money goes out — split it across methods if it leaves more than one way."
@@ -789,7 +799,7 @@ export function PayoutDetailsForm({
                   ...value,
                   lines: [
                     ...value.lines,
-                    newPayoutLine(defaultMethodFor(Math.max(requestAmount - allocated, 0))),
+                    newPayoutLine(defaultMethodFor(Math.max(payable - allocated, 0))),
                   ],
                 })
               }
@@ -807,7 +817,7 @@ export function PayoutDetailsForm({
               balanced ? "bg-ok-soft text-ok" : "bg-hold-soft text-hold",
             )}
           >
-            {formatINR(allocated)} of {formatINR(requestAmount)} allocated
+            {formatINR(allocated)} of {formatINR(payable)} allocated
           </output>
         </div>
       </FormSection>

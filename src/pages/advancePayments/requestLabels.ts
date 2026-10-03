@@ -10,7 +10,7 @@ import {
   type AdvanceRequestEntry,
   type ApprovalStatus,
 } from "./approvalData";
-import { PRIORITIES, type Company } from "./constants";
+import type { Company } from "./constants";
 
 export const STATUS_TONE = {
   PENDING: "hold",
@@ -26,11 +26,6 @@ export const STATUS_LABEL = {
   REJECTED: "Rejected",
   CANCELLED: "Cancelled",
 } as const;
-export const PRIORITY_TONE = { LOW: "ok", MEDIUM: "hold", HIGH: "bad" } as const;
-
-export const priorityLabel = (entry: AdvanceRequestEntry) =>
-  PRIORITIES.find((p) => p.value === entry.form.priority)?.label ?? "—";
-
 export function formatDateTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
@@ -72,8 +67,9 @@ function haystack(entry: AdvanceRequestEntry): string {
     typeLabel(form),
     paymentAgainstLabel(form),
     form.ownership,
-    form.departmentName,
-    form.subDepartmentName,
+    form.budgetName,
+    form.budget,
+    form.purposeLabel,
   ]
     .join(" ")
     .toLowerCase();
@@ -126,7 +122,8 @@ const BALANCE_ROLES = new Set(["PAYMENT", "AUDIT", "FINAL"]);
  * Never to the requester while they raise it.
  */
 export function showsBalance(entry: AdvanceRequestEntry): boolean {
-  const partner = entry.form.type === "VENDOR" || entry.form.type === "EMPLOYEE_IMPREST";
+  const partner =
+    entry.form.type === "VENDOR" || entry.form.type === "EMPLOYEE_IMPREST" || entry.form.type === "CUSTOMER";
   return partner && reachedPayment(entry);
 }
 
