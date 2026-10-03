@@ -22,6 +22,7 @@
 import { normalizeRole, type Session } from "./permissions";
 import { can, isAdmin } from "./permissions";
 import { trackerPagesFor } from "../config/pageAccess";
+import { CONTROL_PANEL_ACCESS_KEYS, controlPanelKeysFor } from "../config/controlPanelAccess";
 
 export interface RouteAccess {
   /** No session required at all. */
@@ -123,6 +124,30 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
    * permission is real AND nobody loses a screen on deploy day.
    */
   "/Sales_Dashboard": { permissions: ["Sales_Dashboard"] },
+
+  // --- Control Panel ------------------------------------------------------
+  /*
+   * Four pages granted per sub-tab (config/controlPanelAccess.ts, mirroring
+   * backend control_panel/permissions.py): a route opens for any sub-tab it
+   * shows, and the server enforces the same again — page guard for the page,
+   * the templates for its inner tabs. No role fallback: a role list would hand
+   * payroll figures to a whole desk.
+   *
+   * `/Control_Panel` opens for any of them: it forwards to the first page the
+   * user can open, as C_Panel's own `/` does.
+   */
+  "/Control_Panel": { permissions: CONTROL_PANEL_ACCESS_KEYS },
+  "/Control_Panel/Realise": { permissions: controlPanelKeysFor("/Control_Panel/Realise") },
+  "/Control_Panel/Sales_Channel": { permissions: controlPanelKeysFor("/Control_Panel/Sales_Channel") },
+  "/Control_Panel/Beverages": { permissions: controlPanelKeysFor("/Control_Panel/Beverages") },
+  "/Control_Panel/Realise_Dashboard": {
+    permissions: controlPanelKeysFor("/Control_Panel/Realise_Dashboard"),
+  },
+  "/Control_Panel/Realise/Targets": { permissions: controlPanelKeysFor("/Control_Panel/Realise/Targets") },
+  "/Control_Panel/Sales": { permissions: controlPanelKeysFor("/Control_Panel/Sales") },
+  "/Control_Panel/Inventory": { permissions: controlPanelKeysFor("/Control_Panel/Inventory") },
+  "/Control_Panel/Expenses": { permissions: controlPanelKeysFor("/Control_Panel/Expenses") },
+  "/Control_Panel/Salaries": { permissions: controlPanelKeysFor("/Control_Panel/Salaries") },
 
   // --- Administration -----------------------------------------------------
   "/App_User": { permissions: ["App_User"] },

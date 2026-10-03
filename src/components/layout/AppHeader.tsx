@@ -45,6 +45,11 @@ type AppHeaderProps = {
   onOpenNotifications: () => void;
   /** Profile is a dialog the shell owns, not a route. */
   onOpenProfile: () => void;
+  /**
+   * Receives the centre slot's element (see `headerSlot.ts`). Empty unless a
+   * page portals into it, so every other page's bar is unchanged.
+   */
+  centerRef?: (el: HTMLDivElement | null) => void;
 };
 
 /**
@@ -70,6 +75,7 @@ export function AppHeader({
   unreadCount,
   onOpenNotifications,
   onOpenProfile,
+  centerRef,
 }: AppHeaderProps) {
   const collapseLabel = collapsed ? "Expand sidebar" : "Collapse sidebar";
 
@@ -77,9 +83,9 @@ export function AppHeader({
     <header
       data-slot="app-header"
       // `header` is the positioning hook in Sidebar.css.
-      className="header border-b border-line bg-white px-3 shadow-none sm:px-4"
+      className="group/header header border-b border-line bg-white px-3 shadow-none sm:px-4"
     >
-      <div className="flex items-center gap-2">
+      <div className="flex shrink-0 items-center gap-2">
         {/*
           The two toggles are exclusive: the hamburger where the rail is a
           drawer, the collapse toggle where it is a rail.
@@ -126,11 +132,20 @@ export function AppHeader({
           >
             <img src="/logo.png" alt="" className="size-full object-contain" />
           </span>
-          <span className="text-[13px] font-bold uppercase tracking-[0.22em] text-ink">OMS</span>
+          {/* Gives way to a page title in the centre slot on narrow screens. */}
+          <span className="text-[13px] font-bold uppercase tracking-[0.22em] text-ink max-sm:group-has-[[data-slot=header-center]>*]/header:hidden">
+            OMS
+          </span>
         </Link>
       </div>
 
-      <div className="flex items-center gap-1">
+      <div
+        ref={centerRef}
+        data-slot="header-center"
+        className="flex min-w-0 flex-1 items-center justify-center px-2"
+      />
+
+      <div className="flex shrink-0 items-center gap-1">
         {/*
           Unconditional.
 

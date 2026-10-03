@@ -325,6 +325,17 @@ export default defineConfig(({ mode, command }) => {
           target: 'http://127.0.0.1:8000',
           changeOrigin: true,
         },
+        // The Control Panel pages (OMS-Backend/cpanel/), as nginx does in
+        // production: served under THIS origin so the page frame's session
+        // cookie is first-party. Loaded straight from :8000 instead, the frame
+        // is a different site whenever the app is opened as localhost (or the
+        // other way round), its cookie is never sent back, and every page
+        // lands on "session ended". `changeOrigin: false` keeps the browser's
+        // Host, so Django's CSRF check sees its own origin on the pages' POSTs.
+        '^/(cp|realise|sales|inventory|expenses|salaries|static)/': {
+          target: 'http://127.0.0.1:8000',
+          changeOrigin: false,
+        },
       },
     },
   }
