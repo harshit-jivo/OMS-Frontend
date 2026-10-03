@@ -9,9 +9,11 @@ import NotificationToaster from "./NotificationToaster";
 import { unsubscribeFromPush } from "../services/webPushClient";
 import NotificationPermissionModal from "./NotificationPermissionModal";
 import { useAuth } from "../auth";
+import { can } from "../auth/permissions";
 import { canOpen } from "../auth/routeAccess";
 import { useNotifications } from "./sidebar/useNotifications";
 import { AppHeader } from "./layout/AppHeader";
+import { HeaderSlotContext } from "./layout/headerSlot";
 import ProfileDialog from "./layout/ProfileDialog";
 import { AppSidebar } from "./layout/AppSidebar";
 import { LogoutDialog } from "./layout/LogoutDialog";
@@ -60,6 +62,8 @@ export default function Sidebar({ children }: SidebarProps) {
   // router's basename and its own history. Drives the active-link highlight.
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
+  /** The top bar's centre slot, for pages that portal their title into it. */
+  const [headerSlot, setHeaderSlot] = useState<HTMLElement | null>(null);
   /** Profile is a dialog now rather than the /Profile route. */
   const [profileOpen, setProfileOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
@@ -121,6 +125,7 @@ export default function Sidebar({ children }: SidebarProps) {
    * it would open.
    */
   const show = (path: string) => canOpen(session, path);
+  const hold = (key: string) => can(session, key);
 
   /**
    * A link is active on its own path and on any route nested under it, so a
@@ -199,6 +204,7 @@ export default function Sidebar({ children }: SidebarProps) {
         unreadCount={unreadCount}
         onOpenNotifications={handleOpenNotifications}
         onOpenProfile={() => setProfileOpen(true)}
+        centerRef={setHeaderSlot}
       />
 
       <ProfileDialog
@@ -222,6 +228,7 @@ export default function Sidebar({ children }: SidebarProps) {
         open={menuOpen}
         collapsed={sidebarCollapsed}
         canShow={show}
+        canHold={hold}
         isLinkActive={isLinkActive}
         onNavigate={closeSidebar}
         onLogout={() => setShowLogoutModal(true)}
@@ -268,7 +275,7 @@ export default function Sidebar({ children }: SidebarProps) {
       <GlobalLoadingOverlay collapsed={sidebarCollapsed} />
 
       <main className={`content-area ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
-        {children}
+        <HeaderSlotContext.Provider value={headerSlot}>{children}</HeaderSlotContext.Provider>
       </main>
     </>
   );

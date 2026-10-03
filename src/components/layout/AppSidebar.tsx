@@ -1,12 +1,13 @@
 import { Fragment, useState } from "react";
-import { Link } from "react-router-dom";
-import { HiOutlineArrowRightOnRectangle } from "react-icons/hi2";
+import { Link, useLocation } from "react-router-dom";
+import { HiOutlineArrowRightOnRectangle, HiOutlineChevronDown } from "react-icons/hi2";
 
 import { cn } from "@/lib/utils";
 import {
   HOME_LINK,
   SIDEBAR_SECTIONS,
   type SidebarLinkDef,
+  type SidebarSectionDef,
 } from "./navigation";
 
 /**
@@ -87,6 +88,8 @@ type AppSidebarProps = {
   collapsed: boolean;
   /** `canOpen(session, path)`, passed in so this file knows nothing about auth. */
   canShow: (path: string) => boolean;
+  /** `can(session, key)`, for rows that carry a `key` (Control Panel inner tabs). Omitted: every key held. */
+  canHold?: (key: string) => boolean;
   isLinkActive: (to: string) => boolean;
   onNavigate: () => void;
   onLogout: () => void;
@@ -174,10 +177,177 @@ function NavLink({
   );
 }
 
+/* ── Collapsible tree (the Control Panel) ────────────────────────────────── */
+
+const TREE_OPEN_KEY = "sidebar_tree_open";
+
+function readOpenTrees(): Record<string, boolean> {
+  try {
+    return JSON.parse(localStorage.getItem(TREE_OPEN_KEY) || "{}") as Record<string, boolean>;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * A section drawn as ONE collapsible row with headed groups beneath it — the
+ * Control Panel's pages and their inner tabs (`tree` in navigation.ts).
+ *
+ * Open/closed is remembered per section, and the tree opens itself when the
+ * current page is inside it, so landing on a Control Panel page from a
+ * bookmark never hides where you are.
+ *
+ * A tab row (`link.tab`) is active when its page is open on that tab
+ * (`?tab=`), or on no tab yet and it is that page's first tab — the page's
+ * own default.
+ *
+ * Collapsed to the 72px rail there is no room for the tree: it becomes one
+ * icon linking to the section's entry page, and the rail's hover-peek (above)
+ * shows the whole tree.
+ */
+function NavTree({
+  section,
+  canShow,
+  canHold,
+  collapsed,
+  onNavigate,
+}: {
+  section: SidebarSectionDef & { tree: NonNullable<SidebarSectionDef["tree"]> };
+  canShow: (path: string) => boolean;
+  canHold: (key: string) => boolean;
+  collapsed: boolean;
+  onNavigate: () => void;
+}) {
+  const location = useLocation();
+  const currentTab = new URLSearchParams(location.search).get("tab");
+
+  const groups = section.tree.groups
+    .map((group) => ({
+      ...group,
+      links: group.links.filter((l) => canShow(l.gate ?? l.to) && (!l.key || canHold(l.key))),
+    }))
+    .filter((group) => group.links.length > 0);
+
+  // The tab a page opens on without `?tab=` is its first one the user holds
+  // (the page itself does the same), so that is the row to highlight.
+  const firstTabOf = (to: string) =>
+    groups.flatMap((g) => g.links).find((l) => l.to === to && l.tab)?.tab;
+  const isActive = (link: SidebarLinkDef) =>
+    location.pathname === link.to &&
+    (!link.tab || link.tab === (currentTab ?? firstTabOf(link.to)));
+  const inside = groups.some((g) => g.links.some((l) => location.pathname === l.to));
+
+  const [open, setOpen] = useState(() => readOpenTrees()[section.label] ?? inside);
+  // Arriving inside the tree opens it (React's "adjust state on a changed
+  // value during render" pattern — no effect, no extra paint).
+  const [wasInside, setWasInside] = useState(inside);
+  if (inside !== wasInside) {
+    setWasInside(inside);
+    if (inside) setOpen(true);
+  }
+  const toggle = () =>
+    setOpen((current) => {
+      const next = !current;
+      try {
+        localStorage.setItem(TREE_OPEN_KEY, JSON.stringify({ ...readOpenTrees(), [section.label]: next }));
+      } catch {
+        /* storage unavailable: still toggles for this visit */
+      }
+      return next;
+    });
+
+  if (groups.length === 0) return null;
+  const Icon = section.tree.icon;
+  const entry = groups[0].links[0];
+
+  if (collapsed) {
+    return (
+      <li>
+        <Link
+          to={entry.tab ? `${entry.to}?tab=${entry.tab}` : entry.to}
+          onClick={onNavigate}
+          title={section.label}
+          aria-current={inside ? "page" : undefined}
+          className={cn(
+            rowClass,
+            collapsedRowClass,
+            inside && "bg-brand font-semibold text-white hover:bg-brand hover:text-white",
+          )}
+        >
+          <NavIcon icon={Icon} active={inside} />
+          <span className="sr-only">{section.label}</span>
+        </Link>
+      </li>
+    );
+  }
+
+  const panelId = `nav-tree-${section.label.replace(/\W+/g, "-").toLowerCase()}`;
+  return (
+    <li className="pt-2">
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={open}
+        aria-controls={panelId}
+        className={cn(
+          "appearance-none border-0 bg-transparent [font-family:inherit] cursor-pointer",
+          rowClass,
+          // index.css's unlayered `button { font: inherit }` would hand this
+          // row the 18px root size and beat rowClass's 12.5px; `!` wins back.
+          "!text-[12.5px]",
+          inside && !open && "bg-rail-hover text-white",
+        )}
+      >
+        <NavIcon icon={Icon} active={inside} />
+        <span className="flex-1 truncate text-left font-semibold">{section.label}</span>
+        <HiOutlineChevronDown
+          aria-hidden="true"
+          className={cn(
+            "size-4 shrink-0 text-rail-muted transition-transform duration-200 [stroke-width:1.25]",
+            open && "rotate-180",
+          )}
+        />
+      </button>
+      {open ? (
+        <ul id={panelId} className="m-0 ml-[18px] mt-0.5 list-none border-l border-rail-line py-0.5 pl-2.5 pr-0">
+          {groups.map((group) => (
+            <Fragment key={group.heading}>
+              <li className="px-2 pb-1 pt-2.5 text-[9.5px] font-semibold uppercase tracking-[0.1em] text-rail-muted first:pt-1">
+                {group.heading}
+              </li>
+              {group.links.map((link) => {
+                const active = isActive(link);
+                return (
+                  <li key={`${link.to}#${link.tab ?? ""}`}>
+                    <Link
+                      to={link.tab ? `${link.to}?tab=${link.tab}` : link.to}
+                      onClick={onNavigate}
+                      aria-current={active ? "page" : undefined}
+                      className={cn(
+                        "flex h-8 items-center rounded-md px-2.5 text-[12.5px] font-medium no-underline",
+                        "text-rail-text transition-colors duration-150 hover:bg-rail-hover hover:text-white",
+                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40",
+                        active && "bg-brand font-semibold text-white hover:bg-brand hover:text-white",
+                      )}
+                    >
+                      <span className="truncate">{link.label}</span>
+                    </Link>
+                  </li>
+                );
+              })}
+            </Fragment>
+          ))}
+        </ul>
+      ) : null}
+    </li>
+  );
+}
+
 export function AppSidebar({
   open,
   collapsed,
   canShow,
+  canHold,
   isLinkActive,
   onNavigate,
   onLogout,
@@ -256,6 +426,18 @@ export function AppSidebar({
           />
 
           {SIDEBAR_SECTIONS.map((section) => {
+            if (section.tree) {
+              return (
+                <NavTree
+                  key={section.label}
+                  section={{ ...section, tree: section.tree }}
+                  canShow={canShow}
+                  canHold={canHold ?? (() => true)}
+                  collapsed={!showLabels}
+                  onNavigate={onNavigate}
+                />
+              );
+            }
             const visible = section.links.filter((link) => canShow(link.gate ?? link.to));
             if (visible.length === 0) return null;
             return (

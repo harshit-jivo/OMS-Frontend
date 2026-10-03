@@ -24,6 +24,17 @@ import Login from "./pages/Login";
 import ProtectedPage from "./components/ProtectedPage";
 const Home = lazy(() => import("./pages/Home"));
 const Sales_Dashboard = lazy(() => import("./pages/Sales_Dashboard"));
+// Control Panel — production C_Panel's pages, embedded (pages/controlPanel/EmbeddedControlPanel).
+const Control_Panel = lazy(() => import("./pages/Control_Panel"));
+const Control_Panel_Realise = lazy(() => import("./pages/Control_Panel_Realise"));
+const Control_Panel_Beverages = lazy(() => import("./pages/Control_Panel_Beverages"));
+const Control_Panel_Sales_Channel = lazy(() => import("./pages/Control_Panel_Sales_Channel"));
+const Control_Panel_Realise_Dashboard = lazy(() => import("./pages/Control_Panel_Realise_Dashboard"));
+const Control_Panel_Realise_Targets = lazy(() => import("./pages/Control_Panel_Realise_Targets"));
+const Control_Panel_Sales = lazy(() => import("./pages/Control_Panel_Sales"));
+const Control_Panel_Inventory = lazy(() => import("./pages/Control_Panel_Inventory"));
+const Control_Panel_Expenses = lazy(() => import("./pages/Control_Panel_Expenses"));
+const Control_Panel_Salaries = lazy(() => import("./pages/Control_Panel_Salaries"));
 const App_User = lazy(() => import("./pages/App_User"));
 const Sap_sync = lazy(() => import("./pages/Sap_Sync"));
 const Add_Sales = lazy(() => import("./pages/Add_Sales"));
@@ -153,6 +164,89 @@ function App() {
           }
         />
         <Route path="/Dashboard" element={<Navigate to="/Sales_Dashboard" replace />} />
+
+        {/* Control Panel — production C_Panel's pages, embedded. Each route has
+            its own key in routeAccess.ts; see the "Control Panel" block there. */}
+        <Route
+          path="/Control_Panel"
+          element={
+            <ProtectedPage>
+              <Control_Panel />
+            </ProtectedPage>
+          }
+        />
+        <Route
+          path="/Control_Panel/Realise"
+          element={
+            <ProtectedPage>
+              <Control_Panel_Realise />
+            </ProtectedPage>
+          }
+        />
+        <Route
+          path="/Control_Panel/Sales_Channel"
+          element={
+            <ProtectedPage>
+              <Control_Panel_Sales_Channel />
+            </ProtectedPage>
+          }
+        />
+        <Route
+          path="/Control_Panel/Beverages"
+          element={
+            <ProtectedPage>
+              <Control_Panel_Beverages />
+            </ProtectedPage>
+          }
+        />
+        <Route
+          path="/Control_Panel/Realise_Dashboard"
+          element={
+            <ProtectedPage>
+              <Control_Panel_Realise_Dashboard />
+            </ProtectedPage>
+          }
+        />
+        <Route
+          path="/Control_Panel/Realise/Targets"
+          element={
+            <ProtectedPage>
+              <Control_Panel_Realise_Targets />
+            </ProtectedPage>
+          }
+        />
+        <Route
+          path="/Control_Panel/Sales"
+          element={
+            <ProtectedPage>
+              <Control_Panel_Sales />
+            </ProtectedPage>
+          }
+        />
+        <Route
+          path="/Control_Panel/Inventory"
+          element={
+            <ProtectedPage>
+              <Control_Panel_Inventory />
+            </ProtectedPage>
+          }
+        />
+        <Route
+          path="/Control_Panel/Expenses"
+          element={
+            <ProtectedPage>
+              <Control_Panel_Expenses />
+            </ProtectedPage>
+          }
+        />
+        <Route
+          path="/Control_Panel/Salaries"
+          element={
+            <ProtectedPage>
+              <Control_Panel_Salaries />
+            </ProtectedPage>
+          }
+        />
 
         {/* System — Device & Version Management (admin) */}
         <Route

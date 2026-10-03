@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
@@ -288,7 +288,16 @@ describe("AppSidebar", () => {
   it("renders every link in the table when nothing is denied", () => {
     renderRail();
 
-    const total = SIDEBAR_SECTIONS.reduce((n, s) => n + s.links.length, 0);
+    // A section with a `tree` (the Control Panel) is drawn as one collapsible
+    // row: its rows are the tree's — pages AND their inner tabs — and they
+    // appear once it is opened.
+    for (const section of SIDEBAR_SECTIONS.filter((s) => s.tree)) {
+      fireEvent.click(screen.getByRole("button", { name: section.label }));
+    }
+    const total = SIDEBAR_SECTIONS.reduce(
+      (n, s) => n + (s.tree ? s.tree.groups.reduce((m, g) => m + g.links.length, 0) : s.links.length),
+      0,
+    );
     // +1 for the dashboard, which sits outside every section.
     expect(screen.getAllByRole("link")).toHaveLength(total + 1);
   });

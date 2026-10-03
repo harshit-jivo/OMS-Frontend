@@ -10,6 +10,7 @@ import { HiOutlineShieldCheck, HiOutlineXMark } from "react-icons/hi2";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
+import { ControlPanelPermissions } from "@/components/admin/ControlPanelPermissions";
 import { PermissionGrid, PermissionToggle } from "@/components/admin/PermissionToggle";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { MultiSelect, type MultiSelectOption } from "@/components/ui/dropdown";
@@ -364,6 +365,24 @@ export default function Page_Permissions() {
                   />
                 ))}
               </PermissionGrid>
+            </>
+          )}
+        </Card>
+      </section>
+
+      {/* Control Panel — four pages, each granted per sub-tab. */}
+      <section className="space-y-3">
+        <SectionHeading>Control Panel</SectionHeading>
+        <Card>
+          {nonAdminSelected.length === 0 ? (
+            <p className="m-0 text-[13px] text-subtle">{pickerHint}</p>
+          ) : (
+            <>
+              <p className="m-0 mb-3 text-[12px] text-subtle">
+                Tick a page for all of its sub-tabs, or just the sub-tabs this user should see.
+                Any sub-tab opens its page, showing only the sub-tabs ticked here.
+              </p>
+              <ControlPanelPermissions selected={pages} onChange={setPages} />
             </>
           )}
         </Card>

@@ -1,3 +1,5 @@
+import { CONTROL_PANEL_KEYS } from "./controlPanelAccess";
+
 // Admin pages that can be individually granted to any user from the
 // Permissions page. The `key` is what gets stored in User.extra_pages and
 // checked by the Sidebar; `path` is the route the grant unlocks.
@@ -190,9 +192,17 @@ export const ORDER_SCOPE_PERMISSIONS: GrantablePage[] = [
 
 export const ORDER_SCOPE_KEYS = ORDER_SCOPE_PERMISSIONS.map((p) => p.key);
 
-/** Every key an admin may grant — page access, payment and order actions. */
+/**
+ * Control Panel keys — four pages, per sub-tab, plus the segment limit and the
+ * AI assistant. Structure in config/controlPanelAccess.ts; the Page Permissions
+ * screen draws them as a tree, not as rows of the page grid.
+ */
+export { CONTROL_PANEL_KEYS };
+
+/** Every key an admin may grant — page access, payment, order and Control Panel. */
 export const ALL_GRANTABLE_KEYS = [
   ...GRANTABLE_PAGE_KEYS,
   ...PAYMENT_ACTION_KEYS,
   ...ORDER_SCOPE_KEYS,
+  ...CONTROL_PANEL_KEYS,
 ];
