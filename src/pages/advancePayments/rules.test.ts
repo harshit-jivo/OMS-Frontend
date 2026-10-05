@@ -16,6 +16,7 @@ import {
   calculatePayment,
   changeAllocation,
   EMPTY_FORM,
+  needsDepartmentHead,
   expectedPeriodError,
   formatINR,
   installmentsFromEmi,
@@ -575,7 +576,7 @@ describe("repayment", () => {
 
 describe("validation", () => {
   const COMMON = {
-    budget: "BackOff", budgetName: "Back Office", purpose: "RAW_MATERIAL", purposeLabel: "Raw Material Purchase",
+    budget: "BackOff", budgetName: "Back Office", purpose: "RAW_MATERIAL", purposeLabel: "Raw Material – Other than Oil (incl. Ghee)",
     ownership: "Finance desk", paymentDate: "2026-10-01", remarks: "Part settlement",
   };
 
@@ -736,10 +737,33 @@ function emiAdvanceForValidation(): RequestForm {
     { expectedFromDate: "2026-10-01", expectedToDate: "2026-10-15" },
     {
       budget: "BackOff", budgetName: "Back Office", purpose: "EMP_ADVANCE", purposeLabel: "Employee Advance",
+      departmentHead: "TEMP0001", departmentHeadName: "Nirmal Didi", departmentHeadLogin: "nirmal",
       ownership: "HR", paymentDate: "2026-09-30", remarks: "Relocation advance",
     },
   );
 }
+
+describe("the Department Head", () => {
+  it("is asked outside Mart for Employee and Imprest requests, and by-department purposes", () => {
+    const base = { ...EMPTY_FORM, company: "OIL" as const };
+    expect(needsDepartmentHead({ ...base, type: "EMPLOYEE_IMPREST" })).toBe(true);
+    expect(needsDepartmentHead({ ...base, type: "VENDOR", purposeNeedsHead: true })).toBe(true);
+    expect(needsDepartmentHead({ ...base, type: "VENDOR", purposeNeedsHead: false })).toBe(false);
+    expect(needsDepartmentHead({ ...base, company: "MART", type: "EMPLOYEE_ADVANCE", purposeNeedsHead: true }))
+      .toBe(false);
+  });
+
+  it("is required while asked, and dropped once it is not", () => {
+    const form = emiAdvanceForValidation();
+    expect(validate({ ...form, departmentHead: "" }).missing).toContain("Department Head");
+    // An HOD the server matched to no login cannot be submitted.
+    expect(validate({ ...form, departmentHeadLogin: "" }).problems).toEqual([
+      "Nirmal Didi has no OMS login to approve with. Choose another, or ask an administrator to create one.",
+    ]);
+    const vendor = applyChange(form, { type: "VENDOR" });
+    expect(vendor.departmentHead).toBe("");
+  });
+});
 
 /* ── EMI: installments and EMI amount, both ways ─────────────────────────── */
 

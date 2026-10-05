@@ -49,6 +49,7 @@ const LABEL: Record<string, string> = {
   sub_budget_code: "Sub budget",
   purpose: "Payment purpose",
   purpose_code: "Payment purpose",
+  department_head: "Department Head",
   // The payment details (PAYOUT_UPDATED).
   beneficiary_name: "Beneficiary",
   to_account: "To account",

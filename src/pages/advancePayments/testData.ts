@@ -278,9 +278,17 @@ export const SAP_BUDGETS: SapBudget[] = [
 
 /** A slice of the Payment Desk's purpose list, as `/payment-purposes/` answers. */
 export const PAYMENT_PURPOSES: PaymentPurpose[] = [
-  { code: "RAW_MATERIAL", label: "Raw Material Purchase", group: "Goods" },
-  { code: "RENT", label: "Rent", group: "Services" },
-  { code: "EMP_ADVANCE", label: "Employee Advance", group: "People" },
+  { code: "RAW_MATERIAL", label: "Raw Material – Other than Oil (incl. Ghee)", group: "Goods", needs_head: false },
+  { code: "RENT", label: "Rent", group: "Services", needs_head: true },
+  { code: "EMP_ADVANCE", label: "Employee Advance", group: "People", needs_head: true },
+];
+
+/** The employee master's HODs and their logins, as `/department-heads/` answers. */
+export const DEPARTMENT_HEADS = [
+  { employee_code: "TEMP0001", employee_name: "Nirmal Didi", user: { id: 31, name: "Nirmal Didi Ji", username: "nirmal" } },
+  { employee_code: "JWPL000C", employee_name: "Jasbir Singh Raju",
+    user: { id: 32, name: "Jasvir Singh (Raju)", username: "Raju Vg" } },
+  { employee_code: "JWPL3005", employee_name: "Arshdeep Singh", user: null },
 ];
 
 /** SAP's customers, as `/customers/` answers. */

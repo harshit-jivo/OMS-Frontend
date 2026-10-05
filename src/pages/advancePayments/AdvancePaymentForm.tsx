@@ -73,7 +73,9 @@ import {
   applyChange,
   availableOf,
   changeAllocation,
+  departmentHeadLoginError,
   documentsFor,
+  needsDepartmentHead,
   plainAmountError,
   pastDateError,
   resolveCase,
@@ -268,6 +270,43 @@ export function AdvancePaymentForm({
   if (form.purpose && !purposeOptions.some((o) => o.value === form.purpose)) {
     purposeOptions.unshift({ value: form.purpose, label: form.purposeLabel || form.purpose, hint: "" });
   }
+  const purposeNeedsHead = (code: string) =>
+    Boolean(purposesQuery.data?.find((p) => p.code === code)?.needs_head);
+  // An edited request learns from the list whether its purpose is approved by
+  // department: the saved request only says whether a head was named.
+  const listedNeedsHead = purposesQuery.data ? purposeNeedsHead(form.purpose) : null;
+  useEffect(() => {
+    if (listedNeedsHead !== null && listedNeedsHead !== form.purposeNeedsHead) {
+      setForm((current) => applyChange(current, { purposeNeedsHead: listedNeedsHead }));
+    }
+  }, [listedNeedsHead, form.purposeNeedsHead]);
+
+  /* ── Department Head: an HOD of the employee master, with their login ─ */
+
+  const askHead = needsDepartmentHead(form);
+  const [headSearch, setHeadSearch] = useState("");
+  const settledHeadSearch = useDebounced(headSearch, 250);
+  const headsQuery = useQuery({
+    queryKey: ["advance-payments", "department-heads", settledHeadSearch],
+    queryFn: () => advancePaymentService.departmentHeads(settledHeadSearch),
+    enabled: askHead,
+    placeholderData: keepPreviousData,
+    staleTime: 60_000,
+    retry: 1,
+  });
+  const headChoices = headsQuery.data ?? [];
+  // Each HOD says which login approves for them, or that they have none.
+  const headOptions = headChoices.map((h) => ({
+    value: h.employee_code,
+    label: h.employee_name,
+    hint: h.user ? `${h.employee_code} · approves as ${h.user.username}` : `${h.employee_code} · No OMS login`,
+  }));
+  // The head already picked stays shown while a search lists other people.
+  if (form.departmentHead && !headOptions.some((o) => o.value === form.departmentHead)) {
+    headOptions.unshift({ value: form.departmentHead, label: form.departmentHeadName || form.departmentHead, hint: "" });
+  }
+  const headLoginError =
+    form.departmentHead && !form.departmentHeadLogin ? departmentHeadLoginError(form.departmentHeadName) : undefined;
 
   /* ── Owners: the employee master's HODs and Sub-HODs ─────────────────── */
 
@@ -717,6 +756,7 @@ export function AdvancePaymentForm({
                   change({
                     purpose: next,
                     purposeLabel: purposeOptions.find((o) => o.value === next)?.label ?? "",
+                    purposeNeedsHead: purposeNeedsHead(next),
                   })
                 }
                 placeholder="Select payment purpose"
@@ -727,6 +767,39 @@ export function AdvancePaymentForm({
               />
             )}
           </Field>
+
+          {/* Approved "by department": the requester names the HOD who
+              approves it, from the employee master. The route's Department
+              Head stage goes to that HOD's OMS login. */}
+          {askHead ? (
+            <Field
+              label="Department Head"
+              required
+              hint={headsQuery.isError || headLoginError ? undefined : "The HOD who approves this request."}
+              error={headsQuery.isError ? advancePaymentError(headsQuery.error) : headLoginError}
+            >
+              {(f) => (
+                <SearchSelect<string>
+                  id={f.id}
+                  value={form.departmentHead}
+                  onChange={(next) => {
+                    const chosen = headChoices.find((h) => h.employee_code === next);
+                    change({
+                      departmentHead: next,
+                      departmentHeadName: chosen?.employee_name ?? "",
+                      departmentHeadLogin: chosen?.user?.username ?? "",
+                    });
+                  }}
+                  onQueryChange={setHeadSearch}
+                  placeholder="Select department head"
+                  searchPlaceholder="Search HOD name or code…"
+                  emptyText="No HOD matches"
+                  loading={headsQuery.isFetching}
+                  options={headOptions}
+                />
+              )}
+            </Field>
+          ) : null}
 
           {/* Who owns this request: a HOD or Sub-HOD from the employee master. */}
           <Field

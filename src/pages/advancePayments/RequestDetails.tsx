@@ -113,6 +113,7 @@ export function RequestSummary({ entry }: { entry: AdvanceRequestEntry }) {
           value={form.budgetName || form.budget || entry.api.department?.name || ""}
         />
         <DetailField label="Payment Purpose" value={form.purposeLabel || form.purpose} />
+        {form.departmentHead ? <DetailField label="Department Head" value={form.departmentHeadName} /> : null}
         <DetailField label="Ownership" value={form.ownership} />
         <DetailField label="Payment Date" value={form.paymentDate ? formatDate(form.paymentDate) : ""} />
         <DetailField label="Remarks" value={form.remarks} span="full" />
