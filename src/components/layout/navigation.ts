@@ -91,8 +91,25 @@ import {
   HiOutlineWallet,
   HiOutlineWrenchScrewdriver,
 } from "react-icons/hi2";
+import { CONTROL_PANEL_REPORT_GROUPS, CONTROL_PANEL_REPORTS } from "../../config/controlPanelAccess";
 
 export type SidebarIconComponent = ComponentType<{ className?: string }>;
+
+const REPORT_GROUP_ICONS: Record<string, SidebarIconComponent> = {
+  "Sales Reports": HiOutlinePresentationChartLine,
+  Accounts: HiOutlineWallet,
+  "Inventory & Production": HiOutlineArchiveBox,
+  "Master Data": HiOutlineUsers,
+};
+
+/** One sidebar row per report in `group` (config/controlPanelAccess.ts). */
+function reportLinks(group: string): SidebarLinkDef[] {
+  return CONTROL_PANEL_REPORTS.filter((r) => r.group === group).map((r) => ({
+    to: r.to,
+    label: r.label,
+    icon: REPORT_GROUP_ICONS[group] ?? HiOutlineDocumentText,
+  }));
+}
 
 export interface SidebarLinkDef {
   to: string;
@@ -248,6 +265,7 @@ export const SIDEBAR_SECTIONS: SidebarSectionDef[] = [
       { to: "/Control_Panel/Inventory", label: "Inventory", icon: HiOutlineCube },
       { to: "/Control_Panel/Expenses", label: "Expenses", icon: HiOutlineWallet },
       { to: "/Control_Panel/Salaries", label: "Salaries", icon: HiOutlineUserGroup },
+      ...CONTROL_PANEL_REPORT_GROUPS.flatMap(reportLinks),
     ],
     tree: {
       groups: [
@@ -294,6 +312,12 @@ export const SIDEBAR_SECTIONS: SidebarSectionDef[] = [
             { to: "/Control_Panel/Salaries", label: "Salaries", icon: HiOutlineUserGroup },
           ],
         },
+        // C_Panel's report pages, in its own sidebar groups.
+        ...CONTROL_PANEL_REPORT_GROUPS.map((group) => ({
+          heading: group,
+          icon: REPORT_GROUP_ICONS[group] ?? HiOutlineDocumentText,
+          links: reportLinks(group),
+        })),
       ],
     },
   },

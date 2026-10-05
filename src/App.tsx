@@ -35,6 +35,7 @@ const Control_Panel_Sales = lazy(() => import("./pages/Control_Panel_Sales"));
 const Control_Panel_Inventory = lazy(() => import("./pages/Control_Panel_Inventory"));
 const Control_Panel_Expenses = lazy(() => import("./pages/Control_Panel_Expenses"));
 const Control_Panel_Salaries = lazy(() => import("./pages/Control_Panel_Salaries"));
+const Control_Panel_Report = lazy(() => import("./pages/Control_Panel_Report"));
 const App_User = lazy(() => import("./pages/App_User"));
 const Sap_sync = lazy(() => import("./pages/Sap_Sync"));
 const Add_Sales = lazy(() => import("./pages/Add_Sales"));
@@ -244,6 +245,168 @@ function App() {
           element={
             <ProtectedPage>
               <Control_Panel_Salaries />
+            </ProtectedPage>
+          }
+        />
+        {/* C_Panel's report pages — one shared component, the route picks the
+            report (config/controlPanelAccess.ts). */}
+        <Route
+          path="/Control_Panel/Compare_Sales"
+          element={
+            <ProtectedPage>
+              <Control_Panel_Report />
+            </ProtectedPage>
+          }
+        />
+        <Route
+          path="/Control_Panel/Sales_CN"
+          element={
+            <ProtectedPage>
+              <Control_Panel_Report />
+            </ProtectedPage>
+          }
+        />
+        <Route
+          path="/Control_Panel/Hidden_Sales"
+          element={
+            <ProtectedPage>
+              <Control_Panel_Report />
+            </ProtectedPage>
+          }
+        />
+        <Route
+          path="/Control_Panel/Sales_Flow"
+          element={
+            <ProtectedPage>
+              <Control_Panel_Report />
+            </ProtectedPage>
+          }
+        />
+        <Route
+          path="/Control_Panel/Dispatch_Details"
+          element={
+            <ProtectedPage>
+              <Control_Panel_Report />
+            </ProtectedPage>
+          }
+        />
+        <Route
+          path="/Control_Panel/Realise_Calculator"
+          element={
+            <ProtectedPage>
+              <Control_Panel_Report />
+            </ProtectedPage>
+          }
+        />
+        <Route
+          path="/Control_Panel/Rate_List"
+          element={
+            <ProtectedPage>
+              <Control_Panel_Report />
+            </ProtectedPage>
+          }
+        />
+        <Route
+          path="/Control_Panel/Plan_vs_Done"
+          element={
+            <ProtectedPage>
+              <Control_Panel_Report />
+            </ProtectedPage>
+          }
+        />
+        <Route
+          path="/Control_Panel/Customer_Aging"
+          element={
+            <ProtectedPage>
+              <Control_Panel_Report />
+            </ProtectedPage>
+          }
+        />
+        <Route
+          path="/Control_Panel/Beverages_GST"
+          element={
+            <ProtectedPage>
+              <Control_Panel_Report />
+            </ProtectedPage>
+          }
+        />
+        <Route
+          path="/Control_Panel/Required_Credit_Limit"
+          element={
+            <ProtectedPage>
+              <Control_Panel_Report />
+            </ProtectedPage>
+          }
+        />
+        <Route
+          path="/Control_Panel/Open_Payments"
+          element={
+            <ProtectedPage>
+              <Control_Panel_Report />
+            </ProtectedPage>
+          }
+        />
+        <Route
+          path="/Control_Panel/Claims"
+          element={
+            <ProtectedPage>
+              <Control_Panel_Report />
+            </ProtectedPage>
+          }
+        />
+        <Route
+          path="/Control_Panel/Reconciliation"
+          element={
+            <ProtectedPage>
+              <Control_Panel_Report />
+            </ProtectedPage>
+          }
+        />
+        <Route
+          path="/Control_Panel/Stock_Available"
+          element={
+            <ProtectedPage>
+              <Control_Panel_Report />
+            </ProtectedPage>
+          }
+        />
+        <Route
+          path="/Control_Panel/Non_Moving_Stock"
+          element={
+            <ProtectedPage>
+              <Control_Panel_Report />
+            </ProtectedPage>
+          }
+        />
+        <Route
+          path="/Control_Panel/OIH_vs_Stock"
+          element={
+            <ProtectedPage>
+              <Control_Panel_Report />
+            </ProtectedPage>
+          }
+        />
+        <Route
+          path="/Control_Panel/Production_Plan"
+          element={
+            <ProtectedPage>
+              <Control_Panel_Report />
+            </ProtectedPage>
+          }
+        />
+        <Route
+          path="/Control_Panel/Daily_Production"
+          element={
+            <ProtectedPage>
+              <Control_Panel_Report />
+            </ProtectedPage>
+          }
+        />
+        <Route
+          path="/Control_Panel/Customer_Master"
+          element={
+            <ProtectedPage>
+              <Control_Panel_Report />
             </ProtectedPage>
           }
         />

@@ -25,7 +25,11 @@ import {
 } from "@/components/ui/page";
 import { Skeleton } from "@/components/ui/skeleton";
 import { showToast } from "@/lib/toastStore";
-import { CONTROL_PANEL_PAGES } from "../config/controlPanelAccess";
+import {
+  CONTROL_PANEL_PAGES,
+  CONTROL_PANEL_REPORT_GROUPS,
+  CONTROL_PANEL_REPORTS,
+} from "../config/controlPanelAccess";
 import { userService } from "../services/userService";
 import type { User } from "../services/userService";
 import { useUserList } from "../lib/authQueries";
@@ -378,16 +382,36 @@ export default function Page_Permissions() {
           {nonAdminSelected.length === 0 ? (
             <p className="m-0 text-[13px] text-subtle">{pickerHint}</p>
           ) : (
-            <PermissionGrid>
-              {CONTROL_PANEL_PAGES.map((page) => (
-                <PermissionToggle
-                  key={page.key}
-                  title={page.label}
-                  checked={pages.includes(page.key)}
-                  onChange={() => togglePage(page.key)}
-                />
+            <div className="space-y-4">
+              <PermissionGrid>
+                {CONTROL_PANEL_PAGES.map((page) => (
+                  <PermissionToggle
+                    key={page.key}
+                    title={page.label}
+                    checked={pages.includes(page.key)}
+                    onChange={() => togglePage(page.key)}
+                  />
+                ))}
+              </PermissionGrid>
+              {/* C_Panel's report pages: one box per report. */}
+              {CONTROL_PANEL_REPORT_GROUPS.map((group) => (
+                <div key={group} className="space-y-2">
+                  <p className="m-0 text-[11px] font-semibold uppercase tracking-[0.08em] text-subtle">
+                    {group}
+                  </p>
+                  <PermissionGrid>
+                    {CONTROL_PANEL_REPORTS.filter((r) => r.group === group).map((report) => (
+                      <PermissionToggle
+                        key={report.key}
+                        title={report.label}
+                        checked={pages.includes(report.key)}
+                        onChange={() => togglePage(report.key)}
+                      />
+                    ))}
+                  </PermissionGrid>
+                </div>
               ))}
-            </PermissionGrid>
+            </div>
           )}
         </Card>
       </section>

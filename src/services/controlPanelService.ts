@@ -13,6 +13,7 @@
  */
 import api from "./api";
 import { messageFrom } from "../lib/apiError";
+import type { ControlPanelReport } from "../config/controlPanelAccess";
 
 /** The page ids the backend knows (`control_panel/permissions.py` PAGES). */
 export type ControlPanelPageId =
@@ -24,7 +25,8 @@ export type ControlPanelPageId =
   | "sales"
   | "inventory"
   | "expenses"
-  | "salaries";
+  | "salaries"
+  | ControlPanelReport["page"];
 
 export interface SsoLink {
   /** Absolute URL of the page's ticket link on the OMS backend. */
