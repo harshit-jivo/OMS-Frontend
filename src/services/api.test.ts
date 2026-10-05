@@ -8,12 +8,15 @@
  *
  * Requests are intercepted at the adapter, so nothing leaves the machine — but
  * everything above the adapter is the real code path: both interceptors, the
- * refresh single-flight, and the retry.
+ * refresh single-flight, and the retry. The refresh goes to Jivo Auth through
+ * its own bare client, which gets its own adapter here (`jivoReplies`).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AxiosError } from "axios";
 import type { AxiosAdapter, AxiosResponse, InternalAxiosRequestConfig } from "axios";
 
 const BASE = "http://localhost:8000/api";
+const AUTH = "https://auth.example.test/api/v1";
 
 /** A minimal, non-expired JWT. Only `exp` is ever read. */
 function token(secondsFromNow = 3600): string {
@@ -23,36 +26,58 @@ function token(secondsFromNow = 3600): string {
 
 type Captured = InternalAxiosRequestConfig;
 
-/**
- * Load a fresh `api` with an adapter that records every request and replies
- * with the queued statuses.
- */
-async function loadApi(statuses: number[] = [200]) {
-  vi.resetModules();
-  vi.stubEnv("VITE_API_BASE_URL", BASE);
-  vi.stubEnv("VITE_API_VERSION", "");
+/** A reply: a bare status, or a status with the body it carries. */
+type Reply = number | { status: number; data: unknown };
 
-  const seen: Captured[] = [];
-  const queue = [...statuses];
-
-  const adapter: AxiosAdapter = async (config) => {
+/** An adapter that records every request and replies from a queue. */
+function queuedAdapter(replies: Reply[], seen: Captured[], fallbackData: unknown): AxiosAdapter {
+  const queue = [...replies];
+  return async (config) => {
     seen.push(config as Captured);
-    const status = queue.length > 1 ? (queue.shift() as number) : queue[0];
+    const next = queue.length > 1 ? (queue.shift() as Reply) : queue[0];
+    const { status, data } = typeof next === "number" ? { status: next, data: fallbackData } : next;
     const response: AxiosResponse = {
-      data: { ok: true },
+      data,
       status,
       statusText: String(status),
       headers: { "x-request-id": "server-echo" },
       config,
     };
-    if (status >= 400) return Promise.reject(Object.assign(new Error(`${status}`), { response, config }));
+    if (status >= 400) {
+      return Promise.reject(new AxiosError(`${status}`, "ERR_BAD_RESPONSE", config, null, response));
+    }
     return response;
   };
-
-  const mod = await import("./api");
-  mod.default.defaults.adapter = adapter;
-  return { api: mod.default, seen };
 }
+
+/**
+ * Load a fresh `api` with an adapter that records every request and replies
+ * with the queued statuses. Jivo Auth's client is loaded with it — the same
+ * module instance `api.ts` imported — and answers nothing until a test says.
+ */
+async function loadApi(replies: Reply[] = [200]) {
+  vi.resetModules();
+  vi.stubEnv("VITE_API_BASE_URL", BASE);
+  vi.stubEnv("VITE_API_VERSION", "");
+  vi.stubEnv("VITE_AUTH_BASE_URL", AUTH);
+
+  const seen: Captured[] = [];
+  const mod = await import("./api");
+  mod.default.defaults.adapter = queuedAdapter(replies, seen, { ok: true });
+
+  const jivo = await import("./jivoAuth");
+  const jivoSeen: Captured[] = [];
+  /** What Jivo Auth answers a refresh with. */
+  const jivoReplies = (...answers: Reply[]) => {
+    jivo.jivoAuthClient.defaults.adapter = queuedAdapter(answers, jivoSeen, {});
+  };
+  jivoReplies(500);
+
+  return { api: mod.default, mod, seen, jivoSeen, jivoReplies };
+}
+
+/** A new pair, as Jivo Auth's refresh returns it. */
+const rotated = () => ({ status: 200, data: { access: token(), refresh: "rotated-refresh" } });
 
 function headerOf(config: Captured, name: string): string {
   const value = config.headers?.get?.(name);
@@ -109,13 +134,10 @@ describe("a 401 retry stays one event in the log", () => {
     // after a token refresh is ONE action from the user's point of view; two
     // IDs would split it across two unrelated-looking log entries, and the
     // half that failed is the half nobody would find.
-    const { api, seen } = await loadApi([401, 200]);
+    const { api, seen, jivoReplies } = await loadApi([401, 200]);
     localStorage.setItem("access", token());
     localStorage.setItem("refresh", "refresh-token");
-
-    // The refresh itself is a bare axios call, so stub it at the network edge.
-    const axios = (await import("axios")).default;
-    vi.spyOn(axios, "post").mockResolvedValue({ data: { access: token() } });
+    jivoReplies(rotated());
 
     await api.get("/orders/");
 
@@ -123,22 +145,173 @@ describe("a 401 retry stays one event in the log", () => {
     expect(attempts).toHaveLength(2);
     expect(headerOf(attempts[0], "X-Request-ID")).toBe(headerOf(attempts[1], "X-Request-ID"));
   });
+});
 
-  it("sends a correlation ID on the token refresh too", async () => {
-    // The refresh bypasses the interceptors by design (no recursion), which
-    // would otherwise make it the one uncorrelated call the app makes — and a
-    // refresh failure is exactly the kind worth correlating.
-    const { api } = await loadApi([401, 200]);
+describe("the token refresh goes to Jivo Auth", () => {
+  it("posts the refresh token to {AUTH}/auth/refresh/", async () => {
+    const { api, jivoSeen, jivoReplies } = await loadApi([401, 200]);
     localStorage.setItem("access", token());
     localStorage.setItem("refresh", "refresh-token");
-
-    const axios = (await import("axios")).default;
-    const post = vi.spyOn(axios, "post").mockResolvedValue({ data: { access: token() } });
+    jivoReplies(rotated());
 
     await api.get("/orders/");
 
-    const headers = post.mock.calls[0]?.[2]?.headers as Record<string, string>;
-    expect(headers["X-Request-ID"]).toMatch(/^web-[a-f0-9]{32}$/);
+    expect(jivoSeen).toHaveLength(1);
+    expect(jivoSeen[0].baseURL).toBe(AUTH);
+    expect(jivoSeen[0].url).toBe("/auth/refresh/");
+    expect(jivoSeen[0].method).toBe("post");
+    expect(JSON.parse(String(jivoSeen[0].data))).toEqual({ refresh: "refresh-token" });
+  });
+
+  it("sends Jivo Auth nothing its CORS would refuse", async () => {
+    // Jivo Auth allows accept, authorization, content-type, user-agent,
+    // x-csrftoken and x-requested-with. One X-App-Version or X-Request-ID
+    // fails the preflight, the browser never sends the refresh, and every
+    // expiry looks like a network error. That is why this call has no
+    // correlation ID, unlike every other request the app makes.
+    const { api, mod, jivoSeen, jivoReplies } = await loadApi([401, 200]);
+    mod.setDeviceHeaderProvider(() => ({ "X-App-Version": "1.0.0", "X-Device-Id": "dev-1" }));
+    localStorage.setItem("access", token());
+    localStorage.setItem("refresh", "refresh-token");
+    jivoReplies(rotated());
+
+    await api.get("/orders/");
+
+    const sent = Object.keys(jivoSeen[0].headers.toJSON()).map((name) => name.toLowerCase());
+    expect(sent.filter((name) => !["accept", "content-type"].includes(name))).toEqual([]);
+    expect(jivoSeen[0].headers.get("Content-Type")).toBe("application/json");
+  });
+
+  it("stores BOTH halves of the new pair", async () => {
+    // Jivo Auth rotates on every refresh; the old refresh token dies ~30s
+    // later. Keeping it would sign the user out on the next refresh.
+    const { api, jivoReplies } = await loadApi([401, 200]);
+    localStorage.setItem("access", token());
+    localStorage.setItem("refresh", "refresh-token");
+    const fresh = token(900);
+    jivoReplies({ status: 200, data: { access: fresh, refresh: "rotated-refresh" } });
+
+    await api.get("/orders/");
+
+    expect(localStorage.getItem("access")).toBe(fresh);
+    expect(localStorage.getItem("refresh")).toBe("rotated-refresh");
+  });
+
+  it("retries with the new access token", async () => {
+    const { api, seen, jivoReplies } = await loadApi([401, 200]);
+    localStorage.setItem("access", token());
+    localStorage.setItem("refresh", "refresh-token");
+    const fresh = token(900);
+    jivoReplies({ status: 200, data: { access: fresh, refresh: "rotated-refresh" } });
+
+    await api.get("/orders/");
+
+    expect(headerOf(seen[1], "Authorization")).toBe(`Bearer ${fresh}`);
+  });
+
+  it("refreshes an expired token silently at startup", async () => {
+    // 15-minute tokens: a tab reopened after a coffee break is the COMMON
+    // case now, not the edge one.
+    const { mod, jivoReplies } = await loadApi();
+    localStorage.setItem("access", token(-60));
+    localStorage.setItem("refresh", "refresh-token");
+    jivoReplies(rotated());
+
+    await expect(mod.resolveStartupSession()).resolves.toBe("authenticated");
+    expect(localStorage.getItem("refresh")).toBe("rotated-refresh");
+  });
+
+  it("keeps the session when Jivo Auth is throttling or down", async () => {
+    // A 429 or a 5xx says nothing about the refresh token. Ending the session
+    // for one would sign everybody out whenever Jivo Auth has a bad minute.
+    for (const status of [429, 503]) {
+      const { api, jivoReplies } = await loadApi([401, 200]);
+      localStorage.setItem("access", token());
+      localStorage.setItem("refresh", "refresh-token");
+      jivoReplies(status);
+
+      await expect(api.get("/orders/")).rejects.toBeDefined();
+      expect(localStorage.getItem("refresh"), String(status)).toBe("refresh-token");
+    }
+  });
+});
+
+describe("what never refreshes", () => {
+  it("a 403 never triggers a refresh", async () => {
+    // "You may not" is not "who are you?". A fresh token for the same person
+    // gets the same answer, and refreshing on it would rotate the pair on
+    // every permission check a page makes.
+    const { api, seen, jivoSeen } = await loadApi([403]);
+    localStorage.setItem("access", token());
+    localStorage.setItem("refresh", "refresh-token");
+
+    await expect(api.get("/orders/")).rejects.toMatchObject({ response: { status: 403 } });
+
+    expect(jivoSeen).toHaveLength(0);
+    expect(seen).toHaveLength(1);
+    expect(localStorage.getItem("refresh")).toBe("refresh-token");
+  });
+
+  it("a disabled OMS account's 401 is not refreshed", async () => {
+    // The Jivo token is fine; OMS has switched the account off. A refresh
+    // would succeed and the retry would be refused again, forever.
+    const { api, seen, jivoSeen } = await loadApi([
+      { status: 401, data: { detail: "User account is disabled." } },
+    ]);
+    localStorage.setItem("access", token());
+    localStorage.setItem("refresh", "refresh-token");
+
+    await expect(api.get("/auth/profile/")).rejects.toMatchObject({ response: { status: 401 } });
+
+    expect(jivoSeen).toHaveLength(0);
+    expect(seen).toHaveLength(1);
+  });
+
+  it("a 401 from a Jivo Auth path is never refreshed", async () => {
+    // Should one ever be sent through `api`: a 401 there is about the
+    // credentials in the request, not about the session.
+    const { api, seen, jivoSeen } = await loadApi([401]);
+    localStorage.setItem("access", token());
+    localStorage.setItem("refresh", "refresh-token");
+
+    await expect(api.post(`${AUTH}/auth/login/`, {})).rejects.toBeDefined();
+
+    expect(jivoSeen).toHaveLength(0);
+    expect(seen).toHaveLength(1);
+  });
+
+  it("refreshes once, not in a loop", async () => {
+    const { api, seen, jivoSeen, jivoReplies } = await loadApi([401]);
+    localStorage.setItem("access", token());
+    localStorage.setItem("refresh", "refresh-token");
+    jivoReplies(rotated());
+
+    await expect(api.get("/orders/")).rejects.toBeDefined();
+
+    expect(jivoSeen).toHaveLength(1);
+    expect(seen).toHaveLength(2);
+  });
+});
+
+describe("a refused refresh ends the session", () => {
+  it("clears every session key, and only those", async () => {
+    // The unified list: this path used to clear a shorter copy that left
+    // extra_roles, is_superuser, is_staff and categories behind.
+    const { api, jivoReplies } = await loadApi([401]);
+    const { SESSION_STORAGE_KEYS } = await import("../auth/session");
+    for (const key of SESSION_STORAGE_KEYS) localStorage.setItem(key, "x");
+    localStorage.setItem("access", token());
+    localStorage.setItem("device_id", "this-browser");
+    jivoReplies({ status: 401, data: { detail: "Token is invalid or expired", code: "token_not_valid" } });
+
+    await expect(api.get("/orders/")).rejects.toBeDefined();
+
+    for (const key of SESSION_STORAGE_KEYS) {
+      expect(localStorage.getItem(key), key).toBeNull();
+    }
+    // One browser keeps one device id across sessions.
+    expect(localStorage.getItem("device_id")).toBe("this-browser");
+    expect(sessionStorage.getItem("session_expired")).toBeTruthy();
   });
 });
 

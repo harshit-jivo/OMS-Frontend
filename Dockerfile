@@ -43,6 +43,12 @@ ENV VITE_PUBLIC_APP_URL=${VITE_PUBLIC_APP_URL}
 ARG VITE_API_VERSION=""
 ENV VITE_API_VERSION=${VITE_API_VERSION}
 
+# Jivo Auth, the central sign-in service the browser signs in against
+# directly (it is a different origin from the API, and is NOT proxied by
+# nginx). Not a secret. The default is production; override for staging.
+ARG VITE_AUTH_BASE_URL=https://auth.jivo.in/api/v1
+ENV VITE_AUTH_BASE_URL=${VITE_AUTH_BASE_URL}
+
 # Dependencies in their own layer, keyed on the manifests alone — editing a
 # component must not re-run a 400-package install.
 #

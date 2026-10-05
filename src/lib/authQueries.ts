@@ -24,7 +24,7 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { userService } from "../services/userService";
-import type { CategoryOption, Option, User } from "../services/userService";
+import type { CategoryOption, JivoUser, Option, User } from "../services/userService";
 
 /**
  * Stable empties, so a page with no data yet does not hand its `useMemo`s a new
@@ -34,6 +34,7 @@ const NO_USERS: User[] = [];
 const NO_OPTIONS: Option[] = [];
 const NO_CATEGORIES: CategoryOption[] = [];
 const NO_STATES: StateOption[] = [];
+const NO_JIVO_USERS: JivoUser[] = [];
 
 /** A state as `/auth/states/` returns it. */
 export type StateOption = {
@@ -113,4 +114,21 @@ export function useCategories(): Lookup<CategoryOption> {
     queryFn: async () => asList<CategoryOption>(await userService.getCategories(), NO_CATEGORIES),
   });
   return { items: data ?? NO_CATEGORIES, isLoading: isPending, isError };
+}
+
+/**
+ * The Jivo Auth people with OMS access — what the App Users create form picks
+ * from. NOT reference data like the lists above: it changes every time a user
+ * is created (their `oms_user_id` fills in) and whenever an administrator adds
+ * someone in Jivo Auth, so it is always refetched when the form opens, and
+ * only fetched while it is open — the server asks Jivo Auth each time.
+ */
+export function useJivoUsers(enabled: boolean): Lookup<JivoUser> & { error: unknown } {
+  const { data, isPending, isError, error } = useQuery({
+    queryKey: ["auth", "jivo-users"],
+    queryFn: async () => asList<JivoUser>(await userService.getJivoUsers(), NO_JIVO_USERS),
+    enabled,
+    staleTime: 0,
+  });
+  return { items: data ?? NO_JIVO_USERS, isLoading: enabled && isPending, isError, error };
 }

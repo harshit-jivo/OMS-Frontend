@@ -23,6 +23,7 @@ import { cleanup } from "@testing-library/react";
 import { afterEach, beforeEach, vi } from "vitest";
 
 import api from "../services/api";
+import { jivoAuthClient } from "../services/jivoAuth";
 
 /**
  * What an unmocked request gets back.
@@ -34,6 +35,21 @@ import api from "../services/api";
  * network on the first paint.
  */
 api.defaults.adapter = async (config) => ({
+  data: [],
+  status: 200,
+  statusText: "OK",
+  headers: {},
+  config,
+});
+
+/*
+ * The same for Jivo Auth's client, which is a SEPARATE axios instance (it must
+ * not carry `api`'s headers — see services/jivoAuth.ts) and so is not covered
+ * by the line above. An unmocked sign-in or refresh in a test gets a body with
+ * no token pair, which the app treats as a refused one: nothing hangs, nothing
+ * reaches auth.jivo.in, and a test that needs a real answer sets its own.
+ */
+jivoAuthClient.defaults.adapter = async (config) => ({
   data: [],
   status: 200,
   statusText: "OK",

@@ -2,13 +2,13 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 
-import api from "../services/api";
+import { jivoLogout } from "../services/jivoAuth";
 import { webDeviceService } from "../services/webDeviceService";
 import GlobalLoadingOverlay from "./GlobalLoadingOverlay";
 import NotificationToaster from "./NotificationToaster";
 import { unsubscribeFromPush } from "../services/webPushClient";
 import NotificationPermissionModal from "./NotificationPermissionModal";
-import { useAuth } from "../auth";
+import { clearSession, useAuth } from "../auth";
 import { can } from "../auth/permissions";
 import { canOpen } from "../auth/routeAccess";
 import { useNotifications } from "./sidebar/useNotifications";
@@ -146,50 +146,35 @@ export default function Sidebar({ children }: SidebarProps) {
     });
   };
 
-  // NOTE: `device_id` / `device_last_sync` are deliberately ABSENT from this
-  // list and must stay that way — one browser keeps ONE device id across
-  // logins. Clearing it would create a phantom device on every logout/login.
-  const clearSessionStorage = () => {
-    [
-      "access",
-      "refresh",
-      "user_id",
-      "username",
-      "name",
-      "role",
-      "role_display",
-      "extra_pages",
-      "company_id",
-      "company_name",
-      "main_group_id",
-      "main_group_name",
-    ].forEach((key) => localStorage.removeItem(key));
-    // Per-session device state only; the persistent id above is untouched.
-    webDeviceService.reset();
-  };
-
   const handleLogout = async () => {
-    // Invalidate the refresh token server-side (blacklist) so it can't be
-    // reused after sign-out. Awaited with a short timeout so a slow/offline
-    // network never blocks logout, and before we navigate (which would cancel
-    // an in-flight request). Best-effort — failure must never block sign-out.
-    try {
-      const refresh = localStorage.getItem("refresh");
-      if (refresh) {
-        await api.post("/auth/logout/", { refresh }, { timeout: 3000 });
-      }
-    } catch {
-      /* best-effort */
-    }
-
-    // Remove this browser's web-push subscription while the token is still
-    // present, so we stop pushing to a signed-out device.
+    // Remove this browser's web-push subscription FIRST, while the session is
+    // still live, so we stop pushing to a signed-out device. It used to run
+    // after the logout call; that was safe when OMS's logout only blacklisted
+    // the refresh token, and is not something to rely on now that ending the
+    // session is Jivo Auth's call to make.
     try {
       await unsubscribeFromPush();
     } catch {
       /* best-effort */
     }
-    clearSessionStorage();
+
+    // End the Jivo Auth session so the refresh token can't be reused after
+    // sign-out. Awaited with a short timeout (3s) so a slow/offline network
+    // never blocks logout, and before we navigate (which would cancel an
+    // in-flight request). Best-effort — `jivoLogout` never throws.
+    try {
+      const refresh = localStorage.getItem("refresh");
+      if (refresh) await jivoLogout(refresh, 3000);
+    } catch {
+      /* storage unavailable — nothing to revoke from here */
+    }
+
+    // The one session key list (auth/session.ts), shared with session expiry
+    // in api.ts. `device_id` / `device_last_sync` are deliberately not in it:
+    // one browser keeps ONE device id across logins.
+    clearSession();
+    // Per-session device state only; the persistent id is untouched.
+    webDeviceService.reset();
     window.location.href = "/";
   };
 

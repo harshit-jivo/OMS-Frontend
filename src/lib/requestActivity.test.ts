@@ -133,8 +133,16 @@ describe("the interceptors release exactly one count per request", () => {
     localStorage.setItem("refresh", token());
     const { api, activity, duringFlight } = await loadApi([401, 200]);
 
-    const axios = (await import("axios")).default;
-    vi.spyOn(axios, "post").mockResolvedValue({ data: { access: token() } });
+    // The refresh goes to Jivo Auth through its own bare client — the copy in
+    // this module graph — so it is answered there, and never counted.
+    const { jivoAuthClient } = await import("../services/jivoAuth");
+    jivoAuthClient.defaults.adapter = async (config) => ({
+      data: { access: token(), refresh: token() },
+      status: 200,
+      statusText: "OK",
+      headers: {},
+      config,
+    });
 
     await api.get("/thing/");
 

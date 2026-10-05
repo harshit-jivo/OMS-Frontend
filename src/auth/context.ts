@@ -23,7 +23,7 @@ export interface AuthValue {
   hasRole: (...names: string[]) => boolean;
   /** Re-read the profile from the server (after a permission change). */
   refresh: () => Promise<void>;
-  /** Adopt a session produced by the login call, without a round trip. */
+  /** Adopt the user sign-in just read from `/auth/profile/`, without a second fetch. */
   signIn: (user: ApiUser) => Session;
   signOut: () => void;
 }

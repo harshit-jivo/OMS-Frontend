@@ -19,6 +19,7 @@ import type {
   StageAction,
   StageRole,
 } from "../../services/advancePaymentService";
+import { JivoAuthError } from "../../services/jivoAuth";
 
 export const TESTER = { id: 1, name: "Tester", username: "tester" };
 const OTHER = { id: 7, name: "Navdeep Singh", username: "navdeep" };
@@ -536,14 +537,13 @@ export class FakeRequestServer {
     return this.answer(held);
   }
 
-  /** "secret" is Tester's password. */
-  async confirmManualPassword(id: number, password: string): Promise<string> {
-    this.calls.push(["confirmManualPassword", id]);
-    if (password !== "secret") {
-      throw Object.assign(new Error("wrong"), {
-        response: { status: 403, data: { success: false, message: "That password is not right." } },
-      });
-    }
+  /**
+   * "secret" is Tester's password. A wrong one fails the way the real service
+   * does: at Jivo Auth, with a 401, before OMS is asked anything.
+   */
+  async confirmManualPassword(id: number, email: string, password: string): Promise<string> {
+    this.calls.push(["confirmManualPassword", id, email]);
+    if (password !== "secret") throw new JivoAuthError(401);
     return "tok-1";
   }
 

@@ -94,9 +94,9 @@ function safeSet(key: string, value: string): void {
 
 // ---------------------------------------------------------------------------
 // Device id — created once, then stable for the life of the browser profile.
-// Deliberately NOT in the auth key lists that logout clears (see api.ts
-// AUTH_STORAGE_KEYS and Sidebar clearSessionStorage), so logging out never
-// mints a phantom device.
+// Deliberately NOT in the session key list that sign-out and session expiry
+// clear (auth/session.ts SESSION_STORAGE_KEYS), so logging out never mints a
+// phantom device.
 // ---------------------------------------------------------------------------
 function uuid(): string {
   // crypto.randomUUID is available in all modern browsers on secure origins

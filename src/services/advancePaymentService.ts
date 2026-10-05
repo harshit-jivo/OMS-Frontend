@@ -16,6 +16,7 @@
  * at the one place they are turned into form data, `advancePayments/sapMapping`.
  */
 import api from "./api";
+import { jivoLogin, jivoLogout } from "./jivoAuth";
 
 const BASE = "/advance-payments";
 
@@ -1200,10 +1201,31 @@ export const advancePaymentService = {
     return unwrap<ApiRequest>(res.data);
   },
 
-  /** The Payment user's password, before typing a payee account by hand. Returns the token. */
-  async confirmManualPassword(id: number, password: string): Promise<string> {
-    const res = await api.post(`${BASE}/requests/${id}/confirm-password/`, { password });
-    return unwrap<{ token: string }>(res.data).token;
+  /**
+   * The Payment user's password, before typing a payee account by hand.
+   * Returns the token `savePayout` carries back as `manual_token`.
+   *
+   * Two calls, because OMS no longer holds passwords. Jivo Auth checks the
+   * password (a sign-in as the CURRENT user, by their email), and OMS takes
+   * the access token that proves it and answers with the manual-entry token.
+   * The Jivo pair is never stored and never touches the real session: OMS
+   * ends that Jivo session itself once it has accepted it. When OMS refuses
+   * it instead, the session is ended here, so a refused confirmation does not
+   * leave a sign-in open at Jivo Auth for the refresh token's 30 days.
+   *
+   * A Jivo Auth failure throws a `JivoAuthError` (wrong password, throttled,
+   * unreachable); an OMS failure throws the usual axios error. The dialog
+   * words the two differently.
+   */
+  async confirmManualPassword(id: number, email: string, password: string): Promise<string> {
+    const { access, refresh } = await jivoLogin(email, password, "OMS payment confirmation");
+    try {
+      const res = await api.post(`${BASE}/requests/${id}/confirm-password/`, { access });
+      return unwrap<{ token: string }>(res.data).token;
+    } catch (error) {
+      await jivoLogout(refresh);
+      throw error;
+    }
   },
 
   /** After paying: one transfer line's UTR, and the proof it was read from. */

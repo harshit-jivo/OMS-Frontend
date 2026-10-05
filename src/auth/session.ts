@@ -32,6 +32,7 @@ const KEYS = {
   userId: "user_id",
   username: "username",
   name: "name",
+  email: "email",
   role: "role",
   roleDisplay: "role_display",
   roles: "extra_roles",
@@ -46,7 +47,14 @@ const KEYS = {
 } as const;
 
 /**
- * Every key a session owns. `api.ts` clears these on logout.
+ * Every key a session owns, and THE list that sign-out clears.
+ *
+ * There used to be three: this one, `AUTH_STORAGE_KEYS` in `api.ts` (session
+ * expiry) and a literal in `Sidebar.tsx` (logout). The other two had drifted —
+ * neither cleared `extra_roles`, `is_superuser`, `is_staff` or `categories` —
+ * so a user who signed out left their roles and admin flags in storage for
+ * the next person on that browser. Both now call `clearSession` below, so a
+ * key added here is cleared everywhere.
  *
  * `device_id` and `device_last_sync` are deliberately ABSENT and must stay
  * that way: one browser keeps one device id across logins, and clearing it
@@ -100,6 +108,7 @@ export function loadSession(): Session | null {
     userId,
     username: readString(KEYS.username),
     name: readString(KEYS.name),
+    email: readString(KEYS.email),
     role: normalizeRole(readString(KEYS.role)),
     roleDisplay: readString(KEYS.roleDisplay),
     roles: readList(KEYS.roles),
@@ -128,9 +137,13 @@ function roleNameOf(value: unknown): string {
 /** The API's user payload, in the several shapes it has actually used. */
 export interface ApiUser {
   id?: number | string;
+  /** The person's Jivo Auth id — the identity behind the OMS user row. */
+  auth_id?: string;
   username?: string;
   name?: string;
   full_name?: string;
+  /** Jivo Auth's email for this person; what a password re-check signs in as. */
+  email?: string | null;
   role?: unknown;
   role_name?: unknown;
   role_display?: string;
@@ -173,9 +186,10 @@ function categoryNames(user: ApiUser): string[] {
 /**
  * Normalise an API user payload into a `Session`.
  *
- * Both `/auth/login/` and `/auth/profile/` come through here, so the two can
- * never populate the session differently — which is exactly how `extra_pages`
- * came to exist on one path and not the other.
+ * Sign-in and the startup refresh both read `/auth/profile/` and come through
+ * here, so the two can never populate the session differently — which is
+ * exactly how `extra_pages` came to exist on one path and not the other, back
+ * when sign-in had its own payload.
  */
 export function sessionFromApi(user: ApiUser): Omit<Session, "userId"> & {
   userId: string;
@@ -193,6 +207,7 @@ export function sessionFromApi(user: ApiUser): Omit<Session, "userId"> & {
     userId: String(user.id ?? ""),
     username: user.username ?? "",
     name: user.full_name || user.name || user.username || "",
+    email: user.email ?? "",
     role: primary,
     roleDisplay: user.role_display || primary,
     roles: Array.from(new Set([primary, ...extras].filter(Boolean))),
@@ -217,6 +232,7 @@ export function saveSession(session: Session): void {
     localStorage.setItem(KEYS.userId, session.userId);
     localStorage.setItem(KEYS.username, session.username);
     localStorage.setItem(KEYS.name, session.name);
+    localStorage.setItem(KEYS.email, session.email);
     localStorage.setItem(KEYS.role, session.role);
     localStorage.setItem(KEYS.roleDisplay, session.roleDisplay);
     localStorage.setItem(KEYS.roles, JSON.stringify(session.roles));

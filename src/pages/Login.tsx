@@ -30,6 +30,15 @@
  * and the shell does not mount on this route, so the gradient the whole app
  * sits on was simply absent here and the page rendered on flat `bg-canvas`.
  * The values below are that rule, copied, so the two agree.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * WHO CHECKS THE PASSWORD
+ * ─────────────────────────────────────────────────────────────────────────
+ * Jivo Auth (auth.jivo.in), not OMS. The form posts to it through
+ * `signInWithJivo`, which then asks OMS's `/auth/profile/` who that is here
+ * — see services/authService.ts. So the identifier is the person's EMAIL, and
+ * there is no "forgot password" link: production Jivo Auth sends no email, so
+ * a reset is something an administrator does.
  */
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -45,8 +54,8 @@ import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/form";
 import { Card, Notice } from "@/components/ui/page";
 import { landingPathFor } from "../config/pageAccess";
-import { loginUser } from "../services/authService";
-import { loadSession, saveTokens, useAuth } from "../auth";
+import { SignInError, signInWithJivo } from "../services/authService";
+import { loadSession, useAuth } from "../auth";
 import { resolveStartupSession } from "../services/api";
 import { webDeviceService } from "../services/webDeviceService";
 import { loadUILabels, loadUIFields } from "../services/uiConfig";
@@ -108,7 +117,7 @@ export default function Login() {
     };
   }, [navigate]);
 
-  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -138,8 +147,8 @@ export default function Login() {
   }, []);
 
   const handleLogin = async () => {
-    if (!username || !password) {
-      setNotice({ message: "Enter both a username and a password.", type: "error" });
+    if (!email.trim() || !password) {
+      setNotice({ message: "Enter both your email and your password.", type: "error" });
       return;
     }
 
@@ -147,13 +156,10 @@ export default function Login() {
     setNotice(null);
 
     try {
-      const data = await loginUser(username, password);
-      const user = data.data.user;
-      const tokens = data.data.tokens;
-
-      // Tokens first: `signIn` persists the rest of the session, and the api
-      // interceptor needs the token in place before anything else fires.
-      saveTokens(tokens.access, tokens.refresh);
+      // Jivo Auth signs the person in, the tokens go into storage, and OMS's
+      // `/auth/profile/` answers with the user — or `signInWithJivo` throws a
+      // `SignInError` worded for this form, having undone all of it.
+      const user = await signInWithJivo(email.trim(), password);
 
       // One call writes the WHOLE session — including `extra_pages` and
       // `extra_roles`, which this function never used to store at all. That gap
@@ -161,7 +167,7 @@ export default function Login() {
       // written until the Sidebar mounted, long after routing had decided.
       // Going through the auth module means login and the profile refresh
       // populate the session identically, so the two cannot drift again.
-      signIn(user);
+      const session = signIn(user);
 
       // Register this browser with the backend. Fire-and-forget: best-effort
       // telemetry that must never block, delay or fail login. Retries by itself
@@ -178,15 +184,22 @@ export default function Login() {
 
       // Landing: tracker users go to their first tracker page (they have no
       // Dashboard); legal reviewers to their workspace; everyone else Dashboard.
-      const landingPath = landingPathFor(user.role);
+      // The session's role rather than the payload's: `sessionFromApi` has
+      // already reduced whichever shape the API sent it in to a name.
+      const landingPath = landingPathFor(session.role);
       // Carry any notification deep-link params (openOrderId / notificationId) so
       // a notification tapped while logged out still opens the exact order after
       // login instead of dropping the user on the dashboard.
       const deepLink = window.location.search;
       setTimeout(() => navigate(landingPath + deepLink), 1000);
     } catch (error) {
-      console.error(error);
-      setNotice({ message: "Invalid username or password.", type: "error" });
+      // No `console.error(error)`, which this used to have: a failed request
+      // carries its body, and this one's body is the password.
+      setNotice({
+        message:
+          error instanceof SignInError ? error.message : "Something went wrong. Try again.",
+        type: "error",
+      });
     } finally {
       setLoading(false);
     }
@@ -264,7 +277,7 @@ export default function Login() {
                 Sign in to your account
               </h1>
               <p className="m-0 mt-1.5 mb-7 text-[13.5px] text-subtle">
-                Enter your credentials to continue.
+                Use your Jivo account email and password.
               </p>
 
               {/*
@@ -280,14 +293,18 @@ export default function Login() {
                   void handleLogin();
                 }}
               >
-                <Field label="Username" required>
+                {/* `autocomplete="username"` on an email field is correct: it is
+                    the token password managers pair with `current-password`,
+                    whatever the identifier happens to be. */}
+                <Field label="Email" required>
                   {(control) => (
                     <Input
                       {...control}
-                      value={username}
-                      onChange={(e) => setUsername(e.target.value)}
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
                       autoComplete="username"
-                      placeholder="username"
+                      placeholder="name@company.com"
                       autoFocus
                     />
                   )}
@@ -350,7 +367,7 @@ export default function Login() {
             </Card>
 
             <p className="m-0 mt-5 text-center text-[12px] text-subtle">
-              Trouble signing in? Contact your system administrator.
+              Forgot your password? Ask your administrator.
             </p>
           </div>
         </main>

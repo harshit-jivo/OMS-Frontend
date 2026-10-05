@@ -37,6 +37,7 @@ import {
 import { messageFrom } from "@/lib/apiError";
 import { showToast } from "@/lib/toastStore";
 import { cn } from "@/lib/utils";
+import { JivoUserPicker } from "../components/JivoUserPicker";
 import { TRACKER_ROLE_LABELS } from "../config/pageAccess";
 import trackerService from "../services/trackerService";
 import type { AdminUser, LookupKind, LookupRow, Stage, TrackerUser } from "../services/trackerService";
@@ -861,12 +862,14 @@ function AccessTab({ flash }: { flash: Flash }) {
 
 // ---------------------------------------------------------------------------
 // Tracker Users — create / delete tracker users (tracker roles only)
+//
+// A tracker user is a Jivo Auth person given a tracker role. People are added
+// to Jivo Auth by an administrator first; creating one here PICKS that person
+// (no username, password, name or email to type), and editing changes only
+// the OMS side — role, phone, active. Name and email are shown, read-only.
 // ---------------------------------------------------------------------------
 const EMPTY_NEW_USER = {
-  username: "",
-  password: "",
-  name: "",
-  email: "",
+  authId: "",
   phone: "",
   role: "tracker_user",
 };
@@ -878,6 +881,19 @@ function UsersTab({ flash }: { flash: Flash }) {
   const [showModal, setShowModal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<TrackerUser | null>(null);
+
+  const queryClient = useQueryClient();
+
+  // Who a new tracker user can be. Only while the create dialog is open, and
+  // refetched each time: the server asks Jivo Auth, and every create changes
+  // the answer.
+  const jivoUsers = useQuery({
+    queryKey: ["tracker", "admin", "jivo-users"],
+    queryFn: () => trackerService.adminListJivoUsers(),
+    enabled: showModal && !editingId,
+    staleTime: 0,
+  });
+  const editing = editingId ? users.find((u) => u.id === editingId) : undefined;
 
   const load = () =>
     trackerService
@@ -904,10 +920,7 @@ function UsersTab({ flash }: { flash: Flash }) {
   const startEdit = (u: TrackerUser) => {
     setEditingId(u.id);
     setDraft({
-      username: u.username,
-      password: "",
-      name: u.name,
-      email: u.email,
+      authId: u.auth_id || "",
       phone: u.phone,
       role: u.role,
       is_active: u.is_active,
@@ -915,25 +928,28 @@ function UsersTab({ flash }: { flash: Flash }) {
     setShowModal(true);
   };
 
-  // A new user needs both; an edit keeps the existing password when blank.
-  const canSave = Boolean(editingId) || (draft.username.trim() && draft.password.trim());
+  // A new user needs a person picked; everything an edit changes has a value.
+  const canSave = Boolean(editingId) || Boolean(draft.authId);
 
   const save = async () => {
     setSaving(true);
     try {
       if (editingId) {
         await trackerService.adminUpdateTrackerUser(editingId, {
-          name: draft.name,
           role: draft.role,
-          email: draft.email,
           phone: draft.phone,
           is_active: draft.is_active,
-          ...(draft.password.trim() ? { password: draft.password } : {}),
         });
-        flash("User updated", draft.username);
+        flash("User updated", editing?.username);
       } else {
-        await trackerService.adminCreateTrackerUser(draft);
-        flash("User created", draft.username);
+        const created = await trackerService.adminCreateTrackerUser({
+          auth_id: draft.authId,
+          role: draft.role,
+          ...(draft.phone.trim() ? { phone: draft.phone.trim() } : {}),
+        });
+        flash("User created", created?.name || created?.username);
+        // They have an OMS user now, so they leave the picker's list.
+        void queryClient.invalidateQueries({ queryKey: ["tracker", "admin", "jivo-users"] });
       }
       resetForm();
       load();
@@ -1027,44 +1043,59 @@ function UsersTab({ flash }: { flash: Flash }) {
           <DialogContent title="Tracker user" size="lg">
             <DialogHeader>
               <DialogTitle>
-                {editingId ? `Edit user ${draft.username}` : "Add a tracker user"}
+                {editingId ? `Edit user ${editing?.username ?? ""}` : "Add a tracker user"}
               </DialogTitle>
             </DialogHeader>
-            <DialogBody>
+            <DialogBody className="space-y-4">
+              {!editingId && (
+                <p className="m-0 text-[12.5px] text-subtle">
+                  People are added to Jivo Auth by an administrator first; pick them here to give
+                  them a tracker role.
+                </p>
+              )}
               <FormGrid>
-                <Field label="Username" required={!editingId}>
-                  {(c) => (
-                    <Input
-                      {...c}
-                      value={draft.username}
-                      disabled={!!editingId}
-                      onChange={(e) => setDraft({ ...draft, username: e.target.value })}
-                    />
-                  )}
-                </Field>
-                <Field label="Full name">
-                  {(c) => (
-                    <Input
-                      {...c}
-                      value={draft.name}
-                      onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                    />
-                  )}
-                </Field>
-                <Field
-                  label={editingId ? "New password" : "Password"}
-                  required={!editingId}
-                  hint={editingId ? "Leave blank to keep the current one." : undefined}
-                >
-                  {(c) => (
-                    <Input
-                      {...c}
-                      type="password"
-                      value={draft.password}
-                      onChange={(e) => setDraft({ ...draft, password: e.target.value })}
-                    />
-                  )}
-                </Field>
+                {editingId ? (
+                  <>
+                    <Field label="Username">
+                      {(c) => <Input {...c} value={editing?.username ?? ""} disabled />}
+                    </Field>
+                    <Field label="Full name" hint="Name and email are managed in Jivo Auth.">
+                      {(c) => <Input {...c} value={editing?.name ?? ""} readOnly />}
+                    </Field>
+                    <Field label="Email" hint="Name and email are managed in Jivo Auth.">
+                      {(c) => (
+                        <Input
+                          {...c}
+                          type="email"
+                          value={editing?.email ?? ""}
+                          placeholder="—"
+                          readOnly
+                        />
+                      )}
+                    </Field>
+                  </>
+                ) : (
+                  <Field
+                    label="Person"
+                    required
+                    span="full"
+                    error={
+                      jivoUsers.isError
+                        ? messageFrom(jivoUsers.error, "Could not load people from Jivo Auth.")
+                        : undefined
+                    }
+                  >
+                    {(c) => (
+                      <JivoUserPicker
+                        id={c.id}
+                        users={jivoUsers.data ?? []}
+                        value={draft.authId}
+                        onChange={(authId) => setDraft({ ...draft, authId })}
+                        loading={jivoUsers.isPending}
+                      />
+                    )}
+                  </Field>
+                )}
                 <Field label="Role">
                   {(c) => (
                     <Select
@@ -1078,16 +1109,6 @@ function UsersTab({ flash }: { flash: Flash }) {
                         </option>
                       ))}
                     </Select>
-                  )}
-                </Field>
-                <Field label="Email" hint="Optional.">
-                  {(c) => (
-                    <Input
-                      {...c}
-                      type="email"
-                      value={draft.email}
-                      onChange={(e) => setDraft({ ...draft, email: e.target.value })}
-                    />
                   )}
                 </Field>
                 <Field label="Phone" hint="Optional.">
@@ -1121,7 +1142,7 @@ function UsersTab({ flash }: { flash: Flash }) {
                 variant="primary"
                 onClick={() => void save()}
                 disabled={saving || !canSave}
-                title={canSave ? undefined : "A username and password are required."}
+                title={canSave ? undefined : "Pick the person first."}
               >
                 {editingId ? (
                   <>

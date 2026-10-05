@@ -1,5 +1,11 @@
 /**
  * App Users — the account list, and the form that creates and edits one.
+ *
+ * Sign-in is Jivo Auth's (auth.jivo.in). A person exists there first — an
+ * administrator adds them — and creating an OMS user here means PICKING that
+ * person and giving them OMS roles and scope. So the create form has no name,
+ * email, username or password inputs, and the edit form shows name and email
+ * read-only: they are Jivo Auth's, and the server ignores them.
  */
 import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -49,11 +55,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { showToast } from "@/lib/toastStore";
+import { JivoUserPicker } from "../components/JivoUserPicker";
 import { userService } from "../services/userService";
 import type { User, Option, CreateUserData } from "../services/userService";
 import {
   useCategories,
   useCompanies,
+  useJivoUsers,
   useMainGroups,
   useRoles,
   useStates,
@@ -64,11 +72,12 @@ import { errorBody, fieldError, messageFrom } from "@/lib/apiError";
 
 const ITEMS_PER_PAGE = 7;
 
+/** Shown wherever the form displays something it cannot change. */
+const MANAGED_IN_JIVO = "Name and email are managed in Jivo Auth.";
+
 const BLANK_FORM: CreateUserData = {
-  name: "",
+  authId: "",
   username: "",
-  password: "",
-  email: "",
   phone: "",
   mainGroup: 0,
   mainGroups: [],
@@ -107,7 +116,17 @@ export default function App_User() {
   const [currentPage, setCurrentPage] = useState(1);
   const [search, setSearch] = useState("");
   const [isEditMode, setIsEditMode] = useState(false);
-  const [editUserId, setEditUserId] = useState<number | null>(null);
+  // The whole row, not just its id: the edit form SHOWS its name and email.
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+
+  // Who a new user can be. Fetched only while the create form is open — the
+  // server asks Jivo Auth every time, and the list changes with each create.
+  const {
+    items: jivoUsers,
+    isLoading: isJivoUsersLoading,
+    isError: isJivoUsersError,
+    error: jivoUsersError,
+  } = useJivoUsers(showForm && !isEditMode);
 
   /** The categories this user holds, primary first. */
   const selectedCategoryIds = useMemo(
@@ -182,15 +201,16 @@ export default function App_User() {
     setFormData((prev) => ({ ...prev, state: ids[0] || 0, states: ids }));
 
   /*
-   * User creation is the one place where a generic "first field error wins" is
-   * the wrong answer, which is why this does not just call `messageFrom`.
+   * Why a create or an edit was refused, named by the field it was about.
    *
-   * Creating a user is a multi-write call, and the failure people actually hit
-   * is a duplicate username or email — sometimes both at once. DRF reports
-   * that as two separate field errors, and reading only the first tells the
-   * admin to change the username when the email is also taken, so they submit
-   * again and fail again. Collapsing the pair into one sentence is the whole
-   * reason for this function.
+   * Not just `messageFrom`: that reads `detail`/`message` first, and the
+   * refusals people hit here are field errors — on a create, `auth_id` (the
+   * picked person already has an OMS user, or no longer has OMS access); on an
+   * edit, a duplicate username. The field is what tells the admin which input
+   * to change.
+   *
+   * Duplicate EMAILS are no longer possible here: email is Jivo Auth's, and
+   * it is not sent.
    *
    * `source` is either an axios error OR the service's own `{success, errors}`
    * result — both reach the same banner, so both are handled here rather than
@@ -206,9 +226,8 @@ export default function App_User() {
         ? (body?.errors as Record<string, unknown>)
         : body;
 
+    const authId = fieldError(bag, "auth_id");
     const username = fieldError(bag, "username");
-    const email = fieldError(bag, "email");
-    const password = fieldError(bag, "password");
     const nonField = fieldError(bag, "non_field_errors");
 
     const isDuplicate = (value?: string) => {
@@ -218,19 +237,12 @@ export default function App_User() {
       );
     };
 
-    // The pair, before either one alone.
-    if (isDuplicate(username) && isDuplicate(email)) {
-      return "Username and email already exist.";
-    }
+    if (authId) return "Person: " + authId;
     if (isDuplicate(username)) return "Username already exists.";
-    if (isDuplicate(email)) return "Email already exists.";
-
-    if (password) return "Password: " + password;
     if (username) return "Username: " + username;
-    if (email) return "Email: " + email;
     if (nonField) return nonField;
 
-    // Any other field the serializer rejected — phone, name, a role id.
+    // Any other field the serializer rejected — phone, a role id.
     for (const [key, value] of Object.entries(bag ?? {})) {
       if (["message", "error", "detail", "success", "errors"].includes(key)) continue;
       const text = fieldError(bag, key);
@@ -239,7 +251,15 @@ export default function App_User() {
       }
     }
 
-    return messageFrom(source, "Something went wrong while creating the user.");
+    // The server's own sentence — a 503 says Jivo Auth could not be reached.
+    // Read here as well as by `messageFrom`, which only reads axios errors and
+    // would drop it from the service's non-throwing `{success: false}` result.
+    const sentence = [body?.detail, body?.message].find(
+      (value): value is string => typeof value === "string" && value.trim() !== "",
+    );
+    if (sentence) return sentence.trim();
+
+    return messageFrom(source, "Something went wrong while saving the user.");
   };
 
   /*
@@ -251,6 +271,7 @@ export default function App_User() {
    * form cannot be submitted into a failure that was knowable beforehand.
    */
   const missing: string[] = [];
+  if (!isEditMode && !formData.authId) missing.push("person");
   if (!formData.role) missing.push("role");
   if (!formData.company) missing.push("company");
   if (!formData.category) missing.push("category");
@@ -261,27 +282,37 @@ export default function App_User() {
     if (!canSubmit) return;
 
     // Creating/updating a user is a multi-write call (role, groups, states,
-    // categories, password); block the form until it settles so an impatient
-    // second submit can't fire the same write twice.
+    // categories); block the form until it settles so an impatient second
+    // submit can't fire the same write twice.
     if (isSaving) return;
     setIsSaving(true);
     setFormError("");
 
+    // Who was saved, for the toast — the picked person on a create.
+    const picked = jivoUsers.find((person) => person.auth_id === formData.authId);
+    const savedName =
+      isEditMode && editingUser
+        ? editingUser.name || formData.username
+        : picked?.name || picked?.email || "The user";
+
     try {
       const result =
-        isEditMode && editUserId
-          ? await userService.updateUser(editUserId, formData)
+        isEditMode && editingUser
+          ? await userService.updateUser(editingUser.id, formData)
           : await userService.createUser(formData);
 
       if (result.success) {
         showToast({
           title: isEditMode ? "User updated" : "User created",
-          message: (formData.name || formData.username) + " was saved.",
+          message: savedName + " was saved.",
         });
         setFormData(BLANK_FORM);
         setIsEditMode(false);
-        setEditUserId(null);
+        setEditingUser(null);
         void queryClient.invalidateQueries({ queryKey: ["users"] });
+        // The person just created now HAS an OMS user, so they leave the
+        // create form's list.
+        void queryClient.invalidateQueries({ queryKey: ["auth", "jivo-users"] });
         setShowForm(false);
       } else {
         setFormError(getCreateUserErrorMessage(result));
@@ -295,7 +326,7 @@ export default function App_User() {
 
   const handleEditUser = (user: User) => {
     setIsEditMode(true);
-    setEditUserId(user.id);
+    setEditingUser(user);
     setFormError("");
 
     const getId = (value: unknown) => {
@@ -332,10 +363,8 @@ export default function App_User() {
       getId(editableUser.role) || role.find((r) => r.name.toLowerCase() === roleName)?.id || 0;
 
     setFormData({
-      name: user.name || "",
+      authId: user.auth_id || "",
       username: user.username || "",
-      password: "",
-      email: user.email || "",
       phone: user.phone || "",
       mainGroup: getId(editableUser.main_group) || mainGroupIds[0] || 0,
       mainGroups: mainGroupIds,
@@ -354,7 +383,7 @@ export default function App_User() {
 
   const openAddForm = () => {
     setIsEditMode(false);
-    setEditUserId(null);
+    setEditingUser(null);
     setFormData(BLANK_FORM);
     setFormError("");
     setShowForm(true);
@@ -363,7 +392,7 @@ export default function App_User() {
   const closeForm = () => {
     setShowForm(false);
     setIsEditMode(false);
-    setEditUserId(null);
+    setEditingUser(null);
     setFormError("");
   };
 
@@ -575,68 +604,80 @@ export default function App_User() {
                   re-submitted mid-write. */}
               <fieldset className="m-0 min-w-0 border-0 p-0" disabled={isSaving}>
                 <DialogBody className="space-y-4">
+                  {!isEditMode && (
+                    <Notice tone="info">
+                      People are added to Jivo Auth by an administrator first; pick them here to
+                      give them OMS access and roles.
+                    </Notice>
+                  )}
+
                   <FormGrid>
-                    <Field label="Full name" required>
-                      {(control) => (
-                        <Input
-                          {...control}
-                          value={formData.name}
-                          onChange={(e) =>
-                            setFormData((prev) => ({ ...prev, name: e.target.value }))
-                          }
-                          placeholder="Name"
-                          required
-                        />
-                      )}
-                    </Field>
+                    {isEditMode ? (
+                      <>
+                        {/* Read-only, not hidden: the admin still needs to see
+                            whose account this is. Changing either is done in
+                            Jivo Auth, and the server ignores them here. */}
+                        <Field label="Full name" hint={MANAGED_IN_JIVO}>
+                          {(control) => (
+                            <Input {...control} value={editingUser?.name || ""} readOnly />
+                          )}
+                        </Field>
 
-                    <Field label="Username" required>
-                      {(control) => (
-                        <Input
-                          {...control}
-                          value={formData.username}
-                          onChange={(e) =>
-                            setFormData((prev) => ({ ...prev, username: e.target.value }))
-                          }
-                          placeholder="Username"
-                          required
-                        />
-                      )}
-                    </Field>
+                        <Field label="Email address" hint={MANAGED_IN_JIVO}>
+                          {(control) => (
+                            <Input
+                              {...control}
+                              type="email"
+                              value={editingUser?.email || ""}
+                              placeholder="—"
+                              readOnly
+                            />
+                          )}
+                        </Field>
 
-                    <Field
-                      label={isEditMode ? "Change password" : "Password"}
-                      required={!isEditMode}
-                      hint={isEditMode ? "Leave blank to keep the current password." : undefined}
-                    >
-                      {(control) => (
-                        <Input
-                          {...control}
-                          type="password"
-                          value={formData.password}
-                          onChange={(e) =>
-                            setFormData((prev) => ({ ...prev, password: e.target.value }))
-                          }
-                          placeholder={isEditMode ? "Unchanged" : "••••••••"}
-                          required={!isEditMode}
-                        />
-                      )}
-                    </Field>
-
-                    <Field label="Email address" required>
-                      {(control) => (
-                        <Input
-                          {...control}
-                          type="email"
-                          value={formData.email}
-                          onChange={(e) =>
-                            setFormData((prev) => ({ ...prev, email: e.target.value }))
-                          }
-                          placeholder="abc@gmail.com"
-                          required
-                        />
-                      )}
-                    </Field>
+                        {/* Still editable: no longer a sign-in credential, but
+                            other OMS features key on it. */}
+                        <Field label="Username" required>
+                          {(control) => (
+                            <Input
+                              {...control}
+                              value={formData.username}
+                              onChange={(e) =>
+                                setFormData((prev) => ({ ...prev, username: e.target.value }))
+                              }
+                              placeholder="Username"
+                              required
+                            />
+                          )}
+                        </Field>
+                      </>
+                    ) : (
+                      <Field
+                        label="Person"
+                        required
+                        span="full"
+                        hint={
+                          isJivoUsersError
+                            ? undefined
+                            : "Everyone with OMS access in Jivo Auth who has no OMS user yet."
+                        }
+                        error={
+                          isJivoUsersError
+                            ? messageFrom(jivoUsersError, "Could not load people from Jivo Auth.")
+                            : undefined
+                        }
+                      >
+                        {(control) => (
+                          <JivoUserPicker
+                            id={control.id}
+                            users={jivoUsers}
+                            value={formData.authId}
+                            onChange={(authId) => setFormData((prev) => ({ ...prev, authId }))}
+                            loading={isJivoUsersLoading}
+                          />
+                        )}
+                      </Field>
+                    )}
 
                     <Field label="Contact number" required>
                       {(control) => (

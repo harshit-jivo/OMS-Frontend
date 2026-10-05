@@ -28,6 +28,7 @@ function session(overrides: Partial<Session> = {}): Session {
     userId: "1",
     username: "u",
     name: "U",
+    email: "",
     role: "billing",
     roleDisplay: "Billing",
     roles: ["billing"],

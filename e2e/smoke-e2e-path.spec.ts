@@ -10,11 +10,12 @@
  * harness.ts). That is deliberate there — 33+ route baselines re-typing a
  * password each would be paying for the login screen over and over for no
  * benefit — but it also means nothing in the suite has ever driven a real
- * `/auth/login/` request, the toast `handleLogin` shows, or the redirect it
- * schedules (Login.tsx:98-152). A seeded session would make that untestable
- * from this file too: Login's own "already signed in" effect
- * (Login.tsx:51-71) calls `resolveStartupSession()` on mount and navigates
- * away before the form could be touched.
+ * sign-in — the Jivo Auth `/auth/login/` call, the OMS `/auth/profile/` call
+ * that follows it, the notice `handleLogin` shows, or the redirect it
+ * schedules (Login.tsx `handleLogin`). A seeded session would make that
+ * untestable from this file too: Login's own "already signed in" effect calls
+ * `resolveStartupSession()` on mount and navigates away before the form could
+ * be touched.
  *
  * So this file uses the bare `page` fixture and assembles the same wiring
  * `appPage` provides by hand (fonts, the fixture-backed `**\/api\/**` catch-all)
@@ -71,37 +72,57 @@ test.describe("smoke path: login to order submission", () => {
     await routeFonts(page);
     await page.route("**/api/**", fulfilFromFixtures);
 
-    // The one endpoint `fixtures.ts` has no entry for, because nothing else
-    // in the suite ever calls it for real. Registered AFTER the generic
-    // handler above so it wins — Playwright runs the most-recently-added
-    // matching route first (the same ordering `capturePost` in
-    // interactions.visual.spec.ts relies on for `/orders/create/`).
+    // Sign-in is two calls now, and neither has a `fixtures.ts` entry that
+    // would do: Jivo Auth's `/auth/login/` (nothing else in the suite calls
+    // it), and OMS's `/auth/profile/`, whose fixture is a thin user that is
+    // not an admin as far as `sessionFromApi` is concerned. Both registered
+    // AFTER the generic handler above so they win — Playwright runs the
+    // most-recently-added matching route first (the same ordering
+    // `capturePost` in interactions.visual.spec.ts relies on for
+    // `/orders/create/`).
+    //
+    // `/auth/login/` matches on the path alone, so it answers whichever Jivo
+    // Auth the build points at (`VITE_AUTH_BASE_URL`). The request is kept to
+    // check below that it carried what Jivo Auth expects and nothing more.
+    const signIns: { body: Record<string, unknown>; headers: Record<string, string> }[] = [];
     await page.route(/\/auth\/login\//, async (route) => {
+      signIns.push({
+        body: route.request().postDataJSON(),
+        headers: route.request().headers(),
+      });
       await route.fulfill({
         status: 200,
         contentType: "application/json",
         headers: { "access-control-allow-origin": "*" },
-        // Shape read straight off `loginUser`/`handleLogin`: `data.data.user`
-        // and `data.data.tokens.{access,refresh}` (authService.ts:3-10,
-        // Login.tsx:108-110). Same identity the rest of the suite's admin
-        // session uses (harness.ts SESSION / fixtures.ts's `/auth/profile/`),
-        // so a later profile refresh cannot disagree with it.
+        // Jivo Auth's sign-in answer: the token pair, nothing else.
+        body: JSON.stringify({ access: realToken(), refresh: "smoke-refresh" }),
+      });
+    });
+
+    await page.route(/\/auth\/profile\//, async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        headers: { "access-control-allow-origin": "*" },
+        // `getCurrentUser` reads `response.data.data`, hence the envelope.
+        // Same identity the rest of the suite's admin session uses
+        // (harness.ts SESSION), so nothing later can disagree with it.
         body: JSON.stringify({
+          success: true,
           data: {
-            user: {
-              id: 1,
-              username: "vrtester",
-              full_name: "Visual Tester",
-              role: "admin",
-              role_display: "Admin",
-              roles: ["admin"],
-              extra_pages: [],
-              is_superuser: true,
-              is_staff: true,
-              company: { id: 1, name: "Test Company" },
-              main_group: { id: 1, name: "Main" },
-            },
-            tokens: { access: realToken(), refresh: "smoke-refresh" },
+            id: 1,
+            auth_id: "jivo-vrtester",
+            username: "vrtester",
+            full_name: "Visual Tester",
+            email: "vr@example.com",
+            role: "admin",
+            role_display: "Admin",
+            roles: ["admin"],
+            extra_pages: [],
+            is_superuser: true,
+            is_staff: true,
+            company: { id: 1, name: "Test Company" },
+            main_group: { id: 1, name: "Main" },
           },
         }),
       });
@@ -110,7 +131,7 @@ test.describe("smoke path: login to order submission", () => {
     // ---- 1. Log in ------------------------------------------------------
     await page.goto("/");
 
-    await page.getByPlaceholder("username").fill("vrtester");
+    await page.getByPlaceholder("name@company.com").fill("vr@example.com");
     await page.getByPlaceholder("••••••••").fill("does-not-matter-its-mocked");
     await page.getByRole("button", { name: "Log in" }).click();
 
@@ -127,6 +148,13 @@ test.describe("smoke path: login to order submission", () => {
     // the `Sales_Dashboard` permission.
     await page.waitForURL(/\/Home/);
     await settle(page);
+
+    // What went to Jivo Auth: the email, and the name this browser's session
+    // is listed under. And none of OMS's X-* headers, which Jivo Auth's CORS
+    // does not allow — one of them would fail the preflight in a real browser.
+    expect(signIns).toHaveLength(1);
+    expect(signIns[0].body).toMatchObject({ email: "vr@example.com", device_name: "OMS web" });
+    expect(Object.keys(signIns[0].headers).filter((name) => /^x-/i.test(name))).toEqual([]);
 
     // ---- 2. Build an order ------------------------------------------------
     await gotoStable(page, "/Add_Sales");

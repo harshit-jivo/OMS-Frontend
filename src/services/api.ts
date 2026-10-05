@@ -1,7 +1,9 @@
 import axios from "axios";
 import type { AxiosRequestConfig } from "axios";
 
+import { clearSession } from "../auth/session";
 import { requestSettled, requestStarted } from "../lib/requestActivity";
+import { AUTH_BASE_URL, JivoAuthError, jivoRefresh } from "./jivoAuth";
 import { newRequestId, REQUEST_ID_HEADER } from "./requestId";
 
 // Where the API lives, and how a path becomes a URL — see services/apiPaths.ts.
@@ -19,30 +21,29 @@ const api = axios.create({
 });
 
 // Auth endpoints must never be auto-retried / refreshed (Task 10).
+//
+// Sign-in, refresh and sign-out are Jivo Auth's now, made through the bare
+// client in jivoAuth.ts, so none of them passes through these interceptors.
+// This stays as the backstop for a call that reaches Jivo Auth through `api`
+// anyway — a 401 there is an answer about credentials, and "refresh and try
+// again" would turn a wrong password into a token rotation. OMS's own copies
+// of these paths are gone (login answers 410, refresh and logout 404), and
+// neither of those statuses is a 401, so matching them too costs nothing.
 const AUTH_PATHS = ["/auth/login/", "/auth/refresh/", "/auth/logout/"];
 const isAuthPath = (url?: string) =>
-  !!url && AUTH_PATHS.some((p) => url.includes(p));
+  !!url && (url.startsWith(AUTH_BASE_URL) || AUTH_PATHS.some((p) => url.includes(p)));
 
-// localStorage keys cleared on session end (mirror of what Login sets).
-//
-// NOTE: `device_id` (and `device_last_sync`) are deliberately ABSENT from this
-// list and must stay that way. One browser must keep ONE device id across
-// logins — clearing it would mint a brand-new "device" on every logout/login
-// and fill the backend with phantom rows. See webDeviceService.
-const AUTH_STORAGE_KEYS = [
-  "access",
-  "refresh",
-  "user_id",
-  "username",
-  "name",
-  "role",
-  "role_display",
-  "company_id",
-  "company_name",
-  "main_group_id",
-  "main_group_name",
-  "extra_pages",
-];
+/**
+ * OMS's 401 for a user whose OMS account is switched off. The Jivo token is
+ * fine, so a refresh would succeed and the retry would be refused again —
+ * a token rotation per request, for an answer that cannot change.
+ */
+export const DISABLED_ACCOUNT_DETAIL = "User account is disabled.";
+
+export const isDisabledAccountResponse = (response: unknown): boolean => {
+  const data = (response as { data?: { detail?: unknown; message?: unknown } } | undefined)?.data;
+  return data?.detail === DISABLED_ACCOUNT_DETAIL || data?.message === DISABLED_ACCOUNT_DETAIL;
+};
 
 /* ------------------------------------------------------------------ *
  * Device/version metadata hooks (inversion of control).
@@ -104,8 +105,10 @@ api.interceptors.request.use((config) => {
     config.headers.set(REQUEST_ID_HEADER, newRequestId());
   }
 
+  // The Jivo Auth access token, on every OMS call. There is no OMS sign-in
+  // request left to exempt — signing in happens against Jivo Auth.
   const token = localStorage.getItem("access");
-  if (token && config.url !== "/auth/login/") {
+  if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
   return config;
@@ -130,7 +133,14 @@ const bearerOf = (header: unknown): string | null => {
   return header.startsWith("Bearer ") ? header.slice(7) : null;
 };
 
-/** True when the access token exists and is not expired (5s skew buffer). */
+/**
+ * True when the access token exists and is not expired (5s skew buffer).
+ *
+ * Jivo Auth's tokens are RS256 and live 15 minutes (OMS's own lived a day).
+ * Neither difference matters here: the payload segment decodes the same
+ * whatever signed it — the SERVER verifies the signature, this only reads
+ * `exp` — and an expired token is refreshed below like any other.
+ */
 export const isAccessTokenValid = (token: string | null): boolean => {
   if (!token) return false;
   try {
@@ -146,31 +156,24 @@ export const isAccessTokenValid = (token: string | null): boolean => {
   }
 };
 
-// Call POST /auth/refresh/ with a BARE axios call so this request never
-// re-enters the interceptors below (no recursion). Never logs tokens.
+// POST {AUTH}/auth/refresh/ through Jivo Auth's BARE client, so this request
+// never re-enters the interceptors below (no recursion). Never logs tokens.
+//
+// It carries NO correlation ID, unlike every other request the app makes:
+// Jivo Auth's CORS does not allow X-Request-ID, and sending it would fail the
+// preflight — every refresh would look like a network error and nobody would
+// ever be signed back in. See jivoAuth.ts.
 const doRefresh = async (): Promise<RefreshResult> => {
   const refresh = localStorage.getItem("refresh");
   if (!refresh) return { ok: false, reason: "invalid" };
   try {
-    const res = await axios.post(
-      `${API_BASE_URL}/auth/refresh/`,
-      { refresh },
-      {
-        headers: {
-          "Content-Type": "application/json",
-          // This call is made with a BARE axios so it cannot re-enter the
-          // interceptors, which means it would otherwise be the one request
-          // the app makes with no correlation ID — and a refresh failure is
-          // exactly the kind of thing worth correlating.
-          [REQUEST_ID_HEADER]: newRequestId(),
-        },
-      },
-    );
-    const newAccess: string | undefined = res.data?.access;
-    const newRefresh: string | undefined = res.data?.refresh;
-    if (!newAccess) return { ok: false, reason: "invalid" };
-    localStorage.setItem("access", newAccess);
-    if (newRefresh) localStorage.setItem("refresh", newRefresh); // rotation
+    const pair = await jivoRefresh(refresh);
+    if (!pair) return { ok: false, reason: "invalid" };
+    // Jivo Auth rotates on every refresh: BOTH halves are new, and the old
+    // refresh token stops working ~30s from now. Storing only `access` would
+    // sign the user out on the next refresh.
+    localStorage.setItem("access", pair.access);
+    localStorage.setItem("refresh", pair.refresh);
     // Successful (re)authentication — let device registration retry if an
     // earlier attempt hadn't succeeded. Fire-and-forget; never affects refresh.
     try {
@@ -178,11 +181,12 @@ const doRefresh = async (): Promise<RefreshResult> => {
     } catch {
       /* the device hook must never impact the auth path */
     }
-    return { ok: true, access: newAccess };
+    return { ok: true, access: pair.access };
   } catch (error: unknown) {
-    const status = (error as { response?: { status?: number } })?.response?.status;
+    const status = error instanceof JivoAuthError ? error.status : 0;
     // ONLY a genuine auth rejection ends the session. Anything without a 401/400
-    // response (timeout, offline, DNS, 5xx) is transient → keep the tokens.
+    // response (timeout, offline, DNS, 5xx, a 429 throttle) is transient → keep
+    // the tokens.
     if (status === 401 || status === 400) return { ok: false, reason: "invalid" };
     return { ok: false, reason: "network" };
   }
@@ -193,7 +197,8 @@ const doRefresh = async (): Promise<RefreshResult> => {
  * (single-flight + cross-tab). `failedToken` is the access token the failing
  * request used — if localStorage already holds a newer one (e.g. another tab
  * just refreshed), we reuse it instead of calling /refresh again, which is
- * critical because rotation would otherwise blacklist a token mid-flight.
+ * critical because rotation would otherwise retire a token mid-flight: Jivo
+ * Auth keeps the old refresh token valid for only ~30 seconds.
  */
 const refreshAccessToken = async (
   failedToken: string | null,
@@ -258,8 +263,10 @@ let sessionEnding = false;
 const endSession = () => {
   if (sessionEnding) return;
   sessionEnding = true;
+  // The ONE session key list (auth/session.ts), shared with sign-out — this
+  // used to clear a shorter copy that left roles and admin flags behind.
+  clearSession();
   try {
-    AUTH_STORAGE_KEYS.forEach((k) => localStorage.removeItem(k));
     sessionStorage.setItem(
       "session_expired",
       "Your session has expired. Please login again.",
@@ -342,13 +349,17 @@ api.interceptors.response.use(
       | (AxiosRequestConfig & { _retry?: boolean })
       | undefined;
 
-    // Only handle 401s on normal authenticated APIs, once.
+    // Only handle 401s on normal authenticated APIs, once. A 403 is passed
+    // straight through and NEVER refreshes: it means "this user may not", and
+    // a fresh token for the same user cannot change that — refreshing on it
+    // would rotate tokens on every permission check a page makes.
     if (
       !response ||
       response.status !== 401 ||
       !config ||
       config._retry ||
-      isAuthPath(config.url)
+      isAuthPath(config.url) ||
+      isDisabledAccountResponse(response)
     ) {
       return Promise.reject(error);
     }

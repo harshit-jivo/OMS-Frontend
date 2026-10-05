@@ -20,6 +20,9 @@ export const TEST_SESSION: Session = {
   userId: "1",
   username: "tester",
   name: "Tester",
+  // Present because the advance-payment password check signs in to Jivo Auth
+  // by email, and refuses to try without one.
+  email: "tester@example.com",
   role: "admin",
   roleDisplay: "Admin",
   roles: ["admin"],

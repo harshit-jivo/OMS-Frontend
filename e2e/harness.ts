@@ -36,6 +36,7 @@ const SESSION: Record<string, string> = {
   user_id: "1",
   username: "vrtester",
   name: "Visual Tester",
+  email: "vr@example.com",
   role: "admin",
   role_display: "Admin",
   extra_roles: JSON.stringify(["admin"]),
@@ -193,8 +194,10 @@ export async function asRole(
       body: JSON.stringify({
         data: {
           id: 1,
+          auth_id: "jivo-vrtester",
           username: "vrtester",
           full_name: "Visual Tester",
+          email: "vr@example.com",
           role: role,
           role_display: role.toUpperCase(),
           roles: [role, "admin"],
@@ -213,7 +216,9 @@ export const test = base.extend<{ appPage: Page }>({
   appPage: async ({ page }, use) => {
     // ---- 1. Nothing reaches a real server ---------------------------------
     // Matched on the path, not the host, because the API origin comes from an
-    // env var that differs between machines.
+    // env var that differs between machines. Jivo Auth is covered by the same
+    // pattern — its base is `https://auth.jivo.in/api/v1` — so a refresh or a
+    // sign-out from a test is answered here and never reaches auth.jivo.in.
     await page.route("**/api/**", fulfil);
     await routeFonts(page);
 

@@ -4,9 +4,15 @@
  * that unlocks typing on this request for a while; the payout carries it
  * back when it is saved (`manual_token`), and the server refuses a typed
  * account without one. This dialog is the asking, never the check.
+ *
+ * The password is Jivo Auth's, so the check signs in to Jivo Auth as the
+ * signed-in user — by EMAIL — and hands OMS the proof (see
+ * `confirmManualPassword`). An OMS account with no email on file therefore
+ * cannot be confirmed at all, and the dialog says so before anything is typed.
  */
 import { useState } from "react";
 
+import { useAuth } from "../../auth";
 import { Button } from "../../components/ui/button";
 import {
   Dialog,
@@ -16,6 +22,9 @@ import {
 } from "../../components/ui/dialog";
 import { Field, Input } from "../../components/ui/form";
 import { advancePaymentError, advancePaymentService } from "../../services/advancePaymentService";
+import { JivoAuthError, passwordCheckErrorMessage } from "../../services/jivoAuth";
+
+const NO_EMAIL = "Your OMS account has no email address; ask your administrator.";
 
 export function ManualAccountPassword({
   requestId,
@@ -28,6 +37,9 @@ export function ManualAccountPassword({
   onClose: () => void;
   onConfirmed: (token: string) => void;
 }) {
+  const { session } = useAuth();
+  const email = session?.email?.trim() ?? "";
+
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -39,18 +51,23 @@ export function ManualAccountPassword({
   };
 
   const confirm = async () => {
+    // No email, no Jivo Auth sign-in to check the password with. Nothing is
+    // sent — not to Jivo Auth, not to OMS.
+    if (!email) return;
     if (!password) {
       setError("Enter your password.");
       return;
     }
     setBusy(true);
     try {
-      const token = await advancePaymentService.confirmManualPassword(requestId, password);
+      const token = await advancePaymentService.confirmManualPassword(requestId, email, password);
       setPassword("");
       setError("");
       onConfirmed(token);
     } catch (err) {
-      setError(advancePaymentError(err));
+      setError(
+        err instanceof JivoAuthError ? passwordCheckErrorMessage(err) : advancePaymentError(err),
+      );
     } finally {
       setBusy(false);
     }
@@ -72,13 +89,14 @@ export function ManualAccountPassword({
                 void confirm();
               }}
             >
-              <Field label="Your password" error={error || undefined}>
+              <Field label="Your password" error={(email ? error : NO_EMAIL) || undefined}>
                 {(f) => (
                   <Input
                     {...f}
                     type="password"
                     autoComplete="current-password"
                     autoFocus
+                    disabled={!email}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                   />
@@ -90,7 +108,7 @@ export function ManualAccountPassword({
             <Button onClick={close} disabled={busy}>
               Cancel
             </Button>
-            <Button variant="primary" onClick={() => void confirm()} disabled={busy}>
+            <Button variant="primary" onClick={() => void confirm()} disabled={busy || !email}>
               {busy ? "Checking…" : "Confirm"}
             </Button>
           </DialogFooter>

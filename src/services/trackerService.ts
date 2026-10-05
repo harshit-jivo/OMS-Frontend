@@ -1,4 +1,5 @@
 import api from "./api";
+import type { JivoUser } from "./userService";
 
 // ---------------------------------------------------------------------------
 // Types (mirror the DRF serializers under /api/tracker/)
@@ -526,20 +527,27 @@ export const trackerService = {
   },
 
   // --- Tracker user CRUD (tracker users only) ---
+  //
+  // A tracker user is a Jivo Auth person given a tracker role. Name, email and
+  // password are Jivo Auth's: create sends only who (`auth_id`) and what role,
+  // and update can no longer change them.
   async adminListTrackerUsers(): Promise<TrackerUser[]> {
     const { data } = await api.get("/tracker/admin/tracker-users/");
     return data;
   },
+  /** Everyone in Jivo Auth with OMS access. A bare array, unlike `/auth/jivo-users/`. */
+  async adminListJivoUsers(): Promise<JivoUser[]> {
+    const { data } = await api.get("/tracker/admin/jivo-users/");
+    return Array.isArray(data) ? data : [];
+  },
   async adminCreateTrackerUser(payload: {
-    username: string; password: string; name?: string;
-    role: string; email?: string; phone?: string;
+    auth_id: string; role: string; phone?: string;
   }): Promise<TrackerUser> {
     const { data } = await api.post("/tracker/admin/tracker-users/", payload);
     return data;
   },
   async adminUpdateTrackerUser(id: number, payload: {
-    name?: string; role?: string; email?: string; phone?: string;
-    is_active?: boolean; password?: string;
+    role?: string; phone?: string; is_active?: boolean;
   }): Promise<TrackerUser> {
     const { data } = await api.patch(`/tracker/admin/tracker-users/${id}/`, payload);
     return data;
@@ -726,6 +734,8 @@ export interface AdminUser {
 
 export interface TrackerUser {
   id: number;
+  /** The person's Jivo Auth id; name and email below are mirrored from there. */
+  auth_id?: string | null;
   username: string;
   name: string;
   email: string;

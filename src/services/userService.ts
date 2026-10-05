@@ -4,6 +4,8 @@ import api from "./api";
 
 export interface User {
   id: number;
+  /** The person's Jivo Auth id. Name and email are Jivo Auth's, mirrored here. */
+  auth_id?: string | null;
   name: string;
   username: string;
   email: string;
@@ -30,11 +32,38 @@ export interface CategoryOption {
   category: string;
 }
 
-export interface CreateUserData {
+/**
+ * A person in Jivo Auth who has access to OMS, as `/auth/jivo-users/` and
+ * `/tracker/admin/jivo-users/` list them.
+ *
+ * People are created in Jivo Auth, not here. Creating an OMS user means
+ * picking one of these and giving them OMS roles and scope — so the create
+ * forms offer only the ones with no OMS user yet (`oms_user_id` null).
+ */
+export interface JivoUser {
+  auth_id: string;
+  email: string;
   name: string;
+  is_active: boolean;
+  /** Their OMS user's id, or null when they do not have one yet. */
+  oms_user_id: number | null;
+}
+
+/**
+ * What the App Users form edits.
+ *
+ * No name, email or password: those belong to Jivo Auth now, and the server
+ * ignores them. A new user is identified by `authId` alone and takes the rest
+ * from Jivo Auth.
+ */
+export interface CreateUserData {
+  /** The Jivo Auth person to create the OMS user for. CREATE only. */
+  authId: string;
+  /**
+   * EDIT only — a new user's username is set by the server. No longer a
+   * sign-in credential, but other OMS features still key on it.
+   */
   username: string;
-  password: string;
-  email?: string;
   phone?: string;
   role: number;
   company?: number | null;
@@ -96,6 +125,15 @@ export const userService = {
 
   getUsers: async () => {
     const response = await api.get("/auth/users/list/");
+    return response.data;
+  },
+
+  /**
+   * Everyone in Jivo Auth with access to OMS, `{success, data: JivoUser[]}`.
+   * A 503 means OMS could not reach Jivo Auth to ask.
+   */
+  getJivoUsers: async () => {
+    const response = await api.get("/auth/jivo-users/");
     return response.data;
   },
 
@@ -193,11 +231,10 @@ removePartyProduct: async (card_code: string, itemCode: string, category: string
   },
 
   createUser: async (data: CreateUserData) => {
+    // The identity is `auth_id`; the server takes name, email and username
+    // from Jivo Auth. Everything below it is OMS's own: role and scope.
     const payload = {
-      name: data.name,
-      username: data.username,
-      password: data.password,
-      email: data.email,
+      auth_id: data.authId,
       phone: data.phone,
       role: data.role || null,
       company: data.company || null,
@@ -230,11 +267,10 @@ updateUser: async (id: number, data: CreateUserData) => {
       ? [category]
       : [];
 
+  // No name, email or password: Jivo Auth owns them and the server ignores
+  // them. Username stays — other OMS features key on it.
   const payload = {
-    name: data.name,
     username: data.username,
-    password: data.password || undefined,
-    email: data.email,
     phone: data.phone,
     role: data.role || null,
     company: data.company || null,

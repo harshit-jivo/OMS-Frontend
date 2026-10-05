@@ -15,7 +15,14 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { isAdmin, can } from "./permissions";
-import { clearSession, loadSession, saveSession, sessionFromApi } from "./session";
+import {
+  SESSION_STORAGE_KEYS,
+  clearSession,
+  loadSession,
+  saveSession,
+  saveTokens,
+  sessionFromApi,
+} from "./session";
 
 beforeEach(() => localStorage.clear());
 afterEach(() => localStorage.clear());
@@ -127,6 +134,18 @@ describe("sessionFromApi", () => {
     // differently from "assigned one".
     expect(sessionFromApi({ id: 1 }).categories).toEqual([]);
   });
+
+  it("carries the email, which the payment password check signs in with", () => {
+    const s = sessionFromApi({ id: 1, auth_id: "jv-1", email: "amit@jivo.in" });
+    expect(s.email).toBe("amit@jivo.in");
+  });
+
+  it("has an empty email when OMS has none on file", () => {
+    // "" rather than "null": the dialog that needs it tests for empty and says
+    // why it cannot continue, and a literal "null" would be signed in with.
+    expect(sessionFromApi({ id: 1, email: null }).email).toBe("");
+    expect(sessionFromApi({ id: 1 }).email).toBe("");
+  });
 });
 
 describe("saveSession / loadSession", () => {
@@ -145,6 +164,7 @@ describe("saveSession / loadSession", () => {
     const loaded = loadSession();
     expect(loaded).not.toBeNull();
     expect(loaded!.username).toBe("amit");
+    expect(loaded!.email).toBe("");
     expect(loaded!.grants).toEqual(["Sap_Sync"]);
     expect(loaded!.categories).toEqual(["OIL"]);
     expect(isAdmin(loaded)).toBe(true);
@@ -192,6 +212,48 @@ describe("saveSession / loadSession", () => {
 });
 
 describe("clearSession", () => {
+  it("is the one list, and it holds every key a session writes", () => {
+    // Three lists used to disagree. The two used on logout and on expiry
+    // missed these four, so a signed-out browser kept the last user's roles
+    // and admin flags. Pinned by name so a regression names the key it lost.
+    for (const key of [
+      "access",
+      "refresh",
+      "user_id",
+      "email",
+      "extra_roles",
+      "extra_pages",
+      "is_superuser",
+      "is_staff",
+      "categories",
+    ]) {
+      expect(SESSION_STORAGE_KEYS).toContain(key);
+    }
+  });
+
+  it("leaves nothing a sign-in wrote", () => {
+    saveTokens("access-token", "refresh-token");
+    saveSession(
+      sessionFromApi({
+        id: 1,
+        username: "amit",
+        email: "amit@jivo.in",
+        role: "billing",
+        extra_roles: ["admin"],
+        extra_pages: ["Sap_Sync"],
+        is_superuser: true,
+        is_staff: true,
+        company: { id: 1, name: "Jivo" },
+        main_group: { id: 2, name: "Main" },
+        categories: [{ id: 1, category: "Oil" }],
+      }),
+    );
+    clearSession();
+    for (const key of SESSION_STORAGE_KEYS) {
+      expect(localStorage.getItem(key), key).toBeNull();
+    }
+  });
+
   it("removes the session", () => {
     localStorage.setItem("access", "token");
     saveSession(sessionFromApi({ id: 1, username: "amit" }));

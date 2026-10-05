@@ -37,6 +37,12 @@ export interface Session {
   userId: string;
   username: string;
   name: string;
+  /**
+   * The person's email in Jivo Auth, "" when OMS has none on file. Needed
+   * wherever the app re-checks the password (the advance-payment
+   * confirmation signs in to Jivo Auth again, and Jivo Auth signs in by email).
+   */
+  email: string;
   /** The primary role name, lowercased. */
   role: string;
   roleDisplay: string;
