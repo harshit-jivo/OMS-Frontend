@@ -91,10 +91,6 @@ import {
   HiOutlineWallet,
   HiOutlineWrenchScrewdriver,
 } from "react-icons/hi2";
-import { controlPanelTabKey } from "../../config/controlPanelAccess";
-
-/** The permission key of a Control Panel inner tab (config/controlPanelAccess.ts). */
-const tabKey = (to: string, tab: string) => controlPanelTabKey(to, tab) ?? to + "#" + tab;
 
 export type SidebarIconComponent = ComponentType<{ className?: string }>;
 
@@ -116,9 +112,10 @@ export interface SidebarLinkDef {
   key?: string;
 }
 
-/** A heading and its rows inside a collapsible section (`tree`). */
+/** One collapsible row of a `tree` section, and the rows it opens. */
 export interface SidebarGroupDef {
   heading: string;
+  icon: SidebarIconComponent;
   links: SidebarLinkDef[];
 }
 
@@ -130,11 +127,11 @@ export interface SidebarSectionDef {
    */
   links: SidebarLinkDef[];
   /**
-   * When present, the rail draws the section as ONE collapsible row (`icon`,
-   * `label`, chevron) with these headed groups beneath it — pages and their
-   * inner tabs — instead of a caption over `links`.
+   * When present, the rail draws the section's caption and then each group as
+   * its own collapsible row (`icon`, `heading`, chevron) with its rows beneath —
+   * pages and their inner tabs — instead of the flat `links`.
    */
-  tree?: { icon: SidebarIconComponent; groups: SidebarGroupDef[] };
+  tree?: { groups: SidebarGroupDef[] };
 }
 
 /**
@@ -233,9 +230,10 @@ export const SIDEBAR_SECTIONS: SidebarSectionDef[] = [
    * `links` is one row per page: what decides visibility (each follows its
    * own key), what /Home tiles and what /Control_Panel forwards to.
    *
-   * `tree` is what the rail DRAWS: one collapsible "Control Panel" row with
-   * the pages grouped under headings, and — for the two pages that have inner
-   * tabs — each tab as its own row (`tab`), opening that tab directly. Tab ids
+   * `tree` is what the rail DRAWS: under the "Control Panel" caption, one
+   * collapsible row per page (Oils Sale, Sales, Inventory, Finance) with its
+   * sub-pages — for the two pages that have inner tabs, each tab its own row
+   * (`tab`), opening that tab directly. Tab ids
    * are the page's own (Oils Sale's panes, Inventory's sections); the mapping
    * to the page's script is pages/controlPanel/tabs.ts.
    */
@@ -252,18 +250,19 @@ export const SIDEBAR_SECTIONS: SidebarSectionDef[] = [
       { to: "/Control_Panel/Salaries", label: "Salaries", icon: HiOutlineUserGroup },
     ],
     tree: {
-      icon: HiOutlinePresentationChartBar,
       groups: [
         {
           heading: "Oils Sale",
+          icon: HiOutlineArrowTrendingUp,
           links: [
-            { to: "/Control_Panel/Realise", tab: "overview", key: tabKey("/Control_Panel/Realise", "overview"), label: "Overview", icon: HiOutlineArrowTrendingUp },
-            { to: "/Control_Panel/Realise", tab: "map", key: tabKey("/Control_Panel/Realise", "map"), label: "Map", icon: HiOutlineMap },
-            { to: "/Control_Panel/Realise", tab: "realise", key: tabKey("/Control_Panel/Realise", "realise"), label: "Realise", icon: HiOutlineTableCells },
+            { to: "/Control_Panel/Realise", tab: "overview", label: "Overview", icon: HiOutlineArrowTrendingUp },
+            { to: "/Control_Panel/Realise", tab: "map", label: "Map", icon: HiOutlineMap },
+            { to: "/Control_Panel/Realise", tab: "realise", label: "Realise", icon: HiOutlineTableCells },
           ],
         },
         {
           heading: "Sales",
+          icon: HiOutlineChartBar,
           links: [
             { to: "/Control_Panel/Sales_Channel", label: "Sales Channel", icon: HiOutlinePresentationChartLine },
             { to: "/Control_Panel/Beverages", label: "Beverages Sale", icon: HiOutlineBeaker },
@@ -274,20 +273,22 @@ export const SIDEBAR_SECTIONS: SidebarSectionDef[] = [
         },
         {
           heading: "Inventory",
+          icon: HiOutlineCube,
           links: [
-            { to: "/Control_Panel/Inventory", tab: "dash", key: tabKey("/Control_Panel/Inventory", "dash"), label: "Dashboard", icon: HiOutlineCube },
-            { to: "/Control_Panel/Inventory", tab: "stock", key: tabKey("/Control_Panel/Inventory", "stock"), label: "Stock & Warehouses", icon: HiOutlineArchiveBox },
-            { to: "/Control_Panel/Inventory", tab: "move", key: tabKey("/Control_Panel/Inventory", "move"), label: "Stock Movement", icon: HiOutlineArrowPath },
-            { to: "/Control_Panel/Inventory", tab: "movers", key: tabKey("/Control_Panel/Inventory", "movers"), label: "Moving / Non-Moving", icon: HiOutlineTruck },
-            { to: "/Control_Panel/Inventory", tab: "billing", key: tabKey("/Control_Panel/Inventory", "billing"), label: "FG Not Billed", icon: HiOutlineDocumentText },
-            { to: "/Control_Panel/Inventory", tab: "abc", key: tabKey("/Control_Panel/Inventory", "abc"), label: "ABC-XYZ Analysis", icon: HiOutlineTag },
-            { to: "/Control_Panel/Inventory", tab: "aging", key: tabKey("/Control_Panel/Inventory", "aging"), label: "Aging Analysis", icon: HiOutlineClock },
-            { to: "/Control_Panel/Inventory", tab: "trace", key: tabKey("/Control_Panel/Inventory", "trace"), label: "Item Trace", icon: HiOutlineDocumentMagnifyingGlass },
-            { to: "/Control_Panel/Inventory", tab: "planning", key: tabKey("/Control_Panel/Inventory", "planning"), label: "Inventory Planning", icon: HiOutlineCalendarDays },
+            { to: "/Control_Panel/Inventory", tab: "dash", label: "Dashboard", icon: HiOutlineCube },
+            { to: "/Control_Panel/Inventory", tab: "stock", label: "Stock & Warehouses", icon: HiOutlineArchiveBox },
+            { to: "/Control_Panel/Inventory", tab: "move", label: "Stock Movement", icon: HiOutlineArrowPath },
+            { to: "/Control_Panel/Inventory", tab: "movers", label: "Moving / Non-Moving", icon: HiOutlineTruck },
+            { to: "/Control_Panel/Inventory", tab: "billing", label: "FG Not Billed", icon: HiOutlineDocumentText },
+            { to: "/Control_Panel/Inventory", tab: "abc", label: "ABC-XYZ Analysis", icon: HiOutlineTag },
+            { to: "/Control_Panel/Inventory", tab: "aging", label: "Aging Analysis", icon: HiOutlineClock },
+            { to: "/Control_Panel/Inventory", tab: "trace", label: "Item Trace", icon: HiOutlineDocumentMagnifyingGlass },
+            { to: "/Control_Panel/Inventory", tab: "planning", label: "Inventory Planning", icon: HiOutlineCalendarDays },
           ],
         },
         {
           heading: "Finance",
+          icon: HiOutlineWallet,
           links: [
             { to: "/Control_Panel/Expenses", label: "Expenses", icon: HiOutlineWallet },
             { to: "/Control_Panel/Salaries", label: "Salaries", icon: HiOutlineUserGroup },

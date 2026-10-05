@@ -24,7 +24,7 @@ function registryModule(name: string): Set<string> {
 describe("Control Panel access", () => {
   it("offers exactly the keys the server registers", () => {
     const registered = registryModule("control_panel");
-    expect(registered.size).toBeGreaterThan(15);
+    expect(registered.size).toBe(4);
     expect([...CONTROL_PANEL_KEYS].sort()).toEqual([...registered].sort());
   });
 
@@ -32,13 +32,12 @@ describe("Control Panel access", () => {
     expect(CONTROL_PANEL_PAGES.map((p) => p.label)).toEqual(["Oils Sale", "Sales", "Inventory", "Finance"]);
   });
 
-  it("opens every sub-tab's route with that sub-tab's key", () => {
+  it("opens every sub-page's route with its page's key, and no other", () => {
     for (const page of CONTROL_PANEL_PAGES) {
-      for (const sub of page.subTabs) {
-        expect(ROUTE_ACCESS[sub.to]?.permissions, sub.to).toContain(sub.key);
+      for (const sub of page.subPages) {
+        expect(ROUTE_ACCESS[sub.to]?.permissions, sub.to).toEqual([page.key]);
       }
     }
-    // A sibling's key does not open the route.
-    expect(controlPanelKeysFor("/Control_Panel/Expenses")).toEqual(["control_panel.finance.expenses"]);
+    expect(controlPanelKeysFor("/Control_Panel/Expenses")).toEqual(["control_panel.finance"]);
   });
 });
