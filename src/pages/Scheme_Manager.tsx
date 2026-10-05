@@ -52,7 +52,7 @@ export default function Scheme_Manager() {
     notice,
     setNotice,
     itemOptions,
-    itemNameOf,
+    itemNameIn,
     expandedId,
     setExpandedId,
     deactivate,
@@ -142,7 +142,7 @@ export default function Scheme_Manager() {
         loadError={loadError}
         expandedId={expandedId}
         setExpandedId={setExpandedId}
-        itemNameOf={itemNameOf}
+        itemNameIn={itemNameIn}
         openNew={openNew}
         openEdit={sm.openEdit}
         deleteScheme={deleteScheme}
@@ -163,7 +163,7 @@ export default function Scheme_Manager() {
             </div>
           </DialogHeader>
           <DialogBody>
-            <VendorCheck itemOptions={itemOptions} itemNameOf={itemNameOf} />
+            <VendorCheck itemOptions={itemOptions} itemNameIn={itemNameIn} />
           </DialogBody>
         </DialogContent>
       </Dialog>

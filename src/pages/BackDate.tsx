@@ -65,12 +65,15 @@ import {
   TableRow,
 } from "../components/ui/table";
 import { Tab, TabList } from "../components/ui/tabs";
+import { newestFirst } from "./backdate/ordering";
+import { useDeepLinkedRequest } from "./backdate/useDeepLinkedRequest";
 import { cn } from "../lib/utils";
 import {
   BACKDATE_COMPANIES,
   backdateError,
   backdateService,
   type BackDateAction,
+  type BackDateActionValue,
   type BackDateCompany,
   type BackDateFieldChange,
   type BackDateFlow,
@@ -98,14 +101,24 @@ const ACTIONS: { value: BackDateAction; label: string }[] = [
 /**
  * What the create form holds.
  *
- * `companies` and `actions` are LISTS, and a submission raises one request per
- * combination — OIL+BEVERAGES with Add+Update is four requests. The API takes
- * one company and one action per request and that stays true: each request
- * gets its own approval chain and its own SAP write, so a failure in one
- * company cannot half-grant another. The JSAP predecessor looped branches
- * inside a single untransacted request, which is exactly the bug this avoids.
+ * `companies` and `actions` are both LISTS and neither fans out here: the
+ * whole selection is ONE request, submitted once, with one approval chain.
+ * OIL+MART with Add+Update is a single request carrying `"OIL,MART"` and
+ * `"A,U"` — see the header above for why each of those is singular.
+ *
+ * The companies separate at the SAP write and nowhere earlier: one
+ * `OPEN_BKDT` call each after final approval, each with its own recorded
+ * payload and its own recorded answer. That record is what makes a partial
+ * failure visible, which is the part JSAP got wrong — it looped branches with
+ * no per-branch result, so a half-failed submission reported success.
  */
 type FormState = {
+  /**
+   * ONE OR MORE companies, still ONE request.
+   *
+   * The same rights in two SAP databases are one decision, so they are one
+   * request with one approval chain. The fan-out is at the SAP write.
+   */
   companies: BackDateCompany[];
   actions: BackDateAction[];
   sap_username: string;
@@ -268,6 +281,9 @@ function formatChange(value: string | number | null) {
 function SapTimelineNode({ flow }: { flow: BackDateFlow }) {
   const failed = flow.hana_status === "FAILED";
   const results = parseResults(flow.hana_status_text, flow.hana_status);
+  const rowIds = results
+    .map((r) => r.sap_row_id)
+    .filter((id): id is number => typeof id === "number");
 
   return (
     <TimelineNode
@@ -283,29 +299,64 @@ function SapTimelineNode({ flow }: { flow: BackDateFlow }) {
           "Timestamp",
           flow.updated_at ? new Date(flow.updated_at).toLocaleString() : "—",
         ],
+        // WHERE the row is, as a field rather than a sentence. It used to be a
+        // SQL query pasted into the middle of the response, which buried the
+        // one thing an approver is reading for: whether the grant landed.
+        ...(rowIds.length > 0
+          ? ([["SAP row id", rowIds.join(", ")]] as [string, React.ReactNode][])
+          : []),
       ]}
       extra={
-        <ul className="m-0 mt-1.5 list-none space-y-1.5 p-0">
-          {results.map((result) => (
-            <li
-              key={result.branch}
-              className={cn(
-                "rounded-lg px-3 py-2 text-[12.5px] leading-relaxed",
-                result.status === "FAILED"
-                  ? "bg-bad-soft text-bad"
-                  : "bg-ok-soft text-ok",
-              )}
-            >
-              {/* SAP's own words, verbatim and never truncated: on a refusal
-                  they are the only thing that says what to correct. */}
-              <span className="whitespace-pre-wrap break-words">
-                {result.response || "SAP returned no message."}
-              </span>
-            </li>
-          ))}
-        </ul>
+        <SapResultList
+          status={flow.hana_status}
+          text={flow.hana_status_text}
+        />
       }
     />
+  );
+}
+
+/**
+ * What SAP said, one tinted line per company.
+ *
+ * Exported so the approval dialog can show the SAME thing the moment a grant
+ * lands, rather than sending the approver off to find it. One component, so
+ * the two readings of one SAP call cannot differ.
+ */
+export function SapResultList({
+  status,
+  text,
+}: {
+  status: BackDateFlow["hana_status"];
+  text: string;
+}) {
+  const results = parseResults(text, status);
+  if (results.length === 0) return null;
+  return (
+    <ul className="m-0 mt-1.5 list-none space-y-1.5 p-0">
+      {results.map((result) => (
+        <li
+          key={result.branch}
+          className={cn(
+            "rounded-lg px-3 py-2 text-[12.5px] leading-relaxed",
+            result.status === "FAILED"
+              ? "bg-bad-soft text-bad"
+              : "bg-ok-soft text-ok",
+          )}
+        >
+          {/* SAP's own words, verbatim and never truncated: on a refusal they
+              are the only thing that says what to correct. */}
+          <span className="whitespace-pre-wrap break-words">
+            {result.response || "SAP returned no message."}
+          </span>
+          {typeof result.sap_row_id === "number" && (
+            <span className="mt-1 block opacity-80">
+              SAP row id {result.sap_row_id}
+            </span>
+          )}
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -400,7 +451,11 @@ function formatDate(value: string | null | undefined) {
 export default function BackDate() {
   const [rows, setRows] = useState<BackDateRequest[]>([]);
   const [insights, setInsights] = useState<BackDateInsights | null>(null);
-  const [loading, setLoading] = useState(false);
+  // Starts TRUE. The first fetch is fired from an effect, so a `false` here
+  // means one render claiming "loaded, nothing here" before anything has been
+  // asked for — an empty-state flash, and the reason a deep-linked request
+  // used to be looked for in a list that had not arrived yet.
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("");
   const [companyFilter, setCompanyFilter] = useState<CompanyFilter>("");
@@ -428,7 +483,10 @@ export default function BackDate() {
         ),
         backdateService.insights(scope),
       ]);
-      setRows(list);
+      // Latest first. The endpoint orders by `-created_at`, which is the
+      // same thing today, but the list and the approval desk beside it now
+      // answer "which is newest" the same way.
+      setRows(newestFirst(list));
       setInsights(counts);
     } catch (e) {
       setError(backdateError(e));
@@ -440,6 +498,15 @@ export default function BackDate() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Arriving from a notification ("your request was approved"): open that
+  // request, not just the list it is somewhere in. Opening the Entries tab
+  // first matters — the deep link can land while Create is selected, and the
+  // dialog would otherwise appear over a half-filled form.
+  useDeepLinkedRequest(rows, !loading, (request) => {
+    setTab("entries");
+    setDetail(request);
+  });
 
   const flash = (message: string) => {
     setNotice(message);
@@ -569,36 +636,35 @@ export default function BackDate() {
  * New request
  * ================================================================== */
 
-function NewRequestForm({
-  onCancel,
-  onCreated,
-}: {
-  onCancel: () => void;
-  onCreated: (message: string) => void;
-}) {
-  const [form, setForm] = useState<FormState>({ ...EMPTY_FORM });
-  const [saving, setSaving] = useState(false);
-  const [formError, setFormError] = useState("");
-
+/**
+ * SAP's user and object-type lists for one company.
+ *
+ * Shared by the create form and the edit form so both offer the SAME choices.
+ * An edit used to be free-text boxes, which let somebody type a SAP user or a
+ * document name that does not exist — accepted by the form, then refused at
+ * the very last stage by the SAP call. Picking from SAP's own list is what
+ * stops that.
+ *
+ * Both lists are cached server-side, so opening an edit costs no HANA round
+ * trip beyond the first. `cancelled` guards the company changing (or the
+ * dialog closing) while a fetch is in flight.
+ */
+function useSapMasters(company: BackDateCompany | undefined) {
   const [sapUsers, setSapUsers] = useState<SapUser[]>([]);
   const [docTypes, setDocTypes] = useState<SapDocumentType[]>([]);
   const [mastersError, setMastersError] = useState("");
   const [loadingMasters, setLoadingMasters] = useState(false);
 
-  /*
-   * SAP users and object types are per company, and the picked user and
-   * document type apply to EVERY company ticked. The lists are therefore read
-   * from the first ticked company — the master data is the same shape in each,
-   * and offering a union would suggest a choice that is valid everywhere when
-   * it may not be.
-   */
-  const company = form.companies[0];
-
   useEffect(() => {
     if (!company) return;
     let cancelled = false;
-    setLoadingMasters(true);
-    setMastersError("");
+    // Set from the fetch's own callbacks rather than synchronously in the
+    // effect body, which cascades a render before the request even starts.
+    Promise.resolve().then(() => {
+      if (cancelled) return;
+      setLoadingMasters(true);
+      setMastersError("");
+    });
     Promise.all([
       backdateService.sapUsers(company),
       backdateService.documentTypes(company),
@@ -631,6 +697,34 @@ function NewRequestForm({
     [docTypes],
   );
 
+  return { userOptions, typeOptions, loadingMasters, mastersError };
+}
+
+function NewRequestForm({
+  onCancel,
+  onCreated,
+}: {
+  onCancel: () => void;
+  onCreated: (message: string) => void;
+}) {
+  const [form, setForm] = useState<FormState>({ ...EMPTY_FORM });
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState("");
+
+  /**
+   * SAP users and object types come from ONE company's masters, so the lists
+   * follow the first company picked.
+   *
+   * The document types are safe to read from any of them: the same 75 objects
+   * with the same names exist in all three schemas. SAP USERS are not — a
+   * login that exists in OIL may not exist in MART — so the form says so
+   * below rather than pretending the list is authoritative for every company.
+   * A user SAP does not know fails that company's call with SAP's own message
+   * recorded against it, which is visible on the request.
+   */
+  const { userOptions, typeOptions, loadingMasters, mastersError } =
+    useSapMasters(form.companies[0]);
+
   /**
    * Both actions ticked is the single combined value, never two requests —
    * `OPEN_BKDT` has no action parameter, so splitting the pair would write SAP
@@ -642,11 +736,9 @@ function NewRequestForm({
 
   const save = async () => {
     if (form.companies.length === 0 || !actionValue) {
-      setFormError("Tick at least one company and one action.");
+      setFormError("Pick at least one company and at least one action.");
       return;
     }
-    // Caught here as well as by the API, because the fan-out means one missing
-    // field would otherwise be reported once per combination.
     if (!form.time_limit) {
       setFormError(
         "Set when the rights expire. SAP ignores back-posting rights that "
@@ -658,44 +750,30 @@ function NewRequestForm({
     setSaving(true);
     setFormError("");
 
-    let created = 0;
     try {
-      // ONE REQUEST PER COMPANY. Each company's grant is approved on its own
-      // and written to its own SAP schema, so a refusal in one cannot
-      // half-grant another. Sequential, not `Promise.all`: if the third is
-      // refused the first two have still been raised, and saying how many
-      // landed is the honest report.
+      // ONE POST, whatever was ticked. Several companies are one request with
+      // one approval chain — the same rights in each database, decided once —
+      // and the server stores them as one canonical value. They separate only
+      // at the SAP write, one `OPEN_BKDT` call each after final approval.
       //
-      // The ACTION never fans out — both ticked is one request carrying
+      // The ACTION never splits either: both ticked is one request carrying
       // "A,U", because SAP is never told the action at all.
-      for (const company of form.companies) {
-        await backdateService.createRequest({
-          company,
-          sap_username: form.sap_username.trim(),
-          document_type_name: form.document_type_name,
-          from_date: form.from_date,
-          to_date: form.to_date,
-          time_limit: form.time_limit,
-          action: actionValue,
-          remarks: form.remarks,
-        });
-        created += 1;
-      }
+      await backdateService.createRequest({
+        company: form.companies,
+        sap_username: form.sap_username.trim(),
+        document_type_name: form.document_type_name,
+        from_date: form.from_date,
+        to_date: form.to_date,
+        time_limit: fromLocalInput(form.time_limit),
+        action: actionValue,
+        remarks: form.remarks,
+      });
       // The tab stays mounted, so the form is cleared here rather than by an
       // open/close cycle — otherwise the next visit shows the last request.
       setForm({ ...EMPTY_FORM });
-      onCreated(
-        created === 1
-          ? "BackDate request submitted successfully."
-          : `${created} BackDate requests submitted successfully — one per company.`,
-      );
+      onCreated("BackDate request submitted successfully.");
     } catch (e) {
-      setFormError(
-        created > 0
-          ? `${created} of ${form.companies.length} requests were submitted. `
-            + `The next one failed: ${backdateError(e)}`
-          : backdateError(e),
-      );
+      setFormError(backdateError(e));
     } finally {
       setSaving(false);
     }
@@ -706,8 +784,9 @@ function NewRequestForm({
       <div className="mb-4">
         <h2 className="m-0 text-[15px] font-semibold text-ink">New BackDate Request</h2>
         <p className="m-0 mt-0.5 text-[13px] text-subtle">
-          One request per company — each is approved on its own. Ticking both
-          actions widens the one request rather than adding another.
+          One company per request — it decides the approval route and the SAP
+          database. Ticking both actions widens the one request rather than
+          adding another.
         </p>
       </div>
 
@@ -727,6 +806,11 @@ function NewRequestForm({
         )}
 
         <FormGrid>
+          {/* SEVERAL AT ONCE, AND STILL ONE REQUEST. Asking for the same
+              rights in OIL and MART is one decision by the same approvers, so
+              it is one request with one approval chain — not two of each that
+              could disagree. The companies separate at the SAP write, where
+              each gets its own `OPEN_BKDT` call into its own schema. */}
           <Field label="Company" required>
             {(c) => (
               <MultiSelect<BackDateCompany>
@@ -735,16 +819,19 @@ function NewRequestForm({
                 onChange={(next) =>
                   setForm({
                     ...form,
-                    // Ordered as the list is, so the company the SAP lists are
-                    // read from does not depend on the order of ticking.
-                    companies: BACKDATE_COMPANIES.filter((co) => next.includes(co)),
-                    // Cleared on purpose — see the effect above.
+                    companies: next as BackDateCompany[],
+                    // Cleared on purpose: the SAP user and document lists come
+                    // from the first company picked, so an earlier selection's
+                    // pick may not exist in the new one.
                     sap_username: "",
                     document_type_name: "",
                   })
                 }
                 options={BACKDATE_COMPANIES.map((co) => ({ value: co, label: co }))}
-                placeholder="Select company"
+                placeholder="Select companies"
+                // Three codes fit in the trigger, and reading them back beats
+                // "2 selected" when the set is the whole point of the field.
+                namedUpTo={BACKDATE_COMPANIES.length}
               />
             )}
           </Field>
@@ -768,7 +855,32 @@ function NewRequestForm({
         </FormGrid>
 
         <FormGrid>
-          <Field label="SAP User" required>
+          {/* THE ONE THING A MULTI-COMPANY REQUEST CANNOT CHECK FOR YOU.
+              The list below comes from the first company picked, and a SAP
+              login that exists in OIL need not exist in MART. Said plainly
+              here, because the alternative is finding out at the SAP call
+              after the approvers have already said yes — that company's call
+              fails with SAP's own message and the others still land. */}
+
+          {/*
+            The caveat the comment on `useSapMasters` above promises.
+            ─────────────────────────────────────────────────────────
+            The list is read from the FIRST company's masters, and a login
+            that exists in OIL need not exist in MART. The form cannot check
+            the others — there is no call that would — so it says so at the
+            moment the question arises, which is when a second company is
+            ticked and not before. Staying silent here means the mismatch
+            surfaces at the SAP write after every approver has signed it off.
+          */}
+          <Field
+            label="SAP User"
+            required
+            hint={
+              form.companies.length > 1
+                ? `SAP users are listed from ${form.companies[0]} only — check this login also exists in ${form.companies.slice(1).join(", ")}.`
+                : undefined
+            }
+          >
             {(c) =>
               userOptions.length > 0 ? (
                 <SearchSelect<string>
@@ -868,11 +980,7 @@ function NewRequestForm({
         <div className="mt-5 flex flex-wrap items-center justify-end gap-2.5">
           <Button variant="secondary" onClick={onCancel}>Cancel</Button>
           <Button variant="primary" onClick={save} disabled={saving}>
-            {saving
-              ? "Submitting…"
-              : form.companies.length > 1
-                ? `Submit ${form.companies.length} Requests`
-                : "Submit Request"}
+            {saving ? "Submitting…" : "Submit Request"}
           </Button>
         </div>
       </div>
@@ -902,6 +1010,12 @@ export function EntryTableHead() {
       <TableHead>To Date</TableHead>
       <TableHead>Time Limit</TableHead>
       <TableHead>Created By</TableHead>
+      {/* WHERE THE REQUEST IS, on every row.
+          Without it a list told you nothing about outcomes: under "All" a
+          rejected request, one awaiting its second approver and one whose SAP
+          write failed were three identical rows, and the only way to tell
+          them apart was to open each one. */}
+      <TableHead>Status</TableHead>
       <TableHead className="text-right">Action</TableHead>
     </TableRow>
   );
@@ -951,6 +1065,15 @@ export function EntryTableRow({
         </div>
       </TableCell>
       <TableCell>
+        {/* The SAME chip the detail and progress dialogs use, so a row and the
+            dialog it opens can never disagree about a request's state. It
+            reports the REQUEST's position — which on an approver's "Approved"
+            tab may still read Pending, because that tab lists what THEY
+            decided and the request can be moving through the stages above
+            them. */}
+        <StatusBadge request={request} />
+      </TableCell>
+      <TableCell>
         <div className="flex items-center justify-end gap-1.5">
           <Button variant="secondary" size="sm" onClick={onDetails}>
             Details
@@ -984,9 +1107,29 @@ function EditRequestForm({
   onCancel: () => void;
   onSaved: (message: string) => void;
 }) {
+  /*
+   * EVERY field of the request is editable here, and each one is entered the
+   * same way it was on the way in — the SAP user and the document type from
+   * SAP's own lists, the action as the same pair of tick boxes. They used to
+   * be free-text boxes, which let somebody type a user or a document name SAP
+   * has never heard of: accepted by the form, then refused at the last stage
+   * by the SAP call, with the request stuck and nobody the wiser about why.
+   *
+   * `company` is the one exception and it is not an oversight: the SET of
+   * companies decides which workflow applies and the request has already been
+   * routed by it. Changing it would either leave the flow pointing at a
+   * workflow chosen for a different set, or move the request to different
+   * approvers mid-decision. A different set is a different request.
+   */
+  const { userOptions, typeOptions, loadingMasters, mastersError } =
+    // The first of the request's companies — `company` is the canonical set
+    // (`"OIL,MART"`), which is not a company a masters endpoint can answer for.
+    useSapMasters(request.companies[0]);
+
   const [form, setForm] = useState({
     sap_username: request.sap_username,
     document_type_name: request.document_type_name,
+    actions: splitActions(request.action),
     from_date: request.from_date,
     to_date: request.to_date,
     time_limit: toLocalInput(request.time_limit),
@@ -999,19 +1142,29 @@ function EditRequestForm({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  const actionValue = joinActions(form.actions);
+
   const save = async () => {
+    if (form.actions.length === 0) {
+      setError("Pick at least one action — Add, Update, or both.");
+      return;
+    }
     setSaving(true);
     setError("");
     try {
+      // Every tracked field goes up, so the server can diff the whole request
+      // and write exactly what changed — with WHO changed it — into this
+      // edit's own UPDATE log row.
       await backdateService.updateRequest(request.id, {
         sap_username: form.sap_username.trim(),
         document_type_name: form.document_type_name,
+        action: actionValue,
         from_date: form.from_date,
         to_date: form.to_date,
-        time_limit: form.time_limit,
+        time_limit: fromLocalInput(form.time_limit),
         remarks: form.remarks,
       });
-      onSaved(`Request #${request.id} updated. Approve again to retry SAP.`);
+      onSaved(`Request #${request.id} updated.`);
     } catch (e) {
       setError(backdateError(e));
     } finally {
@@ -1021,38 +1174,102 @@ function EditRequestForm({
 
   return (
     <section className="mb-4 rounded-lg border border-brand bg-brand-soft/40 px-3.5 py-3">
-      <h4 className="m-0 mb-2 text-[12px] font-semibold uppercase tracking-wide text-brand">
-        Edit request
-      </h4>
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+        <h4 className="m-0 text-[12px] font-semibold uppercase tracking-wide text-brand">
+          Edit request
+        </h4>
+        {/* Said once, here, rather than leaving a disabled company box to be
+            puzzled over. */}
+        <span className="text-[12px] text-subtle">
+          Company stays <strong className="font-semibold">{request.company}</strong> —
+          it decides the approval route
+        </span>
+      </div>
+
       {error && (
         <div className="mb-3 whitespace-pre-wrap rounded-lg bg-bad-soft px-3 py-2.5 text-[13px] text-bad">
           {error}
         </div>
       )}
+      {mastersError && (
+        <div className="mb-3 rounded-lg bg-hold-soft px-3 py-2.5 text-[12.5px] text-hold">
+          SAP&rsquo;s lists could not be loaded, so the user and document type
+          are free text for now: {mastersError}
+        </div>
+      )}
+
       <FormGrid>
         <Field label="SAP User" required>
-          {(c) => (
-            <Input
-              {...c}
-              value={form.sap_username}
-              maxLength={20}
-              onChange={(e) =>
-                setForm({ ...form, sap_username: e.target.value })}
-            />
-          )}
+          {(c) =>
+            userOptions.length > 0 ? (
+              <SearchSelect<string>
+                id={c.id}
+                value={form.sap_username}
+                onChange={(v) => setForm({ ...form, sap_username: String(v) })}
+                options={userOptions}
+                placeholder={loadingMasters ? "Loading SAP users…" : "Select a SAP user"}
+                searchPlaceholder="Search SAP users"
+                maxShown={80}
+              />
+            ) : (
+              <Input
+                {...c}
+                value={form.sap_username}
+                maxLength={20}
+                placeholder={loadingMasters ? "Loading…" : "USER12"}
+                onChange={(e) =>
+                  setForm({ ...form, sap_username: e.target.value })}
+              />
+            )
+          }
         </Field>
+
         <Field label="Document Type" required>
+          {(c) =>
+            typeOptions.length > 0 ? (
+              <SearchSelect<string>
+                id={c.id}
+                value={form.document_type_name}
+                onChange={(v) =>
+                  setForm({ ...form, document_type_name: String(v) })}
+                options={typeOptions}
+                placeholder={loadingMasters ? "Loading document types…" : "Select a document type"}
+                searchPlaceholder="Search document types"
+                maxShown={80}
+              />
+            ) : (
+              <Input
+                {...c}
+                value={form.document_type_name}
+                maxLength={120}
+                placeholder={loadingMasters ? "Loading…" : "A/R Invoice"}
+                onChange={(e) =>
+                  setForm({ ...form, document_type_name: e.target.value })}
+              />
+            )
+          }
+        </Field>
+
+        <Field label="Action" required>
           {(c) => (
-            <Input
-              {...c}
-              value={form.document_type_name}
-              maxLength={120}
-              onChange={(e) =>
-                setForm({ ...form, document_type_name: e.target.value })}
+            <MultiSelect<BackDateAction>
+              id={c.id}
+              value={form.actions}
+              onChange={(next) =>
+                setForm({
+                  ...form,
+                  actions: ACTIONS.map((a) => a.value).filter((a) =>
+                    next.includes(a),
+                  ),
+                })
+              }
+              options={ACTIONS}
+              placeholder="Select action"
             />
           )}
         </Field>
       </FormGrid>
+
       <FormGrid>
         <Field label="From Date" required>
           {(c) => (
@@ -1085,6 +1302,7 @@ function EditRequestForm({
           )}
         </Field>
       </FormGrid>
+
       <Field label="Reason for this change">
         {(c) => (
           <Textarea
@@ -1096,6 +1314,7 @@ function EditRequestForm({
           />
         )}
       </Field>
+
       <div className="mt-3 flex flex-wrap items-center justify-end gap-2.5">
         <Button variant="secondary" size="sm" onClick={onCancel}>Cancel</Button>
         <Button variant="primary" size="sm" onClick={save} disabled={saving}>
@@ -1104,6 +1323,48 @@ function EditRequestForm({
       </div>
     </section>
   );
+}
+
+/** `"A,U"` as the pair of ticks the form works in. */
+function splitActions(value: string): BackDateAction[] {
+  const picked = (value || "").split(",").map((a) => a.trim());
+  return ACTIONS.map((a) => a.value).filter((a) => picked.includes(a));
+}
+
+/**
+ * The ticks back as one stored value.
+ *
+ * Both ticked is `"A,U"` — ONE request with a wider recorded scope, never two.
+ * `OPEN_BKDT` has no action parameter, so splitting the pair would write SAP
+ * rows identical in every column SAP reads.
+ */
+function joinActions(actions: BackDateAction[]): BackDateActionValue {
+  // Ordered by ACTIONS, so "U" then "A" ticked still stores "A,U" — one
+  // spelling, not two that a diff would report as a change.
+  return ACTIONS.map((a) => a.value)
+    .filter((a) => actions.includes(a))
+    .join(",") as BackDateActionValue;
+}
+
+/**
+ * A `datetime-local` value as an unambiguous instant.
+ *
+ * THE INPUT IS A WALL CLOCK, NOT AN INSTANT. `<input type="datetime-local">`
+ * yields `"2026-09-16T14:00"` with no zone at all, and the server reads a
+ * zoneless timestamp as UTC — so "2 o'clock" arrived as 14:00 UTC, which is
+ * 19:30 in Indian time, and every request read back 5h30m later than the
+ * person typing it meant.
+ *
+ * `new Date(value)` resolves it in the BROWSER's zone, which is precisely the
+ * clock the user read it off. Sending the instant leaves nothing to assume.
+ *
+ * The inverse of `toLocalInput`, and the reason both must exist: reading
+ * already converted, writing did not.
+ */
+function fromLocalInput(value: string) {
+  if (!value) return value;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toISOString();
 }
 
 /** An ISO timestamp as `datetime-local` wants it, in the viewer's own zone. */

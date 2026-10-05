@@ -40,6 +40,26 @@ export function orderTotals(items: OrderItem[]): OrderTotals {
 }
 
 /**
+ * An order amount, grouped and prefixed — `₹8,76,385.42`.
+ *
+ * `toFixed(2)` is what every order screen uses today, and it prints
+ * `876385.42`: seven undifferentiated digits that have to be counted to be
+ * read, which is how a lakh gets mistaken for a crore at a glance. Indian
+ * grouping is the point rather than the symbol — `en-IN` groups 2-2-3, so the
+ * lakh and crore boundaries land where a reader here expects them.
+ *
+ * Lives beside `orderTotals` because it is the same vocabulary: that function
+ * decides WHAT the numbers are, this one decides how they read. The approval
+ * screens still call `toFixed(2)` through `OrderTotals.tsx` — moving them onto
+ * this is a change to four live screens and belongs in its own commit.
+ */
+export const formatMoney = (value: number | string): string =>
+  `₹${Number(value || 0).toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+
+/**
  * A stable colour per variety, so the same category reads the same way on
  * every screen. `Other` stays neutral: it is the absence of a classification,
  * not a third one.

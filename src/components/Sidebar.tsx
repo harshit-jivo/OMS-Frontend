@@ -4,6 +4,7 @@ import { useLocation } from "react-router-dom";
 
 import api from "../services/api";
 import { webDeviceService } from "../services/webDeviceService";
+import GlobalLoadingOverlay from "./GlobalLoadingOverlay";
 import NotificationToaster from "./NotificationToaster";
 import { unsubscribeFromPush } from "../services/webPushClient";
 import NotificationPermissionModal from "./NotificationPermissionModal";
@@ -258,6 +259,13 @@ export default function Sidebar({ children }: SidebarProps) {
       />
 
       <NotificationToaster />
+
+      {/* Covers the content region while any API request is in flight. It
+          lives here rather than in `App.tsx` because it has to line up with
+          the rail, and this is where the rail's width is known. Login is not
+          missing out: it has no content region, and its submit button
+          already carries its own pending state. */}
+      <GlobalLoadingOverlay collapsed={sidebarCollapsed} />
 
       <main className={`content-area ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
         {children}

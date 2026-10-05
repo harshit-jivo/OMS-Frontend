@@ -7,16 +7,24 @@ import {
   HiOutlineArrowUpTray,
   HiOutlineBeaker,
   HiOutlineCheckCircle,
+  HiOutlineChevronDown,
   HiOutlineClipboardDocument,
   HiOutlineExclamationTriangle,
   HiOutlineInformationCircle,
+  HiOutlineScale,
   HiOutlineShieldCheck,
 } from "react-icons/hi2";
 import { apiFetch, apiUpload, resolveApiUrl } from "./SalesInvoice/useSalesInvoice";
-import { API_ORIGIN } from "../services/apiPaths";
 import MarkdownReport from "../components/legal/MarkdownReport";
 import FindingsChecklist from "../components/legal/FindingsChecklist";
 import LabelImage from "../components/legal/LabelImage";
+import PackageDimensions, {
+  appendPackageForm,
+  EMPTY_PACKAGE_FORM,
+  isPackageFormActive,
+  type PackageForm,
+} from "../components/legal/PackageDimensions";
+import useLabelPreview from "../components/legal/useLabelPreview";
 import {
   buildReportMarkdown,
   summarise,
@@ -90,18 +98,6 @@ const formatBytes = (bytes: number): string =>
 
 const baseName = (path: string): string => path.split(/[\\/]/).pop() ?? path;
 
-/**
- * Absolute URL for an uploaded file.
- *
- * NOT `resolveApiUrl`: that hangs everything off `/api`, and Django serves
- * MEDIA_URL from the server root — `/media/labels/x.png` would become
- * `/api/media/labels/x.png` and 404. `API_ORIGIN` exists for exactly this
- * (its own docstring names media files as the case). An absolute URL is
- * returned untouched, so moving media to a CDN needs no change here.
- */
-const mediaUrl = (path: string): string =>
-  /^https?:\/\//i.test(path) ? path : `${API_ORIGIN}${path.startsWith("/") ? "" : "/"}${path}`;
-
 const isAccepted = (file: File): boolean =>
   ACCEPTED_EXTENSIONS.test(file.name) ||
   file.type === "application/pdf" ||
@@ -118,6 +114,12 @@ export default function LabelChecker() {
   const [error, setError] = useState("");
   const [stepIndex, setStepIndex] = useState(0);
   const [itemId, setItemId] = useState("");
+  // The dimensional panel. Kept between checks rather than reset with the
+  // file: a reviewer working through a pack's artwork revisions is measuring
+  // the same pack each time, and re-typing the circumference for every
+  // upload is the fastest way to make them stop filling it in at all.
+  const [packageForm, setPackageForm] = useState<PackageForm>(EMPTY_PACKAGE_FORM);
+  const [dimensionsOpen, setDimensionsOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [view, setView] = useState<"report" | "text">("report");
@@ -195,7 +197,14 @@ export default function LabelChecker() {
 
   // The stored copy once the check returns (it renders a PDF's first page as
   // an image the browser can show); the local blob until then.
-  const imageSrc = report?.image_url ? mediaUrl(report.image_url) : previewUrl;
+  //
+  // Fetched rather than linked: the endpoint serving it is behind the legal
+  // gate and an <img src> carries no bearer token — `useLabelPreview` has the
+  // long version. `previewUrl` stays the fallback for the window while that
+  // request is in flight, so an image upload does not blink out of the pane
+  // at the moment its report arrives.
+  const stored = useLabelPreview(report?.image_url);
+  const imageSrc = stored.src || previewUrl;
 
   /* ── Actions ──────────────────────────────────────────────────────────── */
 
@@ -233,6 +242,9 @@ export default function LabelChecker() {
       body.append("label_file", file);
       // Optional: it only adds the nutrition panel to compare against.
       if (itemId) body.append("item_id", itemId);
+      // Sends nothing at all unless a shape was chosen, so an untouched panel
+      // leaves this request identical to the ones sent before it existed.
+      appendPackageForm(body, packageForm);
       const data = await apiUpload<LabelReport>(UPLOAD_URL, body, "POST");
       if (!data) throw new Error("The server returned an empty response.");
       setReport(data);
@@ -464,9 +476,71 @@ export default function LabelChecker() {
         ) : null}
       </FilterBar>
 
+      {/* The dimensional panel.
+
+          Collapsed by default and never required. The five measurement rules
+          are computed from what is entered here (`legal/dimensions.py`); an
+          untouched panel means they are SKIPPED with that reason on the
+          report, not failed — so a reviewer who ignores this section gets
+          exactly the check they got before it existed. The summary line is
+          what tells them the section is doing something when it is closed. */}
+      <Card className="p-0">
+        <button
+          type="button"
+          onClick={() => setDimensionsOpen((open) => !open)}
+          aria-expanded={dimensionsOpen}
+          className="flex w-full items-center gap-2.5 px-4 py-3 text-left"
+        >
+          <HiOutlineScale aria-hidden="true" className="size-4 text-subtle" />
+          <span className="text-[13px] font-medium text-ink">
+            Package &amp; logo dimensions
+          </span>
+          <span className="text-[12px] text-subtle">
+            {isPackageFormActive(packageForm)
+              ? "Dimensional checks will run"
+              : "Optional — skipped unless a package shape is chosen"}
+          </span>
+          <HiOutlineChevronDown
+            aria-hidden="true"
+            className={cn(
+              "ml-auto size-4 shrink-0 text-subtle transition-transform",
+              dimensionsOpen && "rotate-180",
+            )}
+          />
+        </button>
+        {dimensionsOpen ? (
+          <div className="border-t border-line p-4">
+            <PackageDimensions
+              value={packageForm}
+              onChange={setPackageForm}
+              disabled={isAnalysing}
+            />
+          </div>
+        ) : null}
+      </Card>
+
       {error ? (
         <Notice tone="bad" title="The check did not finish">
           {error}
+        </Notice>
+      ) : null}
+
+      {/* Rules that did not apply to this pack — not failures, and not shown
+          as any. An unfortified product was never asked the fortification
+          rules; saying so is what stops the gap between "26 rules" and "21
+          checked" reading as a bug. */}
+      {status === "done" && (report?.skipped?.length ?? 0) > 0 ? (
+        <Notice
+          tone="info"
+          title={`Not checked (${report?.skipped?.length})`}
+        >
+          <ul className="m-0 list-none space-y-1 p-0">
+            {report?.skipped?.map((rule) => (
+              <li key={rule.rule_id}>
+                <span className="font-medium">{rule.rule_name}</span> — {rule.reason}
+              </li>
+            ))}
+          </ul>
         </Notice>
       ) : null}
 
@@ -548,6 +622,22 @@ export default function LabelChecker() {
                 }}
               />
             </>
+          ) : stored.loading ? (
+            /* The render exists by now — the check returned it — and it is
+               being fetched. Repeating "a PDF cannot be shown" here would
+               tell the reviewer the opposite of what is happening. */
+            <div
+              className="flex items-center justify-center rounded-[9px] bg-surface px-4 py-10"
+              role="status"
+              aria-label="Loading the rendered label"
+            >
+              <i
+                aria-hidden="true"
+                className="size-[26px] rounded-full border-[3px] border-line-strong border-t-brand motion-safe:animate-spin"
+              />
+            </div>
+          ) : stored.error ? (
+            <Notice tone="hold">{stored.error}</Notice>
           ) : (
             <div className="flex flex-col items-center gap-2 rounded-[9px] bg-surface px-4 py-10 text-center text-[14px] leading-relaxed text-body">
               <HiOutlineInformationCircle aria-hidden="true" className="text-[18px]" />

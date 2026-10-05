@@ -342,8 +342,19 @@ function PolicyForm({
     setStoreUrl(initial?.store_url ?? "");
   }
 
+  /*
+   * A BLANK required build is valid and meaningful: it switches the gate off
+   * for this platform, letting every app version through. That is what an
+   * admin reaches for when a policy is locking people out, so Save has to
+   * accept it. A build that is present must still be a whole number >= 1.
+   *
+   * The version is only a label — the server never compares it — so it never
+   * blocks saving.
+   */
+  const buildBlank = build.trim() === "";
   const buildNum = Number(build);
-  const valid = Boolean(version.trim()) && Number.isInteger(buildNum) && buildNum >= 1;
+  const gateOff = buildBlank;
+  const valid = buildBlank || (Number.isInteger(buildNum) && buildNum >= 1);
 
   const save = async () => {
     if (!valid) return;
@@ -353,13 +364,18 @@ function PolicyForm({
       await deviceAdminService.saveVersionPolicy({
         platform,
         required_version: version.trim(),
-        required_build: buildNum,
+        required_build: gateOff ? null : buildNum,
         store_url: storeUrl.trim(),
       });
       showToast({
         title: label + " policy saved",
-        message:
-          "Devices below build " + buildNum + " are now asked to update to " + version.trim() + ".",
+        message: gateOff
+          ? "Version checking is OFF for " + label + " — every app version is allowed in."
+          : "Devices below build " +
+            buildNum +
+            " are now asked to update" +
+            (version.trim() ? " to " + version.trim() : "") +
+            ".",
       });
       onSaved();
     } catch (err) {
@@ -379,12 +395,14 @@ function PolicyForm({
     <Card>
       <CardHeader>
         <CardTitle>{label}</CardTitle>
-        {initial?.required_build != null && (
-          <Badge tone="info">Build {initial.required_build}</Badge>
+        {initial?.required_build != null ? (
+          <Badge tone="info">Build {initial.required_build}+</Badge>
+        ) : (
+          <Badge tone="neutral">No version check</Badge>
         )}
       </CardHeader>
       <div className="space-y-3">
-        <Field label="Required version">
+        <Field label="Required version" hint="A label for users. Never compared.">
           {(control) => (
             <Input
               {...control}
@@ -394,7 +412,10 @@ function PolicyForm({
             />
           )}
         </Field>
-        <Field label="Required build" hint="A whole number, 1 or higher.">
+        <Field
+          label="Required build"
+          hint="A whole number, 1 or higher. Leave BLANK to turn version checking off and let every app version in."
+        >
           {(control) => (
             <Input
               {...control}
@@ -432,7 +453,8 @@ function PolicyForm({
 }
 
 /** Version-adoption bars for one platform: build → users, newest first.
- *  The required build is highlighted; everything below it reads as "old".
+ *  The required build and anything above it are highlighted; only builds
+ *  BELOW it read as "old".
  *  A footer summarises how many devices are on the latest build vs old,
  *  counting the bars above (this replaces the old Latest/Old KPI cards). */
 function AdoptionChart({
@@ -448,7 +470,12 @@ function AdoptionChart({
         name: "Build " + b.build_number,
         users: b.users,
         devices: b.devices,
-        isRequired: adoption?.required_build === b.build_number,
+        // At or ABOVE the floor is current, matching what the server
+        // enforces. This was `===`, so a device on a newer build than the
+        // policy was drawn in the "old" colour.
+        isRequired:
+          adoption?.required_build != null &&
+          b.build_number >= adoption.required_build,
       })),
     [adoption],
   );
@@ -753,8 +780,9 @@ export default function Device_Management() {
       <section className="space-y-3">
         <SectionHeading>Mobile version policy</SectionHeading>
         <p className="m-0 text-[12px] text-subtle">
-          The required build for each mobile platform. Devices below it are asked to update. The
-          web is never version-checked.
+          The minimum build for each mobile platform. Devices BELOW it are asked to update;
+          anything at or above it is fine, so a newer release is never blocked. Leave the build
+          blank to turn the check off for that platform. The web is never version-checked.
         </p>
         <div className="grid gap-4 sm:grid-cols-2">
           {MOBILE_PLATFORMS.map(({ key, label }) => (

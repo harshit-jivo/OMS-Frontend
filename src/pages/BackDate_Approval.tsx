@@ -29,6 +29,7 @@ import {
   HiCheckCircle,
   HiExclamationCircle,
   HiShieldCheck,
+  HiXCircle,
 } from "react-icons/hi2";
 
 import { Button } from "../components/ui/button";
@@ -54,12 +55,14 @@ import {
   backdateService,
   type BackDateInsights,
   type BackDateRequest,
+  type DecisionResult,
 } from "../services/backdateService";
 import {
   EntryTableHead,
   EntryTableRow,
   RequestDetailDialog,
   RequestProgressDialog,
+  SapResultList,
 } from "./BackDate";
 import {
   type CompanyFilter,
@@ -69,6 +72,8 @@ import {
   type StatusFilter,
   StatusFilterSelect,
 } from "./backdate/filters";
+import { newestFirst } from "./backdate/ordering";
+import { useDeepLinkedRequest } from "./backdate/useDeepLinkedRequest";
 
 function formatDate(value: string | null | undefined) {
   if (!value) return "—";
@@ -89,7 +94,11 @@ export default function BackDateApproval() {
    * request can be PENDING and still not be this user's to decide.
    */
   const [actionable, setActionable] = useState<Set<number>>(new Set());
-  const [loading, setLoading] = useState(false);
+  // Starts TRUE. The first fetch is fired from an effect, so a `false` here
+  // means one render claiming "loaded, nothing here" before anything has been
+  // asked for — an empty-state flash, and the reason a deep-linked request
+  // used to be looked for in a list that had not arrived yet.
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [search, setSearch] = useState("");
@@ -129,7 +138,14 @@ export default function BackDateApproval() {
       setActionable(queueIds);
       // History can repeat a queued request when "All" is selected; the queue
       // copy wins because only it carries the right to act.
-      setRows([...queue, ...history.filter((r) => !queueIds.has(r.id))]);
+      //
+      // Then sorted as ONE list. Concatenating the two ordered each part and
+      // the whole thing not at all: every pending request sat above every
+      // decided one whatever its age, so under "All" the newest entry could
+      // be halfway down the page.
+      setRows(
+        newestFirst([...queue, ...history.filter((r) => !queueIds.has(r.id))]),
+      );
       setCounts(insights);
     } catch (e) {
       setError(backdateError(e));
@@ -141,6 +157,13 @@ export default function BackDateApproval() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Arriving from a "needs your approval" notification: open that request's
+  // detail dialog, which is the only place the decision can be made. If it is
+  // in `rows` via the queue the Approve and Reject buttons come with it; if it
+  // has since been decided by someone else it opens read-only, which is the
+  // honest answer rather than buttons that would fail.
+  useDeepLinkedRequest(rows, !loading, setDetail);
 
   const announce = (message: string) => {
     setNotice(message);
@@ -173,6 +196,20 @@ export default function BackDateApproval() {
         <StatRow className="mb-4">
           <KpiFilterRow counts={counts} status={status} onSelect={setStatus} />
         </StatRow>
+      )}
+
+      {/* WHY A ROW CAN SAY "PENDING" UNDER "APPROVED".
+          These two views list the stages THIS user decided, and a request
+          carries on to the approvers above them afterwards — so the tab is
+          about their decision and the Status column is about where the
+          request has got to. Said out loud, because the two together look
+          like a contradiction until you know which question each answers. */}
+      {(status === "APPROVED" || status === "REJECTED") && (
+        <p className="mb-3 text-[12.5px] text-subtle">
+          Requests you {status === "APPROVED" ? "approved" : "rejected"} at
+          your stage. The Status column shows where each one has got to since —
+          it can still be pending with a later approver.
+        </p>
       )}
 
       <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
@@ -269,10 +306,14 @@ export default function BackDateApproval() {
       <DecisionDialog
         pending={pending}
         onClose={() => setPending(null)}
-        onDone={(message) => {
-          announce(message);
+        onDecided={() => {
+          // The detail dialog is showing the request as it was BEFORE the
+          // decision — PENDING, with Approve and Reject still offered. Close
+          // it rather than leave a second chance to decide sitting open.
+          setDetail(null);
           load();
         }}
+        onDone={announce}
       />
     </Page>
   );
@@ -281,19 +322,41 @@ export default function BackDateApproval() {
 function DecisionDialog({
   pending,
   onClose,
+  onDecided,
   onDone,
 }: {
   pending: { request: BackDateRequest; approve: boolean } | null;
   onClose: () => void;
+  /** The decision was accepted — close what is now stale, refresh the list. */
+  onDecided: () => void;
+  /** The approver dismissed the result. */
   onDone: (message: string) => void;
 }) {
   const [remarks, setRemarks] = useState("");
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
+  /**
+   * The decision that just landed, held on screen until the approver says Done.
+   *
+   * EVERY OUTCOME GETS ONE, not just a final approval. An intermediate
+   * approval and a rejection used to close straight onto a banner behind the
+   * still-open detail dialog, which went on showing PENDING with Approve and
+   * Reject beside it — so the approver could not tell their decision had
+   * registered, and the buttons invited them to make it twice. The same
+   * dialog in the app (`BackDateDecisionDoneDialog`) already worked this way.
+   *
+   * On a FINAL approval it also holds SAP's own response on screen. That
+   * moment — the one time the approver most wants to see what SAP said — used
+   * to be the moment it disappeared.
+   */
+  const [done, setDone] = useState<
+    { approved: boolean; result: DecisionResult } | null
+  >(null);
 
   useEffect(() => {
     setRemarks("");
     setFormError("");
+    setDone(null);
   }, [pending]);
 
   if (!pending) {
@@ -308,6 +371,15 @@ function DecisionDialog({
 
   const { request, approve } = pending;
   const canDecide = !!request.flow?.current_stage;
+  /**
+   * Whether THIS approval is the one that writes to SAP.
+   *
+   * Only the last stage calls SAP; every earlier approval just moves the
+   * request on. Telling a first-stage approver "Sending the grant to SAP"
+   * described something that was not happening — and made the one approval
+   * that really does call SAP look no different from the rest.
+   */
+  const callsSap = approve && !!request.flow?.is_final_stage;
 
   const submit = async () => {
     if (!canDecide) return;
@@ -322,19 +394,12 @@ function DecisionDialog({
         ? await backdateService.approve(request.id, remarks)
         : await backdateService.reject(request.id, remarks);
 
-      onClose();
-      if (!approve) {
-        onDone(`Request #${request.id} rejected.`);
-        return;
-      }
-      if (result.flow_status === "PENDING") {
-        onDone(`Request #${request.id} approved and moved to the next stage.`);
-      } else {
-        // "Approved" can only be reached now by SAP having accepted the
-        // grant: the last approval calls SAP first and is only written if it
-        // succeeded. A refusal arrives as an error, below.
-        onDone(`Request #${request.id} approved. Rights applied in SAP.`);
-      }
+      // Decided. The detail dialog behind this one is now describing a
+      // request that is no longer in that state, so the parent closes it and
+      // refreshes the list NOW — the result dialog is then the only thing on
+      // screen, and what is under it is already current.
+      setDone({ approved: approve, result });
+      onDecided();
     } catch (e) {
       // A SAP refusal means NOTHING was approved — the request is still
       // sitting at this stage. Say that, and show what SAP actually said, so
@@ -344,6 +409,79 @@ function DecisionDialog({
       setSaving(false);
     }
   };
+
+  if (done) {
+    const { approved, result } = done;
+    // A final approval is the one that wrote to SAP — the flow is finished.
+    const isFinal = approved && result.flow_status === "APPROVED";
+    const title = approved ? "Approved" : "Rejected";
+    const subtitle = !approved
+      ? "The requester has been told why"
+      : isFinal
+        ? "SAP accepted the grant"
+        : "Forwarded to the next approver";
+    const message = !approved
+      ? `Request #${request.id} rejected.`
+      : isFinal
+        ? `Request #${request.id} approved. Rights applied in SAP.`
+        : `Request #${request.id} approved and moved to the next stage.`;
+    const finish = () => {
+      onClose();
+      onDone(message);
+    };
+
+    return (
+      <Dialog open onOpenChange={(o) => !o && finish()}>
+        <DialogContent title={title} size={isFinal ? "md" : "sm"}>
+          <DialogBody>
+            <div className="flex flex-col items-center px-2 pt-2 pb-1 text-center">
+              <span
+                className={
+                  approved
+                    ? "flex size-14 items-center justify-center rounded-full bg-ok-soft text-ok"
+                    : "flex size-14 items-center justify-center rounded-full bg-bad-soft text-bad"
+                }
+              >
+                {approved ? (
+                  <HiCheckCircle className="size-8" aria-hidden />
+                ) : (
+                  <HiXCircle className="size-8" aria-hidden />
+                )}
+              </span>
+              <DialogTitle className="mt-3">{title}</DialogTitle>
+              <DialogDescription className="mt-1">
+                #{request.id} · {subtitle}
+              </DialogDescription>
+              <p className="mt-3 text-[13px] leading-relaxed text-subtle">
+                {!approved
+                  ? "This ends the request. The requester can raise a new one."
+                  : isFinal
+                    ? "The back-posting rights are now in SAP."
+                    : "It now waits for the next approver in the chain."}
+              </p>
+            </div>
+
+            {/* The same component the Progress timeline ends with, so one SAP
+                call cannot read two different ways. */}
+            {isFinal && (
+              <div className="mt-4">
+                <SapResultList
+                  status={result.hana_status ?? null}
+                  text={result.hana_status_text ?? ""}
+                />
+              </div>
+            )}
+          </DialogBody>
+
+          <DialogFooter>
+            <Button variant="primary" onClick={finish}>
+              Done
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  }
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -357,7 +495,7 @@ function DecisionDialog({
               {approve ? "Approve BackDate Request" : "Reject BackDate Request"}
             </DialogTitle>
             <DialogDescription className="mt-0.5">
-              #{request.id} · {request.sap_username} · {request.company}
+              #{request.id} · {request.sap_username} · {request.company_label}
             </DialogDescription>
           </div>
         </DialogHeader>
@@ -410,10 +548,15 @@ function DecisionDialog({
             )}
           </Field>
 
-          {/* SAP is a network call. An approver who cannot tell it is running
-              will press the button again, so the busy state is a banner rather
-              than a disabled button nobody looks at. */}
-          {saving && approve ? (
+          {/* THE SAP BOX IS FOR THE LAST APPROVER ONLY. Theirs is the approval
+              that writes to SAP; everyone before them is moving the request on,
+              and a banner about SAP over that was simply untrue.
+
+              While SAP is being called the box becomes a busy banner rather
+              than a disabled button nobody looks at: it is a network call of a
+              few seconds, and an approver who cannot tell it is running will
+              press the button again. */}
+          {callsSap && saving && (
             <div
               role="status"
               className="mt-3 flex items-center gap-2.5 rounded-lg bg-brand-soft px-3.5 py-2.5 text-[12.5px] text-brand"
@@ -427,11 +570,21 @@ function DecisionDialog({
                 request is only approved once SAP accepts it.
               </span>
             </div>
-          ) : (
+          )}
+          {callsSap && !saving && (
             <p className="mt-3 rounded-lg bg-brand-soft px-3.5 py-2.5 text-[12.5px] leading-relaxed text-brand">
-              {approve
-                ? "If this is the last stage, SAP is called FIRST — the request is approved only if SAP accepts the grant."
-                : "Rejecting ends this request. The requester can raise a new one."}
+              This is the final approval. SAP is called FIRST — the request is
+              approved only if SAP accepts the grant.
+            </p>
+          )}
+          {approve && !callsSap && (
+            <p className="mt-3 text-[12.5px] leading-relaxed text-subtle">
+              After your approval it moves to the next approver.
+            </p>
+          )}
+          {!approve && (
+            <p className="mt-3 rounded-lg bg-brand-soft px-3.5 py-2.5 text-[12.5px] leading-relaxed text-brand">
+              Rejecting ends this request. The requester can raise a new one.
             </p>
           )}
         </DialogBody>
@@ -447,9 +600,11 @@ function DecisionDialog({
             aria-busy={saving}
           >
             {saving
-              ? approve
+              ? callsSap
                 ? "Calling SAP…"
-                : "Rejecting…"
+                : approve
+                  ? "Approving…"
+                  : "Rejecting…"
               : approve
                 ? "Approve"
                 : "Reject"}

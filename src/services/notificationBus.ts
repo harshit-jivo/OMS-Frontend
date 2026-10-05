@@ -13,6 +13,15 @@
 export type NotificationPayload = {
   notification_id?: number | string | null;
   order_id?: number | string | null;
+  /**
+   * The subject, as the reusable notification framework names it: the
+   * backend's `content_type.model` plus the row id. Sales Order pushes carry
+   * `order_id` instead and leave these unset, so both are optional and a
+   * reader must handle either. `routeForNotification` is the one place that
+   * turns this pair into a URL.
+   */
+  entity_type?: string | null;
+  entity_id?: number | string | null;
   event_type?: string | null;
   notification_type?: string | null;
   title?: string | null;

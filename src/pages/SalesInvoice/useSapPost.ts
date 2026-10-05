@@ -1,19 +1,15 @@
 import { useCallback, useReducer, useRef } from "react";
-import { apiFetch, serviceLayerBranch, withBranch } from "./useSalesInvoice";
+import { apiFetch } from "./useSalesInvoice";
 import { extractRawMessage } from "./sapErrorTranslator";
 
 /* ──────────────────────────────────────────────────────────────────────────
- * Stored payload → SAP invoice
+ * Approved invoice log → SAP invoice
  *
- * The Invoice Review flow keeps the full invoice payload on the local PENDING
- * record. Posting sends that payload verbatim to the service-layer invoice
- * endpoint; SAP re-derives pricing/tax from the base sales order lines.
+ * The browser names the log; the server posts the payload it stored, dates it
+ * today, and records the outcome on the log itself (POSTED_TO_SAP with SAP's
+ * numbers, ERROR/CL_RAISED with SAP's message, or POSTING when SAP did not
+ * answer). Nothing here writes a status back.
  * ────────────────────────────────────────────────────────────────────────── */
-
-export type SapInvoicePayload = {
-  DocumentLines?: unknown[];
-  [key: string]: unknown;
-};
 
 // Trim a (possibly large JSON) SAP error down to something a log line / panel can
 // show without overflowing.
@@ -183,10 +179,9 @@ export type SapPostResult = {
 };
 
 export type SapRunInput = {
-  payload: SapInvoicePayload;
+  /** The invoice log to post. */
+  logId: string | number;
   doc: SapDoc;
-  /** Branch as stored on the log (OIL | BEVERAGE); mapped to the service-layer value. */
-  branch?: string;
   /** Runs once per attempt (including retries) after SAP confirms the invoice. */
   onSuccess?: (result: SapPostResult) => void | Promise<void>;
   /** Runs once per attempt (including retries) when the post fails. */
@@ -199,6 +194,9 @@ export function useSapPost() {
   // been superseded and stop dispatching.
   const runRef = useRef(0);
   const lastInputRef = useRef<SapRunInput | null>(null);
+  // A second click while a post is in flight would only earn a 409 from the
+  // server — and, superseding this run, hide the first one's answer.
+  const inFlightRef = useRef(false);
 
   const close = useCallback(() => {
     runRef.current += 1;
@@ -206,6 +204,8 @@ export function useSapPost() {
   }, []);
 
   const run = useCallback(async (input: SapRunInput) => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     const runId = ++runRef.current;
     const alive = () => runRef.current === runId;
     lastInputRef.current = input;
@@ -231,23 +231,19 @@ export function useSapPost() {
       if (!alive()) return;
       log("Secure session established.", "ok");
 
-      // 2. Validate the stored payload (client-side, paced for legibility)
+      // 2. The approved payload, as stored on the log
       goto("payload");
-      log("Validating the stored invoice payload…");
+      log("Using the approved invoice as stored…");
       await wait(550);
       if (!alive()) return;
-      const lines = Array.isArray(input.payload.DocumentLines) ? input.payload.DocumentLines : [];
-      if (lines.length === 0) {
-        throw new Error("Stored invoice payload has no document lines to post.");
-      }
-      dispatch({ type: "doc", patch: { itemCount: lines.length } });
-      log(`Validation passed · ${lines.length} line item${lines.length === 1 ? "" : "s"} ready.`, "ok");
+      const lines = input.doc.itemCount;
+      if (lines) log(`${lines} line item${lines === 1 ? "" : "s"} ready.`, "ok");
       await wait(350);
       if (!alive()) return;
 
       // 3. Submit
       goto("post");
-      const invoiceUrl = withBranch("/api/service-layer/invoice/", serviceLayerBranch(input.branch));
+      const invoiceUrl = `/api/invoice/${encodeURIComponent(String(input.logId))}/post-to-sap/`;
       log(`POST ${invoiceUrl} → submitting document…`);
       await wait(400);
       if (!alive()) return;
@@ -257,7 +253,7 @@ export function useSapPost() {
       log("Awaiting SAP — posting the invoice (this can take 10–30s)…", "warn");
       const result = await apiFetch<{ error?: unknown }>(invoiceUrl, {
         method: "POST",
-        body: JSON.stringify(input.payload),
+        body: JSON.stringify({}),
       });
       if (!alive()) return;
       // The SAP proxy can answer HTTP 200 with an error body.
@@ -300,6 +296,8 @@ export function useSapPost() {
       log(message, "error");
       dispatch({ type: "error", failedStep: current, message, rawError });
       await input.onError?.(message, rawError);
+    } finally {
+      inFlightRef.current = false;
     }
   }, []);
 

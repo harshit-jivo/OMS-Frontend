@@ -86,6 +86,17 @@ type Props = {
    */
   onRaiseCl?: () => void;
   /**
+   * When the failure is about batches or stock, the parent supplies this to
+   * re-read the warehouse, allocate again and post — omitted for every other
+   * kind of error.
+   *
+   * It is the PRIMARY action for those failures and Retry is not, because
+   * Retry cannot fix them: the batches on the invoice are gone, and sending
+   * the same numbers back fails identically. Hence the caution styling — it
+   * reposts to SAP with different stock than the reviewer approved against.
+   */
+  onRecheckBatches?: () => void;
+  /**
    * Opens the invoice's bill print. Shown on the success panel only when the
    * parent supplies it (i.e. SAP gave back a document to print).
    *
@@ -101,6 +112,7 @@ export default function MissionControlLoader({
   onClose,
   onRetry,
   onRaiseCl,
+  onRecheckBatches,
   onOpenReport,
 }: Props) {
   const { status, logs, doc, invoiceNumber, errorMessage, rawError } = state;
@@ -273,9 +285,24 @@ export default function MissionControlLoader({
                     <HiBanknotes aria-hidden="true" /> Raise CL
                   </Button>
                 )}
-                <Button ref={primaryRef} variant="primary" onClick={onRetry}>
-                  <HiArrowPath aria-hidden="true" /> Retry
-                </Button>
+                {onRecheckBatches ? (
+                  <>
+                    <Button onClick={onRetry}>
+                      <HiArrowPath aria-hidden="true" /> Retry
+                    </Button>
+                    {/* The focused button, because it is the one that can
+                        actually work — Retry would send the same dead batch
+                        numbers back. Danger-styled: it posts to SAP against
+                        stock the reviewer has not seen. */}
+                    <Button ref={primaryRef} variant="danger" onClick={onRecheckBatches}>
+                      <HiExclamationTriangle aria-hidden="true" /> Re-check batches &amp; repost
+                    </Button>
+                  </>
+                ) : (
+                  <Button ref={primaryRef} variant="primary" onClick={onRetry}>
+                    <HiArrowPath aria-hidden="true" /> Retry
+                  </Button>
+                )}
               </DialogFooter>
             </>
           )}

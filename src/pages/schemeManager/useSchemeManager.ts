@@ -27,8 +27,8 @@ import { useMainGroups, useStates } from "@/lib/authQueries";
 import { useSapParties, useSapProducts } from "@/lib/sapQueries";
 import { showToast } from "@/lib/toastStore";
 
-import { productOptions } from "./components/productOptions";
-import { CATEGORIES, apiErrorText, isFinishedGood } from "./schemeManagerHelpers";
+import { itemNameResolver, pickerOptions, schemeCatalogue } from "./components/productOptions";
+import { CATEGORIES, apiErrorText } from "./schemeManagerHelpers";
 import type { CatalogueItem, PartyOption } from "./types";
 
 /** Stable empty, so the list memos settle. */
@@ -111,30 +111,22 @@ export function useSchemeManager() {
   const parties = rawParties as unknown as PartyOption[];
 
   const { items: rawProducts } = useSapProducts();
-  const products = useMemo(() => {
-    // Finished goods only. The catalogue also carries PM (packing material),
-    // RM (raw material), CG and SC — about two thirds of it — and none of those
-    // can be sold, so none can trigger a scheme or be given away. Also
-    // de-duplicated: the same item_code exists once per category, and a scheme
-    // matches on the code alone.
-    const seen = new Set<string>();
-    return (rawProducts as unknown as CatalogueItem[]).filter((p) => {
-      if (!isFinishedGood(p.item_code) || seen.has(p.item_code)) return false;
-      seen.add(p.item_code);
-      return true;
-    });
-  }, [rawProducts]);
-
-  // The same catalogue as picker rows, built once rather than per render of
-  // a modal with five pickers in it.
-  const allItemOptions = useMemo(() => productOptions(products), [products]);
+  // Finished goods only, de-duplicated on (code, CATEGORY) — see
+  // `schemeCatalogue` for why the category half of that key matters.
+  const products = useMemo(
+    () => schemeCatalogue(rawProducts as unknown as CatalogueItem[]),
+    [rawProducts],
+  );
 
   // Item codes are what the engine matches on, but nobody reads them — every
   // list on this page shows the product name instead.
-  const itemNameOf = useMemo(() => {
-    const byCode = new Map(products.map((p) => [p.item_code, p.item_name]));
-    return (itemCode: string) => byCode.get(itemCode) || itemCode;
-  }, [products]);
+  //
+  // Bound to the CATEGORY of whatever is being described: `itemNameIn(cat)` is
+  // an `ItemNameResolver`, exactly what `describeTrigger` / `describeBenefit`
+  // already accept, so naming became category-correct without changing a single
+  // signature in `schemeService`. A bare `(code) => name` described an OIL
+  // scheme's trigger with a MART product's name whenever the code was shared.
+  const itemNameIn = useMemo(() => itemNameResolver(products), [products]);
 
   // Editor — `null` means closed, `0` means "new scheme".
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -150,23 +142,15 @@ export function useSchemeManager() {
    * picking one: `resolve_schemes` walls schemes off by category, so a
    * cross-category trigger produced a scheme that silently never fired.
    *
-   * "Every category" (a blank draft.category) keeps the full list, which is
-   * what that option means.
+   * The narrowing used to run over a catalogue already de-duplicated by code,
+   * which quietly did the opposite of what it looks like: a code surviving as
+   * its MART row was then filtered OUT of an OIL scheme's picker even though it
+   * is a live OIL product. See `pickerOptions` and `schemeCatalogue`.
    */
-  const itemOptions = useMemo(() => {
-    const wanted = (draft.category || "").trim().toUpperCase();
-    if (!wanted) return allItemOptions;
-    const inCategory = new Set(
-      products
-        .filter((p) => (p.category || "").trim().toUpperCase() === wanted)
-        .map((p) => p.item_code),
-    );
-    // Fall back to the whole catalogue rather than showing an empty picker:
-    // a category with no products mapped is a data gap, and hiding every
-    // option would look like the page is broken.
-    if (inCategory.size === 0) return allItemOptions;
-    return allItemOptions.filter((option) => inCategory.has(option.value));
-  }, [allItemOptions, products, draft.category]);
+  const itemOptions = useMemo(
+    () => pickerOptions(products, draft.category),
+    [products, draft.category],
+  );
   const [isSaving, setIsSaving] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   // The editor is a wizard: one question per screen, so a half-built offer never
@@ -393,7 +377,7 @@ export function useSchemeManager() {
     parties,
     products,
     itemOptions,
-    itemNameOf,
+    itemNameIn,
     targetOptions,
 
     // list interaction

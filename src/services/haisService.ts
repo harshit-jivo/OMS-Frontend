@@ -28,6 +28,9 @@ export const WORKING_STATUSES: WorkingStatus[] = [
 export interface HaisOption {
   id: number;
   name: string;
+  /** Asset Types only: which optional asset fields this type shows on the form.
+   *  Empty/undefined = show all. Absent for Department / Storage Type. */
+  field_config?: string[];
 }
 
 /* Asset Type / Department / Storage Type are NO LONGER static — they come from
@@ -294,17 +297,36 @@ async function assetToApi(p: Partial<Asset>): Promise<Record<string, unknown>> {
  *  array; tolerate a paginated `{results}` shape too. */
 async function fetchOptions(path: string): Promise<HaisOption[]> {
   const { data } = await api.get(`/hais/${path}/`, { params: { active: 1 } });
-  const rows: Array<{ id: number; name: string }> = Array.isArray(data)
+  const rows: Array<{ id: number; name: string; field_config?: string[] }> = Array.isArray(data)
     ? data
     : data?.results ?? [];
-  return rows.map((r) => ({ id: r.id, name: r.name }));
+  return rows.map((r) => ({ id: r.id, name: r.name, field_config: r.field_config }));
 }
 
-/** Add a new dropdown value. Names are stored in CAPITALS. */
-async function createOption(path: string, name: string): Promise<HaisOption> {
-  const { data } = await api.post(`/hais/${path}/`, { name: name.trim().toUpperCase() });
+/** Add a new dropdown value. Names are stored in CAPITALS. `extra` carries
+ *  master-specific fields (e.g. Asset Type's has_config). */
+async function createOption(
+  path: string,
+  name: string,
+  extra?: Record<string, unknown>,
+): Promise<HaisOption> {
+  const { data } = await api.post(`/hais/${path}/`, {
+    name: name.trim().toUpperCase(),
+    ...extra,
+  });
   optionCache = null; // a new option exists — force the name→id map to reload
-  return { id: data.id, name: data.name };
+  return { id: data.id, name: data.name, field_config: data.field_config };
+}
+
+/** Update an existing dropdown value (name and, for asset types, field_config). */
+async function updateOption(
+  path: string,
+  id: number,
+  body: Record<string, unknown>,
+): Promise<HaisOption> {
+  const { data } = await api.patch(`/hais/${path}/${id}/`, body);
+  optionCache = null; // names / ids may have changed — force the map to reload
+  return { id: data.id, name: data.name, field_config: data.field_config };
 }
 
 export const haisService = {
@@ -313,9 +335,16 @@ export const haisService = {
     assetTypes: (): Promise<HaisOption[]> => fetchOptions("asset-types"),
     departments: (): Promise<HaisOption[]> => fetchOptions("departments"),
     storageTypes: (): Promise<HaisOption[]> => fetchOptions("storage-types"),
-    createAssetType: (name: string): Promise<HaisOption> => createOption("asset-types", name),
+    createAssetType: (name: string, fieldConfig: string[] = []): Promise<HaisOption> =>
+      createOption("asset-types", name, { field_config: fieldConfig }),
     createDepartment: (name: string): Promise<HaisOption> => createOption("departments", name),
     createStorageType: (name: string): Promise<HaisOption> => createOption("storage-types", name),
+    updateAssetType: (id: number, name: string, fieldConfig: string[] = []): Promise<HaisOption> =>
+      updateOption("asset-types", id, { name: name.trim().toUpperCase(), field_config: fieldConfig }),
+    updateDepartment: (id: number, name: string): Promise<HaisOption> =>
+      updateOption("departments", id, { name: name.trim().toUpperCase() }),
+    updateStorageType: (id: number, name: string): Promise<HaisOption> =>
+      updateOption("storage-types", id, { name: name.trim().toUpperCase() }),
   },
 
   /* --- list / search the register --- */

@@ -57,7 +57,8 @@ type ErrorBody = {
  * thing available when present. `sap_error` sits ABOVE the generic `error`
  * because a SAP Service Layer failure sends both — the generic one says
  * "Failed to post", the SAP one names the item or the account, and
- * MartApproval had already worked that out by hand (index.tsx:131). The field
+ * MartApproval had already worked that out by hand
+ * (pages/Distributor/Mart_Approval.tsx). The field
  * map is last: "code: This field must be unique." is accurate but reads worse
  * than a sentence written for a person.
  */

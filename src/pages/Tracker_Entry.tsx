@@ -5,6 +5,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import {
   HiOutlineArrowRight,
   HiOutlineCheckCircle,
+  HiOutlineForward,
   HiOutlineLockClosed,
   HiOutlinePencilSquare,
   HiOutlinePlus,
@@ -338,6 +339,39 @@ export default function Tracker_Entry() {
       refresh();
     } catch (err) {
       flash("Could not advance", messageFrom(err, "The server refused the request."));
+    }
+  };
+
+  /**
+   * Fast-track: straight from Invoice Entry to SAP Approval, skipping Pre-Audit
+   * and Data Entry (and Bilty/GRPO for transport).
+   *
+   * Moved here from the generic stage queue. This is the entry desk, which is
+   * also what the server gates the endpoint on (`IsTrackerEntry`), so the
+   * button now sits on the one screen whose users can actually use it.
+   *
+   * Remarks are checked here as well as server-side. The server is the
+   * authority — `services.fast_track` refuses without them — but this bypasses
+   * the desks where holds and debits are captured, so the user should be told
+   * what is missing before the request rather than after it, and told what they
+   * are about to skip.
+   */
+  const fastTrack = async () => {
+    if (selected.size === 0) return;
+    if (!advRemarks.trim()) {
+      flash("A reason is required", "Skipping Pre-Audit and Data Entry has to be explained.");
+      return;
+    }
+    try {
+      const res = await trackerService.fastTrack([...selected], advRemarks);
+      setAdvRemarks("");
+      flash(
+        `${res.processed_count} sent to SAP Approval`,
+        res.errors.length ? `${res.errors.length} failed.` : "Pre-Audit and Data Entry were skipped.",
+      );
+      refresh();
+    } catch (err) {
+      flash("Fast-track failed", messageFrom(err, "The server refused the request."));
     }
   };
 
@@ -703,13 +737,24 @@ export default function Tracker_Entry() {
           <span className="text-[13px] font-semibold text-ink">{selected.size} selected</span>
           <Input
             className="min-w-[220px] flex-1"
-            placeholder="Remarks (optional)"
-            aria-label="Remarks (optional)"
+            placeholder="Remarks (optional to advance, required to send to SAP Approval)"
+            aria-label="Remarks"
             value={advRemarks}
             onChange={(e) => setAdvRemarks(e.target.value)}
           />
           <Button variant="primary" onClick={() => void bulkAdvance()}>
             <HiOutlineArrowRight aria-hidden="true" /> Advance to next stage
+          </Button>
+          {/* Deliberately NOT the primary action, as it was in the stage queue
+              this moved from: it skips the desks that capture holds and debits,
+              so it should read as the exception, not the default way out of
+              entry. */}
+          <Button
+            variant="ghost"
+            onClick={() => void fastTrack()}
+            title="Skip Pre-Audit and Data Entry — a reason is required"
+          >
+            <HiOutlineForward aria-hidden="true" /> Send to SAP Approval
           </Button>
         </div>
       )}

@@ -497,7 +497,7 @@ export default function DashboardDialogs({ dashboard }: { dashboard: DashboardSt
               <DetailGrid>
                 <DetailField label="Party" value={detailOrder.card_name || "—"} />
                 <DetailField label="Card code" value={detailOrder.card_code || "—"} />
-                <DetailField label="Created by" value={detailOrder.created_by || "—"} />
+                <DetailField label="Punched by" value={detailOrder.created_by || "—"} />
                 <DetailField
                   label="Created at"
                   value={

@@ -296,6 +296,12 @@ export interface MartOrderPayload {
   po_number?: string;
   company: number;
   warehouse_code?: string;
+  // Dispatch location. Optional: the backend defaults distributor orders to the
+  // factory when it isn't sent, but the Mart editor can override it.
+  dispatch_from_id?: number;
+  dispatch_from_name?: string;
+  /** Free-text comment stored on the order (Order.remarks). */
+  remarks?: string;
   total_amount: number;
   items: MartOrderItemPayload[];
 }
@@ -317,6 +323,9 @@ export interface MartOrderSummary {
   created_by?: string | null;
   created_at?: string;
   rejection_reason?: string;
+  rejected_at?: string | null;
+  cancellation_reason?: string;
+  cancelled_at?: string | null;
   items_count: number;
 }
 
@@ -390,6 +399,7 @@ export interface Order {
   created_by: string | number;
   rejected_by?: string | null;
   rejection_reason?: string | null;
+  cancellation_reason?: string | null;
   total_amount: number;
   sap_doc_number?: string;
   quotation_cancelled?: boolean;
@@ -442,6 +452,71 @@ export interface OrderLog {
   remarks: string;
   performed_by_name: string | null;
   created_at: string;
+}
+
+/** One stop on an order's trail — a row of `orders_log`, resolved. */
+export interface MasterOrderStage {
+  status_id: number | null;
+  status_code: string | null;
+  status_name: string;
+  performed_by_name: string | null;
+  remarks: string;
+  at: string;
+}
+
+/**
+ * A row of the Order Master feed: the order, who raised it, where it stands,
+ * and every stage it has been through.
+ *
+ * `pending_with` is who it is waiting on — real usernames at rate approval,
+ * where `order_rate_approvals` names people, and otherwise the responsible
+ * desk ("Billing", "Auditor"), because no other stage records an assignee.
+ * Empty for a finished, rejected or cancelled order, which sits in no queue.
+ */
+export interface MasterOrder {
+  id: number;
+  order_number: string;
+  card_code: string;
+  card_name: string;
+  order_type: string;
+  is_foc: boolean;
+  total_amount: string;
+  created_at: string;
+  delivery_date: string | null;
+  created_by_id: number | null;
+  created_by_name: string | null;
+  status_code: string;
+  status_name: string;
+  /** `orders` has no stage-entered column; this is the newest log's time. */
+  stage_since: string;
+  pending_with: string[];
+  stages: MasterOrderStage[];
+  sap_doc_number: string | null;
+}
+
+export interface MasterOrderPagination {
+  page: number;
+  page_size: number;
+  total: number;
+  total_pages: number;
+}
+
+export interface MasterOrderParams {
+  page?: number;
+  page_size?: number;
+  status?: string;
+  created_by?: string;
+  /** Inclusive `YYYY-MM-DD`, matched on the order's creation date. */
+  date_from?: string;
+  date_to?: string;
+  q?: string;
+  ordering?: string;
+}
+
+/** One entry of the master page's creator filter. */
+export interface MasterOrderCreator {
+  id: number;
+  username: string;
 }
 
 // Latest SAP Sales Order push result for a distributor order (SalesOrderLog).
@@ -648,6 +723,46 @@ const outgoingScheme = (scheme: OrderItemScheme) => ({
 });
 
 
+/** One distributor's rolled-up totals across completed Mart orders. */
+export interface DistributorReportDistributor {
+  card_code: string;
+  card_name: string;
+  order_count: number;
+  sku_count: number;
+  qty: number;
+  boxes: number;
+  pcs: number;
+  value: number;
+}
+
+/** One SKU/item's rolled-up totals across completed Mart orders. */
+export interface DistributorReportSku {
+  item_code: string;
+  item_name: string;
+  order_count: number;
+  distributor_count: number;
+  qty: number;
+  boxes: number;
+  pcs: number;
+  value: number;
+}
+
+export interface DistributorReport {
+  from_date: string | null;
+  to_date: string | null;
+  distributors: DistributorReportDistributor[];
+  skus: DistributorReportSku[];
+  totals: {
+    distributor_count: number;
+    sku_count: number;
+    order_count: number;
+    qty: number;
+    boxes: number;
+    pcs: number;
+    value: number;
+  };
+}
+
 export const ordersService = {
 
   getPartyName: async () => {
@@ -670,6 +785,21 @@ export const ordersService = {
   getPartyProduct: async (card_code: string) => {
     const response = await api.get(`/orders/party-products/${card_code}/`);
     return response.data;
+  },
+
+  /**
+   * The Distributor Report: completed distributor (Mart) orders aggregated
+   * distributor-wise and SKU/item-wise. Reads OMS's own tables; `from`/`to`
+   * are YYYY-MM-DD and filter on the order date.
+   */
+  getDistributorReport: async (range?: { from?: string; to?: string }) => {
+    const response = await api.get("/orders/distributor-report/", {
+      params: {
+        ...(range?.from ? { from_date: range.from } : {}),
+        ...(range?.to ? { to_date: range.to } : {}),
+      },
+    });
+    return response.data as DistributorReport;
   },
 
   getProducts: async () => {
@@ -757,7 +887,9 @@ export const ordersService = {
     return response.data;
   },
 
-  getMartOrders: async (tab?: "pending" | "approved" | "rejected") => {
+  getMartOrders: async (
+    tab?: "pending" | "approved" | "rejected" | "completed" | "cancelled",
+  ) => {
     const response = await api.get("/orders/mart/list/", {
       params: tab ? { tab } : undefined,
     });
@@ -779,6 +911,20 @@ export const ordersService = {
     return response.data;
   },
 
+  // Cancel a COMPLETED distributor order (mart cancel authority only). This
+  // reverses the SAP Sales Order too — SAP is cancelled first, then OMS moves
+  // to "Cancelled". Reason is mandatory. Throws with the SAP error if SAP
+  // refuses (e.g. the order already has a delivery/invoice against it).
+  cancelMartOrder: async (orderId: number, reason: string) => {
+    const response = await api.post(`/orders/mart/${orderId}/cancel/`, { reason });
+    return response.data as {
+      message: string;
+      order_number: string;
+      status?: string;
+      sap?: { doc_entry: number | null };
+    };
+  },
+
   // Batch lookup of the latest SAP Sales Order result for distributor orders.
   // Returns a map keyed by order id (as string). Used by the Distributor Order
   // Tracking page to show DocEntry/DocNum (success) or the SAP error (failure).
@@ -788,6 +934,33 @@ export const ordersService = {
       params: { order_ids: orderIds.join(",") },
     });
     return (response.data?.statuses ?? {}) as Record<string, SalesOrderSapStatus>;
+  },
+
+  // Sales-order print (Crystal Reports PDF). The company decides which layout
+  // renders (OIL → SO_OIL.rpt, BEVERAGE → SO_BEVERAGE.rpt, MART → SO_MART.rpt),
+  // so `branch` is required. Pass docEntry (SAP internal key) when known, else
+  // docNum (the resolver looks it up against that branch's schema). Returns the
+  // PDF as a Blob.
+  getSalesOrderReport: async (params: {
+    branch: string;
+    docEntry?: number | string | null;
+    docNum?: number | string | null;
+    party?: string;
+  }) => {
+    const response = await api.get("/orders/crystal/", {
+      params: {
+        branch: params.branch,
+        ...(params.docEntry != null && params.docEntry !== ""
+          ? { docEntry: params.docEntry }
+          : {}),
+        ...(params.docNum != null && params.docNum !== ""
+          ? { docNum: params.docNum }
+          : {}),
+        ...(params.party ? { party: params.party } : {}),
+      },
+      responseType: "blob",
+    });
+    return response.data as Blob;
   },
 
   // Retry pushing an already-approved distributor order to SAP (mart approver /
@@ -855,6 +1028,35 @@ export const ordersService = {
     return response.data as OrderLog[];
   },
 
+  // The Order Master feed: every order in the caller's scope, each carrying its
+  // whole `orders_log` trail inline. Deliberately NOT getOrderLogs-per-row —
+  // that endpoint writes a log row when it serves a rate-approval order, so
+  // calling it once per listed order would both N+1 and mutate.
+  //
+  // Paginated (`{ results, pagination }` under the `data` envelope), unlike the
+  // older order lists which return a bare array.
+  // Who has raised orders in the caller's scope. Derived from the orders
+  // themselves, not from `users/list/` — that is every active account, most of
+  // which have never raised one.
+  getMasterOrderCreators: async () => {
+    const response = await api.get("/orders/master/creators/");
+    return (Array.isArray(response.data) ? response.data : []) as MasterOrderCreator[];
+  },
+
+  getMasterOrders: async (params: MasterOrderParams = {}) => {
+    const response = await api.get("/orders/master/", { params });
+    const payload = response.data?.data ?? {};
+    return {
+      results: (payload.results ?? []) as MasterOrder[],
+      pagination: (payload.pagination ?? {
+        page: 1,
+        page_size: 0,
+        total: 0,
+        total_pages: 1,
+      }) as MasterOrderPagination,
+    };
+  },
+
   // Batch lookup of SAP Sales Quotation status for the given (completed) orders.
   // Used to show the "Cancel Sales Quotation" button only while the quotation is
   // still open in SAP. Returns a map keyed by order id (as string).
@@ -907,6 +1109,13 @@ export const ordersService = {
       params: category ? { category } : undefined,
     });
     return response.data;
+  },
+
+  /** What a new order starts with — the per-category default warehouse, from the server's env. */
+  getOrderDefaults: async () => {
+    const response = await api.get("/orders/defaults/");
+    const data = (response.data ?? {}) as { warehouse_code?: Record<string, string> };
+    return { warehouse_code: data.warehouse_code ?? {} };
   },
 
   UpdateStatus: async (orderId: number, status: number, reason?: string) => {

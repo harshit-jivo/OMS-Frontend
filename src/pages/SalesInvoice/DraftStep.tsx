@@ -1,7 +1,7 @@
 /**
  * Step 4 — the draft: header, contents, totals, and the post to SAP.
  */
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { HiOutlineCheckCircle, HiOutlinePlus, HiOutlineXMark } from "react-icons/hi2";
 
 import { Badge } from "@/components/ui/badge";
@@ -16,12 +16,14 @@ import {
 } from "@/components/ui/dialog";
 import { Input, Select } from "@/components/ui/form";
 import { Card, Notice, SectionHeading } from "@/components/ui/page";
+import { InfoPopover } from "@/components/ui/info-popover";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import ContentsTab from "./ContentsTab";
 import InteractiveLoader from "./InteractiveLoader";
+import { DraftSOInfoPanel } from "./SOInfoPanel";
 import { formatDateDisplay, formatMoney, toNumber } from "./salesInvoice.utils";
-import type { SalesInvoiceState } from "./useSalesInvoice";
+import type { SalesInvoiceState, SalesOrder } from "./useSalesInvoice";
 
 type Props = {
   state: SalesInvoiceState;
@@ -124,6 +126,25 @@ export default function DraftStep({
   const successModalOpen =
     Boolean(state.postSuccess) && state.postSuccess !== dismissedPostSuccess;
   const customerName = state.customerDetails?.CardName || state.selectedParty?.CardName || "—";
+  /* The orders this draft was built from, in the order they were picked.
+     `selectedLineList` is the only thing that knows WHICH orders made it into
+     the draft; `salesOrders` is the only thing that carries their headers —
+     the addresses, the customer PO, the order total. Neither alone is enough. */
+  const draftOrders = useMemo(() => {
+    const seen = new Set<number>();
+    const picked: SalesOrder[] = [];
+    state.selectedLineList.forEach((line) => {
+      if (seen.has(line.DocEntry)) return;
+      seen.add(line.DocEntry);
+      const order = state.salesOrders.find((candidate) => candidate.DocEntry === line.DocEntry);
+      if (order) picked.push(order);
+    });
+    return picked;
+  }, [state.selectedLineList, state.salesOrders]);
+  const draftAddresses = useMemo(
+    () => [...state.billToAddresses, ...state.shipToAddresses],
+    [state.billToAddresses, state.shipToAddresses],
+  );
   const postDisabledReason = state.selectedLineBatchError;
   // What this customer still owes, straight off their SAP account balance.
   // `null` when SAP did not report one — better a missing tile than a
@@ -174,7 +195,15 @@ export default function DraftStep({
         <div className="min-w-0">
           <BranchBadge branch={state.branch} onChange={onChangeBranch} />
           <p className="m-0 mt-1.5 text-[11px] uppercase tracking-wide text-subtle">Party</p>
-          <strong className="block text-[16px] font-semibold text-ink">{customerName}</strong>
+          <span className="flex flex-wrap items-center gap-1.5">
+            <strong className="text-[16px] font-semibold text-ink">{customerName}</strong>
+            {/* Click, not hover: on this screen the (i) sits beside the party
+                name a biller's cursor crosses on the way to "Add items", and a
+                panel that opened in passing would be in the way. */}
+            <InfoPopover label="Sales order details for this draft" openOn="click" width={340}>
+              <DraftSOInfoPanel orders={draftOrders} addresses={draftAddresses} />
+            </InfoPopover>
+          </span>
           <div className="mt-2 flex flex-wrap gap-2">
             {onAddItems && (
               <Button size="xs" onClick={onAddItems}>

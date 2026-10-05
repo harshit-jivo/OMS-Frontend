@@ -1,8 +1,9 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import LabelHistory from "./Label_History";
+import api from "../services/api";
 import { legalService, type LabelCheckSummary } from "../services/legalService";
 
 /**
@@ -17,13 +18,20 @@ import { legalService, type LabelCheckSummary } from "../services/legalService";
  *  * The list is cheap — it must not fetch full reports to render filenames.
  *  * A check from before previews were stored still opens; it just has no
  *    artwork, and says so rather than showing a broken image.
+ *  * The artwork is FETCHED, not linked. It used to be a `/media/` url in an
+ *    `<img src>`, and Django routes MEDIA_URL only under DEBUG — so the label
+ *    showed on every developer's machine and was a broken image icon on the
+ *    deployed server, which is the only place this record is really read. It
+ *    now comes from a gated endpoint, and a gated endpoint in an `<img src>`
+ *    arrives anonymous: this project authenticates with a bearer token that
+ *    only the axios interceptor attaches.
  */
 
 const ROWS: LabelCheckSummary[] = [
   {
     id: 2,
     file_name: "failed.pdf",
-    image_url: "/media/labels/previews/failed.png",
+    image_url: "/api/legal/history/2/preview/",
     uploaded_at: "2026-09-04T09:20:00Z",
     checked_by_name: "Priya",
     item_name: "Mustard Oil 200ml",
@@ -43,7 +51,7 @@ const ROWS: LabelCheckSummary[] = [
 const DETAIL = {
   id: 2,
   file_name: "failed.pdf",
-  image_url: "/media/labels/previews/failed.png",
+  image_url: "/api/legal/history/2/preview/",
   uploaded_at: "2026-09-04T09:20:00Z",
   checked_by_name: "Priya",
   item_name: "Mustard Oil 200ml",
@@ -71,6 +79,19 @@ const DETAIL = {
     },
   ],
 };
+
+/** The artwork, as the gated endpoint returns it. */
+const PREVIEW_BYTES = new Blob(["PNG"], { type: "image/png" });
+
+beforeEach(() => {
+  // jsdom implements neither half of the object-URL API.
+  URL.createObjectURL = vi.fn(() => "blob:label-preview");
+  URL.revokeObjectURL = vi.fn();
+});
+
+/** Answer the artwork request. `legalService` is mocked above this layer. */
+const servePreview = () =>
+  vi.spyOn(api, "get").mockResolvedValue({ data: PREVIEW_BYTES });
 
 const listChecks = (rows = ROWS, totalPages = 1) =>
   vi.spyOn(legalService, "listChecks").mockResolvedValue({
@@ -124,6 +145,7 @@ describe("Label check history", () => {
 
   it("reopens a check with its stored findings and boxes", async () => {
     vi.spyOn(legalService, "getCheck").mockResolvedValue(DETAIL);
+    servePreview();
     const user = await renderHistory();
 
     await user.click(screen.getByText("failed.pdf"));
@@ -139,8 +161,45 @@ describe("Label check history", () => {
     expect(box.style.top).toBe("53%");
   });
 
+  it("fetches the artwork instead of linking to it", async () => {
+    vi.spyOn(legalService, "getCheck").mockResolvedValue(DETAIL);
+    const fetched = servePreview();
+    const user = await renderHistory();
+
+    await user.click(screen.getByText("failed.pdf"));
+
+    // Through axios, which is the only thing that attaches the bearer token.
+    // An `<img src>` pointed at this endpoint would arrive anonymous and be
+    // refused — the whole reason the bytes come through a blob.
+    await waitFor(() =>
+      expect(fetched).toHaveBeenCalledWith(
+        "/legal/history/2/preview/",
+        expect.objectContaining({ responseType: "blob" }),
+      ),
+    );
+
+    const image = await screen.findByRole("img", { name: /Label: failed.pdf/i });
+    expect(image).toHaveAttribute("src", "blob:label-preview");
+  });
+
+  it("says the artwork failed without casting doubt on the findings", async () => {
+    vi.spyOn(legalService, "getCheck").mockResolvedValue(DETAIL);
+    vi.spyOn(api, "get").mockRejectedValue(new Error("502"));
+    const user = await renderHistory();
+
+    await user.click(screen.getByText("failed.pdf"));
+
+    expect(
+      await screen.findByText(/artwork could not be loaded/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    // The report is the record. It is still on screen, and the message says so.
+    expect(screen.getByText("FSSAI logo and licence number")).toBeInTheDocument();
+  });
+
   it("shows the verdict the check recorded", async () => {
     vi.spyOn(legalService, "getCheck").mockResolvedValue(DETAIL);
+    servePreview();
     const user = await renderHistory();
 
     await user.click(screen.getByText("failed.pdf"));
@@ -150,6 +209,7 @@ describe("Label check history", () => {
 
   it("returns to the list", async () => {
     vi.spyOn(legalService, "getCheck").mockResolvedValue(DETAIL);
+    servePreview();
     const user = await renderHistory();
 
     await user.click(screen.getByText("failed.pdf"));

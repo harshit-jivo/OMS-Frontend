@@ -1,21 +1,21 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { OrderItemsTable } from "./OrderItemsTable";
 import type { OrderItem } from "@/services/ordersService";
 
-// `useUILabels` reaches for the label config over the network; the table only
-// needs it for one column heading.
+// `useUILabels` reaches for the label config over the network; the cards only
+// need it for one figure label.
 vi.mock("@/services/uiConfig", () => ({
   useUILabels: () => ({ t: (_key: string, fallback: string) => fallback }),
 }));
 
 /**
- * The shared line-items table.
+ * The shared line items — one card per line.
  *
- * The property worth pinning is the one the four hand-written copies got
- * wrong: the empty row's `colSpan` has to match the header, and the header
- * changes with the `variety` prop.
+ * What the item IS (name, code, category, variety, scheme) sits at the top of
+ * the card; the figures sit in the same eight labelled slots at the foot of
+ * every card, so they still line up down the page like a table would.
  */
 
 const item = (over: Partial<OrderItem> = {}): OrderItem =>
@@ -35,12 +35,38 @@ const item = (over: Partial<OrderItem> = {}): OrderItem =>
     ...over,
   }) as OrderItem;
 
+const cards = () => screen.getAllByRole("listitem");
+const cardOf = (name: string) => screen.getByText(name).closest("li") as HTMLElement;
+
 describe("OrderItemsTable", () => {
-  it("lists the items", () => {
+  it("lists the items, one card each", () => {
     render(<OrderItemsTable items={[item(), item({ item_code: "JV-MUS-1L" })]} />);
 
+    expect(cards()).toHaveLength(2);
     expect(screen.getByText("JV-CAN-1L")).toBeInTheDocument();
     expect(screen.getByText("JV-MUS-1L")).toBeInTheDocument();
+  });
+
+  it("stacks code, category and variety under the name, and pulls the amount out", () => {
+    render(<OrderItemsTable items={[item()]} />);
+
+    const card = within(cardOf("Jivo Canola Oil 1 Ltr"));
+    expect(card.getByText("JV-CAN-1L")).toBeInTheDocument();
+    expect(card.getByText("Edible Oil")).toBeInTheDocument();
+    expect(card.getByText("Commodity")).toBeInTheDocument();
+    expect(card.getByText("Amount")).toBeInTheDocument();
+    expect(card.getByText("6420.00")).toBeInTheDocument();
+  });
+
+  it("puts the same eight figures on every card, labelled", () => {
+    render(<OrderItemsTable items={[item(), item({ item_code: "JV-MUS-1L" })]} />);
+
+    for (const card of cards()) {
+      const labels = within(card).getAllByRole("term").map((el) => el.textContent);
+      expect(labels).toEqual([
+        "Qty", "Pcs", "Boxes", "Ltrs", "Total Ltrs", "Price List (Basic)", "Basic Price", "Tax %",
+      ]);
+    }
   });
 
   it("title-cases the variety SAP sends in caps", () => {
@@ -50,48 +76,37 @@ describe("OrderItemsTable", () => {
     expect(screen.queryByText("COMMODITY")).not.toBeInTheDocument();
   });
 
-  it("drops the variety column when asked", () => {
+  it("drops the variety chip when asked", () => {
     render(<OrderItemsTable items={[item()]} variety={false} />);
 
-    expect(screen.queryByRole("columnheader", { name: "Variety" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Commodity")).not.toBeInTheDocument();
   });
 
-  it("spans the empty row across every column, with variety", () => {
-    // The four hand-written copies each typed this number, and two of them
-    // typed it wrong — so the placeholder sat under part of the table.
-    render(<OrderItemsTable items={[]} />);
-
-    const cell = screen.getByText("No items found");
-    const headers = screen.getAllByRole("columnheader").length;
-    expect(Number(cell.getAttribute("colspan"))).toBe(headers);
-  });
-
-  it("spans the empty row across every column, without variety", () => {
-    render(<OrderItemsTable items={[]} variety={false} />);
-
-    const cell = screen.getByText("No items found");
-    const headers = screen.getAllByRole("columnheader").length;
-    expect(Number(cell.getAttribute("colspan"))).toBe(headers);
-  });
-
-  it("says so when a line carries no scheme", () => {
-    render(<OrderItemsTable items={[item()]} />);
-
-    expect(screen.getByText("No scheme")).toBeInTheDocument();
-  });
-
-  it("shows a dash rather than an empty cell for a line with no variety", () => {
+  it("shows nothing where a line has no variety", () => {
     render(<OrderItemsTable items={[item({ variety_type: "" })]} />);
 
-    expect(screen.getByText("-")).toBeInTheDocument();
+    expect(screen.queryByText("Commodity")).not.toBeInTheDocument();
   });
 
-  it("scrolls sideways inside its own box", () => {
-    // Sixteen columns; without this the PAGE scrolls horizontally, which
-    // drags the header and the KPI row off-screen with it.
-    const { container } = render(<OrderItemsTable items={[item()]} />);
+  it("names the scheme a line carries, with its quantity, on the card", () => {
+    render(
+      <OrderItemsTable
+        items={[
+          item({ schemes: [{ scheme_name: "BUY 1 GET 1 FREE", scheme_qty: 80 }] as OrderItem["schemes"] }),
+        ]}
+      />,
+    );
 
-    expect(container.firstElementChild?.className).toContain("overflow-x-auto");
+    const card = cardOf("Jivo Canola Oil 1 Ltr");
+    expect(card).toHaveTextContent("BUY 1 GET 1 FREE");
+    expect(card).toHaveTextContent("Qty 80");
+  });
+
+  it("says so when there are no items", () => {
+    render(<OrderItemsTable items={[]} />);
+
+    expect(screen.getByText("No items found")).toBeInTheDocument();
+    expect(screen.queryByRole("list")).not.toBeInTheDocument();
   });
 });
 
@@ -100,15 +115,13 @@ describe("OrderItemsTable", () => {
  *
  * An auditor or rate approver meets zero-priced lines and has to decide on
  * them. A combo's free half used to look identical to a mispriced line, and a
- * scheme giveaway's only trace was a name buried in the Scheme column.
+ * scheme giveaway's only trace was a name buried in a column.
  *
  * The two badges are drawn from different fields because they mean different
  * things: `is_auto_free` marks a row that IS a giveaway, attached schemes mark
  * a row that CARRIES one.
  */
 describe("the combo and scheme badges", () => {
-  /* "Scheme" is a column HEADING too, so every query here is scoped to the
-     badge itself rather than to the text. */
   const BADGE = '[data-slot="badge"]';
 
   it("marks a combo's free half, and names the pack that earned it", () => {
@@ -131,7 +144,7 @@ describe("the combo and scheme badges", () => {
     expect(badge).toHaveAttribute("title", expect.stringContaining("JV-COMBO-5L"));
   });
 
-  it("gives a scheme giveaway a ROW of its own, not just a badge", () => {
+  it("gives a scheme giveaway a CARD of its own, not just a badge", () => {
     // It is stored ON the paid line rather than as one, so without this the
     // approver saw a name in a column and had to infer that something ships
     // free. Three lines is the point of this change.
@@ -154,10 +167,13 @@ describe("the combo and scheme badges", () => {
       />,
     );
 
-    // Two rows for one paid item: the item, then its giveaway.
-    expect(screen.getAllByRole("row")).toHaveLength(3); // header + 2
-    // The giveaway is named, not left as a bare code.
+    // Two cards for one paid item: the item, then its giveaway.
+    expect(cards()).toHaveLength(2);
     expect(screen.getByText("Extra Light Olive 1 Ltr")).toBeInTheDocument();
+    // The giveaway carries the quantity, and prices at zero.
+    const giveaway = within(cardOf("Extra Light Olive 1 Ltr"));
+    expect(giveaway.getByText("960")).toBeInTheDocument();
+    expect(giveaway.getAllByText("0.00").length).toBeGreaterThan(0);
 
     const badge = screen.getByText("Scheme", { selector: BADGE });
     expect(badge).toHaveAttribute("title", expect.stringContaining("BUY 1 GET 1 FREE"));
@@ -186,14 +202,12 @@ describe("the combo and scheme badges", () => {
   });
 
   it("does not badge a parent whose free half is not in the order", () => {
-    // Nothing to explain, so nothing is claimed.
     render(<OrderItemsTable items={[item({ item_code: "FG0000003" })]} />);
 
     expect(screen.queryByText("Combo", { selector: BADGE })).toBeNull();
   });
 
   it("puts neither on an ordinary paid line", () => {
-    // A badge on every row is the same as no badge at all.
     render(<OrderItemsTable items={[item()]} />);
 
     expect(screen.queryByText("Combo", { selector: BADGE })).toBeNull();
@@ -201,7 +215,6 @@ describe("the combo and scheme badges", () => {
   });
 
   it("shows both when a combo line also carries a scheme", () => {
-    // They are independent facts, so they must not be an either/or.
     render(
       <OrderItemsTable
         items={[
@@ -214,14 +227,12 @@ describe("the combo and scheme badges", () => {
       />,
     );
 
-    // The combo badge on the line, the scheme badge on the giveaway row below.
+    // The combo badge on the line, the scheme badge on the giveaway card below.
     expect(screen.getByText("Combo", { selector: BADGE })).toBeInTheDocument();
     expect(screen.getByText("Scheme", { selector: BADGE })).toBeInTheDocument();
   });
 
   it("still labels a combo line when the source code is missing", () => {
-    // `combo_source_code` is blank on orders written before it existed; the
-    // badge is still the useful half.
     render(<OrderItemsTable items={[item({ is_auto_free: true })]} />);
 
     expect(screen.getByText("Combo", { selector: BADGE })).toHaveAttribute(
@@ -231,7 +242,7 @@ describe("the combo and scheme badges", () => {
   });
 });
 
-describe("row order", () => {
+describe("card order", () => {
   it("keeps a combo's two halves together and puts giveaways last", () => {
     // The scheme used to render directly under the line it hangs off, which
     // pushed the combo's free half away from the pack that earned it. An
@@ -262,10 +273,7 @@ describe("row order", () => {
       />,
     );
 
-    const names = screen
-      .getAllByRole("row")
-      .slice(1) // drop the header
-      .map((row) => row.textContent ?? "");
+    const names = cards().map((card) => card.textContent ?? "");
 
     expect(names).toHaveLength(3);
     expect(names[0]).toContain("Cold Press 5 Ltr");

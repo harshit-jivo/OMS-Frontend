@@ -38,6 +38,7 @@ const PersonWise_Report = lazy(() => import("./pages/PersonWise_Report"));
 const Sales_Report = lazy(() => import("./pages/Sales_Report"));
 const StateWise_Report = lazy(() => import("./pages/StateWise_Report"));
 const Order_Tracking = lazy(() => import("./pages/Order_Tracking"));
+const Order_Master = lazy(() => import("./pages/Order_Master"));
 import "./styles/AppShell.css";
 import "./styles/UIConsistency.css";
 const Party_Assignment = lazy(() => import("./pages/Party_Assignment"));
@@ -89,14 +90,20 @@ const HAIS = lazy(() => import("./pages/HAIS"));
 const AssetPublicView = lazy(() => import("./pages/HAIS/AssetPublicView"));
 const Inventory_Report = lazy(() => import("./pages/Inventory_Report"));
 const SO_Invoice_Report = lazy(() => import("./pages/SO_Invoice_Report"));
+const Distributor_Report = lazy(() => import("./pages/Distributor_Report"));
 const Distributor = lazy(() => import("./pages/Distributor"));
-const Distributor_Order_Tracking = lazy(() => import("./pages/Distributor/Order_Tracking"));
-const MartApproval = lazy(() => import("./pages/MartApproval"));
+const Distributor_Edit_Order = lazy(() => import("./pages/Distributor/Edit_Order"));
+// The distributor's "Order Tracking" now uses its own dedicated page under
+// pages/Distributor, so it can diverge from the shared View Orders page.
+const Distributor_Order_Tracking = lazy(
+  () => import("./pages/Distributor/Order_Tracking"),
+);
+const MartApproval = lazy(() => import("./pages/Distributor/Mart_Approval"));
+const Mart_Cancel = lazy(() => import("./pages/Distributor/Mart_Cancel"));
 const Ap_Invoice_Entry = lazy(() => import("./pages/Ap_Invoice_Entry"));
-// Advance Payments — the request FORM only, and it is UI with mock data:
-// no endpoint, no model, no approval route. See the page header comment.
+// Payments — raise requests (Advance_Payment_Request) and the approval desk
+// (Advance_Payment_Approval), on `/api/advance-payments/requests/`.
 const AdvancePaymentRequest = lazy(() => import("./pages/Advance_Payment_Request"));
-// The approval desk — UI only, on sample requests. See the page header.
 const AdvancePaymentApproval = lazy(() => import("./pages/Advance_Payment_Approval"));
 const AdvancePaymentDispatch = lazy(() => import("./pages/Advance_Payment_Dispatch"));
 const AddEmployee = lazy(() => import("./pages/advancePayments/Add_Employee"));
@@ -293,6 +300,15 @@ function App() {
         />
 
         <Route
+          path="/Distributor_Report"
+          element={
+            <ProtectedPage>
+              <Distributor_Report />
+            </ProtectedPage>
+          }
+        />
+
+        <Route
           path="/SO_Invoice_Report"
           element={
             <ProtectedPage>
@@ -408,6 +424,14 @@ function App() {
             </ProtectedPage>
           }
         />
+        <Route
+          path="/Order_Master"
+          element={
+            <ProtectedPage>
+              <Order_Master />
+            </ProtectedPage>
+          }
+        />
 
         <Route
           path="/Distributor_Order_Tracking"
@@ -435,6 +459,7 @@ function App() {
             </ProtectedPage>
           }
         />
+
 
         <Route
           path="/Add_Scheme"
@@ -690,6 +715,24 @@ function App() {
           element={
             <ProtectedPage>
               <MartApproval />
+            </ProtectedPage>
+          }
+        />
+
+        <Route
+          path="/Mart_Edit_Order"
+          element={
+            <ProtectedPage>
+              <Distributor_Edit_Order />
+            </ProtectedPage>
+          }
+        />
+
+        <Route
+          path="/Mart_Cancel"
+          element={
+            <ProtectedPage>
+              <Mart_Cancel />
             </ProtectedPage>
           }
         />

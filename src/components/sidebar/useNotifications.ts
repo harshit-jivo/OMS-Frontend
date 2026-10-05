@@ -14,7 +14,7 @@
  * deep-link should land and who gets asked to enable notifications.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
 import api from "../../services/api";
 import {
@@ -38,6 +38,10 @@ import {
   savePromptState,
   shouldShowPrompt,
 } from "../../utils/notificationPermission";
+import {
+  routeForNotification,
+  routeFromSearchParams,
+} from "../../utils/notificationRouting";
 import {
   initNotificationSound,
   playNotificationSound,
@@ -67,6 +71,7 @@ export function useNotifications({
   isRateApprover,
 }: UseNotificationsOptions) {
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [unreadCount, setUnreadCount] = useState(0);
   const [showNotificationsModal, setShowNotificationsModal] = useState(false);
@@ -86,9 +91,9 @@ export function useNotifications({
   const [historyHasMore, setHistoryHasMore] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
 
-  // Latest order-navigation fn, so long-lived bus handlers always route with
-  // the current role without needing to re-subscribe.
-  const goToOrderRef = useRef<(orderId?: number | string | null) => void>(
+  // Latest navigation fn, so long-lived bus handlers always route with the
+  // current role without needing to re-subscribe.
+  const goToNotificationRef = useRef<(data: NotificationPayload) => void>(
     () => {},
   );
 
@@ -120,9 +125,55 @@ export function useNotifications({
     [navigate, routeForRole],
   );
 
+  /**
+   * Open whatever a notification is about.
+   *
+   * Sales Orders are one case among several now. A framework notification
+   * names its subject as `entity_type` / `entity_id`, and if this client has a
+   * screen for that entity we go there; otherwise we fall back to the order
+   * route exactly as before, so nothing that worked yesterday changes.
+   *
+   * The fallback is why an unrecognised entity is harmless rather than a dead
+   * click — but it is also why a module must add its `ENTITY_ROUTES` row when
+   * it starts sending: without one, its notifications quietly open the orders
+   * page instead.
+   */
+  const goToNotification = useCallback(
+    (data: NotificationPayload) => {
+      const link = routeForNotification(data);
+      if (link) {
+        navigate(link.pathname + link.search);
+        return;
+      }
+      goToOrder(data.order_id ?? null);
+    },
+    [navigate, goToOrder],
+  );
+
   useEffect(() => {
-    goToOrderRef.current = goToOrder;
-  }, [goToOrder]);
+    goToNotificationRef.current = goToNotification;
+  }, [goToNotification]);
+
+  /**
+   * Cold start: a click with no tab already open.
+   *
+   * The service worker can only ask an EXISTING tab to navigate. With none, it
+   * opens `/` instead, carrying the entity in the query string — so the app
+   * lands on Home and has to finish the journey itself. That is the
+   * `/Home?notificationId=…` dead end this replaces.
+   *
+   * `replace` matters: without it Back returns to the landing URL, whose params
+   * are still there, and the user is bounced forward again with no way out.
+   */
+  const handledDeepLink = useRef<string | null>(null);
+  useEffect(() => {
+    const search = location.search;
+    if (!search || handledDeepLink.current === search) return;
+    const link = routeFromSearchParams(search);
+    if (!link) return;
+    handledDeepLink.current = search;
+    navigate(link.pathname + link.search, { replace: true });
+  }, [location.search, navigate]);
 
   // Apply a single read to the badge + history list. Called only from the bus
   // listener so there is exactly one update path (no double-decrement).
@@ -217,10 +268,10 @@ export function useNotifications({
               : data.order_id != null
                 ? String(data.order_id)
                 : null,
-          onAction: () => goToOrderRef.current(data.order_id ?? null),
+          onAction: () => goToNotificationRef.current(data),
         });
       } else if (event.type === "click") {
-        goToOrderRef.current(event.data?.order_id ?? null);
+        goToNotificationRef.current(event.data ?? {});
       } else if (event.type === "read") {
         applyRead(event.id);
       } else if (event.type === "read-all" || event.type === "cleared") {

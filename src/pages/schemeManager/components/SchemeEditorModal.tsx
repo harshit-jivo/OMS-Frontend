@@ -112,7 +112,7 @@ export default function SchemeEditorModal({ sm }: { sm: SchemeManagerState }) {
     goToStep,
     saveScheme,
     itemOptions: items,
-    itemNameOf,
+    itemNameIn,
     targetOptions,
   } = sm;
   const title = editingId ? editingScheme?.name || "Edit scheme" : "New scheme";
@@ -385,9 +385,9 @@ export default function SchemeEditorModal({ sm }: { sm: SchemeManagerState }) {
             </Button>
 
             <div className="mt-5 rounded-sm border border-brand-line bg-brand-soft/60 px-4 py-3 text-[13px] text-body">
-              {draft.triggers.map((t) => describeTrigger(t, itemNameOf)).join(", or ")} →{" "}
+              {draft.triggers.map((t) => describeTrigger(t, itemNameIn(draft.category))).join(", or ")} →{" "}
               <strong className="font-semibold text-ink">
-                {draft.benefits.map((b) => describeBenefit(b, itemNameOf)).join(" and ")}
+                {draft.benefits.map((b) => describeBenefit(b, itemNameIn(draft.category))).join(" and ")}
               </strong>
             </div>
           </section>
@@ -497,11 +497,11 @@ export default function SchemeEditorModal({ sm }: { sm: SchemeManagerState }) {
               </dd>
               <dt className="font-medium text-subtle">Earns it</dt>
               <dd className="m-0 text-body">
-                {draft.triggers.map((t) => describeTrigger(t, itemNameOf)).join(", or ")}
+                {draft.triggers.map((t) => describeTrigger(t, itemNameIn(draft.category))).join(", or ")}
               </dd>
               <dt className="font-medium text-subtle">Gives</dt>
               <dd className="m-0 font-semibold text-ok">
-                {draft.benefits.map((b) => describeBenefit(b, itemNameOf)).join(" and ")}
+                {draft.benefits.map((b) => describeBenefit(b, itemNameIn(draft.category))).join(" and ")}
               </dd>
               <dt className="font-medium text-subtle">Goes to</dt>
               <dd className="m-0 text-body">

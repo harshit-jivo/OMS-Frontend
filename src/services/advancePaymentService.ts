@@ -679,6 +679,11 @@ export interface RequestAbilities {
   send_back: boolean;
   edit_payout: boolean;
   record_utr: boolean;
+  /**
+   * The payee's account — payment details, proofs, their change log, the SAP
+   * balance and ledger — is sent to Payment and later stages only.
+   */
+  see_account: boolean;
 }
 
 /** A cost centre of SAP's Budget (dimension 3, the form's Department) or Sub Budget (4). */
@@ -770,6 +775,11 @@ export interface ApiRequest extends ApiRequestFields {
   voucher: ApiVoucher | null;
   /** The latest return, send-back or rejection: what someone must act on. */
   last_decision: ApiRequestLog | null;
+  /**
+   * The viewer's OWN latest approve / reject / return / send-back on it, or
+   * null. What the desk files a request under — never another approver's.
+   */
+  my_decision?: ApiRequestLog | null;
   /* Detail only. */
   vouchers?: ApiVoucher[];
   logs?: ApiRequestLog[];

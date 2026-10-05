@@ -69,7 +69,7 @@ export default function AssetQr({ asset, size = 128 }: Props) {
         Scan with your phone camera to open this device
       </span>
       <Button size="xs" variant="ghost" type="button" onClick={print}>
-        <HiOutlinePrinter aria-hidden="true" /> Print QR
+        <HiOutlinePrinter className="text-brand" aria-hidden="true" /> Print QR
       </Button>
     </div>
   );

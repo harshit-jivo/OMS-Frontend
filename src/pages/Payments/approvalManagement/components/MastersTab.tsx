@@ -1,6 +1,6 @@
 /**
  * Masters — the reference data the payments module cannot run without:
- * company-to-SAP mapping, payment-method mapping (via ConfigTab) and the
+ * company-to-SAP mapping and the
  * collection persons a receipt can name.
  */
 import {
@@ -12,7 +12,6 @@ import {
   HiOutlineTrash,
 } from "react-icons/hi2";
 
-import ConfigTab from "../../ConfigTab";
 import { COMPANY_OPTIONS, type Company } from "../../../../services/approvalService";
 import { ActivePill, ConfirmDialog, Modal } from "../../ApprovalUI";
 import { Badge } from "@/components/ui/badge";
@@ -49,13 +48,11 @@ export default function MastersTab({ canEdit, flash }: { canEdit: boolean; flash
 
   return (
     <div className="space-y-4">
-      {/* ── Payment method mapping ────────────────────────────────────
-          A company-mapping card used to sit above this, configuring each
-          company's SAP database, HANA schema and cash G/L. All three moved
-          out of the payments database — the SAP target to the environment,
-          the cash G/L into the method mapping itself — so the card went with
-          its table. Company selection now lives inside this section. */}
-      <ConfigTab canEdit={canEdit} flash={flash} />
+      {/* A payment-method mapping card used to sit here, choosing one SAP
+          account per method per company. The collector now picks the
+          receiving account on the payment itself — so the table it edited was
+          dropped, and the card with it. Nothing replaces it: there is no
+          longer a company-wide account to configure. */}
 
       {/* ── Collection persons ────────────────────────────────────────── */}
       <Card className="p-0">

@@ -8,7 +8,14 @@
  */
 
 export type InvoiceStatus =
-  "PENDING" | "APPROVED" | "REJECTED" | "EDITED" | "ERROR" | "POSTED_TO_SAP" | "CL_RAISED";
+  | "PENDING"
+  | "APPROVED"
+  | "REJECTED"
+  | "EDITED"
+  | "ERROR"
+  | "POSTING"
+  | "POSTED_TO_SAP"
+  | "CL_RAISED";
 
 export type InvoiceBatch = {
   BatchNumber?: string;

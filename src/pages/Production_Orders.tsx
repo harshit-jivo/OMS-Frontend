@@ -65,6 +65,7 @@ import {
   type ProductionInsights,
   type ProductionOrder,
 } from "../services/productionService";
+import { useDeepLinkedOrder } from "./production/useDeepLinkedOrder";
 import { fmtDate, fmtDateTime, fmtQty, orderNumber } from "./production/format";
 import {
   CompanyFilterSelect,
@@ -125,6 +126,15 @@ export default function ProductionOrders() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Arriving from a notification ("this order was approved"): open THAT order,
+  // not just the list it is somewhere in.
+  //
+  // Deliberately `orders` and not `paginated` — the deep-linked order may sit
+  // on page 3, and the hook looks the row up rather than reading the screen.
+  // Narrowing it to the visible page would send every off-page arrival down
+  // the `getOrder` fallback for a row already in hand.
+  useDeepLinkedOrder(orders, !loading, setDetail);
 
   // Narrowing the list invalidates the page number: page 4 of every order is
   // past the end of page 4 of one company's.

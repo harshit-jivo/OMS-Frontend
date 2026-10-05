@@ -6,6 +6,7 @@
  * behaves exactly like a card there — click or Enter/Space selects it, and
  * `aria-pressed` says which count the list is showing.
  */
+import type { ReactNode } from "react";
 import { HiMagnifyingGlass } from "react-icons/hi2";
 
 import { Badge } from "../../components/ui/badge";
@@ -33,6 +34,8 @@ import {
   STATUS_TONE,
   formatDateTime,
   type CompanyFilter,
+  type DeskCounts,
+  type DeskFilter,
   type RequestCounts,
   type RequestFilterState,
   type StatusFilter,
@@ -88,6 +91,54 @@ export function RequestKpis({
   );
 }
 
+/**
+ * The approval desk's cards: what waits at YOUR stage, and what YOU approved,
+ * rejected or returned. Other approvers' decisions are not counted here.
+ */
+export function DeskKpis({
+  counts,
+  status,
+  onSelect,
+}: {
+  counts: DeskCounts;
+  status: DeskFilter;
+  onSelect: (status: DeskFilter) => void;
+}) {
+  return (
+    <>
+      <KpiFilter
+        label="Pending at your stage"
+        hint={`${formatINR(counts.pendingAmount)} waiting`}
+        value={counts.pending}
+        tone="hold"
+        active={status === "PENDING"}
+        onSelect={() => onSelect("PENDING")}
+      />
+      <KpiFilter
+        label="Approved by you"
+        value={counts.approved}
+        tone="ok"
+        active={status === "APPROVED"}
+        onSelect={() => onSelect("APPROVED")}
+      />
+      <KpiFilter
+        label="Rejected by you"
+        value={counts.rejected}
+        tone="bad"
+        active={status === "REJECTED"}
+        onSelect={() => onSelect("REJECTED")}
+      />
+      <KpiFilter
+        label="All entries"
+        hint={counts.returned ? `incl. ${counts.returned} returned by you` : undefined}
+        value={counts.total}
+        active={status === ""}
+        onSelect={() => onSelect("")}
+      />
+    </>
+  );
+}
+
 /* ── Search / company / status ───────────────────────────────────────────── */
 
 /** Sized to sit beside a tab strip — the token BackDate's filters use. */
@@ -108,12 +159,14 @@ const STATUS_OPTIONS: ReadonlyArray<{ value: StatusFilter; label: string }> = [
 ];
 
 /** Search, then company, then status — the order they narrow in. */
-export function RequestFilters({
+export function RequestFilters<S extends string = StatusFilter>({
   value,
   onChange,
+  statusOptions = STATUS_OPTIONS as ReadonlyArray<{ value: S; label: string }>,
 }: {
-  value: RequestFilterState;
-  onChange: (next: RequestFilterState) => void;
+  value: RequestFilterState<S>;
+  onChange: (next: RequestFilterState<S>) => void;
+  statusOptions?: ReadonlyArray<{ value: S; label: string }>;
 }) {
   return (
     <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
@@ -149,10 +202,10 @@ export function RequestFilters({
       <select
         aria-label="Filter requests by status"
         value={value.status}
-        onChange={(e) => onChange({ ...value, status: e.target.value as StatusFilter })}
+        onChange={(e) => onChange({ ...value, status: e.target.value as S })}
         className={cn(CONTROL, "cursor-pointer px-2.5")}
       >
-        {STATUS_OPTIONS.map((s) => (
+        {statusOptions.map((s) => (
           <option key={s.value || "all"} value={s.value}>
             {s.label}
           </option>
@@ -169,12 +222,18 @@ export function RequestTable({
   onOpen,
   action,
   emptyText,
+  status,
 }: {
   entries: AdvanceRequestEntry[];
   onOpen: (entry: AdvanceRequestEntry) => void;
   /** The row's button — "Review" on the desk, "Details" for the requester. */
   action: (entry: AdvanceRequestEntry) => { label: string; variant: ButtonVariant };
   emptyText: string;
+  /**
+   * The status column, when it is not the request's own status: the desk
+   * shows the approver's OWN decision instead.
+   */
+  status?: { header: string; cell: (entry: AdvanceRequestEntry) => ReactNode };
 }) {
   return (
     <Table>
@@ -186,7 +245,7 @@ export function RequestTable({
           <TableHead>Payment Against</TableHead>
           <TableHead>Partner</TableHead>
           <TableHead className="text-right">Amount</TableHead>
-          <TableHead>Status</TableHead>
+          <TableHead>{status?.header ?? "Status"}</TableHead>
           <TableHead>
             <span className="sr-only">Action</span>
           </TableHead>
@@ -218,7 +277,11 @@ export function RequestTable({
                   {formatINR(requestAmount(e.form))}
                 </TableCell>
                 <TableCell>
-                  <Badge tone={STATUS_TONE[e.status]}>{STATUS_LABEL[e.status]}</Badge>
+                  {status ? (
+                    status.cell(e)
+                  ) : (
+                    <Badge tone={STATUS_TONE[e.status]}>{STATUS_LABEL[e.status]}</Badge>
+                  )}
                 </TableCell>
                 <TableCell className="text-right">
                   <Button

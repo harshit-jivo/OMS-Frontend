@@ -47,6 +47,14 @@ export type SelectedLine = {
   SalesOrderWhsCode?: string;
   OcrCode?: string;
   ShipDate?: string;
+  /**
+   * SAP's line UDF "Scheme Against": the OPRC profit-centre code (SUNFLOWR,
+   * WATER), the same value as the line's costing code. Its transaction
+   * validation rejects an A/R invoice line with it blank ("Please Select the
+   * SchemeAgst Column"), so every line sent to SAP must carry one. The API
+   * resolves it: /api/hana/so/ per order line, /api/hana/fg-items/ per item.
+   */
+  U_SchemeAgst?: string;
   invoiceQty: number;
   BatchNumbers?: Array<{
     BatchNumber?: string;
@@ -115,6 +123,26 @@ export type PartyAddress = {
   Country?: string | null;
   GSTRegnNo?: string | null;
   GSTType?: number | null;
+};
+
+/**
+ * The address behind a Bill To / Ship To code, as much of it as CRD1 knows.
+ *
+ * `ShipToCode` on a sales order is SAP's address NAME, not a key to something
+ * richer, so the code alone is already meaningful and is what SAP itself
+ * prints on the document. The matching CRD1 row adds city, state and GSTIN.
+ * When there is no matching row the code stands on its own rather than being
+ * replaced by "unknown" — the order really does ship there.
+ */
+export const describeAddress = (code: string, addresses: PartyAddress[]) => {
+  const wanted = String(code ?? "").trim();
+  if (!wanted) return null;
+
+  const match = addresses.find((address) => String(address.Address ?? "").trim() === wanted);
+  const part = (value: unknown) => String(value ?? "").trim();
+  const place = [part(match?.City), part(match?.State)].filter(Boolean).join(", ");
+
+  return { code: wanted, place, gstin: part(match?.GSTRegnNo) };
 };
 
 export type SalespersonDetails = {
@@ -208,6 +236,7 @@ export const buildInvoicePayload = (
         .filter((batch) => batch.BatchNumber && batch.Quantity > 0);
       const batchQuantity = batchNumbers.reduce((sum, batch) => sum + toNumber(batch.Quantity), 0);
       const invoiceQuantity = toNumber(line.invoiceQty) || batchQuantity;
+      const schemeAgainst = String(line.U_SchemeAgst || "").trim();
 
       if (line.SourceType === "items") {
         return {
@@ -217,6 +246,7 @@ export const buildInvoicePayload = (
           Quantity: invoiceQuantity,
           ...(line.Price ? { UnitPrice: toNumber(line.Price) } : {}),
           ...(line.TaxCode ? { TaxCode: line.TaxCode } : {}),
+          ...(schemeAgainst ? { U_SchemeAgst: schemeAgainst } : {}),
           ...(batchNumbers.length ? { BatchNumbers: batchNumbers } : {}),
         };
       }
@@ -238,6 +268,7 @@ export const buildInvoicePayload = (
         WarehouseCode: line.WhsCode,
         ...(line.TaxCode ? { TaxCode: line.TaxCode } : {}),
         ...(line.ShipDate ? { ShipDate: normalizeDateInput(line.ShipDate) } : {}),
+        ...(schemeAgainst ? { U_SchemeAgst: schemeAgainst } : {}),
         BatchNumbers: batchNumbers,
       };
     }),

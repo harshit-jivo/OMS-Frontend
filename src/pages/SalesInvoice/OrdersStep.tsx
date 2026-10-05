@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { FilterBar, FilterCount, FilterSearch } from "@/components/ui/filter-bar";
 import { Card, CardHeader, CardTitle, EmptyState, Notice } from "@/components/ui/page";
+import { InfoPopover } from "@/components/ui/info-popover";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -23,6 +24,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import SOInfoPanel from "./SOInfoPanel";
 import { formatDateDisplay, formatMoney, lineKey, toNumber } from "./salesInvoice.utils";
 import { apiFetch, hanaUrl, type SalesInvoiceState } from "./useSalesInvoice";
 
@@ -35,6 +37,7 @@ const USED_STATUS_LABELS: Record<string, string> = {
   EDITED: "Being reworked",
   ERROR: "Failed, in a log",
   CL_RAISED: "Credit limit raised",
+  POSTING: "Being posted to SAP",
   POSTED_TO_SAP: "Already invoiced",
 };
 
@@ -118,6 +121,15 @@ export default function OrdersStep({
     Record<string, WarehouseStock[]>
   >({});
   const selectedOrderCount = new Set(state.selectedLineList.map((line) => line.DocEntry)).size;
+  /* Bill To and Ship To are separate CRD1 lists, and an order's PayToCode
+     names one while its ShipToCode names the other — so the (i) panel is
+     given both to look in. They are empty until the draft step loads them,
+     and the panel falls back to the bare address code, which is the name SAP
+     itself prints on the document. */
+  const addresses = useMemo(
+    () => [...state.billToAddresses, ...state.shipToAddresses],
+    [state.billToAddresses, state.shipToAddresses],
+  );
   const hasInvalidQty = state.selectedLineList.some(
     (line) => toNumber(line.invoiceQty) < 1 || toNumber(line.invoiceQty) > toNumber(line.OpenQty),
   );
@@ -342,6 +354,17 @@ export default function OrdersStep({
                         {formatDateDisplay(order.DocDueDate)}
                       </span>
                     </button>
+                    {/* A SIBLING of the open-order button, never a child: a
+                        button inside a button is invalid HTML, and the browser
+                        resolves it by folding the inner one's clicks into the
+                        outer, so the (i) would just open the order. */}
+                    <InfoPopover
+                      label={`Order details for SO ${docNum}`}
+                      openOn="hover"
+                      className="mt-0.5 shrink-0"
+                    >
+                      <SOInfoPanel order={order} addresses={addresses} />
+                    </InfoPopover>
                   </li>
                 );
               })}

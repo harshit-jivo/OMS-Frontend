@@ -77,6 +77,7 @@ import {
   productionService,
   type ProductionOrder,
 } from "../services/productionService";
+import { useDeepLinkedOrder } from "./production/useDeepLinkedOrder";
 import { OrderDetailDialog } from "./Production_Orders";
 import { fmtDateTime, fmtQty, orderNumber } from "./production/format";
 import {
@@ -135,6 +136,16 @@ export default function ProductionApproval() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Arriving from a "needs your approval" notification: open that order's
+  // detail dialog. The row behind it keeps its Approve and Reject buttons,
+  // which are rendered from queue membership — the server's answer, not ours.
+  //
+  // `rows`, not `filtered` or `paginated`: the order that was notified about
+  // must open whatever page it is on and whatever status filter is set. Queue
+  // membership is what proves the user may act, and that is a property of the
+  // loaded list, not of what the table happens to be showing.
+  useDeepLinkedOrder(rows, !loading, setDetail);
 
   // Page 3 of the queue is not page 3 of the decided list, and landing past
   // the end of a shorter one shows an empty table that reads as "nothing here".

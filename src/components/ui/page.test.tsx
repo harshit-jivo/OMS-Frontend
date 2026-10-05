@@ -202,7 +202,7 @@ describe("Page", () => {
     const { container } = render(<Page>content</Page>);
 
     const page = container.querySelector("[data-slot='page']") as HTMLElement;
-    expect(page.className).toContain("min-h-[calc(100svh-64px)]");
+    expect(page.className).toContain("min-h-[calc(100svh/var(--app-zoom)-75px)]");
     expect(page.className).toContain("space-y-4");
   });
 

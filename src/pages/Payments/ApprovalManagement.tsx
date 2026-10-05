@@ -24,10 +24,7 @@ import { Notice, Page, PageHeader } from "@/components/ui/page";
 import { Tab as TabButton, TabList } from "@/components/ui/tabs";
 
 import AnalyticsTab from "./AnalyticsTab";
-import ApproversTab from "./approvalManagement/components/ApproversTab";
-import LevelsTab from "./approvalManagement/components/LevelsTab";
 import MastersTab from "./approvalManagement/components/MastersTab";
-import WorkflowsTab from "./approvalManagement/components/WorkflowsTab";
 import { useApprovalManagement } from "./approvalManagement/useApprovalManagement";
 import type { Tab } from "./approvalManagement/types";
 
@@ -37,28 +34,23 @@ import type { Tab } from "./approvalManagement/types";
 // The former Overview and Requests tabs are gone: Overview counted workflows
 // and pending requests, which the dashboard now reports in money terms, and
 // Requests duplicated the approval queue the operators work from in the app.
-// The four configuration tabs stay, because without them nobody can add an
-// approver, change an approval level or map a payment method to a SAP bank.
+//
+// Workflows, Levels and Approvers went with the OLD approval engine. They
+// configured `approvals_*` tables that no longer exist — payments approvals
+// are the generic Workflow Engine's now, configured at /Workflows. Leaving
+// the tabs would have meant three pages that 404 on open.
+//
+// Masters stays: collection people and payment-method mappings are payments'
+// own master data and have nothing to do with the retired engine.
 const TABS: { id: Tab; label: string }[] = [
   { id: "analytics", label: "Analytics" },
-  { id: "workflows", label: "Workflows" },
-  { id: "levels", label: "Levels" },
-  { id: "approvers", label: "Approvers" },
   { id: "masters", label: "Masters" },
 ];
 
 export default function PaymentsDashboard() {
-  const {
-    tab,
-    setTab,
-    flash,
-    isAdmin,
-    selectedWorkflowId,
-    setSelectedWorkflowId,
-    workflows,
-    openLevels,
-    openApprovers,
-  } = useApprovalManagement();
+  // The workflow/level/approver state the hook still exposes belongs to the
+  // retired engine's tabs and is no longer read here.
+  const { tab, setTab, flash, isAdmin } = useApprovalManagement();
 
   const activeLabel = TABS.find((t) => t.id === tab)?.label ?? "";
 
@@ -91,37 +83,6 @@ export default function PaymentsDashboard() {
 
       <div role="tabpanel" aria-label={activeLabel}>
         {tab === "analytics" && <AnalyticsTab />}
-
-        {tab === "workflows" && (
-          <WorkflowsTab
-            resource={workflows}
-            canEdit={isAdmin}
-            flash={flash}
-            onOpenLevels={openLevels}
-            onOpenApprovers={openApprovers}
-          />
-        )}
-
-        {tab === "levels" && (
-          <LevelsTab
-            workflows={workflows.data}
-            selectedId={selectedWorkflowId}
-            onSelect={setSelectedWorkflowId}
-            canEdit={isAdmin}
-            flash={flash}
-            onWorkflowsChanged={workflows.reload}
-          />
-        )}
-
-        {tab === "approvers" && (
-          <ApproversTab
-            workflows={workflows.data}
-            selectedId={selectedWorkflowId}
-            onSelect={setSelectedWorkflowId}
-            canEdit={isAdmin}
-            flash={flash}
-          />
-        )}
 
         {tab === "masters" && <MastersTab canEdit={isAdmin} flash={flash} />}
       </div>

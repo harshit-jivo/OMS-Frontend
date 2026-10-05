@@ -4,7 +4,7 @@ import type { Schemas } from "../types/api";
 /**
  * Approval workflow admin API.
  *
- * Types mirror the DRF serializers under /api/approvals/ (approvals/serializers.py).
+ * Types mirror the DRF serializers under /api/payments/ (payments/serializers.py).
  * Endpoints that do not exist on the backend yet are marked NOT IMPLEMENTED and
  * documented with the URL they will call once built — they are typed exactly as
  * the finished endpoint will respond, so wiring them up later is a no-op here.
@@ -307,139 +307,16 @@ export interface AppUser {
 // ---------------------------------------------------------------------------
 
 const approvalService = {
-  // ---- Workflows -------------------------------------------------------
-  listWorkflows: async (): Promise<ApprovalWorkflow[]> => {
-    const res = await api.get("/approvals/workflows/");
-    return rows<ApprovalWorkflow>(res.data);
-  },
-
-  getWorkflow: async (id: number): Promise<ApprovalWorkflow> => {
-    const res = await api.get(`/approvals/workflows/${id}/`);
-    return unwrap<ApprovalWorkflow>(res.data);
-  },
-
-  createWorkflow: async (payload: WorkflowPayload): Promise<ApprovalWorkflow> => {
-    const res = await api.post("/approvals/workflows/", payload);
-    return unwrap<ApprovalWorkflow>(res.data);
-  },
-
-  updateWorkflow: async (
-    id: number,
-    payload: WorkflowPayload,
-  ): Promise<ApprovalWorkflow> => {
-    const res = await api.patch(`/approvals/workflows/${id}/`, payload);
-    return unwrap<ApprovalWorkflow>(res.data);
-  },
-
-  deleteWorkflow: async (id: number): Promise<void> => {
-    await api.delete(`/approvals/workflows/${id}/`);
-  },
-
-  /**
-   * Resolve the ladder with real approver names. The `blocked` flag is the
-   * point of this call: it is the only way to see that a level has nobody able
-   * to approve it BEFORE a document deadlocks there.
-   */
-  previewWorkflow: async (
-    id: number,
-    company?: Company | "",
-  ): Promise<WorkflowPreview> => {
-    const res = await api.get(`/approvals/workflows/${id}/preview/`, {
-      params: company ? { company } : undefined,
-    });
-    return unwrap<WorkflowPreview>(res.data);
-  },
-
-  // ---- Levels ----------------------------------------------------------
-  listLevels: async (workflowId: number): Promise<ApprovalLevel[]> => {
-    const res = await api.get("/approvals/levels/", {
-      params: { workflow: workflowId },
-    });
-    return rows<ApprovalLevel>(res.data);
-  },
-
-  createLevel: async (payload: LevelPayload): Promise<ApprovalLevel> => {
-    const res = await api.post("/approvals/levels/", payload);
-    return unwrap<ApprovalLevel>(res.data);
-  },
-
-  updateLevel: async (
-    id: number,
-    payload: LevelPayload,
-  ): Promise<ApprovalLevel> => {
-    const res = await api.patch(`/approvals/levels/${id}/`, payload);
-    return unwrap<ApprovalLevel>(res.data);
-  },
-
-  deleteLevel: async (id: number): Promise<void> => {
-    await api.delete(`/approvals/levels/${id}/`);
-  },
-
-  // ---- Named approvers on a level -------------------------------------
-  listLevelApprovers: async (levelId: number): Promise<LevelApprover[]> => {
-    const res = await api.get(`/approvals/levels/${levelId}/approvers/`);
-    return rows<LevelApprover>(res.data);
-  },
-
-  addLevelApprover: async (
-    levelId: number,
-    payload: { user: number; company?: Company | ""; is_active?: boolean },
-  ): Promise<LevelApprover> => {
-    const res = await api.post(`/approvals/levels/${levelId}/approvers/`, payload);
-    return unwrap<LevelApprover>(res.data);
-  },
-
-  updateLevelApprover: async (
-    id: number,
-    payload: Partial<Pick<LevelApprover, "is_active" | "company">>,
-  ): Promise<LevelApprover> => {
-    const res = await api.patch(`/approvals/approvers/${id}/`, payload);
-    return unwrap<LevelApprover>(res.data);
-  },
-
-  removeLevelApprover: async (id: number): Promise<void> => {
-    await api.delete(`/approvals/approvers/${id}/`);
-  },
-
-  // ---- Requests --------------------------------------------------------
-  listRequests: async (
-    filters: RequestFilters = {},
-  ): Promise<{ results: ApprovalRequest[]; count: number }> => {
-    const params: Record<string, string | number> = {};
-    if (filters.status) params.status = filters.status;
-    if (filters.company) params.company = filters.company;
-    if (filters.document_type) params.document_type = filters.document_type;
-    if (filters.mine) params.mine = "true";
-    if (filters.page) params.page = filters.page;
-
-    const res = await api.get("/approvals/requests/", { params });
-    const body = unwrap<Paginated<ApprovalRequest>>(res.data);
-    return { results: body?.results ?? [], count: body?.count ?? 0 };
-  },
-
-  getRequest: async (id: number): Promise<ApprovalRequestDetail> => {
-    const res = await api.get(`/approvals/requests/${id}/`);
-    return unwrap<ApprovalRequestDetail>(res.data);
-  },
-
-  inbox: async (): Promise<{ results: ApprovalRequest[]; count: number }> => {
-    const res = await api.get("/approvals/inbox/");
-    const body = unwrap<Paginated<ApprovalRequest>>(res.data);
-    return { results: body?.results ?? [], count: body?.count ?? 0 };
-  },
-
-  /** Approve / reject / cancel. Remarks are MANDATORY when rejecting. */
-  act: async (
-    id: number,
-    decision: Decision,
-    remarks = "",
-  ): Promise<ApprovalRequestDetail> => {
-    const res = await api.post(`/approvals/requests/${id}/act/`, {
-      decision,
-      remarks,
-    });
-    return unwrap<ApprovalRequestDetail>(res.data);
-  },
+  // The workflow / level / approver / request methods that used to open this
+  // object called `/api/approvals/…`, the OLD per-module approval engine. That
+  // engine has been removed: its routes are gone and its tables are dropped,
+  // so every one of those calls would now 404. Payments approvals are the
+  // generic Workflow Engine's, served from `/api/workflow/` and consumed by
+  // `workflowService.ts`.
+  //
+  // What remains here is payments MASTER data — collection people, and the
+  // payment-method → SAP bank mapping — which never belonged to the approval
+  // engine and is still configured from the Masters tab.
 
   // ---- Masters ---------------------------------------------------------
   // ---- Bank accounts (admin CRUD) --------------------------------------
@@ -486,61 +363,12 @@ const approvalService = {
 
   // ---- Payment method mapping (admin) ---------------------------------
   /** One row per payment method, with its resolved SAP account. */
-  methodMappingStatus: async (
-    company: Company,
-    refresh = false,
-  ): Promise<{ rows: MethodMappingRow[]; meta: BankSyncMeta }> => {
-    const res = await api.get("/payments/admin/method-mapping-status/", {
-      params: refresh ? { company, refresh: "true" } : { company },
-    });
-    return {
-      rows: rows<MethodMappingRow>(res.data),
-      meta: (res.data?.meta ?? {}) as BankSyncMeta,
-    };
-  },
+  // The payment-method mapping calls lived here — one SAP account per method
+  // per company, edited from the Masters tab. The collector now chooses the
+  // receiving account on the payment itself, so the table was dropped and its
+  // admin endpoints with it. What remains below is payments master data that
+  // never belonged to the mapping.
 
-  /** The SAP house bank accounts themselves — the left panel. */
-  listSapBanks: async (
-    company: Company,
-    refresh = false,
-  ): Promise<SapBank[]> => {
-    const res = await api.get("/payments/banks/", {
-      params: refresh ? { company, refresh: "true" } : { company },
-    });
-    return rows<SapBank>(res.data);
-  },
-
-  saveMethodMapping: async (payload: {
-    id?: number;
-    company: Company;
-    payment_method: string;
-    /** Blank for CASH — a drawer is not a house bank. */
-    bank_key: string;
-    /**
-     * CASH only. A banked tender takes its G/L from the house bank in SAP and
-     * the backend refuses one sent here, so it is omitted for those.
-     */
-    gl_account?: string;
-    is_active?: boolean;
-  }): Promise<void> => {
-    const { id, ...body } = payload;
-    if (id) await api.patch(`/payments/admin/method-mappings/${id}/`, body);
-    else await api.post("/payments/admin/method-mappings/", body);
-  },
-
-  /** Deactivate rather than delete keeps the row as history. */
-  setMethodMappingActive: async (
-    id: number,
-    isActive: boolean,
-  ): Promise<void> => {
-    await api.patch(`/payments/admin/method-mappings/${id}/`, {
-      is_active: isActive,
-    });
-  },
-
-  deleteMethodMapping: async (id: number): Promise<void> => {
-    await api.delete(`/payments/admin/method-mappings/${id}/`);
-  },
 
   // ---- Lookups for dropdowns ------------------------------------------
   /**

@@ -2,19 +2,18 @@
  * The scheme list — one accordion row per scheme, virtualized.
  *
  * ─────────────────────────────────────────────────────────────────────────
- * THE SCROLL CONTAINER IS `document.body`
+ * THE SCROLL CONTAINER IS THE WINDOW
  * ─────────────────────────────────────────────────────────────────────────
  * The list has never had an inner scrollbar — it sizes to its content and the
- * page scrolls. It used `useWindowVirtualizer` for that, which reads
- * `window.scrollY` — and `window.scrollY` is ALWAYS 0 here: `index.css` gives
- * `html, body, #root` `height: 100%` and `overflow-x: hidden` on html and
- * body, which makes BODY the scrolling box rather than the viewport. So the
- * virtualizer's idea of "where am I in the list" never moved, and every
- * scheme past the first screenful was unreachable. `e2e/virtualization.spec.ts`
- * pins the Invoice Review half of the same defect.
+ * page scrolls — so it virtualises against the window.
  *
- * `useVirtualizer` with an explicit `getScrollElement` measures the box that
- * actually scrolls.
+ * This has been round once. For a while `index.css` made BODY the scrolling
+ * box (`height: 100%` + `overflow-x: hidden`), `window.scrollY` sat at 0, and
+ * the window virtualizer never moved: every scheme past the first screenful
+ * was unreachable. The fix then was `useVirtualizer` against `document.body`.
+ * The shell is back to a single window scroller (see the top of `index.css`),
+ * so this is `useWindowVirtualizer` again. `e2e/virtualization.spec.ts` pins
+ * the Invoice Review half of the same defect.
  *
  * ─────────────────────────────────────────────────────────────────────────
  * WHY `measureElement`, NOT A FIXED ROW HEIGHT
@@ -35,7 +34,7 @@
  * instead (`index > 0`), which is right regardless of which rows are mounted.
  */
 import { useState } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import {
   HiOutlineChevronRight,
   HiOutlinePencilSquare,
@@ -66,7 +65,7 @@ export default function SchemeList({
   loadError,
   expandedId,
   setExpandedId,
-  itemNameOf,
+  itemNameIn,
   openNew,
   openEdit,
   deleteScheme,
@@ -78,7 +77,7 @@ export default function SchemeList({
   loadError: string;
   expandedId: number | null;
   setExpandedId: (id: number | null) => void;
-  itemNameOf: (itemCode: string) => string;
+  itemNameIn: (category?: string | null) => (itemCode: string) => string;
   openNew: () => void;
   openEdit: (scheme: Scheme) => void;
   deleteScheme: (scheme: Scheme) => void;
@@ -92,9 +91,8 @@ export default function SchemeList({
   const [wrapNode, setWrapNode] = useState<HTMLDivElement | null>(null);
   const scrollMargin = wrapNode?.offsetTop ?? 0;
 
-  const rowVirtualizer = useVirtualizer({
+  const rowVirtualizer = useWindowVirtualizer({
     count: schemes.length,
-    getScrollElement: () => (typeof document === "undefined" ? null : document.body),
     estimateSize: () => ESTIMATED_ROW_HEIGHT,
     overscan: ROW_OVERSCAN,
     scrollMargin,
@@ -158,10 +156,10 @@ export default function SchemeList({
           const grants = scheme.assignments.filter((a) => !a.is_exclusion);
           const exclusions = scheme.assignments.filter((a) => a.is_exclusion);
           const buy = scheme.triggers[0]
-            ? describeTrigger(scheme.triggers[0], itemNameOf)
+            ? describeTrigger(scheme.triggers[0], itemNameIn(scheme.category))
             : "no rule set";
           const get = scheme.benefits[0]
-            ? describeBenefit(scheme.benefits[0], itemNameOf)
+            ? describeBenefit(scheme.benefits[0], itemNameIn(scheme.category))
             : "nothing set";
           const extras = scheme.triggers.length + scheme.benefits.length - 2;
 
@@ -256,7 +254,7 @@ export default function SchemeList({
                       <div className={BLOCK_TITLE}>To earn it</div>
                       <ul className={BLOCK_LIST}>
                         {scheme.triggers.map((trigger, i) => (
-                          <li key={i}>{describeTrigger(trigger, itemNameOf)}</li>
+                          <li key={i}>{describeTrigger(trigger, itemNameIn(scheme.category))}</li>
                         ))}
                       </ul>
                     </div>
@@ -265,7 +263,7 @@ export default function SchemeList({
                       <ul className={BLOCK_LIST}>
                         {scheme.benefits.map((benefit, i) => (
                           <li key={i} className="font-semibold text-ok">
-                            {describeBenefit(benefit, itemNameOf)}
+                            {describeBenefit(benefit, itemNameIn(scheme.category))}
                           </li>
                         ))}
                       </ul>

@@ -72,7 +72,7 @@ import FieldError from "./FieldError";
 import ProblemSummary from "./ProblemSummary";
 import WarehouseField from "./WarehouseField";
 import { stepOneComplete, stepThreeComplete } from "./orderHeaderSchema";
-import { FOC_TOKEN_BASIC_PRICE, computeLandingPrice } from "./rowTotals";
+import { FOC_TOKEN_BASIC_PRICE } from "./rowTotals";
 import { PICKER_FACETS, type PickerFacet, type SalesOrderForm } from "./useSalesOrderForm";
 import { createEmptyRow, type SalesRow } from "../salesOrderRow";
 
@@ -189,13 +189,39 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
     filteredShipAddresses,
     selectedPartyLabel,
     selectedDispatch,
-    isMartOrder,
     isSchemePanelHidden,
     selectedBillAddressLabel,
     selectedShipAddressLabel,
+    selectedBillAddressStreet,
+    selectedShipAddressStreet,
+    addressStreet,
     selectedDispatchLabel,
     selectedCompanyLabel,
+    // Edit-mode flags. This form was create-only until edit moved onto it.
+    isEditMode,
+    isDuplicateMode,
+    isFocMode,
+    isLoadingFromOrder,
+    editOrderIsDraft,
+    t,
   } = form;
+
+  /**
+   * Steps for a NEW order, one page for one that already exists.
+   *
+   * A wizard is for work you are doing for the first time: it decides the
+   * order of the questions because you do not yet know them. Editing is the
+   * opposite — the order exists, you came to change one thing, and being made
+   * to walk four steps to reach it is the "messed up" part. So a loaded order
+   * (edit, duplicate, edit-an-FOC) renders every section stacked with one
+   * action row, and creating keeps the guided path.
+   *
+   * Both are this one component. The sections are the same render functions;
+   * only the assembly differs. `LegacyOrderForm` was the previous answer to
+   * the same question and it drifted — a 14-column item row that overflowed
+   * its container, and a grand total printed to one decimal beside a raw tax.
+   */
+  const stepped = !isLoadingFromOrder;
 
   // ---------------------------------------------------------------------------
   // Add Item picker — search first, filters second.
@@ -269,7 +295,10 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
         item: product.item_name,
         pcs: String(product.sal_factor2 ?? ""),
         tax: String(getProductTaxRate(product)),
-        // Basic Price = pre-tax basic rate; Landing = basic + tax%.
+        // Both columns start from the party's agreed rate (pre-tax). Basic Price
+        // is then editable — that is the discount. Price List keeps the agreed
+        // rate so the two can be compared, and so the SAP fallback reads a
+        // pre-tax rate. See the note in `recalculateRowTotals`.
         basicPrice:
           isFocOrder || product.basic_rate == null
             ? isFocOrder
@@ -278,7 +307,9 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
             : String(product.basic_rate),
         priceListBasic: isFocOrder
           ? "0"
-          : computeLandingPrice(product.basic_rate, getProductTaxRate(product)),
+          : product.basic_rate == null
+            ? ""
+            : String(product.basic_rate),
         qty: "",
         ltrs: "",
         boxes: "",
@@ -292,6 +323,21 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
     void fetchSchemesForRow(rows[index].uid, true);
     setIsPickingItem(false);
   };
+
+  /** The item code for a confirmed row, resolved from the party's catalogue by
+   *  name + facets (rows store the item name, not the code). "" when unknown. */
+  const itemCodeForRow = (row: SalesRow) =>
+    (
+      partyProducts.find(
+        (p) =>
+          p.item_name === row.item &&
+          p.category === row.category &&
+          (p.brand || "") === (row.brand || "") &&
+          (p.variety || "") === (row.variety || ""),
+      ) ||
+      partyProducts.find((p) => p.item_name === row.item && p.category === row.category) ||
+      partyProducts.find((p) => p.item_name === row.item)
+    )?.item_code || "";
 
   /** Distinct values of one facet, with how many products carry each. */
   const facetsOf = (list: PartyProduct[], valueOf: (product: PartyProduct) => string) => {
@@ -307,9 +353,6 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
     return [...counts.entries()].map(([value, count]) => ({ value, count }));
   };
 
-  // `isMartOrder` is defined above (near selectedCompanyLabel).
-  // Company-3 (Mart) orders also choose a dispatch warehouse. Display-only for
-  // now — the value is not persisted.
   const renderSchemePanel = (row: SalesRow, index: number) => {
     if (isSchemePanelHidden(row)) return null;
     return (
@@ -660,6 +703,7 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
                     <span className="flex min-w-0 flex-col gap-0.5">
                       <span className="text-[13.5px] font-semibold leading-snug text-ink">
                         {product.item_name}
+                        {product.item_code ? ` (${product.item_code})` : ""}
                       </span>
                       <span className="text-[11.5px] text-subtle">
                         {[product.category, product.brand, product.variety]
@@ -794,7 +838,9 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
                         <Input {...control} type="number" value={row.ltrs} readOnly />
                       )}
                     </Field>
-                    <Field label="Price List">
+                    {/* `uilabels` lets an administrator rename this column.
+                        Only the legacy form honoured it. */}
+                    <Field label={t("price_list", "Price List (Basic)")}>
                       {(control) => (
                         <Input
                           {...control}
@@ -1058,7 +1104,7 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
   const renderStepParty = () => (
     <div className={cn(PANEL, "p-5 motion-safe:animate-page")}>
       <div className="mb-4.5">
-        <div className={EYEBROW}>Step 1</div>
+        <div className={EYEBROW}>{stepped ? "Step 1" : "Party"}</div>
         <h2 className="m-0 mt-1 text-[19px] font-bold tracking-tight text-ink">
           Party Information
         </h2>
@@ -1104,7 +1150,17 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
           }
         </Field>
 
-        <Field label="Bill To Address" error={problems.header.billAddress}>
+        {/* The street goes in the Field's own `hint`, not beside the Field.
+            A sibling paragraph becomes its own cell in this grid and shunts
+            every following control one place along. `hint` also wires the
+            street into `aria-describedby`, so it is read with the control
+            rather than orphaned after it. An `error` correctly takes its
+            place: a wrong address matters more than where the right one is. */}
+        <Field
+          label="Bill To Address"
+          error={problems.header.billAddress}
+          hint={selectedBillAddressStreet || undefined}
+        >
           {(control) =>
             renderCombo({
               refEl: billDropdownRef,
@@ -1127,6 +1183,13 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
                       <span className="text-[13px] font-medium text-ink">
                         {b.address_name || b.full_address || b.address_id}
                       </span>
+                      {/* The street, so two addresses named "Head Office" and
+                          "Head Office 2" can be told apart before choosing. */}
+                      {addressStreet(b) ? (
+                        <span className="mt-0.5 block text-[11px] leading-snug text-subtle">
+                          {addressStreet(b)}
+                        </span>
+                      ) : null}
                     </button>
                   ))
                 ) : (
@@ -1136,7 +1199,11 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
           }
         </Field>
 
-        <Field label="Ship To Address" error={problems.header.shipAddress}>
+        <Field
+          label="Ship To Address"
+          error={problems.header.shipAddress}
+          hint={selectedShipAddressStreet || undefined}
+        >
           {(control) =>
             renderCombo({
               refEl: shipDropdownRef,
@@ -1159,6 +1226,11 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
                       <span className="text-[13px] font-medium text-ink">
                         {s.address_name || s.full_address || s.address_id}
                       </span>
+                      {addressStreet(s) ? (
+                        <span className="mt-0.5 block text-[11px] leading-snug text-subtle">
+                          {addressStreet(s)}
+                        </span>
+                      ) : null}
                     </button>
                   ))
                 ) : (
@@ -1270,6 +1342,10 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
             />
           )}
         </Field>
+
+        {/* Beside Dispatch From, where the shipping decision is made — not on
+            the summary step, where it used to hide behind the Mart gate. */}
+        <WarehouseField form={form} />
       </div>
     </div>
   );
@@ -1278,7 +1354,7 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
     <div className={cn(PANEL, "p-5 motion-safe:animate-page")}>
       <div className="mb-4 flex items-start justify-between gap-3">
         <div>
-          <div className={EYEBROW}>Step 2</div>
+          <div className={EYEBROW}>{stepped ? "Step 2" : "Items"}</div>
           <h2 className="m-0 mt-1 text-[19px] font-bold tracking-tight text-ink">Items</h2>
         </div>
         <div className="flex flex-col items-end gap-0.5">
@@ -1319,7 +1395,7 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
   const renderStepSummary = () => (
     <div className={cn(PANEL, "p-5 motion-safe:animate-page")}>
       <div className="mb-4.5">
-        <div className={EYEBROW}>Step 3</div>
+        <div className={EYEBROW}>{stepped ? "Step 3" : "Order details"}</div>
         <h2 className="m-0 mt-1 text-[19px] font-bold tracking-tight text-ink">Order Summary</h2>
       </div>
       <div className="grid grid-cols-1 gap-3.5 md:grid-cols-2 lg:grid-cols-3">
@@ -1345,7 +1421,6 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
             )}
           </Field>
         )}
-        {isMartOrder && <WarehouseField form={form} />}
         <Field label="Company">
           {(control) =>
             renderTriggerSelect({
@@ -1431,10 +1506,10 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {[
-            { label: "Bill To", value: selectedBillAddressLabel },
-            { label: "Ship To", value: selectedShipAddressLabel },
-            { label: "Dispatch", value: selectedDispatchLabel },
-            { label: "Delivery Date", value: formData.Deliverydate },
+            { label: "Bill To", value: selectedBillAddressLabel, street: selectedBillAddressStreet },
+            { label: "Ship To", value: selectedShipAddressLabel, street: selectedShipAddressStreet },
+            { label: "Dispatch", value: selectedDispatchLabel, street: "" },
+            { label: "Delivery Date", value: formData.Deliverydate, street: "" },
           ].map((entry) => (
             <div className="flex flex-col gap-0.5" key={entry.label}>
               <span className="text-[11px] font-semibold uppercase tracking-[0.02em] text-subtle">
@@ -1443,17 +1518,25 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
               <em className="text-[13px] font-medium not-italic text-ink-soft">
                 {entry.value || "—"}
               </em>
+              {/* The street under the name, on the last screen before the
+                  order is placed — this is where a wrong branch of the right
+                  customer is still cheap to catch. */}
+              {entry.street ? (
+                <span className="text-[11px] leading-snug text-subtle">{entry.street}</span>
+              ) : null}
             </div>
           ))}
         </div>
         <div className="overflow-hidden rounded-md border border-line">
-          <div className="flex items-center justify-between border-b border-line bg-surface px-4 py-2.5">
-            <span className="text-[12px] font-bold uppercase tracking-[0.04em] text-subtle">
+          <div className="flex items-center gap-3 border-b border-line bg-surface px-4 py-2.5 text-[12px] font-bold uppercase tracking-[0.04em] text-subtle">
+            <span className="min-w-0 flex-1">
               Items
+              <span className="ml-2 rounded-full bg-surface-strong px-1.5 py-px text-[11px] normal-case text-body">
+                {visibleLineCount}
+              </span>
             </span>
-            <span className="text-[12px] font-bold uppercase tracking-[0.04em] text-subtle">
-              {visibleLineCount}
-            </span>
+            <span className="w-16 flex-none text-right">Qty</span>
+            <span className="w-28 flex-none text-right">Amount</span>
           </div>
           {/* Free lines are listed here too. This is the last screen before the
               order is saved, so it has to match what actually gets sent. */}
@@ -1463,9 +1546,12 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
                 <div className="flex items-center gap-3 border-b border-line px-4 py-2.5 last:border-b-0">
                   <strong className="min-w-0 flex-1 text-[14px] font-bold text-ink">
                     {row.item || "Item"}
+                    {itemCodeForRow(row) ? ` (${itemCodeForRow(row)})` : ""}
                   </strong>
-                  <span className="text-[12px] text-subtle">Qty {row.qty || 0}</span>
-                  <span className="text-[12px] font-bold text-ink">
+                  <span className="w-16 flex-none text-right text-[12px] text-subtle">
+                    {row.qty || 0}
+                  </span>
+                  <span className="w-28 flex-none text-right text-[12px] font-bold text-ink">
                     ₹ {Number(row.amount || 0).toFixed(2)}
                   </span>
                 </div>
@@ -1476,6 +1562,7 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
                   >
                     <strong className="min-w-0 flex-1 text-[14px] font-semibold text-body">
                       {line.itemName}
+                      {line.itemCode ? ` (${line.itemCode})` : ""}
                       <span
                         className={cn(
                           "ml-2 inline-block rounded-full px-1.5 py-px align-middle text-[11px] font-semibold",
@@ -1487,8 +1574,12 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
                         {line.kind === "combo" ? "Combo" : "Scheme"}
                       </span>
                     </strong>
-                    <span className="text-[12px] text-subtle">Qty {line.qtyLabel}</span>
-                    <span className="text-[12px] font-semibold text-body">₹ 0.00</span>
+                    <span className="w-16 flex-none text-right text-[12px] text-subtle">
+                      {line.qtyLabel}
+                    </span>
+                    <span className="w-28 flex-none text-right text-[12px] font-semibold text-body">
+                      ₹ 0.00
+                    </span>
                   </div>
                 ))}
               </Fragment>
@@ -1516,13 +1607,31 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
               </strong>
             </div>
           )}
-          <div className="flex items-start justify-between gap-4 border-t border-dashed border-line-strong pt-3">
-            <span className="flex-none text-[12px] font-semibold uppercase tracking-[0.02em] text-subtle">
-              Grand Total
-            </span>
-            <strong className="text-right text-[20px] font-bold text-brand">
-              ₹ {grandTotal.toFixed(2)}
-            </strong>
+          <div className="ml-auto flex w-full max-w-xs flex-col gap-2 rounded-md border border-line p-3.5">
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-[12px] font-semibold uppercase tracking-[0.02em] text-subtle">
+                Total Amount
+              </span>
+              <span className="text-[14px] font-semibold text-ink">
+                ₹ {totalAmount.toFixed(2)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-[12px] font-semibold uppercase tracking-[0.02em] text-subtle">
+                Tax
+              </span>
+              <span className="text-[14px] font-semibold text-ink">
+                ₹ {taxAmount.toFixed(2)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-4 border-t border-line pt-2">
+              <span className="text-[12px] font-semibold uppercase tracking-[0.02em] text-subtle">
+                Grand Total
+              </span>
+              <strong className="text-[20px] font-bold text-brand">
+                ₹ {grandTotal.toFixed(2)}
+              </strong>
+            </div>
           </div>
         </div>
       </div>
@@ -1628,10 +1737,14 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
         "bg-card/90 backdrop-blur-[8px] shadow-[0_-2px_16px_rgba(15,23,42,0.05)]",
       )}
     >
-      {currentStep > 1 ? (
+      {stepped && currentStep > 1 ? (
         <Button onClick={() => setCurrentStep((s) => Math.max(1, s - 1))}>Back</Button>
       ) : (
-        <Button onClick={handleClearForm}>Clear</Button>
+        // `handleClearForm` navigates back to `returnTo` once an order was
+        // loaded, so on the edit form this button is a Cancel, not a Clear.
+        <Button onClick={handleClearForm}>
+          {isLoadingFromOrder ? "Cancel" : "Clear"}
+        </Button>
       )}
       <div className="flex-1" />
       {/*
@@ -1648,18 +1761,23 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
         through, and a draft saved without one is a row nobody can resume.
       */}
       {/*
-        No `(!isEditMode || editOrderIsDraft)` guard, which is what the legacy
-        form carries: `useWizard` requires mode "create" and `isEditMode`
-        requires mode "edit", so inside this component the guard is always true.
-        Copying it across would have been a condition that cannot be false.
+        `(!isEditMode || editOrderIsDraft)` — the legacy form's guard. It used
+        to be vacuous here, because this component only rendered for mode
+        "create" and `isEditMode` could never be true. Edit renders this form
+        now, so it is load-bearing: without it, editing a LIVE order offers
+        Save as Draft, and `handleSaveDraft` passes `draftOrderId` only when
+        the loaded order is itself a draft — so the click would quietly create
+        a second, new draft beside the live order instead of parking the edit.
       */}
-      <Button
-        onClick={handleSaveDraft}
-        disabled={isSaving || isSavingDraft || !formData.parties}
-      >
-        {isSavingDraft ? "Saving Draft..." : "Save as Draft"}
-      </Button>
-      {currentStep < 4 ? (
+      {!isEditMode || editOrderIsDraft ? (
+        <Button
+          onClick={handleSaveDraft}
+          disabled={isSaving || isSavingDraft || !formData.parties}
+        >
+          {isSavingDraft ? "Saving Draft..." : "Save as Draft"}
+        </Button>
+      ) : null}
+      {stepped && currentStep < 4 ? (
         <Button
           variant="primary"
           disabled={!canAdvance(currentStep)}
@@ -1675,11 +1793,38 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
           disabled={isSaving || confirmedRows.length === 0}
           onClick={handleWizardSubmit}
         >
-          {isSaving ? "Saving..." : "Save Order"}
+          {isSaving
+            ? "Saving..."
+            : isEditMode
+              ? "Update Order"
+              : isDuplicateMode
+                ? "Create as New"
+                : isFocMode
+                  ? "Create FOC Order"
+                  : "Save Order"}
         </Button>
       )}
     </div>
   );
+
+  if (!stepped) {
+    return (
+      <div className="flex flex-col gap-4.5">
+        {renderStepParty()}
+        {renderStepItems()}
+        {renderStepSummary()}
+        {/*
+          No review section. Every field it showed is already on this page, so
+          it would be the same order printed twice — but `ProblemSummary` was
+          only ever rendered inside it, so that comes across on its own, just
+          above the action row. That is where the legacy form kept it too.
+        */}
+        <ProblemSummary problems={problems} />
+        {renderWizardFooter()}
+        {renderItemModal()}
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-4.5">

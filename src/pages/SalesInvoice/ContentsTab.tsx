@@ -16,7 +16,17 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { API_ORIGIN } from "../../services/api";
 import { formatMoney, lineKey, toNumber, type SelectedLine } from "./salesInvoice.utils";
-import { apiFetch, hanaUrl, reservedBatchKey, type SalesInvoiceState } from "./useSalesInvoice";
+import { apiFetch, hanaUrl, type SalesInvoiceState } from "./useSalesInvoice";
+import {
+  allocateNearestExpiryBatches,
+  availableBatchQty,
+  getAllocationQuantity,
+  getBatchNumber,
+  hasEnoughAllocation,
+  toSapBatchNumbers,
+  type BatchAllocation,
+  type BatchDetail,
+} from "./batchAllocation";
 
 type Props = {
   state: SalesInvoiceState;
@@ -35,30 +45,6 @@ type InventoryWarehouse = {
   [key: string]: unknown;
 };
 
-type BatchDetail = {
-  BatchNum?: string;
-  BatchNumber?: string;
-  DistNumber?: string;
-  BatchNo?: string;
-  BatchCode?: string;
-  BatchID?: string;
-  BatchId?: string;
-  Batch?: string;
-  LotNumber?: string;
-  MnfSerial?: string;
-  InternalSerialNumber?: string;
-  SerialNumber?: string;
-  WhsCode: string;
-  Quantity: number;
-  PrdDate?: string | null;
-  ExpDate?: string | null;
-  InDate?: string | null;
-  SystemSerialNumber?: number;
-  SysNumber?: number;
-  AbsEntry?: number;
-  [key: string]: unknown;
-};
-
 type BatchPickerContext = {
   key: string;
   itemCode: string;
@@ -66,11 +52,6 @@ type BatchPickerContext = {
   whsCode: string;
   quantity: number;
   maxQuantity: number;
-};
-
-type BatchAllocation = {
-  batch: BatchDetail;
-  quantity: number;
 };
 
 type BatchAllocationFailure = {
@@ -108,74 +89,6 @@ const formatBatchDate = (value?: string | null) => {
   return year && month && day ? `${day}-${month}-${year}` : value;
 };
 
-const getSystemSerialNumber = (batch: BatchDetail) => {
-  const value = batch.SystemSerialNumber ?? batch.SysNumber ?? batch.AbsEntry;
-  return Number.isFinite(Number(value)) ? Number(value) : undefined;
-};
-
-const getBatchDateTokens = (value?: string | null) => {
-  const text = String(value || "").trim();
-  if (!text) return new Set<string>();
-
-  const tokens = new Set([text.toLowerCase().replace(/[^a-z0-9]/g, "")]);
-  const dateOnly = text.split("T")[0]?.split(" ")[0] || text;
-  const parts = dateOnly.split(/[/-]/).map((part) => part.trim()).filter(Boolean);
-
-  if (parts.length === 3) {
-    const [first, second, third] = parts;
-    const year = first.length === 4 ? first : third;
-    const month = second.padStart(2, "0");
-    const day = first.length === 4 ? third.padStart(2, "0") : first.padStart(2, "0");
-
-    if (year.length === 4) {
-      tokens.add(`${year}${month}${day}`);
-      tokens.add(`${day}${month}${year}`);
-    }
-  }
-
-  return tokens;
-};
-
-const isBatchDateValue = (value: string, batch: BatchDetail) => {
-  const candidateTokens = getBatchDateTokens(value);
-  const dateTokens = [batch.ExpDate, batch.PrdDate, batch.InDate].reduce<Set<string>>((tokens, dateValue) => {
-    getBatchDateTokens(dateValue).forEach((token) => tokens.add(token));
-    return tokens;
-  }, new Set());
-
-  return [...candidateTokens].some((token) => token && dateTokens.has(token));
-};
-
-const getBatchNumber = (batch: BatchDetail) => {
-  const source = batch as Record<string, unknown>;
-  const candidateKeys = [
-    "BatchNumber",
-    "DistNumber",
-    "BatchNo",
-    "BatchCode",
-    "BatchID",
-    "BatchId",
-    "Batch",
-    "LotNumber",
-    "BatchNum",
-    "MnfSerial",
-    "InternalSerialNumber",
-    "SerialNumber",
-  ];
-
-  let dateLikeFallback = "";
-  for (const key of candidateKeys) {
-    const value = String(source[key] ?? "").trim();
-    if (!value) continue;
-    if (!isBatchDateValue(value, batch)) return value;
-    if (!dateLikeFallback) dateLikeFallback = value;
-  }
-
-  // Some batches are legitimately named after a date (e.g. "06/06/2026").
-  // Prefer a non-date identifier, but never drop the batch number entirely.
-  return dateLikeFallback;
-};
-
 const getWarehouseCode = (warehouse: InventoryWarehouse) =>
   String(warehouse.WhsCode ?? warehouse.WarehouseCode ?? warehouse.whs_code ?? "").trim();
 
@@ -188,89 +101,6 @@ const getWarehouseQuantity = (warehouse: InventoryWarehouse) =>
       ?? warehouse.AvailableQuantity
       ?? warehouse.TotalQty,
   );
-
-const toSapBatchNumbers = (allocations: BatchAllocation[]) =>
-  allocations
-    .map(({ batch, quantity }) => {
-    const systemSerialNumber = getSystemSerialNumber(batch);
-    const batchNumber = getBatchNumber(batch);
-    return {
-      ...(batchNumber ? { BatchNumber: batchNumber } : {}),
-      ...(systemSerialNumber !== undefined ? { SystemSerialNumber: systemSerialNumber } : {}),
-      Quantity: quantity,
-    };
-  })
-    .filter((batch) => (batch.BatchNumber || batch.SystemSerialNumber !== undefined) && batch.Quantity > 0);
-
-const getBatchSortTime = (batch: BatchDetail) => {
-  const expTime = batch.ExpDate ? new Date(batch.ExpDate).getTime() : Number.POSITIVE_INFINITY;
-  if (Number.isFinite(expTime)) return expTime;
-  const inTime = batch.InDate ? new Date(batch.InDate).getTime() : Number.POSITIVE_INFINITY;
-  return Number.isFinite(inTime) ? inTime : Number.POSITIVE_INFINITY;
-};
-
-/**
- * Stock left in a batch once other in-flight drafts have taken their share.
- *
- * A batch is a pool of pieces, not a single indivisible thing: one batch holds
- * thousands and is normally split across many invoices. `reserved` therefore
- * carries a QUANTITY per batch, and it is subtracted from the batch's stock —
- * treating the batch as untouchable because someone else took 20 pieces locked
- * the other 9,980 away for no reason.
- *
- * SAP does not know a batch is spoken for until the invoice actually posts,
- * which is why these holds are tracked here at all. A rejected log releases its
- * share, so those never appear.
- */
-const availableBatchQty = (
-  batch: BatchDetail,
-  options: { itemCode?: string; whsCode?: string; reserved?: Map<string, number> },
-): number => {
-  const stock = toNumber(batch.Quantity);
-  const held =
-    options.reserved?.get(
-      reservedBatchKey(options.itemCode, options.whsCode, getBatchNumber(batch)),
-    ) || 0;
-  // Never negative: a hold bigger than the batch (stock moved in SAP since the
-  // other draft was built) means nothing is free, not that we owe stock.
-  return Math.max(0, stock - held);
-};
-
-/**
- * Nearest-expiry-first allocation, over what is actually free in each batch.
- *
- * A batch only drops out when other drafts have taken all of it; a part-held
- * batch still contributes whatever is left.
- */
-const allocateNearestExpiryBatches = (
-  batches: BatchDetail[],
-  requiredQty: number,
-  options: { itemCode?: string; whsCode?: string; reserved?: Map<string, number> } = {},
-): BatchAllocation[] => {
-  let remainingQty = toNumber(requiredQty);
-  const allocations: BatchAllocation[] = [];
-
-  [...batches]
-    .map((batch) => ({ batch, free: availableBatchQty(batch, options) }))
-    .filter(({ free }) => free > 0)
-    .sort((a, b) => getBatchSortTime(a.batch) - getBatchSortTime(b.batch))
-    .some(({ batch, free }) => {
-      const allocatedQty = Math.min(remainingQty, free);
-      if (allocatedQty > 0) {
-        allocations.push({ batch, quantity: allocatedQty });
-        remainingQty -= allocatedQty;
-      }
-      return remainingQty <= 0;
-    });
-
-  return allocations;
-};
-
-const getAllocationQuantity = (allocations: BatchAllocation[]) =>
-  allocations.reduce((sum, allocation) => sum + toNumber(allocation.quantity), 0);
-
-const hasEnoughAllocation = (allocations: BatchAllocation[], requiredQty: number) =>
-  getAllocationQuantity(allocations) + 0.0001 >= toNumber(requiredQty);
 
 const getLineDisplayName = (line: Pick<SelectedLine, "ItemCode" | "Dscription">) =>
   line.Dscription || line.ItemCode || "selected item";

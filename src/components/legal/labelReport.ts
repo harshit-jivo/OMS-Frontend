@@ -48,6 +48,54 @@ export type Finding = {
 export const hasRegions = (finding: Finding): boolean =>
   Boolean(finding.regions?.length);
 
+/**
+ * A rule that did not apply to this pack, and why.
+ *
+ * Not a finding and deliberately not rendered as one: an unfortified product
+ * has not FAILED the fortification rules, it was never asked them. The
+ * backend leaves them out of `findings` entirely (`legal/dimensions.py`) and
+ * lists them here instead, so the gap between `rule_count` and
+ * `summary.total` has a visible explanation rather than looking like a bug.
+ */
+export type SkippedRule = {
+  rule_id: string;
+  rule_name: string;
+  reason: string;
+};
+
+/**
+ * The physical facts the reviewer entered, which the artwork cannot supply.
+ *
+ * Echoed back so a report can be read months later without the form beside
+ * it: a dimensional finding is only as trustworthy as the numbers it was
+ * computed from, and a reader who cannot see them cannot judge it.
+ */
+export type PackageSpec = {
+  shape: string;
+  container: string;
+  regulation: string;
+  panel_height_mm: number | null;
+  panel_width_mm: number | null;
+  height_mm: number | null;
+  circumference_mm: number | null;
+  surface_area_cm2: number | null;
+  capacity_cm3: number | null;
+  veg_mark: string;
+  veg_mark_shape: string;
+  veg_mark_mm: number | null;
+  fortified: boolean;
+  fort_a_mm: number | null;
+  fort_b_mm: number | null;
+  /**
+   * Where the panel came from when the reviewer did not type it: '' (they
+   * did), 'DECLARED' (the artwork's FOR INTERNAL USE block, read as text) or
+   * 'DECLARED_OCR' (the same block, read by OCR off a flattened PDF).
+   */
+  panel_source: string;
+  /** The artwork gave no unit and centimetres were assumed. */
+  panel_unit_assumed: boolean;
+};
+
 export type ReportSummary = {
   total: number;
   passed: number;
@@ -64,6 +112,10 @@ export type LabelReport = {
   summary?: ReportSummary;
   ocr_available?: boolean;
   rule_count?: number;
+  /** Measurement rules that did not apply to this pack. */
+  skipped?: SkippedRule[];
+  /** The dimensions the measurement findings were computed from. */
+  package_spec?: PackageSpec | null;
 };
 
 /** Counts recomputed client-side when an older payload carries no summary. */
@@ -142,6 +194,21 @@ export const buildReportMarkdown = (
   if (passes.length) {
     parts.push("", `## Passed (${passes.length})`, "", ...passes.map(line));
   }
+  // After the verdicts, never among them. A skipped rule is not a result and
+  // putting it in either list would make the counts stop adding up.
+  const skipped = report.skipped ?? [];
+  if (skipped.length) {
+    parts.push(
+      "",
+      `## Not checked (${skipped.length})`,
+      "",
+      ...skipped.map(
+        (rule) =>
+          `- **${escapeInline(rule.rule_name)}** — ${escapeInline(rule.reason)}`,
+      ),
+    );
+  }
+
   if (!findings.length) {
     parts.push("", "No rules were checked against this label.");
   }
