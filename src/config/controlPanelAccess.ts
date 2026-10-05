@@ -51,7 +51,7 @@ export const CONTROL_PANEL_PAGES: ControlPanelPage[] = [
   {
     label: "Sales",
     subTabs: [
-      { key: P + "sales.channel", label: "Sales Channel Dashboard", to: "/Control_Panel/Sales_Channel" },
+      { key: P + "sales.channel", label: "Sales Channel", to: "/Control_Panel/Sales_Channel" },
       { key: P + "sales.beverages", label: "Beverages Sale", to: "/Control_Panel/Beverages" },
       { key: P + "sales.realise_dashboard", label: "Realise Dashboard", to: "/Control_Panel/Realise_Dashboard" },
       { key: P + "sales.sales", label: "Sales", to: "/Control_Panel/Sales" },

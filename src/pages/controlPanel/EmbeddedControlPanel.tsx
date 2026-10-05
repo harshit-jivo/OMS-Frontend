@@ -16,7 +16,7 @@
  * and failure ("no access", or the backend unreachable), each with Retry.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import {
   HiOutlineArrowPath,
   HiOutlineArrowsPointingIn,
@@ -27,12 +27,16 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, Notice } from "@/components/ui/page";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useAuth } from "@/auth";
+import { canOpen } from "@/auth/routeAccess";
+import { CONTROL_PANEL_PAGES } from "../../config/controlPanelAccess";
 import {
   controlPanelError,
   getSsoLink,
   type ControlPanelPageId,
 } from "../../services/controlPanelService";
-import { ControlPanelPage } from "./shared/components/ControlPanelPage";
+import { interceptPageLinks } from "./framedLinks";
+import { ControlPanelPage, type ControlPanelCrumb } from "./shared/components/ControlPanelPage";
 import type { TabAdapter } from "./tabs";
 import { useFullscreen } from "./useFullscreen";
 
@@ -41,10 +45,18 @@ export function EmbeddedControlPanel({
   title,
   description,
   tabs,
+  backTo,
 }: {
   page: ControlPanelPageId;
   title: string;
   description?: string;
+  /**
+   * Where this page's breadcrumb goes back to when it was opened directly (a
+   * sidebar click, a bookmark) — e.g. Targets -> Oils Sale, whose "Update
+   * Targets" button opens it. Arriving by a link from another page, the way
+   * back is that page instead.
+   */
+  backTo?: Required<ControlPanelCrumb>;
   /** The page's inner tabs, opened from the sidebar as `?tab=` (tabs.ts). */
   tabs?: TabAdapter;
 }) {
@@ -60,6 +72,40 @@ export function EmbeddedControlPanel({
   // styles/tailwind.css, and the element that goes full screen.
   const frameRef = useRef<HTMLDivElement>(null);
   const fullscreen = useFullscreen(frameRef);
+
+  // Breadcrumb parent: the page a link brought us from, else `backTo`, else
+  // the sidebar group this page sits in.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { session } = useAuth();
+  const from = (location.state as { from?: Required<ControlPanelCrumb> } | null)?.from;
+  const group = CONTROL_PANEL_PAGES.find(
+    (p) => p.label !== title && p.subTabs.some((s) => s.to === location.pathname),
+  );
+  const parent: ControlPanelCrumb | undefined =
+    from ??
+    (backTo && canOpen(session, backTo.to.split("?")[0]) ? backTo : undefined) ??
+    (group ? { label: group.label } : undefined);
+
+  // Links in the page to another Control Panel page open as OMS routes
+  // (framedLinks.ts), remembering this page as their way back.
+  const stopLinks = useRef<() => void>(() => {});
+  useEffect(() => () => stopLinks.current(), []);
+  const here = { label: title, to: location.pathname + location.search };
+  const hereRef = useRef(here);
+  hereRef.current = here;
+  const connectLinks = (win: Window | null) => {
+    stopLinks.current();
+    stopLinks.current = () => {};
+    if (!win) return;
+    try {
+      stopLinks.current = interceptPageLinks(win, (route) =>
+        navigate(route, { state: { from: hereRef.current } }),
+      );
+    } catch {
+      // Not readable (should not happen: same origin) — links behave natively.
+    }
+  };
 
   // Inner tabs: `?tab=` -> the page (on load, and whenever the sidebar picks
   // another tab of this same page), and the page -> `?tab=` when the user
@@ -144,6 +190,7 @@ export function EmbeddedControlPanel({
     <ControlPanelPage
       title={title}
       description={description}
+      parent={parent}
       actions={
         <>
           <Button
@@ -234,6 +281,7 @@ export function EmbeddedControlPanel({
                 // So F / F11 work while the page inside has focus too.
                 fullscreen.listenOn(e.currentTarget.contentWindow);
                 connectTabs(e.currentTarget.contentWindow);
+                connectLinks(e.currentTarget.contentWindow);
               }}
               className="block h-full w-full border-0 bg-white"
               // Downloads (Excel exports) and pop-ups C_Panel opens itself.
