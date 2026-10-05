@@ -7,6 +7,8 @@ export default function Control_Panel_Realise_Targets() {
       page="targets"
       title="Targets"
       description="Person mapping and the targets the sales pages measure against."
+      // Its "Update Targets" button lives on Oils Sale — the way back.
+      backTo={{ label: "Oils Sale", to: "/Control_Panel/Realise" }}
     />
   );
 }

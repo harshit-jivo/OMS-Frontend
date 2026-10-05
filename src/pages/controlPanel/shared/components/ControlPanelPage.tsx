@@ -10,6 +10,10 @@
  *
  * Outside the shell (tests) there is no slot, and the same box renders
  * inline at the top of the page.
+ *
+ * The box is also the breadcrumb: Control Panel › parent › this page. The
+ * parent is the page the user came from (a link, then the way back), or the
+ * page's group in the sidebar (plain text — context, not a destination).
  */
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -20,13 +24,22 @@ import { useHeaderSlot } from "@/components/layout/headerSlot";
 import { Page } from "@/components/ui/page";
 import { cn } from "@/lib/utils";
 
+export interface ControlPanelCrumb {
+  label: string;
+  /** A route to go back to; omitted for a group heading. */
+  to?: string;
+}
+
 export function ControlPanelPage({
   title,
   description,
+  parent,
   actions,
   children,
 }: {
   title: string;
+  /** The middle crumb (see above). */
+  parent?: ControlPanelCrumb;
   /** Shown as the title's tooltip — there is no room for a sentence in the bar. */
   description?: string;
   /** Buttons for the bar (Reload, Open in new tab). Icon-only below `sm`. */
@@ -36,7 +49,8 @@ export function ControlPanelPage({
   const slot = useHeaderSlot();
 
   const box = (
-    <div
+    <nav
+      aria-label="Breadcrumb"
       data-slot="cp-header"
       className={cn(
         // `tw-page`: the portal lands outside `Page`, so it needs the
@@ -55,6 +69,21 @@ export function ControlPanelPage({
         Control Panel
       </Link>
       <HiChevronRight className="hidden size-3 shrink-0 text-subtle lg:block" aria-hidden="true" />
+      {parent ? (
+        <>
+          {parent.to ? (
+            <Link
+              to={parent.to}
+              className="hidden max-w-[11rem] shrink-0 truncate text-[12px] font-medium text-subtle no-underline hover:text-brand sm:inline"
+            >
+              {parent.label}
+            </Link>
+          ) : (
+            <span className="hidden shrink-0 text-[12px] font-medium text-subtle sm:inline">{parent.label}</span>
+          )}
+          <HiChevronRight className="hidden size-3 shrink-0 text-subtle sm:block" aria-hidden="true" />
+        </>
+      ) : null}
       <h1
         className="m-0 min-w-0 truncate text-[14px] font-bold tracking-tight text-ink sm:text-[15px]"
         title={description}
@@ -62,7 +91,7 @@ export function ControlPanelPage({
         {title}
       </h1>
       {actions ? <span className="flex shrink-0 items-center gap-1">{actions}</span> : null}
-    </div>
+    </nav>
   );
 
   return (
