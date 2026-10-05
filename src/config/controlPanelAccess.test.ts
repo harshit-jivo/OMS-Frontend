@@ -9,7 +9,12 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { ROUTE_ACCESS } from "../auth/routeAccess";
-import { CONTROL_PANEL_KEYS, CONTROL_PANEL_PAGES, controlPanelKeysFor } from "./controlPanelAccess";
+import {
+  CONTROL_PANEL_KEYS,
+  CONTROL_PANEL_PAGES,
+  CONTROL_PANEL_REPORTS,
+  controlPanelKeysFor,
+} from "./controlPanelAccess";
 
 function registryModule(name: string): Set<string> {
   const source = readFileSync(
@@ -24,7 +29,7 @@ function registryModule(name: string): Set<string> {
 describe("Control Panel access", () => {
   it("offers exactly the keys the server registers", () => {
     const registered = registryModule("control_panel");
-    expect(registered.size).toBe(4);
+    expect(registered.size).toBe(24);
     expect([...CONTROL_PANEL_KEYS].sort()).toEqual([...registered].sort());
   });
 
@@ -39,5 +44,12 @@ describe("Control Panel access", () => {
       }
     }
     expect(controlPanelKeysFor("/Control_Panel/Expenses")).toEqual(["control_panel.finance"]);
+  });
+
+  it("opens each report's route with that report's key only", () => {
+    expect(CONTROL_PANEL_REPORTS).toHaveLength(20);
+    for (const report of CONTROL_PANEL_REPORTS) {
+      expect(ROUTE_ACCESS[report.to]?.permissions, report.to).toEqual([report.key]);
+    }
   });
 });

@@ -29,7 +29,7 @@ import { Card, Notice } from "@/components/ui/page";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/auth";
 import { canOpen } from "@/auth/routeAccess";
-import { CONTROL_PANEL_PAGES } from "../../config/controlPanelAccess";
+import { CONTROL_PANEL_PAGES, controlPanelReportAt } from "../../config/controlPanelAccess";
 import {
   controlPanelError,
   getSsoLink,
@@ -79,9 +79,12 @@ export function EmbeddedControlPanel({
   const navigate = useNavigate();
   const { session } = useAuth();
   const from = (location.state as { from?: Required<ControlPanelCrumb> } | null)?.from;
-  const group = CONTROL_PANEL_PAGES.find(
-    (p) => p.label !== title && p.subPages.some((s) => s.to === location.pathname),
-  );
+  const report = controlPanelReportAt(location.pathname);
+  const group = report
+    ? { label: report.group }
+    : CONTROL_PANEL_PAGES.find(
+        (p) => p.label !== title && p.subPages.some((s) => s.to === location.pathname),
+      );
   const parent: ControlPanelCrumb | undefined =
     from ??
     (backTo && canOpen(session, backTo.to.split("?")[0]) ? backTo : undefined) ??

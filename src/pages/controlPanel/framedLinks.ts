@@ -13,6 +13,8 @@
  * the browser.
  */
 
+import { CONTROL_PANEL_REPORTS } from "../../config/controlPanelAccess";
+
 /** C_Panel page path -> the OMS route that shows it. Mirrors backend control_panel/permissions.PAGES. */
 export const OMS_ROUTE_FOR_PATH: Record<string, string> = {
   "/realise/": "/Control_Panel/Realise",
@@ -24,6 +26,7 @@ export const OMS_ROUTE_FOR_PATH: Record<string, string> = {
   "/inventory/": "/Control_Panel/Inventory",
   "/expenses/": "/Control_Panel/Expenses",
   "/salaries/": "/Control_Panel/Salaries",
+  ...Object.fromEntries(CONTROL_PANEL_REPORTS.map((r) => [r.path, r.to])),
 };
 
 /** The OMS route an `href` inside the frame leads to, or null. */
