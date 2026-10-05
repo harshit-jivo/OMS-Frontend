@@ -268,7 +268,7 @@ describe("Payments Approval", () => {
     expect(details.getByText("ABC Technologies")).toBeTruthy();
     expect(details.getByText("Procurement — Rajesh")).toBeTruthy();
     expect(details.getByText("Back Office")).toBeTruthy(); // the Department: a budget head
-    expect(details.getByText("Raw Material Purchase")).toBeTruthy(); // the Payment Purpose
+    expect(details.getByText("Raw Material – Other than Oil (incl. Ghee)")).toBeTruthy(); // the Payment Purpose
     const bills = screen.getByRole("heading", { name: /Bills & Amounts/ }).closest("section")!;
     expect(within(bills).getByText("10256")).toBeTruthy();
     expect(within(bills).getByText("₹97,500")).toBeTruthy();

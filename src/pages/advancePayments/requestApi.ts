@@ -32,6 +32,7 @@ import {
   EMPTY_FORM,
   allocationRows,
   allocationTotals,
+  needsDepartmentHead,
   resolveCase,
   type Allocation,
   type ReferenceKind,
@@ -131,6 +132,7 @@ export function toApiRequest(form: RequestForm): ApiRequestInput {
     owner_label: form.ownership,
     budget_code: form.budget,
     purpose_code: form.purpose,
+    department_head_code: needsDepartmentHead(form) && form.departmentHead ? form.departmentHead : null,
   };
 }
 
@@ -218,6 +220,12 @@ export function formFromApi(api: ApiRequest): RequestForm {
     budgetName: api.budget_name ?? "",
     purpose: api.purpose_code ?? "",
     purposeLabel: api.purpose_label ?? "",
+    // The form re-reads it from the purpose list once that loads; a head on
+    // the request says its purpose needed one when it was raised.
+    purposeNeedsHead: Boolean(api.department_head_employee),
+    departmentHead: api.department_head_employee?.employee_code ?? "",
+    departmentHeadName: api.department_head_employee?.employee_name ?? "",
+    departmentHeadLogin: api.department_head?.username ?? "",
     ownership: api.owner_label,
     paymentDate: api.payment_date ?? "",
     remarks: api.remarks,

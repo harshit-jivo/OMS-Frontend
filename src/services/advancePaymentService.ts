@@ -130,6 +130,19 @@ export interface PaymentPurpose {
   code: string;
   label: string;
   group: string;
+  /** Outside Mart, approved by the Department Head the requester picks. */
+  needs_head?: boolean;
+}
+
+/**
+ * Someone who may be picked as a request's Department Head: an HOD of the
+ * employee master, with the OMS login that approves for them (matched on the
+ * server), or null when none matches — then they cannot be submitted.
+ */
+export interface DepartmentHeadChoice {
+  employee_code: string;
+  employee_name: string;
+  user: ApiUser | null;
 }
 
 /** One active employee from the master, as the request form's pickers read it. */
@@ -733,6 +746,8 @@ export interface ApiRequestFields {
 
 /** What the form sends to raise or edit a request. */
 export interface ApiRequestInput extends ApiRequestFields {
+  /** The Department Head: an HOD's employee code; null where none is asked. */
+  department_head_code: string | null;
   documents: ApiRequestDocument[];
   /** Raised from a bill / PO sent to the creator: closes that assignment. */
   assignment_id?: number;
@@ -752,6 +767,10 @@ export interface ApiRequest extends ApiRequestFields {
   sub_budget_code: string;
   sub_budget_name: string;
   purpose_label: string;
+  /** The Department Head picked on the request (an HOD), or null where the route has none. */
+  department_head_employee: { employee_code: string; employee_name: string } | null;
+  /** Their OMS login: who approves at the Department Head stage. */
+  department_head: ApiUser | null;
   status: ApiRequestStatus;
   created_by: ApiUser;
   created_on: string;
@@ -1055,6 +1074,12 @@ export const advancePaymentService = {
   async paymentPurposes(): Promise<PaymentPurpose[]> {
     const res = await api.get(`${BASE}/payment-purposes/`);
     return results<PaymentPurpose>(res.data);
+  },
+
+  /** The employee master's HODs (by name or code), each with their OMS login, for the Department Head picker. */
+  async departmentHeads(search = ""): Promise<DepartmentHeadChoice[]> {
+    const res = await api.get(`${BASE}/department-heads/`, { params: search ? { search } : {} });
+    return results<DepartmentHeadChoice>(res.data);
   },
 
   /** Active employees from the master, for the request form's pickers. */

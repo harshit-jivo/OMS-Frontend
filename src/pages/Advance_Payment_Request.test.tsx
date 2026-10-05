@@ -24,6 +24,7 @@ import {
   SAP_VENDORS,
   SAP_BUDGETS,
   PAYMENT_PURPOSES,
+  DEPARTMENT_HEADS,
   SAP_CUSTOMERS,
   CUSTOMER_LEDGER,
   LEDGER,
@@ -97,6 +98,7 @@ vi.mock("../services/advancePaymentService", async (importOriginal) => {
       partnerBankAccounts: vi.fn(async () => []),
       employeeDirectory: vi.fn(directory),
       paymentPurposes: vi.fn(async () => PAYMENT_PURPOSES),
+      departmentHeads: vi.fn(async () => DEPARTMENT_HEADS),
       budgets: vi.fn(async () => SAP_BUDGETS),
       partnerLedger: vi.fn(async (_company: string, cardCode: string) =>
         cardCode === "CUSTA000846" ? CUSTOMER_LEDGER : LEDGER,
@@ -330,23 +332,23 @@ describe("Advance Payment Request", () => {
 
   it("asks the Department from SAP's budget heads, and the Payment Purpose from the desk's list", async () => {
     const user = await setup();
-    const department = () => field(/^Department/) as unknown as HTMLButtonElement;
+    const department = () => field(/^Department(?! Head)/) as unknown as HTMLButtonElement;
     expect(department().disabled).toBe(true); // budget heads are per company
     expect(screen.queryByLabelText(/^Sub-department/)).toBeNull();
     expect(screen.queryByLabelText(/Sub Budget/)).toBeNull();
 
     await start(user, "VENDOR", "Against Bill");
-    const heads = await openOptions(user, /^Department/);
+    const heads = await openOptions(user, /^Department(?! Head)/);
     expect(heads).toHaveLength(2); // budget heads only, never a sub budget
     expect(heads[0]).toMatch(/Back Office/);
     expect(heads[1]).toMatch(/Factory/);
     await user.keyboard("{Escape}");
-    await pick(user, /^Department/, /Back Office/);
+    await pick(user, /^Department(?! Head)/, /Back Office/);
     expect(department().textContent).toMatch(/Back Office/);
 
     const purposes = await openOptions(user, /^Payment Purpose/);
     expect(purposes.map((p) => p.replace(/(Goods|Services|People)$/, ""))).toEqual([
-      "Raw Material Purchase",
+      "Raw Material – Other than Oil (incl. Ghee)",
       "Rent",
       "Employee Advance",
     ]);
@@ -943,8 +945,8 @@ describe("Advance Payment Request", () => {
 
       // The rest is the requester's; the request then closes the assignment.
       await user.type(field(/^Payment amount for 10256/), "25000");
-      await pick(user, /^Department/, /Back Office/);
-      await pick(user, /^Payment Purpose/, /Raw Material Purchase/);
+      await pick(user, /^Department(?! Head)/, /Back Office/);
+      await pick(user, /^Payment Purpose/, /Raw Material – Other than Oil/);
       await pick(user, /^Ownership/, /Arvinder/);
       await user.type(field(/^Payment Date/), "2026-10-01");
       await user.type(field(/^Remarks/), "As sent");
@@ -1106,8 +1108,8 @@ describe("Advance Payment Request", () => {
       await waitForBills();
       await tick(user, /^Bills/, /10256/);
       await user.type(field(/^Payment amount for 10256/), "25000");
-      await pick(user, /^Department/, /Back Office/);
-      await pick(user, /^Payment Purpose/, /Raw Material Purchase/);
+      await pick(user, /^Department(?! Head)/, /Back Office/);
+      await pick(user, /^Payment Purpose/, /Raw Material – Other than Oil/);
       await pick(user, /^Ownership/, /Arvinder/);
       await user.type(field(/^Payment Date/), "2026-10-01");
       await user.type(field(/^Remarks/), "Mobilisation advance");
@@ -1139,6 +1141,36 @@ describe("Advance Payment Request", () => {
       });
     });
 
+    it("asks the Department Head only where the purpose is approved by department, and sends who it is", async () => {
+      const user = await open();
+      await user.click(screen.getByRole("tab", { name: /New Request/ }));
+      await start(user, "VENDOR", "Against Bill");
+      await pick(user, /^Payment Purpose/, /Raw Material – Other than Oil/);
+      expect(screen.queryByLabelText(/^Department Head/)).toBeNull(); // a fixed owner approves it
+
+      await pick(user, /^Payment Purpose/, /^Rent/);
+      await pick(user, /^Business Partner/, /ABC Technologies/);
+      await waitForBills();
+      await tick(user, /^Bills/, /10256/);
+      await user.type(field(/^Payment amount for 10256/), "25000");
+      await pick(user, /^Department(?! Head)/, /Back Office/);
+      await pick(user, /^Ownership/, /Arvinder/);
+      await user.type(field(/^Payment Date/), "2026-10-01");
+      await user.type(field(/^Remarks/), "Office rent");
+      await user.click(screen.getByRole("button", { name: "Submit Request" }));
+      expect(await screen.findByText(/Still needed: Department Head/)).toBeTruthy();
+
+      // The HODs of the employee master; one with no OMS login cannot approve it.
+      await pick(user, /^Department Head/, /Arshdeep Singh/);
+      expect(screen.getAllByText(/Arshdeep Singh has no OMS login to approve with/).length).toBeGreaterThan(0);
+      await pick(user, /^Department Head/, /Jasbir Singh Raju/);
+      expect(advancePaymentService.departmentHeads).toHaveBeenCalled();
+      await user.click(screen.getByRole("button", { name: "Submit Request" }));
+      await screen.findByText(/AP-2026-0015 raised/);
+      const [input] = vi.mocked(advancePaymentService.createRequest).mock.calls.at(-1)!;
+      expect(input).toMatchObject({ purpose_code: "RENT", department_head_code: "JWPL000C" });
+    });
+
     it("shows the server's refusal above the buttons, and keeps the form", async () => {
       const user = await open();
       await user.click(screen.getByRole("tab", { name: /New Request/ }));
@@ -1150,8 +1182,9 @@ describe("Advance Payment Request", () => {
       await answer(user, /^Payment Against/, "Tools");
       await pick(user, /^Employee/, /RAVINDER SINGH SHUNTY/);
       await user.type(field(/^Amount/), "5000");
-      await pick(user, /^Department/, /Back Office/);
+      await pick(user, /^Department(?! Head)/, /Back Office/);
       await pick(user, /^Payment Purpose/, /Employee Advance/);
+      await pick(user, /^Department Head/, /Nirmal Didi/);
       await pick(user, /^Ownership/, /Arvinder/);
       await user.type(field(/^Payment Date/), "2026-10-01");
       await user.type(field(/^Remarks/), "Tools for the site");

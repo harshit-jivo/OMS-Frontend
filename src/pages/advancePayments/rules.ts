@@ -128,6 +128,20 @@ export interface RequestForm {
   /** Payment Purpose: what the money is for, a code of the Payment Desk's list. */
   purpose: string;
   purposeLabel: string;
+  /**
+   * The purpose is approved "by department" (its `needs_head`): the request
+   * then names a Department Head. Set with the purpose, from the list.
+   */
+  purposeNeedsHead: boolean;
+  /**
+   * The Department Head: an HOD of the employee master, by employee code,
+   * with their name. Asked only when `needsDepartmentHead`. They approve
+   * through the OMS login the server matched to them (`departmentHeadLogin`,
+   * a username); an HOD with none cannot be submitted.
+   */
+  departmentHead: string;
+  departmentHeadName: string;
+  departmentHeadLogin: string;
   /** Who owns this request: a HOD or Sub-HOD, for information only. */
   ownership: string;
   paymentDate: string;
@@ -156,6 +170,10 @@ export const EMPTY_FORM: RequestForm = {
   budgetName: "",
   purpose: "",
   purposeLabel: "",
+  purposeNeedsHead: false,
+  departmentHead: "",
+  departmentHeadName: "",
+  departmentHeadLogin: "",
   ownership: "",
   paymentDate: "",
   remarks: "",
@@ -492,6 +510,26 @@ export function resolveCase(form: RequestForm): ResolvedCase {
   };
 }
 
+/* ── Who approves ────────────────────────────────────────────────────────── */
+
+/** Employee and Imprest requests always go to the requester's Department Head. */
+const HEAD_TYPES: ReadonlyArray<PartnerType> = ["EMPLOYEE_ADVANCE", "EMPLOYEE_IMPREST"];
+
+/**
+ * Whether the request names a Department Head, who approves it: outside Mart,
+ * an Employee or Imprest request, or a purpose approved "by department".
+ * The server applies the same rule (`purposes.needs_department_head`).
+ */
+export function needsDepartmentHead(form: RequestForm): boolean {
+  if (!form.company || form.company === "MART") return false;
+  return (form.type !== "" && HEAD_TYPES.includes(form.type)) || form.purposeNeedsHead;
+}
+
+/** An HOD picked who has no OMS login: they could not approve it. */
+export function departmentHeadLoginError(name: string): string {
+  return `${name || "That Department Head"} has no OMS login to approve with. Choose another, or ask an administrator to create one.`;
+}
+
 /* ── Changing an answer, and what it invalidates ─────────────────────────── */
 
 const CLEARED_DOCUMENTS = { selected: [] as OpenDocument[], allocations: {} } as const;
@@ -579,6 +617,11 @@ export function sanitize(form: RequestForm): RequestForm {
   // Typed answers live only as long as the "other" choice they describe.
   if (next.paymentAgainst !== "OTHER") next.paymentAgainstOther = "";
   if (next.returnMethod !== "CUSTOM") next.returnMethodOther = "";
+  if (!needsDepartmentHead(next)) {
+    next.departmentHead = "";
+    next.departmentHeadName = "";
+    next.departmentHeadLogin = "";
+  }
 
   return next;
 }
@@ -983,6 +1026,10 @@ export function validate(form: RequestForm, today: string = todayIso()): Validat
   if (c.decided && !form.partner) missing.push(c.partnerLabel);
   if (!form.budget) missing.push("Department");
   if (!form.purpose) missing.push("Payment Purpose");
+  if (needsDepartmentHead(form)) {
+    if (!form.departmentHead) missing.push("Department Head");
+    else if (!form.departmentHeadLogin) problems.push(departmentHeadLoginError(form.departmentHeadName));
+  }
   if (c.expectedDate && !form.expectedDate) missing.push("Expected Bill Date");
   const poDate = c.expectedDate
     ? pastDateError("Expected Bill Date", form.expectedDate, today)

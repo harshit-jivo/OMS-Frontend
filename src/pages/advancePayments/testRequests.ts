@@ -102,9 +102,16 @@ export function logRow(action: string, label: string, extra: Partial<ApiRequestL
   };
 }
 
+/** The Department Head (HOD) an Employee or Imprest request names, and their login. */
+export const HEAD = { employee_code: "TEMP0001", employee_name: "Nirmal Didi" };
+export const HEAD_LOGIN = { id: 31, name: "Nirmal Didi Ji", username: "nirmal" };
+
 /** A request as `GET /requests/<id>/` answers, with sensible defaults. */
 export function apiRequest(id: number, fields: Partial<ApiRequest> = {}): ApiRequest {
+  const staff = fields.request_type === "EMPLOYEE_ADVANCE" || fields.request_type === "EMPLOYEE_IMPREST";
   return {
+    department_head_employee: staff ? HEAD : null,
+    department_head: staff ? HEAD_LOGIN : null,
     id,
     request_no: `AP-2026-${String(id).padStart(4, "0")}`,
     company: "OIL",
@@ -135,7 +142,7 @@ export function apiRequest(id: number, fields: Partial<ApiRequest> = {}): ApiReq
     sub_budget_code: "",
     sub_budget_name: "",
     purpose_code: "RAW_MATERIAL",
-    purpose_label: "Raw Material Purchase",
+    purpose_label: "Raw Material – Other than Oil (incl. Ghee)",
     status: "IN_APPROVAL",
     created_by: OTHER,
     created_on: "2026-09-22T10:42:00+05:30",

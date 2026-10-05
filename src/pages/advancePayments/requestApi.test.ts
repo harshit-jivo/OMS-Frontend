@@ -15,7 +15,7 @@ const COMMON: Partial<RequestForm> = {
   budget: "BackOff",
   budgetName: "Back Office",
   purpose: "RAW_MATERIAL",
-  purposeLabel: "Raw Material Purchase",
+  purposeLabel: "Raw Material – Other than Oil (incl. Ghee)",
   ownership: "Preshit Singh (JWPL0030)",
   paymentDate: "2026-10-01",
   remarks: "Part settlement",
