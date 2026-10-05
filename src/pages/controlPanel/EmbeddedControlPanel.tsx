@@ -80,7 +80,7 @@ export function EmbeddedControlPanel({
   const { session } = useAuth();
   const from = (location.state as { from?: Required<ControlPanelCrumb> } | null)?.from;
   const group = CONTROL_PANEL_PAGES.find(
-    (p) => p.label !== title && p.subTabs.some((s) => s.to === location.pathname),
+    (p) => p.label !== title && p.subPages.some((s) => s.to === location.pathname),
   );
   const parent: ControlPanelCrumb | undefined =
     from ??

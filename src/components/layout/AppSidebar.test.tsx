@@ -288,11 +288,13 @@ describe("AppSidebar", () => {
   it("renders every link in the table when nothing is denied", () => {
     renderRail();
 
-    // A section with a `tree` (the Control Panel) is drawn as one collapsible
-    // row: its rows are the tree's — pages AND their inner tabs — and they
-    // appear once it is opened.
+    // A section with a `tree` (the Control Panel) draws each group as its own
+    // collapsible row; its rows — pages AND their inner tabs — appear once
+    // the group is opened.
     for (const section of SIDEBAR_SECTIONS.filter((s) => s.tree)) {
-      fireEvent.click(screen.getByRole("button", { name: section.label }));
+      for (const group of section.tree!.groups) {
+        fireEvent.click(screen.getByRole("button", { name: group.heading }));
+      }
     }
     const total = SIDEBAR_SECTIONS.reduce(
       (n, s) => n + (s.tree ? s.tree.groups.reduce((m, g) => m + g.links.length, 0) : s.links.length),

@@ -10,7 +10,6 @@ import { HiOutlineShieldCheck, HiOutlineXMark } from "react-icons/hi2";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
-import { ControlPanelPermissions } from "@/components/admin/ControlPanelPermissions";
 import { PermissionGrid, PermissionToggle } from "@/components/admin/PermissionToggle";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { MultiSelect, type MultiSelectOption } from "@/components/ui/dropdown";
@@ -26,6 +25,7 @@ import {
 } from "@/components/ui/page";
 import { Skeleton } from "@/components/ui/skeleton";
 import { showToast } from "@/lib/toastStore";
+import { CONTROL_PANEL_PAGES } from "../config/controlPanelAccess";
 import { userService } from "../services/userService";
 import type { User } from "../services/userService";
 import { useUserList } from "../lib/authQueries";
@@ -370,20 +370,24 @@ export default function Page_Permissions() {
         </Card>
       </section>
 
-      {/* Control Panel — four pages, each granted per sub-tab. */}
+      {/* Control Panel — four pages, one permission each; a page opens with all
+          of its sub-pages (config/controlPanelAccess.ts). */}
       <section className="space-y-3">
         <SectionHeading>Control Panel</SectionHeading>
         <Card>
           {nonAdminSelected.length === 0 ? (
             <p className="m-0 text-[13px] text-subtle">{pickerHint}</p>
           ) : (
-            <>
-              <p className="m-0 mb-3 text-[12px] text-subtle">
-                Tick a page for all of its sub-tabs, or just the sub-tabs this user should see.
-                Any sub-tab opens its page, showing only the sub-tabs ticked here.
-              </p>
-              <ControlPanelPermissions selected={pages} onChange={setPages} />
-            </>
+            <PermissionGrid>
+              {CONTROL_PANEL_PAGES.map((page) => (
+                <PermissionToggle
+                  key={page.key}
+                  title={page.label}
+                  checked={pages.includes(page.key)}
+                  onChange={() => togglePage(page.key)}
+                />
+              ))}
+            </PermissionGrid>
           )}
         </Card>
       </section>
