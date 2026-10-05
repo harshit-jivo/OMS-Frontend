@@ -193,9 +193,8 @@ export const ORDER_SCOPE_PERMISSIONS: GrantablePage[] = [
 export const ORDER_SCOPE_KEYS = ORDER_SCOPE_PERMISSIONS.map((p) => p.key);
 
 /**
- * Control Panel keys — four pages, per sub-tab, plus the segment limit and the
- * AI assistant. Structure in config/controlPanelAccess.ts; the Page Permissions
- * screen draws them as a tree, not as rows of the page grid.
+ * Control Panel keys — four pages, one permission each, each opening all of
+ * its sub-pages. Structure in config/controlPanelAccess.ts.
  */
 export { CONTROL_PANEL_KEYS };
 

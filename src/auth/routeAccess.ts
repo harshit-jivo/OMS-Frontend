@@ -22,7 +22,7 @@
 import { normalizeRole, type Session } from "./permissions";
 import { can, isAdmin } from "./permissions";
 import { trackerPagesFor } from "../config/pageAccess";
-import { CONTROL_PANEL_ACCESS_KEYS, controlPanelKeysFor } from "../config/controlPanelAccess";
+import { CONTROL_PANEL_KEYS, controlPanelKeysFor } from "../config/controlPanelAccess";
 
 export interface RouteAccess {
   /** No session required at all. */
@@ -127,16 +127,15 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
 
   // --- Control Panel ------------------------------------------------------
   /*
-   * Four pages granted per sub-tab (config/controlPanelAccess.ts, mirroring
-   * backend control_panel/permissions.py): a route opens for any sub-tab it
-   * shows, and the server enforces the same again — page guard for the page,
-   * the templates for its inner tabs. No role fallback: a role list would hand
-   * payroll figures to a whole desk.
+   * Four pages, one key each (config/controlPanelAccess.ts, mirroring backend
+   * control_panel/permissions.py): a route opens for its page's key, and the
+   * server enforces the same again (page guard). No role fallback: a role
+   * list would hand payroll figures to a whole desk.
    *
    * `/Control_Panel` opens for any of them: it forwards to the first page the
    * user can open, as C_Panel's own `/` does.
    */
-  "/Control_Panel": { permissions: CONTROL_PANEL_ACCESS_KEYS },
+  "/Control_Panel": { permissions: CONTROL_PANEL_KEYS },
   "/Control_Panel/Realise": { permissions: controlPanelKeysFor("/Control_Panel/Realise") },
   "/Control_Panel/Sales_Channel": { permissions: controlPanelKeysFor("/Control_Panel/Sales_Channel") },
   "/Control_Panel/Beverages": { permissions: controlPanelKeysFor("/Control_Panel/Beverages") },
