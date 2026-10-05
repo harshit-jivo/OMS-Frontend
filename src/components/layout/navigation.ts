@@ -265,7 +265,7 @@ export const SIDEBAR_SECTIONS: SidebarSectionDef[] = [
         {
           heading: "Sales",
           links: [
-            { to: "/Control_Panel/Sales_Channel", label: "Sales Channel Dashboard", icon: HiOutlinePresentationChartLine },
+            { to: "/Control_Panel/Sales_Channel", label: "Sales Channel", icon: HiOutlinePresentationChartLine },
             { to: "/Control_Panel/Beverages", label: "Beverages Sale", icon: HiOutlineBeaker },
             { to: "/Control_Panel/Realise_Dashboard", label: "Realise Dashboard", icon: HiOutlineTableCells },
             { to: "/Control_Panel/Sales", label: "Sales", icon: HiOutlineChartBar },
