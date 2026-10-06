@@ -26,8 +26,10 @@ import { Badge } from "../../components/ui/badge";
 import { AttachmentReadingTable } from "./AttachmentReading";
 import { formatSize } from "./attachments";
 import { PAYMENT_MODES } from "./constants";
-import { SapAttachmentLink } from "./SapAttachmentLink";
-import { STATUS_LABEL, formatDateTime, priorityLabel } from "./requestLabels";
+import { DocumentHistory } from "./DocumentHistory";
+import { SapAttachmentLink, SapAttachmentList } from "./SapAttachmentLink";
+import { historyTargetOf, sapDocumentOf } from "./sapMapping";
+import { STATUS_LABEL, formatDateTime } from "./requestLabels";
 import {
   REFERENCE_KINDS,
   allocationRows,
@@ -105,19 +107,15 @@ export function RequestSummary({ entry }: { entry: AdvanceRequestEntry }) {
             )}
           </>
         ) : null}
-        <DetailField label="Department" value={form.departmentName} />
-        <DetailField label="Sub-department" value={form.subDepartmentName} />
+        {/* The budget head; a request raised before budget heads shows its old OMS department. */}
         <DetailField
-          label="Payment Purpose"
-          value={
-            form.budget
-              ? `${form.budgetName || form.budget} / ${form.subBudgetName || form.subBudget}`
-              : ""
-          }
+          label="Department"
+          value={form.budgetName || form.budget || entry.api.department?.name || ""}
         />
+        <DetailField label="Payment Purpose" value={form.purposeLabel || form.purpose} />
+        {form.departmentHead ? <DetailField label="Department Head" value={form.departmentHeadName} /> : null}
         <DetailField label="Ownership" value={form.ownership} />
         <DetailField label="Payment Date" value={form.paymentDate ? formatDate(form.paymentDate) : ""} />
-        <DetailField label="Priority" value={priorityLabel(entry)} />
         <DetailField label="Remarks" value={form.remarks} span="full" />
       </DetailGrid>
 
@@ -188,11 +186,20 @@ export function DocumentLines({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {dueFirst(rows, (row) => row.document).map(({ document: doc, allocation, calc }) => (
+          {dueFirst(rows, (row) => row.document).map(({ document: doc, allocation, calc }) => {
+            const source = sapDocumentOf(doc, entry.form.company);
+            const history = historyTargetOf(doc, entry.form.company);
+            const debit = doc.ledger?.direction === "DEBIT";
+            return (
             <React.Fragment key={doc.id}>
             <TableRow data-due={dueLabel(doc) ? "true" : undefined} className={dueLabel(doc) ? "bg-bad-soft/40" : undefined}>
               <TableCell className="font-semibold text-ink">
                 {doc.number}
+                {doc.ledger ? (
+                  <span className="ml-1.5 align-middle">
+                    <Badge tone={debit ? "hold" : "ok"}>{debit ? "Dr" : "Cr"}</Badge>
+                  </span>
+                ) : null}
                 {dueLabel(doc) ? (
                   <span className="ml-1.5 align-middle">
                     <Badge tone="bad">{dueLabel(doc)}</Badge>
@@ -216,9 +223,29 @@ export function DocumentLines({
                   : ""}
               </TableCell>
               <TableCell className="text-right font-semibold tabular-nums text-ink">
-                {calc.payment !== null ? formatINR(calc.payment) : "—"}
+                {calc.payment !== null ? `${debit ? "− " : ""}${formatINR(calc.payment)}` : "—"}
               </TableCell>
             </TableRow>
+            {source ? (
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={5}>
+                  <p className="m-0 mb-1.5 text-[11.5px] font-semibold uppercase tracking-[0.06em] text-subtle">
+                    {doc.number}&apos;s SAP attachments
+                  </p>
+                  <SapAttachmentList {...source} />
+                </TableCell>
+              </TableRow>
+            ) : null}
+            {history ? (
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={5}>
+                  <p className="m-0 mb-1.5 text-[11.5px] font-semibold uppercase tracking-[0.06em] text-subtle">
+                    OMS payments against {doc.number}
+                  </p>
+                  <DocumentHistory target={history} />
+                </TableCell>
+              </TableRow>
+            ) : null}
             {showReading && doc.attachment ? (
               <TableRow className="hover:bg-transparent">
                 <TableCell colSpan={5} className="bg-surface">
@@ -230,7 +257,8 @@ export function DocumentLines({
               </TableRow>
             ) : null}
             </React.Fragment>
-          ))}
+            );
+          })}
           <TableRow className="bg-surface hover:bg-surface">
             <TableCell className="font-semibold text-ink" colSpan={2}>
               Total

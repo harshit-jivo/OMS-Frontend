@@ -8,6 +8,7 @@
  * ₹1,00,000 paid, so ₹1,50,000 open — so the examples in the specs still hold.
  */
 import type {
+  PaymentPurpose,
   SapBudget,
   SapCashAccount,
   SapEmployee,
@@ -123,6 +124,7 @@ const other = (
   open: string,
 ): SapLedgerDocument => ({
   trans_id: null,
+  line_id: null,
   doc_type_code,
   doc_type,
   doc_entry,
@@ -273,6 +275,65 @@ export const SAP_BUDGETS: SapBudget[] = [
   { kind: "SUB_BUDGET", code: "Accounts", name: "Accounts" },
   { kind: "SUB_BUDGET", code: "IT", name: "IT" },
 ];
+
+/** A slice of the Payment Desk's purpose list, as `/payment-purposes/` answers. */
+export const PAYMENT_PURPOSES: PaymentPurpose[] = [
+  { code: "RAW_MATERIAL", label: "Raw Material – Other than Oil (incl. Ghee)", group: "Goods", needs_head: false },
+  { code: "RENT", label: "Rent", group: "Services", needs_head: true },
+  { code: "EMP_ADVANCE", label: "Employee Advance", group: "People", needs_head: true },
+];
+
+/** The employee master's HODs and their logins, as `/department-heads/` answers. */
+export const DEPARTMENT_HEADS = [
+  { employee_code: "TEMP0001", employee_name: "Nirmal Didi", user: { id: 31, name: "Nirmal Didi Ji", username: "nirmal" } },
+  { employee_code: "JWPL000C", employee_name: "Jasbir Singh Raju",
+    user: { id: 32, name: "Jasvir Singh (Raju)", username: "Raju Vg" } },
+  { employee_code: "JWPL3005", employee_name: "Arshdeep Singh", user: null },
+];
+
+/** SAP's customers, as `/customers/` answers. */
+export const SAP_CUSTOMERS: SapVendor[] = [vendor("CUSTA000846", "ISHWER CHAND & SONS")];
+
+/**
+ * Ishwer Chand's open ledger: they paid 100 (a receipt, Cr), were invoiced 80
+ * (Dr), and an earlier payment out to them is not something a refund is
+ * applied to. A second receipt is already held in full by another request.
+ */
+export const CUSTOMER_LEDGER = {
+  summary: {
+    open_count: 4, open_debit: "80.000000", open_credit: "150.000000", net_open: "-70.000000",
+    net_open_means: "negative = the customer is in advance", overdue_count: 0,
+  },
+  results: [
+    {
+      trans_id: 210827, line_id: 1, doc_type_code: 24, doc_type: "Incoming Payment", doc_entry: 210827,
+      doc_num: "626210827", party_ref: "UTR778", document_date: "2026-09-01", posting_date: "2026-09-01",
+      due_date: "2026-09-01", direction: "CREDIT" as const, total_amount: "100.000000",
+      open_amount: "100.000000", settled_amount: "0.000000", currency: "", remarks: "",
+      oms: { reserved: "0", paid: "0", available: "100", requests: 0 },
+    },
+    {
+      trans_id: 211203, line_id: 0, doc_type_code: 13, doc_type: "A/R Invoice", doc_entry: 74506,
+      doc_num: "626050737", party_ref: "", document_date: "2026-09-05", posting_date: "2026-09-05",
+      due_date: "2026-10-05", direction: "DEBIT" as const, total_amount: "80.000000",
+      open_amount: "80.000000", settled_amount: "0.000000", currency: "", remarks: "",
+      oms: { reserved: "0", paid: "0", available: "80", requests: 0 },
+    },
+    {
+      trans_id: 212000, line_id: 1, doc_type_code: 24, doc_type: "Incoming Payment", doc_entry: 212000,
+      doc_num: "626212000", party_ref: "", document_date: "2026-09-08", posting_date: "2026-09-08",
+      due_date: "2026-09-08", direction: "CREDIT" as const, total_amount: "50.000000",
+      open_amount: "50.000000", settled_amount: "0.000000", currency: "", remarks: "",
+      oms: { reserved: "50", paid: "0", available: "0", requests: 1 },
+    },
+    {
+      trans_id: 9500, line_id: 0, doc_type_code: 46, doc_type: "Outgoing Payment", doc_entry: 2300,
+      doc_num: "926466002", party_ref: "", document_date: "2026-08-10", posting_date: "2026-08-10",
+      due_date: "2026-08-10", direction: "DEBIT" as const, total_amount: "5.000000",
+      open_amount: "5.000000", settled_amount: "0.000000", currency: "", remarks: "",
+    },
+  ],
+};
 
 /** ABC Technologies' open ledger, as `/open-documents/` answers. */
 export const LEDGER = {

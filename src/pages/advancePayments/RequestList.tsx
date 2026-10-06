@@ -30,11 +30,9 @@ import {
 } from "./approvalData";
 import { COMPANIES } from "./constants";
 import {
-  PRIORITY_TONE,
   STATUS_LABEL,
   STATUS_TONE,
   formatDateTime,
-  priorityLabel,
   type CompanyFilter,
   type DeskCounts,
   type DeskFilter,
@@ -247,7 +245,6 @@ export function RequestTable({
           <TableHead>Payment Against</TableHead>
           <TableHead>Partner</TableHead>
           <TableHead className="text-right">Amount</TableHead>
-          <TableHead>Priority</TableHead>
           <TableHead>{status?.header ?? "Status"}</TableHead>
           <TableHead>
             <span className="sr-only">Action</span>
@@ -257,7 +254,7 @@ export function RequestTable({
       <TableBody>
         {entries.length === 0 ? (
           <TableRow className="hover:bg-transparent">
-            <TableCell colSpan={9} className="py-8 text-center text-subtle">
+            <TableCell colSpan={8} className="py-8 text-center text-subtle">
               {emptyText}
             </TableCell>
           </TableRow>
@@ -278,9 +275,6 @@ export function RequestTable({
                 <TableCell>{e.form.partnerName || e.form.partner}</TableCell>
                 <TableCell className="text-right font-semibold tabular-nums text-ink">
                   {formatINR(requestAmount(e.form))}
-                </TableCell>
-                <TableCell>
-                  <Badge tone={PRIORITY_TONE[e.form.priority]}>{priorityLabel(e)}</Badge>
                 </TableCell>
                 <TableCell>
                   {status ? (

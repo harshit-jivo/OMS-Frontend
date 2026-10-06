@@ -41,10 +41,15 @@ const LABEL: Record<string, string> = {
   owner: "Ownership",
   owner_label: "Ownership",
   owner_employee_id: "Ownership (employee id)",
-  budget: "Payment purpose (budget)",
-  budget_code: "Payment purpose (budget)",
-  sub_budget: "Payment purpose (sub budget)",
-  sub_budget_code: "Payment purpose (sub budget)",
+  // The budget head is the form's Department now; rows logged before then
+  // called it the payment purpose.
+  budget: "Department",
+  budget_code: "Department",
+  sub_budget: "Sub budget",
+  sub_budget_code: "Sub budget",
+  purpose: "Payment purpose",
+  purpose_code: "Payment purpose",
+  department_head: "Department Head",
   // The payment details (PAYOUT_UPDATED).
   beneficiary_name: "Beneficiary",
   to_account: "To account",

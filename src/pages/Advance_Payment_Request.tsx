@@ -14,6 +14,7 @@
  * same rule and the buttons only follow `api.can`.
  */
 import { useMemo, useState, type ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { HiChevronRight, HiOutlineBanknotes, HiPlus } from "react-icons/hi2";
 import { cn } from "@/lib/utils";
 
@@ -23,21 +24,21 @@ import { Button } from "../components/ui/button";
 import { Field, Textarea } from "../components/ui/form";
 import { Card, CardHeader, CardTitle, Notice, Page, PageHeader, StatRow } from "../components/ui/page";
 import { Tab, TabList } from "../components/ui/tabs";
-import { advancePaymentError, advancePaymentService } from "../services/advancePaymentService";
+import { advancePaymentError, advancePaymentService, type ApiAssignment } from "../services/advancePaymentService";
 
 import { AdvancePaymentForm } from "./advancePayments/AdvancePaymentForm";
+import { AssignedToMe } from "./advancePayments/AssignedToMe";
+import { useAssignedToMe } from "./advancePayments/assignments";
 import { requestAmount, type AdvanceRequestEntry } from "./advancePayments/approvalData";
 import type { FileAttachment } from "./advancePayments/attachments";
 import { PayoutDetailsForm } from "./advancePayments/PayoutDetailsForm";
 import { DecisionSummary, DocumentLines, RequestSummary } from "./advancePayments/RequestDetails";
 import {
   NO_FILTERS,
-  PRIORITY_TONE,
   STATUS_LABEL,
   STATUS_TONE,
   filterRequests,
   formatDateTime,
-  priorityLabel,
   requestCounts,
   type RequestFilterState,
   type StatusFilter,
@@ -48,7 +49,13 @@ import { toApiRequest } from "./advancePayments/requestApi";
 import { useRequestDetail, useRequestList, useStoreRequest } from "./advancePayments/requestQueries";
 import { formatINR, type RequestForm } from "./advancePayments/rules";
 
-type PageTab = "entries" | "create";
+type PageTab = "entries" | "create" | "assigned";
+
+/** The request form started from a bill / PO sent to this user. */
+interface Prefill {
+  form: RequestForm;
+  assignment: ApiAssignment;
+}
 
 const pageTitle = (
   <span className="flex items-center gap-2.5">
@@ -188,7 +195,6 @@ function EntryDetails({ id, onBack }: { id: number; onBack: () => void }) {
         badges={
           <>
             <Badge tone={STATUS_TONE[entry.status]}>{STATUS_LABEL[entry.status]}</Badge>
-            <Badge tone={PRIORITY_TONE[entry.form.priority]}>{priorityLabel(entry)} priority</Badge>
           </>
         }
         description={`Raised by ${entry.requestedBy} on ${formatDateTime(entry.requestedOn)} · ${formatINR(amount)}`}
@@ -306,6 +312,17 @@ function EntryDetails({ id, onBack }: { id: number; onBack: () => void }) {
                 readOnly
                 company={entry.form.company}
                 payeeCardCode={entry.form.type === "EMPLOYEE_ADVANCE" ? "" : entry.form.partner}
+                tds={
+                  entry.form.type === "VENDOR" && entry.form.company
+                    ? {
+                        company: entry.form.company,
+                        cardCode: entry.form.partner,
+                        bills: entry.form.selected
+                          .filter((d) => d.id.startsWith("PCH-"))
+                          .map((d) => Number(d.id.slice(4))),
+                      }
+                    : null
+                }
               />
             </Card>
           ) : null}
@@ -327,6 +344,9 @@ export default function Advance_Payment_Request() {
   const [filters, setFilters] = useState<RequestFilterState>(NO_FILTERS);
   const [openId, setOpenId] = useState<number | null>(null);
   const [notice, setNotice] = useState("");
+  const [prefill, setPrefill] = useState<Prefill | null>(null);
+  const assigned = useAssignedToMe();
+  const client = useQueryClient();
 
   // The cards count what the search and company filters leave, whatever the
   // status filter — a card must not read 0 just because it is not selected.
@@ -346,8 +366,16 @@ export default function Advance_Payment_Request() {
 
   const raise = async (form: RequestForm, files: FileAttachment[]) => {
     try {
-      const api = await advancePaymentService.createRequest(toApiRequest(form), newFiles(files));
+      const input = toApiRequest(form);
+      const api = await advancePaymentService.createRequest(
+        prefill ? { ...input, assignment_id: prefill.assignment.id } : input,
+        newFiles(files),
+      );
       const entry: AdvanceRequestEntry = store(api);
+      if (prefill) {
+        setPrefill(null);
+        void client.invalidateQueries({ queryKey: ["advance-payments", "assignments"] });
+      }
       // Straight back to the list, showing it where it now sits.
       setFilters({ ...NO_FILTERS, status: "PENDING" });
       setTab("entries");
@@ -365,7 +393,7 @@ export default function Advance_Payment_Request() {
       <Breadcrumbs
         items={[
           { label: "Payments" },
-          { label: tab === "entries" ? "Entries" : "New Request" },
+          { label: tab === "entries" ? "Entries" : tab === "assigned" ? "Assigned to Me" : "New Request" },
         ]}
       />
 
@@ -402,10 +430,25 @@ export default function Advance_Payment_Request() {
             Entries
           </Tab>
           <Tab
+            selected={tab === "assigned"}
+            onClick={() => {
+              setTab("assigned");
+              setNotice("");
+            }}
+          >
+            Assigned to Me
+            {assigned.data?.length ? (
+              <Badge tone="info" className="ml-1.5">
+                {assigned.data.length}
+              </Badge>
+            ) : null}
+          </Tab>
+          <Tab
             selected={tab === "create"}
             onClick={() => {
               setTab("create");
               setNotice("");
+              setPrefill(null);
             }}
           >
             <HiPlus aria-hidden /> New Request
@@ -417,9 +460,36 @@ export default function Advance_Payment_Request() {
         {tab === "entries" ? <RequestFilters value={filters} onChange={setFilters} /> : null}
       </div>
 
-      {tab === "create" ? (
+      {tab === "assigned" ? (
         <Card className="p-4 md:p-5">
-          <AdvancePaymentForm onCancel={() => setTab("entries")} onSubmit={raise} />
+          <AssignedToMe
+            onRaise={(form, assignment) => {
+              setPrefill({ form, assignment });
+              setTab("create");
+            }}
+          />
+        </Card>
+      ) : tab === "create" ? (
+        <Card className="p-4 md:p-5">
+          <AdvancePaymentForm
+            // A new prefill is a new form, not an edit of the last one.
+            key={prefill ? `assignment-${prefill.assignment.id}` : "blank"}
+            initial={prefill?.form}
+            intro={
+              prefill ? (
+                <Notice tone="info" title="Filled from SAP">
+                  {prefill.assignment.kind === "BILL" ? "Bill" : "PO"} {prefill.assignment.sap_doc_num} of{" "}
+                  {prefill.assignment.card_name}, sent by {prefill.assignment.assigned_by.name}. Fill in the
+                  payment amount and the rest.
+                </Notice>
+              ) : undefined
+            }
+            onCancel={() => {
+              setPrefill(null);
+              setTab("entries");
+            }}
+            onSubmit={raise}
+          />
         </Card>
       ) : (
         <Card className="p-4 md:p-5">

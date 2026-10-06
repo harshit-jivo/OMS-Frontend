@@ -31,6 +31,8 @@ import {
   EMPTY_ALLOCATION,
   EMPTY_FORM,
   allocationRows,
+  allocationTotals,
+  needsDepartmentHead,
   resolveCase,
   type Allocation,
   type ReferenceKind,
@@ -59,9 +61,18 @@ function docEntryOf(doc: OpenDocument): number {
   return Number(doc.id.split("-").pop());
 }
 
-const KIND_OF: Partial<Record<ReferenceKind, "BILL" | "PO">> = {
+const KIND_OF: Partial<Record<ReferenceKind, "BILL" | "PO" | "LEDGER">> = {
   VENDOR_BILL: "BILL",
   VENDOR_PO: "PO",
+  CUSTOMER_LEDGER: "LEDGER",
+};
+
+/** A ledger item's SAP object type, named. */
+const LEDGER_TYPE: Record<number, string> = {
+  13: "A/R Invoice",
+  14: "A/R Credit Memo",
+  24: "Incoming Payment",
+  30: "Journal Entry",
 };
 
 /* ── The request ─────────────────────────────────────────────────────────── */
@@ -72,7 +83,14 @@ export function toApiRequest(form: RequestForm): ApiRequestInput {
   const documents: ApiRequestDocument[] = kind
     ? allocationRows(form).map(({ document, allocation, calc }) => ({
         kind,
-        sap_doc_entry: docEntryOf(document),
+        sap_doc_entry: document.ledger?.entry ?? docEntryOf(document),
+        ...(document.ledger
+          ? {
+              sap_line: document.ledger.line,
+              sap_object: document.ledger.object,
+              direction: document.ledger.direction,
+            }
+          : {}),
         sap_doc_num: document.number,
         vendor_ref: document.reference ?? "",
         doc_date: document.date || null,
@@ -89,7 +107,8 @@ export function toApiRequest(form: RequestForm): ApiRequestInput {
         attachment_check: document.reading ?? null,
       }))
     : [];
-  const total = documents.reduce((sum, d) => sum + Math.round(Number(d.amount) * 100), 0) / 100;
+  // Signed for a refund: a ledger debit nets off, as SAP nets it.
+  const total = allocationTotals(allocationRows(form)).payment;
 
   return {
     company: form.company as AdvancePaymentCompany,
@@ -100,8 +119,6 @@ export function toApiRequest(form: RequestForm): ApiRequestInput {
     partner_name: form.partnerName,
     amount: kind ? String(total) : form.amount,
     documents,
-    department_id: form.department ? Number(form.department) : null,
-    sub_department_id: form.subDepartment ? Number(form.subDepartment) : null,
     expected_date: orNull(form.expectedDate),
     expected_bill_date: orNull(form.expectedBillDate),
     return_method: form.returnMethod,
@@ -111,15 +128,38 @@ export function toApiRequest(form: RequestForm): ApiRequestInput {
     expected_from_date: orNull(form.expectedFromDate),
     expected_to_date: orNull(form.expectedToDate),
     payment_date: orNull(form.paymentDate),
-    priority: form.priority,
     remarks: form.remarks,
     owner_label: form.ownership,
     budget_code: form.budget,
-    sub_budget_code: form.subBudget,
+    purpose_code: form.purpose,
+    department_head_code: needsDepartmentHead(form) && form.departmentHead ? form.departmentHead : null,
   };
 }
 
 function documentFromApi(doc: ApiRequestDocument, partner: string, company: AdvancePaymentCompany): OpenDocument {
+  if (doc.kind === "LEDGER") {
+    const object = doc.sap_object ?? 0;
+    const line = doc.sap_line ?? 0;
+    return {
+      id: `LDG-${object}-${doc.sap_doc_entry}-${line}`,
+      number: doc.sap_doc_num || String(doc.sap_doc_entry),
+      date: doc.doc_date ?? "",
+      partner,
+      original: number(doc.original_amount),
+      paid: number(doc.paid_amount),
+      open: number(doc.open_amount),
+      docType: LEDGER_TYPE[object],
+      note: doc.direction === "DEBIT" ? "Owed by the customer — reduces the refund" : "Owed to the customer",
+      reference: doc.vendor_ref || undefined,
+      dueDate: doc.due_date || undefined,
+      ledger: {
+        object,
+        entry: doc.sap_doc_entry,
+        line,
+        direction: doc.direction === "DEBIT" ? "DEBIT" : "CREDIT",
+      },
+    };
+  }
   const kind = doc.kind === "PO" ? "po" : "bill";
   return {
     id: `${doc.kind === "PO" ? "POR" : "PCH"}-${doc.sap_doc_entry}`,
@@ -176,18 +216,18 @@ export function formFromApi(api: ApiRequest): RequestForm {
     expectedFromDate: api.expected_from_date ?? "",
     expectedToDate: api.expected_to_date ?? "",
     expectedBillDate: api.expected_bill_date ?? "",
-    department: String(api.department.id),
-    departmentName: api.department.name,
-    subDepartment: api.sub_department ? String(api.sub_department.id) : "",
-    subDepartmentName: api.sub_department?.name ?? "",
-    hasSubDepartments: api.sub_department !== null,
     budget: api.budget_code ?? "",
     budgetName: api.budget_name ?? "",
-    subBudget: api.sub_budget_code ?? "",
-    subBudgetName: api.sub_budget_name ?? "",
+    purpose: api.purpose_code ?? "",
+    purposeLabel: api.purpose_label ?? "",
+    // The form re-reads it from the purpose list once that loads; a head on
+    // the request says its purpose needed one when it was raised.
+    purposeNeedsHead: Boolean(api.department_head_employee),
+    departmentHead: api.department_head_employee?.employee_code ?? "",
+    departmentHeadName: api.department_head_employee?.employee_name ?? "",
+    departmentHeadLogin: api.department_head?.username ?? "",
     ownership: api.owner_label,
     paymentDate: api.payment_date ?? "",
-    priority: api.priority,
     remarks: api.remarks,
   };
 }
@@ -254,6 +294,15 @@ export function payoutFromApi(payout: ApiPayout, files: ApiRequestFile[]): Payou
     toAccountNumber: payout.to_account_number,
     toIfsc: payout.to_ifsc,
     toAccountManual: payout.to_account_manual,
+    tds: payout.tds?.code
+      ? {
+          code: payout.tds.code,
+          label: payout.tds.label ?? "",
+          rate: Number(payout.tds.rate ?? 0),
+          account: payout.tds.account ?? "",
+          amount: Number(payout.tds.amount ?? 0),
+        }
+      : null,
     bankAttachments: files
       .filter((f) => f.purpose === "BANK_PROOF" && f.payout_line_id === null)
       .map(fileFromApi),
@@ -286,6 +335,8 @@ export function payoutToApi(payout: PayoutDetails): ApiPayout {
     to_account_number: payout.toAccountNumber,
     to_ifsc: payout.toIfsc,
     to_account_manual: payout.toAccountManual,
+    // Only the code goes: the server works out the rate, account and amount from SAP.
+    tds: payout.tds ? { code: payout.tds.code } : null,
     lines: payout.lines.map((line) => ({
       id: line.serverId,
       method: line.method,

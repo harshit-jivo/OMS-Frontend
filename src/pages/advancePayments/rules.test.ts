@@ -16,6 +16,7 @@ import {
   calculatePayment,
   changeAllocation,
   EMPTY_FORM,
+  needsDepartmentHead,
   expectedPeriodError,
   formatINR,
   installmentsFromEmi,
@@ -133,10 +134,10 @@ describe("the case table", () => {
     expect(c.expectedBillDate).toBe(false);
   });
 
-  it("Employee Imprest asks the expected bill date in every case", () => {
+  it("Employee Imprest asks the expected bill date, except against bills it already has", () => {
     for (const paymentAgainst of ["ADVANCE", "AGAINST_BILL", "OTHER"] as const) {
       const c = resolveCase(answer({ type: "EMPLOYEE_IMPREST" }, { paymentAgainst }));
-      expect(c.expectedBillDate, paymentAgainst).toBe(true);
+      expect(c.expectedBillDate, paymentAgainst).toBe(paymentAgainst !== "AGAINST_BILL");
       expect(c.repayment, paymentAgainst).toBe(false);
       expect(c.expectedDate, paymentAgainst).toBe(false);
     }
@@ -575,9 +576,7 @@ describe("repayment", () => {
 
 describe("validation", () => {
   const COMMON = {
-    department: "35", departmentName: "Finance", subDepartment: "92", subDepartmentName: "AP",
-    hasSubDepartments: true,
-    budget: "BackOff", budgetName: "Back Office", subBudget: "Accounts", subBudgetName: "Accounts",
+    budget: "BackOff", budgetName: "Back Office", purpose: "RAW_MATERIAL", purposeLabel: "Raw Material – Other than Oil (incl. Ghee)",
     ownership: "Finance desk", paymentDate: "2026-10-01", remarks: "Part settlement",
   };
 
@@ -620,15 +619,11 @@ describe("validation", () => {
     expect(validate(form).missing).toContain("Expected Bill Date");
   });
 
-  it("requires a Department, and a Sub-department only where the department has them", () => {
+  it("requires a Department: a budget head", () => {
     expect(validate(EMPTY_FORM).missing).toContain("Department");
-    const finance = answer({ department: "35", departmentName: "Finance", hasSubDepartments: true });
-    expect(validate(finance).missing).not.toContain("Department");
-    expect(validate(finance).missing).toContain("Sub-department");
-    expect(validate(answer({ ...finance, subDepartment: "92" })).missing).not.toContain("Sub-department");
-    // Cyber Security has no sub-departments: none is asked.
-    const cyber = answer({ department: "40", departmentName: "Cyber Security", hasSubDepartments: false });
-    expect(validate(cyber).missing).not.toContain("Sub-department");
+    const backOff = answer({ budget: "BackOff", budgetName: "Back Office" });
+    expect(validate(backOff).missing).not.toContain("Department");
+    expect(validate(backOff).missing).not.toContain("Sub-department");
   });
 
   it("requires Ownership, and a blank one does not count", () => {
@@ -741,13 +736,34 @@ function emiAdvanceForValidation(): RequestForm {
     { installments: "4" },
     { expectedFromDate: "2026-10-01", expectedToDate: "2026-10-15" },
     {
-      department: "24", departmentName: "HR", subDepartment: "56", subDepartmentName: "HR Payroll",
-      hasSubDepartments: true,
-      budget: "BackOff", budgetName: "Back Office", subBudget: "Accounts", subBudgetName: "Accounts",
+      budget: "BackOff", budgetName: "Back Office", purpose: "EMP_ADVANCE", purposeLabel: "Employee Advance",
+      departmentHead: "TEMP0001", departmentHeadName: "Nirmal Didi", departmentHeadLogin: "nirmal",
       ownership: "HR", paymentDate: "2026-09-30", remarks: "Relocation advance",
     },
   );
 }
+
+describe("the Department Head", () => {
+  it("is asked outside Mart for Employee and Imprest requests, and by-department purposes", () => {
+    const base = { ...EMPTY_FORM, company: "OIL" as const };
+    expect(needsDepartmentHead({ ...base, type: "EMPLOYEE_IMPREST" })).toBe(true);
+    expect(needsDepartmentHead({ ...base, type: "VENDOR", purposeNeedsHead: true })).toBe(true);
+    expect(needsDepartmentHead({ ...base, type: "VENDOR", purposeNeedsHead: false })).toBe(false);
+    expect(needsDepartmentHead({ ...base, company: "MART", type: "EMPLOYEE_ADVANCE", purposeNeedsHead: true }))
+      .toBe(false);
+  });
+
+  it("is required while asked, and dropped once it is not", () => {
+    const form = emiAdvanceForValidation();
+    expect(validate({ ...form, departmentHead: "" }).missing).toContain("Department Head");
+    // An HOD the server matched to no login cannot be submitted.
+    expect(validate({ ...form, departmentHeadLogin: "" }).problems).toEqual([
+      "Nirmal Didi has no OMS login to approve with. Choose another, or ask an administrator to create one.",
+    ]);
+    const vendor = applyChange(form, { type: "VENDOR" });
+    expect(vendor.departmentHead).toBe("");
+  });
+});
 
 /* ── EMI: installments and EMI amount, both ways ─────────────────────────── */
 
@@ -982,14 +998,17 @@ describe("due documents", () => {
   });
 
   it("asks for the Payment Purpose", () => {
-    const missing = validate(EMPTY_FORM).missing;
-    expect(missing).toContain("Payment Purpose (Budget)");
-    expect(missing).toContain("Payment Purpose (Sub Budget)");
+    expect(validate(EMPTY_FORM).missing).toContain("Payment Purpose");
+    expect(validate({ ...EMPTY_FORM, purpose: "RENT" }).missing).not.toContain("Payment Purpose");
   });
 
-  it("clears the Payment Purpose when the company changes: each company has its own budgets", () => {
-    const form = applyChange({ ...EMPTY_FORM, company: "OIL", budget: "BackOff", subBudget: "IT" }, { company: "MART" });
-    expect([form.budget, form.subBudget]).toEqual(["", ""]);
+  it("clears the Department when the company changes, but keeps the Payment Purpose", () => {
+    const form = applyChange(
+      { ...EMPTY_FORM, company: "OIL", budget: "BackOff", budgetName: "Back Office", purpose: "RENT", purposeLabel: "Rent" },
+      { company: "MART" },
+    );
+    expect([form.budget, form.budgetName]).toEqual(["", ""]);
+    expect([form.purpose, form.purposeLabel]).toEqual(["RENT", "Rent"]);
   });
 });
 

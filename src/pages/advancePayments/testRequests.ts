@@ -102,17 +102,24 @@ export function logRow(action: string, label: string, extra: Partial<ApiRequestL
   };
 }
 
+/** The Department Head (HOD) an Employee or Imprest request names, and their login. */
+export const HEAD = { employee_code: "TEMP0001", employee_name: "Nirmal Didi" };
+export const HEAD_LOGIN = { id: 31, name: "Nirmal Didi Ji", username: "nirmal" };
+
 /** A request as `GET /requests/<id>/` answers, with sensible defaults. */
 export function apiRequest(id: number, fields: Partial<ApiRequest> = {}): ApiRequest {
+  const staff = fields.request_type === "EMPLOYEE_ADVANCE" || fields.request_type === "EMPLOYEE_IMPREST";
   return {
+    department_head_employee: staff ? HEAD : null,
+    department_head: staff ? HEAD_LOGIN : null,
     id,
     request_no: `AP-2026-${String(id).padStart(4, "0")}`,
     company: "OIL",
     request_type: "VENDOR",
     payment_against: "AGAINST_BILL",
     payment_against_other: "",
-    department: { id: 35, name: "Finance" },
-    sub_department: { id: 92, name: "AP" },
+    department: null,
+    sub_department: null,
     partner_code: "VENDA000101",
     partner_name: "ABC Technologies",
     partner_not_in_sap: false,
@@ -127,14 +134,15 @@ export function apiRequest(id: number, fields: Partial<ApiRequest> = {}): ApiReq
     expected_from_date: null,
     expected_to_date: null,
     payment_date: "2026-09-25",
-    priority: "MEDIUM",
     remarks: "",
     owner_label: "Procurement — Rajesh",
     owner_employee_id: null,
     budget_code: "BackOff",
     budget_name: "Back Office",
-    sub_budget_code: "Accounts",
-    sub_budget_name: "Accounts",
+    sub_budget_code: "",
+    sub_budget_name: "",
+    purpose_code: "RAW_MATERIAL",
+    purpose_label: "Raw Material – Other than Oil (incl. Ghee)",
     status: "IN_APPROVAL",
     created_by: OTHER,
     created_on: "2026-09-22T10:42:00+05:30",
@@ -166,7 +174,6 @@ export function sampleRequests(): Array<Omit<Held, "approvedThisRound">> {
       at: 3,
       mine: ["Payment Approval"],
       api: apiRequest(14, {
-        priority: "HIGH",
         amount: "137500",
         remarks: "Part settlement of August invoices; balance next cycle.",
         documents: [
@@ -221,7 +228,6 @@ export function sampleRequests(): Array<Omit<Held, "approvedThisRound">> {
         partner_code: "VENDA000102",
         partner_name: "XYZ Traders",
         amount: "24500",
-        priority: "LOW",
         documents: [bill(10263, "75000", "24500")],
         created_on: "2026-09-20T11:18:00+05:30",
       }),
@@ -271,7 +277,6 @@ export function sampleRequests(): Array<Omit<Held, "approvedThisRound">> {
         partner_code: "VENDA000104",
         partner_name: "Shree Packaging Industries",
         amount: "50000",
-        priority: "HIGH",
         documents: [bill(10301, "50000", "50000")],
         created_on: "2026-09-16T14:55:00+05:30",
         last_decision: REJECTED_10,
@@ -404,15 +409,12 @@ export class FakeRequestServer {
     this.calls.push(["createRequest", input, files]);
     this.maybeRefuse();
     const id = Math.max(...this.held.map((h) => h.api.id)) + 1;
-    const { department_id, sub_department_id, ...fields } = input;
     const held: Held = {
       at: 0,
       mine: [],
       approvedThisRound: false,
       api: apiRequest(id, {
-        ...fields,
-        department: { id: department_id ?? 0, name: department_id === 40 ? "Cyber Security" : "Finance" },
-        sub_department: sub_department_id ? { id: sub_department_id, name: sub_department_id === 88 ? "AR" : "AP" } : null,
+        ...input,
         created_by: TESTER,
         created_on: "2026-09-23T10:00:00+05:30",
         files: files.map((f, i) => ({ id: 900 + i, name: f.name, size: f.size, purpose: "SUPPORTING" as const, payout_line_id: null, uploaded_by: TESTER, uploaded_on: null })),
@@ -430,18 +432,15 @@ export class FakeRequestServer {
     this.calls.push(["editRequest", id, input, options]);
     this.maybeRefuse();
     const held = this.find(id);
-    const { department_id, sub_department_id, ...fields } = input;
     // What the server's EDITED row holds, for the plain fields: {old, new}.
     const before = held.api as unknown as Record<string, unknown>;
     const changes: Record<string, { old: unknown; new: unknown }> = {};
-    for (const key of ["amount", "priority", "remarks", "payment_date"] as const) {
+    for (const key of ["amount", "remarks", "payment_date"] as const) {
       const was = before[key] ?? null;
-      const now = (fields as Record<string, unknown>)[key] ?? null;
+      const now = (input as unknown as Record<string, unknown>)[key] ?? null;
       if (now !== undefined && String(was ?? "") !== String(now ?? "")) changes[key] = { old: was, new: now };
     }
-    Object.assign(held.api, fields, {
-      department: { id: department_id ?? 0, name: held.api.department.name },
-      sub_department: sub_department_id ? { id: sub_department_id, name: held.api.sub_department?.name ?? "AP" } : null,
+    Object.assign(held.api, input, {
       files: held.api.files.filter((f) => !options.removeFileIds.includes(f.id)),
     });
     held.api.logs = [...(held.api.logs ?? []), logRow("EDITED", "Edited", { data: changes })];

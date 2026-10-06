@@ -51,13 +51,11 @@ import {
   COMPANIES,
   MAX_FILE_SIZE_MB,
   PARTNER_TYPES,
-  PRIORITIES,
   type Company,
   type OpenDocument,
   type Partner,
   type PartnerType,
   type PaymentAgainst,
-  type Priority,
   isNotInSap,
 } from "./constants";
 import {
@@ -73,8 +71,11 @@ import {
   allocationRows,
   allocationTotals,
   applyChange,
+  availableOf,
   changeAllocation,
+  departmentHeadLoginError,
   documentsFor,
+  needsDepartmentHead,
   plainAmountError,
   pastDateError,
   resolveCase,
@@ -86,6 +87,7 @@ import {
 import {
   employeeToPartner,
   invoiceToDocument,
+  ledgerToDocument,
   notInSapEmployeeToPartner,
   ownerLabel,
   otherToDocument,
@@ -105,94 +107,6 @@ function useDebounced<T>(value: T, ms: number): T {
     return () => window.clearTimeout(timer);
   }, [value, ms]);
   return settled;
-}
-
-/* ── Priority selector ───────────────────────────────────────────────────── */
-
-/**
- * Three cards, not a `SegmentedControl`.
- *
- * The segmented control is the right control for a filter — a compact strip
- * where one pill is filled. This is a form field standing beside other
- * inputs, and it carries a colour per option; rendered as a segment strip the
- * dots vanish and the row no longer lines up with the inputs either side of
- * it. It is a real `radiogroup` with arrow-key movement, so the semantics are
- * the segmented control's even though the skin is not.
- */
-function PrioritySelector({
-  value,
-  onChange,
-  labelledBy,
-}: {
-  value: Priority;
-  onChange: (next: Priority) => void;
-  labelledBy?: string;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-
-  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    const keys = ["ArrowRight", "ArrowLeft", "ArrowDown", "ArrowUp", "Home", "End"];
-    if (!keys.includes(event.key)) return;
-    const index = PRIORITIES.findIndex((option) => option.value === value);
-    const forward = event.key === "ArrowRight" || event.key === "ArrowDown";
-    const next =
-      event.key === "Home"
-        ? 0
-        : event.key === "End"
-          ? PRIORITIES.length - 1
-          : (index + (forward ? 1 : -1) + PRIORITIES.length) % PRIORITIES.length;
-    event.preventDefault();
-    onChange(PRIORITIES[next].value);
-    ref.current?.querySelectorAll<HTMLElement>('[role="radio"]')[next]?.focus();
-  };
-
-  return (
-    <div
-      ref={ref}
-      role="radiogroup"
-      aria-labelledby={labelledBy}
-      onKeyDown={onKeyDown}
-      className="grid grid-cols-3 gap-2.5"
-    >
-      {PRIORITIES.map((option) => {
-        const checked = option.value === value;
-        return (
-          <button
-            key={option.value}
-            type="button"
-            role="radio"
-            aria-checked={checked}
-            tabIndex={checked ? 0 : -1}
-            onClick={() => onChange(option.value)}
-            className={cn(
-              // Preflight is not imported in this app, so a bare <button>
-              // keeps the UA's outset border and grey face — hence the reset.
-              "appearance-none [font-family:inherit] cursor-pointer",
-              "flex h-control items-center justify-center gap-2 rounded-sm border",
-              "text-[13px] transition-colors",
-              "focus-visible:outline-none focus-visible:shadow-focus",
-              // Chosen: the tone's colour, filled, bolder, with a ring.
-              // Not chosen: no colour at all — see PRIORITIES in constants.
-              checked
-                ? cn("font-semibold ring-2", option.active)
-                : "border-line bg-card font-medium text-subtle hover:border-line-strong hover:text-body",
-            )}
-          >
-            <span
-              aria-hidden="true"
-              className={cn(
-                "grid size-4 shrink-0 place-items-center rounded-full border-2",
-                checked ? "border-current bg-current" : "border-line-strong",
-              )}
-            >
-              {checked ? <span className="size-1.5 rounded-full bg-card" /> : null}
-            </span>
-            {option.label}
-          </button>
-        );
-      })}
-    </div>
-  );
 }
 
 /* ── The form ────────────────────────────────────────────────────────────── */
@@ -235,7 +149,6 @@ export function AdvancePaymentForm({
   const [success, setSuccess] = useState("");
   const [saving, setSaving] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-  const priorityLabelId = React.useId();
 
   // What the current answers make visible. Cheap enough to derive per render,
   // and deriving it is what keeps it from ever disagreeing with `form`.
@@ -284,6 +197,10 @@ export function AdvancePaymentForm({
         ]);
         return [...inSap.map(employeeToPartner), ...notInSap.map(notInSapEmployeeToPartner)];
       }
+      // SAP's customers (CardType C): who a refund is paid to.
+      if (c.partnerSource === "SAP_CUSTOMERS") {
+        return (await advancePaymentService.customers(company!, search, SAP_MAX_ROWS)).map(vendorToPartner);
+      }
       // Vendors (VENDA) and imprest accounts (ORGV) share SAP's supplier
       // list. With nothing typed, SEARCH FOR THE PREFIX — the server returns
       // only that series; with a term, search the term. Either way keep only
@@ -314,33 +231,7 @@ export function AdvancePaymentForm({
         ]
       : partnerOptions;
 
-  /* ── Departments: OMS's own list, what the approval route is chosen by ── */
-
-  const departmentsQuery = useQuery({
-    queryKey: ["advance-payments", "departments"],
-    queryFn: () => advancePaymentService.departments(),
-    staleTime: 10 * 60_000,
-    retry: 1,
-  });
-  const departments = departmentsQuery.data ?? [];
-  const chosenDepartment = departments.find((d) => String(d.id) === form.department);
-  const departmentOptions = departments.map((d) => ({ value: String(d.id), label: d.name }));
-  // A request saved with a department no longer in the list keeps showing it.
-  if (form.department && !chosenDepartment) {
-    departmentOptions.unshift({ value: form.department, label: form.departmentName || form.department });
-  }
-  const subDepartmentOptions = (chosenDepartment?.sub_departments ?? []).map((sd) => ({
-    value: String(sd.id),
-    label: sd.name,
-  }));
-  if (form.subDepartment && !subDepartmentOptions.some((o) => o.value === form.subDepartment)) {
-    subDepartmentOptions.unshift({
-      value: form.subDepartment,
-      label: form.subDepartmentName || form.subDepartment,
-    });
-  }
-
-  /* ── Payment Purpose: the company's Budget and Sub Budget, from SAP ──── */
+  /* ── Department: the company's budget heads, from SAP ───────────────── */
 
   const budgetsQuery = useQuery({
     queryKey: ["advance-payments", "budgets", company],
@@ -349,21 +240,73 @@ export function AdvancePaymentForm({
     staleTime: 10 * 60_000,
     retry: 1,
   });
-  const budgetOptions = (kind: "BUDGET" | "SUB_BUDGET", chosen: string, chosenName: string) => {
-    const options = (budgetsQuery.data ?? [])
-      .filter((b) => b.kind === kind)
-      .map((b) => ({ value: b.code, label: b.name, hint: b.code === b.name ? "" : b.code }));
-    // A request saved with a code SAP no longer lists keeps showing it.
-    if (chosen && !options.some((o) => o.value === chosen)) {
-      options.unshift({ value: chosen, label: chosenName || chosen, hint: "" });
-    }
-    return options;
-  };
-  const budgetHint = !company
+  const departmentOptions = (budgetsQuery.data ?? [])
+    .filter((b) => b.kind === "BUDGET")
+    .map((b) => ({ value: b.code, label: b.name, hint: b.code === b.name ? "" : b.code }));
+  // A request saved with a budget head SAP no longer lists keeps showing it.
+  if (form.budget && !departmentOptions.some((o) => o.value === form.budget)) {
+    departmentOptions.unshift({ value: form.budget, label: form.budgetName || form.budget, hint: "" });
+  }
+  const departmentHint = !company
     ? "Choose the company first."
     : budgetsQuery.isError
       ? undefined
-      : "From SAP's cost centres.";
+      : "SAP's budget heads.";
+
+  /* ── Payment Purpose: the Payment Desk's list ───────────────────────── */
+
+  const purposesQuery = useQuery({
+    queryKey: ["advance-payments", "payment-purposes"],
+    queryFn: () => advancePaymentService.paymentPurposes(),
+    staleTime: 60 * 60_000,
+    retry: 1,
+  });
+  const purposeOptions = (purposesQuery.data ?? []).map((p) => ({
+    value: p.code,
+    label: p.label,
+    hint: p.group,
+  }));
+  // A request saved with a purpose since retired keeps showing it.
+  if (form.purpose && !purposeOptions.some((o) => o.value === form.purpose)) {
+    purposeOptions.unshift({ value: form.purpose, label: form.purposeLabel || form.purpose, hint: "" });
+  }
+  const purposeNeedsHead = (code: string) =>
+    Boolean(purposesQuery.data?.find((p) => p.code === code)?.needs_head);
+  // An edited request learns from the list whether its purpose is approved by
+  // department: the saved request only says whether a head was named.
+  const listedNeedsHead = purposesQuery.data ? purposeNeedsHead(form.purpose) : null;
+  useEffect(() => {
+    if (listedNeedsHead !== null && listedNeedsHead !== form.purposeNeedsHead) {
+      setForm((current) => applyChange(current, { purposeNeedsHead: listedNeedsHead }));
+    }
+  }, [listedNeedsHead, form.purposeNeedsHead]);
+
+  /* ── Department Head: an HOD of the employee master, with their login ─ */
+
+  const askHead = needsDepartmentHead(form);
+  const [headSearch, setHeadSearch] = useState("");
+  const settledHeadSearch = useDebounced(headSearch, 250);
+  const headsQuery = useQuery({
+    queryKey: ["advance-payments", "department-heads", settledHeadSearch],
+    queryFn: () => advancePaymentService.departmentHeads(settledHeadSearch),
+    enabled: askHead,
+    placeholderData: keepPreviousData,
+    staleTime: 60_000,
+    retry: 1,
+  });
+  const headChoices = headsQuery.data ?? [];
+  // Each HOD says which login approves for them, or that they have none.
+  const headOptions = headChoices.map((h) => ({
+    value: h.employee_code,
+    label: h.employee_name,
+    hint: h.user ? `${h.employee_code} · approves as ${h.user.username}` : `${h.employee_code} · No OMS login`,
+  }));
+  // The head already picked stays shown while a search lists other people.
+  if (form.departmentHead && !headOptions.some((o) => o.value === form.departmentHead)) {
+    headOptions.unshift({ value: form.departmentHead, label: form.departmentHeadName || form.departmentHead, hint: "" });
+  }
+  const headLoginError =
+    form.departmentHead && !form.departmentHeadLogin ? departmentHeadLoginError(form.departmentHeadName) : undefined;
 
   /* ── Owners: the employee master's HODs and Sub-HODs ─────────────────── */
 
@@ -395,6 +338,14 @@ export function AdvancePaymentForm({
         return (await advancePaymentService.openVendorPurchaseOrders(company!, form.partner)).map(
           (po) => purchaseOrderToDocument(po, company!),
         );
+      }
+      if (c.reference === "CUSTOMER_LEDGER") {
+        // The customer's open ledger items a refund can be applied to, less
+        // any that other OMS requests already hold in full.
+        const ledger = await advancePaymentService.partnerLedger(company!, form.partner);
+        return ledger.results
+          .map((doc) => ledgerToDocument(doc, form.partner))
+          .filter((doc): doc is OpenDocument => doc !== null && availableOf(doc) > 0);
       }
       if (c.reference === "VENDOR_OTHER") {
         return (await advancePaymentService.openOtherDocuments(company!, form.partner)).map(
@@ -756,79 +707,19 @@ export function AdvancePaymentForm({
           rows={rows}
           totals={totals}
           onAllocationChange={changeLine}
+          company={form.company}
         />
       ) : null}
 
       {/* ── Additional Information ────────────────────────────────── */}
       <FormSection title="Additional Information">
         <FormGrid className="md:grid-cols-3">
-          {/* The department decides the approval route: the workflow queries
-              match on it. */}
+          {/* The Department is SAP's budget head, and it decides the approval
+              route: the workflow queries match on its code. */}
           <Field
             label="Department"
             required
-            error={departmentsQuery.isError ? advancePaymentError(departmentsQuery.error) : undefined}
-          >
-            {(f) => (
-              <SearchSelect<string>
-                id={f.id}
-                value={form.department}
-                onChange={(next) => {
-                  const department = departments.find((d) => String(d.id) === next);
-                  // A new department starts its sub-department afresh.
-                  change({
-                    department: next,
-                    departmentName: department?.name ?? "",
-                    hasSubDepartments: Boolean(department?.sub_departments.length),
-                    subDepartment: "",
-                    subDepartmentName: "",
-                  });
-                }}
-                placeholder="Select department"
-                searchPlaceholder="Search department…"
-                emptyText="No department matches"
-                loading={departmentsQuery.isFetching}
-                options={departmentOptions}
-              />
-            )}
-          </Field>
-
-          <Field
-            label="Sub-department"
-            required={form.hasSubDepartments}
-            hint={
-              form.department && !form.hasSubDepartments
-                ? "This department has no sub-departments."
-                : !form.department
-                  ? "Pick a department first."
-                  : undefined
-            }
-          >
-            {(f) => (
-              <SearchSelect<string>
-                id={f.id}
-                value={form.subDepartment}
-                onChange={(next) =>
-                  change({
-                    subDepartment: next,
-                    subDepartmentName: subDepartmentOptions.find((o) => o.value === next)?.label ?? "",
-                  })
-                }
-                disabled={!form.department || !form.hasSubDepartments}
-                placeholder="Select sub-department"
-                searchPlaceholder="Search sub-department…"
-                emptyText="No sub-department matches"
-                options={subDepartmentOptions}
-              />
-            )}
-          </Field>
-
-          {/* What the money is for, in SAP's own terms: its Budget and Sub
-              Budget cost centres. */}
-          <Field
-            label="Payment Purpose (Budget)"
-            required
-            hint={budgetHint}
+            hint={departmentHint}
             error={budgetsQuery.isError ? advancePaymentError(budgetsQuery.error) : undefined}
           >
             {(f) => (
@@ -838,45 +729,77 @@ export function AdvancePaymentForm({
                 onChange={(next) =>
                   change({
                     budget: next,
-                    budgetName: budgetOptions("BUDGET", "", "").find((o) => o.value === next)?.label ?? "",
+                    budgetName: departmentOptions.find((o) => o.value === next)?.label ?? "",
                   })
                 }
                 disabled={!company}
-                placeholder="Select budget"
-                searchPlaceholder="Search budget…"
-                emptyText="No budget matches"
+                placeholder="Select department"
+                searchPlaceholder="Search department…"
+                emptyText="No department matches"
                 loading={budgetsQuery.isFetching}
-                options={budgetOptions("BUDGET", form.budget, form.budgetName)}
+                options={departmentOptions}
               />
             )}
           </Field>
 
+          {/* What the money is for: the Payment Desk's purpose list. */}
           <Field
-            label="Payment Purpose (Sub Budget)"
+            label="Payment Purpose"
             required
-            hint={budgetHint}
-            error={budgetsQuery.isError ? advancePaymentError(budgetsQuery.error) : undefined}
+            error={purposesQuery.isError ? advancePaymentError(purposesQuery.error) : undefined}
           >
             {(f) => (
               <SearchSelect<string>
                 id={f.id}
-                value={form.subBudget}
+                value={form.purpose}
                 onChange={(next) =>
                   change({
-                    subBudget: next,
-                    subBudgetName:
-                      budgetOptions("SUB_BUDGET", "", "").find((o) => o.value === next)?.label ?? "",
+                    purpose: next,
+                    purposeLabel: purposeOptions.find((o) => o.value === next)?.label ?? "",
+                    purposeNeedsHead: purposeNeedsHead(next),
                   })
                 }
-                disabled={!company}
-                placeholder="Select sub budget"
-                searchPlaceholder="Search sub budget…"
-                emptyText="No sub budget matches"
-                loading={budgetsQuery.isFetching}
-                options={budgetOptions("SUB_BUDGET", form.subBudget, form.subBudgetName)}
+                placeholder="Select payment purpose"
+                searchPlaceholder="Search payment purpose…"
+                emptyText="No payment purpose matches"
+                loading={purposesQuery.isFetching}
+                options={purposeOptions}
               />
             )}
           </Field>
+
+          {/* Approved "by department": the requester names the HOD who
+              approves it, from the employee master. The route's Department
+              Head stage goes to that HOD's OMS login. */}
+          {askHead ? (
+            <Field
+              label="Department Head"
+              required
+              hint={headsQuery.isError || headLoginError ? undefined : "The HOD who approves this request."}
+              error={headsQuery.isError ? advancePaymentError(headsQuery.error) : headLoginError}
+            >
+              {(f) => (
+                <SearchSelect<string>
+                  id={f.id}
+                  value={form.departmentHead}
+                  onChange={(next) => {
+                    const chosen = headChoices.find((h) => h.employee_code === next);
+                    change({
+                      departmentHead: next,
+                      departmentHeadName: chosen?.employee_name ?? "",
+                      departmentHeadLogin: chosen?.user?.username ?? "",
+                    });
+                  }}
+                  onQueryChange={setHeadSearch}
+                  placeholder="Select department head"
+                  searchPlaceholder="Search HOD name or code…"
+                  emptyText="No HOD matches"
+                  loading={headsQuery.isFetching}
+                  options={headOptions}
+                />
+              )}
+            </Field>
+          ) : null}
 
           {/* Who owns this request: a HOD or Sub-HOD from the employee master. */}
           <Field
@@ -916,22 +839,6 @@ export function AdvancePaymentForm({
               />
             )}
           </Field>
-
-          <div className="flex min-w-0 flex-col gap-1.5">
-            {/* Not a `Field`: a radiogroup is labelled by an element, not by a
-                `for`/`id` pair pointing at one control. */}
-            <span id={priorityLabelId} className="text-[12px] font-medium text-body">
-              Priority
-              <span className="ml-0.5 text-danger" aria-hidden="true">
-                *
-              </span>
-            </span>
-            <PrioritySelector
-              value={form.priority}
-              onChange={(priority) => change({ priority })}
-              labelledBy={priorityLabelId}
-            />
-          </div>
         </FormGrid>
 
         <Field label="Remarks" required>

@@ -57,18 +57,18 @@ import { PartnerBalance } from "./advancePayments/PartnerBalance";
 import { PartnerLedger } from "./advancePayments/PartnerLedger";
 import { PaymentProofPanel } from "./advancePayments/PaymentProofPanel";
 import { PayoutDetailsForm } from "./advancePayments/PayoutDetailsForm";
+import { PurchaseOrderDetails } from "./advancePayments/PurchaseOrderDetails";
+import { SapCheck } from "./advancePayments/SapCheck";
 import { startPayout, validatePayout, type PayoutDetails } from "./advancePayments/payout";
 import { DocumentLines, RequestSummary } from "./advancePayments/RequestDetails";
 import {
   DESK_STATUS_OPTIONS,
   MY_DECISION_LABEL,
   MY_DECISION_TONE,
-  PRIORITY_TONE,
   deskBucket,
   deskCounts,
   filterRequests,
   formatDateTime,
-  priorityLabel,
   reachedPayment,
   showsBalance,
   type DeskFilter,
@@ -288,7 +288,7 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
             {/* No overall status and no "At <stage>": how the other approvers
                 stand is not this desk's to show. Only what is yours. */}
             <MyDecisionBadge entry={entry} />
-            <Badge tone={PRIORITY_TONE[entry.form.priority]}>{priorityLabel(entry)} priority</Badge>
+
           </>
         }
         description={`Raised by ${entry.requestedBy} on ${formatDateTime(entry.requestedOn)} · ${formatINR(amount)}`}
@@ -342,6 +342,15 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
 
       <DocumentLines entry={entry} showReading={reachedPayment(entry) && can.see_account} />
 
+      {/* SAP as it is now, while the request is still at Payment, Audit or Final:
+          what Final checks before posting, seen before it gets there. */}
+      {["PAYMENT", "AUDIT", "FINAL"].includes(flow?.current_role ?? "") && entry.form.selected.length ? (
+        <SapCheck requestId={entry.serverId} />
+      ) : null}
+
+      {/* Each PO in full from SAP, from Payment on: what the payment is weighed against. */}
+      {reachedPayment(entry) ? <PurchaseOrderDetails entry={entry} /> : null}
+
       {/* The payee's open ledger in SAP, from Payment on. */}
       {showsBalance(entry) ? <PartnerLedger entry={entry} /> : null}
 
@@ -369,6 +378,17 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
             // An Employee is paid to a G/L account, not a SAP partner,
             // so there are no bank accounts on file to offer.
             payeeCardCode={entry.form.type === "EMPLOYEE_ADVANCE" ? "" : entry.form.partner}
+            tds={
+              entry.form.type === "VENDOR" && entry.form.company
+                ? {
+                    company: entry.form.company,
+                    cardCode: entry.form.partner,
+                    bills: entry.form.selected
+                      .filter((d) => d.id.startsWith("PCH-"))
+                      .map((d) => Number(d.id.slice(4))),
+                  }
+                : null
+            }
             manualEntry={
               can.edit_payout
                 ? { unlocked: manualToken !== null, unlock: (then) => setAfterPassword(() => then) }
