@@ -113,6 +113,64 @@ export interface BudgetSettings {
   updated_at: string | null;
 }
 
+/** One file attached to a draft in SAP. A journal voucher's single link is line 0. */
+export interface BudgetAttachment {
+  line: number;
+  file_name: string;
+  date: string | null;
+}
+
+/** One item's outcome in a bulk approval. */
+export interface BudgetBulkResult {
+  id: number;
+  ok: boolean;
+  /** True when this approval completed the item (SAP may post); false when it moved on. */
+  approved: boolean;
+  message: string;
+}
+
+export interface BudgetBulkOutcome {
+  results: BudgetBulkResult[];
+  approved: number;
+  refused: number;
+  message: string;
+}
+
+export interface BudgetCount {
+  count: number;
+  amount: string;
+}
+
+/** One person on the report: what waits on them now, and what they decided. */
+export interface BudgetApproverRow {
+  user_id: number;
+  name: string;
+  pending: number;
+  approved: number;
+  auto_approved: number;
+  rejected: number;
+  total: number;
+}
+
+export interface BudgetReport {
+  summary: Record<"total" | "pending" | "approved" | "rejected" | "gone" | "superseded", BudgetCount>;
+  approvers: BudgetApproverRow[];
+  items: BudgetItem[];
+  truncated: boolean;
+}
+
+/** The report's filters. `month` is the document's month, `YYYY-MM`. */
+export interface BudgetReportFilters {
+  month?: string;
+  company?: string;
+  status?: string;
+  q?: string;
+}
+
+function reportParams(filters: BudgetReportFilters) {
+  return Object.fromEntries(Object.entries(filters).filter(([, v]) => v));
+}
+
 export interface BudgetHealth {
   company: BudgetCompany;
   last_synced_at: string | null;
@@ -168,6 +226,23 @@ export const budgetService = {
   }): Promise<BudgetSettings> => unwrap<BudgetSettings>((await api.put(`${BASE}/settings/`, input)).data),
   health: async (): Promise<BudgetHealth[]> => unwrap<BudgetHealth[]>((await api.get(`${BASE}/health/`)).data) || [],
   users: async (): Promise<BudgetUser[]> => unwrap<BudgetUser[]>((await api.get(`${BASE}/users/`)).data) || [],
+  /** One item in full: what a notification opens. */
+  item: async (id: number): Promise<BudgetItem> => unwrap<BudgetItem>((await api.get(`${BASE}/items/${id}/`)).data),
+  attachments: async (draftId: number): Promise<BudgetAttachment[]> =>
+    unwrap<BudgetAttachment[]>((await api.get(`${BASE}/drafts/${draftId}/attachments/`)).data) || [],
+  /** The file itself; the name is resolved from SAP on the server, by line. */
+  attachmentFile: async (draftId: number, line: number): Promise<Blob> =>
+    (await api.get(`${BASE}/drafts/${draftId}/attachments/${line}/`, { responseType: "blob" })).data as Blob,
+  /** Approve several at once; each is decided on its own and answers for itself. */
+  approveBulk: async (items: { id: number; version: number }[], remarks: string): Promise<BudgetBulkOutcome> => {
+    const res = await api.post(`${BASE}/items/approve-bulk/`, { items, remarks });
+    const data = unwrap<Omit<BudgetBulkOutcome, "message">>(res.data);
+    return { ...data, message: (res.data?.message as string) || "" };
+  },
+  report: async (filters: BudgetReportFilters): Promise<BudgetReport> =>
+    unwrap<BudgetReport>((await api.get(`${BASE}/report/`, { params: reportParams(filters) })).data),
+  exportReport: async (filters: BudgetReportFilters): Promise<Blob> =>
+    (await api.get(`${BASE}/report/export/`, { params: reportParams(filters), responseType: "blob" })).data as Blob,
 };
 
 /** "FACTORY_ELECTRICITY" -> "Factory · electricity"; the head as people say it. */

@@ -241,6 +241,7 @@ export const SIDEBAR_SECTIONS: SidebarSectionDef[] = [
     label: "Budget",
     links: [
       { to: "/Budget_Approval", label: "Budget Approval", icon: HiOutlineShieldCheck },
+      { to: "/Budget_Reports", label: "Budget Reports", icon: HiOutlineChartBar },
       { to: "/Budget_Settings", label: "Budget Settings", icon: HiOutlineWrenchScrewdriver },
     ],
   },

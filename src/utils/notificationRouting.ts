@@ -97,6 +97,15 @@ const ENTITY_ROUTES: Record<string, RouteResolver> = {
       : "/Production_Orders",
     search: `?orderId=${encodeURIComponent(id)}`,
   }),
+  // `budgetitem` — ContentType.objects.get_for_model(BudgetItem). Every budget
+  // notification is about an item and lands on the approval desk, which opens
+  // it (`pages/budget/useDeepLinkedItem.ts`): Approve / Reject show there only
+  // when it is still the reader's to decide, so the desk serves the "waiting
+  // for you" and the "it was decided" messages alike.
+  budgetitem: (id) => ({
+    pathname: "/Budget_Approval",
+    search: `?itemId=${encodeURIComponent(id)}`,
+  }),
 };
 
 /**

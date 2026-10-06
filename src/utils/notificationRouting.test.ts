@@ -109,6 +109,24 @@ describe("routeForNotification — production orders", () => {
   });
 });
 
+describe("routeForNotification — budget items", () => {
+  it("opens the item on the approval desk, whatever the message", () => {
+    // Every budget message is about an item. The desk opens it, and shows
+    // Approve / Reject only while it is still the reader's to decide.
+    for (const event of [
+      "BUDGET_AWAITING_APPROVAL",
+      "BUDGET_NEW_ITEMS",
+      "BUDGET_PENDING_REMINDER",
+      "BUDGET_APPROVED",
+      "BUDGET_REJECTED",
+    ]) {
+      expect(
+        routeForNotification({ entity_type: "budgetitem", entity_id: 427, event_type: event }),
+      ).toEqual({ pathname: "/Budget_Approval", search: "?itemId=427" });
+    }
+  });
+});
+
 describe("routeFromSearchParams", () => {
   it("resolves the cold-start URL the service worker opens", () => {
     // No tab was open, so the worker could not ask anything to navigate; it

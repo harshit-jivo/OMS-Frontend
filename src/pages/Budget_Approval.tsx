@@ -18,14 +18,21 @@
  *     the draft in SAP, it comes back for approval on its own.
  *   * The budget itself is deliberately not shown here: the business decided
  *     approvers decide on the document, not on a remaining-budget figure.
+ *   * Several can be ticked and approved at once. Each is still decided on its
+ *     own on the server (its own version check, its own SAP write), so one
+ *     that went stale is refused without holding the others back.
+ *   * A notification opens its item here (`?itemId=`), and the draft dialog
+ *     carries Approve / Reject for the parts that are yours, plus the draft's
+ *     SAP attachments.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   HiArrowPath,
   HiExclamationCircle,
   HiOutlineCheckCircle,
   HiOutlineEye,
   HiOutlineInbox,
+  HiOutlinePaperClip,
   HiOutlineXCircle,
 } from "react-icons/hi2";
 
@@ -55,10 +62,12 @@ import {
   budgetService,
   draftLabel,
   routeLabel,
+  type BudgetAttachment,
   type BudgetDraftDetail,
   type BudgetItem,
   type BudgetItemStatus,
 } from "../services/budgetService";
+import { useDeepLinkedItem } from "./budget/useDeepLinkedItem";
 
 type TabKey = "queue" | "decided";
 const PAGE_SIZE = 15;
@@ -100,6 +109,8 @@ export default function BudgetApproval() {
   const [detail, setDetail] = useState<BudgetItem | null>(null);
   const [deciding, setDeciding] = useState<{ item: BudgetItem; approve: boolean } | null>(null);
   const [retrying, setRetrying] = useState<number | null>(null);
+  const [ticked, setTicked] = useState<Set<number>>(() => new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -119,9 +130,37 @@ export default function BudgetApproval() {
   useEffect(() => setPage(1), [tab, company]);
 
   const filtered = company ? rows.filter((r) => r.company === company) : rows;
+  // What can be ticked: only rows the server says are yours to decide, on the
+  // queue. Derived, so a reload or a filter change never leaves a stale tick.
+  const approvable = useMemo(
+    () => (tab === "queue" ? filtered.filter((r) => r.can.approve) : []),
+    [filtered, tab],
+  );
+  const selected = approvable.filter((r) => ticked.has(r.id));
+  const toggle = (id: number) =>
+    setTicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const pageNumber = Math.min(page, totalPages);
   const shown = filtered.slice((pageNumber - 1) * PAGE_SIZE, pageNumber * PAGE_SIZE);
+
+  const shownApprovable = shown.filter((r) => tab === "queue" && r.can.approve);
+  const allShownTicked = shownApprovable.length > 0 && shownApprovable.every((r) => ticked.has(r.id));
+  const toggleShown = () =>
+    setTicked((prev) => {
+      const next = new Set(prev);
+      for (const r of shownApprovable) {
+        if (allShownTicked) next.delete(r.id);
+        else next.add(r.id);
+      }
+      return next;
+    });
+
+  useDeepLinkedItem(rows, !loading, setDetail);
 
   const retrySap = async (item: BudgetItem) => {
     setRetrying(item.id);
@@ -168,6 +207,11 @@ export default function BudgetApproval() {
           )}
         </Field>
         <FilterSpacer />
+        {tab === "queue" && selected.length > 0 && (
+          <Button variant="success" onClick={() => setBulkOpen(true)}>
+            <HiOutlineCheckCircle aria-hidden="true" /> Approve selected ({selected.length})
+          </Button>
+        )}
         <FilterCount>
           {tab === "queue" ? "Waiting on you" : "Decided by you"}: {loading ? "—" : filtered.length}
         </FilterCount>
@@ -202,6 +246,18 @@ export default function BudgetApproval() {
             <Table density="compact" aria-label="Budget approvals">
               <TableHeader>
                 <TableRow className="bg-surface hover:bg-surface">
+                  {tab === "queue" && (
+                    <TableHead className="w-8">
+                      <input
+                        type="checkbox"
+                        className="size-4 cursor-pointer accent-brand"
+                        aria-label="Select every approvable row on this page"
+                        checked={allShownTicked}
+                        disabled={shownApprovable.length === 0}
+                        onChange={toggleShown}
+                      />
+                    </TableHead>
+                  )}
                   <TableHead>Document</TableHead>
                   <TableHead>Company</TableHead>
                   <TableHead>Budget</TableHead>
@@ -216,6 +272,18 @@ export default function BudgetApproval() {
               <TableBody>
                 {shown.map((row) => (
                   <TableRow key={row.id}>
+                    {tab === "queue" && (
+                      <TableCell>
+                        <input
+                          type="checkbox"
+                          className="size-4 cursor-pointer accent-brand"
+                          aria-label={`Select ${draftLabel(row.draft)} · ${routeLabel(row)}`}
+                          checked={ticked.has(row.id)}
+                          disabled={!row.can.approve}
+                          onChange={() => toggle(row.id)}
+                        />
+                      </TableCell>
+                    )}
                     <TableCell className="whitespace-nowrap font-semibold text-brand">{draftLabel(row.draft)}</TableCell>
                     <TableCell>{row.company}</TableCell>
                     <TableCell className="whitespace-nowrap">{routeLabel(row)}</TableCell>
@@ -283,7 +351,24 @@ export default function BudgetApproval() {
         />
       )}
 
-      <DraftDialog item={detail} onClose={() => setDetail(null)} />
+      <DraftDialog
+        item={detail}
+        onClose={() => setDetail(null)}
+        onDecide={(item, approve) => {
+          setDetail(null);
+          setDeciding({ item, approve });
+        }}
+      />
+      <BulkApproveDialog
+        open={bulkOpen}
+        items={selected}
+        onClose={() => setBulkOpen(false)}
+        onDone={(message, refused) => {
+          showToast({ title: "Approved", message, tone: refused ? "bad" : "ok" });
+          setTicked(new Set());
+          void load();
+        }}
+      />
       <DecisionDialog
         pending={deciding}
         onClose={() => setDeciding(null)}
@@ -300,7 +385,16 @@ export default function BudgetApproval() {
  * The draft: its lines, and each budget head's stages and history
  * ================================================================== */
 
-export function DraftDialog({ item, onClose }: { item: BudgetItem | null; onClose: () => void }) {
+export function DraftDialog({
+  item,
+  onClose,
+  onDecide,
+}: {
+  item: BudgetItem | null;
+  onClose: () => void;
+  /** Given on the approval desk: Approve / Reject for the parts that are yours. */
+  onDecide?: (item: BudgetItem, approve: boolean) => void;
+}) {
   // The answer is kept with the draft id it belongs to, and shown only while
   // that draft is the one open — so switching drafts needs no reset in the
   // effect (a set-state-in-effect), and a slow answer for the previous draft
@@ -347,6 +441,7 @@ export function DraftDialog({ item, onClose }: { item: BudgetItem | null; onClos
                     ["Comments", draft.comments || "—"],
                   ]}
                 />
+                <DraftAttachments draftId={draft.id} />
                 {draft.items.map((part) => (
                   <section key={part.id} className="rounded-card border border-line p-3" aria-label={routeLabel(part)}>
                     <div className="mb-2 flex flex-wrap items-center gap-2">
@@ -358,6 +453,16 @@ export function DraftDialog({ item, onClose }: { item: BudgetItem | null; onClos
                           SAP: {part.sap_status_text}
                         </span>
                       ) : null}
+                      {onDecide && part.can.approve && (
+                        <span className="ml-auto flex gap-1">
+                          <Button size="sm" variant="success" onClick={() => onDecide(part, true)}>
+                            <HiOutlineCheckCircle aria-hidden="true" /> Approve
+                          </Button>
+                          <Button size="sm" variant="danger" onClick={() => onDecide(part, false)}>
+                            <HiOutlineXCircle aria-hidden="true" /> Reject
+                          </Button>
+                        </span>
+                      )}
                     </div>
 
                     <ol className="m-0 mb-3 flex list-none flex-wrap gap-2 p-0" aria-label="Stages">
@@ -515,6 +620,217 @@ function DecisionDialog({
             <Button variant={approve ? "primary" : "danger"} onClick={() => void submit()} disabled={saving}>
               {saving ? "Saving…" : approve ? "Approve" : "Reject"}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      )}
+    </Dialog>
+  );
+}
+
+/* ================================================================== *
+ * The draft's attachments in SAP
+ * ================================================================== */
+
+/**
+ * Open a file the API serves in a new tab. The request needs the login, so a
+ * plain link cannot fetch it: the tab is opened SYNCHRONOUSLY (a browser only
+ * allows `window.open` while it can tie it to the click), then pointed at the
+ * blob. Blocked anyway, the file downloads instead.
+ */
+async function openFile(fetcher: () => Promise<Blob>, fileName: string): Promise<string> {
+  const tab = window.open("", "_blank");
+  let blob: Blob;
+  try {
+    blob = await fetcher();
+  } catch (err) {
+    tab?.close();
+    const data = (err as { response?: { data?: unknown } })?.response?.data;
+    if (data instanceof Blob) {
+      try {
+        const parsed = JSON.parse(await data.text()) as { message?: string };
+        if (parsed.message) return parsed.message;
+      } catch {
+        // Not JSON: the generic message below.
+      }
+    }
+    return "Could not open the attachment.";
+  }
+  const url = URL.createObjectURL(blob);
+  if (tab && !tab.closed) {
+    tab.location.href = url;
+    return "";
+  }
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  return "";
+}
+
+export function DraftAttachments({ draftId }: { draftId: number }) {
+  const [loaded, setLoaded] = useState<{ id: number; rows?: BudgetAttachment[]; error?: string } | null>(null);
+  const [opening, setOpening] = useState<number | null>(null);
+  const [openError, setOpenError] = useState("");
+
+  useEffect(() => {
+    budgetService.attachments(draftId).then(
+      (rows) => setLoaded({ id: draftId, rows }),
+      (err) => setLoaded({ id: draftId, error: budgetError(err) }),
+    );
+  }, [draftId]);
+
+  const current = loaded && loaded.id === draftId ? loaded : null;
+
+  const open = async (row: BudgetAttachment) => {
+    setOpening(row.line);
+    setOpenError("");
+    setOpenError(await openFile(() => budgetService.attachmentFile(draftId, row.line), row.file_name));
+    setOpening(null);
+  };
+
+  return (
+    <section aria-label="Attachments" className="rounded-card border border-line p-3">
+      <h3 className="m-0 mb-2 flex items-center gap-1.5 text-[13px] font-semibold text-ink">
+        <HiOutlinePaperClip aria-hidden="true" /> Attachments in SAP
+      </h3>
+      {!current && <p className="m-0 text-[12.5px] text-subtle">Loading…</p>}
+      {current?.error && <p className="m-0 text-[12.5px] text-bad" role="alert">{current.error}</p>}
+      {current?.rows && current.rows.length === 0 && (
+        <p className="m-0 text-[12.5px] text-subtle">This draft has no attachment in SAP.</p>
+      )}
+      {current?.rows && current.rows.length > 0 && (
+        <ul className="m-0 list-none space-y-1 p-0">
+          {current.rows.map((row) => (
+            <li key={row.line}>
+              <button
+                type="button"
+                className="cursor-pointer text-left text-[13px] text-brand underline-offset-2 hover:underline disabled:opacity-60"
+                disabled={opening === row.line}
+                onClick={() => void open(row)}
+              >
+                {row.file_name}
+              </button>
+              {row.date ? <span className="ml-2 text-[11.5px] text-subtle">{row.date}</span> : null}
+              {opening === row.line ? <span className="ml-2 text-[11.5px] text-subtle">Opening…</span> : null}
+            </li>
+          ))}
+        </ul>
+      )}
+      {openError && <p className="m-0 mt-1 text-[12.5px] text-bad" role="alert">{openError}</p>}
+    </section>
+  );
+}
+
+/* ================================================================== *
+ * Approve several at once
+ * ================================================================== */
+
+function BulkApproveDialog({
+  open,
+  items,
+  onClose,
+  onDone,
+}: {
+  open: boolean;
+  items: BudgetItem[];
+  onClose: () => void;
+  onDone: (message: string, refused: number) => void;
+}) {
+  const [remarks, setRemarks] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [problem, setProblem] = useState("");
+
+  const total = items.reduce((sum, i) => sum + Number(i.amount || 0), 0);
+
+  const close = () => {
+    setRemarks("");
+    setProblem("");
+    onClose();
+  };
+
+  const submit = async () => {
+    setSaving(true);
+    setProblem("");
+    try {
+      const outcome = await budgetService.approveBulk(
+        items.map((i) => ({ id: i.id, version: i.version })),
+        remarks.trim(),
+      );
+      const refused = outcome.results.filter((r) => !r.ok);
+      if (refused.length > 0) {
+        // Keep the dialog open on what was refused, so it can be read and dealt with.
+        const byId = new Map(items.map((i) => [i.id, i]));
+        setProblem(
+          refused
+            .map((r) => {
+              const it = byId.get(Number(r.id));
+              return `${it ? `${draftLabel(it.draft)} · ${routeLabel(it)}` : `Item ${r.id}`}: ${r.message}`;
+            })
+            .join("\n"),
+        );
+        onDone(outcome.message, refused.length);
+        return;
+      }
+      onDone(outcome.message, 0);
+      close();
+    } catch (err) {
+      setProblem(budgetError(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(next) => !next && close()}>
+      {open && (
+        <DialogContent title="Approve selected">
+          <DialogHeader className="items-start">
+            <div className="min-w-0">
+              <DialogTitle>
+                Approve {items.length} item{items.length === 1 ? "" : "s"}
+              </DialogTitle>
+              <DialogDescription>{money(total)} in all. Each is decided on its own.</DialogDescription>
+            </div>
+          </DialogHeader>
+          <DialogBody className="space-y-3">
+            <ul className="m-0 max-h-48 list-none space-y-0.5 overflow-y-auto p-0 text-[12.5px]">
+              {items.map((i) => (
+                <li key={i.id}>
+                  {draftLabel(i.draft)} · {routeLabel(i)} · {i.draft.card_name || "No party"} ·{" "}
+                  <span className="tabular-nums">{money(i.amount)}</span>
+                </li>
+              ))}
+            </ul>
+            <Field label="Remarks (optional)">
+              {(control) => (
+                <Textarea
+                  {...control}
+                  value={remarks}
+                  onChange={(e) => setRemarks(e.target.value)}
+                  rows={2}
+                  maxLength={2000}
+                  placeholder="Recorded on every item approved"
+                />
+              )}
+            </Field>
+            {problem && (
+              <p className="m-0 whitespace-pre-line text-[12.5px] text-bad" role="alert">
+                {problem}
+              </p>
+            )}
+          </DialogBody>
+          <DialogFooter>
+            <Button variant="secondary" onClick={close} disabled={saving}>
+              {problem ? "Close" : "Cancel"}
+            </Button>
+            {!problem && (
+              <Button variant="primary" onClick={() => void submit()} disabled={saving || items.length === 0}>
+                {saving ? "Approving…" : `Approve ${items.length}`}
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       )}

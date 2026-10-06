@@ -87,6 +87,7 @@ const ProductionOrders = lazy(() => import("./pages/Production_Orders"));
 const ProductionApproval = lazy(() => import("./pages/Production_Approval"));
 const BudgetApproval = lazy(() => import("./pages/Budget_Approval"));
 const BudgetSettings = lazy(() => import("./pages/Budget_Settings"));
+const BudgetReports = lazy(() => import("./pages/Budget_Reports"));
 const Invoice_Report = lazy(() => import("./pages/Invoice_Report"));
 const HAIS = lazy(() => import("./pages/HAIS"));
 const AssetPublicView = lazy(() => import("./pages/HAIS/AssetPublicView"));
@@ -223,6 +224,14 @@ function App() {
           element={
             <ProtectedPage>
               <BudgetSettings />
+            </ProtectedPage>
+          }
+        />
+        <Route
+          path="/Budget_Reports"
+          element={
+            <ProtectedPage>
+              <BudgetReports />
             </ProtectedPage>
           }
         />

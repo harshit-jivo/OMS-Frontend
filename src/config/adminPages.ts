@@ -67,6 +67,12 @@ export const GRANTABLE_ADMIN_PAGES: GrantablePage[] = [
     label: "Budget — auto-approval settings",
     path: "/Budget_Settings",
   },
+  // Every approver's items, by month, with Excel export. Read-only.
+  {
+    key: "Budget_Reports",
+    label: "Budget — reports (all approvers, export)",
+    path: "/Budget_Reports",
+  },
   // Registered by the backend's advance_payment app — its SAP lookups (the
   // request form's vendors, open bills and employees) and raising a request
   // all require it.
