@@ -1,7 +1,7 @@
 /**
  * Payments — Send Bills & POs.
  *
- * Open SAP bills and POs, sent to an Advance Payment User or Approver, who raises the
+ * Open SAP bills and POs, sent to someone who can raise payment requests, who raises the
  * payment request from them: the document lands under "Assigned to Me" on
  * their Payments page, and opening it starts the request form already filled
  * from the document. The SENT tab follows what became of each.
@@ -252,7 +252,7 @@ function SendTab({ onSent }: { onSent: (message: string) => void }) {
           <Field
             label="Send To"
             required
-            hint="Advance Payment Users and Approvers."
+            hint="Everyone who can raise payment requests."
             error={recipients.isError ? advancePaymentError(recipients.error) : undefined}
           >
             {(f) => (
@@ -490,7 +490,7 @@ export default function Advance_Payment_Dispatch() {
       <PageHeader
         eyebrow="Payments"
         title="Send Bills & POs"
-        description="Send open SAP bills and POs to an Advance Payment User or Approver, who raises the payment request from them."
+        description="Send open SAP bills and POs to someone who can raise payment requests; they raise the request from them."
       />
       {notice ? (
         <Notice tone="ok" title="Sent">

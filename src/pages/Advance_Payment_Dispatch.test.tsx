@@ -1,5 +1,5 @@
 /**
- * Send Bills & POs: tick open SAP documents, choose an Advance Payment User or Approver,
+ * Send Bills & POs: tick open SAP documents, choose someone who can raise payment requests,
  * send; the Sent tab follows them.
  */
 import { screen, within } from "@testing-library/react";
@@ -40,7 +40,7 @@ async function pick(user: ReturnType<typeof userEvent.setup>, label: RegExp, opt
 }
 
 describe("Send Bills & POs", () => {
-  it("sends the ticked bills to an Advance Payment User or Approver", async () => {
+  it("sends the ticked bills to someone who can raise payment requests", async () => {
     const user = userEvent.setup();
     renderPage(<Advance_Payment_Dispatch />, { route: "/Advance_Payment_Dispatch" });
     await user.selectOptions(screen.getByLabelText(/^Company/), "OIL");
