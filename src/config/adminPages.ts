@@ -55,6 +55,18 @@ export const GRANTABLE_ADMIN_PAGES: GrantablePage[] = [
     label: "Production Order — approve/reject",
     path: "/Production_Approval",
   },
+  // Budget approval of SAP drafts. The desk key opens it; deciding an item also
+  // needs being its current stage's user, which the server checks.
+  {
+    key: "Budget_Approval",
+    label: "Budget — approval desk",
+    path: "/Budget_Approval",
+  },
+  {
+    key: "Budget_Settings",
+    label: "Budget — auto-approval settings",
+    path: "/Budget_Settings",
+  },
   // Registered by the backend's advance_payment app — its SAP lookups (the
   // request form's vendors, open bills and employees) and raising a request
   // all require it.

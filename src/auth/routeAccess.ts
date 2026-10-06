@@ -168,6 +168,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // exactly one company's workflow, and OMS has no user->company map.
   "/Production_Orders": { permissions: ["Production_Order"] },
   "/Production_Approval": { permissions: ["Production_Order_Approval"] },
+  // Budget approval of SAP drafts. As with production: the key opens the desk,
+  // and being an item's current stage user today decides it (server-side).
+  "/Budget_Approval": { permissions: ["Budget_Approval"] },
+  "/Budget_Settings": { permissions: ["Budget_Settings"] },
   "/Sap_Sync": { permissions: ["Sap_Sync"] },
   "/Party_Assignment": { permissions: ["Party_Assignment"] },
   "/Party_Product_Assignment": { permissions: ["Party_Product_Assignment"] },

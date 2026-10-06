@@ -85,6 +85,8 @@ const BackDate = lazy(() => import("./pages/BackDate"));
 const BackDateApproval = lazy(() => import("./pages/BackDate_Approval"));
 const ProductionOrders = lazy(() => import("./pages/Production_Orders"));
 const ProductionApproval = lazy(() => import("./pages/Production_Approval"));
+const BudgetApproval = lazy(() => import("./pages/Budget_Approval"));
+const BudgetSettings = lazy(() => import("./pages/Budget_Settings"));
 const Invoice_Report = lazy(() => import("./pages/Invoice_Report"));
 const HAIS = lazy(() => import("./pages/HAIS"));
 const AssetPublicView = lazy(() => import("./pages/HAIS/AssetPublicView"));
@@ -205,6 +207,22 @@ function App() {
           element={
             <ProtectedPage>
               <ProductionApproval />
+            </ProtectedPage>
+          }
+        />
+        <Route
+          path="/Budget_Approval"
+          element={
+            <ProtectedPage>
+              <BudgetApproval />
+            </ProtectedPage>
+          }
+        />
+        <Route
+          path="/Budget_Settings"
+          element={
+            <ProtectedPage>
+              <BudgetSettings />
             </ProtectedPage>
           }
         />

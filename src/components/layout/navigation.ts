@@ -238,6 +238,13 @@ export const SIDEBAR_SECTIONS: SidebarSectionDef[] = [
     ],
   },
   {
+    label: "Budget",
+    links: [
+      { to: "/Budget_Approval", label: "Budget Approval", icon: HiOutlineShieldCheck },
+      { to: "/Budget_Settings", label: "Budget Settings", icon: HiOutlineWrenchScrewdriver },
+    ],
+  },
+  {
     label: "Tracker",
     links: [
       { to: "/Tracker_Entry", label: "Invoice Entry", icon: HiOutlinePencilSquare },
