@@ -125,8 +125,9 @@ export default function CreditLimitRequestDialog({ view }: { view: UseInvoiceRev
                   </Field>
                   <Field
                     label="Attachment"
+                    required
                     span="full"
-                    hint="Optional supporting document for the approver."
+                    hint="Required — a credit-limit request for one party needs a supporting document."
                   >
                     {(control) => (
                       <Input

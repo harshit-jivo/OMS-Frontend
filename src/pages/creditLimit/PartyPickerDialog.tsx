@@ -1,13 +1,13 @@
 /**
- * Pick the party a credit limit request is for, from the synced SAP party
- * table of one company.
+ * Pick the parties a credit limit submission is for, from the synced SAP
+ * party table of one company.
  *
- * A row is the choice: clicking it selects the party and closes the dialog.
- * The code cell is a real button so the same choice is reachable by keyboard
- * without turning the `<tr>` into something that is not a table row.
+ * Several parties can be ticked and added in one go — each becomes its own
+ * request with its own approval chain. Parties already on the form are shown
+ * ticked and locked, so the same party cannot be added twice.
  *
- * The synced table can be stale, so the page still reads the customer live
- * from SAP once a party is picked; this list only answers "which customer".
+ * The synced table can be stale, so the page still reads each customer live
+ * from SAP once it is added; this list only answers "which customers".
  */
 import { useMemo, useState } from "react";
 import { HiOutlineUsers } from "react-icons/hi2";
@@ -43,19 +43,24 @@ const MAX_ROWS = 200;
 export function PartyPickerDialog({
   open,
   company,
+  added,
   onClose,
-  onSelect,
+  onAdd,
 }: {
   open: boolean;
   company: CreditLimitCompany;
+  /** Card codes already on the form. */
+  added: ReadonlySet<string>;
   onClose: () => void;
-  onSelect: (party: Party) => void;
+  onAdd: (parties: Party[]) => void;
 }) {
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent title="Select party" size="lg">
-        {/* Mounted only while open, so the search starts empty each time. */}
-        {open && <PickerBody company={company} onClose={onClose} onSelect={onSelect} />}
+      <DialogContent title="Select parties" size="lg">
+        {/* Mounted only while open, so search and ticks start empty each time. */}
+        {open && (
+          <PickerBody company={company} added={added} onClose={onClose} onAdd={onAdd} />
+        )}
       </DialogContent>
     </Dialog>
   );
@@ -63,14 +68,17 @@ export function PartyPickerDialog({
 
 function PickerBody({
   company,
+  added,
   onClose,
-  onSelect,
+  onAdd,
 }: {
   company: CreditLimitCompany;
+  added: ReadonlySet<string>;
   onClose: () => void;
-  onSelect: (party: Party) => void;
+  onAdd: (parties: Party[]) => void;
 }) {
   const [search, setSearch] = useState("");
+  const [picked, setPicked] = useState<Map<string, Party>>(new Map());
   const { items, isLoading, isError } = useSapPartiesByCategory(company);
 
   const matches = useMemo(() => {
@@ -85,12 +93,24 @@ function PickerBody({
 
   const shown = matches.slice(0, MAX_ROWS);
 
+  const toggle = (party: Party) => {
+    if (added.has(party.card_code)) return;
+    setPicked((current) => {
+      const next = new Map(current);
+      if (next.has(party.card_code)) next.delete(party.card_code);
+      else next.set(party.card_code, party);
+      return next;
+    });
+  };
+
   return (
     <>
       <DialogHeader className="pr-10">
         <div className="min-w-0">
-          <DialogTitle>Select party</DialogTitle>
-          <DialogDescription className="mt-0.5">{company} customers</DialogDescription>
+          <DialogTitle>Select parties</DialogTitle>
+          <DialogDescription className="mt-0.5">
+            {company} customers — tick one or more
+          </DialogDescription>
         </div>
       </DialogHeader>
 
@@ -114,7 +134,7 @@ function PickerBody({
         </FilterBar>
 
         {isLoading ? (
-          <TableSkeleton columns={4} rows={6} label="Loading parties" />
+          <TableSkeleton columns={5} rows={6} label="Loading parties" />
         ) : isError ? (
           <Notice tone="bad">Could not load the {company} parties. Try again.</Notice>
         ) : shown.length === 0 ? (
@@ -127,6 +147,9 @@ function PickerBody({
           <Table density="compact" containerClassName="max-h-[420px] overflow-y-auto">
             <TableHeader>
               <TableRow>
+                <TableHead className="w-10">
+                  <span className="sr-only">Select</span>
+                </TableHead>
                 <TableHead>Code</TableHead>
                 <TableHead>Name</TableHead>
                 <TableHead>Main group</TableHead>
@@ -134,30 +157,36 @@ function PickerBody({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {shown.map((party) => (
-                <TableRow
-                  key={party.card_code}
-                  className="cursor-pointer"
-                  onClick={() => onSelect(party)}
-                >
-                  <TableCell className="whitespace-nowrap">
-                    <button
-                      type="button"
-                      aria-label={`Select ${party.card_name || party.card_code}`}
-                      className="cursor-pointer appearance-none border-0 bg-transparent p-0 font-mono text-[12.5px] font-semibold text-brand [font-family:inherit] hover:underline focus-visible:shadow-focus focus-visible:outline-none"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onSelect(party);
-                      }}
-                    >
+              {shown.map((party) => {
+                const already = added.has(party.card_code);
+                return (
+                  <TableRow
+                    key={party.card_code}
+                    className={already ? "opacity-60" : "cursor-pointer"}
+                    data-picked={picked.has(party.card_code) ? "true" : undefined}
+                    onClick={() => toggle(party)}
+                  >
+                    <TableCell>
+                      <input
+                        type="checkbox"
+                        className="size-4 cursor-pointer accent-brand"
+                        aria-label={`Select ${party.card_name || party.card_code}`}
+                        checked={already || picked.has(party.card_code)}
+                        disabled={already}
+                        title={already ? "Already on the form." : undefined}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={() => toggle(party)}
+                      />
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap font-mono text-[12.5px] font-semibold text-ink">
                       {party.card_code}
-                    </button>
-                  </TableCell>
-                  <TableCell className="text-ink">{party.card_name}</TableCell>
-                  <TableCell className="text-subtle">{party.main_group || "—"}</TableCell>
-                  <TableCell className="text-subtle">{party.state || "—"}</TableCell>
-                </TableRow>
-              ))}
+                    </TableCell>
+                    <TableCell className="text-ink">{party.card_name}</TableCell>
+                    <TableCell className="text-subtle">{party.main_group || "—"}</TableCell>
+                    <TableCell className="text-subtle">{party.state || "—"}</TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         )}
@@ -166,6 +195,13 @@ function PickerBody({
       <DialogFooter>
         <Button variant="secondary" onClick={onClose}>
           Cancel
+        </Button>
+        <Button
+          variant="primary"
+          disabled={picked.size === 0}
+          onClick={() => onAdd([...picked.values()])}
+        >
+          {picked.size > 1 ? `Add ${picked.size} parties` : "Add party"}
         </Button>
       </DialogFooter>
     </>

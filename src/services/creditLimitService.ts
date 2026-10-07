@@ -93,14 +93,49 @@ export interface CreditLimitHistory {
   stages: CreditLimitStageProgress[];
 }
 
-export interface NewCreditLimitRequest {
-  company: CreditLimitCompany;
+/** One party in a submission. Its customer facts are read from SAP. */
+export interface NewCreditLimitLine {
   card_code: string;
   new_credit_limit: string;
   /** `YYYY-MM-DD`, today or later. */
   valid_till: string;
+}
+
+/** One submission: one company, one or more parties, and the remarks and
+ *  supporting document they share. Each party becomes its own request. The
+ *  document is required for a single party and optional for several
+ *  (`attachmentRequired`) — the server enforces the same rule. */
+export interface NewCreditLimitRequest {
+  company: CreditLimitCompany;
+  lines: NewCreditLimitLine[];
   remarks?: string;
   attachment?: File | null;
+}
+
+export const attachmentRequired = (lineCount: number) => lineCount === 1;
+
+/** Which lines of a refused submission failed, by index, with the reason —
+ *  the server's `errors.lines` on a 409. Empty for any other failure. */
+export function creditLimitLineErrors(err: unknown): Record<number, string> {
+  const data = (err as { response?: { data?: { errors?: { lines?: unknown } } } })
+    ?.response?.data;
+  const lines = data?.errors?.lines;
+  const out: Record<number, string> = {};
+  if (!Array.isArray(lines)) return out;
+  lines.forEach((line, position) => {
+    if (!line || typeof line !== "object") return;
+    const entry = line as Record<string, unknown>;
+    // 409: a line that could not be raised — `{index, card_code, message}`.
+    if (typeof entry.index === "number" && typeof entry.message === "string") {
+      out[entry.index] = entry.message;
+      return;
+    }
+    // 400: field errors for the line at this position — `{field: [msg]}`.
+    const messages: string[] = [];
+    for (const value of Object.values(entry)) pushMessages(messages, value);
+    if (messages.length) out[position] = messages.join(" ");
+  });
+  return out;
 }
 
 /* ------------------------------------------------------------------ *
@@ -143,6 +178,8 @@ export function creditLimitError(err: unknown): string {
         if (key === "sap") {
           if (typeof value === "string" && value) details.push(`SAP: ${value}`);
           else if (value && typeof value === "object") details.push(`SAP: ${JSON.stringify(value)}`);
+        } else if (key === "lines" && Array.isArray(value) && value.some((v) => v && typeof v === "object")) {
+          // Per-line errors are shown on their rows — `creditLimitLineErrors`.
         } else {
           pushMessages(details, value);
         }
@@ -198,18 +235,17 @@ export const creditLimitService = {
     const res = await api.get(`${BASE}/requests/${id}/`);
     return unwrap<CreditLimitRequest>(res.data);
   },
-  createRequest: async (body: NewCreditLimitRequest): Promise<CreditLimitRequest> => {
+  /** Raises one request per line; all or nothing. */
+  createRequest: async (body: NewCreditLimitRequest): Promise<CreditLimitRequest[]> => {
     const form = new FormData();
     form.append("company", body.company);
-    form.append("card_code", body.card_code);
-    form.append("new_credit_limit", body.new_credit_limit);
-    form.append("valid_till", body.valid_till);
+    form.append("lines", JSON.stringify(body.lines));
     form.append("remarks", body.remarks ?? "");
     if (body.attachment) form.append("attachment", body.attachment);
     const res = await api.post(`${BASE}/requests/`, form, {
       headers: { "Content-Type": "multipart/form-data" },
     });
-    return unwrap<CreditLimitRequest>(res.data);
+    return unwrap<CreditLimitRequest[]>(res.data) || [];
   },
   history: async (id: number): Promise<CreditLimitHistory> => {
     const res = await api.get(`${BASE}/requests/${id}/history/`);

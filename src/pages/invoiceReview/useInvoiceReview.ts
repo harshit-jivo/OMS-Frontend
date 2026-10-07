@@ -442,7 +442,7 @@ export function useInvoiceReview({
   };
 
   // Submit the credit-limit request as multipart form-data: a documentData JSON
-  // blob plus an optional attachment. The server takes the customer and
+  // blob plus the required attachment. The server takes the customer and
   // company from the invoice and reads the balances from SAP itself, so only
   // what the reviewer decides travels here.
   const submitCreditLimitRequest = async () => {
@@ -455,6 +455,13 @@ export function useInvoiceReview({
     }
     if (!clValidTill) {
       setClSubmitError("Select a valid-till date.");
+      return;
+    }
+
+    // One party, so the supporting document is required (several-party
+    // submissions on /Credit_Limit may go without; the server holds both rules).
+    if (!clFile) {
+      setClSubmitError("Attach a supporting document for this credit-limit request.");
       return;
     }
 

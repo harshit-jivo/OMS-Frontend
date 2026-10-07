@@ -1,33 +1,44 @@
 /**
  * Credit Limit — ask for a customer's SAP credit limit to be changed.
  *
- * The requester picks a company, then a party from that company's synced SAP
- * party table; the customer is then read LIVE from SAP (name, main group,
- * balance and current limit) — the synced table can be stale — and the
- * requester asks for a new limit valid until a date, with a supporting file.
- * The request then goes through whatever approval chain the Workflow Engine
- * selects; on the final approval the new limit is written to SAP.
+ * The requester picks a company, then one or more parties from that company's
+ * synced SAP party table; each is read LIVE from SAP (name, main group,
+ * balance and current limit) — the synced table can be stale — and gets its
+ * own new limit and valid-till date. Every party becomes its own request on
+ * its own approval chain, written to SAP on its final approval. Remarks and
+ * the supporting document are shared by the submission; the document is
+ * required only when a single party is raised.
  *
  * Route access comes from the `Credit_Limit` key via `ProtectedPage` — this
  * page carries no gate of its own. Structure follows BackDate: a list tab and
  * a create tab, one detail dialog shared with the approval desk.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   HiArrowPath,
   HiOutlineCreditCard,
   HiOutlineUsers,
   HiPlus,
+  HiXMark,
 } from "react-icons/hi2";
 
 import { Button } from "../components/ui/button";
-import { DetailField, DetailGrid } from "../components/ui/detail";
 import { Field, FormGrid, Input, Select, Textarea } from "../components/ui/form";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../components/ui/table";
 import { Card, Notice, Page, PageHeader } from "../components/ui/page";
 import { Tab, TabList } from "../components/ui/tabs";
 import {
   CREDIT_LIMIT_COMPANIES,
+  attachmentRequired,
   creditLimitError,
+  creditLimitLineErrors,
   creditLimitService,
   type CreditLimitCompany,
   type CreditLimitCustomer,
@@ -153,21 +164,20 @@ export default function CreditLimit() {
 }
 
 /* ================================================================== *
- * New request
+ * New request — one or more parties
  * ================================================================== */
 
-type FormState = {
-  company: CreditLimitCompany;
+/** One party on the form: what was picked, what SAP says about it now, and
+ *  what the requester is asking for. */
+type Line = {
+  party: Party;
+  customer: CreditLimitCustomer | null;
+  lookingUp: boolean;
+  lookupError: string;
   new_credit_limit: string;
   valid_till: string;
-  remarks: string;
-};
-
-const EMPTY_FORM: FormState = {
-  company: "OIL",
-  new_credit_limit: "",
-  valid_till: "",
-  remarks: "",
+  /** Why this line was refused on the last submit attempt. */
+  serverError: string;
 };
 
 function NewRequestForm({
@@ -177,109 +187,145 @@ function NewRequestForm({
   onCancel: () => void;
   onCreated: (message: string) => void;
 }) {
-  const [form, setForm] = useState<FormState>({ ...EMPTY_FORM });
+  const [company, setCompany] = useState<CreditLimitCompany>("OIL");
+  const [lines, setLines] = useState<Line[]>([]);
+  const [remarks, setRemarks] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-
-  /** The row picked from the synced party table — it supplies the card code. */
-  const [party, setParty] = useState<Party | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
-
-  /** The same customer read LIVE from SAP, which is what the form shows. */
-  const [customer, setCustomer] = useState<CreditLimitCustomer | null>(null);
-  const [lookingUp, setLookingUp] = useState(false);
-  const [lookupError, setLookupError] = useState("");
-  /** Drops a look-up answer that arrives after the company or party changed. */
-  const lookupSeq = useRef(0);
-
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
+  /** Bumped when the company changes, so a look-up answer for the previous
+   *  company's parties is dropped rather than written onto the new list. */
+  const generation = useRef(0);
 
-  const lookUp = async (company: CreditLimitCompany, cardCode: string) => {
-    const seq = ++lookupSeq.current;
-    setLookingUp(true);
-    setLookupError("");
-    setCustomer(null);
+  const needsFile = attachmentRequired(lines.length);
+  const added = useMemo(() => new Set(lines.map((l) => l.party.card_code)), [lines]);
+
+  const patch = (cardCode: string, change: Partial<Line>) =>
+    setLines((current) =>
+      current.map((l) => (l.party.card_code === cardCode ? { ...l, ...change } : l)),
+    );
+
+  const lookUp = async (cardCode: string) => {
+    const gen = generation.current;
+    patch(cardCode, { lookingUp: true, lookupError: "", customer: null });
     try {
       const live = await creditLimitService.customer(company, cardCode);
-      if (seq === lookupSeq.current) setCustomer(live);
+      if (gen === generation.current) patch(cardCode, { customer: live, lookingUp: false });
     } catch (e) {
-      if (seq === lookupSeq.current) setLookupError(creditLimitError(e));
-    } finally {
-      if (seq === lookupSeq.current) setLookingUp(false);
+      if (gen === generation.current) {
+        patch(cardCode, { lookupError: creditLimitError(e), lookingUp: false });
+      }
     }
   };
 
-  /** Parties belong to a company: a different company forgets the last one. */
-  const changeCompany = (company: CreditLimitCompany) => {
-    lookupSeq.current += 1;
-    setForm((f) => ({ ...f, company }));
-    setParty(null);
-    setCustomer(null);
-    setLookingUp(false);
-    setLookupError("");
+  /** Parties belong to a company: a different company starts the list over. */
+  const changeCompany = (next: CreditLimitCompany) => {
+    generation.current += 1;
+    setCompany(next);
+    setLines([]);
+    setFormError("");
   };
 
-  const pickParty = (picked: Party) => {
+  const addParties = (parties: Party[]) => {
     setPickerOpen(false);
-    setParty(picked);
     setFormError("");
-    void lookUp(form.company, picked.card_code);
+    // A new row starts with the date already used above it — a batch is
+    // usually raised for one period.
+    const validTill = lines[lines.length - 1]?.valid_till ?? "";
+    const fresh = parties.filter((p) => !added.has(p.card_code));
+    setLines((current) => [
+      ...current,
+      ...fresh.map((party) => ({
+        party,
+        customer: null,
+        lookingUp: true,
+        lookupError: "",
+        new_credit_limit: "",
+        valid_till: validTill,
+        serverError: "",
+      })),
+    ]);
+    for (const party of fresh) void lookUp(party.card_code);
+  };
+
+  const remove = (cardCode: string) =>
+    setLines((current) => current.filter((l) => l.party.card_code !== cardCode));
+
+  /** The first problem with a line, or "" — checked before anything is sent. */
+  const lineProblem = (l: Line) => {
+    if (l.lookingUp) return "Still reading this customer from SAP.";
+    if (!l.customer) return "This customer could not be read from SAP.";
+    const amount = Number(l.new_credit_limit);
+    if (!l.new_credit_limit || Number.isNaN(amount) || amount < 1) {
+      return "Enter the new credit limit (at least 1).";
+    }
+    if (!l.valid_till) return "Choose the date the new limit is valid till.";
+    if (l.valid_till < todayIso()) return "Valid till cannot be in the past.";
+    return "";
   };
 
   const save = async () => {
-    if (!party || !customer) {
-      setFormError("Select a party and wait for its SAP details before submitting.");
+    if (lines.length === 0) {
+      setFormError("Add at least one party.");
       return;
     }
-    const amount = Number(form.new_credit_limit);
-    if (!form.new_credit_limit || Number.isNaN(amount) || amount < 1) {
-      setFormError("Enter the new credit limit (at least 1).");
+    const problems = lines.map(lineProblem);
+    if (problems.some(Boolean)) {
+      setLines((current) => current.map((l, i) => ({ ...l, serverError: problems[i] })));
+      setFormError("Some parties need attention — see the rows marked below.");
       return;
     }
-    if (!form.valid_till) {
-      setFormError("Choose the date the new limit is valid till.");
-      return;
-    }
-    if (form.valid_till < todayIso()) {
-      setFormError("Valid till cannot be in the past.");
+    if (needsFile && !file) {
+      setFormError("A supporting document is required for a single-party request.");
       return;
     }
     setSaving(true);
     setFormError("");
+    setLines((current) => current.map((l) => ({ ...l, serverError: "" })));
     try {
       const created = await creditLimitService.createRequest({
-        company: form.company,
-        card_code: party.card_code,
-        new_credit_limit: form.new_credit_limit,
-        valid_till: form.valid_till,
-        remarks: form.remarks,
+        company,
+        lines: lines.map((l) => ({
+          card_code: l.party.card_code,
+          new_credit_limit: l.new_credit_limit,
+          valid_till: l.valid_till,
+        })),
+        remarks,
         attachment: file,
       });
-      setForm({ ...EMPTY_FORM });
+      setLines([]);
+      setRemarks("");
       setFile(null);
-      setParty(null);
-      setCustomer(null);
       if (fileRef.current) fileRef.current.value = "";
       onCreated(
-        created?.id
-          ? `Credit limit request #${created.id} submitted.`
-          : "Credit limit request submitted.",
+        created.length > 1
+          ? `${created.length} credit limit requests submitted (#${created
+              .map((r) => r.id)
+              .join(", #")}).`
+          : created[0]?.id
+            ? `Credit limit request #${created[0].id} submitted.`
+            : "Credit limit request submitted.",
       );
     } catch (e) {
+      const byLine = creditLimitLineErrors(e);
+      setLines((current) => current.map((l, i) => ({ ...l, serverError: byLine[i] ?? "" })));
       setFormError(creditLimitError(e));
     } finally {
       setSaving(false);
     }
   };
 
+  const ready = lines.length > 0 && lines.every((l) => l.customer && !l.lookingUp);
+
   return (
     <Card className="p-4 md:p-5">
       <div className="mb-4">
         <h2 className="m-0 text-[15px] font-semibold text-ink">New Credit Limit Request</h2>
         <p className="m-0 mt-0.5 text-[13px] text-subtle">
-          Pick the party, then check its balance and current limit — those are
-          read live from SAP, not from this form.
+          Add one or more parties. Each becomes its own request and is approved on its
+          own; balances and current limits are read live from SAP.
         </p>
       </div>
 
@@ -291,11 +337,15 @@ function NewRequestForm({
         )}
 
         <FormGrid>
-          <Field label="Company" required>
+          <Field
+            label="Company"
+            required
+            hint={lines.length ? "Changing the company clears the parties below." : undefined}
+          >
             {(c) => (
               <Select
                 {...c}
-                value={form.company}
+                value={company}
                 onChange={(e) => changeCompany(e.target.value as CreditLimitCompany)}
               >
                 {CREDIT_LIMIT_COMPANIES.map((co) => (
@@ -306,89 +356,134 @@ function NewRequestForm({
               </Select>
             )}
           </Field>
-
-          <Field label="Party" required error={lookupError || undefined}>
-            {(c) => (
-              <div className="flex min-w-0 items-center gap-3">
-                <Button
-                  id={c.id}
-                  aria-describedby={c["aria-describedby"]}
-                  // The field's <label> would otherwise name this "Party";
-                  // the verb is what a screen reader user needs to hear.
-                  aria-label={party ? "Change party" : "Select party"}
-                  variant="secondary"
-                  onClick={() => setPickerOpen(true)}
-                >
-                  <HiOutlineUsers aria-hidden />
-                  {party ? "Change party" : "Select party"}
-                </Button>
-                {party && (
-                  <span className="min-w-0 truncate text-[13px]">
-                    <span className="font-mono font-semibold text-ink">{party.card_code}</span>
-                    <span className="text-subtle"> · {party.card_name}</span>
-                  </span>
-                )}
-                {party && lookupError && !lookingUp && (
-                  <Button
-                    variant="link"
-                    size="inline"
-                    onClick={() => void lookUp(form.company, party.card_code)}
-                  >
-                    Retry
-                  </Button>
-                )}
-              </div>
-            )}
-          </Field>
         </FormGrid>
 
-        {lookingUp && (
-          <p role="status" className="m-0 text-[12.5px] text-subtle">
-            Reading the customer from SAP…
-          </p>
-        )}
-
-        {customer && (
-          <div aria-label="Customer from SAP" role="group" className="py-1">
-            <DetailGrid>
-              <DetailField label="Customer" value={customer.card_name} />
-              <DetailField label="Main group" value={customer.main_group} />
-              <DetailField label="Balance" value={formatAmount(customer.balance)} />
-              <DetailField
-                label="Current limit"
-                value={formatAmount(customer.credit_limit)}
-                strong
-              />
-            </DetailGrid>
+        <div>
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <h3 className="m-0 text-[13px] font-semibold text-ink">
+              Parties{lines.length ? ` (${lines.length})` : ""}
+            </h3>
+            <Button variant="secondary" onClick={() => setPickerOpen(true)}>
+              <HiOutlineUsers aria-hidden />{" "}
+              {lines.length ? "Add more parties" : "Select parties"}
+            </Button>
           </div>
-        )}
+
+          {lines.length === 0 ? (
+            <p className="m-0 py-3 text-[13px] text-subtle">
+              No parties yet — select one or more from the {company} party list.
+            </p>
+          ) : (
+            <Table density="compact">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Party</TableHead>
+                  <TableHead>Main group</TableHead>
+                  <TableHead className="text-right">Balance</TableHead>
+                  <TableHead className="text-right">Current limit</TableHead>
+                  <TableHead className="min-w-[140px]">New limit</TableHead>
+                  <TableHead className="min-w-[150px]">Valid till</TableHead>
+                  <TableHead className="w-10">
+                    <span className="sr-only">Remove</span>
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {lines.map((l) => {
+                  const code = l.party.card_code;
+                  const name = l.customer?.card_name || l.party.card_name;
+                  const problem = l.serverError || l.lookupError;
+                  const pending = l.lookingUp ? "…" : "—";
+                  return (
+                    <Fragment key={code}>
+                      <TableRow data-invalid={problem ? "true" : undefined}>
+                        <TableCell className="min-w-[180px]">
+                          <span className="font-mono text-[12.5px] font-semibold text-ink">
+                            {code}
+                          </span>
+                          <span className="block truncate text-[12.5px] text-subtle">{name}</span>
+                        </TableCell>
+                        <TableCell className="text-subtle">
+                          {l.customer?.main_group || pending}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {l.customer ? formatAmount(l.customer.balance) : pending}
+                        </TableCell>
+                        <TableCell className="text-right font-semibold tabular-nums">
+                          {l.customer ? formatAmount(l.customer.credit_limit) : pending}
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            aria-label={`New credit limit for ${code}`}
+                            type="number"
+                            inputMode="decimal"
+                            min={1}
+                            step="0.01"
+                            value={l.new_credit_limit}
+                            onChange={(e) =>
+                              patch(code, { new_credit_limit: e.target.value, serverError: "" })
+                            }
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            aria-label={`Valid till for ${code}`}
+                            type="date"
+                            min={todayIso()}
+                            value={l.valid_till}
+                            onChange={(e) =>
+                              patch(code, { valid_till: e.target.value, serverError: "" })
+                            }
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            aria-label={`Remove ${code}`}
+                            onClick={() => remove(code)}
+                          >
+                            <HiXMark aria-hidden />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                      {problem && (
+                        <TableRow>
+                          <TableCell colSpan={7} className="pt-0 text-[12.5px] text-bad">
+                            {problem}
+                            {l.lookupError && !l.lookingUp && (
+                              <Button
+                                variant="link"
+                                size="inline"
+                                className="ml-2"
+                                onClick={() => void lookUp(code)}
+                              >
+                                Retry
+                              </Button>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </Fragment>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </div>
 
         <FormGrid>
-          <Field label="New credit limit" required>
-            {(c) => (
-              <Input
-                {...c}
-                type="number"
-                inputMode="decimal"
-                min={1}
-                step="0.01"
-                value={form.new_credit_limit}
-                onChange={(e) => setForm({ ...form, new_credit_limit: e.target.value })}
-              />
-            )}
-          </Field>
-          <Field label="Valid till" required>
-            {(c) => (
-              <Input
-                {...c}
-                type="date"
-                min={todayIso()}
-                value={form.valid_till}
-                onChange={(e) => setForm({ ...form, valid_till: e.target.value })}
-              />
-            )}
-          </Field>
-          <Field label="Attachment" hint="Optional supporting document for the approver.">
+          <Field
+            label="Supporting document"
+            required={needsFile}
+            hint={
+              needsFile
+                ? "Required for a single-party request."
+                : lines.length > 1
+                  ? "Optional when several parties are raised together; shared by all of them."
+                  : "Required for one party, optional for several."
+            }
+          >
             {(c) => (
               <Input
                 {...c}
@@ -401,14 +496,17 @@ function NewRequestForm({
           </Field>
         </FormGrid>
 
-        <Field label="Remarks">
+        <Field
+          label="Remarks"
+          hint={lines.length > 1 ? "Shared by every request in this submission." : undefined}
+        >
           {(c) => (
             <Textarea
               {...c}
               rows={3}
-              value={form.remarks}
+              value={remarks}
               placeholder="Why the limit should change"
-              onChange={(e) => setForm({ ...form, remarks: e.target.value })}
+              onChange={(e) => setRemarks(e.target.value)}
             />
           )}
         </Field>
@@ -417,17 +515,22 @@ function NewRequestForm({
           <Button variant="secondary" onClick={onCancel}>
             Cancel
           </Button>
-          <Button variant="primary" onClick={() => void save()} disabled={saving || !customer}>
-            {saving ? "Submitting…" : "Submit Request"}
+          <Button variant="primary" onClick={() => void save()} disabled={saving || !ready}>
+            {saving
+              ? "Submitting…"
+              : lines.length > 1
+                ? `Submit ${lines.length} Requests`
+                : "Submit Request"}
           </Button>
         </div>
       </div>
 
       <PartyPickerDialog
         open={pickerOpen}
-        company={form.company}
+        company={company}
+        added={added}
         onClose={() => setPickerOpen(false)}
-        onSelect={pickParty}
+        onAdd={addParties}
       />
     </Card>
   );

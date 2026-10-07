@@ -8,10 +8,11 @@ import { sapService } from "../services/sapService";
 import { renderPage } from "../test/renderPage";
 
 /**
- * The Credit Limit requester page: the party is picked from the synced
- * party table and then read live from SAP, which gates the form; the
- * multipart submit carries what the backend needs, and the detail dialog
- * shows stage progress and history.
+ * The Credit Limit requester page: one or more parties are picked from the
+ * synced party table and each is read live from SAP, which gates the form;
+ * the document is required for one party and optional for several; a
+ * refused line is marked on its row; the detail dialog shows stage progress
+ * and history.
  */
 const REQUEST = {
   id: 21,
@@ -55,18 +56,16 @@ const PARTIES = [
   { id: 2, card_code: "C002", card_name: "Gupta Stores", main_group: "Wholesale", state: "Haryana" },
 ];
 
-async function pickSharma(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole("button", { name: /select party/i }));
-  const picker = await screen.findByRole("dialog", { name: /select party/i });
-  await user.click(await within(picker).findByText("Sharma Traders (synced)"));
-  await screen.findByRole("group", { name: /customer from sap/i });
-}
-
 function stub() {
   vi.spyOn(sapService, "getPartiesByCategory").mockResolvedValue(PARTIES as never);
   vi.spyOn(creditLimitService, "listRequests").mockResolvedValue([REQUEST] as never);
-  vi.spyOn(creditLimitService, "customer").mockResolvedValue(CUSTOMER as never);
-  vi.spyOn(creditLimitService, "createRequest").mockResolvedValue({ id: 22 } as never);
+  vi.spyOn(creditLimitService, "customer").mockImplementation(
+    async (_company, code) =>
+      (code === "C001"
+        ? CUSTOMER
+        : { ...CUSTOMER, card_code: code, card_name: "Gupta Stores Pvt" }) as never,
+  );
+  vi.spyOn(creditLimitService, "createRequest").mockResolvedValue([{ id: 22 }] as never);
   vi.spyOn(creditLimitService, "history").mockResolvedValue({
     actions: [
       {
@@ -121,74 +120,140 @@ describe("CreditLimit", () => {
     expect(within(dialog).getByRole("button", { name: /letter\.pdf/ })).toBeTruthy();
   });
 
-  it("picks the party from the company's party table, then reads it live", async () => {
-    const user = userEvent.setup();
+  /* --- new request: one or more parties ---------------------------- */
+
+  async function openForm(user: ReturnType<typeof userEvent.setup>) {
     renderPage(<CreditLimit />);
     await user.click(await screen.findByRole("tab", { name: /new request/i }));
+  }
 
-    const submit = screen.getByRole("button", { name: /submit request/i });
-    expect((submit as HTMLButtonElement).disabled).toBe(true);
-
-    await user.selectOptions(screen.getByLabelText(/company/i), "BEVERAGES");
-    await user.click(screen.getByRole("button", { name: /select party/i }));
-
-    const picker = await screen.findByRole("dialog", { name: /select party/i });
-    expect(sapService.getPartiesByCategory).toHaveBeenCalledWith("BEVERAGES");
-    expect(await within(picker).findByText("Gupta Stores")).toBeTruthy();
-
-    // Client-side search over code and name.
-    await user.type(within(picker).getByLabelText(/search parties/i), "sharma");
-    expect(within(picker).queryByText("Gupta Stores")).toBeNull();
-    await user.click(within(picker).getByText("Sharma Traders (synced)"));
-
+  /** Tick the given synced names in the picker and add them. */
+  async function addParties(user: ReturnType<typeof userEvent.setup>, ...names: string[]) {
+    await user.click(screen.getByRole("button", { name: /select parties|add more parties/i }));
+    const picker = await screen.findByRole("dialog", { name: /select parties/i });
+    for (const name of names) await user.click(await within(picker).findByText(name));
+    await user.click(within(picker).getByRole("button", { name: /^add (party|\d+ parties)$/i }));
     await waitFor(() =>
-      expect(screen.queryByRole("dialog", { name: /select party/i })).toBeNull(),
+      expect(screen.queryByRole("dialog", { name: /select parties/i })).toBeNull(),
     );
+  }
+
+  async function fillLine(
+    user: ReturnType<typeof userEvent.setup>,
+    code: string,
+    limit: string,
+  ) {
+    await user.type(await screen.findByLabelText(`New credit limit for ${code}`), limit);
+    await user.type(screen.getByLabelText(`Valid till for ${code}`), "2099-12-31");
+  }
+
+  it("adds several parties at once and reads each one live from SAP", async () => {
+    const user = userEvent.setup();
+    await openForm(user);
+    await user.selectOptions(screen.getByLabelText(/company/i), "BEVERAGES");
+    await addParties(user, "Sharma Traders (synced)", "Gupta Stores");
+
+    expect(sapService.getPartiesByCategory).toHaveBeenCalledWith("BEVERAGES");
     expect(creditLimitService.customer).toHaveBeenCalledWith("BEVERAGES", "C001");
-    const facts = await screen.findByRole("group", { name: /customer from sap/i });
-    // The LIVE name from SAP, not the synced one.
-    expect(within(facts).getByText("Sharma Traders")).toBeTruthy();
-    expect(within(facts).getByText("Retail")).toBeTruthy();
-    expect((submit as HTMLButtonElement).disabled).toBe(false);
+    expect(creditLimitService.customer).toHaveBeenCalledWith("BEVERAGES", "C002");
+    // The LIVE name from SAP replaces the synced one.
+    expect(await screen.findByText("Sharma Traders")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /submit 2 requests/i })).toBeTruthy();
+
+    // Parties already on the form are locked in the picker.
+    await user.click(screen.getByRole("button", { name: /add more parties/i }));
+    const picker = await screen.findByRole("dialog", { name: /select parties/i });
+    const box = await within(picker).findByRole("checkbox", { name: /select gupta stores/i });
+    expect((box as HTMLInputElement).disabled).toBe(true);
   });
 
-  it("forgets the party when the company changes", async () => {
+  it("requires a supporting document for a single party", async () => {
     const user = userEvent.setup();
-    renderPage(<CreditLimit />);
-    await user.click(await screen.findByRole("tab", { name: /new request/i }));
-    await pickSharma(user);
+    await openForm(user);
+    await addParties(user, "Sharma Traders (synced)");
+    await fillLine(user, "C001", "75000");
 
-    await user.selectOptions(screen.getByLabelText(/company/i), "MART");
-    expect(screen.queryByRole("group", { name: /customer from sap/i })).toBeNull();
-    expect(screen.getByRole("button", { name: /^select party$/i })).toBeTruthy();
-    expect(
-      (screen.getByRole("button", { name: /submit request/i }) as HTMLButtonElement).disabled,
-    ).toBe(true);
-  });
+    await user.click(screen.getByRole("button", { name: /submit request/i }));
+    expect(await screen.findByText(/supporting document is required/i)).toBeTruthy();
+    expect(creditLimitService.createRequest).not.toHaveBeenCalled();
 
-  it("submits the request as multipart with the attachment", async () => {
-    const user = userEvent.setup();
-    renderPage(<CreditLimit />);
-    await user.click(await screen.findByRole("tab", { name: /new request/i }));
-    await pickSharma(user);
-
-    await user.type(screen.getByLabelText(/new credit limit/i), "75000");
-    await user.type(screen.getByLabelText(/valid till/i), "2099-12-31");
     const file = new File(["x"], "letter.pdf", { type: "application/pdf" });
-    await user.upload(screen.getByLabelText(/attachment/i), file);
+    await user.upload(screen.getByLabelText(/supporting document/i), file);
     await user.click(screen.getByRole("button", { name: /submit request/i }));
 
     await waitFor(() =>
       expect(creditLimitService.createRequest).toHaveBeenCalledWith({
         company: "OIL",
-        card_code: "C001",
-        new_credit_limit: "75000",
-        valid_till: "2099-12-31",
+        lines: [{ card_code: "C001", new_credit_limit: "75000", valid_till: "2099-12-31" }],
         remarks: "",
         attachment: file,
       }),
     );
     expect(await screen.findByText(/request #22 submitted/i)).toBeTruthy();
+  });
+
+  it("submits several parties without a document", async () => {
+    vi.spyOn(creditLimitService, "createRequest").mockResolvedValue([
+      { id: 22 },
+      { id: 23 },
+    ] as never);
+    const user = userEvent.setup();
+    await openForm(user);
+    await addParties(user, "Sharma Traders (synced)", "Gupta Stores");
+    await fillLine(user, "C001", "75000");
+    await fillLine(user, "C002", "9000");
+    expect(screen.getByText(/optional when several parties/i)).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: /submit 2 requests/i }));
+    await waitFor(() =>
+      expect(creditLimitService.createRequest).toHaveBeenCalledWith({
+        company: "OIL",
+        lines: [
+          { card_code: "C001", new_credit_limit: "75000", valid_till: "2099-12-31" },
+          { card_code: "C002", new_credit_limit: "9000", valid_till: "2099-12-31" },
+        ],
+        remarks: "",
+        attachment: null,
+      }),
+    );
+    expect(await screen.findByText(/2 credit limit requests submitted \(#22, #23\)/i)).toBeTruthy();
+  });
+
+  it("marks the party the server refused", async () => {
+    vi.spyOn(creditLimitService, "createRequest").mockRejectedValue({
+      response: {
+        status: 409,
+        data: {
+          success: false,
+          message: "Nothing was submitted: one party could not be raised.",
+          errors: {
+            lines: [{ index: 1, card_code: "C002", message: "No workflow is configured." }],
+          },
+        },
+      },
+    });
+    const user = userEvent.setup();
+    await openForm(user);
+    await addParties(user, "Sharma Traders (synced)", "Gupta Stores");
+    await fillLine(user, "C001", "75000");
+    await fillLine(user, "C002", "9000");
+    await user.click(screen.getByRole("button", { name: /submit 2 requests/i }));
+
+    expect(await screen.findByText("No workflow is configured.")).toBeTruthy();
+    expect(screen.getByText(/nothing was submitted/i)).toBeTruthy();
+  });
+
+  it("clears the parties when the company changes", async () => {
+    const user = userEvent.setup();
+    await openForm(user);
+    await addParties(user, "Sharma Traders (synced)");
+    expect(await screen.findByLabelText("New credit limit for C001")).toBeTruthy();
+
+    await user.selectOptions(screen.getByLabelText(/company/i), "MART");
+    expect(screen.queryByLabelText("New credit limit for C001")).toBeNull();
+    expect(
+      (screen.getByRole("button", { name: /submit request/i }) as HTMLButtonElement).disabled,
+    ).toBe(true);
   });
 
   it("shows the server's reason when SAP has no such customer", async () => {
@@ -199,11 +264,8 @@ describe("CreditLimit", () => {
       },
     });
     const user = userEvent.setup();
-    renderPage(<CreditLimit />);
-    await user.click(await screen.findByRole("tab", { name: /new request/i }));
-    await user.click(screen.getByRole("button", { name: /select party/i }));
-    const picker = await screen.findByRole("dialog", { name: /select party/i });
-    await user.click(await within(picker).findByText("Sharma Traders (synced)"));
+    await openForm(user);
+    await addParties(user, "Sharma Traders (synced)");
 
     expect(await screen.findByText("SAP has no customer C001 in OIL.")).toBeTruthy();
     expect(screen.getByRole("button", { name: /retry/i })).toBeTruthy();
