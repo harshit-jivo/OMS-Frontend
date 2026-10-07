@@ -25,7 +25,7 @@ const REQUEST = {
   new_credit_limit: "75000.00",
   valid_till: "2099-12-31",
   remarks: "Festive season",
-  attachment_name: "letter.pdf",
+  attachments: [{ id: 5, name: "letter.pdf" }],
   invoice_log: null,
   created_by_username: "mukesh",
   created_at: "2026-10-01T10:00:00Z",
@@ -178,7 +178,7 @@ describe("CreditLimit", () => {
     expect(creditLimitService.createRequest).not.toHaveBeenCalled();
 
     const file = new File(["x"], "letter.pdf", { type: "application/pdf" });
-    await user.upload(screen.getByLabelText(/supporting document/i), file);
+    await user.upload(screen.getByLabelText(/supporting documents/i), file);
     await user.click(screen.getByRole("button", { name: /submit request/i }));
 
     await waitFor(() =>
@@ -186,7 +186,7 @@ describe("CreditLimit", () => {
         company: "OIL",
         lines: [{ card_code: "C001", new_credit_limit: "75000", valid_till: "2099-12-31" }],
         remarks: "",
-        attachment: file,
+        attachments: [file],
       }),
     );
     expect(await screen.findByText(/request #22 submitted/i)).toBeTruthy();
@@ -213,7 +213,7 @@ describe("CreditLimit", () => {
           { card_code: "C002", new_credit_limit: "9000", valid_till: "2099-12-31" },
         ],
         remarks: "",
-        attachment: null,
+        attachments: [],
       }),
     );
     expect(await screen.findByText(/2 credit limit requests submitted \(#22, #23\)/i)).toBeTruthy();
@@ -241,6 +241,32 @@ describe("CreditLimit", () => {
 
     expect(await screen.findByText("No workflow is configured.")).toBeTruthy();
     expect(screen.getByText(/nothing was submitted/i)).toBeTruthy();
+  });
+
+  it("collects several documents across picks and sends all of them", async () => {
+    const user = userEvent.setup();
+    await openForm(user);
+    await addParties(user, "Sharma Traders (synced)");
+    await fillLine(user, "C001", "75000");
+
+    const input = screen.getByLabelText(/supporting documents/i);
+    const letter = new File(["a"], "letter.pdf", { type: "application/pdf" });
+    const ledger = new File(["bb"], "ledger.xlsx");
+    const extra = new File(["ccc"], "extra.png", { type: "image/png" });
+    await user.upload(input, [letter, ledger]);
+    await user.upload(input, extra);
+    // A second pick adds to the list rather than replacing it.
+    const chosen = screen.getByRole("list", { name: /chosen documents/i });
+    expect(within(chosen).getAllByRole("listitem")).toHaveLength(3);
+
+    await user.click(screen.getByRole("button", { name: "Remove ledger.xlsx" }));
+    await user.click(screen.getByRole("button", { name: /submit request/i }));
+
+    await waitFor(() =>
+      expect(creditLimitService.createRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ attachments: [letter, extra] }),
+      ),
+    );
   });
 
   it("clears the parties when the company changes", async () => {

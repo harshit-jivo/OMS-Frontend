@@ -49,6 +49,7 @@ import {
   type Notification,
 } from "./notificationGrouping";
 import { getAccessToken } from "@/auth";
+import { routeForNotification } from "./notificationRoutes";
 
 /** Roles that are offered the browser notification prompt. */
 const PROMPTED_ROLES = ["auditor", "billing", "manager"];
@@ -123,6 +124,18 @@ export function useNotifications({
   useEffect(() => {
     goToOrderRef.current = goToOrder;
   }, [goToOrder]);
+
+  // Open what a pushed payload is about: a framework event with a screen of
+  // its own (credit limit...), otherwise the order it names. Through a ref so
+  // the long-lived bus listener always routes with the current role.
+  const openPayloadRef = useRef<(data: NotificationPayload) => void>(() => {});
+  useEffect(() => {
+    openPayloadRef.current = (data) => {
+      const route = routeForNotification(data);
+      if (route) navigate(route);
+      else goToOrder(data.order_id ?? null);
+    };
+  }, [navigate, goToOrder]);
 
   // Apply a single read to the badge + history list. Called only from the bus
   // listener so there is exactly one update path (no double-decrement).
@@ -217,10 +230,10 @@ export function useNotifications({
               : data.order_id != null
                 ? String(data.order_id)
                 : null,
-          onAction: () => goToOrderRef.current(data.order_id ?? null),
+          onAction: () => openPayloadRef.current(data),
         });
       } else if (event.type === "click") {
-        goToOrderRef.current(event.data?.order_id ?? null);
+        openPayloadRef.current(event.data || {});
       } else if (event.type === "read") {
         applyRead(event.id);
       } else if (event.type === "read-all" || event.type === "cleared") {
@@ -280,13 +293,27 @@ export function useNotifications({
     const params = new URLSearchParams(window.location.search);
     const openOrderId = params.get("openOrderId");
     const notificationId = params.get("notificationId");
-    if (!openOrderId) return;
+    // A framework notification's tap carries its event and entity instead.
+    const route = routeForNotification({
+      event_type: params.get("notifEvent"),
+      entity_id: params.get("entityId"),
+    });
+    if (!openOrderId && !route) return;
+
+    params.delete("openOrderId");
+    params.delete("notificationId");
+    params.delete("notifEvent");
+    params.delete("entityId");
+    if (route) {
+      // Framework ids are not Orders ids, so the Orders read endpoint is not
+      // called for them; the framework list marks its own.
+      navigate(route, { replace: true });
+      return;
+    }
 
     if (notificationId) void markNotificationRead(Number(notificationId));
     goToOrder(openOrderId);
 
-    params.delete("openOrderId");
-    params.delete("notificationId");
     const clean =
       window.location.pathname + (params.toString() ? `?${params}` : "");
     window.history.replaceState({}, "", clean);

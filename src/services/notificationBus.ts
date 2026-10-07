@@ -20,6 +20,9 @@ export type NotificationPayload = {
   body?: string | null;
   timestamp?: string | null;
   screen?: string | null;
+  /** Framework notifications: the entity the event concerns. */
+  entity_type?: string | null;
+  entity_id?: number | string | null;
 };
 
 export type NotificationBusEvent =

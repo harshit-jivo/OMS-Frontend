@@ -25,6 +25,7 @@ import { DetailField, DetailGrid } from "@/components/ui/detail";
 import { Field, FormGrid, Input } from "@/components/ui/form";
 import { Notice } from "@/components/ui/page";
 import { Skeleton } from "@/components/ui/skeleton";
+import { AttachmentPicker } from "../../creditLimit/AttachmentPicker";
 import { formatAmount, parsePayload } from "../helpers";
 import type { UseInvoiceReviewResult } from "../useInvoiceReview";
 
@@ -39,7 +40,8 @@ export default function CreditLimitRequestDialog({ view }: { view: UseInvoiceRev
     setClNewLimit,
     clValidTill,
     setClValidTill,
-    setClFile,
+    clFiles,
+    setClFiles,
     clSubmitting,
     clSubmitError,
     submitCreditLimitRequest,
@@ -123,21 +125,13 @@ export default function CreditLimitRequestDialog({ view }: { view: UseInvoiceRev
                       />
                     )}
                   </Field>
-                  <Field
-                    label="Attachment"
+                  <AttachmentPicker
+                    files={clFiles}
+                    onChange={setClFiles}
                     required
                     span="full"
-                    hint="Required — a credit-limit request for one party needs a supporting document."
-                  >
-                    {(control) => (
-                      <Input
-                        {...control}
-                        type="file"
-                        onChange={(event) => setClFile(event.target.files?.[0] || null)}
-                        className="file:mr-3 file:rounded-sm file:border-0 file:bg-surface-strong file:px-3 file:py-1.5 file:text-[12.5px] file:font-medium file:text-body"
-                      />
-                    )}
-                  </Field>
+                    hint="At least one is required. Add as many as needed."
+                  />
                 </FormGrid>
 
                 {clSubmitError ? (

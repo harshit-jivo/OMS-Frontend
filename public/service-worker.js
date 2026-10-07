@@ -41,6 +41,8 @@ function parsePushData(event) {
 
 function notificationTag(data) {
   if (data.order_id) return `oms-order-${data.order_id}`;
+  if (data.event_type && data.entity_id != null)
+    return `oms-${data.event_type}-${data.entity_id}`;
   if (data.notification_id) return `oms-notif-${data.notification_id}`;
   return "oms-notification";
 }
@@ -124,6 +126,13 @@ self.addEventListener("notificationclick", (event) => {
   if (data.order_id) url.searchParams.set("openOrderId", String(data.order_id));
   if (data.notification_id)
     url.searchParams.set("notificationId", String(data.notification_id));
+  // Framework notifications (credit limit...) carry no order id; the app maps
+  // the event + entity to its screen (src/components/sidebar/notificationRoutes.ts).
+  if (!data.order_id && data.event_type) {
+    url.searchParams.set("notifEvent", String(data.event_type));
+    if (data.entity_id != null)
+      url.searchParams.set("entityId", String(data.entity_id));
+  }
   const target = url.pathname + url.search;
 
   event.waitUntil(
