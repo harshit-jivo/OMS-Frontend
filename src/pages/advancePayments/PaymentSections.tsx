@@ -468,7 +468,11 @@ function SelectedDocuments({
                         <DetailField label="Due Date" value={formatDate(doc.dueDate)} />
                       ) : null}
                       <DetailField label={def.originalLabel} value={formatINR(doc.original)} />
-                      <DetailField label={def.paidLabel} value={formatINR(doc.paid)} />
+                      {/* From the cut-off OMS alone tracks it: `paid` is what OMS paid. */}
+                      <DetailField
+                        label={doc.oms?.tracked ? "Paid via OMS" : def.paidLabel}
+                        value={formatINR(doc.paid)}
+                      />
                       <DetailField label="Open Amount" value={formatINR(doc.open)} strong />
                       {doc.note ? <DetailField label="Description" value={doc.note} /> : null}
                       {(() => {

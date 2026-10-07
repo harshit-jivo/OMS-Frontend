@@ -56,7 +56,7 @@ const number = (value: string | null | undefined) => {
 };
 
 /** `PCH-10256` -> 10256: the DocEntry the form's document id carries. */
-function docEntryOf(doc: OpenDocument): number {
+export function docEntryOf(doc: OpenDocument): number {
   if (doc.attachment?.docEntry) return doc.attachment.docEntry;
   return Number(doc.id.split("-").pop());
 }

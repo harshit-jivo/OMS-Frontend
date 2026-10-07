@@ -59,6 +59,7 @@ import { PaymentProofPanel } from "./advancePayments/PaymentProofPanel";
 import { PayoutDetailsForm } from "./advancePayments/PayoutDetailsForm";
 import { PurchaseOrderDetails } from "./advancePayments/PurchaseOrderDetails";
 import { SapCheck } from "./advancePayments/SapCheck";
+import { VendorOnAccount } from "./advancePayments/VendorOnAccount";
 import { startPayout, validatePayout, type PayoutDetails } from "./advancePayments/payout";
 import { DocumentLines, RequestSummary } from "./advancePayments/RequestDetails";
 import {
@@ -77,7 +78,7 @@ import {
 import { DeskKpis, RequestFilters, RequestTable } from "./advancePayments/RequestList";
 import { SapPayment } from "./advancePayments/RequestProgress";
 import { editRows } from "./advancePayments/editChanges";
-import { payoutFileChanges, payoutToApi } from "./advancePayments/requestApi";
+import { docEntryOf, payoutFileChanges, payoutToApi } from "./advancePayments/requestApi";
 import { useRequestDetail, useRequestList, useStoreRequest } from "./advancePayments/requestQueries";
 import { formatINR } from "./advancePayments/rules";
 
@@ -350,6 +351,16 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
 
       {/* Each PO in full from SAP, from Payment on: what the payment is weighed against. */}
       {reachedPayment(entry) ? <PurchaseOrderDetails entry={entry} /> : null}
+
+      {/* An advance against a PO: money the vendor's ledger shows already paid
+          on account (possibly outside OMS), from Payment on. */}
+      {reachedPayment(entry) && entry.form.type === "VENDOR" && entry.form.paymentAgainst === "AGAINST_PO" ? (
+        <VendorOnAccount
+          company={entry.form.company}
+          cardCode={entry.form.partner}
+          poEntries={entry.form.selected.map(docEntryOf)}
+        />
+      ) : null}
 
       {/* The payee's open ledger in SAP, from Payment on. */}
       {showsBalance(entry) ? <PartnerLedger entry={entry} /> : null}
