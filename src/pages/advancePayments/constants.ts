@@ -189,6 +189,12 @@ export interface LedgerKey {
 }
 
 export interface OmsUsage {
+  /**
+   * True: created in SAP since the cut-off (8 Oct 2026), so OMS alone tracks
+   * it — `open` is its total less what OMS paid, and `paid` is OMS's payments.
+   * False: older — SAP's own open amount, less what OMS holds.
+   */
+  tracked: boolean;
   reserved: number;
   paid: number;
   /** A PO: the part of `paid` SAP still holds on account — what still counts against it. */

@@ -14,7 +14,7 @@ import { apiRequest } from "./testRequests";
 
 const PO: OpenDocument = {
   id: "POR-14008", number: "126226600", date: "2026-09-01", partner: "VENDA000101",
-  original: 100, paid: 0, open: 100, oms: { reserved: 25, paid: 40, unadjusted: 40, available: 35, requests: 2 },
+  original: 100, paid: 0, open: 100, oms: { tracked: true, reserved: 25, paid: 40, unadjusted: 40, available: 35, requests: 2 },
 };
 
 describe("what OMS already holds", () => {

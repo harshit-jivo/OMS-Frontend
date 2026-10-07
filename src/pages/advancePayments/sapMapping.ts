@@ -154,6 +154,8 @@ export function purchaseOrderToDocument(
 export function omsOf(usage: SapOmsUsage | undefined): OmsUsage | undefined {
   if (!usage) return undefined;
   return {
+    // Only when the server says so: otherwise SAP's own figures, labelled as SAP's.
+    tracked: usage.tracked === true,
     reserved: sapAmount(usage.reserved),
     paid: sapAmount(usage.paid),
     unadjusted: sapAmount(usage.unadjusted ?? "0"),

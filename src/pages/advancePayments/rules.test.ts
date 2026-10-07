@@ -614,9 +614,11 @@ describe("validation", () => {
     ]);
   });
 
-  it("asks Vendor → Against PO for its Expected Bill Date", () => {
+  it("lets Vendor → Against PO leave its Expected Bill Date blank", () => {
+    // Optional since 2026-10-07. A date that IS given still may not be past
+    // ("refuses a past Expected Bill Date on a vendor PO", below).
     const form = answer({ type: "VENDOR" }, { paymentAgainst: "AGAINST_PO" });
-    expect(validate(form).missing).toContain("Expected Bill Date");
+    expect(validate(form).missing).not.toContain("Expected Bill Date");
   });
 
   it("requires a Department: a budget head", () => {

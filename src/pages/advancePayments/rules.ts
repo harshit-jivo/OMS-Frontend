@@ -301,7 +301,7 @@ export const availableOf = (doc: OpenDocument) => doc.oms?.available ?? doc.open
 interface CaseRule {
   /** Documents must be picked, and the payment is calculated from them. */
   reference?: ReferenceKind;
-  /** Ask when the payment is expected to be adjusted against the documents. */
+  /** Ask when the payment is expected to be adjusted against the documents. Optional. */
   expectedDate?: boolean;
   /** Ask how the money comes back (One Time / EMI / Other), and over what period. */
   repayment?: boolean;
@@ -1030,7 +1030,8 @@ export function validate(form: RequestForm, today: string = todayIso()): Validat
     if (!form.departmentHead) missing.push("Department Head");
     else if (!form.departmentHeadLogin) problems.push(departmentHeadLoginError(form.departmentHeadName));
   }
-  if (c.expectedDate && !form.expectedDate) missing.push("Expected Bill Date");
+  // Vendor → Against PO's Expected Bill Date is optional; one that is given
+  // still may not be in the past.
   const poDate = c.expectedDate
     ? pastDateError("Expected Bill Date", form.expectedDate, today)
     : null;

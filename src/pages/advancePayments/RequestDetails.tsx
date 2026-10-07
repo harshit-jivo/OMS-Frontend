@@ -246,13 +246,13 @@ export function DocumentLines({
                 </TableCell>
               </TableRow>
             ) : null}
-            {showReading && doc.attachment ? (
+            {showReading && doc.reading ? (
               <TableRow className="hover:bg-transparent">
                 <TableCell colSpan={5} className="bg-surface">
                   <p className="m-0 mb-1.5 text-[11.5px] font-semibold uppercase tracking-[0.06em] text-subtle">
                     Read from {doc.number}&apos;s SAP attachment
                   </p>
-                  <AttachmentReadingTable attachment={doc.attachment} stored={doc.reading} />
+                  <AttachmentReadingTable stored={doc.reading} />
                 </TableCell>
               </TableRow>
             ) : null}

@@ -69,6 +69,33 @@ export interface SapAttachment {
 /** A check on a payment proof: matches, shows something else, or cannot tell. */
 export type ProofCheck = boolean | null;
 
+/** One open line of a vendor's ledger that still debits them: paid, not yet adjusted. */
+export interface VendorOnAccountRow {
+  trans_id: number;
+  line_id: number;
+  doc_type: string;
+  doc_type_code: number | null;
+  doc_num: string;
+  posting_date: string | null;
+  paid: string;
+  open: string;
+  memo: string;
+  reference: string;
+  /** The OMS request that posted it, or null when it was paid outside OMS. */
+  oms_request: string | null;
+}
+
+export interface VendorOnAccount {
+  company: string;
+  card_code: string;
+  total_open: string;
+  outside_oms: string;
+  /** False when every PO asked about was created in SAP before `track_from`: show nothing. */
+  applies: boolean;
+  track_from: string;
+  results: VendorOnAccountRow[];
+}
+
 /** What `/payment-proof/` found in an uploaded statement or advice. */
 export interface PaymentProofResult {
   /** "advice" (one payment) or "statement" (many). */
@@ -344,6 +371,8 @@ export interface SapOpenPurchaseOrder {
  */
 /** What OMS already holds against a SAP document (amounts as strings). */
 export interface SapOmsUsage {
+  /** False: created in SAP before the cut-off (6 Oct 2026) — `available` is SAP's open amount as it is. */
+  tracked?: boolean;
   reserved: string;
   paid: string;
   /** A PO: how much of `paid` SAP still holds on account (not yet set off against a bill). */
@@ -941,6 +970,18 @@ export const advancePaymentService = {
   },
 
   /** One PO in full from SAP: header, lines, what was made from it, its attachments. */
+  /** The vendor's money paid but not yet adjusted, from their SAP ledger (`/vendor-on-account/`). */
+  async vendorOnAccount(
+    company: AdvancePaymentCompany,
+    cardCode: string,
+    poEntries: number[] = [],
+  ): Promise<VendorOnAccount> {
+    const params: Record<string, string> = { company, card_code: cardCode };
+    if (poEntries.length) params.po_entries = poEntries.join(",");
+    const res = await api.get(`${BASE}/vendor-on-account/`, { params });
+    return (res.data?.data ?? res.data) as VendorOnAccount;
+  },
+
   async purchaseOrder(company: AdvancePaymentCompany, docEntry: number): Promise<SapPurchaseOrder> {
     const res = await api.get(`${BASE}/purchase-order/`, { params: { company, doc_entry: docEntry } });
     return unwrap<SapPurchaseOrder>(res.data);

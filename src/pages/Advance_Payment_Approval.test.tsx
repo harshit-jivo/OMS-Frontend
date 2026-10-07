@@ -74,6 +74,7 @@ vi.mock("../services/advancePaymentService", async (importOriginal) => {
       paymentPurposes: vi.fn(async () => PAYMENT_PURPOSES),
       budgets: vi.fn(async () => SAP_BUDGETS),
       readDocumentAttachment: vi.fn(),
+      vendorOnAccount: vi.fn().mockResolvedValue({ company: "OIL", card_code: "", total_open: "0", outside_oms: "0", results: [] }),
       documentAttachments: vi.fn(async () => []),
       tdsOptions: vi.fn(async () => ({ rates: ["2"], codes: [], bills_with_tds: [] })),
       purchaseOrder: vi.fn(async () => {

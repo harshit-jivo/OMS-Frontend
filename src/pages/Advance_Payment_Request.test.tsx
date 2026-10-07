@@ -105,6 +105,7 @@ vi.mock("../services/advancePaymentService", async (importOriginal) => {
       ),
       customers: vi.fn(async () => SAP_CUSTOMERS),
       readDocumentAttachment: vi.fn(),
+      vendorOnAccount: vi.fn(),
       documentAttachment: vi.fn(async () => new Blob(["%PDF-"], { type: "application/pdf" })),
       documentAttachments: vi.fn(async (_company: string, _kind: string, docEntry: number) =>
         docEntry === 10256 ? RELATED_ATTACHMENTS : [],
@@ -151,6 +152,10 @@ beforeEach(() => {
   service.employees.mockReset().mockImplementation(async () => SAP_EMPLOYEES);
   service.employeeDirectory.mockReset().mockImplementation(directory);
   service.readDocumentAttachment.mockReset().mockResolvedValue(READING);
+  service.vendorOnAccount.mockReset().mockResolvedValue({
+    company: "OIL", card_code: "", total_open: "0", outside_oms: "0", applies: true, track_from: "2026-10-06",
+    results: [],
+  });
   service.openVendorPurchaseOrders
     .mockReset()
     .mockImplementation(async (_company, cardCode) =>
@@ -540,8 +545,7 @@ describe("Advance Payment Request", () => {
     });
 
     it("expands a row to show the bill's SAP details", async () => {
-      // SAP's own figures only: the attachment is still being read.
-      service.readDocumentAttachment.mockReturnValue(new Promise(() => {}));
+      // SAP's own figures only.
       const user = await setup();
       await toAbcBills(user);
       await tick(user, /^Bills/, /10256/);
@@ -584,41 +588,13 @@ describe("Advance Payment Request", () => {
       expect(await screen.findByText("None in SAP")).toBeTruthy();
     });
 
-    it("reads a chosen bill's SAP attachment in the background, and shows the requester nothing of it", async () => {
-      let finish: (value: typeof READING) => void = () => {};
-      service.readDocumentAttachment.mockImplementation(
-        () => new Promise((resolve) => (finish = resolve as typeof finish)),
-      );
+    it("reads no attachment: nothing runs in the background, and Submit never waits", async () => {
       const user = await setup();
       await toAbcBills(user);
       await tick(user, /^Bills/, /10256/, /10271/);
-
-      // Only the bill WITH an attachment is read, straight away, by document.
-      expect(service.readDocumentAttachment).toHaveBeenCalledTimes(1);
-      expect(service.readDocumentAttachment).toHaveBeenCalledWith("OIL", "bill", 10256);
-      // Submit waits for it; the rest of the form does not.
-      const submit = screen.getByRole("button", { name: "Checking attachments…" }) as HTMLButtonElement;
-      expect(submit.disabled).toBe(true);
-      expect(screen.getByText(/you can keep filling the form/)).toBeTruthy();
-      expect(field(/^Remarks/).disabled).toBe(false);
-
-      finish(READING);
-      expect(await screen.findByRole("button", { name: "Submit Request" })).toBeTruthy();
-      // What it found is for the approvers, not the requester.
-      await user.click(screen.getByRole("button", { name: /^10256/ }));
-      expect(screen.queryByText("On the attachment")).toBeNull();
-      expect(screen.queryByText(/differs from SAP/)).toBeNull();
-    });
-
-    it("does not hold the request up when an attachment cannot be read", async () => {
-      service.readDocumentAttachment.mockRejectedValue({
-        response: { status: 503, data: { message: "The OCR service could not be reached." } },
-      });
-      const user = await setup();
-      await toAbcBills(user);
-      await tick(user, /^Bills/, /10256/);
-      expect(await screen.findByRole("button", { name: "Submit Request" })).toBeTruthy();
-      expect(screen.queryByText(/Could not read the attachment/)).toBeNull();
+      expect(service.readDocumentAttachment).not.toHaveBeenCalled();
+      expect(screen.getByRole("button", { name: "Submit Request" })).toBeTruthy();
+      expect(screen.queryByText(/Checking the documents/)).toBeNull();
     });
 
     it("deletes one row with the trash button and leaves the others as they were", async () => {
@@ -665,6 +641,58 @@ describe("Advance Payment Request", () => {
       await user.click(within(mode).getByRole("radio", { name: "Fixed Amount" }));
       await user.type(field(/^Payment amount for 4519/), "6500");
       expect(within(total()).getByText("₹24,500")).toBeTruthy(); // ₹18,000 + ₹6,500
+    });
+
+    it("shows what the vendor's ledger says is already paid on account, without deducting it", async () => {
+      service.vendorOnAccount.mockResolvedValue({
+        company: "OIL",
+        card_code: "VENDA000102",
+        total_open: "802400",
+        outside_oms: "802400",
+        applies: true,
+        track_from: "2026-10-06",
+        results: [
+          {
+            trans_id: 238072, line_id: 1, doc_type: "Outgoing Payment", doc_type_code: 46,
+            doc_num: "1026466574", posting_date: "2026-10-06", paid: "802400", open: "802400",
+            memo: "", reference: "", oms_request: null,
+          },
+        ],
+      });
+      const user = await setup();
+      await start(user, "VENDOR", "Against PO");
+      await pick(user, /^Business Partner/, /XYZ Traders/);
+      await waitForPos();
+      // Nothing until a PO is chosen: the ledger is weighed against POs.
+      expect(screen.queryByText(/paid but not yet adjusted/)).toBeNull();
+      await tick(user, /^Purchase Orders/, /4512/);
+
+      const notice = await screen.findByText(/paid but not yet adjusted/);
+      expect(service.vendorOnAccount).toHaveBeenCalledWith("OIL", "VENDA000102", [expect.any(Number)]);
+      expect(notice.closest("[data-slot='vendor-on-account']")?.textContent).toMatch(
+        /Outgoing Payment 1026466574.*paid outside OMS/,
+      );
+    });
+
+    it("shows no ledger beside a PO created before the cut-off", async () => {
+      service.vendorOnAccount.mockResolvedValue({
+        company: "OIL", card_code: "VENDA000102", total_open: "802400", outside_oms: "802400",
+        applies: false, track_from: "2026-10-06",
+        results: [
+          {
+            trans_id: 238072, line_id: 1, doc_type: "Outgoing Payment", doc_type_code: 46,
+            doc_num: "1026466574", posting_date: "2026-10-06", paid: "802400", open: "802400",
+            memo: "", reference: "", oms_request: null,
+          },
+        ],
+      });
+      const user = await setup();
+      await start(user, "VENDOR", "Against PO");
+      await pick(user, /^Business Partner/, /XYZ Traders/);
+      await waitForPos();
+      await tick(user, /^Purchase Orders/, /4512/);
+      await vi.waitFor(() => expect(service.vendorOnAccount).toHaveBeenCalled());
+      expect(screen.queryByText(/paid but not yet adjusted/)).toBeNull();
     });
 
     it("will not take a percentage above 100", async () => {
@@ -1132,10 +1160,10 @@ describe("Advance Payment Request", () => {
         payment_date: "2026-10-01",
         budget_code: "BackOff",
         purpose_code: "RAW_MATERIAL",
-        // The bill goes with what its attachment was read to say.
+        // No attachment is read any more, so the bill carries no reading.
         documents: [
           expect.objectContaining({
-            kind: "BILL", sap_doc_entry: 10256, amount: "25000", mode: "FIXED", attachment_check: READING,
+            kind: "BILL", sap_doc_entry: 10256, amount: "25000", mode: "FIXED", attachment_check: null,
           }),
         ],
       });

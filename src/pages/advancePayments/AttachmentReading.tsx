@@ -1,22 +1,19 @@
 /**
- * What a chosen PO's / bill's SAP attachment says, next to what SAP says.
+ * What a chosen PO's / bill's SAP attachment was read to say, next to SAP.
  *
- * `AttachmentReadingStatus`: a one-line chip for the document's row.
- * `AttachmentReadingTable`: the fields, attachment against SAP, for the
- * row's detail. Both read the same query (`readingQuery.ts`).
+ * Shows only a reading SAVED with the request. Nothing here reads a file:
+ * the automatic OCR of attachments (in the background while raising, and on
+ * the desk) was removed on 2026-10-07. Requests raised before then keep the
+ * reading they were saved with; newer ones have none, and show nothing.
  */
 import { HiOutlineCheckCircle, HiOutlineXCircle } from "react-icons/hi2";
 
-import { Badge } from "../../components/ui/badge";
 import {
-  advancePaymentError,
   type AttachmentCheck,
   type AttachmentReading,
   type ReadField,
 } from "../../services/advancePaymentService";
 
-import { useAttachmentReading, summarise } from "./readingQuery";
-import type { DocumentAttachment } from "./constants";
 import { formatDate, formatINR } from "./rules";
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -45,67 +42,17 @@ function show(key: FieldKey, value: ReadField<string | number>["value"] | string
   return String(value);
 }
 
-export function AttachmentReadingStatus({ attachment }: { attachment: DocumentAttachment | undefined }) {
-  const reading = useAttachmentReading(attachment);
-  if (!attachment) return null;
-  if (reading.isPending) {
-    return (
-      <Badge tone="neutral" data-slot="attachment-status">
-        Reading attachment…
-      </Badge>
-    );
-  }
-  if (reading.isError) {
-    return (
-      <Badge tone="hold" data-slot="attachment-status">
-        Attachment not read
-      </Badge>
-    );
-  }
-  const summary = summarise(reading.data);
-  return (
-    <Badge tone={summary.tone} data-slot="attachment-status">
-      {summary.text}
-    </Badge>
-  );
-}
-
-/**
- * `stored` is the reading saved with the request when it was raised: shown
- * as it is, without reading the file again. Without one (a request raised
- * before readings were saved) the attachment is read now.
- */
-export function AttachmentReadingTable({
-  attachment,
-  stored,
-}: {
-  attachment: DocumentAttachment;
-  stored?: AttachmentCheck | null;
-}) {
-  const reading = useAttachmentReading(attachment, !stored);
-  if (stored && "error" in stored) {
+/** The reading saved with the request, or nothing when it has none. */
+export function AttachmentReadingTable({ stored }: { stored?: AttachmentCheck | null }) {
+  if (!stored) return null;
+  if ("error" in stored) {
     return (
       <p role="alert" className="text-[12px] text-hold">
         Could not read the attachment: {stored.error}
       </p>
     );
   }
-  if (stored) return <ReadingFields data={stored} />;
-  if (reading.isPending) {
-    return (
-      <p className="text-[12px] text-subtle">
-        Reading the attachment… a scan or photo takes about ten seconds a page.
-      </p>
-    );
-  }
-  if (reading.isError) {
-    return (
-      <p role="alert" className="text-[12px] text-hold">
-        Could not read the attachment: {advancePaymentError(reading.error)}
-      </p>
-    );
-  }
-  return <ReadingFields data={reading.data} />;
+  return <ReadingFields data={stored} />;
 }
 
 function ReadingFields({ data }: { data: AttachmentReading }) {

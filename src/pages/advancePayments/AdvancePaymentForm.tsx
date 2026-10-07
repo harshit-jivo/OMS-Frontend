@@ -96,7 +96,8 @@ import {
   withCodePrefix,
 } from "./sapMapping";
 import { attachFile, formatSize, type FileAttachment } from "./attachments";
-import { useBackgroundReadings } from "./readingQuery";
+import { VendorOnAccount } from "./VendorOnAccount";
+import { docEntryOf } from "./requestApi";
 
 
 /** `value`, once it has stopped changing for `ms` — for search-as-you-type. */
@@ -377,10 +378,9 @@ export function AdvancePaymentForm({
   const rows = allocationRows(form);
   const totals = allocationTotals(rows);
 
-  // The chosen documents' SAP attachments are read in the background: the
-  // requester sees nothing of it and keeps filling the form, and only Submit
-  // waits, so each document is saved with what its attachment says.
-  const background = useBackgroundReadings(c.reference ? form.selected : []);
+  // The chosen documents' SAP attachments are NOT read (OCR) any more — not in
+  // the background here, not on the desk (removed 2026-10-07). Approvers open
+  // the attachments themselves.
 
   /* ── Attachments (local only — nothing is uploaded) ────────────────────── */
 
@@ -433,18 +433,10 @@ export function AdvancePaymentForm({
       return;
     }
 
-    if (background.pending) return;
     setError("");
     setSaving(true);
-    // Each document goes with its reading (or why it could not be read).
-    const withReadings: RequestForm = {
-      ...form,
-      selected: form.selected.map((doc) =>
-        background.readings.has(doc.id) ? { ...doc, reading: background.readings.get(doc.id) } : doc,
-      ),
-    };
     try {
-      setSuccess((await save(withReadings, files)) || "");
+      setSuccess((await save(form, files)) || "");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setSuccess("");
@@ -633,9 +625,9 @@ export function AdvancePaymentForm({
           ) : null}
 
           {/* Vendor → Against PO only: when the payment is expected to be
-              adjusted against the PO(s). */}
+              adjusted against the PO(s). Optional. */}
           {c.expectedDate ? (
-            <Field label="Expected Bill Date" required>
+            <Field label="Expected Bill Date" hint="Optional.">
               {(f) => (
                 <Input
                   {...f}
@@ -708,6 +700,16 @@ export function AdvancePaymentForm({
           totals={totals}
           onAllocationChange={changeLine}
           company={form.company}
+        />
+      ) : null}
+
+      {/* Against PO: what the vendor's ledger says we already paid on account,
+          which no PO's open amount reflects (shown, never deducted). */}
+      {c.reference === "VENDOR_PO" && form.partner ? (
+        <VendorOnAccount
+          company={form.company}
+          cardCode={form.partner}
+          poEntries={form.selected.map(docEntryOf)}
         />
       ) : null}
 
@@ -942,11 +944,6 @@ export function AdvancePaymentForm({
       </FormSection>
 
       <FormActions>
-        {background.pending ? (
-          <span role="status" className="mr-auto self-center text-[12px] text-subtle">
-            Checking the documents&apos; SAP attachments… you can keep filling the form.
-          </span>
-        ) : null}
         <Button variant="secondary" onClick={cancel} disabled={saving}>
           Cancel
         </Button>
@@ -954,13 +951,13 @@ export function AdvancePaymentForm({
           <Button
             variant="secondary"
             onClick={() => void submit(secondarySubmit.onSubmit)}
-            disabled={saving || background.pending}
+            disabled={saving}
           >
             {secondarySubmit.label}
           </Button>
         ) : null}
-        <Button variant="primary" onClick={() => void submit()} disabled={saving || background.pending}>
-          {saving ? "Saving…" : background.pending ? "Checking attachments…" : submitLabel}
+        <Button variant="primary" onClick={() => void submit()} disabled={saving}>
+          {saving ? "Saving…" : submitLabel}
         </Button>
       </FormActions>
     </div>
