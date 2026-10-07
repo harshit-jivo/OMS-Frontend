@@ -83,6 +83,8 @@ const Device_Management = lazy(() => import("./pages/Device_Management"));
 const Workflows = lazy(() => import("./pages/Workflows"));
 const BackDate = lazy(() => import("./pages/BackDate"));
 const BackDateApproval = lazy(() => import("./pages/BackDate_Approval"));
+const CreditLimit = lazy(() => import("./pages/Credit_Limit"));
+const CreditLimitApproval = lazy(() => import("./pages/Credit_Limit_Approval"));
 const ProductionOrders = lazy(() => import("./pages/Production_Orders"));
 const ProductionApproval = lazy(() => import("./pages/Production_Approval"));
 const Invoice_Report = lazy(() => import("./pages/Invoice_Report"));
@@ -186,6 +188,22 @@ function App() {
           element={
             <ProtectedPage>
               <BackDateApproval />
+            </ProtectedPage>
+          }
+        />
+        <Route
+          path="/Credit_Limit"
+          element={
+            <ProtectedPage>
+              <CreditLimit />
+            </ProtectedPage>
+          }
+        />
+        <Route
+          path="/Credit_Limit_Approval"
+          element={
+            <ProtectedPage>
+              <CreditLimitApproval />
             </ProtectedPage>
           }
         />
