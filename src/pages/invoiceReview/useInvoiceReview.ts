@@ -407,8 +407,8 @@ export function useInvoiceReview({
   };
 
   // Open the credit-limit request form for a credit-limit ERROR record and
-  // prefetch the customer's live balance/limit from the DSR service, matched by
-  // the payload's CardCode.
+  // prefetch the customer's live balance/limit, read from SAP for the payload's
+  // CardCode.
   const openCreditLimitRequest = async (record: InvoiceRecord) => {
     const cardCode = String(parsePayload(record.invoice_payload).CardCode || "");
     setClRecord(record);
@@ -420,16 +420,17 @@ export function useInvoiceReview({
     setClSubmitError("");
     setClLoading(true);
     try {
-      const company = companyForBranch(record.branch);
+      // The branch name, not companyForBranch's 1/2 code: that maps MART to OIL.
+      const company = encodeURIComponent(String(record.branch || ""));
       const data = await apiFetch<{ success?: boolean; data?: CustomerCard[] }>(
-        `/api/invoice/credit-limit/cards/?company=${company}`,
+        `/api/invoice/credit-limit/cards/?company=${company}&card_code=${encodeURIComponent(cardCode)}`,
       );
       const cards = Array.isArray(data?.data) ? data.data : [];
       const card = cards.find((candidate) => String(candidate.cardCode || "") === cardCode) || null;
       setClCard(card);
       if (!card) {
         setClLookupError(
-          `Customer ${cardCode || "(unknown)"} was not found in the credit-limit master, so balances could not be prefilled.`,
+          `Customer ${cardCode || "(unknown)"} was not found in SAP, so balances could not be shown.`,
         );
       }
     } catch (err) {
@@ -441,7 +442,9 @@ export function useInvoiceReview({
   };
 
   // Submit the credit-limit request as multipart form-data: a documentData JSON
-  // blob plus the mandatory attachment.
+  // blob plus an optional attachment. The server takes the customer and
+  // company from the invoice and reads the balances from SAP itself, so only
+  // what the reviewer decides travels here.
   const submitCreditLimitRequest = async () => {
     if (!clRecord) return;
     const cardCode = String(parsePayload(clRecord.invoice_payload).CardCode || "");
@@ -454,28 +457,16 @@ export function useInvoiceReview({
       setClSubmitError("Select a valid-till date.");
       return;
     }
-    if (!clFile) {
-      setClSubmitError("An attachment is mandatory for a credit-limit request.");
-      return;
-    }
 
-    const company = companyForBranch(clRecord.branch);
     const documentData = {
-      branchId: company,
-      customerCode: clCard?.cardCode || cardCode,
-      customerValue: clCard?.cardName || clRecord.party_name || "",
-      currentBalance: toNumber(clCard?.balance),
-      currentCreditLimit: toNumber(clCard?.creditLine),
       newCreditLimit: newLimit,
-      validTill: `${clValidTill} 23:59:59.00`,
-      companyId: company,
-      // createdBy is stamped server-side (OMS_JSAP_USER_ID) — see the backend proxy.
-      totalEntries: 1,
+      validTill: clValidTill,
     };
+    const customerName = clCard?.cardName || clRecord.party_name || cardCode;
 
     const formData = new FormData();
     formData.append("documentData", JSON.stringify(documentData));
-    formData.append("attachment", clFile);
+    if (clFile) formData.append("attachment", clFile);
     if (clRecord.id !== undefined && clRecord.id !== null) {
       formData.append("invoice_log_id", String(clRecord.id));
     }
@@ -493,7 +484,7 @@ export function useInvoiceReview({
         }
       }
       setActionMessage(
-        `Credit-limit request raised for ${documentData.customerValue || cardCode} (new limit ${formatAmount(newLimit)}).`,
+        `Credit-limit request raised for ${customerName} (new limit ${formatAmount(newLimit)}).`,
       );
       setClRecord(null);
       loadInvoices();
@@ -526,8 +517,8 @@ export function useInvoiceReview({
     }
   };
 
-  // Show the JSAP approval flow for a credit-limit request. Keyed by the invoice
-  // log id; company is 1 for OIL, 2 for BEVERAGE (via companyForBranch).
+  // Show the approval flow for a credit-limit request, keyed by the invoice log
+  // id. `company` is no longer used by the server; kept for older builds.
   const openCreditLimitFlow = async (record: InvoiceRecord) => {
     if (record.id === undefined || record.id === null) {
       setActionError("This invoice has no identifier and cannot show its flow.");

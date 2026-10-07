@@ -84,6 +84,10 @@ import { userService, type User } from "../services/userService";
 /** The backend permission key — core/permission_registry.py. */
 const CONFIG_PERMISSION = "workflow.config.manage";
 
+/** `Workflow.DEFAULT_PRIORITY` on the server — every workflow starts here, so
+ *  overlaps stay ambiguous until someone ranks one. */
+const DEFAULT_PRIORITY = 100;
+
 type TabKey = "modules" | "workflows" | "queries" | "stages" | "replacements";
 
 const TABS: { key: TabKey; label: string }[] = [
@@ -860,6 +864,7 @@ function WorkflowsTab({
         code: editing.id ? editing.code : codeFromName(name),
         name,
         company: editing.company ?? "ALL",
+        priority: editing.priority ?? DEFAULT_PRIORITY,
       };
       if (editing.id) await workflowService.updateWorkflow(editing.id, body);
       else await workflowService.createWorkflow(body);
@@ -899,6 +904,7 @@ function WorkflowsTab({
           module: moduleObj?.id,
           name: "",
           company: "ALL",
+          priority: DEFAULT_PRIORITY,
         })
       }
     >
@@ -920,9 +926,10 @@ function WorkflowsTab({
       </div>
 
       <Hint>
-        A <strong>SPECIFIC</strong> company scope does not outrank <strong>ALL</strong>.
-        If both a SPECIFIC and an ALL workflow match the same document, the engine
-        raises <em>AmbiguousWorkflowSelection</em> and nothing is submitted.
+        When a document matches more than one workflow, the one with the{" "}
+        <strong>lowest priority</strong> wins. If they share the lowest priority, the
+        engine raises <em>AmbiguousWorkflowSelection</em> and nothing is submitted. A
+        SPECIFIC company scope does not outrank ALL on its own.
       </Hint>
 
       <StateBlock
@@ -947,6 +954,7 @@ function WorkflowsTab({
               <TableHead>Code</TableHead>
               <TableHead>Name</TableHead>
               <TableHead>Company</TableHead>
+              <TableHead className="w-24 text-center">Priority</TableHead>
               <TableHead className="w-24 text-center">Queries</TableHead>
               <TableHead className="w-24 text-center">Stages</TableHead>
               <TableHead className="text-right">Actions</TableHead>
@@ -972,6 +980,7 @@ function WorkflowsTab({
                 <TableCell>
                   <CompanyBadge company={w.company} />
                 </TableCell>
+                <TableCell className="text-center"><Mono>{w.priority}</Mono></TableCell>
                 <TableCell className="text-center">{w.queries?.length ?? 0}</TableCell>
                 <TableCell className="text-center">{w.stages?.length ?? 0}</TableCell>
                 <TableCell>
@@ -1055,6 +1064,23 @@ function WorkflowsTab({
           value={editing?.company}
           onChange={(company) => setEditing({ ...editing, company })}
         />
+        <Field
+          label="Priority"
+          required
+          hint="Used only when a document matches several workflows: the lowest wins, a tie is an error."
+        >
+          {(c) => (
+            <Input
+              {...c}
+              type="number"
+              min={0}
+              value={editing?.priority ?? DEFAULT_PRIORITY}
+              onChange={(e) =>
+                setEditing({ ...editing, priority: Math.max(0, Number(e.target.value) || 0) })
+              }
+            />
+          )}
+        </Field>
       </FormDialog>
     </>
   );

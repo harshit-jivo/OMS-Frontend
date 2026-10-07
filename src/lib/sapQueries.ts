@@ -88,6 +88,30 @@ export const useSapBranches = () => useSapList<Branch>("branches", sapService.ge
 export const useSapLogs = () => useSapList<Log>("logs", sapService.getLogs);
 
 /**
+ * The synced parties of ONE category (`OIL` / `BEVERAGES` / `MART`).
+ *
+ * Parameterised and conditional like `useProductVarieties`: with no category
+ * the query never runs, and `isLoading` is gated on `enabled` because a
+ * disabled v5 query reports `isPending` forever.
+ */
+export function useSapPartiesByCategory(category: string) {
+  const enabled = Boolean(category);
+  const query = useQuery({
+    queryKey: ["sap", "parties", "category", category],
+    queryFn: () => sapService.getPartiesByCategory(category),
+    enabled,
+  });
+  return {
+    items: asList<Party>(query.data),
+    isLoading: enabled && query.isPending,
+    isFetching: query.isFetching,
+    isError: query.isError,
+    error: query.error,
+    refetch: () => void query.refetch(),
+  };
+}
+
+/**
  * The variety (sub-group) list for one product category.
  *
  * Unlike the five lists above this one is PARAMETERISED and CONDITIONAL: App_User

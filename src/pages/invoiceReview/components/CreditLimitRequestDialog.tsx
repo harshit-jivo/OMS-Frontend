@@ -96,7 +96,7 @@ export default function CreditLimitRequestDialog({ view }: { view: UseInvoiceRev
                     label="Current credit limit"
                     value={clCard ? formatAmount(clCard.creditLine) : "—"}
                   />
-                  <DetailField label="Card type" value={clCard?.cardType || "—"} />
+                  <DetailField label="Customer group" value={clCard?.cardType || "—"} />
                   <DetailField label="Branch" value={clRecord.branch || "—"} />
                 </DetailGrid>
 
@@ -125,9 +125,8 @@ export default function CreditLimitRequestDialog({ view }: { view: UseInvoiceRev
                   </Field>
                   <Field
                     label="Attachment"
-                    required
                     span="full"
-                    hint="Mandatory — the approval chain will not accept a request without one."
+                    hint="Optional supporting document for the approver."
                   >
                     {(control) => (
                       <Input

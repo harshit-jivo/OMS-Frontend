@@ -47,6 +47,12 @@ export const GRANTABLE_ADMIN_PAGES: GrantablePage[] = [
     label: "BackDate — approve/reject",
     path: "/BackDate_Approval",
   },
+  { key: "Credit_Limit", label: "Credit Limit — raise requests", path: "/Credit_Limit" },
+  {
+    key: "Credit_Limit_Approval",
+    label: "Credit Limit — approve/reject",
+    path: "/Credit_Limit_Approval",
+  },
   {
     key: "Production_Order",
     label: "Production Order — view requests",

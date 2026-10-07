@@ -50,6 +50,7 @@ import {
   HiOutlineClipboardDocumentList,
   HiOutlineClock,
   HiOutlineCog6Tooth,
+  HiOutlineCreditCard,
   HiOutlineComputerDesktop,
   HiOutlineCube,
   HiOutlineCurrencyRupee,
@@ -354,6 +355,13 @@ export const SIDEBAR_SECTIONS: SidebarSectionDef[] = [
     links: [
       { to: "/BackDate", label: "BackDate Requests", icon: HiOutlineClock },
       { to: "/BackDate_Approval", label: "BackDate Approval", icon: HiOutlineShieldCheck },
+    ],
+  },
+  {
+    label: "Credit Limit",
+    links: [
+      { to: "/Credit_Limit", label: "Credit Limit Requests", icon: HiOutlineCreditCard },
+      { to: "/Credit_Limit_Approval", label: "Credit Limit Approval", icon: HiOutlineShieldCheck },
     ],
   },
   {

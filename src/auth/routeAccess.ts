@@ -203,6 +203,12 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   "/BackDate": { permissions: ["BackDate"] },
   "/BackDate_Approval": { permissions: ["BackDate_Approval"] },
 
+  // Credit Limit — change a customer's SAP credit limit. Same two-key split as
+  // BackDate: `Credit_Limit_Approval` opens the desk; acting also requires
+  // being the current stage's effective user, which the backend checks.
+  "/Credit_Limit": { permissions: ["Credit_Limit"] },
+  "/Credit_Limit_Approval": { permissions: ["Credit_Limit_Approval"] },
+
   // PRDO (Production Orders) — SAP is the origin, OMS approves.
   //
   // Two keys, same reasoning as BackDate: seeing the orders and deciding

@@ -45,6 +45,7 @@ const WORKFLOW = {
   code: "TESTFLOW_OIL_HIGHVALUE",
   name: "High Value Approval (OIL only)",
   company: "OIL" as const,
+  priority: 100,
   is_active: true,
   queries: [],
   stages: [],

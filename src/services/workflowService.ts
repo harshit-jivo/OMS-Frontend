@@ -117,6 +117,9 @@ export interface Workflow {
   code: string;
   name: string;
   company: CompanyValue;
+  /** When a document matches several workflows the LOWEST wins; a tie is
+   *  still AmbiguousWorkflowSelection. Every workflow starts at 100. */
+  priority: number;
   stages?: WorkflowStage[];
   queries?: WorkflowQuery[];
   is_active: boolean;
