@@ -58,7 +58,8 @@ export interface CreditLimitRequest {
   valid_till: string;
   remarks: string;
   /** Empty when the request has no file. */
-  attachment_name: string;
+  /** Supporting documents — shared by every request of one submission. */
+  attachments: CreditLimitAttachment[];
   invoice_log: unknown;
   created_by?: number;
   created_by_username: string;
@@ -93,6 +94,11 @@ export interface CreditLimitHistory {
   stages: CreditLimitStageProgress[];
 }
 
+export interface CreditLimitAttachment {
+  id: number;
+  name: string;
+}
+
 /** One party in a submission. Its customer facts are read from SAP. */
 export interface NewCreditLimitLine {
   card_code: string;
@@ -102,14 +108,14 @@ export interface NewCreditLimitLine {
 }
 
 /** One submission: one company, one or more parties, and the remarks and
- *  supporting document they share. Each party becomes its own request. The
- *  document is required for a single party and optional for several
- *  (`attachmentRequired`) — the server enforces the same rule. */
+ *  supporting documents they share. Each party becomes its own request. At
+ *  least one document is required for a single party; for several they are
+ *  optional (`attachmentRequired`) — the server enforces the same rule. */
 export interface NewCreditLimitRequest {
   company: CreditLimitCompany;
   lines: NewCreditLimitLine[];
   remarks?: string;
-  attachment?: File | null;
+  attachments?: File[];
 }
 
 export const attachmentRequired = (lineCount: number) => lineCount === 1;
@@ -241,7 +247,7 @@ export const creditLimitService = {
     form.append("company", body.company);
     form.append("lines", JSON.stringify(body.lines));
     form.append("remarks", body.remarks ?? "");
-    if (body.attachment) form.append("attachment", body.attachment);
+    for (const file of body.attachments ?? []) form.append("attachments", file);
     const res = await api.post(`${BASE}/requests/`, form, {
       headers: { "Content-Type": "multipart/form-data" },
     });
@@ -252,8 +258,8 @@ export const creditLimitService = {
     return unwrap<CreditLimitHistory>(res.data) || { actions: [], stages: [] };
   },
   /** The request's file. Needs the auth header, so it is fetched as a blob. */
-  attachment: async (id: number): Promise<Blob> => {
-    const res = await api.get(`${BASE}/requests/${id}/attachment/`, {
+  attachment: async (requestId: number, attachmentId: number): Promise<Blob> => {
+    const res = await api.get(`${BASE}/requests/${requestId}/attachments/${attachmentId}/`, {
       responseType: "blob",
     });
     return res.data as Blob;

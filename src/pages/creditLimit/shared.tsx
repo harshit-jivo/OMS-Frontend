@@ -47,6 +47,7 @@ import {
   CREDIT_LIMIT_COMPANIES,
   creditLimitError,
   creditLimitService,
+  type CreditLimitAttachment,
   type CreditLimitCompany,
   type CreditLimitHistory,
   type CreditLimitRequest,
@@ -191,32 +192,36 @@ async function blobError(error: unknown): Promise<string> {
 }
 
 /**
- * Open the request's file in a new tab.
+ * Open one of a request's files in a new tab.
  *
  * The endpoint needs the auth header, so a plain link cannot fetch it. The
  * tab is opened synchronously (while the browser still ties it to the click)
  * and pointed at the blob once it arrives; if it was blocked, the file is
  * downloaded instead.
  */
-export function AttachmentLink({ request }: { request: CreditLimitRequest }) {
+function AttachmentLink({
+  requestId,
+  attachment,
+}: {
+  requestId: number;
+  attachment: CreditLimitAttachment;
+}) {
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState("");
-
-  if (!request.attachment_name) return <span className="text-subtle">—</span>;
 
   const open = async () => {
     setOpening(true);
     setError("");
     const tab = window.open("", "_blank");
     try {
-      const blob = await creditLimitService.attachment(request.id);
+      const blob = await creditLimitService.attachment(requestId, attachment.id);
       const url = URL.createObjectURL(blob);
       if (tab && !tab.closed) {
         tab.location.href = url;
       } else {
         const link = document.createElement("a");
         link.href = url;
-        link.download = request.attachment_name;
+        link.download = attachment.name;
         document.body.appendChild(link);
         link.click();
         link.remove();
@@ -240,9 +245,22 @@ export function AttachmentLink({ request }: { request: CreditLimitRequest }) {
         className="gap-1 text-brand"
       >
         <HiOutlinePaperClip aria-hidden />
-        {opening ? "Opening…" : request.attachment_name}
+        {opening ? "Opening…" : attachment.name}
       </Button>
       {error && <span className="text-[12px] text-bad">{error}</span>}
+    </span>
+  );
+}
+
+/** Every supporting document on a request, or a dash when there are none. */
+export function AttachmentList({ request }: { request: CreditLimitRequest }) {
+  const files = request.attachments ?? [];
+  if (files.length === 0) return <span className="text-subtle">—</span>;
+  return (
+    <span className="flex flex-col items-start gap-1">
+      {files.map((file) => (
+        <AttachmentLink key={file.id} requestId={request.id} attachment={file} />
+      ))}
     </span>
   );
 }
@@ -435,7 +453,10 @@ function RequestDetailBody({
           <DetailField label="Balance" value={formatAmount(request.current_balance)} />
           <DetailField label="Main group" value={request.main_group} />
           <DetailField label="Valid till" value={formatDate(request.valid_till)} />
-          <DetailField label="Attachment" value={<AttachmentLink request={request} />} />
+          <DetailField
+            label={(request.attachments?.length ?? 0) > 1 ? "Attachments" : "Attachment"}
+            value={<AttachmentList request={request} />}
+          />
           <DetailField label="Raised by" value={request.created_by_username} />
           <DetailField label="Raised on" value={formatDateTime(request.created_at)} />
           <DetailField label="Remarks" value={request.remarks} span="full" />

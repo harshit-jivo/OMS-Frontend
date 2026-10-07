@@ -55,7 +55,9 @@ import {
   type CompanyFilter,
   type StatusFilter,
 } from "./creditLimit/shared";
+import { AttachmentPicker } from "./creditLimit/AttachmentPicker";
 import { PartyPickerDialog } from "./creditLimit/PartyPickerDialog";
+import { useLinkedRequest } from "./creditLimit/useLinkedRequest";
 
 export default function CreditLimit() {
   const [rows, setRows] = useState<CreditLimitRequest[]>([]);
@@ -87,6 +89,12 @@ export default function CreditLimit() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // A notification links here with `?request=<id>`.
+  useLinkedRequest((request) => {
+    setTab("entries");
+    setDetail(request);
+  }, setError);
 
   const flash = (message: string) => {
     setNotice(message);
@@ -190,8 +198,7 @@ function NewRequestForm({
   const [company, setCompany] = useState<CreditLimitCompany>("OIL");
   const [lines, setLines] = useState<Line[]>([]);
   const [remarks, setRemarks] = useState("");
-  const [file, setFile] = useState<File | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
@@ -277,7 +284,7 @@ function NewRequestForm({
       setFormError("Some parties need attention — see the rows marked below.");
       return;
     }
-    if (needsFile && !file) {
+    if (needsFile && files.length === 0) {
       setFormError("A supporting document is required for a single-party request.");
       return;
     }
@@ -293,12 +300,11 @@ function NewRequestForm({
           valid_till: l.valid_till,
         })),
         remarks,
-        attachment: file,
+        attachments: files,
       });
       setLines([]);
       setRemarks("");
-      setFile(null);
-      if (fileRef.current) fileRef.current.value = "";
+      setFiles([]);
       onCreated(
         created.length > 1
           ? `${created.length} credit limit requests submitted (#${created
@@ -473,27 +479,18 @@ function NewRequestForm({
         </div>
 
         <FormGrid>
-          <Field
-            label="Supporting document"
+          <AttachmentPicker
+            files={files}
+            onChange={setFiles}
             required={needsFile}
             hint={
               needsFile
-                ? "Required for a single-party request."
+                ? "At least one is required for a single-party request. Add as many as needed."
                 : lines.length > 1
                   ? "Optional when several parties are raised together; shared by all of them."
                   : "Required for one party, optional for several."
             }
-          >
-            {(c) => (
-              <Input
-                {...c}
-                ref={fileRef}
-                type="file"
-                className="py-1.5"
-                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-              />
-            )}
-          </Field>
+          />
         </FormGrid>
 
         <Field

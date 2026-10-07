@@ -46,6 +46,7 @@ import {
   type CompanyFilter,
   type StatusFilter,
 } from "./creditLimit/shared";
+import { useLinkedRequest } from "./creditLimit/useLinkedRequest";
 
 type View = "queue" | "history";
 
@@ -82,6 +83,10 @@ export default function CreditLimitApproval() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // A notification links here with `?request=<id>`; the server still decides
+  // whether this user may act on it.
+  useLinkedRequest(setDetail, setError);
 
   const announce = (message: string) => {
     setNotice(message);

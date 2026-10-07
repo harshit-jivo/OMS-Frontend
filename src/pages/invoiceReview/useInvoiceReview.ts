@@ -140,7 +140,7 @@ export function useInvoiceReview({
   const [clLookupError, setClLookupError] = useState("");
   const [clNewLimit, setClNewLimit] = useState("");
   const [clValidTill, setClValidTill] = useState("");
-  const [clFile, setClFile] = useState<File | null>(null);
+  const [clFiles, setClFiles] = useState<File[]>([]);
   const [clSubmitting, setClSubmitting] = useState(false);
   const [clSubmitError, setClSubmitError] = useState("");
   const [clFlowRecord, setClFlowRecord] = useState<InvoiceRecord | null>(null);
@@ -416,7 +416,7 @@ export function useInvoiceReview({
     setClLookupError("");
     setClNewLimit("");
     setClValidTill("");
-    setClFile(null);
+    setClFiles([]);
     setClSubmitError("");
     setClLoading(true);
     try {
@@ -442,7 +442,7 @@ export function useInvoiceReview({
   };
 
   // Submit the credit-limit request as multipart form-data: a documentData JSON
-  // blob plus the required attachment. The server takes the customer and
+  // blob plus at least one supporting document. The server takes the customer and
   // company from the invoice and reads the balances from SAP itself, so only
   // what the reviewer decides travels here.
   const submitCreditLimitRequest = async () => {
@@ -460,7 +460,7 @@ export function useInvoiceReview({
 
     // One party, so the supporting document is required (several-party
     // submissions on /Credit_Limit may go without; the server holds both rules).
-    if (!clFile) {
+    if (clFiles.length === 0) {
       setClSubmitError("Attach a supporting document for this credit-limit request.");
       return;
     }
@@ -473,7 +473,7 @@ export function useInvoiceReview({
 
     const formData = new FormData();
     formData.append("documentData", JSON.stringify(documentData));
-    if (clFile) formData.append("attachment", clFile);
+    for (const file of clFiles) formData.append("attachments", file);
     if (clRecord.id !== undefined && clRecord.id !== null) {
       formData.append("invoice_log_id", String(clRecord.id));
     }
@@ -852,8 +852,8 @@ export function useInvoiceReview({
     setClNewLimit,
     clValidTill,
     setClValidTill,
-    clFile,
-    setClFile,
+    clFiles,
+    setClFiles,
     clSubmitting,
     clSubmitError,
     openCreditLimitRequest,

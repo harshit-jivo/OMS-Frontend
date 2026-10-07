@@ -75,6 +75,9 @@ const BACKDATE_APPROVER_EVENTS = new Set(["BACKDATE_AWAITING_APPROVAL"]);
  */
 const PRODUCTION_APPROVER_EVENTS = new Set(["PRDO_AWAITING_APPROVAL"]);
 
+/** Credit Limit splits the same way, for the same reason. */
+const CREDIT_LIMIT_APPROVER_EVENTS = new Set(["CREDIT_LIMIT_AWAITING_APPROVAL"]);
+
 type RouteResolver = (
   id: string,
   notification: RoutableNotification,
@@ -96,6 +99,16 @@ const ENTITY_ROUTES: Record<string, RouteResolver> = {
       ? "/Production_Approval"
       : "/Production_Orders",
     search: `?orderId=${encodeURIComponent(id)}`,
+  }),
+  // `creditlimitrequest` — read off
+  // ContentType.objects.get_for_model(CreditLimitRequest).
+  creditlimitrequest: (id, notification) => ({
+    pathname: CREDIT_LIMIT_APPROVER_EVENTS.has(notification.event_type ?? "")
+      ? "/Credit_Limit_Approval"
+      : "/Credit_Limit",
+    // Read back by `useLinkedRequest`, which opens this request's detail
+    // dialog once the page can fetch it.
+    search: `?request=${encodeURIComponent(id)}`,
   }),
 };
 

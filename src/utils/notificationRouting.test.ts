@@ -109,6 +109,43 @@ describe("routeForNotification — production orders", () => {
   });
 });
 
+describe("routeForNotification — credit limit", () => {
+  it("sends an approver to the desk where the buttons are", () => {
+    expect(
+      routeForNotification({
+        entity_type: "creditlimitrequest",
+        entity_id: 77,
+        event_type: "CREDIT_LIMIT_AWAITING_APPROVAL",
+      }),
+    ).toEqual({ pathname: "/Credit_Limit_Approval", search: "?request=77" });
+  });
+
+  it("sends the requester to their own list", () => {
+    for (const event of ["CREDIT_LIMIT_APPROVED", "CREDIT_LIMIT_REJECTED"]) {
+      expect(
+        routeForNotification({
+          entity_type: "creditlimitrequest",
+          entity_id: 5,
+          event_type: event,
+        }),
+      ).toEqual({ pathname: "/Credit_Limit", search: "?request=5" });
+    }
+  });
+
+  it("declines the batch notification that names no request", () => {
+    // A multi-party submission tells each approver ONCE and carries no
+    // entity; the fallback opens the bell list rather than one arbitrary
+    // request of the batch.
+    expect(
+      routeForNotification({
+        entity_type: "creditlimitrequest",
+        entity_id: null,
+        event_type: "CREDIT_LIMIT_AWAITING_APPROVAL",
+      }),
+    ).toBeNull();
+  });
+});
+
 describe("routeFromSearchParams", () => {
   it("resolves the cold-start URL the service worker opens", () => {
     // No tab was open, so the worker could not ask anything to navigate; it

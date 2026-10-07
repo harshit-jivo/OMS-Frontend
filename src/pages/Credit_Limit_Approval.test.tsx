@@ -1,9 +1,10 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import CreditLimitApproval from "./Credit_Limit_Approval";
 import { creditLimitService } from "../services/creditLimitService";
+import { renderPage } from "../test/renderPage";
 
 /**
  * The Credit Limit approval desk: queue vs history, deciding only from the
@@ -22,7 +23,7 @@ function request(id: number, status: "PENDING" | "APPROVED") {
     new_credit_limit: "75000.00",
     valid_till: "2099-12-31",
     remarks: "",
-    attachment_name: "letter.pdf",
+    attachments: [{ id: 5, name: "letter.pdf" }],
     invoice_log: null,
     created_by_username: "mukesh",
     created_at: "2026-10-01T10:00:00Z",
@@ -74,7 +75,7 @@ describe("CreditLimitApproval", () => {
 
   it("opens on the queue and switches to history", async () => {
     const user = userEvent.setup();
-    render(<CreditLimitApproval />);
+    renderPage(<CreditLimitApproval />);
 
     expect(await screen.findByText("Customer 31")).toBeTruthy();
     expect(creditLimitService.approvalQueue).toHaveBeenCalledWith({});
@@ -93,7 +94,7 @@ describe("CreditLimitApproval", () => {
 
   it("decides only from the detail dialog, which shows the limits", async () => {
     const user = userEvent.setup();
-    render(<CreditLimitApproval />);
+    renderPage(<CreditLimitApproval />);
     await screen.findByText("Customer 31");
     expect(screen.queryByRole("button", { name: /^approve$/i })).toBeNull();
 
@@ -108,7 +109,7 @@ describe("CreditLimitApproval", () => {
 
   it("offers no decision on a request from history", async () => {
     const user = userEvent.setup();
-    render(<CreditLimitApproval />);
+    renderPage(<CreditLimitApproval />);
     await screen.findByText("Customer 31");
     await user.click(screen.getByRole("tab", { name: /history/i }));
     await screen.findByText("Customer 30");
@@ -119,7 +120,7 @@ describe("CreditLimitApproval", () => {
 
   it("requires a reason to reject", async () => {
     const user = userEvent.setup();
-    render(<CreditLimitApproval />);
+    renderPage(<CreditLimitApproval />);
     const dialog = await openDetail(user);
     await user.click(within(dialog).getByRole("button", { name: /^reject$/i }));
 
@@ -138,7 +139,7 @@ describe("CreditLimitApproval", () => {
 
   it("approves, and says when the limit reached SAP", async () => {
     const user = userEvent.setup();
-    render(<CreditLimitApproval />);
+    renderPage(<CreditLimitApproval />);
     const dialog = await openDetail(user);
     await user.click(within(dialog).getByRole("button", { name: /^approve$/i }));
 
@@ -161,7 +162,7 @@ describe("CreditLimitApproval", () => {
       },
     });
     const user = userEvent.setup();
-    render(<CreditLimitApproval />);
+    renderPage(<CreditLimitApproval />);
     const dialog = await openDetail(user);
     await user.click(within(dialog).getByRole("button", { name: /^approve$/i }));
 
@@ -172,5 +173,13 @@ describe("CreditLimitApproval", () => {
       await within(decision).findByText(/SAP refused the new credit limit\./),
     ).toBeTruthy();
     expect(within(decision).getByText(/allowed maximum/)).toBeTruthy();
+  });
+  it("opens the request a notification links to", async () => {
+    vi.spyOn(creditLimitService, "getRequest").mockResolvedValue(request(21, "PENDING") as never);
+    renderPage(<CreditLimitApproval />, { route: "/Credit_Limit_Approval?request=21" });
+
+    const dialog = await screen.findByRole("dialog");
+    expect(creditLimitService.getRequest).toHaveBeenCalledWith(21);
+    expect(within(dialog).getByRole("button", { name: /^approve$/i })).toBeTruthy();
   });
 });
