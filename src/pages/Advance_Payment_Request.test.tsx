@@ -100,6 +100,12 @@ vi.mock("../services/advancePaymentService", async (importOriginal) => {
       paymentPurposes: vi.fn(async () => PAYMENT_PURPOSES),
       departmentHeads: vi.fn(async () => DEPARTMENT_HEADS),
       budgets: vi.fn(async () => SAP_BUDGETS),
+      expenseAccounts: vi.fn(async () => [
+        { code: "5680011", name: "ELECTRICITY EXPENSES", group: "POWER & FUEL", kind: "INDIRECT" },
+        { code: "5670001", name: "RENT", group: "ADMIN", kind: "INDIRECT" },
+        { code: "5100008", name: "CASUAL LABOUR", group: "DIRECT EXPENSE", kind: "DIRECT" },
+      ]),
+      expenseMonths: vi.fn(async () => ({ company: "OIL", months: ["10-2026", "09-2026"], variety: "CANOLA" })),
       partnerLedger: vi.fn(async (_company: string, cardCode: string) =>
         cardCode === "CUSTA000846" ? CUSTOMER_LEDGER : LEDGER,
       ),
@@ -119,6 +125,7 @@ vi.mock("../services/advancePaymentService", async (importOriginal) => {
       editRequest: vi.fn(),
       act: vi.fn(),
       savePayout: vi.fn(),
+      editExpense: vi.fn(),
       confirmManualPassword: vi.fn(),
       recordUtr: vi.fn(),
       addRequestFile: vi.fn(),
@@ -256,7 +263,7 @@ describe("Advance Payment Request", () => {
     expect(heading("Reference Details")).toBeNull();
   });
 
-  it("offers the four types", async () => {
+  it("offers the five types", async () => {
     await setup();
     const type = screen.getByLabelText(/^Type/) as HTMLSelectElement;
     expect([...type.options].map((o) => o.text)).toEqual([
@@ -265,7 +272,90 @@ describe("Advance Payment Request", () => {
       "Employee",
       "Employee Imprest",
       "Customer",
+      "Expense",
     ]);
+  });
+
+  describe("Expense: paid straight to expense G/L accounts", () => {
+    const lineBox = (n: number) => within(screen.getByRole("group", { name: `Line ${n}` }));
+
+    it("is direct or indirect, and takes a SAP vendor if there is one — optional — paying to its name", async () => {
+      const user = await setup();
+      await user.selectOptions(screen.getByLabelText(/^Company/), "OIL");
+      await user.selectOptions(screen.getByLabelText(/^Type/), "EXPENSE");
+      await user.click(field(/^Payment Against/));
+      const kinds = within(await screen.findByRole("listbox")).getAllByRole("option").map((o) => o.textContent);
+      expect(kinds).toEqual(["Direct Expense", "Indirect Expense"]);
+      await user.keyboard("{Escape}");
+      await answer(user, /^Payment Against/, "Indirect Expense");
+      expect(screen.getByLabelText(/^Vendor/).textContent).toMatch(/No vendor \(optional\)/);
+      await pick(user, /^Vendor/, /ABC Technologies/);
+      expect(field(/^Pay To/).value).toBe("ABC Technologies");
+      // A name typed over it stays: the vendor does not overwrite it again.
+      await user.clear(field(/^Pay To/));
+      await user.type(field(/^Pay To/), "ABC (Ludhiana unit)");
+      await pick(user, /^Vendor/, /No vendor/);
+      expect(field(/^Pay To/).value).toBe("ABC (Ludhiana unit)");
+    });
+
+    it("asks who is paid, sub budget and lines (taxable + GST) — no purpose, no month — and sends them", async () => {
+      const user = await setup();
+      await start(user, "EXPENSE", "Indirect Expense");
+      expect(screen.queryByLabelText(/^Payment Purpose/)).toBeNull();
+      expect(screen.queryByLabelText(/^Amount$/)).toBeNull();
+      expect(screen.queryByLabelText(/^Month/)).toBeNull(); // the Payment desk sets it
+      expect(screen.queryByLabelText(/TDS/)).toBeNull(); // so too the TDS
+      expect(heading("Expense")).not.toBeNull();
+
+      await user.type(field(/^Pay To/), "PSPCL");
+      await pick(user, /^Department(?! Head)/, /Factory/);
+      await pick(user, /^Sub Budget/, /Accounts/);
+      await user.click(screen.getByLabelText(/Electricity expense/));
+      await user.type(lineBox(1).getByLabelText(/^Taxable amount/), "10000");
+      await user.selectOptions(lineBox(1).getByLabelText(/^GST/), "CGST_SGST_18");
+      expect(lineBox(1).getByText(/₹11,800 \(GST ₹1,800\)/)).toBeTruthy();
+      // Only the indirect expense accounts are offered.
+      await user.click(lineBox(1).getByLabelText(/^G\/L account/));
+      const offered = within(await screen.findByRole("listbox")).getAllByRole("option").map((o) => o.textContent ?? "");
+      expect(offered.some((o) => /CASUAL LABOUR/.test(o))).toBe(false);
+      await user.click(await screen.findByRole("option", { name: /ELECTRICITY EXPENSES/ }));
+      await user.click(screen.getByRole("button", { name: /Add line/ }));
+      await user.type(lineBox(2).getByLabelText(/^Taxable amount/), "3000.50");
+      expect(screen.getByText("₹14,800.50")).toBeTruthy();
+
+      // A line without a G/L must say what it is for.
+      await pick(user, /^Ownership/, /Arvinder/);
+      await user.type(field(/^Payment Date/), "2026-10-01");
+      await user.type(field(/^Remarks/), "Factory power bill");
+      await user.click(screen.getByRole("button", { name: "Submit Request" }));
+      expect(await screen.findByText(/Remarks on line 2 \(it has no G\/L\)/)).toBeTruthy();
+      expect(service.createRequest).not.toHaveBeenCalled();
+
+      await user.type(lineBox(2).getByLabelText(/^Line remarks/), "Penalty");
+      await user.click(screen.getByRole("button", { name: "Submit Request" }));
+      await screen.findByRole("tab", { name: "Entries", selected: true });
+      const [input] = vi.mocked(advancePaymentService.createRequest).mock.calls[0];
+      expect(input).toMatchObject({
+        company: "OIL",
+        request_type: "EXPENSE",
+        payment_against: "INDIRECT_EXPENSE",
+        partner_code: "",
+        partner_name: "PSPCL",
+        amount: "14800.5",
+        budget_code: "Factory",
+        sub_budget_code: "Accounts",
+        purpose_code: "",
+        effect_month: "",
+        is_electricity: true,
+        documents: [],
+        expense_lines: [
+          { taxable_amount: "10000", gst_code: "CGST_SGST_18", gl_account: "5680011", effect_month: "", remarks: "",
+            tds_override: "" },
+          { taxable_amount: "3000.5", gst_code: "", gl_account: "", effect_month: "", remarks: "Penalty",
+            tds_override: "" },
+        ],
+      });
+    });
   });
 
   describe("Customer: a refund of what they are owed", () => {

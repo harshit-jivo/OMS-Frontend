@@ -51,7 +51,8 @@ import {
   type StageAction,
 } from "../services/advancePaymentService";
 
-import { requestAmount, type AdvanceRequestEntry } from "./advancePayments/approvalData";
+import { paidAmount, payeeOf, requestAmount, type AdvanceRequestEntry } from "./advancePayments/approvalData";
+import { ExpenseEditor } from "./advancePayments/ExpenseEditor";
 import { ManualAccountPassword } from "./advancePayments/ManualAccountPassword";
 import { PartnerBalance } from "./advancePayments/PartnerBalance";
 import { PartnerLedger } from "./advancePayments/PartnerLedger";
@@ -61,7 +62,7 @@ import { PurchaseOrderDetails } from "./advancePayments/PurchaseOrderDetails";
 import { SapCheck } from "./advancePayments/SapCheck";
 import { VendorOnAccount } from "./advancePayments/VendorOnAccount";
 import { startPayout, validatePayout, type PayoutDetails } from "./advancePayments/payout";
-import { DocumentLines, RequestSummary } from "./advancePayments/RequestDetails";
+import { DocumentLines, ExpenseEditHistory, ExpenseLines, RequestSummary } from "./advancePayments/RequestDetails";
 import {
   DESK_STATUS_OPTIONS,
   MY_DECISION_LABEL,
@@ -78,13 +79,23 @@ import {
 import { DeskKpis, RequestFilters, RequestTable } from "./advancePayments/RequestList";
 import { SapPayment } from "./advancePayments/RequestProgress";
 import { editRows } from "./advancePayments/editChanges";
-import { docEntryOf, payoutFileChanges, payoutToApi } from "./advancePayments/requestApi";
+import { docEntryOf, expenseEditToApi, payoutFileChanges, payoutToApi } from "./advancePayments/requestApi";
 import { useRequestDetail, useRequestList, useStoreRequest } from "./advancePayments/requestQueries";
-import { formatINR } from "./advancePayments/rules";
+import { expenseNet, formatINR, validateExpense, type RequestForm } from "./advancePayments/rules";
+import { useTdsCodes } from "./advancePayments/expenseLookups";
 
 /** What each stage is told when the request is waiting on them. */
 function stageGuidance(entry: AdvanceRequestEntry): string {
   const flow = entry.api.flow;
+  // An Expense has no Final: Audit's approval posts it.
+  if (entry.form.type === "EXPENSE") {
+    if (flow?.current_role === "PAYMENT") {
+      return "Choose each line's G/L account, then fill in the payment and bank details and save them. Approving needs every line's G/L and the payment details complete.";
+    }
+    if (flow?.current_role === "AUDIT") {
+      return "Approving posts the expense payment to SAP and completes the request: the money may then be transferred. If SAP refuses it, the request stays here and says why. Or send it back to Payment to correct, or reject it.";
+    }
+  }
   switch (flow?.current_role) {
     case "PAYMENT":
       return entry.api.partner_not_in_sap
@@ -161,16 +172,30 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
   const [manualToken, setManualToken] = useState<string | null>(null);
   const [afterPassword, setAfterPassword] = useState<(() => void) | null>(null);
 
+  // An Expense at Payment: the desk may correct the whole request.
+  const [expenseDraft, setExpenseDraft] = useState<RequestForm | undefined>(undefined);
+  const isExpense = entry?.form.type === "EXPENSE";
+  const editsExpense = Boolean(
+    isExpense && entry?.api.can.edit_payout && entry?.api.flow?.current_role === "PAYMENT",
+  );
+  // SAP's TDS codes for the payee: the desk deducts TDS on each line's taxable amount.
+  const expenseTds = useTdsCodes(
+    entry?.form.company ? entry.form.company : null,
+    expenseDraft?.partner ?? "",
+    editsExpense,
+  );
+
   // A fresh copy of the payout whenever the server's version moves: after a
   // save, a decision, or someone else's action.
   const version = entry?.api.flow?.version;
   useEffect(() => {
     if (!entry) return;
     if (entry.api.can.edit_payout && !entry.payout) {
-      setDraft(startPayout(requestAmount(entry.form), entry.form.partnerName.toUpperCase()));
+      setDraft(startPayout(paidAmount(entry.form), payeeOf(entry.form).toUpperCase()));
     } else {
       setDraft(entry.payout);
     }
+    setExpenseDraft(entry.form.type === "EXPENSE" ? entry.form : undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the version on purpose
   }, [entry?.serverId, version]);
 
@@ -189,7 +214,11 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
     );
   }
 
-  const amount = requestAmount(entry.form);
+  // What is paid: an Expense being corrected pays its corrected lines, less
+  // the TDS the desk is choosing (the invoice value is what it is worth).
+  const payable = editsExpense && expenseDraft ? expenseDraft : entry.form;
+  const invoice = requestAmount(payable);
+  const amount = isExpense ? expenseNet(payable, editsExpense ? expenseTds.rateOf : undefined) : invoice;
   const can = entry.api.can;
   const flow = entry.api.flow;
   const deciding = can.approve || can.reject;
@@ -199,13 +228,14 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
   // moves the request on and "Approve" is still the honest word.
   const hasSapPayment =
     Boolean(entry.api.voucher) || (entry.api.vouchers ?? []).some((v) => v.status === "FAILED");
-  const postsToSap = flow?.current_role === "FINAL";
+  // An Expense's route has no Final: Audit's approval posts it.
+  const postsToSap = flow?.current_role === (isExpense ? "AUDIT" : "FINAL");
   const approveLabel = postsToSap ? "Post to SAP" : "Approve";
   const approveDone = postsToSap ? "Posted to SAP." : "Approved.";
 
   /** Save the payout, then send the files it gained and drop the ones it lost. */
-  const persistPayout = async (payout: PayoutDetails): Promise<ApiRequest> => {
-    let api = await advancePaymentService.savePayout(entry.serverId, payoutToApi(payout), version, manualToken);
+  const persistPayout = async (payout: PayoutDetails, at = version): Promise<ApiRequest> => {
+    let api = await advancePaymentService.savePayout(entry.serverId, payoutToApi(payout), at, manualToken);
     const changes = payoutFileChanges(payout, api.payout ?? { ...payoutToApi(payout), lines: [] }, entry.payout);
     for (const item of changes.upload) {
       api = await advancePaymentService.addRequestFile(entry.serverId, item.file, item.purpose, item.lineId);
@@ -255,6 +285,14 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
     void run(() => persistPayout(draft), "Payment details saved.");
   };
 
+  // The Payment desk's corrections to an Expense, unsaved.
+  const expenseDirty =
+    editsExpense &&
+    expenseDraft !== undefined &&
+    JSON.stringify(expenseEditToApi(expenseDraft)) !== JSON.stringify(expenseEditToApi(entry.form));
+  const saveExpense = (at = version) =>
+    advancePaymentService.editExpense(entry.serverId, expenseEditToApi(expenseDraft ?? entry.form), at);
+
   const decide = (action: StageAction, done: string) => {
     if (action !== "approve" && !remarks.trim()) {
       setNotice({ tone: "bad", text: "Say why, in the remarks." });
@@ -262,6 +300,12 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
     }
     if (action === "approve" && can.edit_payout && draft) {
       const { missing, problems } = validatePayout(draft, amount);
+      if (editsExpense && expenseDraft) {
+        const expense = validateExpense(expenseDraft, { atPayment: true });
+        if (!expenseDraft.budget) expense.missing.unshift("Department");
+        missing.unshift(...expense.missing);
+        problems.unshift(...expense.problems);
+      }
       const messages = [...(missing.length ? [`Still needed: ${missing.join(", ")}.`] : []), ...problems];
       if (messages.length) {
         setNotice({ tone: "bad", text: messages.join(" ") });
@@ -270,8 +314,11 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
     }
     void run(async () => {
       let current = version;
+      if (action === "approve" && expenseDirty) {
+        current = (await saveExpense(current)).flow?.version;
+      }
       if (action === "approve" && can.edit_payout && draft) {
-        current = (await persistPayout(draft)).flow?.version;
+        current = (await persistPayout(draft, current)).flow?.version;
       }
       return advancePaymentService.act(entry.serverId, action, remarks.trim(), current);
     }, done);
@@ -292,7 +339,7 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
 
           </>
         }
-        description={`Raised by ${entry.requestedBy} on ${formatDateTime(entry.requestedOn)} · ${formatINR(amount)}`}
+        description={`Raised by ${entry.requestedBy} on ${formatDateTime(entry.requestedOn)} · ${formatINR(invoice)}`}
         actions={
           <Button variant="ghost" onClick={onBack}>
             Back to list
@@ -342,6 +389,40 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
       </Card>
 
       <DocumentLines entry={entry} showReading={reachedPayment(entry) && can.see_account} />
+
+      {/* An Expense: read-only lines, or at Payment the whole request to correct. */}
+      {editsExpense && expenseDraft ? (
+        <Card className="p-4 md:p-5">
+          <CardHeader>
+            <CardTitle>Expense — correct at Payment</CardTitle>
+            {expenseDirty ? (
+              <Button
+                variant="secondary"
+                size="xs"
+                onClick={() => void run(() => saveExpense(), "Expense request saved.")}
+                disabled={busy}
+              >
+                Save Expense Changes
+              </Button>
+            ) : (
+              <Badge tone="note">No unsaved changes</Badge>
+            )}
+          </CardHeader>
+          <ExpenseEditor
+            form={expenseDraft}
+            onChange={setExpenseDraft}
+            tds={{
+              codes: expenseTds.codes,
+              rateOf: expenseTds.rateOf,
+              loading: expenseTds.query.isFetching,
+              error: expenseTds.query.isError ? advancePaymentError(expenseTds.query.error) : undefined,
+            }}
+          />
+          <ExpenseEditHistory entry={entry} />
+        </Card>
+      ) : (
+        <ExpenseLines entry={entry} />
+      )}
 
       {/* SAP as it is now, while the request is still at Payment, Audit or Final:
           what Final checks before posting, seen before it gets there. */}

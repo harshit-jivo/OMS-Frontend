@@ -18,26 +18,36 @@ import {
 
 import {
   paymentAgainstLabel,
+  requestAmount,
   returnMethodLabel,
   typeLabel,
   type AdvanceRequestEntry,
 } from "./approvalData";
+import { monthLabel } from "./expenseLookups";
 import { Badge } from "../../components/ui/badge";
 import { AttachmentReadingTable } from "./AttachmentReading";
 import { formatSize } from "./attachments";
-import { PAYMENT_MODES } from "./constants";
+import { GST_OPTIONS, PAYMENT_MODES } from "./constants";
 import { DocumentHistory } from "./DocumentHistory";
 import { SapAttachmentLink, SapAttachmentList } from "./SapAttachmentLink";
 import { historyTargetOf, sapDocumentOf } from "./sapMapping";
 import { STATUS_LABEL, formatDateTime } from "./requestLabels";
+import { EditChanges } from "./RequestProgress";
 import {
   REFERENCE_KINDS,
   allocationRows,
   allocationTotals,
   dueFirst,
   dueLabel,
+  expenseNet,
+  expenseTds,
+  expenseTotal,
   formatDate,
   formatINR,
+  lineGst,
+  lineInvoice,
+  lineTaxable,
+  lineTds,
   resolveCase,
 } from "./rules";
 
@@ -52,11 +62,29 @@ export function RequestSummary({ entry }: { entry: AdvanceRequestEntry }) {
         <DetailField label="Company" value={form.company} />
         <DetailField label="Type" value={typeLabel(form)} />
         <DetailField label="Payment Against" value={paymentAgainstLabel(form)} />
-        <DetailField
-          label={c.partnerLabel}
-          value={form.partnerName || form.partner}
-          hint={form.partnerName ? form.partner : undefined}
-        />
+        {c.expense ? (
+          <>
+            <DetailField label="Pay To" value={form.payee} hint={form.partner || undefined} />
+            <DetailField label="Invoice Value" value={formatINR(requestAmount(form))} strong />
+            {expenseTds(form) ? (
+              <DetailField
+                label="TDS · Paid"
+                value={`${formatINR(expenseTds(form))} · ${formatINR(expenseNet(form))}`}
+              />
+            ) : null}
+            <DetailField
+              label="Month"
+              value={form.effectMonth ? `${monthLabel(form.effectMonth)} (${form.effectMonth})` : "Set by the Payment desk"}
+            />
+            <DetailField label="Electricity" value={form.isElectricity ? "Yes — the Director approves too" : "No"} />
+          </>
+        ) : (
+          <DetailField
+            label={c.partnerLabel}
+            value={form.partnerName || form.partner}
+            hint={form.partnerName ? form.partner : undefined}
+          />
+        )}
         {c.plainAmount ? (
           <DetailField label="Amount" value={formatINR(Number(form.amount) || 0)} strong />
         ) : null}
@@ -112,7 +140,11 @@ export function RequestSummary({ entry }: { entry: AdvanceRequestEntry }) {
           label="Department"
           value={form.budgetName || form.budget || entry.api.department?.name || ""}
         />
-        <DetailField label="Payment Purpose" value={form.purposeLabel || form.purpose} />
+        {c.expense ? (
+          <DetailField label="Sub Budget" value={form.subBudgetName || form.subBudget} />
+        ) : (
+          <DetailField label="Payment Purpose" value={form.purposeLabel || form.purpose} />
+        )}
         {form.departmentHead ? <DetailField label="Department Head" value={form.departmentHeadName} /> : null}
         <DetailField label="Ownership" value={form.ownership} />
         <DetailField label="Payment Date" value={form.paymentDate ? formatDate(form.paymentDate) : ""} />
@@ -141,6 +173,116 @@ export function RequestSummary({ entry }: { entry: AdvanceRequestEntry }) {
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Who corrected the Expense at Payment, when, and what changed — Was → Now.
+ * Shown to every stage that sees the lines, so Audit knows what Payment did.
+ */
+export function ExpenseEditHistory({ entry }: { entry: AdvanceRequestEntry }) {
+  const edits = (entry.api.logs ?? []).filter((log) => log.action === "PAYMENT_EDITED");
+  if (edits.length === 0) return null;
+  return (
+    <div className="mt-4 space-y-3 border-t border-line pt-4" data-slot="expense-edit-history">
+      <p className="m-0 text-[10px] font-semibold uppercase tracking-[0.08em] text-subtle">Edited at Payment</p>
+      {edits.map((log) => (
+        <div key={log.id}>
+          <p className="m-0 text-[12.5px] text-ink">
+            <span className="font-semibold">{log.actor?.name ?? "—"}</span>
+            {log.stage_name ? <span className="text-subtle"> · {log.stage_name}</span> : null}
+            <span className="text-subtle"> · {formatDateTime(log.created_on)}</span>
+          </p>
+          <EditChanges log={log} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** An Expense's lines: amount, G/L, month, remarks — read-only, with the Payment desk's edits. */
+export function ExpenseLines({ entry }: { entry: AdvanceRequestEntry }) {
+  const { form } = entry;
+  if (form.type !== "EXPENSE") return null;
+  const missing = form.expenseLines.filter((l) => !l.glAccount).length;
+  return (
+    <Card className="p-4 md:p-5">
+      <CardHeader>
+        <CardTitle>Expense Lines</CardTitle>
+        {missing ? (
+          <Badge tone="hold">{missing === 1 ? "1 line without a G/L" : `${missing} lines without a G/L`}</Badge>
+        ) : null}
+      </CardHeader>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="w-10">#</TableHead>
+            <TableHead className="text-right">Taxable</TableHead>
+            <TableHead>GST</TableHead>
+            <TableHead className="text-right">Invoice value</TableHead>
+            <TableHead className="text-right">TDS</TableHead>
+            <TableHead className="text-right">Paid</TableHead>
+            <TableHead>G/L account</TableHead>
+            <TableHead>Month</TableHead>
+            <TableHead>Remarks</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {form.expenseLines.map((line, index) => {
+            const month = line.effectMonth || form.effectMonth;
+            const tds = lineTds(line, form);
+            return (
+              <TableRow key={line.id}>
+                <TableCell className="tabular-nums text-subtle">{index + 1}</TableCell>
+                <TableCell className="text-right tabular-nums">{formatINR(lineTaxable(line))}</TableCell>
+                <TableCell>
+                  {GST_OPTIONS.find((o) => o.value === line.gstCode)?.label ?? line.gstCode}
+                  {line.gstCode ? (
+                    <span className="block text-[11px] text-subtle">{formatINR(lineGst(line))}</span>
+                  ) : null}
+                </TableCell>
+                <TableCell className="text-right font-semibold tabular-nums text-ink">
+                  {formatINR(lineInvoice(line))}
+                </TableCell>
+                <TableCell className="text-right tabular-nums">
+                  {tds ? formatINR(tds) : "—"}
+                  {tds && line.tdsCode ? <span className="block text-[11px] text-subtle">{line.tdsCode}</span> : null}
+                </TableCell>
+                <TableCell className="text-right tabular-nums">{formatINR(lineInvoice(line) - tds)}</TableCell>
+                <TableCell>
+                  {line.glAccount ? (
+                    <span>
+                      <span className="font-medium text-ink">{line.glAccount}</span>
+                      {line.glName ? <span className="text-subtle"> · {line.glName}</span> : null}
+                    </span>
+                  ) : (
+                    <span className="text-subtle">Payment desk to choose</span>
+                  )}
+                </TableCell>
+                <TableCell>
+                  {month ? monthLabel(month) : <span className="text-subtle">Payment desk to set</span>}
+                  {line.effectMonth && line.effectMonth !== form.effectMonth ? (
+                    <span className="block text-[11px] text-subtle">its own month</span>
+                  ) : null}
+                </TableCell>
+                <TableCell className="text-body">{line.remarks || "—"}</TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+      <p className="m-0 mt-2 text-right text-[13px] text-body" data-slot="expense-lines-total">
+        Invoice value <span className="font-semibold text-ink">{formatINR(expenseTotal(form.expenseLines))}</span>
+        {expenseTds(form) ? (
+          <>
+            {" "}
+            · TDS {formatINR(expenseTds(form))} · Paid{" "}
+            <span className="font-semibold text-ink">{formatINR(expenseNet(form))}</span>
+          </>
+        ) : null}
+      </p>
+      <ExpenseEditHistory entry={entry} />
+    </Card>
   );
 }
 

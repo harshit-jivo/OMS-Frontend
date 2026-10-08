@@ -22,16 +22,18 @@ import type {
   ApiRequestFile,
   ApiRequestInput,
   ApiRequestLog,
+  ApiExpenseEdit,
 } from "../../services/advancePaymentService";
 import type { AdvanceRequestEntry, ApprovalStatus, Decision } from "./approvalData";
 import type { FileAttachment } from "./attachments";
-import type { OpenDocument, PaymentMode } from "./constants";
+import type { GstCode, OpenDocument, PaymentMode } from "./constants";
 import type { PayoutDetails, PayoutLine, PayoutMethod, UtrProof } from "./payout";
 import {
   EMPTY_ALLOCATION,
   EMPTY_FORM,
   allocationRows,
   allocationTotals,
+  expenseTotal,
   needsDepartmentHead,
   resolveCase,
   type Allocation,
@@ -109,6 +111,21 @@ export function toApiRequest(form: RequestForm): ApiRequestInput {
     : [];
   // Signed for a refund: a ledger debit nets off, as SAP nets it.
   const total = allocationTotals(allocationRows(form)).payment;
+  // An Expense pays its lines; it has no SAP partner, only who is paid.
+  const expense = c.expense
+    ? {
+        sub_budget_code: form.subBudget,
+        expense_tds_code: form.expenseTdsCode,
+        expense_lines: form.expenseLines.map((line) => ({
+          taxable_amount: line.taxableAmount,
+          gst_code: line.gstCode,
+          gl_account: line.glAccount,
+          effect_month: line.effectMonth,
+          remarks: line.remarks.trim(),
+          tds_override: line.tdsOverride,
+        })),
+      }
+    : {};
 
   return {
     company: form.company as AdvancePaymentCompany,
@@ -116,8 +133,8 @@ export function toApiRequest(form: RequestForm): ApiRequestInput {
     payment_against: form.paymentAgainst,
     payment_against_other: form.paymentAgainst === "OTHER" ? form.paymentAgainstOther : "",
     partner_code: form.partner,
-    partner_name: form.partnerName,
-    amount: kind ? String(total) : form.amount,
+    partner_name: c.expense ? form.payee.trim() : form.partnerName,
+    amount: kind ? String(total) : c.expense ? String(expenseTotal(form.expenseLines)) : form.amount,
     documents,
     expected_date: orNull(form.expectedDate),
     expected_bill_date: orNull(form.expectedBillDate),
@@ -133,6 +150,25 @@ export function toApiRequest(form: RequestForm): ApiRequestInput {
     budget_code: form.budget,
     purpose_code: form.purpose,
     department_head_code: needsDepartmentHead(form) && form.departmentHead ? form.departmentHead : null,
+    effect_month: c.expense ? form.effectMonth : "",
+    is_electricity: c.expense && form.isElectricity,
+    ...expense,
+  };
+}
+
+/** What the Payment desk sends to correct an Expense request (`PUT /requests/<id>/expense/`). */
+export function expenseEditToApi(form: RequestForm): ApiExpenseEdit {
+  const input = toApiRequest(form);
+  return {
+    payment_against: input.payment_against,
+    partner_code: input.partner_code,
+    partner_name: input.partner_name,
+    budget_code: input.budget_code,
+    sub_budget_code: input.sub_budget_code ?? "",
+    effect_month: input.effect_month,
+    is_electricity: input.is_electricity,
+    expense_tds_code: input.expense_tds_code ?? "",
+    expense_lines: input.expense_lines ?? [],
   };
 }
 
@@ -197,6 +233,7 @@ export function formFromApi(api: ApiRequest): RequestForm {
   const allocations = Object.fromEntries(
     api.documents.map((d, i) => [selected[i].id, allocationFromApi(d)]),
   );
+  const expense = api.request_type === "EXPENSE";
   return {
     ...EMPTY_FORM,
     company: api.company,
@@ -204,10 +241,11 @@ export function formFromApi(api: ApiRequest): RequestForm {
     paymentAgainst: api.payment_against as RequestForm["paymentAgainst"],
     paymentAgainstOther: api.payment_against_other,
     partner: api.partner_code,
-    partnerName: api.partner_name,
+    // An Expense's partner_name is who is paid: the vendor's name only when one is named.
+    partnerName: expense && !api.partner_code ? "" : api.partner_name,
     selected,
     allocations,
-    amount: api.documents.length ? "" : plain(api.amount),
+    amount: api.documents.length || expense ? "" : plain(api.amount),
     expectedDate: api.expected_date ?? "",
     returnMethod: api.return_method as RequestForm["returnMethod"],
     returnMethodOther: api.return_method_other,
@@ -229,6 +267,24 @@ export function formFromApi(api: ApiRequest): RequestForm {
     ownership: api.owner_label,
     paymentDate: api.payment_date ?? "",
     remarks: api.remarks,
+    payee: expense ? api.partner_name : "",
+    subBudget: expense ? api.sub_budget_code ?? "" : "",
+    subBudgetName: expense ? api.sub_budget_name ?? "" : "",
+    effectMonth: expense ? api.effect_month ?? "" : "",
+    isElectricity: expense && Boolean(api.is_electricity),
+    expenseTdsCode: expense ? api.expense_tds_code ?? "" : "",
+    expenseLines: (api.expense_lines ?? []).map((line) => ({
+      id: String(line.id),
+      taxableAmount: plain(line.taxable_amount),
+      gstCode: (line.gst_code ?? "") as GstCode,
+      glAccount: line.gl_account,
+      glName: line.gl_name,
+      effectMonth: line.effect_month,
+      remarks: line.remarks,
+      tdsOverride: line.tds_override ?? "",
+      tdsCode: line.tds_code ?? "",
+      tdsAmount: plain(line.tds_amount),
+    })),
   };
 }
 

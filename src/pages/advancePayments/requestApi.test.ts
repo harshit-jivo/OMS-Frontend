@@ -9,7 +9,7 @@ import type { OpenDocument } from "./constants";
 import { newPayoutLine, type PayoutDetails } from "./payout";
 import { formFromApi, fromApiRequest, payoutFileChanges, payoutFromApi, payoutToApi, toApiRequest } from "./requestApi";
 import { EMPTY_FORM, applyChange, changeAllocation, type RequestForm } from "./rules";
-import { apiRequest } from "./testRequests";
+import { apiRequest, storedInput } from "./testRequests";
 
 const COMMON: Partial<RequestForm> = {
   budget: "BackOff",
@@ -46,7 +46,7 @@ function vendorBills(): RequestForm {
 function stored(form: RequestForm): ApiRequest {
   const fields = toApiRequest(form);
   return apiRequest(30, {
-    ...fields,
+    ...storedInput(fields),
     department: null,
     sub_department: null,
     budget_name: form.budgetName,

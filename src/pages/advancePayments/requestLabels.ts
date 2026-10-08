@@ -65,12 +65,14 @@ function haystack(entry: AdvanceRequestEntry): string {
     entry.requestedBy,
     form.partnerName,
     form.partner,
+    form.payee,
     typeLabel(form),
     paymentAgainstLabel(form),
     form.ownership,
     form.budgetName,
     form.budget,
     form.purposeLabel,
+    form.subBudgetName,
   ]
     .join(" ")
     .toLowerCase();

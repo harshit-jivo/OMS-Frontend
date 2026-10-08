@@ -23,6 +23,7 @@ import { cn } from "@/lib/utils";
 import { KpiFilter } from "../backdate/filters";
 
 import {
+  payeeOf,
   paymentAgainstLabel,
   requestAmount,
   typeLabel,
@@ -272,7 +273,7 @@ export function RequestTable({
                 <TableCell>{e.form.company}</TableCell>
                 <TableCell>{typeLabel(e.form)}</TableCell>
                 <TableCell>{paymentAgainstLabel(e.form)}</TableCell>
-                <TableCell>{e.form.partnerName || e.form.partner}</TableCell>
+                <TableCell>{payeeOf(e.form)}</TableCell>
                 <TableCell className="text-right font-semibold tabular-nums text-ink">
                   {formatINR(requestAmount(e.form))}
                 </TableCell>

@@ -73,6 +73,11 @@ vi.mock("../services/advancePaymentService", async (importOriginal) => {
       employeeDirectory: vi.fn(directory),
       paymentPurposes: vi.fn(async () => PAYMENT_PURPOSES),
       budgets: vi.fn(async () => SAP_BUDGETS),
+      expenseAccounts: vi.fn(async () => [
+        { code: "5680011", name: "ELECTRICITY EXPENSES", group: "POWER & FUEL", kind: "INDIRECT" },
+        { code: "5670001", name: "RENT", group: "ADMIN", kind: "INDIRECT" },
+      ]),
+      expenseMonths: vi.fn(async () => ({ company: "OIL", months: ["10-2026", "09-2026"], variety: "CANOLA" })),
       readDocumentAttachment: vi.fn(),
       vendorOnAccount: vi.fn().mockResolvedValue({ company: "OIL", card_code: "", total_open: "0", outside_oms: "0", results: [] }),
       documentAttachments: vi.fn(async () => []),
@@ -88,6 +93,7 @@ vi.mock("../services/advancePaymentService", async (importOriginal) => {
       editRequest: vi.fn(),
       act: vi.fn(),
       savePayout: vi.fn(),
+      editExpense: vi.fn(),
       confirmManualPassword: vi.fn(),
       recordUtr: vi.fn(),
       addRequestFile: vi.fn(),
@@ -621,6 +627,138 @@ describe("Payments Approval", () => {
     expect(screen.getByText("Approved by you")).toBeTruthy();
     expect(screen.queryByText("At Final Approval")).toBeNull();
     expect(screen.queryByText("SAP Outgoing Payment")).toBeNull();
+  });
+
+  describe("an Expense: Payment corrects it and sets month and TDS, Audit posts it", () => {
+    const EXPENSE = {
+      request_type: "EXPENSE" as const,
+      payment_against: "INDIRECT_EXPENSE",
+      partner_code: "",
+      partner_name: "PSPCL",
+      amount: "14800.50",
+      budget_code: "Factory",
+      budget_name: "Factory",
+      sub_budget_code: "Accounts",
+      sub_budget_name: "Accounts",
+      purpose_code: "",
+      purpose_label: "",
+      effect_month: "",
+      is_electricity: true,
+      expense_tds_code: "",
+      documents: [],
+      expense_lines: [
+        { id: 501, line_no: 1, taxable_amount: "10000.00", gst_code: "CGST_SGST_18", gst_amount: "1800.00",
+          amount: "11800.00", gl_account: "5680011", gl_name: "ELECTRICITY EXPENSES", effect_month: "", month: "",
+          remarks: "Unit 1", tds_override: "", tds_code: "", tds_label: "", tds_rate: null, tds_amount: "0.00",
+          net: "11800.00" },
+        { id: 502, line_no: 2, taxable_amount: "3000.50", gst_code: "", gst_amount: "0.00", amount: "3000.50",
+          gl_account: "", gl_name: "", effect_month: "", month: "", remarks: "Penalty, G/L to confirm",
+          tds_override: "", tds_code: "", tds_label: "", tds_rate: null, tds_amount: "0.00", net: "3000.50" },
+      ],
+    };
+    const TDS = {
+      rates: ["2", "10"],
+      codes: [
+        { code: "C194-2", name: "194C Contractor", rate: "2", account: "2133011", account_name: "TDS PAYABLE", assigned: false },
+        { code: "J194-10", name: "194J Professional", rate: "10", account: "2133012", account_name: "TDS 194J", assigned: false },
+      ],
+      bills_with_tds: [],
+    };
+    const lineBox = (n: number) => within(screen.getByRole("group", { name: `Line ${n}` }));
+
+    it("at Payment, opens the whole request to correct, and will not approve without every G/L and a month", async () => {
+      onDesk(21, 3, ["Payment Approval"], EXPENSE);
+      const user = setup();
+      await review(user, "AP-2026-0021");
+      expect(screen.getByRole("heading", { name: "Expense — correct at Payment" })).toBeTruthy();
+      expect(screen.getAllByText("Sub Budget").length).toBeGreaterThan(0);
+      expect(screen.queryByText("Payment Purpose")).toBeNull();
+      expect(screen.getByText(/Choose each line's G\/L account/)).toBeTruthy();
+      expect(field("Beneficiary Name").value).toBe("PSPCL");
+      expect(field("Pay To").value).toBe("PSPCL");
+      expect((field("Payment Against") as unknown as HTMLSelectElement).value).toBe("INDIRECT_EXPENSE");
+      expect((lineBox(2).getByLabelText(/^Line remarks/) as HTMLInputElement).value).toBe("Penalty, G/L to confirm");
+
+      await approve(user);
+      const needed = screen.getByText(/Still needed:/).textContent;
+      expect(needed).toMatch(/Month/);
+      expect(needed).toMatch(/G\/L account on line 2/);
+      expect(advancePaymentService.act).not.toHaveBeenCalled();
+    });
+
+    it("sets the month and TDS on the taxable amount — a line its own or none — and pays the invoice less TDS", async () => {
+      vi.mocked(advancePaymentService.tdsOptions).mockResolvedValue(TDS);
+      onDesk(21, 3, ["Payment Approval"], EXPENSE);
+      const user = setup();
+      await review(user, "AP-2026-0021");
+      await user.selectOptions(field("Month") as unknown as HTMLSelectElement, "10-2026");
+      await screen.findAllByRole("option", { name: /194C Contractor \(2%\)/ });
+      await user.selectOptions(field("TDS") as unknown as HTMLSelectElement, "C194-2");
+      await user.selectOptions(lineBox(2).getByLabelText(/^Line TDS/), "NONE");
+      await user.click(screen.getByLabelText(/^Department/));
+      await user.click(await screen.findByRole("option", { name: /Back Office/ }));
+      await user.click(lineBox(2).getByLabelText(/^G\/L account/));
+      await user.click(await screen.findByRole("option", { name: /RENT/ }));
+      // 2% of line 1's taxable 10,000 (not of its 11,800); line 2 none.
+      expect(lineBox(1).getByText(/₹200 · ₹11,600/)).toBeTruthy();
+      expect(screen.getByRole("status", { name: "Allocated to payment methods" }).textContent).toMatch(
+        /of ₹14,600.50/,
+      );
+
+      await user.click(screen.getByRole("button", { name: "Save Expense Changes" }));
+      expect(await screen.findByText("Expense request saved.")).toBeTruthy();
+      expect(advancePaymentService.editExpense).toHaveBeenCalledWith(
+        21,
+        expect.objectContaining({
+          payment_against: "INDIRECT_EXPENSE",
+          budget_code: "BackOff",
+          sub_budget_code: "Accounts",
+          effect_month: "10-2026",
+          expense_tds_code: "C194-2",
+          expense_lines: [
+            expect.objectContaining({ taxable_amount: "10000", gst_code: "CGST_SGST_18", gl_account: "5680011",
+              tds_override: "" }),
+            expect.objectContaining({ taxable_amount: "3000.5", gl_account: "5670001", tds_override: "NONE" }),
+          ],
+        }),
+        expect.any(Number),
+      );
+      // The history: edited at Payment, by Tester, each change Was → Now.
+      const history = screen.getByText("Edited at Payment").parentElement!;
+      expect(history.textContent).toMatch(/Tester · Payment Approval/);
+      expect(history.textContent).toMatch(/DepartmentFactoryBackOff/);
+      expect(history.textContent).toMatch(/Line 2no G\/L · 3000.505670001 · 3000.50/);
+      expect(screen.getByText("No unsaved changes")).toBeTruthy();
+    });
+
+    it("at Audit, approving posts it to SAP — an Expense has no Final", async () => {
+      onDesk(21, 4, ["Audit Approval"], {
+        ...EXPENSE,
+        effect_month: "10-2026",
+        expense_tds_code: "C194-2",
+        expense_lines: [
+          { ...EXPENSE.expense_lines[0], tds_code: "C194-2", tds_amount: "200.00", net: "11600.00" },
+          { ...EXPENSE.expense_lines[1], gl_account: "5670001", tds_override: "NONE" },
+        ],
+        logs: [
+          logRow("PAYMENT_EDITED", "Edited at Payment", {
+            stage_name: "Payment Approval",
+            actor: { id: 9, name: "Kamal", username: "kamal" },
+            data: { expense_lines: { "Line 2": { old: "no G/L · 3000.50", new: "5670001 · 3000.50" } } },
+          }),
+        ],
+      });
+      const user = setup();
+      await review(user, "AP-2026-0021");
+      expect(screen.getByText(/Approving posts the expense payment to SAP/)).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Post to SAP" })).toBeTruthy();
+      // Read-only lines at Audit: taxable, GST, invoice, TDS and what is paid.
+      expect(screen.getByRole("heading", { name: "Expense Lines" })).toBeTruthy();
+      expect(screen.queryByRole("group", { name: "Line 2" })).toBeNull();
+      const totals = document.querySelector('[data-slot="expense-lines-total"]')!.textContent;
+      expect(totals).toMatch(/Invoice value ₹14,800.50 · TDS ₹200 · Paid ₹14,600.50/);
+      expect(screen.getByText("Edited at Payment").parentElement!.textContent).toMatch(/Kamal · Payment Approval/);
+    });
   });
 
   it("at Final, posts to SAP and completes the request", async () => {
