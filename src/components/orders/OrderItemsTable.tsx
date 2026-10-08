@@ -125,7 +125,7 @@ function ItemCard({
   note?: React.ReactNode;
   amount: string;
   /** `null` keeps a column's slot empty so the next figures stay aligned. */
-  figures: ([label: string, value: React.ReactNode] | null)[];
+  figures: (readonly [label: string, value: React.ReactNode] | null)[];
   /** Giveaway cards: the same shape, indented and one tone quieter. */
   muted?: boolean;
 }) {

@@ -253,13 +253,15 @@ describe("Payments Approval", () => {
     expect(screen.getByRole("button", { name: /Approved by you/ }).textContent).toMatch(/2/);
   });
 
-  it("does not show the request's status, stage or history on review", async () => {
+  it("shows the request's status (its route) and its history on review", async () => {
+    // A desk user follows the requests at their stage and those they decided
+    // on: where each stands, and what was done to it.
     const user = setup();
     await review(user, "AP-2026-0012");
     expect(screen.getByText("Waiting on you")).toBeTruthy();
-    expect(screen.queryByText("At HOD Approval")).toBeNull();
-    expect(screen.queryByRole("heading", { name: "History" })).toBeNull();
-    expect(screen.queryByRole("list", { name: "Approval route" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "Status" })).toBeTruthy();
+    expect(screen.getByRole("list", { name: "Approval route" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "History" })).toBeTruthy();
   });
 
   it("shows the request's details and its bills with their payment lines", async () => {
@@ -267,10 +269,7 @@ describe("Payments Approval", () => {
     await review(user, "AP-2026-0014");
 
     expect(screen.getByText(/Fill in the payment and bank details and save them/)).toBeTruthy();
-    // The approval route timeline is deliberately not on this page any more -
-    // the approver acts on what is in front of them. It is still on the
-    // Request page, which Advance_Payment_Request.test.tsx covers.
-    expect(screen.queryByRole("list", { name: "Approval route" })).toBeNull();
+    expect(screen.getByRole("list", { name: "Approval route" })).toBeTruthy();
     const details = within(screen.getByRole("heading", { name: "Request Details" }).closest("section")!);
     expect(details.getByText("ABC Technologies")).toBeTruthy();
     expect(details.getByText("Procurement — Rajesh")).toBeTruthy();
@@ -724,7 +723,7 @@ describe("Payments Approval", () => {
         ],
       });
       // The history: edited at Payment, by Tester, each change Was → Now.
-      const history = screen.getByText("Edited at Payment").parentElement!;
+      const history = document.querySelector('[data-slot="expense-edit-history"]')!;
       expect(history.textContent).toMatch(/Tester · Payment Approval/);
       expect(history.textContent).toMatch(/Sub budget—Accounts/);
       expect(history.textContent).toMatch(/Line 2no G\/L · 3000.505670001 · 3000.50/);
@@ -760,7 +759,9 @@ describe("Payments Approval", () => {
       expect(screen.getByText(/Taxable ₹10,000 · GST ₹1,800/)).toBeTruthy();
       const totals = document.querySelector('[data-slot="expense-lines-total"]')!.textContent;
       expect(totals).toMatch(/Total ₹14,800.50 · TDS ₹200 · Paid ₹14,600.50/);
-      expect(screen.getByText("Edited at Payment").parentElement!.textContent).toMatch(/Kamal · Payment Approval/);
+      expect(document.querySelector('[data-slot="expense-edit-history"]')!.textContent).toMatch(
+        /Kamal · Payment Approval/,
+      );
     });
   });
 

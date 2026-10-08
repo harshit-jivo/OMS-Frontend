@@ -20,7 +20,7 @@ import { cn } from "@/lib/utils";
 import { ChoiceOrText } from "./ChoiceOrText";
 import { DocumentHistory } from "./DocumentHistory";
 import { SapAttachmentLink, SapAttachmentList } from "./SapAttachmentLink";
-import { historyTargetOf, omsSummary, sapDocumentOf } from "./sapMapping";
+import { historyTargetOf, omsSummary, sapDocumentOf, sapTdsLabel } from "./sapMapping";
 
 import {
   PAYMENT_MODES,
@@ -254,7 +254,7 @@ export function ReferenceDetails({
 
 /**
  * The small line under a document number: what kind it is (under "All"), the
- * vendor's own reference (on a SAP bill), and its date.
+ * vendor's own reference (on a SAP bill), its date, and whether SAP withheld TDS.
  */
 function documentSubtitle(doc: OpenDocument): string {
   // The note is on the picker line, not only in the expanded row: under "All"
@@ -267,6 +267,7 @@ function documentSubtitle(doc: OpenDocument): string {
     formatDate(doc.date),
     // What other OMS requests already hold against it, seen before it is ticked.
     omsSummary(doc) || null,
+    sapTdsLabel(doc),
   ]
     .filter(Boolean)
     .join(" · ");
@@ -474,6 +475,7 @@ function SelectedDocuments({
                         value={formatINR(doc.paid)}
                       />
                       <DetailField label="Open Amount" value={formatINR(doc.open)} strong />
+                      {sapTdsLabel(doc) ? <DetailField label="TDS in SAP" value={sapTdsLabel(doc)} /> : null}
                       {doc.note ? <DetailField label="Description" value={doc.note} /> : null}
                       {(() => {
                         const target = company ? historyTargetOf(doc, company) : null;

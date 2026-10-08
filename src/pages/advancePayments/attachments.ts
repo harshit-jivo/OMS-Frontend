@@ -28,3 +28,37 @@ export function formatSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
+
+/**
+ * Open a file our API sends as a blob in a new tab.
+ *
+ * The API needs the login, so a plain link cannot fetch it: the blob is fetched
+ * here and the tab pointed at it. The tab is opened SYNCHRONOUSLY, before the
+ * request, because a browser only allows `window.open` while it can still tie
+ * it to the click; if it is blocked anyway, the file is downloaded instead.
+ * Throws what `load` throws, having closed the empty tab.
+ */
+export async function openBlobInTab(load: () => Promise<Blob>, fileName: string): Promise<void> {
+  const tab = window.open("", "_blank");
+  let blob: Blob;
+  try {
+    blob = await load();
+  } catch (error) {
+    tab?.close();
+    throw error;
+  }
+  const url = URL.createObjectURL(blob);
+  if (tab && !tab.closed) {
+    // Not revoked: the tab is still reading from it. The browser reclaims it
+    // when this page goes away.
+    tab.location.href = url;
+    return;
+  }
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}

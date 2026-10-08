@@ -119,6 +119,7 @@ export function invoiceToDocument(
     currency: invoice.currency || undefined,
     attachment: toAttachment(invoice.attachment, company, "bill", invoice.doc_entry),
     oms: omsOf(invoice.oms),
+    sapTds: invoice.tds != null ? { amount: sapAmount(invoice.tds) } : undefined,
   };
 }
 
@@ -147,6 +148,10 @@ export function purchaseOrderToDocument(
     currency: po.currency || undefined,
     attachment: toAttachment(po.attachment, company, "po", po.doc_entry),
     oms: omsOf(po.oms),
+    sapTds:
+      po.tds_on_bills != null
+        ? { amount: sapAmount(po.tds_on_bills), bills: po.billed ?? 0 }
+        : undefined,
   };
 }
 
@@ -309,4 +314,22 @@ export function omsSummary(doc: OpenDocument): string {
   ]
     .filter(Boolean)
     .join(" · ");
+}
+
+/**
+ * Whether SAP withheld TDS — said before a document is ticked, so a requester
+ * knows whether the payment still has TDS to come. A PO never carries TDS in
+ * SAP; its bills do, so a PO speaks for the bills raised from it.
+ */
+export function sapTdsLabel(doc: OpenDocument): string | null {
+  const tds = doc.sapTds;
+  if (!tds) return null;
+  if (tds.bills === undefined) {
+    return tds.amount > 0 ? `TDS deducted in SAP ${formatINR(tds.amount)}` : "No TDS deducted in SAP";
+  }
+  if (tds.bills === 0) return "Not billed yet — no TDS deducted in SAP";
+  const bills = `${tds.bills} ${tds.bills === 1 ? "bill" : "bills"}`;
+  return tds.amount > 0
+    ? `TDS deducted in SAP ${formatINR(tds.amount)} on its ${bills}`
+    : `No TDS deducted in SAP on its ${bills}`;
 }

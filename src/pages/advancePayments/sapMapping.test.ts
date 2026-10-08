@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
+import type { OpenDocument } from "./constants";
 import {
   employeeToPartner,
   invoiceToDocument,
   sapAmount,
+  sapTdsLabel,
   vendorToPartner,
   withCodePrefix,
 } from "./sapMapping";
@@ -86,5 +88,25 @@ describe("SAP rows → form data", () => {
     // None in SAP, or no company to fetch it from: nothing to open.
     expect(invoiceToDocument(SAP_OPEN_INVOICES[1], "MART").attachment).toBeUndefined();
     expect(invoiceToDocument(SAP_OPEN_INVOICES[0]).attachment).toBeUndefined();
+  });
+});
+
+describe("TDS in SAP", () => {
+  const doc = (sapTds?: OpenDocument["sapTds"]) =>
+    ({ id: "x", number: "1", date: "2026-10-01", partner: "V1", original: 0, paid: 0, open: 0, sapTds }) as OpenDocument;
+
+  it("says what SAP withheld on a bill, or that it withheld none", () => {
+    expect(sapTdsLabel(doc({ amount: 37500 }))).toBe("TDS deducted in SAP ₹37,500");
+    expect(sapTdsLabel(doc({ amount: 0 }))).toBe("No TDS deducted in SAP");
+  });
+
+  it("speaks for a PO's bills — SAP never carries TDS on the PO itself", () => {
+    expect(sapTdsLabel(doc({ amount: 12589, bills: 2 }))).toBe("TDS deducted in SAP ₹12,589 on its 2 bills");
+    expect(sapTdsLabel(doc({ amount: 0, bills: 1 }))).toBe("No TDS deducted in SAP on its 1 bill");
+    expect(sapTdsLabel(doc({ amount: 0, bills: 0 }))).toBe("Not billed yet — no TDS deducted in SAP");
+  });
+
+  it("says nothing when SAP was not asked", () => {
+    expect(sapTdsLabel(doc())).toBeNull();
   });
 });

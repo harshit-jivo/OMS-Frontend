@@ -13,21 +13,33 @@
  * is RETURNED to them, when saving can resubmit it; the server enforces the
  * same rule and the buttons only follow `api.can`.
  */
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { HiChevronRight, HiOutlineBanknotes, HiPlus } from "react-icons/hi2";
-import { cn } from "@/lib/utils";
+import { HiOutlineBanknotes, HiPlus } from "react-icons/hi2";
 
 import { Badge } from "../components/ui/badge";
 import { Breadcrumbs } from "../components/ui/breadcrumbs";
 import { Button } from "../components/ui/button";
 import { Field, Textarea } from "../components/ui/form";
-import { Card, CardHeader, CardTitle, Notice, Page, PageHeader, StatRow } from "../components/ui/page";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  Notice,
+  Page,
+  PageHeader,
+  StatRow,
+} from "../components/ui/page";
 import { Tab, TabList } from "../components/ui/tabs";
-import { advancePaymentError, advancePaymentService, type ApiAssignment } from "../services/advancePaymentService";
+import {
+  advancePaymentError,
+  advancePaymentService,
+  type ApiAssignment,
+} from "../services/advancePaymentService";
 
 import { AdvancePaymentForm } from "./advancePayments/AdvancePaymentForm";
 import { AssignedToMe } from "./advancePayments/AssignedToMe";
+import { CollapsibleCard } from "./advancePayments/CollapsibleCard";
 import { useAssignedToMe } from "./advancePayments/assignments";
 import { requestAmount, type AdvanceRequestEntry } from "./advancePayments/approvalData";
 import type { FileAttachment } from "./advancePayments/attachments";
@@ -39,14 +51,21 @@ import {
   STATUS_TONE,
   filterRequests,
   formatDateTime,
+  historySummary,
   requestCounts,
+  statusSummary,
   type RequestFilterState,
   type StatusFilter,
 } from "./advancePayments/requestLabels";
 import { RequestFilters, RequestKpis, RequestTable } from "./advancePayments/RequestList";
+import { RequestFilesProvider } from "./advancePayments/RequestFileLink";
 import { RequestHistory, RouteTimeline, SapPayment } from "./advancePayments/RequestProgress";
 import { toApiRequest } from "./advancePayments/requestApi";
-import { useRequestDetail, useRequestList, useStoreRequest } from "./advancePayments/requestQueries";
+import {
+  useRequestDetail,
+  useRequestList,
+  useStoreRequest,
+} from "./advancePayments/requestQueries";
 import { formatINR, type RequestForm } from "./advancePayments/rules";
 
 type PageTab = "entries" | "create" | "assigned";
@@ -74,46 +93,6 @@ function rethrow(err: unknown): never {
 const newFiles = (files: FileAttachment[]) => files.flatMap((f) => (f.file ? [f.file] : []));
 
 /** A request as its requester sees it — where it stands, and what they may still do. */
-/**
- * A card that opens on a click: the route and the log are there when the
- * requester wants them, without pushing the request itself down the page.
- * A native `<details>`, as elsewhere in the app — keyboard and screen readers
- * get the disclosure for free.
- */
-function CollapsibleCard({ title, summary, children }: { title: string; summary?: string; children: ReactNode }) {
-  return (
-    <Card className="p-0">
-      <details className="group">
-        <summary
-          className={cn(
-            "flex cursor-pointer list-none items-center gap-2 px-4 py-3 md:px-5 [&::-webkit-details-marker]:hidden",
-            "rounded-card hover:bg-surface",
-          )}
-        >
-          <HiChevronRight
-            className="size-4 shrink-0 text-subtle transition-transform group-open:rotate-90"
-            aria-hidden="true"
-          />
-          <h2 className="m-0 text-[14px] font-semibold text-ink">{title}</h2>
-          {summary ? <span className="truncate text-[12.5px] text-subtle">{summary}</span> : null}
-        </summary>
-        <div className="border-t border-line px-4 pb-4 pt-4 md:px-5 md:pb-5">{children}</div>
-      </details>
-    </Card>
-  );
-}
-
-/** One line on the closed Status card: where it stands. */
-function statusSummary(entry: AdvanceRequestEntry): string {
-  const stage = entry.api.flow?.current_stage;
-  return entry.status === "PENDING" && stage ? `Waiting at ${stage}` : STATUS_LABEL[entry.status];
-}
-
-function historySummary(entry: AdvanceRequestEntry): string {
-  const n = entry.api.logs?.length ?? 0;
-  return n ? `${n} ${n === 1 ? "entry" : "entries"}` : "";
-}
-
 function EntryDetails({ id, onBack }: { id: number; onBack: () => void }) {
   const detail = useRequestDetail(id);
   const store = useStoreRequest();
@@ -148,7 +127,9 @@ function EntryDetails({ id, onBack }: { id: number; onBack: () => void }) {
       const kept = new Set(files.map((f) => f.serverId).filter(Boolean));
       const api = await advancePaymentService.editRequest(entry.serverId, toApiRequest(form), {
         files: newFiles(files),
-        removeFileIds: entry.files.flatMap((f) => (f.serverId && !kept.has(f.serverId) ? [f.serverId] : [])),
+        removeFileIds: entry.files.flatMap((f) =>
+          f.serverId && !kept.has(f.serverId) ? [f.serverId] : [],
+        ),
         resubmit,
         version,
       });
@@ -174,7 +155,10 @@ function EntryDetails({ id, onBack }: { id: number; onBack: () => void }) {
       setRemarks("");
       setNotice({
         tone: "ok",
-        text: action === "cancel" ? "Request cancelled." : `Resubmitted — now waiting at ${api.flow?.current_stage}.`,
+        text:
+          action === "cancel"
+            ? "Request cancelled."
+            : `Resubmitted — now waiting at ${api.flow?.current_stage}.`,
       });
     } catch (err) {
       setNotice({ tone: "bad", text: advancePaymentError(err) });
@@ -186,161 +170,170 @@ function EntryDetails({ id, onBack }: { id: number; onBack: () => void }) {
   const returned = entry.status === "RETURNED";
 
   return (
-    <Page>
-      <Breadcrumbs items={[{ label: "Payments", onClick: onBack }, { label: entry.requestNo }]} />
+    <RequestFilesProvider value={entry.serverId}>
+      <Page>
+        <Breadcrumbs items={[{ label: "Payments", onClick: onBack }, { label: entry.requestNo }]} />
 
-      <PageHeader
-        eyebrow="Payments"
-        title={entry.requestNo}
-        badges={
-          <>
-            <Badge tone={STATUS_TONE[entry.status]}>{STATUS_LABEL[entry.status]}</Badge>
-          </>
-        }
-        description={`Raised by ${entry.requestedBy} on ${formatDateTime(entry.requestedOn)} · ${formatINR(amount)}`}
-        actions={
-          <>
-            {/* In the header, not inside Status: Status opens closed. */}
-            {can.resubmit && !editing ? (
-              <Button variant="primary" onClick={() => void act("resubmit")} disabled={busy}>
-                Resubmit as it is
+        <PageHeader
+          eyebrow="Payments"
+          title={entry.requestNo}
+          badges={
+            <>
+              <Badge tone={STATUS_TONE[entry.status]}>{STATUS_LABEL[entry.status]}</Badge>
+            </>
+          }
+          description={`Raised by ${entry.requestedBy} on ${formatDateTime(entry.requestedOn)} · ${formatINR(amount)}`}
+          actions={
+            <>
+              {/* In the header, not inside Status: Status opens closed. */}
+              {can.resubmit && !editing ? (
+                <Button variant="primary" onClick={() => void act("resubmit")} disabled={busy}>
+                  Resubmit as it is
+                </Button>
+              ) : null}
+              {can.edit && !editing ? (
+                <Button variant="secondary" onClick={() => setEditing(true)}>
+                  Edit Request
+                </Button>
+              ) : null}
+              {can.cancel && !editing ? (
+                <Button variant="danger" onClick={() => setCancelling(true)}>
+                  Cancel Request
+                </Button>
+              ) : null}
+              <Button variant="ghost" onClick={onBack}>
+                Back to entries
               </Button>
-            ) : null}
-            {can.edit && !editing ? (
-              <Button variant="secondary" onClick={() => setEditing(true)}>
-                Edit Request
-              </Button>
-            ) : null}
-            {can.cancel && !editing ? (
-              <Button variant="danger" onClick={() => setCancelling(true)}>
-                Cancel Request
-              </Button>
-            ) : null}
-            <Button variant="ghost" onClick={onBack}>
-              Back to entries
-            </Button>
-          </>
-        }
-      />
+            </>
+          }
+        />
 
-      {notice ? (
-        <Notice tone={notice.tone} title={notice.tone === "ok" ? "Done" : "Not done"}>
-          {notice.text}
-        </Notice>
-      ) : null}
+        {notice ? (
+          <Notice tone={notice.tone} title={notice.tone === "ok" ? "Done" : "Not done"}>
+            {notice.text}
+          </Notice>
+        ) : null}
 
-      {returned && entry.decision ? (
-        <Notice tone="hold" title={`Returned to you by ${entry.decision.by}`}>
-          {entry.decision.remarks} — edit the request and resubmit it, or cancel it.
-        </Notice>
-      ) : null}
+        {returned && entry.decision ? (
+          <Notice tone="hold" title={`Returned to you by ${entry.decision.by}`}>
+            {entry.decision.remarks} — edit the request and resubmit it, or cancel it.
+          </Notice>
+        ) : null}
 
-      {cancelling ? (
-        <Card className="p-4 md:p-5">
-          <CardHeader>
-            <CardTitle>Cancel {entry.requestNo}?</CardTitle>
-          </CardHeader>
-          <div className="space-y-3">
-            <Field label="Reason" hint="Optional.">
-              {(f) => (
-                <Textarea {...f} rows={2} value={remarks} onChange={(e) => setRemarks(e.target.value)} />
-              )}
-            </Field>
-            <div className="flex justify-end gap-2">
-              <Button variant="secondary" onClick={() => setCancelling(false)} disabled={busy}>
-                Keep it
-              </Button>
-              <Button variant="danger" onClick={() => void act("cancel")} disabled={busy}>
-                Cancel Request
-              </Button>
-            </div>
-          </div>
-        </Card>
-      ) : null}
-
-      {editing ? (
-        <Card className="p-4 md:p-5">
-          <AdvancePaymentForm
-            initial={entry.form}
-            initialFiles={entry.files}
-            submitLabel={returned ? "Save & Resubmit" : "Save Changes"}
-            secondarySubmit={
-              returned ? { label: "Save Only", onSubmit: (form, files) => save(form, files, false) } : undefined
-            }
-            intro={
-              <Notice tone="info" title="Editing">
-                {returned
-                  ? "Resubmitting starts the approval again from its first stage."
-                  : "No one has approved it yet, so it can still be changed."}
-              </Notice>
-            }
-            onCancel={() => setEditing(false)}
-            onSubmit={(form, files) => save(form, files, returned)}
-          />
-        </Card>
-      ) : (
-        <>
-          <CollapsibleCard title="Status" summary={statusSummary(entry)}>
-            <div className="space-y-4">
-              <DecisionSummary entry={entry} />
-              <RouteTimeline entry={entry} />
-              <SapPayment entry={entry} />
-            </div>
-          </CollapsibleCard>
-
+        {cancelling ? (
           <Card className="p-4 md:p-5">
             <CardHeader>
-              <CardTitle>Request Details</CardTitle>
+              <CardTitle>Cancel {entry.requestNo}?</CardTitle>
             </CardHeader>
-            <RequestSummary entry={entry} />
+            <div className="space-y-3">
+              <Field label="Reason" hint="Optional.">
+                {(f) => (
+                  <Textarea
+                    {...f}
+                    rows={2}
+                    value={remarks}
+                    onChange={(e) => setRemarks(e.target.value)}
+                  />
+                )}
+              </Field>
+              <div className="flex justify-end gap-2">
+                <Button variant="secondary" onClick={() => setCancelling(false)} disabled={busy}>
+                  Keep it
+                </Button>
+                <Button variant="danger" onClick={() => void act("cancel")} disabled={busy}>
+                  Cancel Request
+                </Button>
+              </div>
+            </div>
           </Card>
+        ) : null}
 
-          <DocumentLines entry={entry} />
+        {editing ? (
+          <Card className="p-4 md:p-5">
+            <AdvancePaymentForm
+              initial={entry.form}
+              initialFiles={entry.files}
+              submitLabel={returned ? "Save & Resubmit" : "Save Changes"}
+              secondarySubmit={
+                returned
+                  ? { label: "Save Only", onSubmit: (form, files) => save(form, files, false) }
+                  : undefined
+              }
+              intro={
+                <Notice tone="info" title="Editing">
+                  {returned
+                    ? "Resubmitting starts the approval again from its first stage."
+                    : "No one has approved it yet, so it can still be changed."}
+                </Notice>
+              }
+              onCancel={() => setEditing(false)}
+              onSubmit={(form, files) => save(form, files, returned)}
+            />
+          </Card>
+        ) : (
+          <>
+            <CollapsibleCard title="Status" summary={statusSummary(entry)}>
+              <div className="space-y-4">
+                <DecisionSummary entry={entry} />
+                <RouteTimeline entry={entry} />
+                <SapPayment entry={entry} />
+              </div>
+            </CollapsibleCard>
 
-          {/* How it was paid — once completed, and only to someone who holds
-              Payment or a later stage: the server sends the account to no one
-              else, so for the creator this stays empty. */}
-          {entry.status === "APPROVED" && entry.payout && can.see_account ? (
+            <CollapsibleCard title="History" summary={historySummary(entry)}>
+              <RequestHistory entry={entry} />
+            </CollapsibleCard>
+
             <Card className="p-4 md:p-5">
               <CardHeader>
-                <CardTitle>Payment &amp; Bank Details</CardTitle>
+                <CardTitle>Request Details</CardTitle>
               </CardHeader>
-              <PayoutDetailsForm
-                value={entry.payout}
-                onChange={() => {}}
-                requestAmount={amount}
-                readOnly
-                company={entry.form.company}
-                payeeCardCode={entry.form.type === "EMPLOYEE_ADVANCE" ? "" : entry.form.partner}
-                tds={
-                  entry.form.type === "VENDOR" && entry.form.company
-                    ? {
-                        company: entry.form.company,
-                        cardCode: entry.form.partner,
-                        bills: entry.form.selected
-                          .filter((d) => d.id.startsWith("PCH-"))
-                          .map((d) => Number(d.id.slice(4))),
-                      }
-                    : null
-                }
-              />
+              <RequestSummary entry={entry} />
             </Card>
-          ) : null}
 
-          <CollapsibleCard title="History" summary={historySummary(entry)}>
-            <RequestHistory entry={entry} />
-          </CollapsibleCard>
-        </>
-      )}
-    </Page>
+            <DocumentLines entry={entry} />
+
+            {/* How it was paid — once completed, and only to someone who holds
+              Payment or a later stage: the server sends the account to no one
+              else, so for the creator this stays empty. */}
+            {entry.status === "APPROVED" && entry.payout && can.see_account ? (
+              <Card className="p-4 md:p-5">
+                <CardHeader>
+                  <CardTitle>Payment &amp; Bank Details</CardTitle>
+                </CardHeader>
+                <PayoutDetailsForm
+                  value={entry.payout}
+                  onChange={() => {}}
+                  requestAmount={amount}
+                  readOnly
+                  company={entry.form.company}
+                  payeeCardCode={entry.form.type === "EMPLOYEE_ADVANCE" ? "" : entry.form.partner}
+                  tds={
+                    entry.form.type === "VENDOR" && entry.form.company
+                      ? {
+                          company: entry.form.company,
+                          cardCode: entry.form.partner,
+                          bills: entry.form.selected
+                            .filter((d) => d.id.startsWith("PCH-"))
+                            .map((d) => Number(d.id.slice(4))),
+                        }
+                      : null
+                  }
+                />
+              </Card>
+            ) : null}
+          </>
+        )}
+      </Page>
+    </RequestFilesProvider>
   );
 }
 
 export default function Advance_Payment_Request() {
   const list = useRequestList("mine");
+  const [tab, setTab] = useState<PageTab>("entries");
   const store = useStoreRequest();
   const entries = useMemo(() => list.data ?? [], [list.data]);
-  const [tab, setTab] = useState<PageTab>("entries");
   const [filters, setFilters] = useState<RequestFilterState>(NO_FILTERS);
   const [openId, setOpenId] = useState<number | null>(null);
   const [notice, setNotice] = useState("");
@@ -393,7 +386,10 @@ export default function Advance_Payment_Request() {
       <Breadcrumbs
         items={[
           { label: "Payments" },
-          { label: tab === "entries" ? "Entries" : tab === "assigned" ? "Assigned to Me" : "New Request" },
+          {
+            label:
+              tab === "entries" ? "Entries" : tab === "assigned" ? "Assigned to Me" : "New Request",
+          },
         ]}
       />
 
@@ -478,9 +474,9 @@ export default function Advance_Payment_Request() {
             intro={
               prefill ? (
                 <Notice tone="info" title="Filled from SAP">
-                  {prefill.assignment.kind === "BILL" ? "Bill" : "PO"} {prefill.assignment.sap_doc_num} of{" "}
-                  {prefill.assignment.card_name}, sent by {prefill.assignment.assigned_by.name}. Fill in the
-                  payment amount and the rest.
+                  {prefill.assignment.kind === "BILL" ? "Bill" : "PO"}{" "}
+                  {prefill.assignment.sap_doc_num} of {prefill.assignment.card_name}, sent by{" "}
+                  {prefill.assignment.assigned_by.name}. Fill in the payment amount and the rest.
                 </Notice>
               ) : undefined
             }

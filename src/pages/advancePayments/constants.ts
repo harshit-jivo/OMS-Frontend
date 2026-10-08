@@ -184,6 +184,11 @@ export interface OpenDocument {
    * may not take more than `available`.
    */
   oms?: OmsUsage;
+  /**
+   * The TDS SAP withheld: on a bill itself, or (`bills` set) on the bills
+   * raised from a PO. Absent where SAP was not asked or could not say.
+   */
+  sapTds?: { amount: number; bills?: number };
 }
 
 export interface LedgerKey {

@@ -27,6 +27,7 @@ import {
   paymentAgainstLabel,
   requestAmount,
   typeLabel,
+  vendorRefs,
   type AdvanceRequestEntry,
 } from "./approvalData";
 import { COMPANIES } from "./constants";
@@ -273,7 +274,14 @@ export function RequestTable({
                 <TableCell>{e.form.company}</TableCell>
                 <TableCell>{typeLabel(e.form)}</TableCell>
                 <TableCell>{paymentAgainstLabel(e.form)}</TableCell>
-                <TableCell>{payeeOf(e.form)}</TableCell>
+                <TableCell>
+                  {payeeOf(e.form)}
+                  {vendorRefs(e.form).length ? (
+                    <span className="block text-[11px] text-subtle">
+                      Vendor Ref. {vendorRefs(e.form).join(", ")}
+                    </span>
+                  ) : null}
+                </TableCell>
                 <TableCell className="text-right font-semibold tabular-nums text-ink">
                   {formatINR(requestAmount(e.form))}
                 </TableCell>

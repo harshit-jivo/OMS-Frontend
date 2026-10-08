@@ -54,6 +54,7 @@ import {
   type PayoutLine,
   type PayoutMethod,
 } from "./payout";
+import { RequestFileName } from "./RequestFileLink";
 import { formatINR } from "./rules";
 
 /* ── A small file list with an "Add" button ─────────────────────────────── */
@@ -116,7 +117,7 @@ function FileList({
               className="flex items-center gap-2 rounded-sm border border-line bg-card px-2.5 py-1.5"
             >
               <HiOutlineDocumentText className="size-4 shrink-0 text-subtle" aria-hidden="true" />
-              <span className="min-w-0 flex-1 truncate text-[12.5px] text-ink">{f.name}</span>
+              <RequestFileName file={f} className="min-w-0 flex-1 truncate text-[12.5px] text-ink" />
               <span className="shrink-0 text-[11px] text-subtle">{formatSize(f.size)}</span>
               {!disabled ? (
                 <Button

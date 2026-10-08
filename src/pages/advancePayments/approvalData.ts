@@ -63,6 +63,11 @@ export function paidAmount(form: RequestForm): number {
   return resolveCase(form).expense ? expenseNet(form) : requestAmount(form);
 }
 
+/** The vendor's own numbers (SAP `NumAtCard`) of the bills / POs a request pays, each once. */
+export function vendorRefs(form: RequestForm): string[] {
+  return [...new Set(form.selected.flatMap((doc) => (doc.reference ? [doc.reference] : [])))];
+}
+
 /** Who is paid: the SAP partner's name, or an Expense's typed payee. */
 export function payeeOf(form: RequestForm): string {
   return form.type === "EXPENSE" ? form.payee : form.partnerName || form.partner;

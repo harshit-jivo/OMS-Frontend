@@ -327,6 +327,8 @@ export interface SapOpenInvoice {
   doc_total: string;
   paid_to_date: string;
   balance_due: string;
+  /** The TDS SAP withheld on the bill (`WTSum`); "0" when none was. */
+  tds?: string;
   attachment: SapAttachment | null;
   /** What OMS already holds against it. */
   oms?: SapOmsUsage;
@@ -356,6 +358,13 @@ export interface SapOpenPurchaseOrder {
   received_amount: string;
   open_amount: string;
   remarks: string;
+  /**
+   * The TDS SAP withheld on the bills raised from this PO (SAP never carries
+   * TDS on a PO itself), and how many such bills there are. Null when SAP
+   * could not be asked.
+   */
+  tds_on_bills?: string | null;
+  billed?: number | null;
   attachment: SapAttachment | null;
   /** What OMS already holds against it. */
   oms?: SapOmsUsage;

@@ -33,6 +33,7 @@ import { SapAttachmentLink, SapAttachmentList } from "./SapAttachmentLink";
 import { historyTargetOf, sapDocumentOf } from "./sapMapping";
 import { STATUS_LABEL, formatDateTime } from "./requestLabels";
 import { EditChanges } from "./RequestProgress";
+import { RequestFileName } from "./RequestFileLink";
 import {
   REFERENCE_KINDS,
   allocationRows,
@@ -163,7 +164,7 @@ export function RequestSummary({ entry }: { entry: AdvanceRequestEntry }) {
                 className="flex items-center gap-1.5 rounded-sm border border-line bg-surface px-2.5 py-1 text-[12.5px] text-ink"
               >
                 <HiOutlineDocumentText className="size-4 text-subtle" aria-hidden="true" />
-                {f.name}
+                <RequestFileName file={f} />
                 <span className="text-[11px] text-subtle">{formatSize(f.size)}</span>
               </li>
             ))}
@@ -321,6 +322,7 @@ export function DocumentLines({
         <TableHeader>
           <TableRow className="hover:bg-transparent">
             <TableHead>{def.numberLabel}</TableHead>
+            <TableHead>Vendor Ref.</TableHead>
             <TableHead>{def.dateLabel}</TableHead>
             <TableHead className="text-right">Open Amount</TableHead>
             <TableHead>Payment</TableHead>
@@ -347,15 +349,13 @@ export function DocumentLines({
                     <Badge tone="bad">{dueLabel(doc)}</Badge>
                   </span>
                 ) : null}
-                {doc.reference ? (
-                  <span className="block text-[11px] font-normal text-subtle">Ref {doc.reference}</span>
-                ) : null}
                 {doc.attachment ? (
                   <span className="block text-[12px] font-normal">
                     <SapAttachmentLink attachment={doc.attachment} compact />
                   </span>
                 ) : null}
               </TableCell>
+              <TableCell className="font-medium text-ink">{doc.reference || "—"}</TableCell>
               <TableCell>{formatDate(doc.date)}</TableCell>
               <TableCell className="text-right tabular-nums">{formatINR(doc.open)}</TableCell>
               <TableCell>
@@ -370,7 +370,7 @@ export function DocumentLines({
             </TableRow>
             {source ? (
               <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={5}>
+                <TableCell colSpan={6}>
                   <p className="m-0 mb-1.5 text-[11.5px] font-semibold uppercase tracking-[0.06em] text-subtle">
                     {doc.number}&apos;s SAP attachments
                   </p>
@@ -380,7 +380,7 @@ export function DocumentLines({
             ) : null}
             {history ? (
               <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={5}>
+                <TableCell colSpan={6}>
                   <p className="m-0 mb-1.5 text-[11.5px] font-semibold uppercase tracking-[0.06em] text-subtle">
                     OMS payments against {doc.number}
                   </p>
@@ -390,7 +390,7 @@ export function DocumentLines({
             ) : null}
             {showReading && doc.reading ? (
               <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={5} className="bg-surface">
+                <TableCell colSpan={6} className="bg-surface">
                   <p className="m-0 mb-1.5 text-[11.5px] font-semibold uppercase tracking-[0.06em] text-subtle">
                     Read from {doc.number}&apos;s SAP attachment
                   </p>
@@ -402,7 +402,7 @@ export function DocumentLines({
             );
           })}
           <TableRow className="bg-surface hover:bg-surface">
-            <TableCell className="font-semibold text-ink" colSpan={2}>
+            <TableCell className="font-semibold text-ink" colSpan={3}>
               Total
             </TableCell>
             <TableCell className="text-right font-semibold tabular-nums">{formatINR(totals.open)}</TableCell>

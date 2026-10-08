@@ -21,6 +21,7 @@ import {
   type SapRelatedAttachment,
 } from "../../services/advancePaymentService";
 
+import { openBlobInTab } from "./attachments";
 import type { DocumentAttachment } from "./constants";
 import { formatDate } from "./rules";
 
@@ -48,34 +49,16 @@ async function attachmentError(error: unknown): Promise<string> {
 }
 
 async function openSapAttachment(target: AttachmentTarget): Promise<string> {
-  const tab = window.open("", "_blank");
-  let blob: Blob;
   try {
-    blob = await advancePaymentService.documentAttachment(
-      target.company,
-      target.kind,
-      target.docEntry,
-      target.line,
+    await openBlobInTab(
+      () =>
+        advancePaymentService.documentAttachment(target.company, target.kind, target.docEntry, target.line),
+      target.fileName,
     );
+    return "";
   } catch (error) {
-    tab?.close();
     return attachmentError(error);
   }
-  const url = URL.createObjectURL(blob);
-  if (tab && !tab.closed) {
-    // Not revoked: the tab is still reading from it. The browser reclaims it
-    // when this page goes away.
-    tab.location.href = url;
-    return "";
-  }
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = target.fileName;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-  return "";
 }
 
 /** A button that opens one file, with its error under it. */

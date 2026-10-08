@@ -28,11 +28,7 @@
  * never the permission.
  */
 import { useEffect, useMemo, useState } from "react";
-import {
-  HiOutlineArrowUturnLeft,
-  HiOutlineCheckCircle,
-  HiOutlineXCircle,
-} from "react-icons/hi2";
+import { HiOutlineArrowUturnLeft, HiOutlineCheckCircle, HiOutlineXCircle } from "react-icons/hi2";
 
 import { showToast } from "../lib/toastStore";
 
@@ -41,7 +37,15 @@ import { Badge } from "../components/ui/badge";
 import { Breadcrumbs } from "../components/ui/breadcrumbs";
 import { Button } from "../components/ui/button";
 import { Field, Textarea } from "../components/ui/form";
-import { Card, CardHeader, CardTitle, Notice, Page, PageHeader, StatRow } from "../components/ui/page";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  Notice,
+  Page,
+  PageHeader,
+  StatRow,
+} from "../components/ui/page";
 import {
   advancePaymentError,
   advancePaymentProblems,
@@ -51,7 +55,13 @@ import {
   type StageAction,
 } from "../services/advancePaymentService";
 
-import { paidAmount, payeeOf, requestAmount, type AdvanceRequestEntry } from "./advancePayments/approvalData";
+import {
+  paidAmount,
+  payeeOf,
+  requestAmount,
+  type AdvanceRequestEntry,
+} from "./advancePayments/approvalData";
+import { CollapsibleCard } from "./advancePayments/CollapsibleCard";
 import { ExpenseEditor } from "./advancePayments/ExpenseEditor";
 import { ManualAccountPassword } from "./advancePayments/ManualAccountPassword";
 import { PartnerBalance } from "./advancePayments/PartnerBalance";
@@ -62,7 +72,12 @@ import { PurchaseOrderDetails } from "./advancePayments/PurchaseOrderDetails";
 import { SapCheck } from "./advancePayments/SapCheck";
 import { VendorOnAccount } from "./advancePayments/VendorOnAccount";
 import { startPayout, validatePayout, type PayoutDetails } from "./advancePayments/payout";
-import { DocumentLines, ExpenseEditHistory, ExpenseLines, RequestSummary } from "./advancePayments/RequestDetails";
+import {
+  DocumentLines,
+  ExpenseEditHistory,
+  ExpenseLines,
+  RequestSummary,
+} from "./advancePayments/RequestDetails";
 import {
   DESK_STATUS_OPTIONS,
   MY_DECISION_LABEL,
@@ -71,16 +86,28 @@ import {
   deskCounts,
   filterRequests,
   formatDateTime,
+  historySummary,
   reachedPayment,
   showsBalance,
+  statusSummary,
   type DeskFilter,
   type RequestFilterState,
 } from "./advancePayments/requestLabels";
 import { DeskKpis, RequestFilters, RequestTable } from "./advancePayments/RequestList";
-import { SapPayment } from "./advancePayments/RequestProgress";
+import { RequestFilesProvider } from "./advancePayments/RequestFileLink";
+import { RequestHistory, RouteTimeline, SapPayment } from "./advancePayments/RequestProgress";
 import { editRows } from "./advancePayments/editChanges";
-import { docEntryOf, expenseEditToApi, payoutFileChanges, payoutToApi } from "./advancePayments/requestApi";
-import { useRequestDetail, useRequestList, useStoreRequest } from "./advancePayments/requestQueries";
+import {
+  docEntryOf,
+  expenseEditToApi,
+  payoutFileChanges,
+  payoutToApi,
+} from "./advancePayments/requestApi";
+import {
+  useRequestDetail,
+  useRequestList,
+  useStoreRequest,
+} from "./advancePayments/requestQueries";
 import { expenseNet, formatINR, validateExpense, type RequestForm } from "./advancePayments/rules";
 import { useTdsCodes } from "./advancePayments/expenseLookups";
 
@@ -126,7 +153,9 @@ function BankDetailFlags({ entry }: { entry: AdvanceRequestEntry }) {
   );
   const manual = entry.payout?.toAccountManual && entry.payout.toAccountNumber;
   if (!manual && !changed) return null;
-  const rows = changed ? editRows(changed.data).filter((r) => /Beneficiary|To account|IFSC|Account/.test(r.field)) : [];
+  const rows = changed
+    ? editRows(changed.data).filter((r) => /Beneficiary|To account|IFSC|Account/.test(r.field))
+    : [];
   return (
     <>
       {manual ? (
@@ -202,7 +231,9 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
   if (!entry) {
     return (
       <Page>
-        <Breadcrumbs items={[{ label: "Payments Approval", onClick: onBack }, { label: "Request" }]} />
+        <Breadcrumbs
+          items={[{ label: "Payments Approval", onClick: onBack }, { label: "Request" }]}
+        />
         {detail.isError ? (
           <Notice tone="bad" title="Could not open the request">
             {advancePaymentError(detail.error)}
@@ -218,7 +249,9 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
   // the TDS the desk is choosing (the invoice value is what it is worth).
   const payable = editsExpense && expenseDraft ? expenseDraft : entry.form;
   const invoice = requestAmount(payable);
-  const amount = isExpense ? expenseNet(payable, editsExpense ? expenseTds.rateOf : undefined) : invoice;
+  const amount = isExpense
+    ? expenseNet(payable, editsExpense ? expenseTds.rateOf : undefined)
+    : invoice;
   const can = entry.api.can;
   const flow = entry.api.flow;
   const deciding = can.approve || can.reject;
@@ -235,10 +268,24 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
 
   /** Save the payout, then send the files it gained and drop the ones it lost. */
   const persistPayout = async (payout: PayoutDetails, at = version): Promise<ApiRequest> => {
-    let api = await advancePaymentService.savePayout(entry.serverId, payoutToApi(payout), at, manualToken);
-    const changes = payoutFileChanges(payout, api.payout ?? { ...payoutToApi(payout), lines: [] }, entry.payout);
+    let api = await advancePaymentService.savePayout(
+      entry.serverId,
+      payoutToApi(payout),
+      at,
+      manualToken,
+    );
+    const changes = payoutFileChanges(
+      payout,
+      api.payout ?? { ...payoutToApi(payout), lines: [] },
+      entry.payout,
+    );
     for (const item of changes.upload) {
-      api = await advancePaymentService.addRequestFile(entry.serverId, item.file, item.purpose, item.lineId);
+      api = await advancePaymentService.addRequestFile(
+        entry.serverId,
+        item.file,
+        item.purpose,
+        item.lineId,
+      );
     }
     for (const fileId of changes.remove) {
       api = await advancePaymentService.removeRequestFile(entry.serverId, fileId);
@@ -291,7 +338,11 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
     expenseDraft !== undefined &&
     JSON.stringify(expenseEditToApi(expenseDraft)) !== JSON.stringify(expenseEditToApi(entry.form));
   const saveExpense = (at = version) =>
-    advancePaymentService.editExpense(entry.serverId, expenseEditToApi(expenseDraft ?? entry.form), at);
+    advancePaymentService.editExpense(
+      entry.serverId,
+      expenseEditToApi(expenseDraft ?? entry.form),
+      at,
+    );
 
   const decide = (action: StageAction, done: string) => {
     if (action !== "approve" && !remarks.trim()) {
@@ -305,7 +356,10 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
         missing.unshift(...expense.missing);
         problems.unshift(...expense.problems);
       }
-      const messages = [...(missing.length ? [`Still needed: ${missing.join(", ")}.`] : []), ...problems];
+      const messages = [
+        ...(missing.length ? [`Still needed: ${missing.join(", ")}.`] : []),
+        ...problems,
+      ];
       if (messages.length) {
         setNotice({ tone: "bad", text: messages.join(" ") });
         return;
@@ -324,269 +378,300 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
   };
 
   return (
-    <Page>
-      <Breadcrumbs items={[{ label: "Payments Approval", onClick: onBack }, { label: entry.requestNo }]} />
-
-      <PageHeader
-        eyebrow="Payments"
-        title={entry.requestNo}
-        badges={
-          <>
-            {/* No overall status and no "At <stage>": how the other approvers
-                stand is not this desk's to show. Only what is yours. */}
-            <MyDecisionBadge entry={entry} />
-
-          </>
-        }
-        description={`Raised by ${entry.requestedBy} on ${formatDateTime(entry.requestedOn)} · ${formatINR(invoice)}`}
-        actions={
-          <Button variant="ghost" onClick={onBack}>
-            Back to list
-          </Button>
-        }
-      />
-
-      {notice ? (
-        <Notice tone={notice.tone} title={notice.tone === "ok" ? "Done" : "Not done"}>
-          {notice.text}
-        </Notice>
-      ) : null}
-
-      {deciding ? (
-        <Notice tone="info" title={`Waiting on you: ${flow?.current_stage}`}>
-          {stageGuidance(entry)}
-        </Notice>
-      ) : null}
-
-      {/* The route timeline, the "waiting at ..." line and the history log are
-          deliberately NOT on this page: the approver acts on what is in front
-          of them, and the Request page still carries the full record.
-          What survives is the posted outgoing payment, which is a fact about
-          the money rather than about the workflow. `SapPayment` renders null
-          until something is posted, so the card is guarded to match and no
-          empty shell appears before then. */}
-      {hasSapPayment ? (
-        <Card className="p-4 md:p-5">
-          <CardHeader>
-            <CardTitle>SAP Payment</CardTitle>
-          </CardHeader>
-          <SapPayment entry={entry} />
-        </Card>
-      ) : null}
-
-      <Card className="p-4 md:p-5">
-        <CardHeader>
-          <CardTitle>Request Details</CardTitle>
-        </CardHeader>
-        <RequestSummary entry={entry} />
-        {/* From Payment on, never before: what the payment is weighed against. */}
-        {showsBalance(entry) ? (
-          <div className="mt-4 border-t border-line pt-4">
-            <PartnerBalance entry={entry} />
-          </div>
-        ) : null}
-      </Card>
-
-      <DocumentLines entry={entry} showReading={reachedPayment(entry) && can.see_account} />
-
-      {/* An Expense: read-only lines, or at Payment the whole request to correct. */}
-      {editsExpense && expenseDraft ? (
-        <Card className="p-4 md:p-5">
-          <CardHeader>
-            <CardTitle>Expense — correct at Payment</CardTitle>
-            {expenseDirty ? (
-              <Button
-                variant="secondary"
-                size="xs"
-                onClick={() => void run(() => saveExpense(), "Expense request saved.")}
-                disabled={busy}
-              >
-                Save Expense Changes
-              </Button>
-            ) : (
-              <Badge tone="note">No unsaved changes</Badge>
-            )}
-          </CardHeader>
-          <ExpenseEditor
-            form={expenseDraft}
-            onChange={setExpenseDraft}
-            tds={{
-              codes: expenseTds.codes,
-              rateOf: expenseTds.rateOf,
-              loading: expenseTds.query.isFetching,
-              error: expenseTds.query.isError ? advancePaymentError(expenseTds.query.error) : undefined,
-            }}
-          />
-          <ExpenseEditHistory entry={entry} />
-        </Card>
-      ) : (
-        <ExpenseLines entry={entry} />
-      )}
-
-      {/* SAP as it is now, while the request is still at Payment, Audit or Final:
-          what Final checks before posting, seen before it gets there. */}
-      {["PAYMENT", "AUDIT", "FINAL"].includes(flow?.current_role ?? "") && entry.form.selected.length ? (
-        <SapCheck requestId={entry.serverId} />
-      ) : null}
-
-      {/* Each PO in full from SAP, from Payment on: what the payment is weighed against. */}
-      {reachedPayment(entry) ? <PurchaseOrderDetails entry={entry} /> : null}
-
-      {/* An advance against a PO: money the vendor's ledger shows already paid
-          on account (possibly outside OMS), from Payment on. */}
-      {reachedPayment(entry) && entry.form.type === "VENDOR" && entry.form.paymentAgainst === "AGAINST_PO" ? (
-        <VendorOnAccount
-          company={entry.form.company}
-          cardCode={entry.form.partner}
-          poEntries={entry.form.selected.map(docEntryOf)}
+    <RequestFilesProvider value={entry.serverId}>
+      <Page>
+        <Breadcrumbs
+          items={[{ label: "Payments Approval", onClick: onBack }, { label: entry.requestNo }]}
         />
-      ) : null}
 
-      {/* The payee's open ledger in SAP, from Payment on. */}
-      {showsBalance(entry) ? <PartnerLedger entry={entry} /> : null}
+        <PageHeader
+          eyebrow="Payments"
+          title={entry.requestNo}
+          badges={
+            <>
+              {/* No overall status and no "At <stage>": how the other approvers
+                stand is not this desk's to show. Only what is yours. */}
+              <MyDecisionBadge entry={entry} />
+            </>
+          }
+          description={`Raised by ${entry.requestedBy} on ${formatDateTime(entry.requestedOn)} · ${formatINR(invoice)}`}
+          actions={
+            <Button variant="ghost" onClick={onBack}>
+              Back to list
+            </Button>
+          }
+        />
 
-      {/* Account detail from here down: sent to Payment and later stages only. */}
-      {can.see_account ? <BankDetailFlags entry={entry} /> : null}
+        {notice ? (
+          <Notice tone={notice.tone} title={notice.tone === "ok" ? "Done" : "Not done"}>
+            {notice.text}
+          </Notice>
+        ) : null}
 
-      {draft && can.see_account ? (
+        {deciding ? (
+          <Notice tone="info" title={`Waiting on you: ${flow?.current_stage}`}>
+            {stageGuidance(entry)}
+          </Notice>
+        ) : null}
+
+        {/* Where it stands and how it got here — the route, stage by stage,
+          and every action taken on it. First, but closed: open on a click,
+          so the request itself stays near the top. */}
+        <CollapsibleCard title="Status" summary={statusSummary(entry)}>
+          <RouteTimeline entry={entry} />
+        </CollapsibleCard>
+
+        <CollapsibleCard title="History" summary={historySummary(entry)}>
+          <RequestHistory entry={entry} />
+        </CollapsibleCard>
+
+        {/* The posted outgoing payment. `SapPayment` renders null until
+          something is posted, so the card is guarded to match and no empty
+          shell appears before then. */}
+        {hasSapPayment ? (
+          <Card className="p-4 md:p-5">
+            <CardHeader>
+              <CardTitle>SAP Payment</CardTitle>
+            </CardHeader>
+            <SapPayment entry={entry} />
+          </Card>
+        ) : null}
+
         <Card className="p-4 md:p-5">
           <CardHeader>
-            <CardTitle>Payment &amp; Bank Details</CardTitle>
-            {can.edit_payout ? (
-              <Button variant="secondary" size="xs" onClick={savePayout} disabled={busy}>
-                Save Payment Details
-              </Button>
-            ) : (
-              <Badge tone="note">Filled at Payment</Badge>
-            )}
+            <CardTitle>Request Details</CardTitle>
           </CardHeader>
-          <PayoutDetailsForm
-            value={draft}
-            onChange={setDraft}
-            requestAmount={amount}
-            readOnly={!can.edit_payout}
-            company={entry.form.company}
-            // An Employee is paid to a G/L account, not a SAP partner,
-            // so there are no bank accounts on file to offer.
-            payeeCardCode={entry.form.type === "EMPLOYEE_ADVANCE" ? "" : entry.form.partner}
-            tds={
-              entry.form.type === "VENDOR" && entry.form.company
-                ? {
-                    company: entry.form.company,
-                    cardCode: entry.form.partner,
-                    bills: entry.form.selected
-                      .filter((d) => d.id.startsWith("PCH-"))
-                      .map((d) => Number(d.id.slice(4))),
-                  }
-                : null
-            }
-            manualEntry={
-              can.edit_payout
-                ? { unlocked: manualToken !== null, unlock: (then) => setAfterPassword(() => then) }
-                : undefined
-            }
-          />
-        </Card>
-      ) : null}
-
-      <ManualAccountPassword
-        requestId={entry.serverId}
-        open={afterPassword !== null}
-        onClose={() => setAfterPassword(null)}
-        onConfirmed={(token) => {
-          setManualToken(token);
-          const then = afterPassword;
-          setAfterPassword(null);
-          then?.();
-        }}
-      />
-
-      {entry.payout && entry.status === "APPROVED" && can.record_utr ? (
-        <Card className="p-4 md:p-5">
-          <CardHeader>
-            <CardTitle>Record Payment</CardTitle>
-            <Badge tone="note">After paying</Badge>
-          </CardHeader>
-          <PaymentProofPanel
-            lines={entry.payout.lines}
-            context={{
-              company: entry.form.company as AdvancePaymentCompany,
-              toAccount: entry.payout.toAccountNumber,
-              cardCode: entry.form.type === "EMPLOYEE_ADVANCE" ? "" : entry.form.partner,
-              // The request's documents, by number and by the vendor's own
-              // reference: either may be in the transfer's remarks.
-              invoices: entry.form.selected.flatMap((doc) =>
-                doc.reference ? [doc.number, doc.reference] : [doc.number],
-              ),
-              recordedBy: approver,
-            }}
-            onRecord={(lineId, utr, proof) => {
-              const line = entry.payout?.lines.find((l) => l.id === lineId);
-              if (!line?.serverId) return;
-              void run(
-                () => advancePaymentService.recordUtr(entry.serverId, line.serverId as number, utr, proof ?? null),
-                `UTR ${utr} recorded.`,
-              );
-            }}
-          />
-        </Card>
-      ) : null}
-
-      {deciding ? (
-        <Card className="p-4 md:p-5">
-          <CardHeader>
-            <CardTitle>Decision</CardTitle>
-          </CardHeader>
-          <div className="space-y-4">
-            <Field
-              label="Approver Remarks"
-              hint="Required to reject, return or send back; optional to approve."
-            >
-              {(f) => (
-                <Textarea
-                  {...f}
-                  rows={3}
-                  placeholder="Enter remarks"
-                  value={remarks}
-                  onChange={(e) => setRemarks(e.target.value)}
-                />
-              )}
-            </Field>
-            <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line pt-4">
-              <Button variant="danger" onClick={() => decide("reject", "Rejected.")} disabled={busy}>
-                <HiOutlineXCircle className="size-4" aria-hidden="true" />
-                Reject
-              </Button>
-              {can.return_to_creator ? (
-                <Button
-                  variant="secondary"
-                  onClick={() => decide("return", "Returned to its creator.")}
-                  disabled={busy}
-                >
-                  <HiOutlineArrowUturnLeft className="size-4" aria-hidden="true" />
-                  Return to Creator
-                </Button>
-              ) : null}
-              {can.send_back ? (
-                <Button
-                  variant="secondary"
-                  onClick={() => decide("send-back", "Sent back to Payment.")}
-                  disabled={busy}
-                >
-                  <HiOutlineArrowUturnLeft className="size-4" aria-hidden="true" />
-                  Send Back to Payment
-                </Button>
-              ) : null}
-              <Button variant="primary" onClick={() => decide("approve", approveDone)} disabled={busy}>
-                <HiOutlineCheckCircle className="size-4" aria-hidden="true" />
-                {busy ? "Working…" : approveLabel}
-              </Button>
+          <RequestSummary entry={entry} />
+          {/* From Payment on, never before: what the payment is weighed against. */}
+          {showsBalance(entry) ? (
+            <div className="mt-4 border-t border-line pt-4">
+              <PartnerBalance entry={entry} />
             </div>
-          </div>
+          ) : null}
         </Card>
-      ) : null}
 
-    </Page>
+        <DocumentLines entry={entry} showReading={reachedPayment(entry) && can.see_account} />
+
+        {/* An Expense: read-only lines, or at Payment the whole request to correct. */}
+        {editsExpense && expenseDraft ? (
+          <Card className="p-4 md:p-5">
+            <CardHeader>
+              <CardTitle>Expense — correct at Payment</CardTitle>
+              {expenseDirty ? (
+                <Button
+                  variant="secondary"
+                  size="xs"
+                  onClick={() => void run(() => saveExpense(), "Expense request saved.")}
+                  disabled={busy}
+                >
+                  Save Expense Changes
+                </Button>
+              ) : (
+                <Badge tone="note">No unsaved changes</Badge>
+              )}
+            </CardHeader>
+            <ExpenseEditor
+              form={expenseDraft}
+              onChange={setExpenseDraft}
+              tds={{
+                codes: expenseTds.codes,
+                rateOf: expenseTds.rateOf,
+                loading: expenseTds.query.isFetching,
+                error: expenseTds.query.isError
+                  ? advancePaymentError(expenseTds.query.error)
+                  : undefined,
+              }}
+            />
+            <ExpenseEditHistory entry={entry} />
+          </Card>
+        ) : (
+          <ExpenseLines entry={entry} />
+        )}
+
+        {/* SAP as it is now, while the request is still at Payment, Audit or Final:
+          what Final checks before posting, seen before it gets there. */}
+        {["PAYMENT", "AUDIT", "FINAL"].includes(flow?.current_role ?? "") &&
+        entry.form.selected.length ? (
+          <SapCheck requestId={entry.serverId} />
+        ) : null}
+
+        {/* Each PO in full from SAP, from Payment on: what the payment is weighed against. */}
+        {reachedPayment(entry) ? <PurchaseOrderDetails entry={entry} /> : null}
+
+        {/* An advance against a PO: money the vendor's ledger shows already paid
+          on account (possibly outside OMS), from Payment on. */}
+        {reachedPayment(entry) &&
+        entry.form.type === "VENDOR" &&
+        entry.form.paymentAgainst === "AGAINST_PO" ? (
+          <VendorOnAccount
+            company={entry.form.company}
+            cardCode={entry.form.partner}
+            poEntries={entry.form.selected.map(docEntryOf)}
+          />
+        ) : null}
+
+        {/* The payee's open ledger in SAP, from Payment on. */}
+        {showsBalance(entry) ? <PartnerLedger entry={entry} /> : null}
+
+        {/* Account detail from here down: sent to Payment and later stages only. */}
+        {can.see_account ? <BankDetailFlags entry={entry} /> : null}
+
+        {draft && can.see_account ? (
+          <Card className="p-4 md:p-5">
+            <CardHeader>
+              <CardTitle>Payment &amp; Bank Details</CardTitle>
+              {can.edit_payout ? (
+                <Button variant="secondary" size="xs" onClick={savePayout} disabled={busy}>
+                  Save Payment Details
+                </Button>
+              ) : (
+                <Badge tone="note">Filled at Payment</Badge>
+              )}
+            </CardHeader>
+            <PayoutDetailsForm
+              value={draft}
+              onChange={setDraft}
+              requestAmount={amount}
+              readOnly={!can.edit_payout}
+              company={entry.form.company}
+              // An Employee is paid to a G/L account, not a SAP partner,
+              // so there are no bank accounts on file to offer.
+              payeeCardCode={entry.form.type === "EMPLOYEE_ADVANCE" ? "" : entry.form.partner}
+              tds={
+                entry.form.type === "VENDOR" && entry.form.company
+                  ? {
+                      company: entry.form.company,
+                      cardCode: entry.form.partner,
+                      bills: entry.form.selected
+                        .filter((d) => d.id.startsWith("PCH-"))
+                        .map((d) => Number(d.id.slice(4))),
+                    }
+                  : null
+              }
+              manualEntry={
+                can.edit_payout
+                  ? {
+                      unlocked: manualToken !== null,
+                      unlock: (then) => setAfterPassword(() => then),
+                    }
+                  : undefined
+              }
+            />
+          </Card>
+        ) : null}
+
+        <ManualAccountPassword
+          requestId={entry.serverId}
+          open={afterPassword !== null}
+          onClose={() => setAfterPassword(null)}
+          onConfirmed={(token) => {
+            setManualToken(token);
+            const then = afterPassword;
+            setAfterPassword(null);
+            then?.();
+          }}
+        />
+
+        {entry.payout && entry.status === "APPROVED" && can.record_utr ? (
+          <Card className="p-4 md:p-5">
+            <CardHeader>
+              <CardTitle>Record Payment</CardTitle>
+              <Badge tone="note">After paying</Badge>
+            </CardHeader>
+            <PaymentProofPanel
+              lines={entry.payout.lines}
+              context={{
+                company: entry.form.company as AdvancePaymentCompany,
+                toAccount: entry.payout.toAccountNumber,
+                cardCode: entry.form.type === "EMPLOYEE_ADVANCE" ? "" : entry.form.partner,
+                // The request's documents, by number and by the vendor's own
+                // reference: either may be in the transfer's remarks.
+                invoices: entry.form.selected.flatMap((doc) =>
+                  doc.reference ? [doc.number, doc.reference] : [doc.number],
+                ),
+                recordedBy: approver,
+              }}
+              onRecord={(lineId, utr, proof) => {
+                const line = entry.payout?.lines.find((l) => l.id === lineId);
+                if (!line?.serverId) return;
+                void run(
+                  () =>
+                    advancePaymentService.recordUtr(
+                      entry.serverId,
+                      line.serverId as number,
+                      utr,
+                      proof ?? null,
+                    ),
+                  `UTR ${utr} recorded.`,
+                );
+              }}
+            />
+          </Card>
+        ) : null}
+
+        {deciding ? (
+          <Card className="p-4 md:p-5">
+            <CardHeader>
+              <CardTitle>Decision</CardTitle>
+            </CardHeader>
+            <div className="space-y-4">
+              <Field
+                label="Approver Remarks"
+                hint="Required to reject, return or send back; optional to approve."
+              >
+                {(f) => (
+                  <Textarea
+                    {...f}
+                    rows={3}
+                    placeholder="Enter remarks"
+                    value={remarks}
+                    onChange={(e) => setRemarks(e.target.value)}
+                  />
+                )}
+              </Field>
+              <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line pt-4">
+                <Button
+                  variant="danger"
+                  onClick={() => decide("reject", "Rejected.")}
+                  disabled={busy}
+                >
+                  <HiOutlineXCircle className="size-4" aria-hidden="true" />
+                  Reject
+                </Button>
+                {can.return_to_creator ? (
+                  <Button
+                    variant="secondary"
+                    onClick={() => decide("return", "Returned to its creator.")}
+                    disabled={busy}
+                  >
+                    <HiOutlineArrowUturnLeft className="size-4" aria-hidden="true" />
+                    Return to Creator
+                  </Button>
+                ) : null}
+                {can.send_back ? (
+                  <Button
+                    variant="secondary"
+                    onClick={() => decide("send-back", "Sent back to Payment.")}
+                    disabled={busy}
+                  >
+                    <HiOutlineArrowUturnLeft className="size-4" aria-hidden="true" />
+                    Send Back to Payment
+                  </Button>
+                ) : null}
+                <Button
+                  variant="primary"
+                  onClick={() => decide("approve", approveDone)}
+                  disabled={busy}
+                >
+                  <HiOutlineCheckCircle className="size-4" aria-hidden="true" />
+                  {busy ? "Working…" : approveLabel}
+                </Button>
+              </div>
+            </div>
+          </Card>
+        ) : null}
+      </Page>
+    </RequestFilesProvider>
   );
 }
 
@@ -600,7 +685,9 @@ function DecisionCell({ entry }: { entry: AdvanceRequestEntry }) {
     <>
       <Badge tone={tone}>{MY_DECISION_LABEL[mine.action] ?? mine.label}</Badge>
       {mine.created_on ? (
-        <span className="mt-0.5 block text-[11px] text-subtle">{formatDateTime(mine.created_on)}</span>
+        <span className="mt-0.5 block text-[11px] text-subtle">
+          {formatDateTime(mine.created_on)}
+        </span>
       ) : null}
     </>
   );
@@ -612,7 +699,8 @@ export default function Advance_Payment_Approval() {
   const entries = useMemo(
     () =>
       [...(list.data ?? [])].sort(
-        (a, b) => Number(Boolean(b.api.flow?.awaiting_me)) - Number(Boolean(a.api.flow?.awaiting_me)),
+        (a, b) =>
+          Number(Boolean(b.api.flow?.awaiting_me)) - Number(Boolean(a.api.flow?.awaiting_me)),
       ),
     [list.data],
   );
@@ -662,9 +750,18 @@ export default function Advance_Payment_Approval() {
       <Card className="p-4 md:p-5">
         <CardHeader>
           <CardTitle>
-            Requests{awaiting ? <Badge tone="hold" className="ml-2">{awaiting} waiting on you</Badge> : null}
+            Requests
+            {awaiting ? (
+              <Badge tone="hold" className="ml-2">
+                {awaiting} waiting on you
+              </Badge>
+            ) : null}
           </CardTitle>
-          <RequestFilters value={filters} onChange={setFilters} statusOptions={DESK_STATUS_OPTIONS} />
+          <RequestFilters
+            value={filters}
+            onChange={setFilters}
+            statusOptions={DESK_STATUS_OPTIONS}
+          />
         </CardHeader>
         <RequestTable
           entries={shown}
