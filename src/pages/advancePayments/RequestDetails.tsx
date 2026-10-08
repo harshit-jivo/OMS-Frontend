@@ -65,7 +65,7 @@ export function RequestSummary({ entry }: { entry: AdvanceRequestEntry }) {
         {c.expense ? (
           <>
             <DetailField label="Pay To" value={form.payee} hint={form.partner || undefined} />
-            <DetailField label="Invoice Value" value={formatINR(requestAmount(form))} strong />
+            <DetailField label="Amount" value={formatINR(requestAmount(form))} strong />
             {expenseTds(form) ? (
               <DetailField
                 label="TDS · Paid"
@@ -141,12 +141,12 @@ export function RequestSummary({ entry }: { entry: AdvanceRequestEntry }) {
           value={form.budgetName || form.budget || entry.api.department?.name || ""}
         />
         {c.expense ? (
-          <DetailField label="Sub Budget" value={form.subBudgetName || form.subBudget} />
+          <DetailField label="Sub Budget" value={form.subBudgetName || form.subBudget || "Set by the Payment desk"} />
         ) : (
           <DetailField label="Payment Purpose" value={form.purposeLabel || form.purpose} />
         )}
         {form.departmentHead ? <DetailField label="Department Head" value={form.departmentHeadName} /> : null}
-        <DetailField label="Ownership" value={form.ownership} />
+        {c.expense ? null : <DetailField label="Ownership" value={form.ownership} />}
         <DetailField label="Payment Date" value={form.paymentDate ? formatDate(form.paymentDate) : ""} />
         <DetailField label="Remarks" value={form.remarks} span="full" />
       </DetailGrid>
@@ -217,9 +217,8 @@ export function ExpenseLines({ entry }: { entry: AdvanceRequestEntry }) {
         <TableHeader>
           <TableRow>
             <TableHead className="w-10">#</TableHead>
-            <TableHead className="text-right">Taxable</TableHead>
+            <TableHead className="text-right">Amount</TableHead>
             <TableHead>GST</TableHead>
-            <TableHead className="text-right">Invoice value</TableHead>
             <TableHead className="text-right">TDS</TableHead>
             <TableHead className="text-right">Paid</TableHead>
             <TableHead>G/L account</TableHead>
@@ -234,15 +233,16 @@ export function ExpenseLines({ entry }: { entry: AdvanceRequestEntry }) {
             return (
               <TableRow key={line.id}>
                 <TableCell className="tabular-nums text-subtle">{index + 1}</TableCell>
-                <TableCell className="text-right tabular-nums">{formatINR(lineTaxable(line))}</TableCell>
-                <TableCell>
-                  {GST_OPTIONS.find((o) => o.value === line.gstCode)?.label ?? line.gstCode}
-                  {line.gstCode ? (
-                    <span className="block text-[11px] text-subtle">{formatINR(lineGst(line))}</span>
-                  ) : null}
-                </TableCell>
                 <TableCell className="text-right font-semibold tabular-nums text-ink">
                   {formatINR(lineInvoice(line))}
+                </TableCell>
+                <TableCell>
+                  {line.gstCode ? GST_OPTIONS.find((o) => o.value === line.gstCode)?.label ?? line.gstCode : "—"}
+                  {line.gstCode ? (
+                    <span className="block text-[11px] text-subtle">
+                      Taxable {formatINR(lineTaxable(line))} · GST {formatINR(lineGst(line))}
+                    </span>
+                  ) : null}
                 </TableCell>
                 <TableCell className="text-right tabular-nums">
                   {tds ? formatINR(tds) : "—"}
@@ -272,7 +272,7 @@ export function ExpenseLines({ entry }: { entry: AdvanceRequestEntry }) {
         </TableBody>
       </Table>
       <p className="m-0 mt-2 text-right text-[13px] text-body" data-slot="expense-lines-total">
-        Invoice value <span className="font-semibold text-ink">{formatINR(expenseTotal(form.expenseLines))}</span>
+        Total <span className="font-semibold text-ink">{formatINR(expenseTotal(form.expenseLines))}</span>
         {expenseTds(form) ? (
           <>
             {" "}

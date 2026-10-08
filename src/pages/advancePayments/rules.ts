@@ -59,17 +59,22 @@ export interface Allocation {
 export const EMPTY_ALLOCATION: Allocation = { mode: "FIXED", amount: "", percentage: "" };
 
 /**
- * One line of an Expense request: an invoice to an expense G/L account.
+ * One line of an Expense request: an amount (the invoice value) to an
+ * expense G/L account.
  *
- * The requester gives the taxable amount and its GST (for the record); the
- * invoice value is the two together. The G/L may be left blank (with remarks
- * saying what it is for): the Payment stage fills it in, sets the month (blank
- * is the request's) and the TDS, deducted on the taxable amount.
+ * A requester who does not know the G/L ticks so (`glUnknown`) and says in
+ * the remarks what it is for: the Payment desk picks it. The desk also records
+ * the line's GST (the taxable amount is backed out of the amount), sets its
+ * month (blank: the request's) and the TDS, deducted on the taxable amount.
  */
 export interface ExpenseLineForm {
   /** The client's own key for the row (the server's id once saved, as text). */
   id: string;
-  taxableAmount: string;
+  /** The invoice value. Fixed once raised: the Payment desk cannot change it. */
+  amount: string;
+  /** "I don't know the G/L account": remarks instead. */
+  glUnknown: boolean;
+  /** The Payment desk's: how much of the amount is GST. */
   gstCode: GstCode;
   glAccount: string;
   glName: string;
@@ -89,7 +94,8 @@ export function newExpenseLine(): ExpenseLineForm {
   expenseLineSeq += 1;
   return {
     id: `new-${expenseLineSeq}`,
-    taxableAmount: "",
+    amount: "",
+    glUnknown: false,
     gstCode: "",
     glAccount: "",
     glName: "",
@@ -753,7 +759,14 @@ export function applyChange(form: RequestForm, patch: Partial<RequestForm>): Req
     const only = next.type ? Object.keys(CASE_RULES[next.type]) : [];
     next = {
       ...next,
-      paymentAgainst: only.length === 1 ? (only[0] as PaymentAgainst) : "",
+      // An Expense is not asked it: direct or indirect follows from its G/L
+      // accounts (the server decides; indirect until a direct one is chosen).
+      paymentAgainst:
+        next.type === "EXPENSE"
+          ? "INDIRECT_EXPENSE"
+          : only.length === 1
+            ? (only[0] as PaymentAgainst)
+            : "",
       ...CLEARED_PARTNER,
       ...CLEARED_DOCUMENTS,
       amount: "",
@@ -799,11 +812,6 @@ export function applyChange(form: RequestForm, patch: Partial<RequestForm>): Req
   // Starting an Expense: one line to fill in. (The month is the Payment desk's.)
   if (resolveCase(next).expense && !resolveCase(form).expense) {
     next = { ...next, expenseLines: next.expenseLines.length ? next.expenseLines : [newExpenseLine()] };
-  }
-  // Direct and indirect expenses have different G/L accounts: a G/L chosen
-  // under one is not offered under the other.
-  if (changed("paymentAgainst") && resolveCase(form).expense && resolveCase(next).expense) {
-    next = { ...next, expenseLines: next.expenseLines.map((l) => ({ ...l, glAccount: "", glName: "" })) };
   }
 
   return sanitize(next);
@@ -956,30 +964,23 @@ export function plainAmountError(amount: string): string | null {
 /** Most lines one Expense may carry (the server's `MAX_EXPENSE_LINES`). */
 export const MAX_EXPENSE_LINES = 50;
 
-/** "direct" / "indirect": which G/L accounts an Expense's Payment Against offers. */
-export function expenseKind(form: RequestForm): "DIRECT" | "INDIRECT" | null {
-  if (form.paymentAgainst === "DIRECT_EXPENSE") return "DIRECT";
-  if (form.paymentAgainst === "INDIRECT_EXPENSE") return "INDIRECT";
-  return null;
-}
-
 const toPaisa = (value: number) => Math.round(value * 100) / 100;
 
-/** A line's taxable amount, or 0 while it is blank or not a positive number. */
-export function lineTaxable(line: ExpenseLineForm): number {
-  const value = parseNumber(line.taxableAmount);
+/** A line's amount (its invoice value), or 0 while it is blank or not a positive number. */
+export function lineInvoice(line: ExpenseLineForm): number {
+  const value = parseNumber(line.amount);
   return value !== null && !Number.isNaN(value) && value > 0 ? value : 0;
 }
 
-/** A line's GST, to the paisa — as the server works it. */
-export function lineGst(line: ExpenseLineForm): number {
+/** A line's taxable amount: its amount less the GST the desk records — as the server works it. */
+export function lineTaxable(line: ExpenseLineForm): number {
   const rate = GST_OPTIONS.find((o) => o.value === line.gstCode)?.rate ?? 0;
-  return Math.round(lineTaxable(line) * rate) / 100;
+  return toPaisa((lineInvoice(line) * 100) / (100 + rate));
 }
 
-/** A line's invoice value: taxable + GST. */
-export function lineInvoice(line: ExpenseLineForm): number {
-  return toPaisa(lineTaxable(line) + lineGst(line));
+/** A line's GST: what of its amount is not taxable value. */
+export function lineGst(line: ExpenseLineForm): number {
+  return toPaisa(lineInvoice(line) - lineTaxable(line));
 }
 
 /** What an Expense is worth: the sum of its lines' invoice values. */
@@ -1190,16 +1191,15 @@ export interface Validation {
 }
 
 /**
- * An Expense's own fields: who is paid, Sub Budget and the lines.
- * `atPayment`: the Payment desk's check — every line must then have its G/L
- * and a month (the requester leaves both to them; without a G/L, the
- * remarks say what the line is for).
+ * An Expense's own fields: its lines — each an amount, and a G/L or (not
+ * knowing it) remarks saying what it is for. `atPayment`: the Payment desk's
+ * check — every line must then have its G/L and a month, and the request its
+ * Sub Budget.
  */
 export function validateExpense(form: RequestForm, { atPayment = false } = {}): Validation {
   const missing: string[] = [];
   const problems: string[] = [];
-  if (!form.payee.trim()) missing.push("Pay To");
-  if (!form.subBudget) missing.push("Sub Budget");
+  if (atPayment && !form.subBudget) missing.push("Sub Budget");
   if (form.expenseLines.length === 0) missing.push("Expense lines");
   if (form.expenseLines.length > MAX_EXPENSE_LINES) {
     problems.push(`An Expense may have at most ${MAX_EXPENSE_LINES} lines.`);
@@ -1209,12 +1209,17 @@ export function validateExpense(form: RequestForm, { atPayment = false } = {}): 
   }
   form.expenseLines.forEach((line, index) => {
     const n = index + 1;
-    const error = plainAmountError(line.taxableAmount);
-    if (error) problems.push(`Line ${n}: enter a taxable amount above zero.`);
-    else if (!line.taxableAmount) missing.push(`Taxable amount on line ${n}`);
-    if (atPayment && !line.glAccount) missing.push(`G/L account on line ${n}`);
-    // No G/L is allowed (Payment fills it in), but then say what it is for.
-    else if (!line.glAccount && !line.remarks.trim()) missing.push(`Remarks on line ${n} (it has no G/L)`);
+    const error = plainAmountError(line.amount);
+    if (error) problems.push(`Line ${n}: enter an amount above zero.`);
+    else if (!line.amount) missing.push(`Amount on line ${n}`);
+    if (atPayment) {
+      if (!line.glAccount) missing.push(`G/L account on line ${n}`);
+    } else if (line.glUnknown) {
+      // Not knowing the G/L is allowed (Payment picks it), but then say what it is for.
+      if (!line.remarks.trim()) missing.push(`Remarks on line ${n} (what it is for)`);
+    } else if (!line.glAccount) {
+      missing.push(`G/L account on line ${n}`);
+    }
   });
   return { missing, problems };
 }
@@ -1308,11 +1313,14 @@ export function validate(form: RequestForm, today: string = todayIso()): Validat
     ? pastDateError("Expected Bill Date", form.expectedBillDate, today)
     : null;
   if (billDate) problems.push(billDate);
-  if (!form.ownership.trim()) missing.push("Ownership");
-  if (!form.paymentDate) missing.push("Payment Date");
-  const payDate = pastDateError("Payment Date", form.paymentDate, today);
-  if (payDate) problems.push(payDate);
-  if (!form.remarks.trim()) missing.push("Remarks");
+  // An Expense is not asked them: dated the day it is raised, remarks optional.
+  if (!c.expense) {
+    if (!form.ownership.trim()) missing.push("Ownership");
+    if (!form.paymentDate) missing.push("Payment Date");
+    const payDate = pastDateError("Payment Date", form.paymentDate, today);
+    if (payDate) problems.push(payDate);
+    if (!form.remarks.trim()) missing.push("Remarks");
+  }
 
   return { missing, problems };
 }

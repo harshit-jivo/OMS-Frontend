@@ -116,18 +116,20 @@ export const HEAD_LOGIN = { id: 31, name: "Nirmal Didi Ji", username: "nirmal" }
 export function storedInput(input: ApiRequestInput, firstLineId = 500): Partial<ApiRequest> {
   const { expense_lines: lines = [], ...rest } = input;
   const stored = lines.map((line, i) => {
-    const taxable = Number(line.taxable_amount) || 0;
-    const gst = Math.round(taxable * (GST_OPTIONS.find((o) => o.value === line.gst_code)?.rate ?? 0)) / 100;
+    const amount = Number(line.amount) || 0;
+    const gstRate = GST_OPTIONS.find((o) => o.value === line.gst_code)?.rate ?? 0;
+    const taxable = Math.round((amount * 100 * 100) / (100 + gstRate)) / 100;
+    const gst = Math.round((amount - taxable) * 100) / 100;
     const code = line.tds_override === "NONE" ? "" : line.tds_override || input.expense_tds_code || "";
     const rate = code ? TEST_TDS_RATES[code] ?? 0 : 0;
     const tds = Math.round((taxable * rate) / 100);
-    const amount = Math.round((taxable + gst) * 100) / 100;
     return {
       ...line,
       tds_override: line.tds_override ?? "",
       id: firstLineId + i,
       line_no: i + 1,
       gl_name: "",
+      taxable_amount: taxable.toFixed(2),
       gst_amount: gst.toFixed(2),
       amount: amount.toFixed(2),
       // The request's month is a line's unless it names its own.
@@ -140,8 +142,11 @@ export function storedInput(input: ApiRequestInput, firstLineId = 500): Partial<
       net: (amount - tds).toFixed(2),
     };
   });
+  const expense = input.request_type === "EXPENSE";
   return {
     ...rest,
+    // As the server does: an Expense with no vendor is paid to whoever raised it.
+    ...(expense && !rest.partner_name ? { partner_name: TESTER.name } : {}),
     expense_tds_code: input.expense_tds_code ?? "",
     expense_lines: stored,
     ...(lines.length ? { amount: String(stored.reduce((sum, l) => sum + Number(l.amount), 0)) } : {}),
@@ -590,10 +595,12 @@ export class FakeRequestServer {
     this.calls.push(["editExpense", id, edit]);
     this.maybeRefuse();
     const held = this.find(id);
-    const line = (l: { gl_account: string; taxable_amount: string } | undefined) =>
-      l ? `${l.gl_account || "no G/L"} · ${Number(l.taxable_amount).toFixed(2)}` : null;
+    const line = (l: { gl_account: string; amount: string } | undefined) =>
+      l ? `${l.gl_account || "no G/L"} · ${Number(l.amount).toFixed(2)}` : null;
     const data: Record<string, unknown> = {};
-    if (edit.budget_code !== held.api.budget_code) data.budget = { old: held.api.budget_code, new: edit.budget_code };
+    if (edit.sub_budget_code !== held.api.sub_budget_code) {
+      data.sub_budget = { old: held.api.sub_budget_code || null, new: edit.sub_budget_code };
+    }
     const lines: Record<string, { old: string | null; new: string | null }> = {};
     const count = Math.max(edit.expense_lines.length, held.api.expense_lines.length);
     for (let i = 0; i < count; i += 1) {

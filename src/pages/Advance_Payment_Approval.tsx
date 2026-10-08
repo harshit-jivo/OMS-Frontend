@@ -302,7 +302,6 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
       const { missing, problems } = validatePayout(draft, amount);
       if (editsExpense && expenseDraft) {
         const expense = validateExpense(expenseDraft, { atPayment: true });
-        if (!expenseDraft.budget) expense.missing.unshift("Department");
         missing.unshift(...expense.missing);
         problems.unshift(...expense.problems);
       }

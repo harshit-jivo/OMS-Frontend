@@ -796,9 +796,9 @@ export interface SapExpenseMonths {
 
 /** One line of an Expense request as the form sends it. */
 export interface ApiExpenseLineInput {
-  /** Before GST. */
-  taxable_amount: string;
-  /** "" (no GST), CGST_SGST_5, CGST_SGST_18, IGST_5, IGST_18 — for the record. */
+  /** The invoice value. */
+  amount: string;
+  /** The Payment desk's: "" (no GST), CGST_SGST_5, CGST_SGST_18, IGST_5, IGST_18 — for the record. */
   gst_code: string;
   /** Blank: the Payment stage fills it in (then `remarks` says what it is for). */
   gl_account: string;
@@ -811,10 +811,6 @@ export interface ApiExpenseLineInput {
 
 /** The Payment desk's correction of an Expense request. */
 export interface ApiExpenseEdit {
-  payment_against: string;
-  partner_code: string;
-  partner_name: string;
-  budget_code: string;
   sub_budget_code: string;
   effect_month: string;
   is_electricity: boolean;
@@ -826,9 +822,9 @@ export interface ApiExpenseEdit {
 export interface ApiExpenseLine extends ApiExpenseLineInput {
   id: number;
   line_no: number;
+  /** The amount less its GST: what TDS is on. */
+  taxable_amount: string;
   gst_amount: string;
-  /** The invoice value: taxable + GST. */
-  amount: string;
   gl_name: string;
   /** The month it posts to: its own, else the request's. */
   month: string;
