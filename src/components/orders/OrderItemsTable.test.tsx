@@ -20,7 +20,7 @@ vi.mock("@/services/uiConfig", () => ({
 
 const item = (over: Partial<OrderItem> = {}): OrderItem =>
   ({
-    item_code: "JV-CAN-1L",
+    item_code: "FG0000032",
     item_name: "Jivo Canola Oil 1 Ltr",
     category: "Edible Oil",
     variety_type: "COMMODITY",
@@ -40,18 +40,18 @@ const cardOf = (name: string) => screen.getByText(name).closest("li") as HTMLEle
 
 describe("OrderItemsTable", () => {
   it("lists the items, one card each", () => {
-    render(<OrderItemsTable items={[item(), item({ item_code: "JV-MUS-1L" })]} />);
+    render(<OrderItemsTable items={[item(), item({ item_code: "FG0000011" })]} />);
 
     expect(cards()).toHaveLength(2);
-    expect(screen.getByText("JV-CAN-1L")).toBeInTheDocument();
-    expect(screen.getByText("JV-MUS-1L")).toBeInTheDocument();
+    expect(screen.getByText("FG0000032")).toBeInTheDocument();
+    expect(screen.getByText("FG0000011")).toBeInTheDocument();
   });
 
   it("stacks code, category and variety under the name, and pulls the amount out", () => {
     render(<OrderItemsTable items={[item()]} />);
 
     const card = within(cardOf("Jivo Canola Oil 1 Ltr"));
-    expect(card.getByText("JV-CAN-1L")).toBeInTheDocument();
+    expect(card.getByText("FG0000032")).toBeInTheDocument();
     expect(card.getByText("Edible Oil")).toBeInTheDocument();
     expect(card.getByText("Commodity")).toBeInTheDocument();
     expect(card.getByText("Amount")).toBeInTheDocument();
@@ -59,7 +59,7 @@ describe("OrderItemsTable", () => {
   });
 
   it("puts the same eight figures on every card, labelled", () => {
-    render(<OrderItemsTable items={[item(), item({ item_code: "JV-MUS-1L" })]} />);
+    render(<OrderItemsTable items={[item(), item({ item_code: "FG0000011" })]} />);
 
     for (const card of cards()) {
       const labels = within(card).getAllByRole("term").map((el) => el.textContent);
@@ -67,6 +67,20 @@ describe("OrderItemsTable", () => {
         "Qty", "Pcs", "Boxes", "Ltrs", "Total Ltrs", "Price List (Basic)", "Basic Price", "Tax %",
       ]);
     }
+  });
+
+  it("shows packaging as plain pieces — no Boxes, no per-box Pcs — keeping the slots aligned", () => {
+    render(
+      <OrderItemsTable
+        items={[item({ item_code: "PM0000076", item_name: "TIN 15 LTR", qty: 25, pcs: 1, boxes: 25, ltrs: 0 })]}
+      />,
+    );
+
+    const card = within(cardOf("TIN 15 LTR"));
+    const labels = card.getAllByRole("term").map((el) => el.textContent);
+    expect(labels).toEqual(["Pcs", "Ltrs", "Total Ltrs", "Price List (Basic)", "Basic Price", "Tax %"]);
+    expect(card.getAllByRole("definition")[0]).toHaveTextContent("25");
+    expect(card.queryByText("Boxes")).not.toBeInTheDocument();
   });
 
   it("title-cases the variety SAP sends in caps", () => {
@@ -306,10 +320,10 @@ describe("card order", () => {
   });
 
   it("leaves an ordinary line's code alone", () => {
-    render(<OrderItemsTable items={[item({ item_code: "JV-CAN-1L" })]} />);
+    render(<OrderItemsTable items={[item({ item_code: "FG0000032" })]} />);
 
-    expect(screen.getByText("JV-CAN-1L")).toBeInTheDocument();
-    expect(screen.getByText("JV-CAN-1L")).not.toHaveAttribute("title");
+    expect(screen.getByText("FG0000032")).toBeInTheDocument();
+    expect(screen.getByText("FG0000032")).not.toHaveAttribute("title");
   });
 });
 

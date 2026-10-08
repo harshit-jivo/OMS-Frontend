@@ -25,7 +25,7 @@ import { useState, useEffect, useRef } from "react";
 import { useFieldArray, useForm } from "react-hook-form";
 import { useLocation, useNavigate } from "react-router-dom";
 
-import { litresPerPiece } from "@/lib/litres";
+import { litresPerPiece } from "@/lib/itemUnits";
 import { getCurrentUser } from "@/services/authService";
 import { ordersService } from "@/services/ordersService";
 import { sapService } from "@/services/sapService";
@@ -2328,6 +2328,7 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
     poField,
     canEditPoNumber,
     getProductType,
+    getRowProduct,
     fetchSchemesForRow,
     validateBeforeSave,
     submitOrder,

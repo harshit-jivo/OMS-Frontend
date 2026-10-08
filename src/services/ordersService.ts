@@ -1,4 +1,4 @@
-import { isLitreItem } from "@/lib/litres";
+import { isLitreItem } from "@/lib/itemUnits";
 import api from "./api"
 
 export interface Product {

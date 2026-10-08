@@ -5,7 +5,7 @@
  */
 import type { Party, Product, SapSalesOrder } from "../../services/sapService";
 import type { BadgeTone } from "@/components/ui/badge";
-import { isLitreItem } from "@/lib/litres";
+import { isLitreItem } from "@/lib/itemUnits";
 import type { PartyDemand, StockDisplayProduct, StockStatus } from "./types";
 
 export const ITEMS_PER_PAGE = 15;

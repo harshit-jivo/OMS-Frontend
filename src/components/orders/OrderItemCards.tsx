@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge";
+import { isBoxedItem } from "@/lib/itemUnits";
 import {
   getOrderItemSchemes,
   getOrderItemTotalLtrs,
@@ -76,9 +77,14 @@ export function OrderItemCards({
 
           <dl className="mt-3 grid grid-cols-3 gap-x-3 gap-y-2 sm:grid-cols-4">
             {[
-              { label: "Qty", value: String(item.qty) },
-              { label: "Pcs", value: String(item.pcs) },
-              { label: "Boxes", value: Number(item.boxes).toFixed(2) },
+              // Packaging / raw material is a plain count: its qty IS the pieces.
+              ...(isBoxedItem(item.item_code)
+                ? [
+                    { label: "Qty", value: String(item.qty) },
+                    { label: "Pcs", value: String(item.pcs) },
+                    { label: "Boxes", value: Number(item.boxes).toFixed(2) },
+                  ]
+                : [{ label: "Pcs", value: String(item.qty) }]),
               { label: "Ltrs", value: String(item.ltrs) },
               { label: "Total Ltrs", value: getOrderItemTotalLtrs(item).toFixed(2) },
               { label: "Price List (Basic)", value: Number(item.price_list_basic).toFixed(2) },

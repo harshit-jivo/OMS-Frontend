@@ -41,7 +41,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { litresPerPiece } from "@/lib/litres";
+import { litresPerPiece } from "@/lib/itemUnits";
 import { showToast } from "@/lib/toastStore";
 import { ordersService } from "../services/ordersService";
 import type { Product } from "../services/ordersService";

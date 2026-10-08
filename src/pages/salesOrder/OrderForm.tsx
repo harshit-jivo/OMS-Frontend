@@ -65,6 +65,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Field, Input, /* Select, (legacy scheme panel) */ Textarea } from "@/components/ui/form";
+import { isBoxedItem } from "@/lib/itemUnits";
 import { cn } from "@/lib/utils";
 import type { PartyProduct } from "@/services/ordersService";
 
@@ -154,6 +155,7 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
     poField,
     canEditPoNumber,
     getProductType,
+    getRowProduct,
     fetchSchemesForRow,
     validateBeforeSave,
     handleSaveDraft,
@@ -777,6 +779,8 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
 
   const renderItemModal = () => {
     const row = itemModalIndex === null ? null : rows[itemModalIndex];
+    // Packaging / raw material is keyed straight in pieces: no Boxes, no Pcs.
+    const boxed = row == null || isBoxedItem(getRowProduct(row)?.item_code);
 
     return (
       <Dialog
@@ -845,18 +849,20 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
                       been in — Boxes, Qty, then price — because that is the
                       order the numbers arrive off a purchase order.
                     */}
-                    <Field label="Boxes">
-                      {(control) => (
-                        <Input
-                          {...control}
-                          type="number"
-                          name="boxes"
-                          value={row.boxes}
-                          onChange={(e) => handleRowChange(itemModalIndex, e)}
-                        />
-                      )}
-                    </Field>
-                    <Field label="Qty">
+                    {boxed && (
+                      <Field label="Boxes">
+                        {(control) => (
+                          <Input
+                            {...control}
+                            type="number"
+                            name="boxes"
+                            value={row.boxes}
+                            onChange={(e) => handleRowChange(itemModalIndex, e)}
+                          />
+                        )}
+                      </Field>
+                    )}
+                    <Field label={boxed ? "Qty" : "Qty (Pcs)"}>
                       {(control) => (
                         <Input
                           {...control}
@@ -867,16 +873,18 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
                         />
                       )}
                     </Field>
-                    <Field label="Pcs">
-                      {(control) => (
-                        <Input
-                          {...control}
-                          type="number"
-                          value={row.pcs ? Number(row.pcs).toFixed(1) : ""}
-                          readOnly
-                        />
-                      )}
-                    </Field>
+                    {boxed && (
+                      <Field label="Pcs">
+                        {(control) => (
+                          <Input
+                            {...control}
+                            type="number"
+                            value={row.pcs ? Number(row.pcs).toFixed(1) : ""}
+                            readOnly
+                          />
+                        )}
+                      </Field>
+                    )}
                     <Field label="Ltrs">
                       {(control) => (
                         <Input {...control} type="number" value={row.ltrs} readOnly />
@@ -962,8 +970,14 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
           </span>
           <span className="text-[12px] text-subtle">
             {row.type ? `${row.type} · ` : ""}
-            {row.boxes ? `${row.boxes} box · ` : ""}
-            Qty {row.qty || 0}
+            {isBoxedItem(getRowProduct(row)?.item_code) ? (
+              <>
+                {row.boxes ? `${row.boxes} box · ` : ""}
+                Qty {row.qty || 0}
+              </>
+            ) : (
+              `${row.qty || 0} pcs`
+            )}
           </span>
         </div>
         <span className="whitespace-nowrap text-[15px] font-bold text-ink">

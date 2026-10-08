@@ -7,6 +7,7 @@ import {
 } from "@/services/ordersService";
 import type { OrderItem } from "@/services/ordersService";
 import { useUILabels } from "@/services/uiConfig";
+import { isBoxedItem } from "@/lib/itemUnits";
 import { cn } from "@/lib/utils";
 import { titleCaseVariety, varietyBadgeTone } from "./orderDetail";
 
@@ -123,7 +124,8 @@ function ItemCard({
   /** A third line — the scheme a line carries, or what a giveaway is free with. */
   note?: React.ReactNode;
   amount: string;
-  figures: [label: string, value: React.ReactNode][];
+  /** `null` keeps a column's slot empty so the next figures stay aligned. */
+  figures: ([label: string, value: React.ReactNode] | null)[];
   /** Giveaway cards: the same shape, indented and one tone quieter. */
   muted?: boolean;
 }) {
@@ -189,9 +191,13 @@ function ItemCard({
           index !== undefined && "pl-[26px]",
         )}
       >
-        {figures.map(([label, value]) => (
-          <Figure key={label} label={label} value={value} />
-        ))}
+        {figures.map((figure, slot) =>
+          figure ? (
+            <Figure key={figure[0]} label={figure[0]} value={figure[1]} />
+          ) : (
+            <div key={`empty-${slot}`} aria-hidden />
+          ),
+        )}
       </dl>
     </li>
   );
@@ -279,9 +285,14 @@ export function OrderItemsTable({ items, variety = true }: OrderItemsTableProps)
             }
             amount={fixed(item.total)}
             figures={[
-              ["Qty", item.qty],
-              ["Pcs", item.pcs],
-              ["Boxes", fixed(item.boxes)],
+              // Packaging / raw material is a plain count: its qty IS the pieces.
+              ...(isBoxedItem(item.item_code)
+                ? ([
+                    ["Qty", item.qty],
+                    ["Pcs", item.pcs],
+                    ["Boxes", fixed(item.boxes)],
+                  ] as const)
+                : ([["Pcs", item.qty], null, null] as const)),
               ["Ltrs", item.ltrs],
               ["Total Ltrs", getOrderItemTotalLtrs(item).toFixed(2)],
               [priceList, fixed(item.price_list_basic)],

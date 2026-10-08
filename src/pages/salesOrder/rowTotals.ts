@@ -15,7 +15,7 @@
  * the live field object, where that same code would mutate form state behind
  * the resolver's back.
  */
-import { litresPerPiece } from "@/lib/litres";
+import { litresPerPiece } from "@/lib/itemUnits";
 import type { PartyProduct, Product } from "@/services/ordersService";
 
 import type { SalesRow } from "../salesOrderRow";
