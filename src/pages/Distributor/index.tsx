@@ -3,6 +3,7 @@ import { useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { userService } from "../../services/userService";
 import { ordersService, type MartOrderPayload } from "../../services/ordersService";
+import { litresPerPiece } from "@/lib/litres";
 import { showToast } from "@/lib/toastStore";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { Button } from "@/components/ui/button";
@@ -436,7 +437,7 @@ function Distributor() {
     const rate = product?.basic_rate ?? 0;
     const pcs = Number(product?.sal_factor2) || 0;
     const factor = Number(product?.sal_factor2) || 1;
-    const pack = Number(product?.sal_pack_unit) || 0;
+    const pack = litresPerPiece(product);
     // qty is stored on the row (kept in sync with boxes); ltrs / amount follow.
     const boxes = row.boxes || 0;
     const qty = row.qty || 0;

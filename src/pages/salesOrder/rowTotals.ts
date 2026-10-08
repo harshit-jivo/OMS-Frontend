@@ -15,6 +15,7 @@
  * the live field object, where that same code would mutate form state behind
  * the resolver's back.
  */
+import { litresPerPiece } from "@/lib/litres";
 import type { PartyProduct, Product } from "@/services/ordersService";
 
 import type { SalesRow } from "../salesOrderRow";
@@ -103,7 +104,8 @@ export type RowTotalsSource = "boxes" | "qty" | "price";
  * The row you get when one of its numbers changes.
  *
  * `product` supplies the pack size (`sal_factor2`, pieces per box) and the pack
- * unit (`sal_pack_unit`, litres per piece). Without one there is nothing to
+ * unit (`sal_pack_unit`, litres per piece — liquid items only, see
+ * `litresPerPiece`). Without one there is nothing to
  * derive, and the row comes back unchanged apart from FOC pricing.
  */
 export const recalculateRowTotals = (
@@ -122,7 +124,7 @@ export const recalculateRowTotals = (
   if (!product) return withFoc(row);
 
   const factor = Number(product.sal_factor2) || 1;
-  const packUnit = Number(product.sal_pack_unit) || 0;
+  const packUnit = litresPerPiece(product);
   const qty = source === "boxes" ? (Number(row.boxes) || 0) * factor : Number(row.qty) || 0;
   // Priced off the Basic rate so the amount stays pre-tax.
   const price = Number(row.basicPrice) || 0;

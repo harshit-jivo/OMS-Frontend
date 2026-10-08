@@ -5,6 +5,7 @@
  */
 import type { Party, Product, SapSalesOrder } from "../../services/sapService";
 import type { BadgeTone } from "@/components/ui/badge";
+import { isLitreItem } from "@/lib/litres";
 import type { PartyDemand, StockDisplayProduct, StockStatus } from "./types";
 
 export const ITEMS_PER_PAGE = 15;
@@ -96,11 +97,15 @@ export const getPackLtrs = (pack?: string | null) => {
   return match[2].toUpperCase() === "ML" ? value / 1000 : value;
 };
 
+// Packaging / consumables carry no litres (see `isLitreItem`).
+const stockPackLtrs = (product: StockDisplayProduct) =>
+  isLitreItem(product.item_code) ? getPackLtrs(product.sal_pack_unit) : 0;
+
 export const getWarehouseQtyLtrs = (product: StockDisplayProduct) =>
-  product.display_stock * getPackLtrs(product.sal_pack_unit);
+  product.display_stock * stockPackLtrs(product);
 
 export const getRequiredQtyLtrs = (product: StockDisplayProduct) =>
-  product.display_required_qty * getPackLtrs(product.sal_pack_unit);
+  product.display_required_qty * stockPackLtrs(product);
 
 export const formatOrderDate = (value?: string | null) => {
   if (!value) return "-";

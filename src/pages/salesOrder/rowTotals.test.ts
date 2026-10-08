@@ -22,7 +22,7 @@ import {
 
 /** A 12-piece carton of 1-litre bottles at 107 a piece, 5% tax. */
 const PRODUCT = {
-  item_code: "JV-CAN-1L",
+  item_code: "FG0000032",
   item_name: "JIVO CANOLA OIL 1 LTR",
   sal_factor2: 12,
   sal_pack_unit: 1,
@@ -69,6 +69,15 @@ describe("recalculateRowTotals", () => {
     expect(result.ltrs).toBe("60"); // 60 pieces x 1 litre
     expect(result.amount).toBe("6420.00"); // 60 x 107, pre-tax
     expect(result.priceListBasic).toBe("107"); // the agreed rate, untouched
+  });
+
+  it("gives packaging no litres, whatever its pack unit", () => {
+    // SAP's SalPackUn is 1 on a 15 LTR tin; 25 tins are not 25 litres.
+    const tin = { ...PRODUCT, item_code: "PM0000076", sal_factor2: 1, sal_pack_unit: 1 };
+    const result = recalculateRowTotals(row({ boxes: "25" }), "boxes", tin, false);
+
+    expect(result.qty).toBe("25");
+    expect(result.ltrs).toBe("0");
   });
 
   it("leaves the agreed rate alone when the line is discounted", () => {

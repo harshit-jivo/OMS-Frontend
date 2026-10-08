@@ -41,6 +41,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { litresPerPiece } from "@/lib/litres";
 import { showToast } from "@/lib/toastStore";
 import { ordersService } from "../services/ordersService";
 import type { Product } from "../services/ordersService";
@@ -185,7 +186,7 @@ export default function Staff() {
     if (!product) return row;
 
     const factor = Number(product.sal_factor2) || 1;
-    const packUnit = Number(product.sal_pack_unit) || 0;
+    const packUnit = litresPerPiece(product);
     let qty = Number(row.qty) || 0;
 
     if (source === "boxes") {

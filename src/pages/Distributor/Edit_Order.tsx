@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
 import { ordersService, type MartOrderPayload } from "../../services/ordersService";
 import type { Order } from "../../services/ordersService";
+import { litresPerPiece } from "@/lib/litres";
 import { showToast } from "@/lib/toastStore";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { Button } from "@/components/ui/button";
@@ -395,7 +396,7 @@ export default function Distributor_Edit_Order() {
     // currently selected item.
     const rate = Number(product?.basic_rate) || 0;
     const pcs = Number(product?.sal_factor2) || 0;
-    const pack = Number(product?.sal_pack_unit) || 0;
+    const pack = litresPerPiece(product);
     const boxes = row.boxes || 0;
     const qty = row.qty || 0;
     const ltrs = pack * qty;

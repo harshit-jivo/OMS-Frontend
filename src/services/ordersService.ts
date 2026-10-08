@@ -1,3 +1,4 @@
+import { isLitreItem } from "@/lib/litres";
 import api from "./api"
 
 export interface Product {
@@ -653,14 +654,20 @@ const normalizeOrderItem = (item: OrderItem): OrderItem => {
   // `total_ltrs` is sent by the API but is not on `OrderItem` — it is a
   // computed field the backend adds, so the cast names it rather than opening
   // the whole row to `any`.
-  const totalLtrs =
-    (item as OrderItem & { total_ltrs?: number | string | null }).total_ltrs ??
-    toNumber(item.ltrs) + toNumber(schemeQty);
+  // Orders saved before litres were limited to liquid items still store
+  // qty-as-litres on packaging lines; read those as 0 (see `isLitreItem`).
+  const isLitre = isLitreItem(item.item_code);
+  const ltrs = isLitre ? item.ltrs : 0;
+  const totalLtrs = isLitre
+    ? (item as OrderItem & { total_ltrs?: number | string | null }).total_ltrs ??
+      toNumber(ltrs) + toNumber(schemeQty)
+    : 0;
 
   return {
     ...item,
     schemes,
     scheme_qty: schemeQty,
+    ltrs,
     // scheme_ltrs: schemeLtrs,
     total_ltrs: totalLtrs,
   };
