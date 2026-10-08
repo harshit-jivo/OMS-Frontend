@@ -1,14 +1,16 @@
 /**
- * Expense requests: paid straight to expense G/L accounts, with no SAP
- * partner required. Direct or indirect (one kind per request), routed by
- * budget head (no Payment Purpose). Each line: a taxable amount and its GST
- * (for the record) make the invoice value; the G/L is optional (remarks then
- * required); the month and the TDS are the Payment desk's.
+ * Expense requests: paid straight to expense G/L accounts. The form asks the
+ * company, budget head, electricity, an optional vendor, remarks (optional)
+ * and the lines — each an amount and its G/L, or, not knowing it, what it is
+ * for. Not asked: Payment Against (follows from the G/Ls), who is paid (the
+ * vendor, else whoever raises it), ownership, payment date and month (the day
+ * it is raised), sub budget. The Payment desk sets the sub budget, month, GST
+ * and TDS; never the amounts.
  */
 import { describe, expect, it } from "vitest";
 
-import { paidAmount, payeeOf, requestAmount } from "./approvalData";
-import { formFromApi, toApiRequest } from "./requestApi";
+import { paidAmount, requestAmount } from "./approvalData";
+import { expenseEditToApi, formFromApi, toApiRequest } from "./requestApi";
 import {
   EMPTY_FORM,
   NO_TDS,
@@ -17,7 +19,7 @@ import {
   expenseTds,
   expenseTotal,
   lineGst,
-  lineInvoice,
+  lineTaxable,
   newExpenseLine,
   resolveCase,
   validate,
@@ -27,7 +29,7 @@ import {
 } from "./rules";
 import { TEST_TDS_RATES, apiRequest, storedInput } from "./testRequests";
 
-const TODAY = "2026-10-07";
+const TODAY = "2026-10-08";
 const rateOf = (code: string) => TEST_TDS_RATES[code] ?? null;
 
 const line = (patch: Partial<ExpenseLineForm>): ExpenseLineForm => ({
@@ -38,42 +40,26 @@ const line = (patch: Partial<ExpenseLineForm>): ExpenseLineForm => ({
 function expense(patch: Partial<RequestForm> = {}): RequestForm {
   return [
     { company: "OIL" as const, type: "EXPENSE" as const },
-    { paymentAgainst: "INDIRECT_EXPENSE" as const },
     {
-      payee: "PSPCL",
       budget: "Factory",
       budgetName: "Factory",
-      subBudget: "Accounts",
-      subBudgetName: "Accounts",
       isElectricity: true,
       expenseLines: [
-        line({
-          taxableAmount: "10000",
-          gstCode: "CGST_SGST_18",
-          glAccount: "5680011",
-          glName: "ELECTRICITY EXPENSES",
-        }),
-        line({ taxableAmount: "3000.50", remarks: "Penalty, G/L to confirm" }),
+        line({ amount: "11800", glAccount: "5680011", glName: "ELECTRICITY EXPENSES" }),
+        line({ amount: "3000.50", glUnknown: true, remarks: "Penalty, G/L to confirm" }),
       ],
-      ownership: "Preshit Singh (JWPL0030)",
-      paymentDate: "2026-10-08",
-      remarks: "Factory power bill",
     },
     patch,
   ].reduce<RequestForm>((f, p) => applyChange(f, p), EMPTY_FORM);
 }
 
 describe("an Expense request", () => {
-  it("is direct or indirect — the requester picks — and starts with one empty line and no month", () => {
+  it("is not asked Payment Against, and starts with one empty line", () => {
     const form = applyChange(applyChange(EMPTY_FORM, { company: "OIL" }), { type: "EXPENSE" });
-    expect(form.paymentAgainst).toBe("");
-    expect(resolveCase(form).paymentAgainstOptions.map((o) => o.value)).toEqual([
-      "DIRECT_EXPENSE",
-      "INDIRECT_EXPENSE",
-    ]);
-    const indirect = applyChange(form, { paymentAgainst: "INDIRECT_EXPENSE" });
-    expect([indirect.effectMonth, indirect.expenseLines.length]).toEqual(["", 1]);
-    const c = resolveCase(indirect);
+    // Provisional: the server makes it direct when the G/L accounts are.
+    expect(form.paymentAgainst).toBe("INDIRECT_EXPENSE");
+    expect([form.effectMonth, form.expenseLines.length]).toEqual(["", 1]);
+    const c = resolveCase(form);
     expect([c.expense, c.plainAmount, c.reference, c.partnerSource]).toEqual([
       true,
       false,
@@ -82,114 +68,88 @@ describe("an Expense request", () => {
     ]);
   });
 
-  it("drops the lines' G/L accounts when it changes between direct and indirect", () => {
-    const direct = applyChange(expense(), { paymentAgainst: "DIRECT_EXPENSE" });
-    expect(direct.expenseLines.map((l) => l.glAccount)).toEqual(["", ""]);
-    expect(direct.expenseLines[0].taxableAmount).toBe("10000");
-  });
-
-  it("is complete without a partner, a purpose or a month", () => {
+  it("is complete without a payee, ownership, payment date, sub budget, month or remarks", () => {
     expect(validate(expense(), TODAY)).toEqual({ missing: [], problems: [] });
   });
 
-  it("asks for who is paid, sub budget and lines — not a partner, purpose or month", () => {
-    const { missing } = validate(expense({ payee: " ", subBudget: "", expenseLines: [] }), TODAY);
-    expect(missing).toEqual(expect.arrayContaining(["Pay To", "Sub Budget", "Expense lines"]));
-    expect(missing).not.toContain("Payment Purpose");
-    expect(missing).not.toContain("Vendor");
-    expect(missing).not.toContain("Month");
-  });
-
-  it("needs each line's taxable amount, and remarks only where it has no G/L", () => {
+  it("needs each line's amount, and its G/L — or, not knowing it, what it is for", () => {
     const { missing, problems } = validate(
       expense({
         expenseLines: [
-          line({ taxableAmount: "0", glAccount: "5670001" }),
-          line({ taxableAmount: "" }),
-          line({ taxableAmount: "5", glAccount: "5670001" }),
+          line({ amount: "0", glAccount: "5670001" }),
+          line({ amount: "" }),
+          line({ amount: "5", glUnknown: true }),
         ],
       }),
       TODAY,
     );
-    expect(problems).toContain("Line 1: enter a taxable amount above zero.");
-    expect(missing).toEqual(["Taxable amount on line 2", "Remarks on line 2 (it has no G/L)"]);
+    expect(problems).toContain("Line 1: enter an amount above zero.");
+    expect(missing).toEqual([
+      "Amount on line 2",
+      "G/L account on line 2",
+      "Remarks on line 3 (what it is for)",
+    ]);
   });
 
-  it("at Payment needs every line's G/L and a month", () => {
+  it("at Payment needs every line's G/L, a month and a sub budget", () => {
     const { missing } = validateExpense(expense(), { atPayment: true });
-    expect(missing).toEqual(["Month", "G/L account on line 2"]);
-    const set = expense({ effectMonth: "10-2026" });
+    expect(missing).toEqual(["Sub Budget", "Month", "G/L account on line 2"]);
+    const set = expense({ effectMonth: "10-2026", subBudget: "Accounts" });
     set.expenseLines[1] = { ...set.expenseLines[1], glAccount: "5670001" };
     expect(validateExpense(set, { atPayment: true })).toEqual({ missing: [], problems: [] });
   });
 
-  it("is worth its lines' invoice values: taxable + GST", () => {
+  it("is worth its lines' amounts; the desk's GST backs the taxable amount out", () => {
     const form = expense();
-    expect([lineGst(form.expenseLines[0]), lineInvoice(form.expenseLines[0])]).toEqual([
-      1800, 11800,
-    ]);
-    expect(lineGst(line({ taxableAmount: "999.99", gstCode: "IGST_5" }))).toBe(50);
     expect(expenseTotal(form.expenseLines)).toBe(14800.5);
     expect(requestAmount(form)).toBe(14800.5);
-    expect(payeeOf(form)).toBe("PSPCL");
+    const taxed = line({ amount: "11800", gstCode: "CGST_SGST_18" });
+    expect([lineTaxable(taxed), lineGst(taxed)]).toEqual([10000, 1800]);
+    expect(lineTaxable(line({ amount: "1049.99", gstCode: "IGST_5" }))).toBe(999.99);
   });
 
   it("deducts TDS on the taxable amount, to the rupee — the request's code, a line's own, or none", () => {
     const form = expense({
       expenseTdsCode: "C194-2",
       expenseLines: [
-        line({ taxableAmount: "10000", gstCode: "CGST_SGST_18", glAccount: "5680011" }),
-        line({ taxableAmount: "2500", glAccount: "5670001", tdsOverride: "J194-10" }),
-        line({ taxableAmount: "700", glAccount: "5670001", tdsOverride: NO_TDS }),
-        line({ taxableAmount: "1234.50", glAccount: "5670001" }),
+        line({ amount: "11800", gstCode: "CGST_SGST_18", glAccount: "5680011" }),
+        line({ amount: "2500", glAccount: "5670001", tdsOverride: "J194-10" }),
+        line({ amount: "700", glAccount: "5670001", tdsOverride: NO_TDS }),
       ],
     });
-    // 200 (2% of 10000, not of 11800) + 250 + 0 + 25 (24.69 to the rupee)
-    expect(expenseTds(form, rateOf)).toBe(475);
-    expect(expenseNet(form, rateOf)).toBe(16234.5 - 475);
+    // 200 (2% of the taxable 10,000, not of 11,800) + 250 + 0
+    expect(expenseTds(form, rateOf)).toBe(450);
+    expect(expenseNet(form, rateOf)).toBe(15000 - 450);
   });
 
-  it("drops its fields when the type changes, and a company change drops the budget and sub budget", () => {
-    const vendor = applyChange(expense({ expenseTdsCode: "C194-2" }), { type: "VENDOR" });
-    expect([
-      vendor.payee,
-      vendor.subBudget,
-      vendor.expenseTdsCode,
-      vendor.isElectricity,
-      vendor.expenseLines,
-    ]).toEqual(["", "", "", false, []]);
-    const bev = applyChange(expense(), { company: "BEVERAGES" });
-    expect([bev.budget, bev.subBudget]).toEqual(["", ""]);
-    expect(bev.expenseLines).toHaveLength(2);
-  });
-
-  it("goes to the API as its lines, with the payee as the partner name", () => {
-    const input = toApiRequest(expense());
+  it("goes to the API without what is not asked; a line without a G/L sends what it is for", () => {
+    const input = toApiRequest(expense({ remarks: "" }));
     expect(input).toMatchObject({
       request_type: "EXPENSE",
-      payment_against: "INDIRECT_EXPENSE",
       partner_code: "",
-      partner_name: "PSPCL",
+      partner_name: "",
       amount: "14800.5",
       budget_code: "Factory",
-      sub_budget_code: "Accounts",
+      sub_budget_code: "",
       purpose_code: "",
       effect_month: "",
+      owner_label: "",
+      payment_date: null,
+      remarks: "",
       is_electricity: true,
-      department_head_code: null,
       documents: [],
     });
     expect(input.expense_lines).toEqual([
       {
-        taxable_amount: "10000",
-        gst_code: "CGST_SGST_18",
+        amount: "11800",
+        gst_code: "",
         gl_account: "5680011",
         effect_month: "",
         remarks: "",
         tds_override: "",
       },
       {
-        taxable_amount: "3000.50",
+        amount: "3000.50",
         gst_code: "",
         gl_account: "",
         effect_month: "",
@@ -199,8 +159,40 @@ describe("an Expense request", () => {
     ]);
   });
 
+  it("names its vendor as who is paid", () => {
+    const form = expense({ partner: "VENDA000101", partnerName: "ABC Technologies" });
+    expect(toApiRequest(form)).toMatchObject({
+      partner_code: "VENDA000101",
+      partner_name: "ABC Technologies",
+    });
+  });
+
+  it("sends the Payment desk only what it may change", () => {
+    const edit = expenseEditToApi(
+      expense({ subBudget: "IT", effectMonth: "09-2026", expenseTdsCode: "C194-2" }),
+    );
+    expect(Object.keys(edit).sort()).toEqual(
+      [
+        "effect_month",
+        "expense_lines",
+        "expense_tds_code",
+        "is_electricity",
+        "sub_budget_code",
+      ].sort(),
+    );
+    expect(edit).toMatchObject({
+      sub_budget_code: "IT",
+      effect_month: "09-2026",
+      expense_tds_code: "C194-2",
+    });
+  });
+
   it("comes back from the API as it was raised, with the server's TDS", () => {
-    const form = expense({ expenseTdsCode: "C194-2", effectMonth: "10-2026" });
+    const form = expense({
+      expenseTdsCode: "C194-2",
+      effectMonth: "10-2026",
+      subBudget: "Accounts",
+    });
     const back = formFromApi(
       apiRequest(40, {
         ...storedInput(toApiRequest(form)),
@@ -208,8 +200,7 @@ describe("an Expense request", () => {
         budget_name: "Factory",
       }),
     );
-    expect(back.payee).toBe("PSPCL");
-    expect([back.partner, back.partnerName, back.amount]).toEqual(["", "", ""]);
+    expect(back.payee).toBe("Tester"); // no vendor: whoever raised it
     expect([back.subBudget, back.effectMonth, back.isElectricity, back.expenseTdsCode]).toEqual([
       "Accounts",
       "10-2026",
@@ -217,19 +208,13 @@ describe("an Expense request", () => {
       "C194-2",
     ]);
     expect(
-      back.expenseLines.map((l) => [
-        l.taxableAmount,
-        l.gstCode,
-        l.glAccount,
-        l.remarks,
-        l.tdsAmount,
-      ]),
+      back.expenseLines.map((l) => [l.amount, l.glUnknown, l.glAccount, l.remarks, l.tdsAmount]),
     ).toEqual([
-      ["10000", "CGST_SGST_18", "5680011", "", "200"],
-      ["3000.5", "", "", "Penalty, G/L to confirm", "60"],
+      ["11800", false, "5680011", "", "236"],
+      ["3000.5", true, "", "Penalty, G/L to confirm", "60"],
     ]);
-    // Read back, the payment pays the invoice values less the server's TDS.
-    expect(paidAmount(back)).toBe(14800.5 - 260);
+    // Read back, the payment pays the amounts less the server's TDS.
+    expect(paidAmount(back)).toBe(14800.5 - 296);
     expect(validate(back, TODAY)).toEqual({ missing: [], problems: [] });
   });
 });

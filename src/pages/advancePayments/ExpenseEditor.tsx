@@ -1,21 +1,22 @@
 /**
- * The Payment desk's correction of an Expense request: direct or indirect,
- * vendor / payee, budget head, sub budget, month, TDS, electricity and every
- * line (taxable amount, GST, G/L, month, TDS, remarks). The server checks it as it checks the requester's form, and logs
- * it as "Edited at Payment" with who made each change (`ExpenseEditHistory`).
+ * The Payment desk's correction of an Expense request.
+ *
+ * The requester's own — company, budget head, who is paid and every amount —
+ * are shown, not edited (return the request to change one). The desk sets the
+ * Sub Budget and Month, and each line's G/L, GST, month, TDS and remarks. The
+ * server checks it as it checks the requester's form, and logs it as "Edited
+ * at Payment" with who made each change (`ExpenseEditHistory`).
  */
-import { useState } from "react";
-
 import { SearchSelect } from "../../components/ui/dropdown";
-import { Field, FormGrid, Input, Select } from "../../components/ui/form";
+import { DetailField, DetailGrid } from "../../components/ui/detail";
+import { Field, FormGrid } from "../../components/ui/form";
 import {
   advancePaymentError,
   type AdvancePaymentCompany,
 } from "../../services/advancePaymentService";
 
-import { PAYMENT_AGAINST_OPTIONS, type PaymentAgainst } from "./constants";
 import { ExpenseDetails, type ExpenseTds } from "./ExpenseDetails";
-import { useBudgetOptions, useSapVendors } from "./expenseLookups";
+import { useBudgetOptions } from "./expenseLookups";
 import { FormSection } from "./PaymentSections";
 import { applyChange, type RequestForm } from "./rules";
 
@@ -30,10 +31,6 @@ function withSaved(
     : options;
 }
 
-const KINDS = PAYMENT_AGAINST_OPTIONS.filter(
-  (o) => o.value === "DIRECT_EXPENSE" || o.value === "INDIRECT_EXPENSE",
-);
-
 export function ExpenseEditor({
   form,
   onChange,
@@ -47,93 +44,21 @@ export function ExpenseEditor({
 }) {
   const company = (form.company || null) as AdvancePaymentCompany | null;
   const change = (patch: Partial<RequestForm>) => onChange(applyChange(form, patch));
-  const [search, setSearch] = useState("");
-  const vendors = useSapVendors(company, search.trim());
   const budgets = useBudgetOptions(company);
-  const vendorOptions = withSaved(
-    (vendors.data ?? []).map((v) => ({ value: v.value, label: v.label, hint: v.code })),
-    form.partner,
-    form.partnerName,
-  );
   const budgetError = budgets.query.isError ? advancePaymentError(budgets.query.error) : undefined;
 
   return (
     <div className="space-y-5" data-slot="expense-editor">
-      <FormSection title="Payee & Budget">
+      <FormSection
+        title="Payee & Budget"
+        description="As raised: return the request to change these."
+      >
+        <DetailGrid>
+          <DetailField label="Company" value={form.company} />
+          <DetailField label="Department" value={form.budgetName || form.budget} />
+          <DetailField label="Pay To" value={form.payee} hint={form.partner || undefined} />
+        </DetailGrid>
         <FormGrid className="md:grid-cols-2">
-          <Field
-            label="Payment Against"
-            required
-            hint="Changing it clears the lines' G/L accounts."
-          >
-            {(f) => (
-              <Select
-                {...f}
-                value={form.paymentAgainst}
-                onChange={(e) => change({ paymentAgainst: e.target.value as PaymentAgainst })}
-              >
-                {KINDS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </Select>
-            )}
-          </Field>
-          <Field
-            label="Vendor"
-            hint="Optional — a SAP vendor, if it is one."
-            error={vendors.isError ? advancePaymentError(vendors.error) : undefined}
-          >
-            {(f) => (
-              <SearchSelect<string>
-                id={f.id}
-                value={form.partner}
-                onChange={(next) =>
-                  change({
-                    partner: next,
-                    partnerName: vendorOptions.find((o) => o.value === next)?.label ?? "",
-                  })
-                }
-                placeholder="No vendor (optional)"
-                searchPlaceholder="Search name or code…"
-                clearLabel="No vendor"
-                emptyText="No match in SAP"
-                onQueryChange={setSearch}
-                loading={vendors.isFetching}
-                options={vendorOptions}
-              />
-            )}
-          </Field>
-          <Field label="Pay To" required>
-            {(f) => (
-              <Input
-                {...f}
-                maxLength={200}
-                value={form.payee}
-                onChange={(e) => change({ payee: e.target.value })}
-              />
-            )}
-          </Field>
-          <Field label="Department" required hint="The budget head." error={budgetError}>
-            {(f) => (
-              <SearchSelect<string>
-                id={f.id}
-                value={form.budget}
-                onChange={(next) =>
-                  change({
-                    budget: next,
-                    budgetName: budgets.heads.find((o) => o.value === next)?.label ?? "",
-                  })
-                }
-                placeholder="Select department"
-                searchPlaceholder="Search department…"
-                emptyText="No department matches"
-                loading={budgets.query.isFetching}
-                options={withSaved(budgets.heads, form.budget, form.budgetName)}
-              />
-            )}
-          </Field>
           <Field label="Sub Budget" required error={budgetError}>
             {(f) => (
               <SearchSelect<string>
@@ -161,7 +86,7 @@ export function ExpenseEditor({
         onChange={change}
         atPayment
         tds={tds}
-        description="Every line needs its G/L account and a month before approving; TDS is on the taxable amount. Changes are saved as edited at Payment, by you."
+        description="Every line needs its G/L account and a month before approving. GST and TDS are yours to set; TDS is on the taxable amount. Changes are saved as edited at Payment, by you."
       />
     </div>
   );

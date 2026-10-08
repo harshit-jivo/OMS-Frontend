@@ -258,13 +258,6 @@ export function AdvancePaymentForm({
       : c.expense
         ? "SAP's budget heads. Its owner approves this expense."
         : "SAP's budget heads.";
-  // Expense only: SAP's Sub Budgets (dimension 4), not tied to a head.
-  const subBudgetOptions = (budgetsQuery.data ?? [])
-    .filter((b) => b.kind === "SUB_BUDGET")
-    .map((b) => ({ value: b.code, label: b.name, hint: b.code === b.name ? "" : b.code }));
-  if (form.subBudget && !subBudgetOptions.some((o) => o.value === form.subBudget)) {
-    subBudgetOptions.unshift({ value: form.subBudget, label: form.subBudgetName || form.subBudget, hint: "" });
-  }
 
   /* ── Payment Purpose: the Payment Desk's list ───────────────────────── */
 
@@ -545,30 +538,33 @@ export function AdvancePaymentForm({
             )}
           </Field>
 
-          <Field
-            label="Payment Against"
-            required
-            hint={form.type ? undefined : "Pick a type first."}
-          >
-            {(f) => (
-              // Pick a listed answer, or TYPE what else it is — no separate
-              // "Other" to choose first. A typed answer is stored as OTHER plus
-              // the text, so the rules are unchanged.
-              <ChoiceOrText<PaymentAgainst>
-                id={f.id}
-                aria-describedby={f["aria-describedby"]}
-                required
-                disabled={!form.type}
-                options={c.paymentAgainstOptions.filter((option) => option.value !== "OTHER")}
-                otherValue="OTHER"
-                value={form.paymentAgainst}
-                text={form.paymentAgainstOther}
-                onChange={(paymentAgainst, paymentAgainstOther) =>
-                  change({ paymentAgainst, paymentAgainstOther })
-                }
-              />
-            )}
-          </Field>
+          {/* An Expense is not asked it: direct or indirect follows from its G/L accounts. */}
+          {c.expense ? null : (
+            <Field
+              label="Payment Against"
+              required
+              hint={form.type ? undefined : "Pick a type first."}
+            >
+              {(f) => (
+                // Pick a listed answer, or TYPE what else it is — no separate
+                // "Other" to choose first. A typed answer is stored as OTHER plus
+                // the text, so the rules are unchanged.
+                <ChoiceOrText<PaymentAgainst>
+                  id={f.id}
+                  aria-describedby={f["aria-describedby"]}
+                  required
+                  disabled={!form.type}
+                  options={c.paymentAgainstOptions.filter((option) => option.value !== "OTHER")}
+                  otherValue="OTHER"
+                  value={form.paymentAgainst}
+                  text={form.paymentAgainstOther}
+                  onChange={(paymentAgainst, paymentAgainstOther) =>
+                    change({ paymentAgainst, paymentAgainstOther })
+                  }
+                />
+              )}
+            </Field>
+          )}
         </FormGrid>
 
         <FormGrid className="md:grid-cols-3">
@@ -614,20 +610,6 @@ export function AdvancePaymentForm({
               />
             )}
           </Field>
-          {/* An Expense names who is paid: the vendor's name, or typed. */}
-          {c.expense ? (
-            <Field label="Pay To" required hint="Who is being paid — the Payment desk adds their bank details.">
-              {(f) => (
-                <Input
-                  {...f}
-                  maxLength={200}
-                  placeholder="Payee name"
-                  value={form.payee}
-                  onChange={(e) => change({ payee: e.target.value })}
-                />
-              )}
-            </Field>
-          ) : null}
           {partnerNotInSap ? (
             <Notice
               tone="hold"
@@ -780,33 +762,8 @@ export function AdvancePaymentForm({
             )}
           </Field>
 
-          {/* Expense: SAP's Sub Budget, which every expense line carries. */}
-          {c.expense ? (
-            <Field
-              label="Sub Budget"
-              required
-              error={budgetsQuery.isError ? advancePaymentError(budgetsQuery.error) : undefined}
-            >
-              {(f) => (
-                <SearchSelect<string>
-                  id={f.id}
-                  value={form.subBudget}
-                  onChange={(next) =>
-                    change({
-                      subBudget: next,
-                      subBudgetName: subBudgetOptions.find((o) => o.value === next)?.label ?? "",
-                    })
-                  }
-                  disabled={!company}
-                  placeholder="Select sub budget"
-                  searchPlaceholder="Search sub budget…"
-                  emptyText="No sub budget matches"
-                  loading={budgetsQuery.isFetching}
-                  options={subBudgetOptions}
-                />
-              )}
-            </Field>
-          ) : (
+          {/* An Expense has no purpose (its budget head routes it); the Payment desk sets its Sub Budget. */}
+          {c.expense ? null : (
             /* What the money is for: the Payment Desk's purpose list. */
             <Field
               label="Payment Purpose"
@@ -867,47 +824,52 @@ export function AdvancePaymentForm({
             </Field>
           ) : null}
 
-          {/* Who owns this request: a HOD or Sub-HOD from the employee master. */}
-          <Field
-            label="Ownership"
-            required
-            error={ownersQuery.isError ? advancePaymentError(ownersQuery.error) : undefined}
-            hint={ownersQuery.isError ? undefined : "HODs and Sub-HODs from the employee master."}
-          >
-            {(f) => (
-              <SearchSelect<string>
-                id={f.id}
-                value={form.ownership}
-                onChange={(next) => change({ ownership: next })}
-                placeholder="Select owner"
-                searchPlaceholder="Search name or code…"
-                emptyText="No HOD or Sub-HOD matches"
-                loading={ownersQuery.isFetching}
-                options={ownerOptions}
-              />
-            )}
-          </Field>
+          {/* Not asked on an Expense: dated the day it is raised. */}
+          {c.expense ? null : (
+            <>
+              {/* Who owns this request: a HOD or Sub-HOD from the employee master. */}
+              <Field
+                label="Ownership"
+                required
+                error={ownersQuery.isError ? advancePaymentError(ownersQuery.error) : undefined}
+                hint={ownersQuery.isError ? undefined : "HODs and Sub-HODs from the employee master."}
+              >
+                {(f) => (
+                  <SearchSelect<string>
+                    id={f.id}
+                    value={form.ownership}
+                    onChange={(next) => change({ ownership: next })}
+                    placeholder="Select owner"
+                    searchPlaceholder="Search name or code…"
+                    emptyText="No HOD or Sub-HOD matches"
+                    loading={ownersQuery.isFetching}
+                    options={ownerOptions}
+                  />
+                )}
+              </Field>
 
-          <Field
-            label="Payment Date"
-            required
-            error={pastDateError("Payment Date", form.paymentDate, today) ?? undefined}
-          >
-            {(f) => (
-              <Input
-                {...f}
-                type="date"
-                // No past dates: the picker offers none, and `validate` refuses
-                // a typed one.
-                min={today}
-                value={form.paymentDate}
-                onChange={(e) => change({ paymentDate: e.target.value })}
-              />
-            )}
-          </Field>
+              <Field
+                label="Payment Date"
+                required
+                error={pastDateError("Payment Date", form.paymentDate, today) ?? undefined}
+              >
+                {(f) => (
+                  <Input
+                    {...f}
+                    type="date"
+                    // No past dates: the picker offers none, and `validate` refuses
+                    // a typed one.
+                    min={today}
+                    value={form.paymentDate}
+                    onChange={(e) => change({ paymentDate: e.target.value })}
+                  />
+                )}
+              </Field>
+            </>
+          )}
         </FormGrid>
 
-        <Field label="Remarks" required>
+        <Field label="Remarks" required={!c.expense}>
           {(f) => (
             <Textarea
               {...f}

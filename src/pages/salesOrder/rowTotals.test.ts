@@ -73,7 +73,7 @@ describe("recalculateRowTotals", () => {
 
   it("gives packaging no litres, whatever its pack unit", () => {
     // SAP's SalPackUn is 1 on a 15 LTR tin; 25 tins are not 25 litres.
-    const tin = { ...PRODUCT, item_code: "PM0000076", sal_factor2: 1, sal_pack_unit: 1 };
+    const tin = { ...PRODUCT, item_code: "PM0000076", sal_factor2: 1, sal_pack_unit: "1" };
     const result = recalculateRowTotals(row({ boxes: "25" }), "boxes", tin, false);
 
     expect(result.qty).toBe("25");

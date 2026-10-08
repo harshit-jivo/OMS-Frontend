@@ -117,8 +117,9 @@ export function toApiRequest(form: RequestForm): ApiRequestInput {
         sub_budget_code: form.subBudget,
         expense_tds_code: form.expenseTdsCode,
         expense_lines: form.expenseLines.map((line) => ({
-          taxable_amount: line.taxableAmount,
+          amount: line.amount,
           gst_code: line.gstCode,
+          // Ticking "don't know the G/L" clears it; the Payment desk picking one sets it.
           gl_account: line.glAccount,
           effect_month: line.effectMonth,
           remarks: line.remarks.trim(),
@@ -133,7 +134,8 @@ export function toApiRequest(form: RequestForm): ApiRequestInput {
     payment_against: form.paymentAgainst,
     payment_against_other: form.paymentAgainst === "OTHER" ? form.paymentAgainstOther : "",
     partner_code: form.partner,
-    partner_name: c.expense ? form.payee.trim() : form.partnerName,
+    // An Expense: paid to its vendor, else (the server fills it in) whoever raised it.
+    partner_name: c.expense ? (form.partner ? form.partnerName : form.payee.trim()) : form.partnerName,
     amount: kind ? String(total) : c.expense ? String(expenseTotal(form.expenseLines)) : form.amount,
     documents,
     expected_date: orNull(form.expectedDate),
@@ -159,11 +161,8 @@ export function toApiRequest(form: RequestForm): ApiRequestInput {
 /** What the Payment desk sends to correct an Expense request (`PUT /requests/<id>/expense/`). */
 export function expenseEditToApi(form: RequestForm): ApiExpenseEdit {
   const input = toApiRequest(form);
+  // Not the company, budget head, who is paid or any amount: the requester's.
   return {
-    payment_against: input.payment_against,
-    partner_code: input.partner_code,
-    partner_name: input.partner_name,
-    budget_code: input.budget_code,
     sub_budget_code: input.sub_budget_code ?? "",
     effect_month: input.effect_month,
     is_electricity: input.is_electricity,
@@ -275,7 +274,8 @@ export function formFromApi(api: ApiRequest): RequestForm {
     expenseTdsCode: expense ? api.expense_tds_code ?? "" : "",
     expenseLines: (api.expense_lines ?? []).map((line) => ({
       id: String(line.id),
-      taxableAmount: plain(line.taxable_amount),
+      amount: plain(line.amount),
+      glUnknown: !line.gl_account,
       gstCode: (line.gst_code ?? "") as GstCode,
       glAccount: line.gl_account,
       glName: line.gl_name,
