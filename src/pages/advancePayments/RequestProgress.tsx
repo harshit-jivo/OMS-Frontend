@@ -116,11 +116,12 @@ const LOG_TONE: Record<string, BadgeTone> = {
   SAP_CANCELLED: "bad",
   RETURNED: "note",
   SENT_BACK: "note",
+  PAYMENT_EDITED: "hold",
   CANCELLED: "neutral",
 };
 
 /** Under an "Edited" or "Payment details updated" row: each change, Was → Now. */
-function EditChanges({ log }: { log: ApiRequestLog }) {
+export function EditChanges({ log }: { log: ApiRequestLog }) {
   const rows = editRows(log.data);
   if (rows.length === 0) return null;
   return (
@@ -174,7 +175,9 @@ export function RequestHistory({ entry }: { entry: AdvanceRequestEntry }) {
                 </Badge>
               </p>
             ) : null}
-            {log.action === "EDITED" || log.action === "PAYOUT_UPDATED" ? <EditChanges log={log} /> : null}
+            {log.action === "EDITED" || log.action === "PAYMENT_EDITED" || log.action === "PAYOUT_UPDATED" ? (
+              <EditChanges log={log} />
+            ) : null}
           </TimelineItem>
         );
       })}

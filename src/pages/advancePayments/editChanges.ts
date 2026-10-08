@@ -1,7 +1,7 @@
 /**
  * What an edit changed, as rows a person reads: Field · Was · Now.
  *
- * Read from an EDITED or PAYOUT_UPDATED log row's `data`, which the server writes as
+ * Read from an EDITED, PAYMENT_EDITED or PAYOUT_UPDATED log row's `data`, which the server writes as
  * `{field: {old, new}}`, plus `documents` (added / removed / changed amounts)
  * and `files_added` / `files_removed`. Rows logged before the server stored
  * readable values (ids, `BILL:10256:40000`) still come out — just plainer.
@@ -50,6 +50,9 @@ const LABEL: Record<string, string> = {
   purpose: "Payment purpose",
   purpose_code: "Payment purpose",
   department_head: "Department Head",
+  // Expense requests.
+  effect_month: "Month",
+  electricity: "Electricity",
   // The payment details (PAYOUT_UPDATED).
   beneficiary_name: "Beneficiary",
   to_account: "To account",
@@ -101,6 +104,17 @@ export function editRows(data: Record<string, unknown> | null | undefined): Edit
       for (const d of change.changed ?? []) rows.push({ field: d.doc, was: money(d.old), now: money(d.new) });
       for (const d of change.added ?? []) rows.push({ field: d.doc, was: "Not on it", now: money(d.amount) });
       for (const d of change.removed ?? []) rows.push({ field: d.doc, was: money(d.amount), now: "Removed" });
+      continue;
+    }
+    // An Expense's lines: {"Line 1": {old, new}}, each as "G/L · month · amount · remarks".
+    if (key === "expense_lines" && !("old" in change)) {
+      for (const [line, v] of Object.entries(change as Record<string, { old?: unknown; new?: unknown }>)) {
+        rows.push({
+          field: line,
+          was: v?.old ? String(v.old) : "Not on it",
+          now: v?.new ? String(v.new) : "Removed",
+        });
+      }
       continue;
     }
     const method = /^payment_method_(\d+)$/.exec(key);

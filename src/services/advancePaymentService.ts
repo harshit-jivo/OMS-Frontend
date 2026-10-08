@@ -750,7 +750,7 @@ export interface SapPartnerLedger {
 
 export interface ApiRequestFields {
   company: AdvancePaymentCompany;
-  request_type: "VENDOR" | "EMPLOYEE_ADVANCE" | "EMPLOYEE_IMPREST" | "CUSTOMER";
+  request_type: "VENDOR" | "EMPLOYEE_ADVANCE" | "EMPLOYEE_IMPREST" | "CUSTOMER" | "EXPENSE";
   payment_against: string;
   payment_against_other: string;
   partner_code: string;
@@ -771,6 +771,73 @@ export interface ApiRequestFields {
   budget_code: string;
   /** Payment Purpose: a code of the Payment Desk's list. */
   purpose_code: string;
+  /** Expense only: SAP's Effective Month ("10-2026") of every line not naming its own. */
+  effect_month: string;
+  /** Expense only: an electricity expense (the Director approves it too). */
+  is_electricity: boolean;
+}
+
+/** An expense G/L account an Expense line may pay to. */
+export interface SapExpenseAccount {
+  code: string;
+  name: string;
+  /** The parent account it sits under (its group). */
+  group: string;
+  /** Direct (SAP's 5100000 group) or indirect (5610000-5690000). */
+  kind: "DIRECT" | "INDIRECT";
+}
+
+/** SAP's Effective Months, newest first, and the company's Variety. */
+export interface SapExpenseMonths {
+  company: AdvancePaymentCompany;
+  months: string[];
+  variety: string;
+}
+
+/** One line of an Expense request as the form sends it. */
+export interface ApiExpenseLineInput {
+  /** Before GST. */
+  taxable_amount: string;
+  /** "" (no GST), CGST_SGST_5, CGST_SGST_18, IGST_5, IGST_18 — for the record. */
+  gst_code: string;
+  /** Blank: the Payment stage fills it in (then `remarks` says what it is for). */
+  gl_account: string;
+  /** Blank: the request's month. */
+  effect_month: string;
+  remarks: string;
+  /** The Payment desk's TDS for the line: "" (the request's), "NONE", or a code. */
+  tds_override?: string;
+}
+
+/** The Payment desk's correction of an Expense request. */
+export interface ApiExpenseEdit {
+  payment_against: string;
+  partner_code: string;
+  partner_name: string;
+  budget_code: string;
+  sub_budget_code: string;
+  effect_month: string;
+  is_electricity: boolean;
+  expense_tds_code: string;
+  expense_lines: ApiExpenseLineInput[];
+}
+
+/** One line of an Expense request as the server holds it. */
+export interface ApiExpenseLine extends ApiExpenseLineInput {
+  id: number;
+  line_no: number;
+  gst_amount: string;
+  /** The invoice value: taxable + GST. */
+  amount: string;
+  gl_name: string;
+  /** The month it posts to: its own, else the request's. */
+  month: string;
+  tds_code: string;
+  tds_label: string;
+  tds_rate: string | null;
+  tds_amount: string;
+  /** What SAP's payment pays to its G/L: the invoice value less TDS. */
+  net: string;
 }
 
 /** What the form sends to raise or edit a request. */
@@ -778,6 +845,12 @@ export interface ApiRequestInput extends ApiRequestFields {
   /** The Department Head: an HOD's employee code; null where none is asked. */
   department_head_code: string | null;
   documents: ApiRequestDocument[];
+  /** Expense only: SAP's Sub Budget (dimension 4). */
+  sub_budget_code?: string;
+  /** Expense, the Payment desk only: the TDS code of every line not naming its own. */
+  expense_tds_code?: string;
+  /** Expense only: what it pays. */
+  expense_lines?: ApiExpenseLineInput[];
   /** Raised from a bill / PO sent to the creator: closes that assignment. */
   assignment_id?: number;
 }
@@ -792,9 +865,13 @@ export interface ApiRequest extends ApiRequestFields {
   currency: string;
   owner_employee_id: number | null;
   budget_name: string;
-  /** Sub Budget: only on requests raised before it stopped being asked. */
+  /** Sub Budget: an Expense's, or a request raised before it stopped being asked. */
   sub_budget_code: string;
   sub_budget_name: string;
+  /** Expense only: the lines it pays (empty otherwise). */
+  expense_lines: ApiExpenseLine[];
+  /** Expense only: the Payment desk's TDS code for every line not naming its own. */
+  expense_tds_code: string;
   purpose_label: string;
   /** The Department Head picked on the request (an HOD), or null where the route has none. */
   department_head_employee: { employee_code: string; employee_name: string } | null;
@@ -905,6 +982,18 @@ export const advancePaymentService = {
   async budgets(company: AdvancePaymentCompany): Promise<SapBudget[]> {
     const res = await api.get(`${BASE}/budgets/`, { params: { company } });
     return results<SapBudget>(res.data);
+  },
+
+  /** The expense G/L accounts an Expense line may pay to. */
+  async expenseAccounts(company: AdvancePaymentCompany): Promise<SapExpenseAccount[]> {
+    const res = await api.get(`${BASE}/expense-accounts/`, { params: { company } });
+    return results<SapExpenseAccount>(res.data);
+  },
+
+  /** SAP's Effective Months (newest first) and the company's Variety. */
+  async expenseMonths(company: AdvancePaymentCompany): Promise<SapExpenseMonths> {
+    const res = await api.get(`${BASE}/expense-months/`, { params: { company } });
+    return unwrap<SapExpenseMonths>(res.data);
   },
 
   /** A partner's whole open ledger (JDT1, as SAP's ageing reads it), oldest due first. */
@@ -1238,6 +1327,15 @@ export const advancePaymentService = {
       version,
       ...(manualToken ? { manual_token: manualToken } : {}),
     });
+    return unwrap<ApiRequest>(res.data);
+  },
+
+  /**
+   * The Payment desk corrects an Expense request: vendor / payee, budget head,
+   * sub budget, month, electricity, the lines. Logged as "Edited at Payment".
+   */
+  async editExpense(id: number, edit: ApiExpenseEdit, version?: number): Promise<ApiRequest> {
+    const res = await api.put(`${BASE}/requests/${id}/expense/`, { ...edit, version });
     return unwrap<ApiRequest>(res.data);
   },
 

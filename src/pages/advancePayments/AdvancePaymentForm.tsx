@@ -20,6 +20,8 @@
  *     memos, payments on account, journals);
  *   * Employee's employees — their advance GL accounts. `rules.ts` (`partnerSourceFor`, `REFERENCE_KINDS[].live`) decides
  * which is which; this file only fetches what it is told is live.
+ *   * Expense: no partner — who is paid is typed — plus the Sub Budget, and
+ *     `ExpenseDetails` (Month, Electricity, the lines to expense G/Ls).
  *
  * The form saves nothing itself: `onSubmit` hands a validated form to the page,
  * which sends it to the server and says how that went.
@@ -97,6 +99,7 @@ import {
 } from "./sapMapping";
 import { attachFile, formatSize, type FileAttachment } from "./attachments";
 import { VendorOnAccount } from "./VendorOnAccount";
+import { ExpenseDetails } from "./ExpenseDetails";
 import { docEntryOf } from "./requestApi";
 
 
@@ -252,7 +255,16 @@ export function AdvancePaymentForm({
     ? "Choose the company first."
     : budgetsQuery.isError
       ? undefined
-      : "SAP's budget heads.";
+      : c.expense
+        ? "SAP's budget heads. Its owner approves this expense."
+        : "SAP's budget heads.";
+  // Expense only: SAP's Sub Budgets (dimension 4), not tied to a head.
+  const subBudgetOptions = (budgetsQuery.data ?? [])
+    .filter((b) => b.kind === "SUB_BUDGET")
+    .map((b) => ({ value: b.code, label: b.name, hint: b.code === b.name ? "" : b.code }));
+  if (form.subBudget && !subBudgetOptions.some((o) => o.value === form.subBudget)) {
+    subBudgetOptions.unshift({ value: form.subBudget, label: form.subBudgetName || form.subBudget, hint: "" });
+  }
 
   /* ── Payment Purpose: the Payment Desk's list ───────────────────────── */
 
@@ -562,9 +574,15 @@ export function AdvancePaymentForm({
         <FormGrid className="md:grid-cols-3">
           <Field
             label={c.partnerLabel}
-            required
+            required={!c.expense}
             error={partnerError}
-            hint={partnerError ? undefined : partnerHint}
+            hint={
+              partnerError
+                ? undefined
+                : c.expense
+                  ? "Optional — a SAP vendor, if it is one. Its bank accounts are then offered at Payment."
+                  : partnerHint
+            }
           >
             {(f) => (
               <SearchSelect<string>
@@ -577,7 +595,8 @@ export function AdvancePaymentForm({
                   })
                 }
                 disabled={!c.decided || (c.livePartners && !form.company)}
-                placeholder={`Select ${c.partnerLabel}`}
+                placeholder={c.expense ? "No vendor (optional)" : `Select ${c.partnerLabel}`}
+                clearLabel={c.expense ? "No vendor" : undefined}
                 searchPlaceholder="Search name or code…"
                 emptyText={c.livePartners ? "No match in SAP" : "No matches"}
                 onQueryChange={c.livePartners ? setPartnerQuery : undefined}
@@ -595,6 +614,20 @@ export function AdvancePaymentForm({
               />
             )}
           </Field>
+          {/* An Expense names who is paid: the vendor's name, or typed. */}
+          {c.expense ? (
+            <Field label="Pay To" required hint="Who is being paid — the Payment desk adds their bank details.">
+              {(f) => (
+                <Input
+                  {...f}
+                  maxLength={200}
+                  placeholder="Payee name"
+                  value={form.payee}
+                  onChange={(e) => change({ payee: e.target.value })}
+                />
+              )}
+            </Field>
+          ) : null}
           {partnerNotInSap ? (
             <Notice
               tone="hold"
@@ -662,6 +695,9 @@ export function AdvancePaymentForm({
           ) : null}
         </FormGrid>
       </FormSection>
+
+      {/* ── Expense: Month, Electricity, the lines ─────────────────── */}
+      {c.expense ? <ExpenseDetails company={company} form={form} onChange={change} /> : null}
 
       {/* ── Repayment & Settlement (Employee Advance + Advance) ──── */}
       {c.repayment ? (
@@ -744,31 +780,59 @@ export function AdvancePaymentForm({
             )}
           </Field>
 
-          {/* What the money is for: the Payment Desk's purpose list. */}
-          <Field
-            label="Payment Purpose"
-            required
-            error={purposesQuery.isError ? advancePaymentError(purposesQuery.error) : undefined}
-          >
-            {(f) => (
-              <SearchSelect<string>
-                id={f.id}
-                value={form.purpose}
-                onChange={(next) =>
-                  change({
-                    purpose: next,
-                    purposeLabel: purposeOptions.find((o) => o.value === next)?.label ?? "",
-                    purposeNeedsHead: purposeNeedsHead(next),
-                  })
-                }
-                placeholder="Select payment purpose"
-                searchPlaceholder="Search payment purpose…"
-                emptyText="No payment purpose matches"
-                loading={purposesQuery.isFetching}
-                options={purposeOptions}
-              />
-            )}
-          </Field>
+          {/* Expense: SAP's Sub Budget, which every expense line carries. */}
+          {c.expense ? (
+            <Field
+              label="Sub Budget"
+              required
+              error={budgetsQuery.isError ? advancePaymentError(budgetsQuery.error) : undefined}
+            >
+              {(f) => (
+                <SearchSelect<string>
+                  id={f.id}
+                  value={form.subBudget}
+                  onChange={(next) =>
+                    change({
+                      subBudget: next,
+                      subBudgetName: subBudgetOptions.find((o) => o.value === next)?.label ?? "",
+                    })
+                  }
+                  disabled={!company}
+                  placeholder="Select sub budget"
+                  searchPlaceholder="Search sub budget…"
+                  emptyText="No sub budget matches"
+                  loading={budgetsQuery.isFetching}
+                  options={subBudgetOptions}
+                />
+              )}
+            </Field>
+          ) : (
+            /* What the money is for: the Payment Desk's purpose list. */
+            <Field
+              label="Payment Purpose"
+              required
+              error={purposesQuery.isError ? advancePaymentError(purposesQuery.error) : undefined}
+            >
+              {(f) => (
+                <SearchSelect<string>
+                  id={f.id}
+                  value={form.purpose}
+                  onChange={(next) =>
+                    change({
+                      purpose: next,
+                      purposeLabel: purposeOptions.find((o) => o.value === next)?.label ?? "",
+                      purposeNeedsHead: purposeNeedsHead(next),
+                    })
+                  }
+                  placeholder="Select payment purpose"
+                  searchPlaceholder="Search payment purpose…"
+                  emptyText="No payment purpose matches"
+                  loading={purposesQuery.isFetching}
+                  options={purposeOptions}
+                />
+              )}
+            </Field>
+          )}
 
           {/* Approved "by department": the requester names the HOD who
               approves it, from the employee master. The route's Department

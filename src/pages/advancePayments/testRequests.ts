@@ -13,12 +13,15 @@ import type {
   ApiRequest,
   ApiRequestDocument,
   ApiRequestInput,
+  ApiExpenseEdit,
   ApiRequestLog,
   ApiStage,
   RequestAbilities,
   StageAction,
   StageRole,
 } from "../../services/advancePaymentService";
+
+import { GST_OPTIONS } from "./constants";
 
 export const TESTER = { id: 1, name: "Tester", username: "tester" };
 const OTHER = { id: 7, name: "Navdeep Singh", username: "navdeep" };
@@ -106,6 +109,48 @@ export function logRow(action: string, label: string, extra: Partial<ApiRequestL
 export const HEAD = { employee_code: "TEMP0001", employee_name: "Nirmal Didi" };
 export const HEAD_LOGIN = { id: 31, name: "Nirmal Didi Ji", username: "nirmal" };
 
+/**
+ * What the server stores for `input`: the request's own fields, with Expense
+ * lines numbered and given ids (G/L names are SAP's, so blank here).
+ */
+export function storedInput(input: ApiRequestInput, firstLineId = 500): Partial<ApiRequest> {
+  const { expense_lines: lines = [], ...rest } = input;
+  const stored = lines.map((line, i) => {
+    const taxable = Number(line.taxable_amount) || 0;
+    const gst = Math.round(taxable * (GST_OPTIONS.find((o) => o.value === line.gst_code)?.rate ?? 0)) / 100;
+    const code = line.tds_override === "NONE" ? "" : line.tds_override || input.expense_tds_code || "";
+    const rate = code ? TEST_TDS_RATES[code] ?? 0 : 0;
+    const tds = Math.round((taxable * rate) / 100);
+    const amount = Math.round((taxable + gst) * 100) / 100;
+    return {
+      ...line,
+      tds_override: line.tds_override ?? "",
+      id: firstLineId + i,
+      line_no: i + 1,
+      gl_name: "",
+      gst_amount: gst.toFixed(2),
+      amount: amount.toFixed(2),
+      // The request's month is a line's unless it names its own.
+      effect_month: line.effect_month === input.effect_month ? "" : line.effect_month,
+      month: line.effect_month || input.effect_month,
+      tds_code: rate ? code : "",
+      tds_label: "",
+      tds_rate: rate ? String(rate) : null,
+      tds_amount: tds.toFixed(2),
+      net: (amount - tds).toFixed(2),
+    };
+  });
+  return {
+    ...rest,
+    expense_tds_code: input.expense_tds_code ?? "",
+    expense_lines: stored,
+    ...(lines.length ? { amount: String(stored.reduce((sum, l) => sum + Number(l.amount), 0)) } : {}),
+  };
+}
+
+/** The TDS codes the fake server knows, by their rate. */
+export const TEST_TDS_RATES: Record<string, number> = { "C194-2": 2, "J194-10": 10 };
+
 /** A request as `GET /requests/<id>/` answers, with sensible defaults. */
 export function apiRequest(id: number, fields: Partial<ApiRequest> = {}): ApiRequest {
   const staff = fields.request_type === "EMPLOYEE_ADVANCE" || fields.request_type === "EMPLOYEE_IMPREST";
@@ -141,6 +186,10 @@ export function apiRequest(id: number, fields: Partial<ApiRequest> = {}): ApiReq
     budget_name: "Back Office",
     sub_budget_code: "",
     sub_budget_name: "",
+    expense_tds_code: "",
+    effect_month: "",
+    is_electricity: false,
+    expense_lines: [],
     purpose_code: "RAW_MATERIAL",
     purpose_label: "Raw Material – Other than Oil (incl. Ghee)",
     status: "IN_APPROVAL",
@@ -414,7 +463,7 @@ export class FakeRequestServer {
       mine: [],
       approvedThisRound: false,
       api: apiRequest(id, {
-        ...input,
+        ...storedInput(input, id * 100),
         created_by: TESTER,
         created_on: "2026-09-23T10:00:00+05:30",
         files: files.map((f, i) => ({ id: 900 + i, name: f.name, size: f.size, purpose: "SUPPORTING" as const, payout_line_id: null, uploaded_by: TESTER, uploaded_on: null })),
@@ -440,7 +489,7 @@ export class FakeRequestServer {
       const now = (input as unknown as Record<string, unknown>)[key] ?? null;
       if (now !== undefined && String(was ?? "") !== String(now ?? "")) changes[key] = { old: was, new: now };
     }
-    Object.assign(held.api, input, {
+    Object.assign(held.api, storedInput(input, id * 100 + 50), {
       files: held.api.files.filter((f) => !options.removeFileIds.includes(f.id)),
     });
     held.api.logs = [...(held.api.logs ?? []), logRow("EDITED", "Edited", { data: changes })];
@@ -536,6 +585,32 @@ export class FakeRequestServer {
     return this.answer(held);
   }
 
+  /** The Payment desk's correction of an Expense: stored, and logged as "Edited at Payment". */
+  async editExpense(id: number, edit: ApiExpenseEdit): Promise<ApiRequest> {
+    this.calls.push(["editExpense", id, edit]);
+    this.maybeRefuse();
+    const held = this.find(id);
+    const line = (l: { gl_account: string; taxable_amount: string } | undefined) =>
+      l ? `${l.gl_account || "no G/L"} · ${Number(l.taxable_amount).toFixed(2)}` : null;
+    const data: Record<string, unknown> = {};
+    if (edit.budget_code !== held.api.budget_code) data.budget = { old: held.api.budget_code, new: edit.budget_code };
+    const lines: Record<string, { old: string | null; new: string | null }> = {};
+    const count = Math.max(edit.expense_lines.length, held.api.expense_lines.length);
+    for (let i = 0; i < count; i += 1) {
+      const [was, now] = [line(held.api.expense_lines[i]), line(edit.expense_lines[i])];
+      if (was !== now) lines[`Line ${i + 1}`] = { old: was, new: now };
+    }
+    if (Object.keys(lines).length) data.expense_lines = lines;
+    Object.assign(held.api, storedInput({ ...held.api, ...edit, documents: [] } as unknown as ApiRequestInput, id * 100 + 70), {
+      documents: held.api.documents,
+    });
+    held.api.logs = [
+      ...(held.api.logs ?? []),
+      logRow("PAYMENT_EDITED", "Edited at Payment", { stage_name: "Payment Approval", data }),
+    ];
+    return this.answer(held);
+  }
+
   /** "secret" is Tester's password. */
   async confirmManualPassword(id: number, password: string): Promise<string> {
     this.calls.push(["confirmManualPassword", id]);
@@ -583,6 +658,7 @@ export class FakeRequestServer {
       editRequest: this.editRequest.bind(this),
       act: this.act.bind(this),
       savePayout: this.savePayout.bind(this),
+      editExpense: this.editExpense.bind(this),
       confirmManualPassword: this.confirmManualPassword.bind(this),
       recordUtr: this.recordUtr.bind(this),
       addRequestFile: this.addRequestFile.bind(this),

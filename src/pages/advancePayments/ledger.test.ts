@@ -10,7 +10,7 @@ import { formFromApi, toApiRequest } from "./requestApi";
 import { EMPTY_FORM, allocationRows, allocationTotals, applyChange, calculatePayment, changeAllocation } from "./rules";
 import { ledgerToDocument } from "./sapMapping";
 import { CUSTOMER_LEDGER } from "./testData";
-import { apiRequest } from "./testRequests";
+import { apiRequest, storedInput } from "./testRequests";
 
 const PO: OpenDocument = {
   id: "POR-14008", number: "126226600", date: "2026-09-01", partner: "VENDA000101",
@@ -62,7 +62,7 @@ describe("a customer refund against the ledger", () => {
         ["LEDGER", 74506, 0, 13, "DEBIT", "80"],
       ]);
     const stored: ApiRequest = apiRequest(50, {
-      ...input,
+      ...storedInput(input),
       department: null,
       sub_department: null,
       documents: input.documents.map((d, i) => ({ ...d, id: i + 1, amount: `${d.amount}.00` })),
