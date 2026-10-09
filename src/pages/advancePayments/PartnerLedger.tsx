@@ -5,12 +5,12 @@
  *
  * Shown on the approval desk from the Payment stage on, beside the current
  * balance (`requestLabels.showsBalance`): it is what a payment is weighed
- * against, and it is not shown to the requester.
+ * against, and it is not shown to the requester. Closed until clicked — it
+ * can run to dozens of rows — with its totals on the closed line.
  */
 import { useQuery } from "@tanstack/react-query";
 
 import { Badge } from "../../components/ui/badge";
-import { Card, CardHeader, CardTitle } from "../../components/ui/page";
 import {
   Table,
   TableBody,
@@ -25,6 +25,7 @@ import {
   type AdvancePaymentCompany,
 } from "../../services/advancePaymentService";
 import type { AdvanceRequestEntry } from "./approvalData";
+import { CollapsibleCard } from "./CollapsibleCard";
 import { formatDate, formatINR } from "./rules";
 
 const money = (value: string | null | undefined) => Number(value ?? 0) || 0;
@@ -41,18 +42,16 @@ export function PartnerLedger({ entry }: { entry: AdvanceRequestEntry }) {
   const rows = query.data?.results ?? [];
   const summary = query.data?.summary;
 
+  const totals = summary
+    ? `${summary.open_count} open · Dr ${formatINR(money(summary.open_debit))} · Cr ${formatINR(
+        money(summary.open_credit),
+      )}${summary.overdue_count ? ` · ${summary.overdue_count} overdue` : ""}`
+    : query.isLoading
+      ? "Reading from SAP…"
+      : undefined;
+
   return (
-    <Card className="p-4 md:p-5">
-      <CardHeader>
-        <CardTitle>Ledger in SAP ({entry.form.partnerName})</CardTitle>
-        {summary ? (
-          <span className="text-[12px] text-subtle">
-            {summary.open_count} open · Dr {formatINR(money(summary.open_debit))} · Cr{" "}
-            {formatINR(money(summary.open_credit))}
-            {summary.overdue_count ? ` · ${summary.overdue_count} overdue` : ""}
-          </span>
-        ) : null}
-      </CardHeader>
+    <CollapsibleCard title={`Ledger in SAP (${entry.form.partnerName})`} summary={totals}>
       {query.isError ? (
         <p className="m-0 text-[13px] text-bad">{advancePaymentError(query.error)}</p>
       ) : query.isLoading ? (
@@ -108,6 +107,6 @@ export function PartnerLedger({ entry }: { entry: AdvanceRequestEntry }) {
           </TableBody>
         </Table>
       )}
-    </Card>
+    </CollapsibleCard>
   );
 }
