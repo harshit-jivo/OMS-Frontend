@@ -53,6 +53,9 @@ import {
   type PayoutDetails,
   type PayoutLine,
   type PayoutMethod,
+  SAP_PAYMENT_MODES,
+  autoSapPaymentMode,
+  type SapPaymentMode,
 } from "./payout";
 import { formatINR } from "./rules";
 
@@ -725,6 +728,7 @@ export function PayoutDetailsForm({
   const balanced = Math.round(allocated * 100) === Math.round(payable * 100);
   const setLine = (id: string, next: PayoutLine) =>
     onChange({ ...value, lines: value.lines.map((l) => (l.id === id ? next : l)) });
+  const autoMode = autoSapPaymentMode(value.lines);
 
   return (
     <fieldset disabled={readOnly} className="m-0 min-w-0 space-y-5 border-0 p-0">
@@ -787,6 +791,31 @@ export function PayoutDetailsForm({
             />
           ))}
         </div>
+
+        {/* SAP's Payment Mode: required by SAP on a bank payment (its check
+            460007). Automatic follows the methods; the desk may choose. */}
+        {autoMode ? (
+          <FormGrid className="md:grid-cols-3">
+            <Field label="SAP Payment Mode">
+              {(f) => (
+                <Select
+                  {...f}
+                  value={value.sapPaymentMode}
+                  onChange={(e) =>
+                    onChange({ ...value, sapPaymentMode: e.target.value as SapPaymentMode | "" })
+                  }
+                >
+                  <option value="">Automatic ({autoMode})</option>
+                  {SAP_PAYMENT_MODES.map((mode) => (
+                    <option key={mode} value={mode}>
+                      {mode}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </Field>
+          </FormGrid>
+        ) : null}
 
         <div className="flex flex-wrap items-center justify-between gap-3">
           {!readOnly ? (

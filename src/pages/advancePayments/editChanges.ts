@@ -58,6 +58,7 @@ const LABEL: Record<string, string> = {
   to_account: "To account",
   to_ifsc: "IFSC",
   account_source: "Account",
+  sap_payment_mode: "SAP payment mode",
 };
 
 /** Flags beside the changes, not changes themselves. */

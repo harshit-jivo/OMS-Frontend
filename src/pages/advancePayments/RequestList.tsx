@@ -224,6 +224,7 @@ export function RequestTable({
   action,
   emptyText,
   status,
+  selection,
 }: {
   entries: AdvanceRequestEntry[];
   onOpen: (entry: AdvanceRequestEntry) => void;
@@ -235,11 +236,38 @@ export function RequestTable({
    * shows the approver's OWN decision instead.
    */
   status?: { header: string; cell: (entry: AdvanceRequestEntry) => ReactNode };
+  /** A tick per row that can be selected (the desk: what you may approve), and a tick for all of them. */
+  selection?: {
+    canSelect: (entry: AdvanceRequestEntry) => boolean;
+    selected: ReadonlySet<number>;
+    onChange: (next: Set<number>) => void;
+  };
 }) {
+  const selectable = selection ? entries.filter(selection.canSelect).map((e) => e.serverId) : [];
+  const allTicked = selectable.length > 0 && selectable.every((id) => selection?.selected.has(id));
+  const toggle = (id: number) => {
+    if (!selection) return;
+    const next = new Set(selection.selected);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    selection.onChange(next);
+  };
   return (
     <Table>
       <TableHeader>
         <TableRow className="hover:bg-transparent">
+          {selection ? (
+            <TableHead className="w-8">
+              <input
+                type="checkbox"
+                className="size-4 cursor-pointer accent-brand"
+                aria-label="Select all you can approve"
+                disabled={selectable.length === 0}
+                checked={allTicked}
+                onChange={() => selection.onChange(allTicked ? new Set() : new Set(selectable))}
+              />
+            </TableHead>
+          ) : null}
           <TableHead>Request</TableHead>
           <TableHead>Company</TableHead>
           <TableHead>Type</TableHead>
@@ -255,7 +283,7 @@ export function RequestTable({
       <TableBody>
         {entries.length === 0 ? (
           <TableRow className="hover:bg-transparent">
-            <TableCell colSpan={8} className="py-8 text-center text-subtle">
+            <TableCell colSpan={selection ? 9 : 8} className="py-8 text-center text-subtle">
               {emptyText}
             </TableCell>
           </TableRow>
@@ -264,6 +292,19 @@ export function RequestTable({
             const { label, variant } = action(e);
             return (
               <TableRow key={e.id}>
+                {selection ? (
+                  <TableCell className="w-8">
+                    {selection.canSelect(e) ? (
+                      <input
+                        type="checkbox"
+                        className="size-4 cursor-pointer accent-brand"
+                        aria-label={`Select ${e.requestNo}`}
+                        checked={selection.selected.has(e.serverId)}
+                        onChange={() => toggle(e.serverId)}
+                      />
+                    ) : null}
+                  </TableCell>
+                ) : null}
                 <TableCell>
                   <span className="block font-semibold text-ink">{e.requestNo}</span>
                   <span className="block text-[11px] text-subtle">

@@ -165,6 +165,15 @@ function onDesk(id: number, at: number, mine: string[], fields = {}) {
   held.mine = mine;
 }
 
+/** A decision done, the page is back on the desk, where the rest are waiting. */
+const backOnDesk = () => screen.findByRole("heading", { name: "Payments Approval" });
+
+/** Open a request again from the desk's full list, to see where it stands now. */
+async function reopen(user: User, requestNo: string) {
+  await user.click(screen.getByRole("button", { name: /All entries/ }));
+  await review(user, requestNo);
+}
+
 async function approve(user: User) {
   // Final labels this button "Post to SAP", because that is what approving
   // there does; every earlier stage still says "Approve".
@@ -175,7 +184,7 @@ describe("Payments Approval", () => {
   it("lists what is waiting, waiting on you first, with the totals", async () => {
     setup();
     await screen.findByRole("button", { name: /Review AP-2026-0014/ });
-    expect(requestRows().map((r) => within(r).getAllByRole("cell")[0].textContent)).toEqual([
+    expect(requestRows().map((r) => within(r).getAllByRole("cell")[1].textContent)).toEqual([
       expect.stringMatching(/^AP-2026-0014/),
       expect.stringMatching(/^AP-2026-0013/),
       expect.stringMatching(/^AP-2026-0012/),
@@ -247,10 +256,48 @@ describe("Payments Approval", () => {
     const user = setup();
     await review(user, "AP-2026-0012"); // at HOD, Tester's
     await approve(user);
-    expect(await screen.findByText("Approved.")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Back to list" }));
+    await backOnDesk();
     expect(screen.getByRole("button", { name: /Pending at your stage/ }).textContent).toMatch(/2/);
     expect(screen.getByRole("button", { name: /Approved by you/ }).textContent).toMatch(/2/);
+  });
+
+  describe("bulk approve", () => {
+    it("ticks only what you can approve, and approves the ticked one by one", async () => {
+      const user = setup();
+      await screen.findByRole("button", { name: /Review AP-2026-0014/ });
+      await user.click(screen.getByRole("button", { name: /All entries/ }));
+      // Waiting on you: a tick. Already decided: none.
+      expect(screen.getByLabelText("Select AP-2026-0012")).toBeTruthy();
+      expect(screen.queryByLabelText("Select AP-2026-0011")).toBeNull();
+
+      await user.click(screen.getByLabelText("Select AP-2026-0012"));
+      await user.click(screen.getByLabelText("Select AP-2026-0014"));
+      await user.click(screen.getByRole("button", { name: "Approve selected (2)" }));
+      const dialog = await screen.findByRole("dialog");
+      expect(within(dialog).getByText(/AP-2026-0012, AP-2026-0014|AP-2026-0014, AP-2026-0012/)).toBeTruthy();
+      await user.type(within(dialog).getByLabelText(/^Remarks/), "Checked in bulk");
+      await user.click(within(dialog).getByRole("button", { name: "Approve 2" }));
+
+      expect(await screen.findByText(/^Approved 2:/)).toBeTruthy();
+      const calls = vi.mocked(advancePaymentService.act).mock.calls;
+      expect(calls.map(([id, action, remarks]) => [id, action, remarks]).sort()).toEqual([
+        [12, "approve", "Checked in bulk"],
+        [14, "approve", "Checked in bulk"],
+      ]);
+      expect(calls.every(([, , , version]) => typeof version === "number")).toBe(true);
+      expect(screen.queryByRole("button", { name: /Approve selected/ })).toBeNull();
+    });
+
+    it("says which were not approved, and why", async () => {
+      const user = setup();
+      await screen.findByRole("button", { name: /Review AP-2026-0014/ });
+      await user.click(screen.getByLabelText("Select all you can approve"));
+      await user.click(screen.getByRole("button", { name: "Approve selected (3)" }));
+      server.refuseNext = { status: 409, message: "Fill in the payment and bank details." };
+      await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Approve 3" }));
+      expect(await screen.findByText(/^Approved 2, not approved 1:/)).toBeTruthy();
+      expect(screen.getByText("Fill in the payment and bank details.", { exact: false })).toBeTruthy();
+    });
   });
 
   it("does not show the request's status, stage or history on review", async () => {
@@ -536,12 +583,13 @@ describe("Payments Approval", () => {
     await user.type(field("Approver Remarks"), "OK to pay");
     await approve(user);
 
-    expect(await screen.findByText("Approved.")).toBeTruthy();
+    await backOnDesk();
     const saved = vi.mocked(advancePaymentService.savePayout).mock.invocationCallOrder[0];
     expect(saved).toBeLessThan(vi.mocked(advancePaymentService.act).mock.invocationCallOrder[0]);
     expect(advancePaymentService.act).toHaveBeenCalledWith(14, "approve", "OK to pay", expect.any(Number));
     // Now at Audit, which is not Tester's: the details are read-only, no buttons.
     // The page says what Tester did — not where it waits now.
+    await reopen(user, "AP-2026-0014");
     expect(screen.getByText("Approved by you")).toBeTruthy();
     expect(screen.queryByText("At Audit Approval")).toBeNull();
     expect(field("IFSC").closest("fieldset")?.disabled).toBe(true);
@@ -579,7 +627,7 @@ describe("Payments Approval", () => {
     await user.type(field("Quantity 1"), "18");
     await approve(user);
     // …and no payee account needed when every line is cash.
-    expect(await screen.findByText("Approved.")).toBeTruthy();
+    await backOnDesk();
     expect(advancePaymentService.savePayout).toHaveBeenCalledWith(
       15,
       expect.objectContaining({
@@ -599,9 +647,10 @@ describe("Payments Approval", () => {
 
     await user.type(field("Approver Remarks"), "PO not yet released");
     await user.click(screen.getByRole("button", { name: "Reject" }));
-    expect(await screen.findByText("Rejected.")).toBeTruthy();
+    await backOnDesk();
     expect(advancePaymentService.act).toHaveBeenCalledWith(
       12, "reject", "PO not yet released", expect.any(Number));
+    await reopen(user, "AP-2026-0012");
     expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
   });
 
@@ -612,8 +661,9 @@ describe("Payments Approval", () => {
     expect(screen.getByText("Say why, in the remarks.")).toBeTruthy();
     await user.type(field("Approver Remarks"), "Attach the signed PO");
     await user.click(screen.getByRole("button", { name: "Return to Creator" }));
-    expect(await screen.findByText("Returned to its creator.")).toBeTruthy();
+    await backOnDesk();
     expect(advancePaymentService.act).toHaveBeenCalledWith(12, "return", "Attach the signed PO", expect.any(Number));
+    await reopen(user, "AP-2026-0012");
     expect(screen.getByText("Returned by you")).toBeTruthy();
   });
 
@@ -623,7 +673,8 @@ describe("Payments Approval", () => {
     await review(user, "AP-2026-0016");
     expect(screen.getByText(/Nothing is posted to SAP yet/)).toBeTruthy();
     await approve(user);
-    expect(await screen.findByText("Approved.")).toBeTruthy();
+    await backOnDesk();
+    await reopen(user, "AP-2026-0016");
     expect(screen.getByText("Approved by you")).toBeTruthy();
     expect(screen.queryByText("At Final Approval")).toBeNull();
     expect(screen.queryByText("SAP Outgoing Payment")).toBeNull();
@@ -770,7 +821,8 @@ describe("Payments Approval", () => {
     await review(user, "AP-2026-0016");
     expect(screen.getByText(/Approving posts the outgoing payment to SAP and completes the request/)).toBeTruthy();
     await approve(user);
-    expect(await screen.findByText("Posted to SAP.")).toBeTruthy();
+    await backOnDesk();
+    await reopen(user, "AP-2026-0016");
     expect(screen.getByText("926466971")).toBeTruthy();
     expect(screen.getByText("Approved by you")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Post to SAP" })).toBeNull();
@@ -793,7 +845,8 @@ describe("Payments Approval", () => {
     expect(screen.queryByRole("button", { name: "Return to Creator" })).toBeNull();
     await user.type(field("Approver Remarks"), "Wrong bank account");
     await user.click(screen.getByRole("button", { name: "Send Back to Payment" }));
-    expect(await screen.findByText("Sent back to Payment.")).toBeTruthy();
+    await backOnDesk();
+    await reopen(user, "AP-2026-0017");
     expect(screen.getByText("Sent back by you")).toBeTruthy();
     expect(screen.queryByText("At Payment Approval")).toBeNull();
   });

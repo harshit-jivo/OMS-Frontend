@@ -6,6 +6,7 @@ import {
   defaultMethodFor,
   methodAmountError,
   methodsFor,
+  autoSapPaymentMode,
   newPayoutLine,
   payoutTotal,
   startPayout,
@@ -24,6 +25,7 @@ const upi = (amount: string, extra: Partial<PayoutLine> = {}): PayoutLine => ({
 
 const complete = (lines: PayoutLine[]): PayoutDetails => ({
   tds: null,
+  sapPaymentMode: "",
   beneficiaryName: "ABC TECHNOLOGIES",
   toAccountNumber: "50100234567812",
   toIfsc: "HDFC0001234",
@@ -230,5 +232,20 @@ describe("which payment methods an amount may use", () => {
   it("starts a line on UPI where it may, NEFT where it may not", () => {
     expect(defaultMethodFor(20000)).toBe("UPI");
     expect(defaultMethodFor(250000)).toBe("NEFT");
+  });
+});
+
+describe("SAP's Payment Mode, when left Automatic", () => {
+  it("follows the bank method carrying the most money: NEFT and RTGS as themselves, the rest as FT", () => {
+    expect(autoSapPaymentMode([{ ...newPayoutLine("NEFT"), amount: "100" }])).toBe("NEFT");
+    expect(autoSapPaymentMode([{ ...newPayoutLine("UPI"), amount: "100" }])).toBe("FT");
+    expect(
+      autoSapPaymentMode([
+        { ...newPayoutLine("NEFT"), amount: "40000" },
+        { ...newPayoutLine("RTGS"), amount: "200000" },
+      ]),
+    ).toBe("RTGS");
+    // Cash alone: nothing goes through a bank, SAP asks none.
+    expect(autoSapPaymentMode([{ ...newPayoutLine("CASH"), amount: "9000" }])).toBeNull();
   });
 });
