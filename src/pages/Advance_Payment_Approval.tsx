@@ -37,6 +37,7 @@ import { Badge } from "../components/ui/badge";
 import { Breadcrumbs } from "../components/ui/breadcrumbs";
 import { Button } from "../components/ui/button";
 import { Field, Textarea } from "../components/ui/form";
+import { Dialog, DialogBody, DialogContent, DialogFooter } from "../components/ui/dialog";
 import {
   Card,
   CardHeader,
@@ -374,7 +375,7 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
         current = (await persistPayout(draft, current)).flow?.version;
       }
       return advancePaymentService.act(entry.serverId, action, remarks.trim(), current);
-    }, done);
+    }, done, onBack);
   };
 
   return (
@@ -711,6 +712,15 @@ export default function Advance_Payment_Approval() {
     status: "PENDING",
   });
   const [openId, setOpenId] = useState<number | null>(null);
+  const store = useStoreRequest();
+  // Bulk approve: what is ticked, the confirm dialog, its progress and its outcome.
+  const [ticked, setTicked] = useState<Set<number>>(new Set());
+  const [confirming, setConfirming] = useState(false);
+  const [bulkRemarks, setBulkRemarks] = useState("");
+  const [progress, setProgress] = useState<string | null>(null);
+  const [outcome, setOutcome] = useState<{ done: string[]; failed: Array<{ no: string; reason: string }> } | null>(
+    null,
+  );
 
   // The cards count what the search and company filters leave, whatever the
   // status filter — a card must not read 0 just because it is not selected.
@@ -720,6 +730,35 @@ export default function Advance_Payment_Approval() {
   );
   const shown = filterRequests(entries, filters, deskBucket);
   const awaiting = entries.filter((e) => e.api.flow?.awaiting_me).length;
+  const canBulk = (e: AdvanceRequestEntry) => Boolean(e.api.can.approve);
+  // Only what is still shown and still yours to approve counts as chosen.
+  const chosen = shown.filter((e) => ticked.has(e.serverId) && canBulk(e));
+  const postsSome = chosen.some((e) => e.api.flow?.current_role === (e.form.type === "EXPENSE" ? "AUDIT" : "FINAL"));
+
+  /** Approve the chosen one by one; each with its own version, as its screen would. */
+  const approveChosen = async () => {
+    const done: string[] = [];
+    const failed: Array<{ no: string; reason: string }> = [];
+    for (const [i, e] of chosen.entries()) {
+      setProgress(`Approving ${i + 1} of ${chosen.length}…`);
+      try {
+        store(await advancePaymentService.act(e.serverId, "approve", bulkRemarks.trim(), e.api.flow?.version));
+        done.push(e.requestNo);
+      } catch (err) {
+        failed.push({ no: e.requestNo, reason: advancePaymentError(err) });
+      }
+    }
+    setProgress(null);
+    setConfirming(false);
+    setBulkRemarks("");
+    setTicked(new Set());
+    setOutcome({ done, failed });
+    showToast({
+      title: failed.length ? `Approved ${done.length}, ${failed.length} not approved` : `Approved ${done.length}`,
+      message: failed.length ? "See the list on the desk." : done.join(", "),
+      tone: failed.length ? "bad" : "ok",
+    });
+  };
 
   if (openId !== null) return <ReviewRequest id={openId} onBack={() => setOpenId(null)} />;
 
@@ -747,6 +786,20 @@ export default function Advance_Payment_Approval() {
         />
       </StatRow>
 
+      {outcome ? (
+        <Notice
+          tone={outcome.failed.length ? "bad" : "ok"}
+          title={`Approved ${outcome.done.length}${outcome.failed.length ? `, not approved ${outcome.failed.length}` : ""}`}
+        >
+          {outcome.done.length ? <span className="block">{outcome.done.join(", ")}</span> : null}
+          {outcome.failed.map((f) => (
+            <span key={f.no} className="block">
+              <span className="font-semibold">{f.no}</span>: {f.reason}
+            </span>
+          ))}
+        </Notice>
+      ) : null}
+
       <Card className="p-4 md:p-5">
         <CardHeader>
           <CardTitle>
@@ -757,14 +810,31 @@ export default function Advance_Payment_Approval() {
               </Badge>
             ) : null}
           </CardTitle>
-          <RequestFilters
-            value={filters}
-            onChange={setFilters}
-            statusOptions={DESK_STATUS_OPTIONS}
-          />
+          <div className="flex flex-wrap items-center gap-2">
+            {chosen.length ? (
+              <>
+                <Button variant="ghost" size="xs" onClick={() => setTicked(new Set())}>
+                  Clear
+                </Button>
+                <Button
+                  variant="primary"
+                  size="xs"
+                  onClick={() => {
+                    setOutcome(null);
+                    setConfirming(true);
+                  }}
+                >
+                  <HiOutlineCheckCircle className="size-4" aria-hidden="true" />
+                  Approve selected ({chosen.length})
+                </Button>
+              </>
+            ) : null}
+            <RequestFilters value={filters} onChange={setFilters} statusOptions={DESK_STATUS_OPTIONS} />
+          </div>
         </CardHeader>
         <RequestTable
           entries={shown}
+          selection={{ canSelect: canBulk, selected: ticked, onChange: setTicked }}
           onOpen={(e) => setOpenId(e.serverId)}
           action={(e) =>
             e.api.flow?.awaiting_me
@@ -775,6 +845,46 @@ export default function Advance_Payment_Approval() {
           emptyText={list.isLoading ? "Loading…" : "No requests match these filters."}
         />
       </Card>
+
+      <Dialog
+        open={confirming}
+        onOpenChange={(next) => {
+          if (!next && !progress) setConfirming(false);
+        }}
+      >
+        {confirming ? (
+          <DialogContent title="Approve selected" size="sm" className="max-w-[460px]">
+            <DialogBody className="space-y-3">
+              <p className="m-0 text-[14px] text-ink">
+                Approve <span className="font-semibold">{chosen.length}</span> request
+                {chosen.length === 1 ? "" : "s"}: {chosen.map((e) => e.requestNo).join(", ")}?
+              </p>
+              {postsSome ? (
+                <p className="m-0 text-[13px] text-body">Those at the last stage are posted to SAP.</p>
+              ) : null}
+              <Field label="Remarks">
+                {(f) => (
+                  <Textarea
+                    {...f}
+                    rows={2}
+                    placeholder="Optional"
+                    value={bulkRemarks}
+                    onChange={(e) => setBulkRemarks(e.target.value)}
+                  />
+                )}
+              </Field>
+            </DialogBody>
+            <DialogFooter>
+              <Button onClick={() => setConfirming(false)} disabled={Boolean(progress)}>
+                Cancel
+              </Button>
+              <Button variant="primary" onClick={() => void approveChosen()} disabled={Boolean(progress)}>
+                {progress ?? `Approve ${chosen.length}`}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        ) : null}
+      </Dialog>
     </Page>
   );
 }

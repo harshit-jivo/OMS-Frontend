@@ -134,6 +134,7 @@ describe("the request, to the API and back", () => {
 describe("the payment details, to the API and back", () => {
   const payout: PayoutDetails = {
     tds: null,
+    sapPaymentMode: "RTGS",
     beneficiaryName: "ABC TECHNOLOGIES",
     toAccountNumber: "50100234567812",
     toIfsc: "HDFC0001234",
