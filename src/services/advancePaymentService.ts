@@ -892,6 +892,8 @@ export interface ApiRequest extends ApiRequestFields {
     version: number;
     total_stages: number;
     awaiting_me: boolean;
+    /** Returned by Payment: resubmitted with the same amount, company, budget head, purpose and request type, it goes straight back to Payment. */
+    returned_after_approval?: boolean;
   } | null;
   can: RequestAbilities;
   /** The SAP outgoing payment, once Final's approval has posted it. */
