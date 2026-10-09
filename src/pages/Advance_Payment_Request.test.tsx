@@ -284,12 +284,13 @@ describe("Advance Payment Request", () => {
       await user.selectOptions(screen.getByLabelText(/^Company/), "OIL");
       await user.selectOptions(screen.getByLabelText(/^Type/), "EXPENSE");
       for (const gone of [/^Payment Against/, /^Pay To/, /^Ownership/, /^Payment Date/, /^Sub Budget/,
-                          /^Payment Purpose/, /^Month/, /^GST/, /^Taxable/, /TDS/]) {
+                          /^Payment Purpose/, /^Month/, /^GST/, /^Taxable/, /TDS/,
+                          /Electricity/]) {
         expect(screen.queryByLabelText(gone)).toBeNull();
       }
       // The vendor stays, optional.
       expect(screen.getByLabelText(/^Vendor/).textContent).toMatch(/No vendor \(optional\)/);
-      expect(heading("Expense")).not.toBeNull();
+      expect(heading("Expense lines")).not.toBeNull();
       // Remarks are optional.
       expect(field(/^Remarks/).required).toBe(false);
     });
@@ -299,7 +300,6 @@ describe("Advance Payment Request", () => {
       await user.selectOptions(screen.getByLabelText(/^Company/), "OIL");
       await user.selectOptions(screen.getByLabelText(/^Type/), "EXPENSE");
       await pick(user, /^Department(?! Head)/, /Factory/);
-      await user.click(screen.getByLabelText(/Electricity expense/));
       await user.type(lineBox(1).getByLabelText(/^Amount/), "11800");
       // Direct and indirect accounts in one list, each labelled.
       await user.click(lineBox(1).getByLabelText(/^G\/L account/));
@@ -311,7 +311,7 @@ describe("Advance Payment Request", () => {
       await user.click(screen.getByRole("button", { name: /Add line/ }));
       await user.type(lineBox(2).getByLabelText(/^Amount/), "3000.50");
       expect(lineBox(2).queryByLabelText(/^What is it for/)).toBeNull();
-      await user.click(lineBox(2).getByLabelText(/I don't know the G\/L account/));
+      await user.click(lineBox(2).getByLabelText(/Don't know G\/L/));
       expect(lineBox(2).queryByLabelText(/^G\/L account/)).toBeNull();
       expect((lineBox(2).getByLabelText(/^What is it for/) as HTMLInputElement).placeholder).toMatch(/e\.g\./);
       expect(screen.getByText("₹14,800.50")).toBeTruthy();
@@ -336,7 +336,7 @@ describe("Advance Payment Request", () => {
         owner_label: "",
         payment_date: null,
         effect_month: "",
-        is_electricity: true,
+        is_electricity: false,
         documents: [],
         expense_lines: [
           { amount: "11800", gst_code: "", gl_account: "5680011", effect_month: "", remarks: "", tds_override: "" },

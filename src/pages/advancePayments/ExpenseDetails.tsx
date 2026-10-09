@@ -14,7 +14,7 @@ import { HiOutlinePlus, HiOutlineXMark } from "react-icons/hi2";
 
 import { Button } from "../../components/ui/button";
 import { SearchSelect } from "../../components/ui/dropdown";
-import { Checkbox, Field, FormGrid, Input, Select } from "../../components/ui/form";
+import { Field, FormGrid, Input, Select } from "../../components/ui/form";
 import {
   advancePaymentError,
   advancePaymentService,
@@ -41,9 +41,6 @@ import {
   type ExpenseLineForm,
   type RequestForm,
 } from "./rules";
-
-const REQUESTER_NOTE =
-  "Each line: its amount and G/L account. Don't know the account? Tick so and say what it is for — the Payment desk picks it.";
 
 /** The desk's TDS: SAP's codes, and the rate of one. */
 export interface ExpenseTds {
@@ -74,14 +71,14 @@ export function ExpenseDetails({
   company,
   form,
   onChange,
-  description = REQUESTER_NOTE,
+  description,
   atPayment = false,
   tds,
 }: {
   company: AdvancePaymentCompany | null;
   form: RequestForm;
   onChange: (patch: Partial<RequestForm>) => void;
-  /** Under the section's title: the requester's note by default. */
+  /** Under the section's title (the desk's note); none for the requester. */
   description?: string;
   /** The Payment desk: amounts fixed; G/L, GST, month and TDS its own. */
   atPayment?: boolean;
@@ -155,223 +152,117 @@ export function ExpenseDetails({
   );
 
   return (
-    <FormSection title="Expense" description={description}>
-      <FormGrid className="md:grid-cols-3">
-        {atPayment ? (
-          <Field
-            label="Month"
-            required
-            hint={lookupError ? undefined : "SAP's Effective Month for every line without its own."}
-            error={lookupError}
-          >
-            {(f) => (
-              <Select
-                {...f}
-                value={form.effectMonth}
-                disabled={!company}
-                onChange={(e) => onChange({ effectMonth: e.target.value })}
-              >
-                <option value="" disabled hidden>
-                  Select month
-                </option>
-                {monthChoices.map((code) => (
-                  <option key={code} value={code}>
-                    {monthLabel(code)} ({code})
+    <FormSection title={atPayment ? "Expense" : "Expense lines"} description={description}>
+      {atPayment ? (
+        <FormGrid className="md:grid-cols-3">
+          {atPayment ? (
+            <Field
+              label="Month"
+              required
+              hint={
+                lookupError ? undefined : "SAP's Effective Month for every line without its own."
+              }
+              error={lookupError}
+            >
+              {(f) => (
+                <Select
+                  {...f}
+                  value={form.effectMonth}
+                  disabled={!company}
+                  onChange={(e) => onChange({ effectMonth: e.target.value })}
+                >
+                  <option value="" disabled hidden>
+                    Select month
                   </option>
-                ))}
-              </Select>
-            )}
-          </Field>
-        ) : null}
-        {atPayment ? (
-          <Field
-            label="TDS"
-            hint={
-              tds?.error
-                ? undefined
-                : "On each line's taxable amount. A line may have its own, or none."
-            }
-            error={tds?.error}
-          >
-            {(f) => (
-              <Select
-                {...f}
-                value={form.expenseTdsCode}
-                onChange={(e) => onChange({ expenseTdsCode: e.target.value })}
-              >
-                <option value="">No TDS</option>
-                {form.expenseTdsCode && !requestTds ? (
-                  <option value={form.expenseTdsCode}>{form.expenseTdsCode}</option>
-                ) : null}
-                {codes.map((c) => (
-                  <option key={c.code} value={c.code}>
-                    {tdsLabel(c)}
-                  </option>
-                ))}
-              </Select>
-            )}
-          </Field>
-        ) : null}
-        <div className="flex items-end pb-1.5">
-          <Checkbox
-            label="Electricity expense"
-            hint="Marks it as an electricity expense, for the record."
-            checked={form.isElectricity}
-            onChange={(e) => onChange({ isElectricity: e.target.checked })}
-          />
-        </div>
-      </FormGrid>
+                  {monthChoices.map((code) => (
+                    <option key={code} value={code}>
+                      {monthLabel(code)} ({code})
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </Field>
+          ) : null}
+          {atPayment ? (
+            <Field
+              label="TDS"
+              hint={
+                tds?.error
+                  ? undefined
+                  : "On each line's taxable amount. A line may have its own, or none."
+              }
+              error={tds?.error}
+            >
+              {(f) => (
+                <Select
+                  {...f}
+                  value={form.expenseTdsCode}
+                  onChange={(e) => onChange({ expenseTdsCode: e.target.value })}
+                >
+                  <option value="">No TDS</option>
+                  {form.expenseTdsCode && !requestTds ? (
+                    <option value={form.expenseTdsCode}>{form.expenseTdsCode}</option>
+                  ) : null}
+                  {codes.map((c) => (
+                    <option key={c.code} value={c.code}>
+                      {tdsLabel(c)}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </Field>
+          ) : null}
+        </FormGrid>
+      ) : null}
 
-      <div className="space-y-3" data-slot="expense-lines">
+      <div className={atPayment ? "space-y-3" : "space-y-2"} data-slot="expense-lines">
         {lines.map((line, index) => {
           const n = index + 1;
           const amountError = plainAmountError(line.amount)
             ? "Enter an amount above zero."
             : undefined;
           const lineTdsAmount = lineTds(line, form, rateOf);
-          return (
-            <fieldset
-              key={line.id}
-              aria-label={`Line ${n}`}
-              className="m-0 space-y-2 rounded-sm border border-line bg-card p-3"
-            >
-              <div className="flex items-center justify-between">
-                <p className="m-0 text-[12.5px] font-semibold text-ink">Line {n}</p>
-                {atPayment ? null : (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label={`Remove line ${n}`}
-                    disabled={lines.length === 1}
-                    onClick={() =>
-                      onChange({ expenseLines: lines.filter((l) => l.id !== line.id) })
-                    }
-                  >
-                    <HiOutlineXMark className="size-4" aria-hidden="true" />
-                  </Button>
-                )}
-              </div>
-              {atPayment ? (
-                <FormGrid className="md:grid-cols-3">
-                  <Figure label="Amount" value={formatINR(lineInvoice(line))} strong />
-                  <Field
-                    label="GST"
-                    hint={`Taxable ${formatINR(lineTaxable(line))} · GST ${formatINR(lineGst(line))}`}
-                  >
-                    {(f) => (
-                      <Select
-                        {...f}
-                        value={line.gstCode}
-                        onChange={(e) => setLine(line.id, { gstCode: e.target.value as GstCode })}
-                      >
-                        {GST_OPTIONS.map((o) => (
-                          <option key={o.value} value={o.value}>
-                            {o.label}
-                          </option>
-                        ))}
-                      </Select>
-                    )}
-                  </Field>
-                  <Figure
-                    label="TDS · Paid"
-                    value={`${formatINR(lineTdsAmount)} · ${formatINR(lineInvoice(line) - lineTdsAmount)}`}
+          if (!atPayment) {
+            // The requester's line: one row — amount, then the G/L or what it is for.
+            return (
+              <div
+                key={line.id}
+                role="group"
+                aria-label={`Line ${n}`}
+                className="flex flex-wrap items-center gap-2"
+              >
+                <span className="w-5 text-right text-[12px] tabular-nums text-subtle">{n}</span>
+                <div className="w-40">
+                  <RupeeInput
+                    aria-label="Amount"
+                    aria-invalid={amountError ? true : undefined}
+                    placeholder="Amount"
+                    value={line.amount}
+                    onChange={(e) => setLine(line.id, { amount: e.target.value })}
                   />
-                  <Field label="G/L account" required error={lookupError}>
-                    {(f) => glPicker(line, f.id)}
-                  </Field>
-                  <Field label="Line remarks" className="md:col-span-2">
-                    {(f) => (
-                      <Input
-                        {...f}
-                        maxLength={254}
-                        value={line.remarks}
-                        onChange={(e) => setLine(line.id, { remarks: e.target.value })}
-                      />
-                    )}
-                  </Field>
-                  <Field label="Line month">
-                    {(f) => (
-                      <Select
-                        {...f}
-                        value={line.effectMonth}
-                        onChange={(e) => setLine(line.id, { effectMonth: e.target.value })}
-                      >
-                        <option value="">
-                          {form.effectMonth
-                            ? `Request's (${monthLabel(form.effectMonth)})`
-                            : "Request's month"}
-                        </option>
-                        {monthChoices.map((code) => (
-                          <option key={code} value={code}>
-                            {monthLabel(code)}
-                          </option>
-                        ))}
-                      </Select>
-                    )}
-                  </Field>
-                  <Field label="Line TDS">
-                    {(f) => (
-                      <Select
-                        {...f}
-                        value={line.tdsOverride}
-                        onChange={(e) => setLine(line.id, { tdsOverride: e.target.value })}
-                      >
-                        <option value="">
-                          {requestTds ? `Request's (${tdsLabel(requestTds)})` : "Request's (none)"}
-                        </option>
-                        <option value={NO_TDS}>No TDS</option>
-                        {line.tdsOverride &&
-                        line.tdsOverride !== NO_TDS &&
-                        !codes.some((c) => c.code === line.tdsOverride) ? (
-                          <option value={line.tdsOverride}>{line.tdsOverride}</option>
-                        ) : null}
-                        {codes.map((c) => (
-                          <option key={c.code} value={c.code}>
-                            {tdsLabel(c)}
-                          </option>
-                        ))}
-                      </Select>
-                    )}
-                  </Field>
-                </FormGrid>
-              ) : (
-                <FormGrid className="md:grid-cols-3">
-                  <Field label="Amount" required error={amountError}>
-                    {(f) => (
-                      <RupeeInput
-                        {...f}
-                        placeholder="Enter amount"
-                        value={line.amount}
-                        onChange={(e) => setLine(line.id, { amount: e.target.value })}
-                      />
-                    )}
-                  </Field>
+                </div>
+                <div className="min-w-[14rem] flex-1">
                   {line.glUnknown ? (
-                    <Field label="What is it for?" required className="md:col-span-2">
-                      {(f) => (
-                        <Input
-                          {...f}
-                          maxLength={254}
-                          placeholder="e.g. Diesel for the factory generator, September"
-                          value={line.remarks}
-                          onChange={(e) => setLine(line.id, { remarks: e.target.value })}
-                        />
-                      )}
-                    </Field>
+                    <Input
+                      aria-label="What is it for?"
+                      maxLength={254}
+                      placeholder="What is it for? e.g. generator diesel"
+                      value={line.remarks}
+                      onChange={(e) => setLine(line.id, { remarks: e.target.value })}
+                    />
                   ) : (
-                    <Field
-                      label="G/L account"
-                      required
-                      error={lookupError}
-                      className="md:col-span-2"
-                    >
-                      {(f) => glPicker(line, f.id)}
-                    </Field>
+                    <>
+                      <label htmlFor={`expense-gl-${line.id}`} className="sr-only">
+                        G/L account
+                      </label>
+                      {glPicker(line, `expense-gl-${line.id}`)}
+                    </>
                   )}
-                  <Checkbox
-                    className="md:col-span-3"
-                    label="I don't know the G/L account"
-                    hint="Say what it is for instead: the Payment desk picks the account."
+                </div>
+                <label className="flex cursor-pointer items-center gap-1.5 whitespace-nowrap text-[12.5px] text-body">
+                  <input
+                    type="checkbox"
+                    className="size-4 accent-brand"
                     checked={line.glUnknown}
                     onChange={(e) =>
                       setLine(line.id, {
@@ -381,8 +272,109 @@ export function ExpenseDetails({
                       })
                     }
                   />
-                </FormGrid>
-              )}
+                  Don't know G/L
+                </label>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={`Remove line ${n}`}
+                  disabled={lines.length === 1}
+                  onClick={() => onChange({ expenseLines: lines.filter((l) => l.id !== line.id) })}
+                >
+                  <HiOutlineXMark className="size-4" aria-hidden="true" />
+                </Button>
+              </div>
+            );
+          }
+          return (
+            <fieldset
+              key={line.id}
+              aria-label={`Line ${n}`}
+              className="m-0 space-y-2 rounded-sm border border-line bg-card p-3"
+            >
+              <p className="m-0 text-[12.5px] font-semibold text-ink">Line {n}</p>
+              <FormGrid className="md:grid-cols-3">
+                <Figure label="Amount" value={formatINR(lineInvoice(line))} strong />
+                <Field
+                  label="GST"
+                  hint={`Taxable ${formatINR(lineTaxable(line))} · GST ${formatINR(lineGst(line))}`}
+                >
+                  {(f) => (
+                    <Select
+                      {...f}
+                      value={line.gstCode}
+                      onChange={(e) => setLine(line.id, { gstCode: e.target.value as GstCode })}
+                    >
+                      {GST_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </Select>
+                  )}
+                </Field>
+                <Figure
+                  label="TDS · Paid"
+                  value={`${formatINR(lineTdsAmount)} · ${formatINR(lineInvoice(line) - lineTdsAmount)}`}
+                />
+                <Field label="G/L account" required error={lookupError}>
+                  {(f) => glPicker(line, f.id)}
+                </Field>
+                <Field label="Line remarks" className="md:col-span-2">
+                  {(f) => (
+                    <Input
+                      {...f}
+                      maxLength={254}
+                      value={line.remarks}
+                      onChange={(e) => setLine(line.id, { remarks: e.target.value })}
+                    />
+                  )}
+                </Field>
+                <Field label="Line month">
+                  {(f) => (
+                    <Select
+                      {...f}
+                      value={line.effectMonth}
+                      onChange={(e) => setLine(line.id, { effectMonth: e.target.value })}
+                    >
+                      <option value="">
+                        {form.effectMonth
+                          ? `Request's (${monthLabel(form.effectMonth)})`
+                          : "Request's month"}
+                      </option>
+                      {monthChoices.map((code) => (
+                        <option key={code} value={code}>
+                          {monthLabel(code)}
+                        </option>
+                      ))}
+                    </Select>
+                  )}
+                </Field>
+                <Field label="Line TDS">
+                  {(f) => (
+                    <Select
+                      {...f}
+                      value={line.tdsOverride}
+                      onChange={(e) => setLine(line.id, { tdsOverride: e.target.value })}
+                    >
+                      <option value="">
+                        {requestTds ? `Request's (${tdsLabel(requestTds)})` : "Request's (none)"}
+                      </option>
+                      <option value={NO_TDS}>No TDS</option>
+                      {line.tdsOverride &&
+                      line.tdsOverride !== NO_TDS &&
+                      !codes.some((c) => c.code === line.tdsOverride) ? (
+                        <option value={line.tdsOverride}>{line.tdsOverride}</option>
+                      ) : null}
+                      {codes.map((c) => (
+                        <option key={c.code} value={c.code}>
+                          {tdsLabel(c)}
+                        </option>
+                      ))}
+                    </Select>
+                  )}
+                </Field>
+              </FormGrid>
             </fieldset>
           );
         })}
