@@ -271,7 +271,7 @@ function EntryDetails({ id, onBack }: { id: number; onBack: () => void }) {
               <Notice tone="info" title="Editing">
                 {returned
                   ? entry.api.flow?.returned_after_approval
-                    ? "Its approvals stand: resubmitted, it goes straight back to Payment. Changing the amount, company, budget head, purpose or request type sends it through the full approval again."
+                    ? "Its approvals stand: resubmitted, it goes straight back to Payment. Changing the amount, company, budget head, purpose, request type or Department Head sends it through the full approval again."
                     : "Resubmitting starts the approval again from its first stage."
                   : "No one has approved it yet, so it can still be changed."}
               </Notice>
