@@ -755,6 +755,15 @@ describe("the Department Head", () => {
       .toBe(false);
   });
 
+  it("is not asked for a plant's staff salary advance: the plant's approver takes it, by amount", () => {
+    const base = { ...EMPTY_FORM, company: "OIL" as const, type: "EMPLOYEE_ADVANCE" as const };
+    expect(needsDepartmentHead({ ...base, budget: "Factory" })).toBe(false);
+    expect(needsDepartmentHead({ ...base, budget: "FACT_COM" })).toBe(false);
+    expect(needsDepartmentHead({ ...base, budget: "BackOff" })).toBe(true);
+    // Imprest is unchanged, plant or not.
+    expect(needsDepartmentHead({ ...base, type: "EMPLOYEE_IMPREST", budget: "Factory" })).toBe(true);
+  });
+
   it("is required while asked, and dropped once it is not", () => {
     const form = emiAdvanceForValidation();
     expect(validate({ ...form, departmentHead: "" }).missing).toContain("Department Head");

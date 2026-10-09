@@ -215,7 +215,7 @@ export function ExpenseDetails({
         <div className="flex items-end pb-1.5">
           <Checkbox
             label="Electricity expense"
-            hint="Approved by the budget head's owner, then the Director."
+            hint="Marks it as an electricity expense, for the record."
             checked={form.isElectricity}
             onChange={(e) => onChange({ isElectricity: e.target.checked })}
           />
