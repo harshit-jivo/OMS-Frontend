@@ -28,6 +28,7 @@ import { Badge } from "../../components/ui/badge";
 import { AttachmentReadingTable } from "./AttachmentReading";
 import { formatSize } from "./attachments";
 import { GST_OPTIONS, PAYMENT_MODES } from "./constants";
+import { BillBreakdown } from "./BillBreakdown";
 import { DocumentHistory } from "./DocumentHistory";
 import { SapAttachmentLink, SapAttachmentList } from "./SapAttachmentLink";
 import { historyTargetOf, sapDocumentOf } from "./sapMapping";
@@ -298,9 +299,12 @@ export function ExpenseLines({ entry }: { entry: AdvanceRequestEntry }) {
 export function DocumentLines({
   entry,
   showReading = false,
+  showBreakdown = false,
 }: {
   entry: AdvanceRequestEntry;
   showReading?: boolean;
+  /** Each bill's A/P breakdown from SAP — the desk, from the Payment stage on. */
+  showBreakdown?: boolean;
 }) {
   const c = resolveCase(entry.form);
   if (!c.reference) return null;
@@ -375,6 +379,17 @@ export function DocumentLines({
                     {doc.number}&apos;s SAP attachments
                   </p>
                   <SapAttachmentList {...source} />
+                </TableCell>
+              </TableRow>
+            ) : null}
+            {showBreakdown && source?.kind === "bill" ? (
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={6}>
+                  <BillBreakdown
+                    company={source.company}
+                    docEntry={source.docEntry}
+                    label={`${doc.number}: taxable, GST, TDS, net and G/L in SAP`}
+                  />
                 </TableCell>
               </TableRow>
             ) : null}

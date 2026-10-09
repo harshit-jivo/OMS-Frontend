@@ -244,6 +244,56 @@ export interface SapRelatedAttachment {
 }
 
 /** One PO as SAP holds it (`/purchase-order/`). Amounts and quantities are strings. */
+/** One A/P invoice as SAP booked it (`/bill-breakdown/`). Amounts are strings. */
+export interface SapBillBreakdown {
+  company: AdvancePaymentCompany;
+  header: {
+    doc_entry: number;
+    doc_num: number | null;
+    vendor_ref: string;
+    doc_date: string | null;
+    status: string;
+    card_code: string;
+    card_name: string;
+    /** The vendor's control (payable) account. */
+    payable_account: string;
+    payable_account_name: string;
+    taxable: string;
+    freight: string;
+    discount: string;
+    gst: string;
+    /** What the vendor's invoice shows: taxable + freight + GST. */
+    gross: string;
+    tds: string;
+    rounding: string;
+    /** SAP's DocTotal: payable after TDS. */
+    net: string;
+    paid: string;
+    balance: string;
+  };
+  lines: Array<{
+    line: number;
+    item_code: string;
+    description: string;
+    quantity: string;
+    taxable: string;
+    gst: string;
+    tax_code: string;
+    account: string;
+    account_name: string;
+  }>;
+  gst: Array<{ code: string; rate: string; base: string; amount: string; account: string; account_name: string }>;
+  tds: Array<{
+    code: string;
+    name: string;
+    rate: string;
+    taxable: string;
+    amount: string;
+    account: string;
+    account_name: string;
+  }>;
+}
+
 export interface SapPurchaseOrder {
   header: {
     doc_entry: number;
@@ -1083,6 +1133,12 @@ export const advancePaymentService = {
   async purchaseOrder(company: AdvancePaymentCompany, docEntry: number): Promise<SapPurchaseOrder> {
     const res = await api.get(`${BASE}/purchase-order/`, { params: { company, doc_entry: docEntry } });
     return unwrap<SapPurchaseOrder>(res.data);
+  },
+
+  /** One A/P invoice's taxable, GST, TDS, net and G/L accounts, as SAP booked it. */
+  async billBreakdown(company: AdvancePaymentCompany, docEntry: number): Promise<SapBillBreakdown> {
+    const res = await api.get(`${BASE}/bill-breakdown/`, { params: { company, doc_entry: docEntry } });
+    return unwrap<SapBillBreakdown>(res.data);
   },
 
   /**

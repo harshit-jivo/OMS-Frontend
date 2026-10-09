@@ -3,6 +3,7 @@
  * attachments — read live from SAP. For the approvers from the Payment stage
  * on, beside the request's own PO lines: what the payment is weighed against.
  */
+import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { Badge } from "../../components/ui/badge";
@@ -22,6 +23,7 @@ import {
 } from "../../services/advancePaymentService";
 
 import type { AdvanceRequestEntry } from "./approvalData";
+import { BillBreakdown } from "./BillBreakdown";
 import { CollapsibleCard } from "./CollapsibleCard";
 import { SapAttachmentList } from "./SapAttachmentLink";
 import { sapDocumentOf } from "./sapMapping";
@@ -178,16 +180,30 @@ function OnePurchaseOrder({
                 </TableHeader>
                 <TableBody>
                   {query.data.follow_on.map((doc) => (
-                    <TableRow key={`${doc.kind}-${doc.doc_entry}`}>
-                      <TableCell>{doc.kind_label}</TableCell>
-                      <TableCell className="font-medium text-ink">{doc.doc_num ?? doc.doc_entry}</TableCell>
-                      <TableCell>{doc.doc_date ? formatDate(doc.doc_date) : "—"}</TableCell>
-                      <TableCell>{doc.vendor_ref || "—"}</TableCell>
-                      <TableCell className="text-right tabular-nums">{money(doc.doc_total)}</TableCell>
-                      <TableCell>
-                        <Badge tone={statusTone(doc.status)}>{doc.status || "—"}</Badge>
-                      </TableCell>
-                    </TableRow>
+                    <React.Fragment key={`${doc.kind}-${doc.doc_entry}`}>
+                      <TableRow>
+                        <TableCell>{doc.kind_label}</TableCell>
+                        <TableCell className="font-medium text-ink">{doc.doc_num ?? doc.doc_entry}</TableCell>
+                        <TableCell>{doc.doc_date ? formatDate(doc.doc_date) : "—"}</TableCell>
+                        <TableCell>{doc.vendor_ref || "—"}</TableCell>
+                        <TableCell className="text-right tabular-nums">{money(doc.doc_total)}</TableCell>
+                        <TableCell>
+                          <Badge tone={statusTone(doc.status)}>{doc.status || "—"}</Badge>
+                        </TableCell>
+                      </TableRow>
+                      {/* A bill raised from the PO: what it booked, as for a bill paid directly. */}
+                      {doc.kind === "bill" ? (
+                        <TableRow className="hover:bg-transparent">
+                          <TableCell colSpan={6}>
+                            <BillBreakdown
+                              company={company}
+                              docEntry={doc.doc_entry}
+                              label={`${doc.doc_num ?? doc.doc_entry}: taxable, GST, TDS, net and G/L in SAP`}
+                            />
+                          </TableCell>
+                        </TableRow>
+                      ) : null}
+                    </React.Fragment>
                   ))}
                 </TableBody>
               </Table>

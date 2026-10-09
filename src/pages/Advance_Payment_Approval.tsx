@@ -451,7 +451,11 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
           ) : null}
         </Card>
 
-        <DocumentLines entry={entry} showReading={reachedPayment(entry) && can.see_account} />
+        <DocumentLines
+          entry={entry}
+          showReading={reachedPayment(entry) && can.see_account}
+          showBreakdown={reachedPayment(entry)}
+        />
 
         {/* An Expense: read-only lines, or at Payment the whole request to correct. */}
         {editsExpense && expenseDraft ? (
