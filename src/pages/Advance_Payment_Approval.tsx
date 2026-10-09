@@ -118,23 +118,23 @@ function stageGuidance(entry: AdvanceRequestEntry): string {
   // An Expense has no Final: Audit's approval posts it.
   if (entry.form.type === "EXPENSE") {
     if (flow?.current_role === "PAYMENT") {
-      return "Choose each line's G/L account, then fill in the payment and bank details and save them. Approving needs every line's G/L and the payment details complete.";
+      return "Set each line's G/L account, then fill in the payment and bank details and save them.";
     }
     if (flow?.current_role === "AUDIT") {
-      return "Approving posts the expense payment to SAP and completes the request: the money may then be transferred. If SAP refuses it, the request stays here and says why. Or send it back to Payment to correct, or reject it.";
+      return "Approving posts the expense payment to SAP and completes the request.";
     }
   }
   switch (flow?.current_role) {
     case "PAYMENT":
       return entry.api.partner_not_in_sap
-        ? `${entry.form.partnerName} has no employee advance account in SAP yet. Create it in SAP first — approving checks SAP and links the request to it.`
-        : "Fill in the payment and bank details and save them. Approving needs them complete and adding up to the request.";
+        ? `${entry.form.partnerName} has no employee advance account in SAP yet — create it in SAP first.`
+        : "Fill in the payment and bank details and save them.";
     case "AUDIT":
-      return "Check the request and its payment details, then approve it on to Final, or reject it. Nothing is posted to SAP yet.";
+      return "Check the payment details, then approve on to Final. Nothing is posted to SAP yet.";
     case "FINAL":
-      return "Approving posts the outgoing payment to SAP and completes the request: the money may then be transferred. If SAP refuses it, the request stays here and says why. Or send it back to Payment to correct, or reject it.";
+      return "Approving posts the outgoing payment to SAP and completes the request.";
     default:
-      return "Approve it, return it to its creator to correct and resubmit, or reject it.";
+      return "Approve, return it to its creator, or reject it.";
   }
 }
 

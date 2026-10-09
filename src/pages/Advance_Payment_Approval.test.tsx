@@ -721,7 +721,7 @@ describe("Payments Approval", () => {
       const user = setup();
       await review(user, "AP-2026-0021");
       expect(screen.getByRole("heading", { name: "Expense — correct at Payment" })).toBeTruthy();
-      expect(screen.getByText(/Choose each line's G\/L account/)).toBeTruthy();
+      expect(screen.getByText(/Set each line's G\/L account/)).toBeTruthy();
       expect(field("Beneficiary Name").value).toBe("KAMAL KUMAR");
       // Not the desk's to change: no picker or box for them, and no adding or removing lines.
       const editor = within(document.querySelector<HTMLElement>('[data-slot="expense-editor"]')!);

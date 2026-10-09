@@ -91,7 +91,7 @@ export function TdsSection({
   return (
     <FormSection
       title="TDS"
-      description="Deduct TDS from this vendor payment. It is booked to SAP with the payment, at Final."
+      description={readOnly ? undefined : "Deducted from this vendor payment; booked to SAP with it, at Final."}
     >
       {query.isError ? (
         <p role="alert" className="m-0 text-[13px] text-danger">

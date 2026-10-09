@@ -75,6 +75,8 @@ function FileList({
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [rejected, setRejected] = React.useState("");
+  // Read only and empty: nothing to add and nothing to open, so no row at all.
+  if (disabled && files.length === 0) return null;
 
   const add = (incoming: FileList | null) => {
     if (!incoming) return;
@@ -325,7 +327,7 @@ function MethodCard({
             label={`Payment Method ${n}`}
             required
             error={methodError ?? undefined}
-            hint="UPI below ₹1,00,000 · RTGS above ₹2,00,000 · IMPS below ₹5,00,000 · Cash up to ₹10,000."
+            hint={readOnly ? undefined : "UPI < ₹1L · RTGS > ₹2L · IMPS < ₹5L · Cash ≤ ₹10,000"}
           >
             {(f) => (
               <Select
@@ -359,11 +361,7 @@ function MethodCard({
           <Field
             label={`${isCash ? "From Cash Account" : "From Bank Account"} (method ${n})`}
             required
-            hint={
-              isCash
-                ? cashNote
-                : banksNote
-            }
+            hint={readOnly ? undefined : isCash ? cashNote : banksNote}
           >
             {(f) => (
               <Select
@@ -399,7 +397,7 @@ function MethodCard({
             </Field>
             <Field
               label={`Cheque Bank (method ${n})`}
-              hint="The bank the cheque is drawn on — ours, since we are paying."
+              hint={readOnly ? undefined : "Our bank, the cheque is drawn on."}
             >
               {(f) => (
                 <Input
@@ -483,6 +481,7 @@ function PayToAccount({
   error,
   lookedUp,
   manualEntry,
+  readOnly = false,
 }: {
   value: PayoutDetails;
   onChange: (next: PayoutDetails) => void;
@@ -492,6 +491,8 @@ function PayToAccount({
   /** False for an employee (no SAP partner to ask about). */
   lookedUp: boolean;
   manualEntry?: ManualEntry;
+  /** Read only: only what a checker must notice — a typed account, or SAP's error. */
+  readOnly?: boolean;
 }) {
   const chosen = value.toAccountManual
     ? undefined
@@ -520,7 +521,7 @@ function PayToAccount({
     });
   };
 
-  const hint = !lookedUp
+  const guide = !lookedUp
     ? "Employee accounts are not held in SAP. Type the payee's details."
     : loading
       ? "Reading the payee's accounts from SAP…"
@@ -533,6 +534,7 @@ function PayToAccount({
             : chosen?.is_default
               ? "The payee's default account in SAP."
               : "One of the payee's accounts in SAP.";
+  const hint = !readOnly || error || (typing && lookedUp && accounts.length > 0) ? guide : undefined;
 
   return (
     <>
@@ -733,10 +735,7 @@ export function PayoutDetailsForm({
 
   return (
     <fieldset disabled={readOnly} className="m-0 min-w-0 space-y-5 border-0 p-0">
-      <FormSection
-        title="Pay To"
-        description="The payee's bank details, as finance has verified them."
-      >
+      <FormSection title="Pay To">
         <FormGrid className="md:grid-cols-3">
           <Field label="Beneficiary Name" required>
             {(f) => (
@@ -756,6 +755,7 @@ export function PayoutDetailsForm({
             error={payeeQuery.isError ? advancePaymentError(payeeQuery.error) : ""}
             lookedUp={payeeCardCode !== ""}
             manualEntry={readOnly ? undefined : manualEntry}
+            readOnly={readOnly}
           />
         </FormGrid>
 
@@ -771,10 +771,7 @@ export function PayoutDetailsForm({
         <TdsSection value={value} onChange={onChange} requestAmount={requestAmount} context={tds} readOnly={readOnly} />
       ) : null}
 
-      <FormSection
-        title="Payment Methods"
-        description="How the money goes out — split it across methods if it leaves more than one way."
-      >
+      <FormSection title="Payment Methods">
         <div className="space-y-3">
           {value.lines.map((line, index) => (
             <MethodCard
