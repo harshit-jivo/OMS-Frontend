@@ -256,7 +256,7 @@ export function AdvancePaymentForm({
     : budgetsQuery.isError
       ? undefined
       : c.expense
-        ? "SAP's budget heads. Its owner approves this expense."
+        ? undefined
         : "SAP's budget heads.";
 
   /* ── Payment Purpose: the Payment Desk's list ───────────────────────── */
@@ -572,13 +572,7 @@ export function AdvancePaymentForm({
             label={c.partnerLabel}
             required={!c.expense}
             error={partnerError}
-            hint={
-              partnerError
-                ? undefined
-                : c.expense
-                  ? "Optional — a SAP vendor, if it is one. Its bank accounts are then offered at Payment."
-                  : partnerHint
-            }
+            hint={partnerError || c.expense ? undefined : partnerHint}
           >
             {(f) => (
               <SearchSelect<string>
@@ -873,8 +867,8 @@ export function AdvancePaymentForm({
           {(f) => (
             <Textarea
               {...f}
-              rows={4}
-              placeholder="Enter remarks"
+              rows={c.expense ? 2 : 4}
+              placeholder={c.expense ? "Optional" : "Enter remarks"}
               value={form.remarks}
               onChange={(e) => change({ remarks: e.target.value })}
             />
@@ -897,7 +891,8 @@ export function AdvancePaymentForm({
           }}
           className={cn(
             "flex flex-wrap items-center justify-between gap-3",
-            "rounded-card border border-dashed px-4 py-6 transition-colors",
+            "rounded-card border border-dashed px-4 transition-colors",
+            c.expense ? "py-3" : "py-6",
             dragging ? "border-brand bg-brand-soft" : "border-line-strong bg-surface",
           )}
         >
