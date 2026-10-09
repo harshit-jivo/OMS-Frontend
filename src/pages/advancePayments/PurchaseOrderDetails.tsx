@@ -7,7 +7,6 @@ import { useQuery } from "@tanstack/react-query";
 
 import { Badge } from "../../components/ui/badge";
 import { DetailField, DetailGrid } from "../../components/ui/detail";
-import { Card, CardHeader, CardTitle } from "../../components/ui/page";
 import {
   Table,
   TableBody,
@@ -23,6 +22,7 @@ import {
 } from "../../services/advancePaymentService";
 
 import type { AdvanceRequestEntry } from "./approvalData";
+import { CollapsibleCard } from "./CollapsibleCard";
 import { SapAttachmentList } from "./SapAttachmentLink";
 import { sapDocumentOf } from "./sapMapping";
 import { formatDate, formatINR } from "./rules";
@@ -49,14 +49,13 @@ function OnePurchaseOrder({
     retry: 1,
   });
 
+  // Closed until clicked, like the ledger: its status on the closed line.
   return (
-    <Card className="p-4 md:p-5" aria-label={`Purchase order ${number} in SAP`}>
-      <CardHeader>
-        <CardTitle>Purchase Order {number} in SAP</CardTitle>
-        {query.data ? (
-          <Badge tone={statusTone(query.data.header.status)}>{query.data.header.status}</Badge>
-        ) : null}
-      </CardHeader>
+    <CollapsibleCard
+      title={`Purchase Order ${number} in SAP`}
+      label={`Purchase order ${number} in SAP`}
+      summary={query.data ? query.data.header.status : query.isPending ? "Reading from SAP…" : undefined}
+    >
 
       {query.isPending ? <p className="m-0 text-[13px] text-subtle">Reading the purchase order from SAP…</p> : null}
       {query.isError ? (
@@ -203,7 +202,7 @@ function OnePurchaseOrder({
           </div>
         </div>
       ) : null}
-    </Card>
+    </CollapsibleCard>
   );
 }
 

@@ -14,14 +14,17 @@ import { Card } from "../../components/ui/page";
 export function CollapsibleCard({
   title,
   summary,
+  label,
   children,
 }: {
   title: string;
   summary?: string;
+  /** The card's accessible name, when the title alone is not it. */
+  label?: string;
   children: ReactNode;
 }) {
   return (
-    <Card className="p-0">
+    <Card className="p-0" aria-label={label}>
       <details className="group">
         <summary
           className={cn(
