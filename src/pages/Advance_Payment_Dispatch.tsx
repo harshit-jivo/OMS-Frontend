@@ -324,8 +324,8 @@ function SendTab({ onSent }: { onSent: (message: string) => void }) {
                   </TableHead>
                   <TableHead>{kind === "BILL" ? "Bill" : "PO"}</TableHead>
                   <TableHead>Vendor</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Due</TableHead>
+                  <TableHead>Document Date</TableHead>
+                  <TableHead>Due Date</TableHead>
                   <TableHead className="text-right">Total</TableHead>
                   <TableHead className="text-right">Open in SAP</TableHead>
                   <TableHead className="text-right">Held in OMS</TableHead>
@@ -365,7 +365,9 @@ function SendTab({ onSent }: { onSent: (message: string) => void }) {
                           {row.card_name}
                           <span className="block text-[11px] text-subtle">{row.card_code}</span>
                         </TableCell>
-                        <TableCell>{row.doc_date ? formatDate(row.doc_date) : "—"}</TableCell>
+                        <TableCell>
+                          {row.document_date || row.doc_date ? formatDate((row.document_date || row.doc_date) as string) : "—"}
+                        </TableCell>
                         <TableCell>{row.due_date ? formatDate(row.due_date) : "—"}</TableCell>
                         <TableCell className="text-right tabular-nums">{money(row.doc_total)}</TableCell>
                         <TableCell className="text-right tabular-nums">{money(openOf(row))}</TableCell>

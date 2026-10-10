@@ -337,6 +337,7 @@ export function DocumentLines({
             <TableHead>{def.numberLabel}</TableHead>
             <TableHead>Vendor Ref.</TableHead>
             <TableHead>{def.dateLabel}</TableHead>
+            <TableHead>Due Date</TableHead>
             <TableHead className="text-right">Open Amount</TableHead>
             <TableHead>Payment</TableHead>
             <TableHead className="text-right">Payment Amount</TableHead>
@@ -370,6 +371,7 @@ export function DocumentLines({
               </TableCell>
               <TableCell className="font-medium text-ink">{doc.reference || "—"}</TableCell>
               <TableCell>{formatDate(doc.date)}</TableCell>
+              <TableCell>{doc.dueDate ? formatDate(doc.dueDate) : "—"}</TableCell>
               <TableCell className="text-right tabular-nums">{formatINR(doc.open)}</TableCell>
               <TableCell>
                 {PAYMENT_MODES.find((m) => m.value === allocation.mode)?.label}
@@ -383,7 +385,7 @@ export function DocumentLines({
             </TableRow>
             {source ? (
               <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={6}>
+                <TableCell colSpan={7}>
                   <p className="m-0 mb-1.5 text-[11.5px] font-semibold uppercase tracking-[0.06em] text-subtle">
                     {doc.number}&apos;s SAP attachments
                   </p>
@@ -393,7 +395,7 @@ export function DocumentLines({
             ) : null}
             {showBreakdown && source?.kind === "bill" ? (
               <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={6}>
+                <TableCell colSpan={7}>
                   <BillBreakdown
                     company={source.company}
                     docEntry={source.docEntry}
@@ -404,7 +406,7 @@ export function DocumentLines({
             ) : null}
             {history ? (
               <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={6}>
+                <TableCell colSpan={7}>
                   <p className="m-0 mb-1.5 text-[11.5px] font-semibold uppercase tracking-[0.06em] text-subtle">
                     OMS payments against {doc.number}
                   </p>
@@ -414,7 +416,7 @@ export function DocumentLines({
             ) : null}
             {showReading && doc.reading ? (
               <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={6} className="bg-surface">
+                <TableCell colSpan={7} className="bg-surface">
                   <p className="m-0 mb-1.5 text-[11.5px] font-semibold uppercase tracking-[0.06em] text-subtle">
                     Read from {doc.number}&apos;s SAP attachment
                   </p>

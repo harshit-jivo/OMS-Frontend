@@ -72,6 +72,13 @@ describe("SAP rows → form data", () => {
     });
   });
 
+  it("dates a bill by the date on it (Document Date), not when SAP posted it", () => {
+    const bill = { ...SAP_OPEN_INVOICES[0], doc_date: "2026-09-01", document_date: "2026-08-31", due_date: "2026-09-28" };
+    expect(invoiceToDocument(bill)).toMatchObject({ date: "2026-08-31", dueDate: "2026-09-28" });
+    // A server that sends no Document Date yet: the posting date, as before.
+    expect(invoiceToDocument({ ...bill, document_date: null }).date).toBe("2026-09-01");
+  });
+
   it("leaves out an empty vendor reference", () => {
     expect(invoiceToDocument(SAP_OPEN_INVOICES[1]).reference).toBeUndefined();
   });

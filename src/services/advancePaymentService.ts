@@ -371,7 +371,10 @@ export interface SapOpenInvoice {
   card_name: string;
   /** The vendor's own invoice number (`NumAtCard`). */
   party_ref: string;
+  /** SAP's posting date. */
   doc_date: string;
+  /** The date on the bill (SAP's Document Date): the vendor's invoice date. */
+  document_date?: string | null;
   due_date: string;
   currency: string;
   doc_total: string;
@@ -400,7 +403,10 @@ export interface SapOpenPurchaseOrder {
   card_name: string;
   /** The vendor's own reference for the order (`NumAtCard`). */
   vendor_ref: string;
+  /** SAP's posting date. */
   doc_date: string;
+  /** The date on the order (SAP's Document Date). */
+  document_date?: string | null;
   due_date: string;
   currency: string;
   doc_total: string;
