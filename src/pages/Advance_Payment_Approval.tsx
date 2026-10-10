@@ -267,7 +267,8 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
     Boolean(entry.api.voucher) || (entry.api.vouchers ?? []).some((v) => v.status === "FAILED");
   // An Expense's route has no Final: Audit's approval posts it.
   const postsToSap = flow?.current_role === (isExpense ? "AUDIT" : "FINAL");
-  const approveLabel = postsToSap ? "Post to SAP" : "Approve";
+  const sapFailure = entry.api.sap_failure;
+  const approveLabel = postsToSap ? (sapFailure ? "Post to SAP again" : "Post to SAP") : "Approve";
   const approveDone = postsToSap ? "Posted to SAP." : "Approved.";
 
   /** Save the payout, then send the files it gained and drop the ones it lost. */
@@ -409,6 +410,21 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
         {notice ? (
           <Notice tone={notice.tone} title={notice.tone === "ok" ? "Done" : "Not done"}>
             {notice.text}
+          </Notice>
+        ) : null}
+
+        {/* SAP refused it: why, and that posting again is how to finish it. */}
+        {sapFailure ? (
+          <Notice
+            tone="bad"
+            title={`Not posted to SAP${sapFailure.attempts > 1 ? ` — ${sapFailure.attempts} attempts` : ""}`}
+          >
+            <span className="block">{sapFailure.error}</span>
+            <span className="mt-1 block">
+              {deciding && postsToSap
+                ? `Clear the cause, then press ${approveLabel}: a payment SAP already took is found, never paid twice.`
+                : `Waiting at ${flow?.current_stage ?? "its posting stage"} to be posted again.`}
+            </span>
           </Notice>
         ) : null}
 
@@ -686,6 +702,16 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
 /** The desk's status column: your own decision and when — nothing else. */
 function DecisionCell({ entry }: { entry: AdvanceRequestEntry }) {
   const mine = entry.api.my_decision;
+  if (entry.api.sap_failure) {
+    return (
+      <>
+        <Badge tone="bad">Not posted to SAP</Badge>
+        {entry.api.flow?.awaiting_me ? (
+          <span className="mt-0.5 block text-[11px] text-subtle">Waiting on you to post again</span>
+        ) : null}
+      </>
+    );
+  }
   if (entry.api.flow?.awaiting_me) return <Badge tone="hold">Waiting on you</Badge>;
   if (!mine) return <span className="text-subtle">—</span>;
   const tone = MY_DECISION_TONE[mine.action as keyof typeof MY_DECISION_TONE] ?? "neutral";
@@ -792,6 +818,8 @@ export default function Advance_Payment_Approval() {
   );
   const shown = filterRequests(entries, filters, deskBucket);
   const awaiting = entries.filter((e) => e.api.flow?.awaiting_me).length;
+  // Refused by SAP and not posted since: each needs its posting stage to post again.
+  const refused = entries.filter((e) => e.api.sap_failure).length;
   const canBulk = (e: AdvanceRequestEntry) => Boolean(e.api.can.approve || e.api.can.reject);
   // Only what is still shown and still yours to decide counts as chosen.
   const chosen = shown.filter((e) => ticked.has(e.serverId) && canBulk(e));
@@ -914,6 +942,11 @@ export default function Advance_Payment_Approval() {
             {awaiting ? (
               <Badge tone="hold" className="ml-2">
                 {awaiting} waiting on you
+              </Badge>
+            ) : null}
+            {refused ? (
+              <Badge tone="bad" className="ml-2">
+                {refused} not posted to SAP
               </Badge>
             ) : null}
           </CardTitle>

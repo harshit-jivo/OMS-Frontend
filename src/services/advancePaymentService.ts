@@ -224,8 +224,11 @@ export type AttachmentCheck = AttachmentReading | { error: string };
 /** The document kinds `/document-attachment/` reads, and whose attachments are listed. */
 export type SapAttachmentKind = "po" | "bill";
 
-/** Any document an attachment can sit on: a bill's GRPO too. */
-export type SapAttachmentSource = SapAttachmentKind | "grpo";
+/** Any document an attachment can sit on: a bill's GRPO, a payment too. */
+export type SapAttachmentSource = SapAttachmentKind | "grpo" | "payment";
+
+/** The documents whose attachments can be LISTED (`/document-attachments/`). */
+export type SapAttachmentListKind = SapAttachmentSource;
 
 /**
  * One SAP attachment related to a document (`/document-attachments/`): a
@@ -252,6 +255,8 @@ export interface SapBillBreakdown {
     doc_num: number | null;
     vendor_ref: string;
     doc_date: string | null;
+    document_date: string | null;
+    due_date: string | null;
     status: string;
     card_code: string;
     card_name: string;
@@ -292,6 +297,103 @@ export interface SapBillBreakdown {
     account: string;
     account_name: string;
   }>;
+  /** SAP's Linked Documents: the GRPOs and POs it came from, the payments applied to it. */
+  links: SapDocumentLink[];
+}
+
+/** One SAP document's link to another, as its Linked Documents tab lists it. */
+export interface SapDocumentLink {
+  kind: "grpo" | "po" | "bill" | "payment";
+  kind_label: string;
+  doc_entry: number;
+  doc_num: number | null;
+  doc_date: string | null;
+  amount: string;
+}
+
+/** One goods receipt PO as SAP holds it (`/goods-receipt/`). Amounts are strings. */
+export interface SapGoodsReceipt {
+  company: AdvancePaymentCompany;
+  header: {
+    doc_entry: number;
+    doc_num: number | null;
+    vendor_ref: string;
+    doc_date: string | null;
+    due_date: string | null;
+    document_date: string | null;
+    status: string;
+    card_code: string;
+    card_name: string;
+    branch: string;
+    remarks: string;
+    before_discount: string;
+    discount: string;
+    freight: string;
+    tax: string;
+    rounding: string;
+    total: string;
+  };
+  lines: Array<{
+    line: number;
+    item_code: string;
+    description: string;
+    quantity: string;
+    price: string;
+    line_total: string;
+    tax_code: string;
+    tax: string;
+    warehouse: string;
+    account: string;
+    account_name: string;
+  }>;
+  links: SapDocumentLink[];
+}
+
+/** One outgoing payment as SAP holds it (`/outgoing-payment/`). Amounts are strings. */
+export interface SapOutgoingPayment {
+  company: AdvancePaymentCompany;
+  header: {
+    doc_entry: number;
+    doc_num: number | null;
+    /** Vendor, Customer or Account. */
+    paid_to: string;
+    doc_date: string | null;
+    due_date: string | null;
+    document_date: string | null;
+    status: string;
+    card_code: string;
+    card_name: string;
+    branch: string;
+    remarks: string;
+    journal_memo: string;
+    reference: string;
+    trans_id: number | null;
+    transfer_account: string;
+    transfer_account_name: string;
+    transfer_sum: string;
+    transfer_date: string | null;
+    transfer_ref: string;
+    cash_account: string;
+    cash_account_name: string;
+    cash_sum: string;
+    check_sum: string;
+    on_account: string;
+    total: string;
+    payment_mode: string;
+    urgency: string;
+    type_of_advance: string;
+    settle_by: string | null;
+  };
+  documents: Array<{
+    inv_type: number | null;
+    kind_label: string;
+    doc_entry: number;
+    doc_num: number | null;
+    vendor_ref: string;
+    applied: string;
+    tds: string;
+  }>;
+  accounts: Array<{ account: string; account_name: string; description: string; applied: string }>;
 }
 
 export interface SapPurchaseOrder {
@@ -978,6 +1080,11 @@ export interface ApiRequest extends ApiRequestFields {
   last_activity?: { action: string; label: string; by: string; stage: string; on: string } | null;
   /** The SAP outgoing payment, once Final's approval has posted it. */
   voucher: ApiVoucher | null;
+  /**
+   * SAP refused the last post and nothing has been posted since: its message,
+   * when, and how many attempts. Null once posted, or never tried.
+   */
+  sap_failure?: { error: string; at: string | null; attempts: number } | null;
   /** The latest return, send-back or rejection: what someone must act on. */
   last_decision: ApiRequestLog | null;
   /**
@@ -1130,7 +1237,7 @@ export const advancePaymentService = {
   /** EVERY SAP attachment related to a bill (its own, its GRPOs', their POs') or a PO. */
   async documentAttachments(
     company: AdvancePaymentCompany,
-    kind: SapAttachmentKind,
+    kind: SapAttachmentListKind,
     docEntry: number,
   ): Promise<SapRelatedAttachment[]> {
     const res = await api.get(`${BASE}/document-attachments/`, {
@@ -1155,6 +1262,18 @@ export const advancePaymentService = {
   async purchaseOrder(company: AdvancePaymentCompany, docEntry: number): Promise<SapPurchaseOrder> {
     const res = await api.get(`${BASE}/purchase-order/`, { params: { company, doc_entry: docEntry } });
     return unwrap<SapPurchaseOrder>(res.data);
+  },
+
+  /** One goods receipt PO, as SAP holds it. */
+  async goodsReceipt(company: AdvancePaymentCompany, docEntry: number): Promise<SapGoodsReceipt> {
+    const res = await api.get(`${BASE}/goods-receipt/`, { params: { company, doc_entry: docEntry } });
+    return unwrap<SapGoodsReceipt>(res.data);
+  },
+
+  /** One outgoing payment, as SAP holds it. */
+  async outgoingPayment(company: AdvancePaymentCompany, docEntry: number): Promise<SapOutgoingPayment> {
+    const res = await api.get(`${BASE}/outgoing-payment/`, { params: { company, doc_entry: docEntry } });
+    return unwrap<SapOutgoingPayment>(res.data);
   },
 
   /** One A/P invoice's taxable, GST, TDS, net and G/L accounts, as SAP booked it. */

@@ -25,6 +25,7 @@ import {
 import type { AdvanceRequestEntry } from "./approvalData";
 import { BillBreakdown } from "./BillBreakdown";
 import { CollapsibleCard } from "./CollapsibleCard";
+import { SapDocLink } from "./SapDocument";
 import { SapAttachmentList } from "./SapAttachmentLink";
 import { sapDocumentOf } from "./sapMapping";
 import { formatDate, formatINR } from "./rules";
@@ -183,7 +184,18 @@ function OnePurchaseOrder({
                     <React.Fragment key={`${doc.kind}-${doc.doc_entry}`}>
                       <TableRow>
                         <TableCell>{doc.kind_label}</TableCell>
-                        <TableCell className="font-medium text-ink">{doc.doc_num ?? doc.doc_entry}</TableCell>
+                        <TableCell className="font-medium text-ink">
+                          {doc.kind === "bill" ? (
+                            <SapDocLink
+                              company={company}
+                              kind="bill"
+                              docEntry={doc.doc_entry}
+                              number={String(doc.doc_num ?? doc.doc_entry)}
+                            />
+                          ) : (
+                            (doc.doc_num ?? doc.doc_entry)
+                          )}
+                        </TableCell>
                         <TableCell>{doc.doc_date ? formatDate(doc.doc_date) : "—"}</TableCell>
                         <TableCell>{doc.vendor_ref || "—"}</TableCell>
                         <TableCell className="text-right tabular-nums">{money(doc.doc_total)}</TableCell>

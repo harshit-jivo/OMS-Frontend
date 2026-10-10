@@ -16,7 +16,7 @@ import {
   advancePaymentError,
   advancePaymentService,
   type AdvancePaymentCompany,
-  type SapAttachmentKind,
+  type SapAttachmentListKind,
   type SapAttachmentSource,
   type SapRelatedAttachment,
 } from "../../services/advancePaymentService";
@@ -139,7 +139,7 @@ export function SapAttachmentList({
   docEntry,
 }: {
   company: AdvancePaymentCompany;
-  kind: SapAttachmentKind;
+  kind: SapAttachmentListKind;
   docEntry: number;
 }) {
   const query = useQuery({

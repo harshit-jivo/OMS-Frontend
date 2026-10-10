@@ -10,7 +10,8 @@ import { BillBreakdown } from "./BillBreakdown";
 const BILL: SapBillBreakdown = {
   company: "OIL",
   header: {
-    doc_entry: 188, doc_num: 624104114, vendor_ref: "7/2024-25", doc_date: "2024-10-01", status: "Open",
+    doc_entry: 188, doc_num: 624104114, vendor_ref: "7/2024-25", doc_date: "2024-10-01",
+    document_date: "2024-10-01", due_date: "2024-10-01", status: "Open",
     card_code: "VENDA000869", card_name: "GEETA GUPTA",
     payable_account: "2110004", payable_account_name: "SUNDRY CREDITOR SERVICE",
     taxable: "375000", freight: "0", discount: "0", gst: "67500", gross: "442500", tds: "37500",
@@ -24,6 +25,7 @@ const BILL: SapBillBreakdown = {
   ],
   tds: [{ code: "94IB", name: "194I TDS ON RENT", rate: "10", taxable: "375000", amount: "37500",
           account: "2133001", account_name: "TDS ON RENT 194I" }],
+  links: [],
 };
 
 afterEach(() => vi.restoreAllMocks());

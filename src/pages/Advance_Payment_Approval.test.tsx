@@ -882,6 +882,25 @@ describe("Payments Approval", () => {
     expect(screen.getByRole("button", { name: "Post to SAP" })).toBeTruthy();
   });
 
+  it("flags a request SAP refused, on the desk and on review, and posts it again", async () => {
+    onDesk(18, 5, ["Final Approval"], {
+      amount: "24500",
+      documents: [bill(10700, "24500", "24500")],
+      sap_failure: {
+        error: "SAP refused the payment: 1320000257 - You are not assigned to selected branch 'DELHI ISD'",
+        at: "2026-10-10T11:00:00Z",
+        attempts: 2,
+      },
+    });
+    const user = setup();
+    expect(await screen.findByText("1 not posted to SAP")).toBeTruthy();
+    expect(screen.getByText("Not posted to SAP")).toBeTruthy();
+    await review(user, "AP-2026-0018");
+    expect(screen.getByText(/^Not posted to SAP — 2 attempts/)).toBeTruthy();
+    expect(screen.getByText(/not assigned to selected branch 'DELHI ISD'/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Post to SAP again" })).toBeTruthy();
+  });
+
   it("at Final, sends a request back to Payment", async () => {
     onDesk(17, 5, ["Final Approval"], { amount: "24500", documents: [bill(10600, "24500", "24500")] });
     const user = setup();

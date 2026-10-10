@@ -249,3 +249,13 @@ describe("SAP's Payment Mode, when left Automatic", () => {
     expect(autoSapPaymentMode([{ ...newPayoutLine("CASH"), amount: "9000" }])).toBeNull();
   });
 });
+
+describe("isBankAccountNumber", () => {
+  it("refuses what SAP may hold that is not an account number (AP-2026-0054)", async () => {
+    const { isBankAccountNumber } = await import("./payout");
+    expect(isBankAccountNumber("DIL957")).toBe(false); // DIL EXIM's SAP default account
+    expect(isBankAccountNumber("50100123456789")).toBe(true);
+    expect(isBankAccountNumber(" 123456789 ")).toBe(true);
+    expect(isBankAccountNumber("12345678")).toBe(false);
+  });
+});

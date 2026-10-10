@@ -56,6 +56,7 @@ import {
   SAP_PAYMENT_MODES,
   autoSapPaymentMode,
   type SapPaymentMode,
+  isBankAccountNumber,
 } from "./payout";
 import { RequestFileName } from "./RequestFileLink";
 import { formatINR } from "./rules";
@@ -521,7 +522,12 @@ function PayToAccount({
     });
   };
 
-  const guide = !lookedUp
+  // SAP's own record can hold something that is not an account number at all
+  // (a short code, a name): say so where it is picked, not only on save.
+  const badSapNumber = !typing && chosen && !isBankAccountNumber(chosen.account_number);
+  const guide = badSapNumber
+    ? `SAP's account number for this payee, "${chosen.account_number}", is not a bank account number (9 to 18 digits). Correct it in SAP's Business Partner master, or type the right one by hand.`
+    : !lookedUp
     ? "Employee accounts are not held in SAP. Type the payee's details."
     : loading
       ? "Reading the payee's accounts from SAP…"
@@ -534,7 +540,8 @@ function PayToAccount({
             : chosen?.is_default
               ? "The payee's default account in SAP."
               : "One of the payee's accounts in SAP.";
-  const hint = !readOnly || error || (typing && lookedUp && accounts.length > 0) ? guide : undefined;
+  const hint =
+    !readOnly || error || badSapNumber || (typing && lookedUp && accounts.length > 0) ? guide : undefined;
 
   return (
     <>

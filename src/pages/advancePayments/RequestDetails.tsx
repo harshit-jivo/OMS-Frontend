@@ -29,6 +29,7 @@ import { AttachmentReadingTable } from "./AttachmentReading";
 import { formatSize } from "./attachments";
 import { GST_OPTIONS, PAYMENT_MODES } from "./constants";
 import { BillBreakdown } from "./BillBreakdown";
+import { SapDocLink } from "./SapDocument";
 import { DocumentHistory } from "./DocumentHistory";
 import { SapAttachmentLink, SapAttachmentList } from "./SapAttachmentLink";
 import { historyTargetOf, sapDocumentOf } from "./sapMapping";
@@ -352,7 +353,12 @@ export function DocumentLines({
             <React.Fragment key={doc.id}>
             <TableRow data-due={dueLabel(doc) ? "true" : undefined} className={dueLabel(doc) ? "bg-bad-soft/40" : undefined}>
               <TableCell className="font-semibold text-ink">
-                {doc.number}
+                {/* From Payment on, the number opens the document as SAP shows it. */}
+                {showBreakdown && source ? (
+                  <SapDocLink company={source.company} kind={source.kind} docEntry={source.docEntry} number={doc.number} />
+                ) : (
+                  doc.number
+                )}
                 {doc.ledger ? (
                   <span className="ml-1.5 align-middle">
                     <Badge tone={debit ? "hold" : "ok"}>{debit ? "Dr" : "Cr"}</Badge>
