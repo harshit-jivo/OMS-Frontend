@@ -233,6 +233,11 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
    */
   "/Advance_Payment_Approval": { permissions: ["Advance_Payment_Approval"] },
   /*
+   * Every request, filtered any way, read only — for a supervisor of the
+   * desks. The same key as the desk's All Requests tab; admins pass always.
+   */
+  "/Advance_Payment_Register": { permissions: ["Advance_Payment_View_All"] },
+  /*
    * Send SAP bills and POs to Advance Payment Users and Approvers, who raise the request
    * from them. Its own key: sending work out is neither raising nor approving.
    */

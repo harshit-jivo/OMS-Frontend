@@ -955,6 +955,10 @@ export interface ApiRequest extends ApiRequestFields {
     returned_after_approval?: boolean;
   } | null;
   can: RequestAbilities;
+  /** The all-requests list only: everyone who approved, rejected, returned or sent it back. */
+  approvers?: Array<{ username: string; name: string }>;
+  /** The all-requests list only: its latest log row, any action. */
+  last_activity?: { action: string; label: string; by: string; stage: string; on: string } | null;
   /** The SAP outgoing payment, once Final's approval has posted it. */
   voucher: ApiVoucher | null;
   /** The latest return, send-back or rejection: what someone must act on. */

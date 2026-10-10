@@ -637,7 +637,7 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
                   />
                 )}
               </Field>
-              <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line pt-4">
+              <div className="grid grid-cols-1 gap-2 border-t border-line pt-4 sm:flex sm:flex-wrap sm:items-center sm:justify-end">
                 <Button
                   variant="danger"
                   onClick={() => decide("reject", "Rejected.")}
@@ -742,6 +742,14 @@ function AllRequests({ onOpen }: { onOpen: (id: number) => void }) {
   );
 }
 
+/** What the desk may do to many requests at once. */
+type BulkAction = "approve" | "reject";
+
+const BULK_WORDS: Record<BulkAction, { verb: string; done: string; progress: string }> = {
+  approve: { verb: "Approve", done: "Approved", progress: "Approving" },
+  reject: { verb: "Reject", done: "Rejected", progress: "Rejecting" },
+};
+
 export default function Advance_Payment_Approval() {
   const canViewAll = useCan("Advance_Payment_View_All");
   const [view, setView] = useState<"desk" | "all">("desk");
@@ -763,14 +771,18 @@ export default function Advance_Payment_Approval() {
   });
   const [openId, setOpenId] = useState<number | null>(null);
   const store = useStoreRequest();
-  // Bulk approve: what is ticked, the confirm dialog, its progress and its outcome.
+  // Bulk approve / reject: what is ticked, the confirm dialog (which of the
+  // two), its progress and its outcome.
   const [ticked, setTicked] = useState<Set<number>>(new Set());
-  const [confirming, setConfirming] = useState(false);
+  const [bulk, setBulk] = useState<BulkAction | null>(null);
   const [bulkRemarks, setBulkRemarks] = useState("");
+  const [bulkError, setBulkError] = useState("");
   const [progress, setProgress] = useState<string | null>(null);
-  const [outcome, setOutcome] = useState<{ done: string[]; failed: Array<{ no: string; reason: string }> } | null>(
-    null,
-  );
+  const [outcome, setOutcome] = useState<{
+    action: BulkAction;
+    done: string[];
+    failed: Array<{ no: string; reason: string }>;
+  } | null>(null);
 
   // The cards count what the search and company filters leave, whatever the
   // status filter — a card must not read 0 just because it is not selected.
@@ -780,31 +792,47 @@ export default function Advance_Payment_Approval() {
   );
   const shown = filterRequests(entries, filters, deskBucket);
   const awaiting = entries.filter((e) => e.api.flow?.awaiting_me).length;
-  const canBulk = (e: AdvanceRequestEntry) => Boolean(e.api.can.approve);
-  // Only what is still shown and still yours to approve counts as chosen.
+  const canBulk = (e: AdvanceRequestEntry) => Boolean(e.api.can.approve || e.api.can.reject);
+  // Only what is still shown and still yours to decide counts as chosen.
   const chosen = shown.filter((e) => ticked.has(e.serverId) && canBulk(e));
-  const postsSome = chosen.some((e) => e.api.flow?.current_role === (e.form.type === "EXPENSE" ? "AUDIT" : "FINAL"));
+  const chosenFor = (action: BulkAction) => chosen.filter((e) => e.api.can[action]);
+  const acting = bulk ? chosenFor(bulk) : [];
+  const postsSome = acting.some((e) => e.api.flow?.current_role === (e.form.type === "EXPENSE" ? "AUDIT" : "FINAL"));
 
-  /** Approve the chosen one by one; each with its own version, as its screen would. */
-  const approveChosen = async () => {
+  const openBulk = (action: BulkAction) => {
+    setOutcome(null);
+    setBulkError("");
+    setBulk(action);
+  };
+
+  /** Approve or reject the chosen one by one; each with its own version, as its screen would. */
+  const actOnChosen = async (action: BulkAction) => {
+    const words = BULK_WORDS[action];
+    // Rejecting is final and needs a reason, here as on each request's screen.
+    if (action === "reject" && !bulkRemarks.trim()) {
+      setBulkError("Say why, in the remarks.");
+      return;
+    }
     const done: string[] = [];
     const failed: Array<{ no: string; reason: string }> = [];
-    for (const [i, e] of chosen.entries()) {
-      setProgress(`Approving ${i + 1} of ${chosen.length}…`);
+    for (const [i, e] of acting.entries()) {
+      setProgress(`${words.progress} ${i + 1} of ${acting.length}…`);
       try {
-        store(await advancePaymentService.act(e.serverId, "approve", bulkRemarks.trim(), e.api.flow?.version));
+        store(await advancePaymentService.act(e.serverId, action, bulkRemarks.trim(), e.api.flow?.version));
         done.push(e.requestNo);
       } catch (err) {
         failed.push({ no: e.requestNo, reason: advancePaymentError(err) });
       }
     }
     setProgress(null);
-    setConfirming(false);
+    setBulk(null);
     setBulkRemarks("");
     setTicked(new Set());
-    setOutcome({ done, failed });
+    setOutcome({ action, done, failed });
     showToast({
-      title: failed.length ? `Approved ${done.length}, ${failed.length} not approved` : `Approved ${done.length}`,
+      title: failed.length
+        ? `${words.done} ${done.length}, ${failed.length} not ${words.done.toLowerCase()}`
+        : `${words.done} ${done.length}`,
       message: failed.length ? "See the list on the desk." : done.join(", "),
       tone: failed.length ? "bad" : "ok",
     });
@@ -864,7 +892,11 @@ export default function Advance_Payment_Approval() {
       {outcome ? (
         <Notice
           tone={outcome.failed.length ? "bad" : "ok"}
-          title={`Approved ${outcome.done.length}${outcome.failed.length ? `, not approved ${outcome.failed.length}` : ""}`}
+          title={`${BULK_WORDS[outcome.action].done} ${outcome.done.length}${
+            outcome.failed.length
+              ? `, not ${BULK_WORDS[outcome.action].done.toLowerCase()} ${outcome.failed.length}`
+              : ""
+          }`}
         >
           {outcome.done.length ? <span className="block">{outcome.done.join(", ")}</span> : null}
           {outcome.failed.map((f) => (
@@ -885,28 +917,38 @@ export default function Advance_Payment_Approval() {
               </Badge>
             ) : null}
           </CardTitle>
-          <div className="flex flex-wrap items-center gap-2">
-            {chosen.length ? (
-              <>
-                <Button variant="ghost" size="xs" onClick={() => setTicked(new Set())}>
-                  Clear
-                </Button>
-                <Button
-                  variant="primary"
-                  size="xs"
-                  onClick={() => {
-                    setOutcome(null);
-                    setConfirming(true);
-                  }}
-                >
-                  <HiOutlineCheckCircle className="size-4" aria-hidden="true" />
-                  Approve selected ({chosen.length})
-                </Button>
-              </>
-            ) : null}
-            <RequestFilters value={filters} onChange={setFilters} statusOptions={DESK_STATUS_OPTIONS} />
-          </div>
+          <RequestFilters value={filters} onChange={setFilters} statusOptions={DESK_STATUS_OPTIONS} />
         </CardHeader>
+        {/* What is ticked, and what to do with it: kept in view (below the
+            app's fixed header) while scrolling down a long list. */}
+        {chosen.length ? (
+          <div
+            role="region"
+            aria-label="Selected requests"
+            className="sticky top-[68px] z-10 mb-3 flex flex-wrap items-center justify-between gap-2 rounded-sm border border-brand/30 bg-card p-2.5 shadow-card"
+          >
+            <span className="text-[13px] text-ink">
+              <span className="font-semibold">{chosen.length}</span> selected
+            </span>
+            <div className="flex flex-1 flex-wrap items-center justify-end gap-2 sm:flex-none">
+              <Button variant="ghost" size="xs" onClick={() => setTicked(new Set())}>
+                Clear
+              </Button>
+              {chosenFor("reject").length ? (
+                <Button variant="danger" size="xs" onClick={() => openBulk("reject")}>
+                  <HiOutlineXCircle className="size-4" aria-hidden="true" />
+                  Reject selected ({chosenFor("reject").length})
+                </Button>
+              ) : null}
+              {chosenFor("approve").length ? (
+                <Button variant="primary" size="xs" onClick={() => openBulk("approve")}>
+                  <HiOutlineCheckCircle className="size-4" aria-hidden="true" />
+                  Approve selected ({chosenFor("approve").length})
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
         <RequestTable
           entries={shown}
           selection={{ canSelect: canBulk, selected: ticked, onChange: setTicked }}
@@ -922,39 +964,53 @@ export default function Advance_Payment_Approval() {
       </Card>
 
       <Dialog
-        open={confirming}
+        open={bulk !== null}
         onOpenChange={(next) => {
-          if (!next && !progress) setConfirming(false);
+          if (!next && !progress) setBulk(null);
         }}
       >
-        {confirming ? (
-          <DialogContent title="Approve selected" size="sm" className="max-w-[460px]">
+        {bulk ? (
+          <DialogContent title={`${BULK_WORDS[bulk].verb} selected`} size="sm" className="max-w-[460px]">
             <DialogBody className="space-y-3">
               <p className="m-0 text-[14px] text-ink">
-                Approve <span className="font-semibold">{chosen.length}</span> request
-                {chosen.length === 1 ? "" : "s"}: {chosen.map((e) => e.requestNo).join(", ")}?
+                {BULK_WORDS[bulk].verb} <span className="font-semibold">{acting.length}</span> request
+                {acting.length === 1 ? "" : "s"}: {acting.map((e) => e.requestNo).join(", ")}?
               </p>
-              {postsSome ? (
+              {bulk === "approve" && postsSome ? (
                 <p className="m-0 text-[13px] text-body">Those at the last stage are posted to SAP.</p>
               ) : null}
-              <Field label="Remarks">
+              {bulk === "reject" ? (
+                <p className="m-0 text-[13px] text-body">Rejecting is final: they cannot be resubmitted.</p>
+              ) : null}
+              <Field
+                label="Remarks"
+                required={bulk === "reject"}
+                error={bulkError || undefined}
+              >
                 {(f) => (
                   <Textarea
                     {...f}
                     rows={2}
-                    placeholder="Optional"
+                    placeholder={bulk === "reject" ? "Why they are rejected" : "Optional"}
                     value={bulkRemarks}
-                    onChange={(e) => setBulkRemarks(e.target.value)}
+                    onChange={(e) => {
+                      setBulkRemarks(e.target.value);
+                      setBulkError("");
+                    }}
                   />
                 )}
               </Field>
             </DialogBody>
             <DialogFooter>
-              <Button onClick={() => setConfirming(false)} disabled={Boolean(progress)}>
+              <Button onClick={() => setBulk(null)} disabled={Boolean(progress)}>
                 Cancel
               </Button>
-              <Button variant="primary" onClick={() => void approveChosen()} disabled={Boolean(progress)}>
-                {progress ?? `Approve ${chosen.length}`}
+              <Button
+                variant={bulk === "reject" ? "danger" : "primary"}
+                onClick={() => void actOnChosen(bulk)}
+                disabled={Boolean(progress)}
+              >
+                {progress ?? `${BULK_WORDS[bulk].verb} ${acting.length}`}
               </Button>
             </DialogFooter>
           </DialogContent>

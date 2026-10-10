@@ -43,6 +43,7 @@ import {
   type StatusFilter,
 } from "./requestLabels";
 import { formatINR } from "./rules";
+import { useNarrow } from "./useNarrow";
 
 /* ── KPI cards ───────────────────────────────────────────────────────────── */
 
@@ -237,13 +238,14 @@ export function RequestTable({
    * shows the approver's OWN decision instead.
    */
   status?: { header: string; cell: (entry: AdvanceRequestEntry) => ReactNode };
-  /** A tick per row that can be selected (the desk: what you may approve), and a tick for all of them. */
+  /** A tick per row that can be selected (the desk: what you may decide), and a tick for all of them. */
   selection?: {
     canSelect: (entry: AdvanceRequestEntry) => boolean;
     selected: ReadonlySet<number>;
     onChange: (next: Set<number>) => void;
   };
 }) {
+  const narrow = useNarrow();
   const selectable = selection ? entries.filter(selection.canSelect).map((e) => e.serverId) : [];
   const allTicked = selectable.length > 0 && selectable.every((id) => selection?.selected.has(id));
   const toggle = (id: number) => {
@@ -253,6 +255,81 @@ export function RequestTable({
     else next.add(id);
     selection.onChange(next);
   };
+  const tickAll = () => selection?.onChange(allTicked ? new Set() : new Set(selectable));
+
+  if (narrow) {
+    return (
+      <div className="space-y-2">
+        {selection && selectable.length ? (
+          <label className="flex cursor-pointer items-center gap-2 px-1 text-[12.5px] text-body">
+            <input
+              type="checkbox"
+              className="size-4 cursor-pointer accent-brand"
+              aria-label="Select all waiting on you"
+              checked={allTicked}
+              onChange={tickAll}
+            />
+            Select all waiting on you
+          </label>
+        ) : null}
+        {entries.length === 0 ? (
+          <p className="m-0 py-8 text-center text-[13px] text-subtle">{emptyText}</p>
+        ) : (
+          entries.map((e) => {
+            const { label, variant } = action(e);
+            return (
+              <article key={e.id} className="rounded-sm border border-line bg-surface p-3">
+                <div className="flex items-start gap-2.5">
+                  {selection?.canSelect(e) ? (
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 size-4 shrink-0 cursor-pointer accent-brand"
+                      aria-label={`Select ${e.requestNo}`}
+                      checked={selection.selected.has(e.serverId)}
+                      onChange={() => toggle(e.serverId)}
+                    />
+                  ) : null}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="font-semibold text-ink">{e.requestNo}</span>
+                      <span className="shrink-0 font-semibold tabular-nums text-ink">
+                        {formatINR(requestAmount(e.form))}
+                      </span>
+                    </div>
+                    <p className="m-0 mt-0.5 truncate text-[12.5px] text-body">{payeeOf(e.form)}</p>
+                    <p className="m-0 mt-0.5 text-[11px] text-subtle">
+                      {[e.form.company, typeLabel(e.form), paymentAgainstLabel(e.form)].filter(Boolean).join(" · ")}
+                    </p>
+                    <p className="m-0 text-[11px] text-subtle">
+                      {e.requestedBy} · {formatDateTime(e.requestedOn)}
+                    </p>
+                    <div className="mt-2 flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        {status ? (
+                          status.cell(e)
+                        ) : (
+                          <Badge tone={STATUS_TONE[e.status]}>{STATUS_LABEL[e.status]}</Badge>
+                        )}
+                      </div>
+                      <Button
+                        variant={variant}
+                        size="xs"
+                        aria-label={`${label} ${e.requestNo}`}
+                        onClick={() => onOpen(e)}
+                      >
+                        {label}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </article>
+            );
+          })
+        )}
+      </div>
+    );
+  }
+
   return (
     <Table>
       <TableHeader>
@@ -262,10 +339,10 @@ export function RequestTable({
               <input
                 type="checkbox"
                 className="size-4 cursor-pointer accent-brand"
-                aria-label="Select all you can approve"
+                aria-label="Select all waiting on you"
                 disabled={selectable.length === 0}
                 checked={allTicked}
-                onChange={() => selection.onChange(allTicked ? new Set() : new Set(selectable))}
+                onChange={tickAll}
               />
             </TableHead>
           ) : null}

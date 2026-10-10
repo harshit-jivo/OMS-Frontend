@@ -291,12 +291,55 @@ describe("Payments Approval", () => {
     it("says which were not approved, and why", async () => {
       const user = setup();
       await screen.findByRole("button", { name: /Review AP-2026-0014/ });
-      await user.click(screen.getByLabelText("Select all you can approve"));
+      await user.click(screen.getByLabelText("Select all waiting on you"));
       await user.click(screen.getByRole("button", { name: "Approve selected (3)" }));
       server.refuseNext = { status: 409, message: "Fill in the payment and bank details." };
       await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Approve 3" }));
       expect(await screen.findByText(/^Approved 2, not approved 1:/)).toBeTruthy();
       expect(screen.getByText("Fill in the payment and bank details.", { exact: false })).toBeTruthy();
+    });
+
+    it("offers reject beside approve, and rejects the ticked only with a reason", async () => {
+      const user = setup();
+      await screen.findByRole("button", { name: /Review AP-2026-0014/ });
+      await user.click(screen.getByLabelText("Select AP-2026-0012"));
+      await user.click(screen.getByLabelText("Select AP-2026-0014"));
+      const bar = screen.getByRole("region", { name: "Selected requests" });
+      expect(within(bar).getByRole("button", { name: "Approve selected (2)" })).toBeTruthy();
+      await user.click(within(bar).getByRole("button", { name: "Reject selected (2)" }));
+
+      const dialog = await screen.findByRole("dialog");
+      await user.click(within(dialog).getByRole("button", { name: "Reject 2" }));
+      expect(within(dialog).getByText("Say why, in the remarks.")).toBeTruthy();
+      expect(vi.mocked(advancePaymentService.act)).not.toHaveBeenCalled();
+
+      await user.type(within(dialog).getByLabelText(/^Remarks/), "Duplicate requests");
+      await user.click(within(dialog).getByRole("button", { name: "Reject 2" }));
+      expect(await screen.findByText(/^Rejected 2:/)).toBeTruthy();
+      const calls = vi.mocked(advancePaymentService.act).mock.calls;
+      expect(calls.map(([id, action, remarks]) => [id, action, remarks]).sort()).toEqual([
+        [12, "reject", "Duplicate requests"],
+        [14, "reject", "Duplicate requests"],
+      ]);
+      expect(screen.queryByRole("region", { name: "Selected requests" })).toBeNull();
+    });
+
+    it("lists the requests as cards on a phone, with the same ticks", async () => {
+      const wide = window.matchMedia;
+      window.matchMedia = ((query: string) => ({ ...wide(query), matches: query.includes("max-width") })) as typeof window.matchMedia;
+      try {
+        const user = setup();
+        await screen.findByRole("button", { name: /Review AP-2026-0014/ });
+        expect(screen.queryByRole("table")).toBeNull();
+        await user.click(screen.getByLabelText("Select all waiting on you"));
+        expect(
+          within(screen.getByRole("region", { name: "Selected requests" })).getByRole("button", {
+            name: "Approve selected (3)",
+          }),
+        ).toBeTruthy();
+      } finally {
+        window.matchMedia = wide;
+      }
     });
   });
 

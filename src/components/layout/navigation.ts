@@ -169,6 +169,7 @@ export const SIDEBAR_SECTIONS: SidebarSectionDef[] = [
       // does not submit yet (no create endpoint).
       { to: "/Advance_Payment_Request", label: "Payments", icon: HiOutlineBanknotes },
       { to: "/Advance_Payment_Approval", label: "Payments Approval", icon: HiOutlineCheckBadge },
+      { to: "/Advance_Payment_Register", label: "All Payment Requests", icon: HiOutlineQueueList },
       { to: "/Advance_Payment_Dispatch", label: "Send Bills & POs", icon: HiOutlinePaperAirplane },
     ],
   },
