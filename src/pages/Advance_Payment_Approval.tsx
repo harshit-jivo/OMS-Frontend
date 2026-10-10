@@ -32,7 +32,7 @@ import { HiOutlineArrowUturnLeft, HiOutlineCheckCircle, HiOutlineXCircle } from 
 
 import { showToast } from "../lib/toastStore";
 
-import { useAuth } from "../auth";
+import { useAuth, useCan } from "../auth";
 import { Badge } from "../components/ui/badge";
 import { Breadcrumbs } from "../components/ui/breadcrumbs";
 import { Button } from "../components/ui/button";
@@ -47,6 +47,7 @@ import {
   PageHeader,
   StatRow,
 } from "../components/ui/page";
+import { Tab, TabList } from "../components/ui/tabs";
 import {
   advancePaymentError,
   advancePaymentProblems,
@@ -82,6 +83,7 @@ import {
 import {
   DESK_STATUS_OPTIONS,
   MY_DECISION_LABEL,
+  NO_FILTERS,
   MY_DECISION_TONE,
   deskBucket,
   deskCounts,
@@ -89,12 +91,13 @@ import {
   formatDateTime,
   historySummary,
   reachedPayment,
+  requestCounts,
   showsBalance,
   statusSummary,
   type DeskFilter,
   type RequestFilterState,
 } from "./advancePayments/requestLabels";
-import { DeskKpis, RequestFilters, RequestTable } from "./advancePayments/RequestList";
+import { DeskKpis, RequestFilters, RequestKpis, RequestTable } from "./advancePayments/RequestList";
 import { RequestFilesProvider } from "./advancePayments/RequestFileLink";
 import { RequestHistory, RouteTimeline, SapPayment } from "./advancePayments/RequestProgress";
 import { editRows } from "./advancePayments/editChanges";
@@ -698,7 +701,50 @@ function DecisionCell({ entry }: { entry: AdvanceRequestEntry }) {
   );
 }
 
+/**
+ * Every request, read only — for holders of `Advance_Payment_View_All`, who
+ * follow the desks rather than sit at one. Opens the same review screen, whose
+ * buttons appear only for whoever may act.
+ */
+function AllRequests({ onOpen }: { onOpen: (id: number) => void }) {
+  const list = useRequestList("all");
+  const entries = useMemo(() => list.data ?? [], [list.data]);
+  const [filters, setFilters] = useState<RequestFilterState>(NO_FILTERS);
+  const counts = useMemo(
+    () => requestCounts(filterRequests(entries, { ...filters, status: "" })),
+    [entries, filters],
+  );
+  const shown = filterRequests(entries, filters);
+
+  return (
+    <>
+      {list.isError ? (
+        <Notice tone="bad" title="Could not load the requests">
+          {advancePaymentError(list.error)}
+        </Notice>
+      ) : null}
+      <StatRow>
+        <RequestKpis counts={counts} status={filters.status} onSelect={(status) => setFilters({ ...filters, status })} />
+      </StatRow>
+      <Card className="p-4 md:p-5">
+        <CardHeader>
+          <CardTitle>All Requests</CardTitle>
+          <RequestFilters value={filters} onChange={setFilters} />
+        </CardHeader>
+        <RequestTable
+          entries={shown}
+          onOpen={(e) => onOpen(e.serverId)}
+          action={() => ({ label: "View", variant: "secondary" })}
+          emptyText={list.isLoading ? "Loading…" : "No requests match these filters."}
+        />
+      </Card>
+    </>
+  );
+}
+
 export default function Advance_Payment_Approval() {
+  const canViewAll = useCan("Advance_Payment_View_All");
+  const [view, setView] = useState<"desk" | "all">("desk");
   const list = useRequestList("desk");
   // Waiting on you first, then newest first.
   const entries = useMemo(
@@ -766,6 +812,29 @@ export default function Advance_Payment_Approval() {
 
   if (openId !== null) return <ReviewRequest id={openId} onBack={() => setOpenId(null)} />;
 
+  // Only a holder of the view-all key has a second list to switch to.
+  const tabs = canViewAll ? (
+    <TabList label="Payments Approval">
+      <Tab selected={view === "desk"} onClick={() => setView("desk")}>
+        My Desk
+      </Tab>
+      <Tab selected={view === "all"} onClick={() => setView("all")}>
+        All Requests
+      </Tab>
+    </TabList>
+  ) : null;
+
+  if (canViewAll && view === "all") {
+    return (
+      <Page>
+        <Breadcrumbs items={[{ label: "Payments" }, { label: "Payments Approval" }, { label: "All Requests" }]} />
+        <PageHeader eyebrow="Payments" title="Payments Approval" description="Every payment request, read only." />
+        {tabs}
+        <AllRequests onOpen={setOpenId} />
+      </Page>
+    );
+  }
+
   return (
     <Page>
       <Breadcrumbs items={[{ label: "Payments" }, { label: "Payments Approval" }]} />
@@ -781,6 +850,8 @@ export default function Advance_Payment_Approval() {
           {advancePaymentError(list.error)}
         </Notice>
       ) : null}
+
+      {tabs}
 
       <StatRow>
         <DeskKpis

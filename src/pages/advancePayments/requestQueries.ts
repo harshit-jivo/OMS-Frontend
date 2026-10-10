@@ -21,11 +21,13 @@ export const requestKeys = {
   detail: (id: number) => ["advance-payments", "requests", "detail", id] as const,
 };
 
-export function useRequestList(scope: RequestScope) {
+/** `enabled: false` until the list is wanted — `all` is only read on its tab. */
+export function useRequestList(scope: RequestScope, { enabled = true }: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: requestKeys.list(scope),
     queryFn: async () => (await advancePaymentService.requests(scope)).map(fromApiRequest),
     staleTime: 15_000,
+    enabled,
   });
 }
 

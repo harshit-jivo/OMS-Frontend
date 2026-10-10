@@ -970,7 +970,8 @@ export interface ApiRequest extends ApiRequestFields {
   stages?: ApiStage[];
 }
 
-export type RequestScope = "mine" | "desk";
+/** `all`: every request, read only — `Advance_Payment_View_All`. */
+export type RequestScope = "mine" | "desk" | "all";
 export type StageAction = "approve" | "reject" | "return" | "send-back" | "cancel" | "resubmit";
 
 /** The problems a refused action lists, beside its message. */
@@ -1324,7 +1325,7 @@ export const advancePaymentService = {
   },
   /* ── Payment requests ─────────────────────────────────────────────── */
 
-  /** Your own requests (`mine`), or the approval desk's (`desk`), newest first. */
+  /** Your own requests (`mine`), the approval desk's (`desk`) or every one (`all`), newest first. */
   async requests(scope: RequestScope): Promise<ApiRequest[]> {
     const res = await api.get(`${BASE}/requests/`, { params: { scope } });
     return results<ApiRequest>(res.data);

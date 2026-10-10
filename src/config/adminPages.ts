@@ -77,6 +77,13 @@ export const GRANTABLE_ADMIN_PAGES: GrantablePage[] = [
     path: "/Advance_Payment_Approval",
   },
   // Send SAP bills and POs to Advance Payment Users and Approvers to raise requests from.
+  // Follow EVERY request on the approval desk (an All Requests tab), read
+  // only — a supervisor of the desks. Acting still needs the current stage.
+  {
+    key: "Advance_Payment_View_All",
+    label: "Payments — view all requests",
+    path: "/Advance_Payment_Approval",
+  },
   {
     key: "Advance_Payment_Dispatch",
     label: "Payments — send bills & POs to users",
