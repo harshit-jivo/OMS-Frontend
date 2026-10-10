@@ -67,6 +67,7 @@ import {
   useStoreRequest,
 } from "./advancePayments/requestQueries";
 import { formatINR, type RequestForm } from "./advancePayments/rules";
+import "./advancePayments/sapSkin.css";
 
 type PageTab = "entries" | "create" | "assigned";
 
@@ -105,7 +106,7 @@ function EntryDetails({ id, onBack }: { id: number; onBack: () => void }) {
   const entry = detail.data;
   if (!entry) {
     return (
-      <Page>
+      <Page className="sap-skin">
         <Breadcrumbs items={[{ label: "Payments", onClick: onBack }, { label: "Request" }]} />
         {detail.isError ? (
           <Notice tone="bad" title="Could not open the request">
@@ -171,7 +172,7 @@ function EntryDetails({ id, onBack }: { id: number; onBack: () => void }) {
 
   return (
     <RequestFilesProvider value={entry.serverId}>
-      <Page>
+      <Page className="sap-skin">
         <Breadcrumbs items={[{ label: "Payments", onClick: onBack }, { label: entry.requestNo }]} />
 
         <PageHeader
@@ -384,7 +385,7 @@ export default function Advance_Payment_Request() {
   };
 
   return (
-    <Page>
+    <Page className="sap-skin">
       <Breadcrumbs
         items={[
           { label: "Payments" },

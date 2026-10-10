@@ -64,16 +64,15 @@ import {
   type AdvanceRequestEntry,
 } from "./advancePayments/approvalData";
 import { CollapsibleCard } from "./advancePayments/CollapsibleCard";
+import "./advancePayments/sapSkin.css";
 import { ExpenseEditor } from "./advancePayments/ExpenseEditor";
 import { ManualAccountPassword } from "./advancePayments/ManualAccountPassword";
 import { PartnerBalance } from "./advancePayments/PartnerBalance";
-import { PartnerLedger } from "./advancePayments/PartnerLedger";
 import { PaymentProofPanel } from "./advancePayments/PaymentProofPanel";
 import { PayoutDetailsForm } from "./advancePayments/PayoutDetailsForm";
-import { PurchaseOrderDetails } from "./advancePayments/PurchaseOrderDetails";
 import { SapCheck } from "./advancePayments/SapCheck";
 import { VendorOnAccount } from "./advancePayments/VendorOnAccount";
-import { startPayout, validatePayout, type PayoutDetails } from "./advancePayments/payout";
+import { isBankAccountNumber, startPayout, validatePayout, type PayoutDetails } from "./advancePayments/payout";
 import {
   DocumentLines,
   ExpenseEditHistory,
@@ -156,7 +155,13 @@ function BankDetailFlags({ entry }: { entry: AdvanceRequestEntry }) {
     }),
   );
   const manual = entry.payout?.toAccountManual && entry.payout.toAccountNumber;
-  if (!manual && !changed) return null;
+  // From SAP, but not the usual 9-18 digits: a bank's special account, trusted
+  // as SAP holds it — and said, so every later stage checks it.
+  const unusual =
+    !manual && entry.payout?.toAccountNumber && !isBankAccountNumber(entry.payout.toAccountNumber)
+      ? entry.payout.toAccountNumber
+      : "";
+  if (!manual && !changed && !unusual) return null;
   const rows = changed
     ? editRows(changed.data).filter((r) => /Beneficiary|To account|IFSC|Account/.test(r.field))
     : [];
@@ -166,6 +171,12 @@ function BankDetailFlags({ entry }: { entry: AdvanceRequestEntry }) {
         <Notice tone="bad" title="Bank account entered manually">
           The payee's account was typed in by hand at Payment, not picked from SAP. Check it against
           the bank proof before approving.
+        </Notice>
+      ) : null}
+      {unusual ? (
+        <Notice tone="hold" title="Unusual account number">
+          SAP holds "{unusual}" for this payee — not the usual 9 to 18 digits. Check it with the vendor before
+          paying.
         </Notice>
       ) : null}
       {changed ? (
@@ -234,7 +245,7 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
 
   if (!entry) {
     return (
-      <Page>
+      <Page className="sap-skin">
         <Breadcrumbs
           items={[{ label: "Payments Approval", onClick: onBack }, { label: "Request" }]}
         />
@@ -384,7 +395,8 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
 
   return (
     <RequestFilesProvider value={entry.serverId}>
-      <Page>
+      {/* The SAP client's look, as the documents it opens have (sapSkin.css). */}
+      <Page className="sap-skin">
         <Breadcrumbs
           items={[{ label: "Payments Approval", onClick: onBack }, { label: entry.requestNo }]}
         />
@@ -461,7 +473,7 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
           <CardHeader>
             <CardTitle>Request Details</CardTitle>
           </CardHeader>
-          <RequestSummary entry={entry} />
+          <RequestSummary entry={entry} partnerLedger={showsBalance(entry)} />
           {/* From Payment on, never before: what the payment is weighed against. */}
           {showsBalance(entry) ? (
             <div className="mt-4 border-t border-line pt-4">
@@ -519,9 +531,6 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
           <SapCheck requestId={entry.serverId} />
         ) : null}
 
-        {/* Each PO in full from SAP, from Payment on: what the payment is weighed against. */}
-        {reachedPayment(entry) ? <PurchaseOrderDetails entry={entry} /> : null}
-
         {/* An advance against a PO: money the vendor's ledger shows already paid
           on account (possibly outside OMS), from Payment on. */}
         {reachedPayment(entry) &&
@@ -534,8 +543,6 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
           />
         ) : null}
 
-        {/* The payee's open ledger in SAP, from Payment on. */}
-        {showsBalance(entry) ? <PartnerLedger entry={entry} /> : null}
 
         {/* Account detail from here down: sent to Payment and later stages only. */}
         {can.see_account ? <BankDetailFlags entry={entry} /> : null}
@@ -882,7 +889,7 @@ export default function Advance_Payment_Approval() {
 
   if (canViewAll && view === "all") {
     return (
-      <Page>
+      <Page className="sap-skin">
         <Breadcrumbs items={[{ label: "Payments" }, { label: "Payments Approval" }, { label: "All Requests" }]} />
         <PageHeader eyebrow="Payments" title="Payments Approval" description="Every payment request, read only." />
         {tabs}
@@ -892,7 +899,7 @@ export default function Advance_Payment_Approval() {
   }
 
   return (
-    <Page>
+    <Page className="sap-skin">
       <Breadcrumbs items={[{ label: "Payments" }, { label: "Payments Approval" }]} />
 
       <PageHeader

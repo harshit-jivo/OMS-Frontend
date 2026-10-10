@@ -58,7 +58,6 @@ export function PartnerBalance({ entry }: { entry: AdvanceRequestEntry }) {
                 ? "Loading…"
                 : "Not found in SAP"
         }
-        hint={balance ? `${balance.meaning}, as SAP holds it now.` : undefined}
       />
     </DetailGrid>
   );

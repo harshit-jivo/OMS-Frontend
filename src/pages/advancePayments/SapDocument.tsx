@@ -273,7 +273,7 @@ function BillWindow({ company, docEntry }: { company: AdvancePaymentCompany; doc
       header={{
         left: (
           <>
-            <SapField label="Vendor" value={h.card_code} />
+            <SapField label="Vendor" value={<SapPartnerLink company={company} cardCode={h.card_code} name={h.card_code} />} />
             <SapField label="Name" value={h.card_name} />
             <SapField label="Vendor Ref. No." value={h.vendor_ref} />
             <SapField label="Payable Account" value={account(h.payable_account, h.payable_account_name)} />
@@ -391,7 +391,7 @@ function PoWindow({ company, docEntry }: { company: AdvancePaymentCompany; docEn
       header={{
         left: (
           <>
-            <SapField label="Vendor" value={h.card_code} />
+            <SapField label="Vendor" value={<SapPartnerLink company={company} cardCode={h.card_code} name={h.card_code} />} />
             <SapField label="Name" value={h.card_name} />
             <SapField label="Vendor Ref. No." value={h.vendor_ref} />
             <SapField label="Pay To" value={h.pay_to} />
@@ -510,7 +510,7 @@ function GrpoWindow({ company, docEntry }: { company: AdvancePaymentCompany; doc
       header={{
         left: (
           <>
-            <SapField label="Vendor" value={h.card_code} />
+            <SapField label="Vendor" value={<SapPartnerLink company={company} cardCode={h.card_code} name={h.card_code} />} />
             <SapField label="Name" value={h.card_name} />
             <SapField label="Vendor Ref. No." value={h.vendor_ref} />
             <SapField label="Branch" value={h.branch} />
@@ -713,6 +713,136 @@ function PaymentWindow({ company, docEntry }: { company: AdvancePaymentCompany; 
         />
       }
     />
+  );
+}
+
+/* ── Business Partner: the account (open items) ───────────────────────── */
+
+/** SAP object type of a ledger line -> the window that opens it, where there is one. */
+const LEDGER_WINDOW: Partial<Record<number, DocKind>> = { 18: "bill", 46: "payment", 22: "po", 20: "grpo" };
+
+function LedgerWindow({ company, cardCode, name }: { company: AdvancePaymentCompany; cardCode: string; name: string }) {
+  const query = useQuery({
+    queryKey: ["advance-payments", "partner-ledger", company, cardCode],
+    queryFn: () => advancePaymentService.partnerLedger(company, cardCode),
+    staleTime: 60_000,
+    retry: 1,
+  });
+  if (!query.data) return <Status query={query} />;
+  const { summary, results } = query.data;
+
+  return (
+    <SapWindow
+      header={{
+        left: (
+          <>
+            <SapField label="Code" value={cardCode} />
+            <SapField label="Name" value={name} />
+          </>
+        ),
+        right: (
+          <>
+            <SapField label="Open Items" value={String(summary.open_count)} />
+            <SapField label="Overdue" value={summary.overdue_count ? String(summary.overdue_count) : "None"} />
+          </>
+        ),
+      }}
+      tabs={[
+        {
+          id: "open",
+          label: "Open Items",
+          body: (
+            <SapGrid
+              label={`Open items of ${name}`}
+              columns={[
+                { head: "Document" },
+                { head: "No." },
+                { head: "Ref." },
+                { head: "Posting Date" },
+                { head: "Due Date" },
+                { head: "Overdue", right: true },
+                { head: "Debit", right: true },
+                { head: "Credit", right: true },
+              ]}
+              rows={results.map((row) => {
+                const kind = row.doc_type_code != null ? LEDGER_WINDOW[row.doc_type_code] : undefined;
+                const open = money(row.open_amount);
+                return [
+                  row.doc_type,
+                  kind && row.doc_entry != null ? (
+                    <SapDocLink company={company} kind={kind} docEntry={row.doc_entry} number={row.doc_num} />
+                  ) : (
+                    row.doc_num || "—"
+                  ),
+                  row.party_ref || "—",
+                  date(row.posting_date) || "—",
+                  date(row.due_date) || "—",
+                  (row.days_overdue ?? 0) > 0 ? (
+                    <span className="font-semibold text-danger">{row.days_overdue} d</span>
+                  ) : (
+                    "—"
+                  ),
+                  row.direction === "DEBIT" ? open : "",
+                  row.direction === "CREDIT" ? open : "",
+                ];
+              })}
+              empty="Nothing open in SAP."
+            />
+          ),
+        },
+      ]}
+      totals={
+        <SapTotals
+          rows={[
+            { label: "Open Debit", value: money(summary.open_debit) },
+            { label: "Open Credit", value: money(summary.open_credit) },
+            {
+              label: `Balance${summary.net_open_means ? ` (${summary.net_open_means})` : ""}`,
+              value: money(summary.net_open),
+              strong: true,
+            },
+          ]}
+        />
+      }
+    />
+  );
+}
+
+/** A business partner with SAP's golden arrow; the arrow opens their account. */
+export function SapPartnerLink({
+  company,
+  cardCode,
+  name,
+}: {
+  company: AdvancePaymentCompany;
+  cardCode: string;
+  name: string;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const shown = name || cardCode;
+  return (
+    <span className="inline-flex items-center gap-1">
+      <GoldenArrow label={`Open the ledger of ${shown}`} onClick={() => setOpen(true)} />
+      <span>{shown}</span>
+      {open ? (
+        <Dialog open onOpenChange={(next) => (next ? null : setOpen(false))}>
+          <DialogContent
+            title={`Business Partner ${shown}`}
+            description={`Open items in SAP, in ${company}.`}
+            size="xl"
+            className="max-w-[1080px] rounded-md"
+          >
+            <DialogHeader className={cn("gap-2 border-b bg-[#dfe4ea] px-3 py-1.5 pr-12", LINE)}>
+              <DialogTitle className="text-[13px] font-semibold">Business Partner — Account Balance</DialogTitle>
+              <span className="text-[11px] text-subtle">{company}</span>
+            </DialogHeader>
+            <DialogBody className="p-0">
+              <LedgerWindow company={company} cardCode={cardCode} name={name || cardCode} />
+            </DialogBody>
+          </DialogContent>
+        </Dialog>
+      ) : null}
+    </span>
   );
 }
 

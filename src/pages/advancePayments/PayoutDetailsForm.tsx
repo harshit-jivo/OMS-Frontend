@@ -56,6 +56,7 @@ import {
   SAP_PAYMENT_MODES,
   autoSapPaymentMode,
   type SapPaymentMode,
+  ifscProblem,
   isBankAccountNumber,
 } from "./payout";
 import { RequestFileName } from "./RequestFileLink";
@@ -526,7 +527,7 @@ function PayToAccount({
   // (a short code, a name): say so where it is picked, not only on save.
   const badSapNumber = !typing && chosen && !isBankAccountNumber(chosen.account_number);
   const guide = badSapNumber
-    ? `SAP's account number for this payee, "${chosen.account_number}", is not a bank account number (9 to 18 digits). Correct it in SAP's Business Partner master, or type the right one by hand.`
+    ? `SAP holds "${chosen.account_number}" for this payee — not the usual 9 to 18 digits. Check it with the vendor before paying.`
     : !lookedUp
     ? "Employee accounts are not held in SAP. Type the payee's details."
     : loading
@@ -600,7 +601,11 @@ function PayToAccount({
       <Field
         label="IFSC"
         required
-        hint={chosen && !chosen.ifsc_valid ? "SAP's IFSC for this account does not look valid." : undefined}
+        hint={
+          chosen && !chosen.ifsc_valid
+            ? `SAP's IFSC: ${ifscProblem(chosen.ifsc) ?? "does not look valid."} Correct it in SAP's Business Partner master, or type the right one by hand.`
+            : undefined
+        }
       >
         {(f) => (
           <Input

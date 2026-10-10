@@ -742,10 +742,10 @@ describe("Advance Payment Request", () => {
       await pick(user, /^Business Partner/, /XYZ Traders/);
       await waitForPos();
       // Nothing until a PO is chosen: the ledger is weighed against POs.
-      expect(screen.queryByText(/paid but not yet adjusted/)).toBeNull();
+      expect(screen.queryByText(/not yet adjusted against a bill/)).toBeNull();
       await tick(user, /^Purchase Orders/, /4512/);
 
-      const notice = await screen.findByText(/paid but not yet adjusted/);
+      const notice = await screen.findByText(/not yet adjusted against a bill/);
       expect(service.vendorOnAccount).toHaveBeenCalledWith("OIL", "VENDA000102", [expect.any(Number)]);
       expect(notice.closest("[data-slot='vendor-on-account']")?.textContent).toMatch(
         /Outgoing Payment 1026466574.*paid outside OMS/,
@@ -770,7 +770,7 @@ describe("Advance Payment Request", () => {
       await waitForPos();
       await tick(user, /^Purchase Orders/, /4512/);
       await vi.waitFor(() => expect(service.vendorOnAccount).toHaveBeenCalled());
-      expect(screen.queryByText(/paid but not yet adjusted/)).toBeNull();
+      expect(screen.queryByText(/not yet adjusted against a bill/)).toBeNull();
     });
 
     it("will not take a percentage above 100", async () => {

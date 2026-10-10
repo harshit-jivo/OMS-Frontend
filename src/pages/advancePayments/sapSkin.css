@@ -1,0 +1,248 @@
+/*
+ * The SAP Business One look, for the payment desk's review screen.
+ *
+ * Dense the way the SAP client is: small type, label beside a boxed field,
+ * thin grey rules, flat cards, grey grid heads, a pale-yellow row hover. The
+ * same palette as the SAP document windows (`SapDocument.tsx`), so the screen
+ * and the documents it opens read as one application.
+ *
+ * Scoped to `.sap-skin` and keyed on the UI kit's `data-slot` names, so it
+ * restyles every card, field, grid and form on the screen without touching a
+ * component — and nothing outside it. UNLAYERED on purpose: Tailwind's
+ * utilities live in a cascade layer, and unlayered rules beat layered ones
+ * whatever their specificity, so no `!important` is needed.
+ */
+
+.sap-skin {
+  --sap-line: #c4c9d0;
+  --sap-rule: #e1e4e9;
+  --sap-head: #e4e8ee;
+  --sap-label: #4a5361;
+  --sap-ground: #eef1f5;
+  background: var(--sap-ground);
+  gap: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+/* ── The page header: SAP's title bar ─────────────────────────────────── */
+.sap-skin [data-slot="page-header"] {
+  border: 1px solid var(--sap-line);
+  border-radius: 2px;
+  background: #dfe4ea;
+  padding: 4px 8px;
+  box-shadow: none;
+  gap: 4px;
+}
+.sap-skin [data-slot="page-header"] h1,
+.sap-skin [data-slot="page-header"] h2 {
+  font-size: 14px;
+  line-height: 1.3;
+}
+.sap-skin [data-slot="page-header"] p {
+  font-size: 11px;
+  margin: 0;
+}
+
+/* ── Cards: flat panels with a thin rule ──────────────────────────────── */
+.sap-skin [data-slot="card"] {
+  border: 1px solid var(--sap-line);
+  border-radius: 2px;
+  box-shadow: none;
+  background: #fff;
+  padding: 6px 8px;
+}
+.sap-skin [data-slot="card"].p-0 {
+  padding: 0;
+}
+.sap-skin [data-slot="card-header"] {
+  margin: 0 0 4px;
+  padding: 0;
+  min-height: 0;
+  gap: 6px;
+}
+.sap-skin [data-slot="card-title"] {
+  font-size: 12px;
+  font-weight: 600;
+}
+/* A collapsible card's bar (Status, History, the ledger, a PO). */
+.sap-skin [data-slot="card"] details > summary {
+  padding: 3px 8px;
+  min-height: 0;
+}
+.sap-skin [data-slot="card"] details > summary h2 {
+  font-size: 12px;
+}
+.sap-skin [data-slot="card"] details > summary span {
+  font-size: 11px;
+}
+.sap-skin [data-slot="card"] details > div {
+  padding: 6px 8px;
+}
+
+/* ── Header fields: a label beside a boxed value, as SAP lays them ───── */
+.sap-skin [data-slot="detail-grid"] {
+  gap: 3px 16px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+.sap-skin [data-slot="detail-field"] {
+  display: grid;
+  grid-template-columns: 8rem minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+}
+.sap-skin [data-slot="detail-field"] > dt {
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--sap-label);
+}
+/* A field's hint (a partner's code) under its own box, not a row of its own. */
+.sap-skin [data-slot="detail-field"] > p {
+  grid-column: 2;
+  margin: -1px 0 0;
+  font-size: 10.5px;
+  line-height: 13px;
+  color: var(--sap-label);
+}
+.sap-skin [data-slot="detail-field"] > dd {
+  margin: 0;
+  min-height: 20px;
+  border: 1px solid var(--sap-line);
+  border-radius: 2px;
+  background: #fff;
+  padding: 1px 6px;
+  font-size: 11.5px;
+  line-height: 16px;
+}
+
+/* ── Grids: SAP's matrix ──────────────────────────────────────────────── */
+.sap-skin [data-slot="table-container"] {
+  border: 1px solid var(--sap-line);
+  border-radius: 0;
+}
+.sap-skin [data-slot="table"] {
+  font-size: 11.5px;
+}
+.sap-skin [data-slot="table-head"] {
+  height: auto;
+  padding: 3px 6px;
+  background: var(--sap-head);
+  border-left: 1px solid var(--sap-line);
+  color: var(--sap-label);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.sap-skin [data-slot="table-cell"] {
+  padding: 2px 6px;
+  font-size: 11.5px;
+  border-left: 1px solid var(--sap-rule);
+}
+.sap-skin [data-slot="table-head"]:first-child,
+.sap-skin [data-slot="table-cell"]:first-child {
+  border-left: 0;
+}
+.sap-skin [data-slot="table-row"] {
+  border-bottom: 1px solid var(--sap-rule);
+}
+.sap-skin [data-slot="table-body"] [data-slot="table-row"]:hover {
+  background: #fff7dd;
+}
+
+/* ── Forms (Payment & Bank Details): compact boxed controls ───────────── */
+.sap-skin [data-slot="form-grid"] {
+  gap: 4px 16px;
+}
+.sap-skin [data-slot="field"] {
+  gap: 2px;
+}
+.sap-skin [data-slot="field"] label {
+  font-size: 11px;
+  color: var(--sap-label);
+}
+.sap-skin [data-slot="input"],
+.sap-skin [data-slot="select"],
+.sap-skin [data-slot="textarea"] {
+  min-height: 22px;
+  height: auto;
+  /* Top and bottom only: the sides are the control's own — a ₹ prefix or a
+     unit suffix sits in that space, and taking it put the ₹ over the digits. */
+  padding-top: 1px;
+  padding-bottom: 1px;
+  border: 1px solid var(--sap-line);
+  border-radius: 2px;
+  font-size: 11.5px;
+  box-shadow: none;
+}
+/* SAP's amount fields have no spinner arrows. */
+.sap-skin input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+.sap-skin input[type="number"]::-webkit-outer-spin-button,
+.sap-skin input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* ── Notices, badges, buttons, tabs: small and flat ───────────────────── */
+.sap-skin [data-slot="notice"] {
+  padding: 4px 8px;
+  border-radius: 2px;
+  font-size: 11.5px;
+}
+.sap-skin [data-slot="badge"] {
+  padding: 0 6px;
+  border-radius: 2px;
+  font-size: 10.5px;
+  line-height: 16px;
+}
+.sap-skin [data-slot="button"] {
+  min-height: 22px;
+  height: auto;
+  padding: 2px 10px;
+  border-radius: 2px;
+  font-size: 11.5px;
+}
+.sap-skin [data-slot="tab"] {
+  padding: 3px 10px;
+  font-size: 11.5px;
+}
+.sap-skin [data-slot="stat"] {
+  padding: 4px 8px;
+  border-radius: 2px;
+}
+
+/* ── The request's attachments: a field row like the others ───────────── */
+.sap-skin [data-slot="request-attachments"] {
+  display: grid;
+  grid-template-columns: 8rem minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+}
+.sap-skin [data-slot="request-attachments"] > p {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--sap-label);
+}
+.sap-skin [data-slot="request-attachments"] ul {
+  gap: 4px;
+}
+.sap-skin [data-slot="request-attachments"] li {
+  padding: 1px 6px;
+  border-color: var(--sap-line);
+  border-radius: 2px;
+  background: #fff;
+  font-size: 11.5px;
+}
+.sap-skin [data-slot="request-attachments"] li svg {
+  width: 13px;
+  height: 13px;
+}

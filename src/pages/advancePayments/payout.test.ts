@@ -140,7 +140,7 @@ describe("what stops an approval", () => {
 
   it("checks the account number and IFSC formats", () => {
     const { problems } = validatePayout(
-      { ...complete([upi("100")]), toAccountNumber: "1234", toIfsc: "HDFC1234" },
+      { ...complete([upi("100")]), toAccountNumber: "1234", toAccountManual: true, toIfsc: "HDFC1234" },
       100,
     );
     expect(problems).toEqual(
@@ -149,6 +149,15 @@ describe("what stops an approval", () => {
         expect.stringMatching(/^IFSC must look like/),
       ]),
     );
+  });
+
+  it("trusts a special account SAP holds, but not one typed by hand (AP-2026-0054)", () => {
+    const fromSap = (toAccountNumber: string) =>
+      validatePayout({ ...complete([upi("100")]), toAccountNumber, toAccountManual: false }, 100).problems;
+    expect(fromSap("DIL957")).toEqual([]);
+    expect(fromSap("D9")).toEqual(["To Account Number must be the payee's SAP account: 3 to 34 letters and digits."]);
+    const typed = validatePayout({ ...complete([upi("100")]), toAccountNumber: "DIL957", toAccountManual: true }, 100);
+    expect(typed.problems).toContain("To Account Number must be 9 to 18 digits.");
   });
 
   it("asks a cheque for its number and date", () => {
@@ -257,5 +266,16 @@ describe("isBankAccountNumber", () => {
     expect(isBankAccountNumber("50100123456789")).toBe(true);
     expect(isBankAccountNumber(" 123456789 ")).toBe(true);
     expect(isBankAccountNumber("12345678")).toBe(false);
+  });
+});
+
+describe("ifscProblem", () => {
+  it("says why SAP's IFSC is wrong, and the likely fix (AP-2026-0041)", async () => {
+    const { ifscProblem } = await import("./payout");
+    expect(ifscProblem("ICICI0004020")).toBe(
+      '"ICICI0004020" is not a valid IFSC (12 characters; an IFSC is 11 characters: a 4-letter bank code, 0, then a 6-character branch code). Probably ICIC0004020.',
+    );
+    expect(ifscProblem("ICIC0004020")).toBeNull();
+    expect(ifscProblem("HDFC000037")).toMatch(/10 characters/);
   });
 });

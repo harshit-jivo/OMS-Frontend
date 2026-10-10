@@ -32,6 +32,7 @@ import {
 import { COMPANIES } from "./advancePayments/constants";
 import { formatDateTime } from "./advancePayments/requestLabels";
 import { formatDate, formatINR } from "./advancePayments/rules";
+import "./advancePayments/sapSkin.css";
 
 type Kind = "BILL" | "PO";
 type PageTab = "send" | "sent";
@@ -487,7 +488,7 @@ export default function Advance_Payment_Dispatch() {
   const [notice, setNotice] = useState("");
   const crumbs = useMemo(() => [{ label: "Payments" }, { label: "Send Bills & POs" }], []);
   return (
-    <Page>
+    <Page className="sap-skin">
       <Breadcrumbs items={crumbs} />
       <PageHeader
         eyebrow="Payments"

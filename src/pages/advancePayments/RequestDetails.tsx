@@ -23,13 +23,13 @@ import {
   typeLabel,
   type AdvanceRequestEntry,
 } from "./approvalData";
+import type { AdvancePaymentCompany } from "../../services/advancePaymentService";
 import { monthLabel } from "./expenseLookups";
 import { Badge } from "../../components/ui/badge";
 import { AttachmentReadingTable } from "./AttachmentReading";
 import { formatSize } from "./attachments";
 import { GST_OPTIONS, PAYMENT_MODES } from "./constants";
-import { BillBreakdown } from "./BillBreakdown";
-import { SapDocLink } from "./SapDocument";
+import { SapDocLink, SapPartnerLink } from "./SapDocument";
 import { DocumentHistory } from "./DocumentHistory";
 import { SapAttachmentLink, SapAttachmentList } from "./SapAttachmentLink";
 import { historyTargetOf, sapDocumentOf } from "./sapMapping";
@@ -54,7 +54,14 @@ import {
   resolveCase,
 } from "./rules";
 
-export function RequestSummary({ entry }: { entry: AdvanceRequestEntry }) {
+export function RequestSummary({
+  entry,
+  partnerLedger = false,
+}: {
+  entry: AdvanceRequestEntry;
+  /** The business partner with SAP's golden arrow to their ledger — the desk, from Payment on. */
+  partnerLedger?: boolean;
+}) {
   const { form } = entry;
   const c = resolveCase(form);
   const emi = c.installments && form.emiAmount ? Number(form.emiAmount) : null;
@@ -84,7 +91,17 @@ export function RequestSummary({ entry }: { entry: AdvanceRequestEntry }) {
         ) : (
           <DetailField
             label={c.partnerLabel}
-            value={form.partnerName || form.partner}
+            value={
+              partnerLedger && form.company && form.partner ? (
+                <SapPartnerLink
+                  company={form.company as AdvancePaymentCompany}
+                  cardCode={form.partner}
+                  name={form.partnerName || form.partner}
+                />
+              ) : (
+                form.partnerName || form.partner
+              )
+            }
             hint={form.partnerName ? form.partner : undefined}
           />
         )}
@@ -154,7 +171,7 @@ export function RequestSummary({ entry }: { entry: AdvanceRequestEntry }) {
         <DetailField label="Remarks" value={form.remarks} span="full" />
       </DetailGrid>
 
-      <div>
+      <div data-slot="request-attachments">
         <p className="m-0 mb-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-subtle">
           Attachments
         </p>
@@ -313,7 +330,11 @@ export function DocumentLines({
 }: {
   entry: AdvanceRequestEntry;
   showReading?: boolean;
-  /** Each bill's A/P breakdown from SAP — the desk, from the Payment stage on. */
+  /**
+   * The desk, from the Payment stage on: each document number carries SAP's
+   * golden arrow, and its attachments, taxes and G/L are inside the window it
+   * opens — not repeated on the page.
+   */
   showBreakdown?: boolean;
 }) {
   const c = resolveCase(entry.form);
@@ -328,9 +349,7 @@ export function DocumentLines({
         <CardTitle>
           {def.pluralLabel} &amp; Amounts ({rows.length})
         </CardTitle>
-        <span className={c.liveDocuments ? "text-[12px] font-medium text-ok" : "text-[12px] font-medium text-hold"}>
-          {c.liveDocuments ? "From SAP" : "Sample data"}
-        </span>
+        {c.liveDocuments ? null : <span className="text-[12px] font-medium text-hold">Sample data</span>}
       </CardHeader>
       <Table>
         <TableHeader>
@@ -369,7 +388,8 @@ export function DocumentLines({
                     <Badge tone="bad">{dueLabel(doc)}</Badge>
                   </span>
                 ) : null}
-                {doc.attachment ? (
+                {/* With the golden arrow, the attachments are inside the document's window. */}
+                {doc.attachment && !(showBreakdown && source) ? (
                   <span className="block text-[12px] font-normal">
                     <SapAttachmentLink attachment={doc.attachment} compact />
                   </span>
@@ -389,24 +409,13 @@ export function DocumentLines({
                 {calc.payment !== null ? `${debit ? "− " : ""}${formatINR(calc.payment)}` : "—"}
               </TableCell>
             </TableRow>
-            {source ? (
+            {source && !showBreakdown ? (
               <TableRow className="hover:bg-transparent">
                 <TableCell colSpan={7}>
                   <p className="m-0 mb-1.5 text-[11.5px] font-semibold uppercase tracking-[0.06em] text-subtle">
                     {doc.number}&apos;s SAP attachments
                   </p>
                   <SapAttachmentList {...source} />
-                </TableCell>
-              </TableRow>
-            ) : null}
-            {showBreakdown && source?.kind === "bill" ? (
-              <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={7}>
-                  <BillBreakdown
-                    company={source.company}
-                    docEntry={source.docEntry}
-                    label={`${doc.number}: taxable, GST, TDS, net and G/L in SAP`}
-                  />
                 </TableCell>
               </TableRow>
             ) : null}

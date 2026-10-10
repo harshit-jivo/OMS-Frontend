@@ -378,7 +378,6 @@ describe("Payments Approval", () => {
     const user = setup();
     await review(user, "AP-2026-0014"); // at Payment: ABC Technologies, OIL
     expect(await screen.findByText("₹6,89,875 Cr")).toBeTruthy();
-    expect(screen.getByText("Payable to the vendor, as SAP holds it now.")).toBeTruthy();
     // Read fresh for exactly this vendor.
     expect(advancePaymentService.vendors).toHaveBeenCalledWith("OIL", "VENDA000101", 50);
   });
@@ -421,9 +420,11 @@ describe("Payments Approval", () => {
   it("at Payment, shows the vendor's open ledger from SAP", async () => {
     const user = setup();
     await review(user, "AP-2026-0014");
-    const ledger = await screen.findByRole("table", { name: "Open ledger items" });
-    expect(within(ledger).getByText("A/P Invoice 10256")).toBeTruthy();
-    expect(within(ledger).getByText("20 days overdue")).toBeTruthy();
+    // As in SAP: the business partner's golden arrow opens their account.
+    await user.click(screen.getByRole("button", { name: /^Open the ledger of / }));
+    const ledger = await within(await screen.findByRole("dialog")).findByRole("table", { name: /^Open items of / });
+    expect(within(ledger).getByText("10256")).toBeTruthy();
+    expect(within(ledger).getByText("20 d")).toBeTruthy();
     expect(advancePaymentService.partnerLedger).toHaveBeenCalledWith("OIL", "VENDA000101");
   });
 
@@ -435,7 +436,10 @@ describe("Payments Approval", () => {
     const user = setup();
     await review(user, "AP-2026-0018");
     expect(await screen.findByText("Current Balance")).toBeTruthy();
-    expect(screen.getByRole("heading", { name: /Ledger in SAP/ })).toBeTruthy();
+    // Read when its golden arrow is followed, as SAP opens the account.
+    expect(advancePaymentService.partnerLedger).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Open the ledger of RAHUL SHARMA IMPREST JWPL0901" }));
+    expect(await screen.findByRole("dialog")).toBeTruthy();
     expect(advancePaymentService.partnerLedger).toHaveBeenCalledWith("MART", "ORGV000901");
   });
 
@@ -447,7 +451,7 @@ describe("Payments Approval", () => {
     const user = setup();
     await review(user, "AP-2026-0018");
     expect(screen.queryByText("Current Balance")).toBeNull();
-    expect(screen.queryByRole("heading", { name: /Ledger in SAP/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Open the ledger of / })).toBeNull();
     expect(advancePaymentService.partnerLedger).not.toHaveBeenCalled();
   });
 

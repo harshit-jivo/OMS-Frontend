@@ -57,11 +57,9 @@ export function VendorOnAccount({
   const outside = Number(query.data.outside_oms);
   return (
     <Notice tone="hold" title="Already paid on account" data-slot="vendor-on-account">
-      This vendor&apos;s SAP ledger holds {formatINR(Number(query.data.total_open))} paid but not yet adjusted
-      against a bill
-      {outside > 0 ? <>, {formatINR(outside)} of it paid outside OMS</> : null}. SAP does not say which PO it
-      was for, so it is <strong>not</strong> taken off the amounts below — check it is not an advance for this
-      PO before paying again.
+      {formatINR(Number(query.data.total_open))} on the vendor&apos;s ledger, not yet adjusted against a bill
+      {outside > 0 ? <> ({formatINR(outside)} paid outside OMS)</> : null}. Check it is not an advance for this
+      PO.
       <ul className="m-0 mt-2 list-none space-y-0.5 p-0 text-[12.5px]">
         {rows.map((row) => (
           <li key={`${row.trans_id}-${row.line_id}`}>
