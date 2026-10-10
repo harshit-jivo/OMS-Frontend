@@ -11,6 +11,10 @@ export interface FileAttachment {
   file?: File;
   /** Held by the server: `advance_payment_request_file.id`. */
   serverId?: number;
+  /** Where it stands on its way to SAP; absent until the server has tried. */
+  sap?: "IN_SAP" | "ON_SHARE" | "NOT_SHARED";
+  /** Why it is not on the SAP share. */
+  sapError?: string;
 }
 
 /** A newly chosen file, as the lists hold it. */

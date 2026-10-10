@@ -167,6 +167,15 @@ export function RequestSummary({ entry }: { entry: AdvanceRequestEntry }) {
                 <HiOutlineDocumentText className="size-4 text-subtle" aria-hidden="true" />
                 <RequestFileName file={f} />
                 <span className="text-[11px] text-subtle">{formatSize(f.size)}</span>
+                {f.sap === "IN_SAP" ? (
+                  <Badge tone="ok">In SAP</Badge>
+                ) : f.sap === "ON_SHARE" ? (
+                  <Badge tone="info">On SAP share</Badge>
+                ) : f.sap === "NOT_SHARED" ? (
+                  <span title={f.sapError}>
+                    <Badge tone="bad">Not on SAP share</Badge>
+                  </span>
+                ) : null}
               </li>
             ))}
           </ul>

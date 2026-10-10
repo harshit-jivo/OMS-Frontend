@@ -10,13 +10,23 @@
  * All three read the server's record (`entry.api`); nothing here decides
  * anything.
  */
+import { useState } from "react";
+
+import { showToast } from "../../lib/toastStore";
 import { Badge, type BadgeTone } from "../../components/ui/badge";
+import { Button } from "../../components/ui/button";
 import { DetailField, DetailGrid } from "../../components/ui/detail";
 import { Timeline, TimelineItem } from "../../components/ui/timeline";
-import type { ApiRequestLog, ApiStage } from "../../services/advancePaymentService";
+import {
+  advancePaymentError,
+  advancePaymentService,
+  type ApiRequestLog,
+  type ApiStage,
+} from "../../services/advancePaymentService";
 import type { AdvanceRequestEntry } from "./approvalData";
 import { editRows } from "./editChanges";
 import { formatDateTime } from "./requestLabels";
+import { useStoreRequest } from "./requestQueries";
 
 const STAGE_STATE: Record<string, { label: string; tone: BadgeTone }> = {
   CURRENT: { label: "Waiting", tone: "hold" },
@@ -86,10 +96,57 @@ export function SapPayment({ entry }: { entry: AdvanceRequestEntry }) {
           />
         </>
       ) : null}
+      {live ? <SapFiles entry={entry} /> : null}
       {lastFailedIsLatest ? (
         <DetailField label="Last posting attempt failed" value={failed.error} span="full" />
       ) : null}
     </DetailGrid>
+  );
+}
+
+/**
+ * The request's files on the posted payment in SAP: attached, or why not —
+ * and, for whoever records the payment, a button to attach what SAP lacks
+ * (all of them when posting could not, or files added since).
+ */
+function SapFiles({ entry }: { entry: AdvanceRequestEntry }) {
+  const store = useStoreRequest();
+  const [busy, setBusy] = useState(false);
+  const live = entry.api.voucher;
+  if (!live) return null;
+  const files = entry.api.files ?? [];
+  const missing = files.filter((f) => !f.in_sap).length;
+  const value = live.attachment_entry
+    ? `Attached (SAP attachment ${live.attachment_entry})${missing ? ` · ${missing} not yet` : ""}`
+    : files.length
+      ? live.attachment_error || "Not attached"
+      : "No files";
+  const attach = async () => {
+    setBusy(true);
+    try {
+      store(await advancePaymentService.attachToSap(entry.serverId));
+      showToast({ title: "Files attached in SAP", message: entry.requestNo, tone: "ok" });
+    } catch (err) {
+      showToast({ title: "Could not attach the files", message: advancePaymentError(err), tone: "bad" });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <DetailField
+      label="Files in SAP"
+      span="full"
+      value={
+        <span className="flex flex-wrap items-center gap-2">
+          <span>{value}</span>
+          {entry.api.can.attach_to_sap && missing ? (
+            <Button variant="secondary" size="xs" onClick={() => void attach()} disabled={busy}>
+              {busy ? "Attaching…" : "Attach to SAP"}
+            </Button>
+          ) : null}
+        </span>
+      }
+    />
   );
 }
 
@@ -103,6 +160,9 @@ function logDetail(log: ApiRequestLog): string {
   if (log.action === "UTR_RECORDED") return `UTR ${String(data.utr ?? "")} · ${String(data.method ?? "")} ${String(data.amount ?? "")}`;
   if (log.action === "PARTNER_LINKED") return `Linked to ${String(data.account ?? data.new ?? "")}`;
   if (log.action === "FILE_ADDED" || log.action === "FILE_REMOVED") return String(data.file ?? "");
+  if (log.action === "SAP_ATTACHED") {
+    return `${(data.files as string[] | undefined)?.join(", ") ?? ""} · SAP attachment ${String(data.attachment ?? "")}`;
+  }
   return "";
 }
 

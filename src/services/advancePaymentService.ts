@@ -689,6 +689,12 @@ export interface ApiRequestFile {
   payout_line_id: number | null;
   uploaded_by: ApiUser | null;
   uploaded_on: string | null;
+  /** On the company's SAP attachments share (the file upload service). */
+  on_sap_share?: boolean;
+  /** Why it is not on the share, when putting it there failed. */
+  share_error?: string;
+  /** Attached to the request's SAP outgoing payment. */
+  in_sap?: boolean;
 }
 
 export interface ApiPayoutLine {
@@ -741,6 +747,9 @@ export interface ApiVoucher {
   posted_on: string | null;
   cancelled_by: ApiUser | null;
   cancelled_on: string | null;
+  /** The request's files as a SAP attachment on this payment, or why they are not. */
+  attachment_entry?: number | null;
+  attachment_error?: string;
 }
 
 export interface ApiRequestLog {
@@ -782,6 +791,8 @@ export interface RequestAbilities {
   send_back: boolean;
   edit_payout: boolean;
   record_utr: boolean;
+  /** After posting: attach to the SAP payment the files SAP does not have yet. */
+  attach_to_sap?: boolean;
   /**
    * The payee's account — payment details, proofs, their change log, the SAP
    * balance and ledger — is sent to Payment and later stages only.
@@ -1440,6 +1451,12 @@ export const advancePaymentService = {
     const res = await api.post(`${BASE}/requests/${id}/files/`, body, {
       headers: { "Content-Type": "multipart/form-data" },
     });
+    return unwrap<ApiRequest>(res.data);
+  },
+
+  /** Attach to the posted SAP payment the request's files SAP does not have yet. */
+  async attachToSap(id: number): Promise<ApiRequest> {
+    const res = await api.post(`${BASE}/requests/${id}/sap-attachments/`);
     return unwrap<ApiRequest>(res.data);
   },
 
