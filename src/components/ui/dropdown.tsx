@@ -189,6 +189,7 @@ export function MultiSelect<T extends string | number>({
   size = "md",
   className,
   onSearch,
+  multiline = false,
 }: {
   id?: string;
   value: T[];
@@ -200,6 +201,12 @@ export function MultiSelect<T extends string | number>({
    * and passes it back in `options`.
    */
   onSearch?: (term: string) => void;
+  /**
+   * Let the closed box grow and wrap, so every chosen label stays readable on
+   * a narrow screen — as `SearchSelect`'s `multiline`. Bill numbers are what
+   * the user is checking; "62609…" is not.
+   */
+  multiline?: boolean;
   placeholder?: string;
   /** Offer a "Select all" row above the options. */
   selectAll?: boolean;
@@ -311,9 +318,16 @@ export function MultiSelect<T extends string | number>({
         aria-expanded={open}
         disabled={disabled}
         onClick={() => setOpen((current) => !current)}
-        className={triggerClass(size, open)}
+        className={triggerClass(size, open, multiline)}
       >
-        <span className={cn("truncate", value.length === 0 && "text-subtle")}>{summary}</span>
+        <span
+          className={cn(
+            multiline ? "min-w-0 whitespace-normal break-words" : "truncate",
+            value.length === 0 && "text-subtle",
+          )}
+        >
+          {summary}
+        </span>
         <HiOutlineChevronDown
           aria-hidden="true"
           className={cn("size-3.5 shrink-0 text-subtle transition-transform", open && "rotate-180")}
@@ -359,7 +373,7 @@ export function MultiSelect<T extends string | number>({
               shown.map((option) => (
                 <label
                   key={String(option.value)}
-                  className="flex cursor-pointer items-center gap-2.5 rounded-sm px-2.5 py-1.5 text-[12.5px] text-body hover:bg-surface"
+                  className="flex cursor-pointer flex-wrap items-center gap-x-2.5 gap-y-0.5 rounded-sm px-2.5 py-1.5 text-[12.5px] text-body hover:bg-surface"
                 >
                   <input
                     type="checkbox"
@@ -367,14 +381,14 @@ export function MultiSelect<T extends string | number>({
                     checked={value.includes(option.value)}
                     onChange={() => toggle(option.value)}
                   />
-                  <span className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate">{option.label}</span>
+                  <span className="flex min-w-[9rem] flex-1 flex-col">
+                    <span className="break-words font-medium">{option.label}</span>
                     {option.hint ? (
-                      <span className="truncate text-[11px] text-subtle">{option.hint}</span>
+                      <span className="break-words text-[11px] text-subtle">{option.hint}</span>
                     ) : null}
                   </span>
                   {option.meta !== undefined ? (
-                    <span className="shrink-0 text-[11.5px] tabular-nums text-subtle">
+                    <span className="ml-auto text-[11.5px] tabular-nums text-subtle">
                       {option.meta}
                     </span>
                   ) : null}

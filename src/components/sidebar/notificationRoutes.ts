@@ -15,6 +15,11 @@ const ROUTES: Record<string, string> = {
   CREDIT_LIMIT_AWAITING_APPROVAL: "/Credit_Limit_Approval",
   CREDIT_LIMIT_APPROVED: "/Credit_Limit",
   CREDIT_LIMIT_REJECTED: "/Credit_Limit",
+  ADVANCE_PAYMENT_AWAITING_APPROVAL: "/Advance_Payment_Approval",
+  ADVANCE_PAYMENT_COMPLETED: "/Advance_Payment_Request",
+  ADVANCE_PAYMENT_REJECTED: "/Advance_Payment_Request",
+  ADVANCE_PAYMENT_RETURNED: "/Advance_Payment_Request",
+  ADVANCE_PAYMENT_ASSIGNED: "/Advance_Payment_Request",
 };
 
 /** `"/Credit_Limit?request=12"`, `"/Credit_Limit_Approval"`, or null. */

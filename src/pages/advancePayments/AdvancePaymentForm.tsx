@@ -28,6 +28,8 @@
  */
 import * as React from "react";
 import { useEffect, useRef, useState } from "react";
+
+import { showToast } from "@/lib/toastStore";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
   HiOutlineArrowUpTray,
@@ -100,6 +102,7 @@ import {
 } from "./sapMapping";
 import { attachFile, formatSize, type FileAttachment } from "./attachments";
 import { VendorOnAccount } from "./VendorOnAccount";
+import { SapPartnerLink } from "./SapDocument";
 import { ExpenseDetails } from "./ExpenseDetails";
 import { docEntryOf } from "./requestApi";
 
@@ -460,6 +463,7 @@ export function AdvancePaymentForm({
     if (messages.length > 0) {
       setError(messages.join(" "));
       setSuccess("");
+      showToast({ title: "Not submitted", message: messages.join(" "), tone: "bad" });
       return;
     }
 
@@ -468,8 +472,10 @@ export function AdvancePaymentForm({
     try {
       setSuccess((await save(form, files)) || "");
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
       setSuccess("");
+      showToast({ title: "Not saved", message, tone: "bad" });
     } finally {
       setSaving(false);
     }
@@ -597,7 +603,22 @@ export function AdvancePaymentForm({
             label={c.partnerLabel}
             required={!c.expense}
             error={partnerError}
-            hint={partnerError || c.expense ? undefined : partnerHint}
+            hint={
+              partnerError || c.expense
+                ? undefined
+                : c.livePartners && form.company && form.partner && !partnerNotInSap
+                  ? (
+                      <span className="inline-flex items-center gap-1">
+                        Ledger in SAP:{" "}
+                        <SapPartnerLink
+                          company={form.company as AdvancePaymentCompany}
+                          cardCode={form.partner}
+                          name={form.partnerName || form.partner}
+                        />
+                      </span>
+                    )
+                  : partnerHint
+            }
           >
             {(f) => (
               <SearchSelect<string>
@@ -613,6 +634,8 @@ export function AdvancePaymentForm({
                 placeholder={c.expense ? "No vendor (optional)" : `Select ${c.partnerLabel}`}
                 clearLabel={c.expense ? "No vendor" : undefined}
                 searchPlaceholder="Search name or code…"
+                // A vendor's full name, wrapped — never cut off on a narrow screen.
+                multiline
                 emptyText={c.livePartners ? "No match in SAP" : "No matches"}
                 onQueryChange={c.livePartners ? setPartnerQuery : undefined}
                 loading={c.livePartners && partnersQuery.isFetching}

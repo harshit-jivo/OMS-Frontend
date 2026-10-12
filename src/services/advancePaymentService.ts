@@ -451,13 +451,61 @@ export interface SapJournalEntry {
   }>;
 }
 
+/** Every line of the partner's ledger, with a running balance (`/full-ledger/`). */
+export interface SapFullLedger {
+  company: AdvancePaymentCompany;
+  /** Signed Debit-minus-Credit: positive Dr, negative Cr. */
+  opening: string;
+  closing: string;
+  truncated: boolean;
+  rows: Array<{
+    trans_id: number;
+    line_id: number | null;
+    doc_type_code: number | null;
+    doc_type: string;
+    doc_entry: number | null;
+    doc_num: string;
+    ref: string;
+    posting_date: string | null;
+    due_date: string | null;
+    debit: string;
+    credit: string;
+    balance: string;
+    memo: string;
+  }>;
+}
+
+/** One bill's own ledger: the bill, then what settled it (`/bill-ledger/`). */
+export interface SapBillLedger {
+  company: AdvancePaymentCompany;
+  bill: { doc_entry: number; doc_num: number; vendor_ref: string; card_code: string; date: string | null;
+          due_date: string | null; total: string };
+  rows: Array<{
+    kind: "bill" | "settlement";
+    doc_type: string;
+    doc_type_code: number | null;
+    doc_num: string;
+    doc_entry: number | null;
+    trans_id: number | null;
+    also?: string[];
+    date: string | null;
+    posted: string | null;
+    debit: string;
+    credit: string;
+    open: string;
+  }>;
+  open: string;
+  /** SAP's own DocTotal - PaidToDate, beside `open` to show they agree. */
+  sap_open: string;
+}
+
 /** The partner's balance in a company where the same code is the same business. */
 export interface SapPartnerCompanyBalance {
   company: AdvancePaymentCompany;
   card_code: string;
   card_name: string;
   balance: string | null;
-  matched_by: "self" | "PAN" | "name" | "";
+  matched_by: "self" | "PAN" | "GSTIN" | "bank account" | "name" | "";
   error?: string;
 }
 
@@ -1350,6 +1398,30 @@ export const advancePaymentService = {
   async partnerBalances(company: AdvancePaymentCompany, cardCode: string): Promise<SapPartnerCompanyBalance[]> {
     const res = await api.get(`${BASE}/partner-balances/`, { params: { company, card_code: cardCode } });
     return results<SapPartnerCompanyBalance>(res.data);
+  },
+
+  /** Every line of the partner's ledger, optionally between two dates (YYYY-MM-DD). */
+  async fullLedger(
+    company: AdvancePaymentCompany,
+    cardCode: string,
+    dateFrom = "",
+    dateTo = "",
+  ): Promise<SapFullLedger> {
+    const res = await api.get(`${BASE}/full-ledger/`, {
+      params: {
+        company,
+        card_code: cardCode,
+        ...(dateFrom ? { date_from: dateFrom } : {}),
+        ...(dateTo ? { date_to: dateTo } : {}),
+      },
+    });
+    return unwrap<SapFullLedger>(res.data);
+  },
+
+  /** One A/P invoice's own ledger: what settled it, and what is left. */
+  async billLedger(company: AdvancePaymentCompany, docEntry: number): Promise<SapBillLedger> {
+    const res = await api.get(`${BASE}/bill-ledger/`, { params: { company, doc_entry: docEntry } });
+    return unwrap<SapBillLedger>(res.data);
   },
 
   /** One goods receipt PO, as SAP holds it. */

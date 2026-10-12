@@ -9,9 +9,10 @@
  * Imprest accounts are business partners and have one; an Employee advance
  * is paid to a G/L account, which the desk does not read here.
  *
- * Beside it, the balance in Oil / Beverages — only where the SAME card code
- * is the SAME business there (same PAN, else same name): a code can be
- * another partner in the other company (`sap_relations.partner_balances`).
+ * Beside it, the balance in Oil / Beverages wherever the same business is
+ * there, under the same card code or another one, found by GSTIN, PAN, bank
+ * account or name (`sap_relations.partner_balances`). Another code is shown
+ * beside the company.
  */
 import { useQuery } from "@tanstack/react-query";
 
@@ -74,10 +75,11 @@ export function PartnerBalance({ entry }: { entry: AdvanceRequestEntry }) {
       />
       {(others.data ?? []).map((row) => {
         const side = row.balance != null ? balanceSide(row.balance, who) : null;
+        const company = COMPANY_NAME[row.company] ?? row.company;
         return (
           <DetailField
-            key={row.company}
-            label={`Balance in ${COMPANY_NAME[row.company] ?? row.company}`}
+            key={`${row.company}:${row.card_code}`}
+            label={row.card_code === cardCode ? `Balance in ${company}` : `Balance in ${company} (${row.card_code})`}
             strong
             value={
               row.error ? (

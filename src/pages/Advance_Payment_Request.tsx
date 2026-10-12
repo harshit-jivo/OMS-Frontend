@@ -14,6 +14,8 @@
  * same rule and the buttons only follow `api.can`.
  */
 import { useMemo, useState } from "react";
+
+import { showToast } from "@/lib/toastStore";
 import { useQueryClient } from "@tanstack/react-query";
 import { HiOutlineBanknotes, HiPlus } from "react-icons/hi2";
 
@@ -41,6 +43,7 @@ import { AdvancePaymentForm } from "./advancePayments/AdvancePaymentForm";
 import { AssignedToMe } from "./advancePayments/AssignedToMe";
 import { CollapsibleCard } from "./advancePayments/CollapsibleCard";
 import { useAssignedToMe } from "./advancePayments/assignments";
+import { useLinkedRequest } from "./advancePayments/useLinkedRequest";
 import { requestAmount, type AdvanceRequestEntry } from "./advancePayments/approvalData";
 import type { FileAttachment } from "./advancePayments/attachments";
 import { PayoutDetailsForm } from "./advancePayments/PayoutDetailsForm";
@@ -94,6 +97,12 @@ function rethrow(err: unknown): never {
 const newFiles = (files: FileAttachment[]) => files.flatMap((f) => (f.file ? [f.file] : []));
 
 /** A request as its requester sees it — where it stands, and what they may still do. */
+/** A request whose partner is an SAP business partner: it has a ledger to open. */
+const inSap = (entry: AdvanceRequestEntry) =>
+  ["VENDOR", "EMPLOYEE_IMPREST", "CUSTOMER"].includes(entry.form.type) &&
+  Boolean(entry.form.partner) &&
+  !entry.api.partner_not_in_sap;
+
 function EntryDetails({ id, onBack }: { id: number; onBack: () => void }) {
   const detail = useRequestDetail(id);
   const store = useStoreRequest();
@@ -136,12 +145,11 @@ function EntryDetails({ id, onBack }: { id: number; onBack: () => void }) {
       });
       store(api);
       setEditing(false);
-      setNotice({
-        tone: "ok",
-        text: resubmit
-          ? `Resubmitted — now waiting at ${api.flow?.current_stage || "its first stage"}.`
-          : "Changes saved.",
-      });
+      const saved = resubmit
+        ? `Resubmitted — now waiting at ${api.flow?.current_stage || "its first stage"}.`
+        : "Changes saved.";
+      setNotice({ tone: "ok", text: saved });
+      showToast({ title: entry.requestNo, message: saved, tone: "ok" });
     } catch (err) {
       rethrow(err);
     }
@@ -154,15 +162,14 @@ function EntryDetails({ id, onBack }: { id: number; onBack: () => void }) {
       store(api);
       setCancelling(false);
       setRemarks("");
-      setNotice({
-        tone: "ok",
-        text:
-          action === "cancel"
-            ? "Request cancelled."
-            : `Resubmitted — now waiting at ${api.flow?.current_stage}.`,
-      });
+      const done =
+        action === "cancel" ? "Request cancelled." : `Resubmitted — now waiting at ${api.flow?.current_stage}.`;
+      setNotice({ tone: "ok", text: done });
+      showToast({ title: entry.requestNo, message: done, tone: "ok" });
     } catch (err) {
-      setNotice({ tone: "bad", text: advancePaymentError(err) });
+      const message = advancePaymentError(err);
+      setNotice({ tone: "bad", text: message });
+      showToast({ title: action === "cancel" ? "Not cancelled" : "Not resubmitted", message, tone: "bad" });
     } finally {
       setBusy(false);
     }
@@ -291,10 +298,12 @@ function EntryDetails({ id, onBack }: { id: number; onBack: () => void }) {
               <CardHeader>
                 <CardTitle>Request Details</CardTitle>
               </CardHeader>
-              <RequestSummary entry={entry} />
+              {/* The vendor's ledger, and each bill / PO as SAP holds it, for the
+                  requester too: golden arrows, as on the desk. */}
+              <RequestSummary entry={entry} partnerLedger={inSap(entry)} />
             </Card>
 
-            <DocumentLines entry={entry} />
+            <DocumentLines entry={entry} showBreakdown />
 
             {/* How it was paid — once completed, and only to someone who holds
               Payment or a later stage: the server sends the account to no one
@@ -339,6 +348,8 @@ export default function Advance_Payment_Request() {
   const entries = useMemo(() => list.data ?? [], [list.data]);
   const [filters, setFilters] = useState<RequestFilterState>(NO_FILTERS);
   const [openId, setOpenId] = useState<number | null>(null);
+  // A notification links here with `?request=<id>`.
+  useLinkedRequest(setOpenId);
   const [notice, setNotice] = useState("");
   const [prefill, setPrefill] = useState<Prefill | null>(null);
   const assigned = useAssignedToMe();
@@ -375,10 +386,11 @@ export default function Advance_Payment_Request() {
       // Straight back to the list, showing it where it now sits.
       setFilters({ ...NO_FILTERS, status: "PENDING" });
       setTab("entries");
-      setNotice(
+      const raised =
         `${entry.requestNo} raised for ${formatINR(requestAmount(form))} — it is now waiting at ` +
-          `${api.flow?.current_stage || "its first stage"}.`,
-      );
+        `${api.flow?.current_stage || "its first stage"}.`;
+      setNotice(raised);
+      showToast({ title: `${entry.requestNo} raised`, message: raised, tone: "ok" });
     } catch (err) {
       rethrow(err);
     }

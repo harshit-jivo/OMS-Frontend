@@ -21,6 +21,7 @@ import { ChoiceOrText } from "./ChoiceOrText";
 import { DocumentHistory } from "./DocumentHistory";
 import { SapAttachmentLink, SapAttachmentList } from "./SapAttachmentLink";
 import { historyTargetOf, omsSummary, sapDocumentOf, sapTdsLabel } from "./sapMapping";
+import { SapDocLink } from "./SapDocument";
 
 import {
   PAYMENT_MODES,
@@ -215,6 +216,7 @@ export function ReferenceDetails({
               disabled={!hasPartner || loading}
               placeholder={loading ? "Loading…" : def.placeholder}
               searchable
+              multiline
               searchPlaceholder={`Search ${def.numberLabel.toLowerCase()} or vendor ref…`}
               onSearch={onSearch}
               emptyText={`No open ${noun} for this ${partnerLabel.toLowerCase()}`}
@@ -464,7 +466,17 @@ function SelectedDocuments({
                 <div id={detailId} className="order-6 col-span-full">
                   <div className="rounded-sm border border-line bg-card px-3 py-2.5 md:ml-5">
                     <DetailGrid>
-                      <DetailField label={def.numberLabel} value={doc.number} />
+                      <DetailField
+                        label={def.numberLabel}
+                        value={(() => {
+                          const source = company ? sapDocumentOf(doc, company) : null;
+                          return source ? (
+                            <SapDocLink company={source.company} kind={source.kind} docEntry={source.docEntry} number={doc.number} />
+                          ) : (
+                            doc.number
+                          );
+                        })()}
+                      />
                       {doc.docType ? <DetailField label="Document Type" value={doc.docType} /> : null}
                       <DetailField label={def.dateLabel} value={formatDate(doc.date)} />
                       {doc.reference ? (

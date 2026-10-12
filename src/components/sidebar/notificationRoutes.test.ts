@@ -21,6 +21,18 @@ describe("routeForNotification", () => {
     );
   });
 
+  it("opens a payment request on the desk, or the creator's own", () => {
+    expect(
+      routeForNotification({ event_type: "ADVANCE_PAYMENT_AWAITING_APPROVAL", entity_id: 62 }),
+    ).toBe("/Advance_Payment_Approval?request=62");
+    expect(routeForNotification({ event_type: "ADVANCE_PAYMENT_RETURNED", entity_id: 62 })).toBe(
+      "/Advance_Payment_Request?request=62",
+    );
+    expect(routeForNotification({ event_type: "ADVANCE_PAYMENT_ASSIGNED" })).toBe(
+      "/Advance_Payment_Request",
+    );
+  });
+
   it("leaves everything else to the existing order routing", () => {
     expect(routeForNotification({ event_type: "ORDER_CREATED", entity_id: 1 })).toBeNull();
     expect(routeForNotification(null)).toBeNull();

@@ -113,6 +113,7 @@ import {
 } from "./advancePayments/requestQueries";
 import { expenseNet, formatINR, validateExpense, type RequestForm } from "./advancePayments/rules";
 import { useTdsCodes } from "./advancePayments/expenseLookups";
+import { useLinkedRequest } from "./advancePayments/useLinkedRequest";
 
 /** What each stage is told when the request is waiting on them. */
 function stageGuidance(entry: AdvanceRequestEntry): string {
@@ -363,6 +364,7 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
   const decide = (action: StageAction, done: string) => {
     if (action !== "approve" && !remarks.trim()) {
       setNotice({ tone: "bad", text: "Say why, in the remarks." });
+      showToast({ title: "Not done", message: "Say why, in the remarks.", tone: "bad" });
       return;
     }
     if (action === "approve" && can.edit_payout && draft) {
@@ -378,6 +380,7 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
       ];
       if (messages.length) {
         setNotice({ tone: "bad", text: messages.join(" ") });
+        showToast({ title: "Not approved", message: messages.join(" "), tone: "bad" });
         return;
       }
     }
@@ -803,6 +806,8 @@ export default function Advance_Payment_Approval() {
     status: "PENDING",
   });
   const [openId, setOpenId] = useState<number | null>(null);
+  // A notification links here with `?request=<id>`.
+  useLinkedRequest(setOpenId);
   const store = useStoreRequest();
   // Bulk approve / reject: what is ticked, the confirm dialog (which of the
   // two), its progress and its outcome.

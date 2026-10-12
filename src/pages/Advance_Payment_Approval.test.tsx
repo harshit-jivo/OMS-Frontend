@@ -12,6 +12,7 @@ import userEvent from "@testing-library/user-event";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { advancePaymentService } from "../services/advancePaymentService";
+import { subscribeToToasts } from "../lib/toastStore";
 import { renderPage } from "../test/renderPage";
 import Advance_Payment_Approval from "./Advance_Payment_Approval";
 import { FakeRequestServer, apiRequest, bill, logRow } from "./advancePayments/testRequests";
@@ -682,6 +683,16 @@ describe("Payments Approval", () => {
       expect.any(Number),
       null, // picked from SAP, or cash: no password needed
     );
+  });
+
+  it("says a refused decision in a toast, top right, as well as on the page", async () => {
+    const toasts: string[] = [];
+    const stop = subscribeToToasts((items) => toasts.push(...items.map((t) => `${t.tone}:${t.title}`)));
+    const user = setup();
+    await review(user, "AP-2026-0012");
+    await user.click(screen.getByRole("button", { name: "Reject" }));
+    stop();
+    expect(toasts).toContain("bad:Not done");
   });
 
   it("needs a reason to reject, and the rejection is final", async () => {

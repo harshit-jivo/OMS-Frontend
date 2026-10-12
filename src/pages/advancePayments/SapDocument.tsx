@@ -344,6 +344,7 @@ function BillWindow({ company, docEntry }: { company: AdvancePaymentCompany; doc
           ),
         },
         { id: "map", label: "Relationship Map", body: <RelationshipMap company={company} kind="bill" docEntry={docEntry} /> },
+        { id: "ledger", label: "Bill Ledger", body: <BillLedger company={company} docEntry={docEntry} /> },
         { id: "je", label: "Journal Entry", body: <JournalTab company={company} transId={h.trans_id} /> },
         {
           id: "attachments",
@@ -913,6 +914,145 @@ function RelationshipMap({ company, kind, docEntry }: {
   );
 }
 
+/* ── Ledgers: the whole account, and one bill's ───────────────────────── */
+
+/** A signed Debit-minus-Credit figure as SAP shows a balance: amount, then Dr or Cr. */
+const drCr = (value: string) => {
+  const n = Number(value) || 0;
+  return n === 0 ? formatINR(0) : `${formatINR(Math.abs(n))} ${n > 0 ? "Dr" : "Cr"}`;
+};
+
+/** A ledger line's document: its window where there is one, else its journal entry. */
+function LedgerDoc({ company, code, entry, transId, number, label }: {
+  company: AdvancePaymentCompany;
+  code: number | null;
+  entry: number | null;
+  transId: number | null;
+  number: string;
+  label: string;
+}) {
+  const kind = code != null ? LEDGER_WINDOW[code] : undefined;
+  if (kind && entry != null) return <SapDocLink company={company} kind={kind} docEntry={entry} number={number} />;
+  if (transId) return <SapJournalLink company={company} transId={transId} number={number} title={label} />;
+  return <>{number}</>;
+}
+
+function AllTransactions({ company, cardCode }: { company: AdvancePaymentCompany; cardCode: string }) {
+  const [from, setFrom] = React.useState("");
+  const [to, setTo] = React.useState("");
+  const query = useQuery({
+    queryKey: ["advance-payments", "full-ledger", company, cardCode, from, to],
+    queryFn: () => advancePaymentService.fullLedger(company, cardCode, from, to),
+    staleTime: 60_000,
+    retry: 1,
+  });
+  const dateBox = cn("h-[22px] rounded-[2px] border bg-white px-1.5 text-[11.5px]", LINE);
+  return (
+    <div className="grid gap-1.5">
+      <div className="flex flex-wrap items-center gap-2 text-[11px] text-[#4a5361]">
+        <label className="flex items-center gap-1">
+          From <input type="date" aria-label="From date" className={dateBox} value={from} onChange={(e) => setFrom(e.target.value)} />
+        </label>
+        <label className="flex items-center gap-1">
+          To <input type="date" aria-label="To date" className={dateBox} value={to} onChange={(e) => setTo(e.target.value)} />
+        </label>
+      </div>
+      {!query.data ? (
+        <Status query={query} />
+      ) : (
+        <>
+          <SapGrid
+            label="All transactions"
+            columns={[
+              { head: "Posting Date" },
+              { head: "Document" },
+              { head: "No." },
+              { head: "Due Date" },
+              { head: "Remarks" },
+              { head: "Debit", right: true },
+              { head: "Credit", right: true },
+              { head: "Balance", right: true },
+            ]}
+            rows={[
+              ...(from ? [["", <strong key="o">Opening balance</strong>, "", "", "", "", "", drCr(query.data.opening)]] : []),
+              ...query.data.rows.map((r) => [
+                date(r.posting_date) || "—",
+                r.doc_type,
+                <LedgerDoc
+                  key={`${r.trans_id}-${r.line_id}`}
+                  company={company}
+                  code={r.doc_type_code}
+                  entry={r.doc_entry}
+                  transId={r.trans_id}
+                  number={r.doc_num}
+                  label={r.doc_type}
+                />,
+                date(r.due_date) || "—",
+                r.memo || "—",
+                Number(r.debit) ? money(r.debit) : "",
+                Number(r.credit) ? money(r.credit) : "",
+                drCr(r.balance),
+              ]),
+            ]}
+            empty="No transactions in these dates."
+          />
+          {query.data.truncated ? (
+            <p className="m-0 text-[11px] text-hold">The first 2,000 lines only — narrow the dates to see the rest.</p>
+          ) : null}
+          <SapTotals rows={[{ label: "Closing Balance", value: drCr(query.data.closing), strong: true }]} />
+        </>
+      )}
+    </div>
+  );
+}
+
+function BillLedger({ company, docEntry }: { company: AdvancePaymentCompany; docEntry: number }) {
+  const query = useQuery({
+    queryKey: ["advance-payments", "bill-ledger", company, docEntry],
+    queryFn: () => advancePaymentService.billLedger(company, docEntry),
+    staleTime: 60_000,
+    retry: 1,
+  });
+  if (!query.data) return <Status query={query} />;
+  const { rows, open } = query.data;
+  return (
+    <div className="grid gap-1.5">
+      <SapGrid
+        label="Bill ledger"
+        columns={[
+          { head: "Date" },
+          { head: "Document" },
+          { head: "No." },
+          { head: "Debit", right: true },
+          { head: "Credit", right: true },
+          { head: "Open After", right: true },
+        ]}
+        rows={rows.map((r) => [
+          date(r.date) || "—",
+          <span key="t">
+            {r.doc_type}
+            {r.also?.length ? <span className="block text-[10.5px] text-subtle">with {r.also.join(", ")}</span> : null}
+          </span>,
+          <LedgerDoc
+            key="n"
+            company={company}
+            code={r.doc_type_code}
+            entry={r.doc_entry}
+            transId={r.trans_id}
+            number={r.doc_num}
+            label={r.doc_type}
+          />,
+          Number(r.debit) ? money(r.debit) : "",
+          Number(r.credit) ? money(r.credit) : "",
+          money(r.open),
+        ])}
+        empty="No ledger lines."
+      />
+      <SapTotals rows={[{ label: "Balance Due", value: money(open), strong: true }]} />
+    </div>
+  );
+}
+
 /* ── Business Partner: the account (open items) ───────────────────────── */
 
 /** SAP object type of a ledger line -> the window that opens it, where there is one. */
@@ -987,6 +1127,7 @@ function LedgerWindow({ company, cardCode, name }: { company: AdvancePaymentComp
             />
           ),
         },
+        { id: "all", label: "All Transactions", body: <AllTransactions company={company} cardCode={cardCode} /> },
       ]}
       totals={
         <SapTotals

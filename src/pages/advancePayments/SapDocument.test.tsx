@@ -9,7 +9,7 @@ import {
 } from "../../services/advancePaymentService";
 import { renderPage } from "../../test/renderPage";
 
-import { SapDocLink } from "./SapDocument";
+import { SapDocLink, SapPartnerLink } from "./SapDocument";
 
 /** Bill 626094379: copied from GRPO 2026096869, behind it PO 220926011. */
 const BILL: SapBillBreakdown = {
@@ -175,5 +175,57 @@ describe("SAP document windows", () => {
     const lines = await within(window).findByRole("table", { name: "Journal entry 926302500" });
     expect(within(lines).getByText("GOODS RECEIVED BUT NOT INVOICED")).toBeTruthy();
     expect(within(lines).getByText("VAISHNODEVI REFOILS")).toBeTruthy();
+  });
+
+  it("shows the vendor's whole ledger with a running balance, and a bill's own ledger", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(advancePaymentService, "partnerLedger").mockResolvedValue({
+      summary: { open_count: 1, open_debit: "0", open_credit: "4635", net_open: "4635", net_open_means: "payable",
+                 overdue_count: 1 },
+      results: [],
+    } as never);
+    const full = vi.spyOn(advancePaymentService, "fullLedger").mockResolvedValue({
+      company: "BEVERAGES", opening: "0", closing: "-4635", truncated: false,
+      rows: [
+        { trans_id: 1, line_id: 0, doc_type_code: 18, doc_type: "A/P Invoice", doc_entry: 188, doc_num: "625119145",
+          ref: "", posting_date: "2025-11-13", due_date: "2025-11-13", debit: "0", credit: "184209",
+          balance: "-184209", memo: "" },
+        { trans_id: 2, line_id: 0, doc_type_code: 46, doc_type: "Outgoing Payment", doc_entry: 900, doc_num: "1025000001",
+          ref: "", posting_date: "2025-12-01", due_date: null, debit: "179574", credit: "0", balance: "-4635", memo: "" },
+      ],
+    });
+    renderPage(<SapPartnerLink company="BEVERAGES" cardCode="VENDA000948" name="ARNAV TRANSPORT SERVICE" />);
+    await user.click(screen.getByRole("button", { name: "Open the ledger of ARNAV TRANSPORT SERVICE" }));
+    const window = await screen.findByRole("dialog");
+    await user.click(within(window).getByRole("tab", { name: "All Transactions" }));
+    const grid = await within(window).findByRole("table", { name: "All transactions" });
+    expect(within(grid).getByText("₹1,84,209 Cr")).toBeTruthy();
+    expect(within(window).getAllByText("₹4,635 Cr").length).toBeGreaterThan(0); // running and closing
+    expect(full).toHaveBeenCalledWith("BEVERAGES", "VENDA000948", "", "");
+  });
+
+  it("settles a bill in its own ledger, down to SAP's balance due", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(advancePaymentService, "billBreakdown").mockResolvedValue(BILL);
+    vi.spyOn(advancePaymentService, "billLedger").mockResolvedValue({
+      company: "OIL",
+      bill: { doc_entry: 27400, doc_num: 626094379, vendor_ref: "INV-77", card_code: "VENDA001607", date: null,
+              due_date: null, total: "405000" },
+      rows: [
+        { kind: "bill", doc_type: "A/P Invoice", doc_type_code: 18, doc_num: "626094379", doc_entry: 27400,
+          trans_id: 50, date: "2024-10-01", posted: "2024-10-01", debit: "0", credit: "405000", open: "405000" },
+        { kind: "settlement", doc_type: "Outgoing Payment", doc_type_code: 46, doc_num: "1024466623", doc_entry: 197,
+          trans_id: 60, date: "2025-02-13", posted: "2024-10-14", debit: "305000", credit: "0", open: "100000" },
+      ],
+      open: "100000",
+      sap_open: "100000",
+    });
+    renderPage(<SapDocLink company="OIL" kind="bill" docEntry={27400} number="626094379" />);
+    await user.click(screen.getByRole("button", { name: "Open A/P Invoice 626094379" }));
+    const window = await screen.findByRole("dialog");
+    await user.click(await within(window).findByRole("tab", { name: "Bill Ledger" }));
+    const grid = await within(window).findByRole("table", { name: "Bill ledger" });
+    expect(within(grid).getByText("1024466623")).toBeTruthy();
+    expect(within(window).getAllByText("₹1,00,000").length).toBeGreaterThan(0);
   });
 });
