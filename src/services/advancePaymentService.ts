@@ -23,7 +23,8 @@ const BASE = "/advance-payments";
 const PICKER_LIMIT = 100;
 /** The server's own cap — for a caller that filters what comes back. */
 export const SAP_MAX_ROWS = 500;
-const DOCUMENT_LIMIT = 500;
+/** At most this many of a vendor's open bills / POs in one list; a search reaches the rest. */
+export const DOCUMENT_LIMIT = 500;
 
 export type AdvancePaymentCompany = "OIL" | "MART" | "BEVERAGES";
 
@@ -260,6 +261,8 @@ export interface SapBillBreakdown {
     status: string;
     card_code: string;
     card_name: string;
+    /** Its journal entry (OJDT.TransId). */
+    trans_id?: number | null;
     /** The vendor's control (payable) account. */
     payable_account: string;
     payable_account_name: string;
@@ -326,6 +329,8 @@ export interface SapGoodsReceipt {
     card_name: string;
     branch: string;
     remarks: string;
+    /** Its journal entry (OJDT.TransId). */
+    trans_id?: number | null;
     before_discount: string;
     discount: string;
     freight: string;
@@ -394,6 +399,66 @@ export interface SapOutgoingPayment {
     tds: string;
   }>;
   accounts: Array<{ account: string; account_name: string; description: string; applied: string }>;
+}
+
+/** SAP's relationship map around a PO, goods receipt or bill (`/relationship-map/`). */
+export interface SapRelationshipMap {
+  company: AdvancePaymentCompany;
+  focus: { kind: "po" | "grpo" | "bill"; doc_entry: number };
+  nodes: Array<{
+    key: string;
+    kind: "po" | "grpo" | "bill" | "goods_return" | "credit_memo" | "down_payment" | "payment";
+    kind_label: string;
+    doc_entry: number;
+    doc_num: number | null;
+    date: string | null;
+    total: string;
+    status: string;
+    ref: string;
+    trans_id: number | null;
+    /** The documents it was made from or paid against, by `key`. */
+    parents: string[];
+    /** An OMS advance paid against the PO: its request number. */
+    oms: string;
+  }>;
+}
+
+/** A posted document's journal entry (`/journal-entry/`). Amounts are strings. */
+export interface SapJournalEntry {
+  company: AdvancePaymentCompany;
+  header: {
+    trans_id: number;
+    number: number | null;
+    posting_date: string | null;
+    document_date: string | null;
+    memo: string;
+    trans_type: number | null;
+    base_ref: string;
+    ref1: string;
+    ref2: string;
+    debit: string;
+    credit: string;
+  };
+  lines: Array<{
+    line: number;
+    account: string;
+    account_name: string;
+    partner: string;
+    partner_name: string;
+    debit: string;
+    credit: string;
+    memo: string;
+  }>;
+}
+
+/** The partner's balance in a company where the same code is the same business. */
+export interface SapPartnerCompanyBalance {
+  company: AdvancePaymentCompany;
+  card_code: string;
+  card_name: string;
+  balance: string | null;
+  matched_by: "self" | "PAN" | "name" | "";
+  error?: string;
 }
 
 export interface SapPurchaseOrder {
@@ -1144,9 +1209,10 @@ export const advancePaymentService = {
   async openVendorPurchaseOrders(
     company: AdvancePaymentCompany,
     cardCode: string,
+    search = "",
   ): Promise<SapOpenPurchaseOrder[]> {
     const res = await api.get(`${BASE}/open-purchase-orders/`, {
-      params: { company, card_code: cardCode, limit: DOCUMENT_LIMIT },
+      params: { company, card_code: cardCode, limit: DOCUMENT_LIMIT, ...(search ? { search } : {}) },
     });
     return results<SapOpenPurchaseOrder>(res.data);
   },
@@ -1262,6 +1328,28 @@ export const advancePaymentService = {
   async purchaseOrder(company: AdvancePaymentCompany, docEntry: number): Promise<SapPurchaseOrder> {
     const res = await api.get(`${BASE}/purchase-order/`, { params: { company, doc_entry: docEntry } });
     return unwrap<SapPurchaseOrder>(res.data);
+  },
+
+  /** SAP's relationship map around a PO, goods receipt or bill. */
+  async relationshipMap(
+    company: AdvancePaymentCompany,
+    kind: "po" | "grpo" | "bill",
+    docEntry: number,
+  ): Promise<SapRelationshipMap> {
+    const res = await api.get(`${BASE}/relationship-map/`, { params: { company, kind, doc_entry: docEntry } });
+    return unwrap<SapRelationshipMap>(res.data);
+  },
+
+  /** A posted document's journal entry: its G/L lines. */
+  async journalEntry(company: AdvancePaymentCompany, transId: number): Promise<SapJournalEntry> {
+    const res = await api.get(`${BASE}/journal-entry/`, { params: { company, trans_id: transId } });
+    return unwrap<SapJournalEntry>(res.data);
+  },
+
+  /** The partner's balance in its company, and in Oil / Beverages where the same code is the same business. */
+  async partnerBalances(company: AdvancePaymentCompany, cardCode: string): Promise<SapPartnerCompanyBalance[]> {
+    const res = await api.get(`${BASE}/partner-balances/`, { params: { company, card_code: cardCode } });
+    return results<SapPartnerCompanyBalance>(res.data);
   },
 
   /** One goods receipt PO, as SAP holds it. */
@@ -1457,9 +1545,16 @@ export const advancePaymentService = {
   async openVendorInvoices(
     company: AdvancePaymentCompany,
     cardCode: string,
+    search = "",
   ): Promise<SapOpenInvoice[]> {
     const res = await api.get(`${BASE}/open-invoices/`, {
-      params: { company, party_type: "vendor", card_code: cardCode, limit: DOCUMENT_LIMIT },
+      params: {
+        company,
+        party_type: "vendor",
+        card_code: cardCode,
+        limit: DOCUMENT_LIMIT,
+        ...(search ? { search } : {}),
+      },
     });
     return results<SapOpenInvoice>(res.data);
   },

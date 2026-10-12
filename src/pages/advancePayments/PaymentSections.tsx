@@ -155,6 +155,7 @@ export function ReferenceDetails({
   totals,
   onAllocationChange,
   company,
+  onSearch,
 }: {
   kind: ReferenceKind;
   documents: OpenDocument[];
@@ -172,6 +173,8 @@ export function ReferenceDetails({
   onAllocationChange: (id: string, patch: Partial<Allocation>) => void;
   /** The request's company: what a chosen document's SAP attachments are read from. */
   company?: string;
+  /** The picker's search term, for a list SAP holds more of than was read. */
+  onSearch?: (term: string) => void;
 }) {
   const def = REFERENCE_KINDS[kind];
   const noun = def.pluralLabel.toLowerCase();
@@ -212,7 +215,8 @@ export function ReferenceDetails({
               disabled={!hasPartner || loading}
               placeholder={loading ? "Loading…" : def.placeholder}
               searchable
-              searchPlaceholder={`Search ${def.numberLabel.toLowerCase()}…`}
+              searchPlaceholder={`Search ${def.numberLabel.toLowerCase()} or vendor ref…`}
+              onSearch={onSearch}
               emptyText={`No open ${noun} for this ${partnerLabel.toLowerCase()}`}
               // Names read better than "2 selected" while they still fit.
               namedUpTo={2}
@@ -223,7 +227,8 @@ export function ReferenceDetails({
                   value: doc.id,
                   label: doc.number,
                   hint: documentSubtitle(doc),
-                  keywords: due,
+                  // Searchable on its number and the vendor's own ref, whatever the hint shows.
+                  keywords: [due, doc.number, doc.reference].filter(Boolean).join(" "),
                   meta: due ? (
                     <span className="font-semibold text-bad">
                       {due} · Open {formatINR(doc.open)}

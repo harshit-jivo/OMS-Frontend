@@ -8,6 +8,10 @@
  * NOT shown to the requester while they raise it. Vendors and Employee
  * Imprest accounts are business partners and have one; an Employee advance
  * is paid to a G/L account, which the desk does not read here.
+ *
+ * Beside it, the balance in Oil / Beverages — only where the SAME card code
+ * is the SAME business there (same PAN, else same name): a code can be
+ * another partner in the other company (`sap_relations.partner_balances`).
  */
 import { useQuery } from "@tanstack/react-query";
 
@@ -19,6 +23,8 @@ import {
 } from "../../services/advancePaymentService";
 import type { AdvanceRequestEntry } from "./approvalData";
 import { balanceSide, formatINR } from "./rules";
+
+const COMPANY_NAME: Record<string, string> = { OIL: "Oil", BEVERAGES: "Beverages", MART: "Mart" };
 
 export function PartnerBalance({ entry }: { entry: AdvanceRequestEntry }) {
   const company = entry.form.company as AdvancePaymentCompany;
@@ -35,6 +41,13 @@ export function PartnerBalance({ entry }: { entry: AdvanceRequestEntry }) {
     retry: 1,
   });
   const balance = query.data ? balanceSide(query.data.balance, who) : null;
+  const others = useQuery({
+    queryKey: ["advance-payments", "partner-balances", company, cardCode],
+    queryFn: async () =>
+      (await advancePaymentService.partnerBalances(company, cardCode)).filter((row) => row.company !== company),
+    staleTime: 60_000,
+    retry: 1,
+  });
 
   return (
     <DetailGrid>
@@ -59,6 +72,28 @@ export function PartnerBalance({ entry }: { entry: AdvanceRequestEntry }) {
                 : "Not found in SAP"
         }
       />
+      {(others.data ?? []).map((row) => {
+        const side = row.balance != null ? balanceSide(row.balance, who) : null;
+        return (
+          <DetailField
+            key={row.company}
+            label={`Balance in ${COMPANY_NAME[row.company] ?? row.company}`}
+            strong
+            value={
+              row.error ? (
+                <span className="text-subtle">Could not read SAP</span>
+              ) : side ? (
+                <span className={side.side === "Cr" ? "text-bad" : side.side === "Dr" ? "text-ok" : undefined}>
+                  {formatINR(side.amount)}
+                  {side.side ? ` ${side.side}` : ""}
+                </span>
+              ) : (
+                "—"
+              )
+            }
+          />
+        );
+      })}
     </DetailGrid>
   );
 }

@@ -44,6 +44,7 @@ import {
   SAP_MAX_ROWS,
   advancePaymentError,
   advancePaymentService,
+  DOCUMENT_LIMIT,
   type AdvancePaymentCompany,
 } from "../../services/advancePaymentService";
 
@@ -366,8 +367,32 @@ export function AdvancePaymentForm({
     staleTime: 60_000,
     retry: 1,
   });
+  // A vendor with more open bills / POs than one list holds (Reliance Retail,
+  // Jivo Wellness): the picker's search asks SAP too, so an old one is found
+  // by its number or vendor ref, and what it finds is offered with the rest.
+  const [docSearch, setDocSearch] = useState("");
+  const searchTerm = useDebounced(docSearch.trim(), 300);
+  const searchable = c.reference === "VENDOR_PO" || c.reference === "VENDOR_BILL";
+  const capped = (documentsQuery.data?.length ?? 0) >= DOCUMENT_LIMIT;
+  const searchQuery = useQuery({
+    queryKey: ["advance-payments", "documents-search", c.reference, company, form.partner, searchTerm],
+    queryFn: async (): Promise<OpenDocument[]> =>
+      c.reference === "VENDOR_PO"
+        ? (await advancePaymentService.openVendorPurchaseOrders(company!, form.partner, searchTerm)).map((po) =>
+            purchaseOrderToDocument(po, company!),
+          )
+        : (await advancePaymentService.openVendorInvoices(company!, form.partner, searchTerm)).map((invoice) =>
+            invoiceToDocument(invoice, company!),
+          ),
+    enabled: searchable && capped && searchTerm.length >= 2 && company !== null && form.partner !== "",
+    staleTime: 60_000,
+    retry: 1,
+  });
   const documentOptions: OpenDocument[] = c.liveDocuments
-    ? (documentsQuery.data ?? [])
+    ? [
+        ...(documentsQuery.data ?? []),
+        ...(searchQuery.data ?? []).filter((doc) => !(documentsQuery.data ?? []).some((d) => d.id === doc.id)),
+      ]
     : c.documents;
 
   /** Ticked ids → the documents themselves, snapshotted into the form. */
@@ -712,6 +737,7 @@ export function AdvancePaymentForm({
           totals={totals}
           onAllocationChange={changeLine}
           company={form.company}
+          onSearch={searchable ? setDocSearch : undefined}
         />
       ) : null}
 

@@ -307,3 +307,31 @@ describe("dropdown width", () => {
     expect(panel.className).toContain("w-full");
   });
 });
+
+describe("MultiSelect, searching bills", () => {
+  const BILLS = [
+    { value: "PCH-1", label: "625119145", hint: "Ref ATS:294 · 13 Nov 2025", keywords: "625119145 ATS:294" },
+    { value: "PCH-2", label: "626099113", hint: "Ref ATS:412 · 11 Sep 2026", keywords: "626099113 ATS:412" },
+  ];
+
+  it("finds a vendor ref however it is typed — 'ats294', 'ATS 294', 'ATS:294'", async () => {
+    const user = userEvent.setup();
+    render(<MultiSelect value={[]} onChange={() => {}} options={BILLS} searchable />);
+    await user.click(screen.getByRole("button"));
+    const search = screen.getByRole("searchbox");
+    for (const typed of ["ats294", "ATS 294", "ATS:294", "625119"]) {
+      await user.clear(search);
+      await user.type(search, typed);
+      expect(within(screen.getByRole("group")).getAllByRole("checkbox"), typed).toHaveLength(1);
+    }
+  });
+
+  it("tells the caller what is typed, so it can ask SAP for more", async () => {
+    const user = userEvent.setup();
+    const onSearch = vi.fn();
+    render(<MultiSelect value={[]} onChange={() => {}} options={BILLS} searchable onSearch={onSearch} />);
+    await user.click(screen.getByRole("button"));
+    await user.type(screen.getByRole("searchbox"), "ATS:3");
+    expect(onSearch).toHaveBeenLastCalledWith("ATS:3");
+  });
+});

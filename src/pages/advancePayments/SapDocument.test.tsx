@@ -122,4 +122,58 @@ describe("SAP document windows", () => {
     await user.click(within(window).getByRole("tab", { name: "User Fields" }));
     expect(within(window).getByText("HIGH")).toBeTruthy();
   });
+
+  it("shows a bill's relationship map and its journal entry, as SAP does", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(advancePaymentService, "billBreakdown").mockResolvedValue({
+      ...BILL,
+      header: { ...BILL.header, trans_id: 239031 },
+    });
+    vi.spyOn(advancePaymentService, "relationshipMap").mockResolvedValue({
+      company: "OIL",
+      focus: { kind: "bill", doc_entry: 27400 },
+      nodes: [
+        { key: "po:13574", kind: "po", kind_label: "Purchase Order", doc_entry: 13574, doc_num: 220926011,
+          date: "2026-09-02", total: "6348507", status: "Open", ref: "", trans_id: null, parents: [], oms: "" },
+        { key: "grpo:27357", kind: "grpo", kind_label: "Goods Receipt PO", doc_entry: 27357, doc_num: 2026096869,
+          date: "2026-09-28", total: "885000", status: "Closed", ref: "", trans_id: 236715, parents: ["po:13574"], oms: "" },
+        { key: "bill:27400", kind: "bill", kind_label: "A/P Invoice", doc_entry: 27400, doc_num: 626094379,
+          date: "2026-09-29", total: "884250", status: "Open", ref: "", trans_id: 239031, parents: ["grpo:27357"], oms: "" },
+        { key: "credit_memo:9", kind: "credit_memo", kind_label: "A/P Credit Memo", doc_entry: 9, doc_num: 5550001,
+          date: "2026-10-01", total: "1000", status: "Closed", ref: "", trans_id: 240000, parents: ["bill:27400"], oms: "" },
+        { key: "payment:30001", kind: "payment", kind_label: "Outgoing Payment", doc_entry: 30001, doc_num: 1026466700,
+          date: "2026-10-09", total: "500000", status: "Closed", ref: "", trans_id: 240100, parents: ["po:13574"],
+          oms: "AP-2026-0021" },
+      ],
+    });
+    const je = vi.spyOn(advancePaymentService, "journalEntry").mockResolvedValue({
+      company: "OIL",
+      header: { trans_id: 239031, number: 926302500, posting_date: "2026-09-29", document_date: null,
+                memo: "A/P Invoices - VENDA001607", trans_type: 18, base_ref: "626094379", ref1: "", ref2: "",
+                debit: "884250", credit: "884250" },
+      lines: [
+        { line: 0, account: "2110005", account_name: "SUNDRY CREDITOR DOMESTIC", partner: "VENDA001607",
+          partner_name: "VAISHNODEVI REFOILS", debit: "0", credit: "884250", memo: "" },
+        { line: 1, account: "2140001", account_name: "GOODS RECEIVED BUT NOT INVOICED", partner: "",
+          partner_name: "", debit: "884250", credit: "0", memo: "" },
+      ],
+    });
+    renderPage(<SapDocLink company="OIL" kind="bill" docEntry={27400} number="626094379" />);
+    await user.click(screen.getByRole("button", { name: "Open A/P Invoice 626094379" }));
+    const window = await screen.findByRole("dialog");
+
+    await user.click(await within(window).findByRole("tab", { name: "Relationship Map" }));
+    const map = await within(window).findByLabelText("Relationship map");
+    expect(within(map).getByText("from Goods Receipt PO 2026096869")).toBeTruthy();
+    expect(within(map).getByText("Advance (OMS)")).toBeTruthy();
+    expect(within(map).getByText("AP-2026-0021")).toBeTruthy();
+    // A debit note has no form here: its arrow opens its journal entry.
+    expect(within(map).getByRole("button", { name: "Open the journal entry of A/P Credit Memo 5550001" })).toBeTruthy();
+
+    await user.click(within(window).getByRole("tab", { name: "Journal Entry" }));
+    expect(je).toHaveBeenCalledWith("OIL", 239031);
+    const lines = await within(window).findByRole("table", { name: "Journal entry 926302500" });
+    expect(within(lines).getByText("GOODS RECEIVED BUT NOT INVOICED")).toBeTruthy();
+    expect(within(lines).getByText("VAISHNODEVI REFOILS")).toBeTruthy();
+  });
 });

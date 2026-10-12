@@ -188,11 +188,18 @@ export function MultiSelect<T extends string | number>({
   disabled = false,
   size = "md",
   className,
+  onSearch,
 }: {
   id?: string;
   value: T[];
   onChange: (next: T[]) => void;
   options: ReadonlyArray<MultiSelectOption<T>>;
+  /**
+   * Told the search term as it is typed ("" when the panel closes), for a list
+   * that holds only part of what can be found — the caller fetches the rest
+   * and passes it back in `options`.
+   */
+  onSearch?: (term: string) => void;
   placeholder?: string;
   /** Offer a "Select all" row above the options. */
   selectAll?: boolean;
@@ -235,14 +242,24 @@ export function MultiSelect<T extends string | number>({
     else setQuery("");
   }, [open, searchable]);
 
+  React.useEffect(() => {
+    onSearch?.(searchable ? query.trim() : "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- told the term, not re-told on a new callback
+  }, [query, searchable]);
+
   const term = searchable ? query.trim().toLowerCase() : "";
+  // Also matched without punctuation or spaces: "ats294" finds "ATS:294".
+  const squashed = term.replace(/[^a-z0-9]/g, "");
   const matched = term
     ? options.filter((option) =>
         [
           typeof option.label === "string" ? option.label : "",
           option.hint ?? "",
           option.keywords ?? "",
-        ].some((field) => field.toLowerCase().includes(term)),
+        ].some((field) => {
+          const text = field.toLowerCase();
+          return text.includes(term) || (squashed !== "" && text.replace(/[^a-z0-9]/g, "").includes(squashed));
+        }),
       )
     : options;
   const shown = maxShown !== undefined ? matched.slice(0, maxShown) : matched;

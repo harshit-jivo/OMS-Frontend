@@ -23,6 +23,7 @@ import {
   advancePaymentService,
   type AdvancePaymentCompany,
   type SapDocumentLink,
+  type SapRelationshipMap,
 } from "../../services/advancePaymentService";
 
 import { DocumentHistory } from "./DocumentHistory";
@@ -342,6 +343,8 @@ function BillWindow({ company, docEntry }: { company: AdvancePaymentCompany; doc
             </div>
           ),
         },
+        { id: "map", label: "Relationship Map", body: <RelationshipMap company={company} kind="bill" docEntry={docEntry} /> },
+        { id: "je", label: "Journal Entry", body: <JournalTab company={company} transId={h.trans_id} /> },
         {
           id: "attachments",
           label: "Attachments",
@@ -465,6 +468,7 @@ function PoWindow({ company, docEntry }: { company: AdvancePaymentCompany; docEn
             />
           ),
         },
+        { id: "map", label: "Relationship Map", body: <RelationshipMap company={company} kind="po" docEntry={docEntry} /> },
         {
           id: "attachments",
           label: "Attachments",
@@ -558,6 +562,8 @@ function GrpoWindow({ company, docEntry }: { company: AdvancePaymentCompany; doc
           ),
         },
         { id: "links", label: "Linked Documents", body: <LinksGrid company={company} links={links} /> },
+        { id: "map", label: "Relationship Map", body: <RelationshipMap company={company} kind="grpo" docEntry={docEntry} /> },
+        { id: "je", label: "Journal Entry", body: <JournalTab company={company} transId={h.trans_id} /> },
         {
           id: "attachments",
           label: "Attachments",
@@ -684,6 +690,7 @@ function PaymentWindow({ company, docEntry }: { company: AdvancePaymentCompany; 
             </div>
           ),
         },
+        { id: "je", label: "Journal Entry", body: <JournalTab company={company} transId={h.trans_id} /> },
         {
           id: "attachments",
           label: "Attachments",
@@ -713,6 +720,196 @@ function PaymentWindow({ company, docEntry }: { company: AdvancePaymentCompany; 
         />
       }
     />
+  );
+}
+
+/* ── Journal Entry: the G/L a document posted ───────────────────────────── */
+
+function JournalLines({ company, transId }: { company: AdvancePaymentCompany; transId: number }) {
+  const query = useQuery({
+    queryKey: ["advance-payments", "journal-entry", company, transId],
+    queryFn: () => advancePaymentService.journalEntry(company, transId),
+    staleTime: 5 * 60_000,
+    retry: 1,
+  });
+  if (!query.data) return <Status query={query} />;
+  const { header: h, lines } = query.data;
+  return (
+    <div className="grid gap-1.5">
+      <div className="grid gap-x-5 gap-y-[3px] md:grid-cols-2">
+        <SapField label="Journal Entry No." value={String(h.number ?? h.trans_id)} />
+        <SapField label="Posting Date" value={date(h.posting_date)} />
+        <SapField label="Remarks" value={h.memo} />
+        <SapField label="Origin No." value={h.base_ref} />
+      </div>
+      <SapGrid
+        label={`Journal entry ${h.number ?? h.trans_id}`}
+        columns={[
+          { head: "G/L Acct/BP Code" },
+          { head: "G/L Acct/BP Name" },
+          { head: "Control Acct" },
+          { head: "Debit", right: true },
+          { head: "Credit", right: true },
+        ]}
+        rows={[
+          ...lines.map((l) => [
+            l.partner || l.account,
+            l.partner ? l.partner_name || l.partner : l.account_name || "—",
+            l.partner ? account(l.account, l.account_name) : "",
+            Number(l.debit) ? money(l.debit) : "",
+            Number(l.credit) ? money(l.credit) : "",
+          ]),
+          [<strong key="t">Total</strong>, "", "", <strong key="d">{money(h.debit)}</strong>, <strong key="c">{money(h.credit)}</strong>],
+        ]}
+        empty="No lines."
+      />
+    </div>
+  );
+}
+
+/** A Journal Entry tab's body: the document's G/L, or why there is none. */
+function JournalTab({ company, transId }: { company: AdvancePaymentCompany; transId?: number | null }) {
+  return transId ? (
+    <JournalLines company={company} transId={transId} />
+  ) : (
+    <p className="m-0 px-1 py-2 text-[11.5px] text-subtle">Not posted to the G/L.</p>
+  );
+}
+
+/** A document number whose golden arrow opens its journal entry (no form of its own here). */
+function SapJournalLink({
+  company,
+  transId,
+  number,
+  title,
+}: {
+  company: AdvancePaymentCompany;
+  transId: number;
+  number: string;
+  title: string;
+}) {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <span className="inline-flex items-center gap-1">
+      <GoldenArrow label={`Open the journal entry of ${title} ${number}`} onClick={() => setOpen(true)} />
+      <span>{number}</span>
+      {open ? (
+        <Dialog open onOpenChange={(next) => (next ? null : setOpen(false))}>
+          <DialogContent title={`${title} ${number} — Journal Entry`} size="xl" className="max-w-[1080px] rounded-md">
+            <DialogHeader className={cn("gap-2 border-b bg-[#dfe4ea] px-3 py-1.5 pr-12", LINE)}>
+              <DialogTitle className="text-[13px] font-semibold">
+                Journal Entry — {title} {number}
+              </DialogTitle>
+              <span className="text-[11px] text-subtle">{company}</span>
+            </DialogHeader>
+            <DialogBody className="bg-[#f2f4f7] p-2">
+              <JournalLines company={company} transId={transId} />
+            </DialogBody>
+          </DialogContent>
+        </Dialog>
+      ) : null}
+    </span>
+  );
+}
+
+/* ── Relationship Map: the purchase trail, as SAP draws it ──────────────── */
+
+type MapNode = SapRelationshipMap["nodes"][number];
+
+/** SAP's columns, left to right: what each document was made from sits to its left. */
+const MAP_COLUMNS: Array<{ title: string; kinds: MapNode["kind"][] }> = [
+  { title: "Purchase Order", kinds: ["po"] },
+  { title: "Receipt / Down Payment", kinds: ["grpo", "down_payment"] },
+  { title: "A/P Invoice / Return", kinds: ["bill", "goods_return"] },
+  { title: "Payment / Debit Note", kinds: ["payment", "credit_memo"] },
+];
+const OPENS = new Set<MapNode["kind"]>(["po", "grpo", "bill", "payment"]);
+
+function MapCard({ company, node, byKey, focus }: {
+  company: AdvancePaymentCompany;
+  node: MapNode;
+  byKey: Map<string, MapNode>;
+  focus: boolean;
+}) {
+  const number = String(node.doc_num ?? node.doc_entry);
+  const from = node.parents
+    .map((key) => byKey.get(key))
+    .filter((p): p is MapNode => Boolean(p))
+    .map((p) => `${p.kind_label} ${p.doc_num ?? p.doc_entry}`);
+  return (
+    <div
+      data-slot="map-node"
+      className={cn(
+        "grid gap-[1px] rounded-[2px] border bg-white px-1.5 py-1 text-[11px]",
+        focus ? "border-[#f0ab00] bg-[#fff7dd]" : LINE,
+      )}
+    >
+      <span className="font-semibold text-[#4a5361]">
+        {node.oms ? "Advance (OMS)" : node.kind_label}
+        {node.status === "Cancelled" ? <span className="ml-1 text-danger">· Cancelled</span> : null}
+      </span>
+      <span className="text-[11.5px] font-semibold text-ink">
+        {OPENS.has(node.kind) ? (
+          <SapDocLink company={company} kind={node.kind as DocKind} docEntry={node.doc_entry} number={number} />
+        ) : node.trans_id ? (
+          <SapJournalLink company={company} transId={node.trans_id} number={number} title={node.kind_label} />
+        ) : (
+          number
+        )}
+      </span>
+      <span className="tabular-nums text-ink">{money(node.total)}</span>
+      <span className="text-[#4a5361]">
+        {date(node.date)}
+        {node.status && node.status !== "Cancelled" ? ` · ${node.status}` : ""}
+      </span>
+      {node.oms ? <span className="text-[#4a5361]">{node.oms}</span> : null}
+      {from.length ? <span className="text-[10.5px] text-subtle">from {from.join(", ")}</span> : null}
+    </div>
+  );
+}
+
+function RelationshipMap({ company, kind, docEntry }: {
+  company: AdvancePaymentCompany;
+  kind: "po" | "grpo" | "bill";
+  docEntry: number;
+}) {
+  const query = useQuery({
+    queryKey: ["advance-payments", "relationship-map", company, kind, docEntry],
+    queryFn: () => advancePaymentService.relationshipMap(company, kind, docEntry),
+    staleTime: 5 * 60_000,
+    retry: 1,
+  });
+  if (!query.data) return <Status query={query} />;
+  const { nodes, focus } = query.data;
+  const byKey = new Map(nodes.map((n) => [n.key, n]));
+  const columns = MAP_COLUMNS.map((c) => ({ ...c, nodes: nodes.filter((n) => c.kinds.includes(n.kind)) })).filter(
+    (c) => c.nodes.length,
+  );
+  if (!columns.length) return <p className="m-0 px-1 py-2 text-[11.5px] text-subtle">Nothing linked in SAP.</p>;
+  return (
+    <div aria-label="Relationship map" className="flex gap-1 overflow-x-auto pb-1">
+      {columns.map((c, i) => (
+        <React.Fragment key={c.title}>
+          {i ? (
+            <span aria-hidden="true" className="self-center px-0.5 text-[14px] text-[#9aa3ae]">
+              →
+            </span>
+          ) : null}
+          <div className="grid min-w-[11.5rem] content-start gap-1">
+            <span className="text-[10.5px] font-semibold uppercase tracking-[0.04em] text-[#4a5361]">{c.title}</span>
+            {c.nodes.map((n) => (
+              <MapCard
+                key={n.key}
+                company={company}
+                node={n}
+                byKey={byKey}
+                focus={n.kind === focus.kind && n.doc_entry === focus.doc_entry}
+              />
+            ))}
+          </div>
+        </React.Fragment>
+      ))}
+    </div>
   );
 }
 
