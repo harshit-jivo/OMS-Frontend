@@ -1192,6 +1192,12 @@ export interface ApiRequest extends ApiRequestFields {
     returned_after_approval?: boolean;
   } | null;
   can: RequestAbilities;
+  /**
+   * The payee's credit period: its SAP payment terms ("NET-30", 30 days).
+   * `set` is false on SAP's default "ADVANCE/CASH/0 DAYS", which nobody
+   * chose. Null for an employee, a payee not in SAP, or when SAP was down.
+   */
+  credit_terms?: { terms: string; days: number; set: boolean } | null;
   /** The all-requests list only: everyone who approved, rejected, returned or sent it back. */
   approvers?: Array<{ username: string; name: string }>;
   /** The all-requests list only: its latest log row, any action. */

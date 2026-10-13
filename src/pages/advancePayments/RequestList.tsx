@@ -24,6 +24,8 @@ import { KpiFilter } from "../backdate/filters";
 
 import {
   payeeOf,
+  billOrAdvance,
+  creditPeriod,
   paymentAgainstLabel,
   requestAmount,
   typeLabel,
@@ -220,6 +222,13 @@ export function RequestFilters<S extends string = StatusFilter>({
 
 /* ── The table ───────────────────────────────────────────────────────────── */
 
+/** "Bill" or "Advance", where it is either: what the approver is paying for. */
+function BillOrAdvance({ form }: { form: AdvanceRequestEntry["form"] }) {
+  const kind = billOrAdvance(form);
+  if (!kind) return null;
+  return <Badge tone={kind === "Bill" ? "info" : "hold"}>{kind}</Badge>;
+}
+
 export function RequestTable({
   entries,
   onOpen,
@@ -296,7 +305,12 @@ export function RequestTable({
                         {formatINR(requestAmount(e.form))}
                       </span>
                     </div>
-                    <p className="m-0 mt-0.5 truncate text-[12.5px] text-body">{payeeOf(e.form)}</p>
+                    <p className="m-0 mt-0.5 truncate text-[12.5px] text-body">
+                      {billOrAdvance(e.form) ? <BillOrAdvance form={e.form} /> : null} {payeeOf(e.form)}
+                    </p>
+                    {creditPeriod(e.api.credit_terms) ? (
+                      <p className="m-0 text-[11px] text-subtle">Credit: {creditPeriod(e.api.credit_terms)}</p>
+                    ) : null}
                     <p className="m-0 mt-0.5 text-[11px] text-subtle">
                       {[e.form.company, typeLabel(e.form), paymentAgainstLabel(e.form)].filter(Boolean).join(" · ")}
                     </p>
@@ -391,9 +405,19 @@ export function RequestTable({
                 </TableCell>
                 <TableCell>{e.form.company}</TableCell>
                 <TableCell>{typeLabel(e.form)}</TableCell>
-                <TableCell>{paymentAgainstLabel(e.form)}</TableCell>
+                <TableCell>
+                  {billOrAdvance(e.form) ? (
+                    <span className="mb-0.5 block">
+                      <BillOrAdvance form={e.form} />
+                    </span>
+                  ) : null}
+                  <span className="block text-[12px] text-subtle">{paymentAgainstLabel(e.form)}</span>
+                </TableCell>
                 <TableCell>
                   {payeeOf(e.form)}
+                  {creditPeriod(e.api.credit_terms) ? (
+                    <span className="block text-[11px] text-subtle">Credit: {creditPeriod(e.api.credit_terms)}</span>
+                  ) : null}
                   {vendorRefs(e.form).length ? (
                     <span className="block text-[11px] text-subtle">
                       Vendor Ref. {vendorRefs(e.form).join(", ")}

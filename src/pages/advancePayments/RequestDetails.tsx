@@ -17,6 +17,8 @@ import {
 } from "../../components/ui/table";
 
 import {
+  billOrAdvance,
+  creditPeriod,
   paymentAgainstLabel,
   requestAmount,
   returnMethodLabel,
@@ -72,6 +74,24 @@ export function RequestSummary({
         <DetailField label="Company" value={form.company} />
         <DetailField label="Type" value={typeLabel(form)} />
         <DetailField label="Payment Against" value={paymentAgainstLabel(form)} />
+        {billOrAdvance(form) ? (
+          <DetailField
+            label="Bill or Advance"
+            value={
+              billOrAdvance(form) === "Bill"
+                ? "Bill: paying a bill already received"
+                : "Advance: paying before the bill"
+            }
+            strong
+          />
+        ) : null}
+        {entry.api.credit_terms ? (
+          <DetailField
+            label="Credit Period"
+            value={creditPeriod(entry.api.credit_terms)}
+            hint={entry.api.credit_terms.set ? "The vendor's payment terms in SAP" : `SAP shows ${entry.api.credit_terms.terms}, its default`}
+          />
+        ) : null}
         {c.expense ? (
           <>
             <DetailField label="Pay To" value={form.payee} hint={form.partner || undefined} />
