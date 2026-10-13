@@ -490,6 +490,18 @@ export default function DraftStep({
           <div className="flex flex-col gap-0.5">
             <span className="text-[11px] uppercase tracking-wide text-subtle">
               <label htmlFor="invoice-round-off">Round off</label>
+              {state.totals.roundOffIsManual ? (
+                <Button
+                  variant="ghost"
+                  size="inline"
+                  className="ml-1 px-1 text-[11px] normal-case tracking-normal"
+                  onClick={() => state.updateForm({ roundOff: "" })}
+                >
+                  Use automatic
+                </Button>
+              ) : (
+                <span className="ml-1 normal-case tracking-normal">· automatic</span>
+              )}
             </span>
             <Input
               id="invoice-round-off"
@@ -498,7 +510,7 @@ export default function DraftStep({
               min={-ROUND_OFF_LIMIT}
               max={ROUND_OFF_LIMIT}
               value={state.form.roundOff ?? ""}
-              placeholder="0.00"
+              placeholder={state.totals.autoRoundOff.toFixed(2)}
               aria-invalid={roundOffOutOfRange || undefined}
               title={roundOffOutOfRange
                 ? `Round off must be between -${ROUND_OFF_LIMIT} and ${ROUND_OFF_LIMIT}.`

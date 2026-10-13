@@ -73,7 +73,7 @@ export type InvoiceForm = {
   billDate: string;
   driverMobile: string;
   discountPercent: number;
-  /** Round-off sent to SAP, as typed. Empty means none. */
+  /** Round-off sent to SAP. Empty means automatic: to the nearest rupee. */
   roundOff: string;
   shipTo: string;
   payTo: string;
@@ -196,8 +196,9 @@ export const calculateTotals = (
   }, 0);
   const freight = freightRows.reduce((sum, row) => sum + Math.max(toNumber(row.lineTotal), 0), 0);
   const totalBeforeRoundOff = taxable + tax + freight;
-  // Only what the user typed — the page never rounds on its own.
-  const roundOff = round2(toNumber(roundOffInput));
+  const autoRoundOff = round2(Math.floor(totalBeforeRoundOff + 0.5) - totalBeforeRoundOff);
+  const roundOffIsManual = String(roundOffInput ?? "").trim() !== "";
+  const roundOff = roundOffIsManual ? round2(toNumber(roundOffInput)) : autoRoundOff;
 
   return {
     totalQty,
@@ -207,7 +208,9 @@ export const calculateTotals = (
     tax,
     freight,
     totalBeforeRoundOff,
+    autoRoundOff,
     roundOff,
+    roundOffIsManual,
     // Money is two decimals: the invoice log's total_amount refuses more.
     grandTotal: round2(totalBeforeRoundOff + roundOff),
   };

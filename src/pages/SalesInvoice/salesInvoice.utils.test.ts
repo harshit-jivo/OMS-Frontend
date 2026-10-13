@@ -76,22 +76,29 @@ describe("round off", () => {
   // 3 x 33.33 = 99.99 taxable, + 5% tax 4.9995 = 104.9895 before round-off.
   const pricedLine: SelectedLine = { ...orderLine, Price: 33.33, invoiceQty: 3 };
 
-  it("is never applied on its own", () => {
+  it("defaults to the nearest rupee and sends it to SAP as document rounding", () => {
     const totals = calculateTotals([pricedLine], 0, [], "");
-    expect(totals.roundOff).toBe(0);
-    expect(totals.grandTotal).toBe(104.99);
-
-    const payload = buildInvoicePayload(party, { a: pricedLine }, form);
-    expect(payload).not.toHaveProperty("Rounding");
-    expect(payload).not.toHaveProperty("RoundingDiffAmount");
-  });
-
-  it("sends the amount typed in to SAP as document rounding", () => {
-    const totals = calculateTotals([pricedLine], 0, [], "0.01");
+    expect(totals.roundOffIsManual).toBe(false);
     expect(totals.roundOff).toBe(0.01);
     expect(totals.grandTotal).toBe(105);
 
+    const payload = buildInvoicePayload(party, { a: pricedLine }, form);
+    expect(payload).toMatchObject({ Rounding: "tYES", RoundingDiffAmount: 0.01 });
+  });
+
+  it("uses the amount typed in instead of the automatic one", () => {
+    const totals = calculateTotals([pricedLine], 0, [], "-0.99");
+    expect(totals.roundOffIsManual).toBe(true);
+    expect(totals.roundOff).toBe(-0.99);
+    expect(totals.grandTotal).toBe(104);
+
     const payload = buildInvoicePayload(party, { a: pricedLine }, { ...form, roundOff: "-0.99" });
     expect(payload).toMatchObject({ Rounding: "tYES", RoundingDiffAmount: -0.99 });
+  });
+
+  it("sends no rounding when 0 is typed in", () => {
+    const payload = buildInvoicePayload(party, { a: pricedLine }, { ...form, roundOff: "0" });
+    expect(payload).not.toHaveProperty("Rounding");
+    expect(payload).not.toHaveProperty("RoundingDiffAmount");
   });
 });
