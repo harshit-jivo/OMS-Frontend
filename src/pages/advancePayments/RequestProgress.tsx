@@ -160,6 +160,7 @@ function logDetail(log: ApiRequestLog): string {
   if (log.action === "UTR_RECORDED") return `UTR ${String(data.utr ?? "")} · ${String(data.method ?? "")} ${String(data.amount ?? "")}`;
   if (log.action === "PARTNER_LINKED") return `Linked to ${String(data.account ?? data.new ?? "")}`;
   if (log.action === "FILE_ADDED" || log.action === "FILE_REMOVED") return String(data.file ?? "");
+  if (log.action === "RECALLED") return `Was waiting at ${String(data.was_waiting_at ?? "")}`;
   if (log.action === "SAP_ATTACHED") {
     return `${(data.files as string[] | undefined)?.join(", ") ?? ""} · SAP attachment ${String(data.attachment ?? "")}`;
   }
@@ -176,6 +177,7 @@ const LOG_TONE: Record<string, BadgeTone> = {
   SAP_CANCELLED: "bad",
   RETURNED: "note",
   SENT_BACK: "note",
+  RECALLED: "hold",
   PAYMENT_EDITED: "hold",
   CANCELLED: "neutral",
 };

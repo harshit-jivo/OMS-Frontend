@@ -210,6 +210,9 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
 
   const [draft, setDraft] = useState<PayoutDetails | undefined>(undefined);
   const [remarks, setRemarks] = useState("");
+  // Taking back your approval while the next stage has not decided.
+  const [changing, setChanging] = useState(false);
+  const [changeRemarks, setChangeRemarks] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ tone: "ok" | "bad"; text: string } | null>(null);
   // Typing the payee's account by hand: the password token, and what to do
@@ -446,6 +449,22 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
         {deciding ? (
           <Notice tone="info" title={`Waiting on you: ${flow?.current_stage}`}>
             {stageGuidance(entry)}
+          </Notice>
+        ) : null}
+
+        {/* You approved it and the very next stage has not decided yet: you
+            may take it back. Once it moves on further, the decision stands. */}
+        {can.change_decision ? (
+          <Notice tone="hold" title="You approved this">
+            <span className="block">
+              It now waits at {flow?.current_stage}. Until that stage decides, you can take your approval back
+              and decide again.
+            </span>
+            <span className="mt-2 block">
+              <Button variant="secondary" size="xs" onClick={() => setChanging(true)} disabled={busy}>
+                Change decision
+              </Button>
+            </span>
           </Notice>
         ) : null}
 
@@ -704,6 +723,53 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
             </div>
           </Card>
         ) : null}
+        <Dialog
+          open={changing}
+          onOpenChange={(next) => {
+            if (!next && !busy) setChanging(false);
+          }}
+        >
+          {changing ? (
+            <DialogContent title="Change your decision" size="sm" className="max-w-[460px]">
+              <DialogBody className="space-y-3">
+                <p className="m-0 text-[14px] text-ink">
+                  Take back your approval of <span className="font-semibold">{entry.requestNo}</span>? It leaves{" "}
+                  {flow?.current_stage} and waits at your stage again, where you approve, reject or return it.
+                </p>
+                <Field label="Remarks">
+                  {(f) => (
+                    <Textarea
+                      {...f}
+                      rows={2}
+                      placeholder="Optional: why"
+                      value={changeRemarks}
+                      onChange={(e) => setChangeRemarks(e.target.value)}
+                    />
+                  )}
+                </Field>
+              </DialogBody>
+              <DialogFooter>
+                <Button onClick={() => setChanging(false)} disabled={busy}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="primary"
+                  disabled={busy}
+                  onClick={() => {
+                    setChanging(false);
+                    void run(
+                      () => advancePaymentService.act(entry.serverId, "change-decision", changeRemarks.trim(), version),
+                      "Your approval is taken back: decide it again below.",
+                      () => setChangeRemarks(""),
+                    );
+                  }}
+                >
+                  Take back my approval
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          ) : null}
+        </Dialog>
       </Page>
     </RequestFilesProvider>
   );

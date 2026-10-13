@@ -1010,6 +1010,11 @@ export interface RequestAbilities {
   reject: boolean;
   return_to_creator: boolean;
   send_back: boolean;
+  /**
+   * You approved it and it waits at the VERY NEXT stage, which has not
+   * decided: you may take the approval back and decide again.
+   */
+  change_decision?: boolean;
   edit_payout: boolean;
   record_utr: boolean;
   /** After posting: attach to the SAP payment the files SAP does not have yet. */
@@ -1213,7 +1218,15 @@ export interface ApiRequest extends ApiRequestFields {
 
 /** `all`: every request, read only — `Advance_Payment_View_All`. */
 export type RequestScope = "mine" | "desk" | "all";
-export type StageAction = "approve" | "reject" | "return" | "send-back" | "cancel" | "resubmit";
+export type StageAction =
+  | "approve"
+  | "reject"
+  | "return"
+  | "send-back"
+  | "cancel"
+  | "resubmit"
+  /** Take back your approval while the very next stage has not decided. */
+  | "change-decision";
 
 /** The problems a refused action lists, beside its message. */
 export function advancePaymentProblems(err: unknown): string[] {
