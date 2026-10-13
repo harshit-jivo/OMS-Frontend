@@ -40,6 +40,21 @@ import { ControlPanelPage, type ControlPanelCrumb } from "./shared/components/Co
 import type { TabAdapter } from "./tabs";
 import { useFullscreen } from "./useFullscreen";
 
+/** Shown when the frame received the OMS app instead of a Control Panel page. */
+const MISROUTED =
+  "This server is not passing Control Panel pages to the backend. Ask the server administrator to " +
+  "route /cp/, /realise/, /sales/, /inventory/, /expenses/, /salaries/ and /static/ to the OMS " +
+  "backend, the same way /api/ is.";
+
+/** True when `win` shows the OMS app's own page (index.html's application-name meta). */
+function isOmsApp(win: Window | null): boolean {
+  try {
+    return Boolean(win?.document.querySelector('meta[name="application-name"][content="oms-web"]'));
+  } catch {
+    return false; // not readable: not our app (and not same-origin)
+  }
+}
+
 export function EmbeddedControlPanel({
   page,
   title,
@@ -281,6 +296,14 @@ export function EmbeddedControlPanel({
               title={title}
               onLoad={(e) => {
                 setFrameLoading(false);
+                // The server answered the Control Panel path with the OMS app
+                // itself (its web server routes only /api to the backend), so
+                // the frame would show OMS inside OMS. Say what is wrong instead.
+                if (isOmsApp(e.currentTarget.contentWindow)) {
+                  setSrc(null);
+                  setError(MISROUTED);
+                  return;
+                }
                 // So F / F11 work while the page inside has focus too.
                 fullscreen.listenOn(e.currentTarget.contentWindow);
                 connectTabs(e.currentTarget.contentWindow);

@@ -4,6 +4,10 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/logo.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Identifies the OMS app's own page: the Control Panel frame checks for it
+         to tell a misrouted server (which hands every path to this app) from a
+         real Control Panel page. See pages/controlPanel/EmbeddedControlPanel.tsx. -->
+    <meta name="application-name" content="oms-web" />
     <title>JIVO OMS - Live Edition</title>
   </head>
   <body>
