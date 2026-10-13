@@ -22,7 +22,7 @@ import { cn } from "@/lib/utils";
 import ContentsTab from "./ContentsTab";
 import InteractiveLoader from "./InteractiveLoader";
 import { DraftSOInfoPanel } from "./SOInfoPanel";
-import { formatDateDisplay, formatMoney, toNumber } from "./salesInvoice.utils";
+import { ROUND_OFF_LIMIT, formatDateDisplay, formatMoney, toNumber } from "./salesInvoice.utils";
 import type { SalesInvoiceState, SalesOrder } from "./useSalesInvoice";
 
 type Props = {
@@ -146,6 +146,7 @@ export default function DraftStep({
     [state.billToAddresses, state.shipToAddresses],
   );
   const postDisabledReason = state.selectedLineBatchError;
+  const roundOffOutOfRange = Math.abs(state.totals.roundOff) > ROUND_OFF_LIMIT;
   // What this customer still owes, straight off their SAP account balance.
   // `null` when SAP did not report one — better a missing tile than a
   // confident zero that isn't true.
@@ -485,6 +486,33 @@ export default function DraftStep({
               {formatMoney(state.totals.grandTotal)}
             </strong>
           </span>
+
+          <div className="flex flex-col gap-0.5">
+            <span className="text-[11px] uppercase tracking-wide text-subtle">
+              <label htmlFor="invoice-round-off">Round off</label>
+            </span>
+            <Input
+              id="invoice-round-off"
+              type="number"
+              step="0.01"
+              min={-ROUND_OFF_LIMIT}
+              max={ROUND_OFF_LIMIT}
+              value={state.form.roundOff ?? ""}
+              placeholder="0.00"
+              aria-invalid={roundOffOutOfRange || undefined}
+              title={roundOffOutOfRange
+                ? `Round off must be between -${ROUND_OFF_LIMIT} and ${ROUND_OFF_LIMIT}.`
+                : undefined}
+              className="h-control-sm w-28 text-right tabular-nums"
+              onChange={(event) => state.updateForm({ roundOff: event.target.value })}
+            />
+          </div>
+
+          {roundOffOutOfRange && (
+            <Badge tone="bad">
+              Round off must be between -{ROUND_OFF_LIMIT} and {ROUND_OFF_LIMIT}
+            </Badge>
+          )}
 
           {outstanding !== null && (
             <span title={"Account balance for " + (state.selectedParty?.CardCode || customerName)}>

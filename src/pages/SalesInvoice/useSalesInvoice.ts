@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   buildInvoicePayload,
+  ROUND_OFF_LIMIT,
   calculateTotals,
   emptyForm,
   lineKey,
@@ -1037,8 +1038,8 @@ export function useSalesInvoice() {
     [selectedLineList],
   );
   const totals = useMemo(
-    () => calculateTotals(selectedLineList, form.discountPercent, freightRows),
-    [form.discountPercent, freightRows, selectedLineList],
+    () => calculateTotals(selectedLineList, form.discountPercent, freightRows, form.roundOff),
+    [form.discountPercent, form.roundOff, freightRows, selectedLineList],
   );
   const payload = useMemo(
     () => buildInvoicePayload(selectedParty, selectedLines, form, freightRows),
@@ -1332,6 +1333,11 @@ export function useSalesInvoice() {
 
     if (invalidLine) {
       setPostError("Every selected line must have a valid invoice quantity.");
+      return;
+    }
+
+    if (Math.abs(totals.roundOff) > ROUND_OFF_LIMIT) {
+      setPostError(`Round off must be between -${ROUND_OFF_LIMIT} and ${ROUND_OFF_LIMIT}.`);
       return;
     }
 

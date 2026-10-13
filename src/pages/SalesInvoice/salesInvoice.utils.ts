@@ -73,6 +73,8 @@ export type InvoiceForm = {
   billDate: string;
   driverMobile: string;
   discountPercent: number;
+  /** Round-off sent to SAP, as typed. Empty means none. */
+  roundOff: string;
   shipTo: string;
   payTo: string;
   shippingType: string;
@@ -160,6 +162,7 @@ export const emptyForm = (): InvoiceForm => ({
   billDate: todayInput(),
   driverMobile: "",
   discountPercent: 0,
+  roundOff: "",
   shipTo: "",
   payTo: "",
   shippingType: "Road",
@@ -168,7 +171,17 @@ export const emptyForm = (): InvoiceForm => ({
   shippingPriority: "Normal",
 });
 
-export const calculateTotals = (lines: SelectedLine[], discountPercent = 0, freightRows: FreightRow[] = []) => {
+/** The e-invoice (IRN) accepts a round-off of at most this, either way. */
+export const ROUND_OFF_LIMIT = 99.99;
+
+const round2 = (value: number) => Math.round(value * 100) / 100;
+
+export const calculateTotals = (
+  lines: SelectedLine[],
+  discountPercent = 0,
+  freightRows: FreightRow[] = [],
+  roundOffInput = "",
+) => {
   const totalQty = lines.reduce((sum, line) => sum + toNumber(line.invoiceQty), 0);
   const totalBeforeDiscount = lines.reduce(
     (sum, line) => sum + toNumber(line.invoiceQty) * toNumber(line.Price),
@@ -183,7 +196,8 @@ export const calculateTotals = (lines: SelectedLine[], discountPercent = 0, frei
   }, 0);
   const freight = freightRows.reduce((sum, row) => sum + Math.max(toNumber(row.lineTotal), 0), 0);
   const totalBeforeRoundOff = taxable + tax + freight;
-  const grandTotal = Math.floor(totalBeforeRoundOff + 0.5);
+  // Only what the user typed — the page never rounds on its own.
+  const roundOff = round2(toNumber(roundOffInput));
 
   return {
     totalQty,
@@ -193,8 +207,9 @@ export const calculateTotals = (lines: SelectedLine[], discountPercent = 0, frei
     tax,
     freight,
     totalBeforeRoundOff,
-    roundOff: grandTotal - totalBeforeRoundOff,
-    grandTotal,
+    roundOff,
+    // Money is two decimals: the invoice log's total_amount refuses more.
+    grandTotal: round2(totalBeforeRoundOff + roundOff),
   };
 };
 
@@ -206,6 +221,7 @@ export const buildInvoicePayload = (
 ) => {
   const lines = Object.values(selectedLines);
   const firstLine = lines[0];
+  const { roundOff } = calculateTotals(lines, form.discountPercent, freightRows, form.roundOff);
 
   const additionalExpenses = freightRows
     .filter((row) => toNumber(row.expenseCode) > 0 && toNumber(row.lineTotal) > 0)
@@ -273,5 +289,8 @@ export const buildInvoicePayload = (
       };
     }),
     ...(additionalExpenses.length ? { DocumentAdditionalExpenses: additionalExpenses } : {}),
+    // SAP's own document rounding: the invoice total becomes the computed
+    // total plus this amount, and the e-invoice carries it as RndOffAmt.
+    ...(Math.abs(roundOff) >= 0.005 ? { Rounding: "tYES", RoundingDiffAmount: roundOff } : {}),
   };
 };

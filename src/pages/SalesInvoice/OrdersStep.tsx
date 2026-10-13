@@ -43,6 +43,10 @@ const USED_STATUS_LABELS: Record<string, string> = {
 
 type Props = {
   state: SalesInvoiceState;
+};
+
+type ContinueBarProps = {
+  state: SalesInvoiceState;
   continueLabel?: string;
   continueLoadingLabel?: string;
   onContinue?: () => void | Promise<void>;
@@ -109,18 +113,12 @@ const normalizeWarehouseStock = (warehouses: InventoryWarehouse[]) =>
     .filter((warehouse) => warehouse.code)
     .sort((a, b) => a.code.localeCompare(b.code));
 
-export default function OrdersStep({
-  state,
-  continueLabel = "Next: review lines",
-  continueLoadingLabel = "Loading draft…",
-  onContinue,
-}: Props) {
+export default function OrdersStep({ state }: Props) {
   const [query, setQuery] = useState("");
   const [activeOrderKey, setActiveOrderKey] = useState<string | null>(null);
   const [warehouseStockByItemCode, setWarehouseStockByItemCode] = useState<
     Record<string, WarehouseStock[]>
   >({});
-  const selectedOrderCount = new Set(state.selectedLineList.map((line) => line.DocEntry)).size;
   /* Bill To and Ship To are separate CRD1 lists, and an order's PayToCode
      names one while its ShipToCode names the other — so the (i) panel is
      given both to look in. They are empty until the draft step loads them,
@@ -130,11 +128,6 @@ export default function OrdersStep({
     () => [...state.billToAddresses, ...state.shipToAddresses],
     [state.billToAddresses, state.shipToAddresses],
   );
-  const hasInvalidQty = state.selectedLineList.some(
-    (line) => toNumber(line.invoiceQty) < 1 || toNumber(line.invoiceQty) > toNumber(line.OpenQty),
-  );
-  const cannotContinue = hasInvalidQty || Boolean(state.selectedOrderAddressError);
-
   const filteredOrders = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     if (!normalized) return state.salesOrders;
@@ -521,47 +514,67 @@ export default function OrdersStep({
         </div>
       )}
 
-      {state.selectedLineList.length > 0 && (
-        <Card className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <strong className="block text-[13px] font-semibold text-ink">
-              {state.selectedLineList.length} line
-              {state.selectedLineList.length === 1 ? "" : "s"} across {selectedOrderCount} order
-              {selectedOrderCount === 1 ? "" : "s"}
-            </strong>
-            <span className="text-[12px] tabular-nums text-subtle">
-              Qty {state.totals.totalQty} · Taxable {formatMoney(state.totals.taxable)} · Grand
-              total {formatMoney(state.totals.grandTotal)}
-            </span>
-            {state.selectedOrderAddressError && (
-              <Notice tone="bad" className="mt-2">
-                {state.selectedOrderAddressError}
-              </Notice>
-            )}
-          </div>
-          <Button
-            variant="primary"
-            disabled={cannotContinue || state.loadingDraftDetails}
-            title={
-              state.selectedOrderAddressError
-                ? state.selectedOrderAddressError
-                : hasInvalidQty
-                  ? "One or more invoice quantities are outside the open quantity."
-                  : undefined
-            }
-            onClick={() => {
-              if (onContinue) {
-                onContinue();
-                return;
-              }
-              state.createInvoiceDraft();
-            }}
-          >
-            {state.loadingDraftDetails ? continueLoadingLabel : continueLabel}
-            <HiOutlineArrowRight aria-hidden="true" />
-          </Button>
-        </Card>
-      )}
     </div>
+  );
+}
+
+/**
+ * What is selected, and the button that turns it into a draft.
+ *
+ * Rendered in the dialog footer rather than under the order list, so it stays
+ * in view while the list scrolls.
+ */
+export function OrdersContinueBar({
+  state,
+  continueLabel = "Next: review lines",
+  continueLoadingLabel = "Loading draft…",
+  onContinue,
+}: ContinueBarProps) {
+  if (state.selectedLineList.length === 0) return null;
+
+  const selectedOrderCount = new Set(state.selectedLineList.map((line) => line.DocEntry)).size;
+  const hasInvalidQty = state.selectedLineList.some(
+    (line) => toNumber(line.invoiceQty) < 1 || toNumber(line.invoiceQty) > toNumber(line.OpenQty),
+  );
+  const cannotContinue = hasInvalidQty || Boolean(state.selectedOrderAddressError);
+
+  return (
+    <>
+      <div className="min-w-0 text-right">
+        <strong className="block text-[13px] font-semibold text-ink">
+          {state.selectedLineList.length} line
+          {state.selectedLineList.length === 1 ? "" : "s"} across {selectedOrderCount} order
+          {selectedOrderCount === 1 ? "" : "s"}
+        </strong>
+        <span className="text-[12px] tabular-nums text-subtle">
+          Qty {state.totals.totalQty} · Taxable {formatMoney(state.totals.taxable)} · Grand total{" "}
+          {formatMoney(state.totals.grandTotal)}
+        </span>
+        {state.selectedOrderAddressError && (
+          <span className="block text-[12px] text-bad">{state.selectedOrderAddressError}</span>
+        )}
+      </div>
+      <Button
+        variant="primary"
+        disabled={cannotContinue || state.loadingDraftDetails}
+        title={
+          state.selectedOrderAddressError
+            ? state.selectedOrderAddressError
+            : hasInvalidQty
+              ? "One or more invoice quantities are outside the open quantity."
+              : undefined
+        }
+        onClick={() => {
+          if (onContinue) {
+            onContinue();
+            return;
+          }
+          state.createInvoiceDraft();
+        }}
+      >
+        {state.loadingDraftDetails ? continueLoadingLabel : continueLabel}
+        <HiOutlineArrowRight aria-hidden="true" />
+      </Button>
+    </>
   );
 }

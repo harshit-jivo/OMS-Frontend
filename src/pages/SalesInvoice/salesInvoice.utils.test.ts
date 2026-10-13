@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { buildInvoicePayload, type InvoiceForm, type SelectedLine } from "./salesInvoice.utils";
+import { buildInvoicePayload, calculateTotals, type InvoiceForm, type SelectedLine } from "./salesInvoice.utils";
 
 const form: InvoiceForm = {
   postingDate: "2026-09-22",
@@ -17,6 +17,7 @@ const form: InvoiceForm = {
   billDate: "",
   driverMobile: "",
   discountPercent: 0,
+  roundOff: "",
   shipTo: "SABRI TRADERS DELHI",
   payTo: "SABRI TRADERS DELHI",
   shippingType: "",
@@ -68,5 +69,29 @@ describe("buildInvoicePayload U_SchemeAgst", () => {
   it("omits the field rather than sending an empty string when nothing resolved", () => {
     const payload = buildInvoicePayload(party, { "10985-1": { ...orderLine, U_SchemeAgst: "" } }, form);
     expect(payload.DocumentLines[0]).not.toHaveProperty("U_SchemeAgst");
+  });
+});
+
+describe("round off", () => {
+  // 3 x 33.33 = 99.99 taxable, + 5% tax 4.9995 = 104.9895 before round-off.
+  const pricedLine: SelectedLine = { ...orderLine, Price: 33.33, invoiceQty: 3 };
+
+  it("is never applied on its own", () => {
+    const totals = calculateTotals([pricedLine], 0, [], "");
+    expect(totals.roundOff).toBe(0);
+    expect(totals.grandTotal).toBe(104.99);
+
+    const payload = buildInvoicePayload(party, { a: pricedLine }, form);
+    expect(payload).not.toHaveProperty("Rounding");
+    expect(payload).not.toHaveProperty("RoundingDiffAmount");
+  });
+
+  it("sends the amount typed in to SAP as document rounding", () => {
+    const totals = calculateTotals([pricedLine], 0, [], "0.01");
+    expect(totals.roundOff).toBe(0.01);
+    expect(totals.grandTotal).toBe(105);
+
+    const payload = buildInvoicePayload(party, { a: pricedLine }, { ...form, roundOff: "-0.99" });
+    expect(payload).toMatchObject({ Rounding: "tYES", RoundingDiffAmount: -0.99 });
   });
 });

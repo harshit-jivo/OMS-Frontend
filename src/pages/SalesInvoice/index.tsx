@@ -46,7 +46,7 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import DraftStep, { BranchBadge } from "./DraftStep";
-import OrdersStep from "./OrdersStep";
+import OrdersStep, { OrdersContinueBar } from "./OrdersStep";
 import { apiFetch, hanaUrl, useSalesInvoice, type SalesInvoiceState } from "./useSalesInvoice";
 import { formatMoney, type SelectedLine } from "./salesInvoice.utils";
 
@@ -2480,15 +2480,18 @@ export default function SalesInvoiceWizard() {
               </DialogTitle>
             </DialogHeader>
             <DialogBody>
-              <OrdersStep
+              <OrdersStep state={state} />
+            </DialogBody>
+            <DialogFooter className="flex-wrap">
+              <Button className="mr-auto" onClick={backToPartyModal}>
+                Back to parties
+              </Button>
+              <OrdersContinueBar
                 state={state}
                 continueLabel="Create draft"
                 continueLoadingLabel="Creating draft..."
                 onContinue={createDraftFromSelectedOrders}
               />
-            </DialogBody>
-            <DialogFooter>
-              <Button onClick={backToPartyModal}>Back to parties</Button>
             </DialogFooter>
           </DialogContent>
         )}
