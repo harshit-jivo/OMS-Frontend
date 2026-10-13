@@ -11,6 +11,7 @@ import {
 import { cn } from "@/lib/utils";
 import {
   groupNotifications,
+  notificationKey,
   type Notification,
 } from "@/components/sidebar/notificationGrouping";
 import { isWebPushSupported } from "@/services/webPushClient";
@@ -182,7 +183,7 @@ export function NotificationsDialog({
                     <div className="space-y-1.5">
                       {group.items.map((item) => (
                         <button
-                          key={item.id}
+                          key={notificationKey(item)}
                           type="button"
                           onClick={() => onSelect(item)}
                           className={cn(
@@ -202,6 +203,13 @@ export function NotificationsDialog({
                             )}
                           />
                           <span className="min-w-0 flex-1">
+                            {/* The framework feed sends a heading as well as a
+                                body; the Orders feed sends only a body. */}
+                            {item.title ? (
+                              <span className="block text-[13px] font-semibold leading-snug text-ink">
+                                {item.title}
+                              </span>
+                            ) : null}
                             <span className="block text-[13px] leading-snug text-ink">
                               {item.message}
                             </span>

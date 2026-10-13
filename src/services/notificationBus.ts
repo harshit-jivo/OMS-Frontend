@@ -28,7 +28,10 @@ export type NotificationPayload = {
 export type NotificationBusEvent =
   | { type: "push"; data: NotificationPayload }
   | { type: "click"; data: NotificationPayload }
-  | { type: "read"; id: number }
+  // `key` identifies WHICH feed's row (see `notificationKey`): the two
+  // tables number independently, so an id alone marked the wrong row read in
+  // every other tab. Optional for older tabs still broadcasting without it.
+  | { type: "read"; id: number; key?: string }
   | { type: "read-all" }
   | { type: "cleared" }
   | { type: "resubscribe"; subscription: PushSubscriptionJSON };

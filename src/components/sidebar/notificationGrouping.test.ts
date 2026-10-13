@@ -13,6 +13,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  notificationKey,
   REFRESH_EVENT_NAMES,
   dateGroupLabel,
   extractNotifications,
@@ -149,5 +150,30 @@ describe("REFRESH_EVENT_NAMES", () => {
       "refresh-notifications",
       "refreshNotifications",
     ]);
+  });
+});
+
+/**
+ * The bell shows TWO tables, and they number independently.
+ *
+ * `orders.Notification` and `notifications.Notification` both start at 1, so
+ * Orders #9 and payment-request #9 are different notifications that sit in one
+ * list together. Keying either on the bare id gives React a duplicate key —
+ * which silently drops a row — and makes "mark this one read" mark the other
+ * one read as well.
+ */
+describe("notificationKey", () => {
+  const row = (over: Record<string, unknown> = {}) =>
+    ({ id: 9, message: "m", is_read: false, created_at: "2026-10-13T06:00:00Z", ...over }) as never;
+
+  it("keeps the same id in the two feeds apart", () => {
+    const orders = notificationKey(row({ key: "orders:9", source: "orders" }));
+    const framework = notificationKey(row({ key: "framework:9", source: "framework" }));
+    expect(orders).not.toBe(framework);
+  });
+
+  it("treats a row with no key as an Orders row", () => {
+    // Everything that was in the list before the second feed existed.
+    expect(notificationKey(row())).toBe("orders:9");
   });
 });

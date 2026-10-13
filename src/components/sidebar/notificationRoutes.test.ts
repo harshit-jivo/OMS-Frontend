@@ -33,6 +33,40 @@ describe("routeForNotification", () => {
     );
   });
 
+  it("routes a row taken straight from the bell's list", () => {
+    // What `handleNotificationClick` now passes it: a whole notification as
+    // the history endpoint returned it, not a hand-built payload. Until that
+    // handler called this, clicking a payment-request notification in the bell
+    // opened the order list with nothing selected - the row carries no
+    // `order_id`, because it is not about an order.
+    const fromTheList = {
+      id: 9838,
+      key: "framework:9838",
+      source: "framework" as const,
+      title: "Payment request awaiting you",
+      message: "AP-84 - a vendor - Rs 5,000 (OIL)",
+      is_read: false,
+      created_at: "2026-10-13T07:40:00Z",
+      event_type: "ADVANCE_PAYMENT_AWAITING_APPROVAL",
+      entity_id: 84,
+      entity_type: "advancerequest",
+    };
+    expect(routeForNotification(fromTheList)).toBe("/Advance_Payment_Approval?request=84");
+  });
+
+  it("sends an Orders row back to the order routing, as before", () => {
+    // Orders rows carry no event, so this must keep returning null and let
+    // `goToOrder` handle them - the second feed must not capture the first.
+    const ordersRow = {
+      id: 9,
+      message: "Order SO-1 needs approval",
+      is_read: false,
+      created_at: "2026-10-13T07:40:00Z",
+      order_id: 1,
+    };
+    expect(routeForNotification(ordersRow)).toBeNull();
+  });
+
   it("leaves everything else to the existing order routing", () => {
     expect(routeForNotification({ event_type: "ORDER_CREATED", entity_id: 1 })).toBeNull();
     expect(routeForNotification(null)).toBeNull();

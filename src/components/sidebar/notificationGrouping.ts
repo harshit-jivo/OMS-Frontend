@@ -14,7 +14,33 @@ export type Notification = {
   is_read: boolean;
   order_id?: number;
   created_at: string;
+
+  /* ── The second feed ──────────────────────────────────────────────────
+     The bell merges two tables (see `services/frameworkNotificationService`),
+     and everything below belongs to rows from the newer one. All optional, so
+     an Orders row is unchanged and nothing that only reads `message` cares. */
+
+  /**
+   * Unique across BOTH feeds.
+   *
+   * The two tables number independently, so Orders #9 and framework #9 both
+   * exist. Anything keying a list, matching a read, or de-duplicating must use
+   * this and not `id` — React would otherwise see one duplicate key and drop a
+   * row, and marking one read would mark the other read too.
+   */
+  key?: string;
+  source?: "orders" | "framework";
+  /** The framework sends a heading as well as a body; Orders sends only a body. */
+  title?: string;
+  /** What the row is about, for routing. See `notificationRoutes`. */
+  event_type?: string | null;
+  entity_id?: number | string | null;
+  entity_type?: string | null;
 };
+
+/** The composite key for a row from either feed. */
+export const notificationKey = (item: Notification): string =>
+  item.key ?? `orders:${item.id}`;
 
 export type NotificationGroup = { label: string; items: Notification[] };
 

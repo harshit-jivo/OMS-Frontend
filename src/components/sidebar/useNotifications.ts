@@ -46,10 +46,38 @@ import { showToast } from "@/lib/toastStore";
 import {
   REFRESH_EVENT_NAMES,
   extractNotifications,
+  notificationKey,
   type Notification,
 } from "./notificationGrouping";
+import {
+  frameworkNotificationService,
+  type FrameworkNotification,
+} from "../../services/frameworkNotificationService";
 import { getAccessToken } from "@/auth";
 import { routeForNotification } from "./notificationRoutes";
+
+/**
+ * A framework row as the bell's list renders it.
+ *
+ * The two feeds are different tables with independent ids, so the composite
+ * `key` is what everything downstream matches on — see `notificationKey`.
+ */
+const fromFramework = (n: FrameworkNotification): Notification => ({
+  id: n.id,
+  key: `framework:${n.id}`,
+  source: "framework",
+  title: n.title,
+  message: n.message,
+  is_read: n.is_read,
+  created_at: n.created_at,
+  event_type: n.event_type,
+  entity_id: n.entity_id,
+  entity_type: n.entity_type,
+});
+
+/** Newest first, across both feeds. */
+const byNewest = (a: Notification, b: Notification) =>
+  new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
 
 /** Roles that are offered the browser notification prompt. */
 const PROMPTED_ROLES = ["auditor", "billing", "manager"];
@@ -94,14 +122,31 @@ export function useNotifications({
   );
 
   // Lightweight unread snapshot for the bell badge (also the polling fallback).
+  //
+  // BOTH FEEDS. Counting only Orders is what left the badge at zero while a
+  // user had payment-request notifications waiting — the two live in separate
+  // tables and the second one was never asked. Each is settled on its own, so
+  // one feed being down still shows the other's count rather than none.
   const fetchNotifications = useCallback(async () => {
-    try {
-      const response = await api.get("/orders/notifications/");
+    const [orders, framework] = await Promise.allSettled([
+      api.get("/orders/notifications/"),
+      frameworkNotificationService.unreadCount(),
+    ]);
+
+    let total = 0;
+    if (orders.status === "fulfilled") {
+      const response = orders.value;
       const items = extractNotifications(response.data ?? response);
-      setUnreadCount(items.filter((n) => !n.is_read).length);
-    } catch (error) {
-      console.error("Error fetching notifications:", error);
+      total += items.filter((n) => !n.is_read).length;
+    } else {
+      console.error("Error fetching notifications:", orders.reason);
     }
+    if (framework.status === "fulfilled") {
+      total += framework.value;
+    } else {
+      console.error("Error fetching notifications:", framework.reason);
+    }
+    setUnreadCount(total);
   }, []);
 
   // Resolve the correct role route for a Sales Order deep-link (unchanged
@@ -139,23 +184,39 @@ export function useNotifications({
 
   // Apply a single read to the badge + history list. Called only from the bus
   // listener so there is exactly one update path (no double-decrement).
-  const applyRead = useCallback((id: number) => {
+  //
+  // Matched on the composite key where the broadcaster sent one: Orders #9 and
+  // framework #9 are different notifications, and matching on the bare id
+  // marked both read.
+  const applyRead = useCallback((id: number, key?: string) => {
     setUnreadCount((c) => Math.max(0, c - 1));
     setHistoryItems((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)),
+      prev.map((n) =>
+        (key ? notificationKey(n) === key : n.id === id)
+          ? { ...n, is_read: true }
+          : n,
+      ),
     );
   }, []);
 
   // Marks read on the server, then broadcasts so THIS tab and every other tab
   // update through the single bus path. Only call for a currently-unread item.
-  const markNotificationRead = useCallback(async (id: number) => {
-    try {
-      await api.patch(`/orders/notifications/${id}/`, {});
-    } catch (error) {
-      console.error("Error marking as read:", error);
-    }
-    broadcastNotificationEvent({ type: "read", id });
-  }, []);
+  const markNotificationRead = useCallback(
+    async (id: number, source: Notification["source"] = "orders") => {
+      try {
+        if (source === "framework") await frameworkNotificationService.markRead(id);
+        else await api.patch(`/orders/notifications/${id}/`, {});
+      } catch (error) {
+        console.error("Error marking as read:", error);
+      }
+      broadcastNotificationEvent({
+        type: "read",
+        id,
+        key: `${source}:${id}`,
+      });
+    },
+    [],
+  );
 
   // Paginated history for the modal: unread/read + Today/Yesterday/Older
   // grouping (grouped client-side), with "load more".
@@ -165,18 +226,53 @@ export function useNotifications({
       try {
         const offset = reset ? 0 : historyOffset;
         const filter = filterOverride ?? historyFilter;
-        const response = await api.get("/orders/notifications/history/", {
-          params: { limit: HISTORY_PAGE_SIZE, offset, filter },
-        });
-        const payload = response.data ?? response;
+
+        // THE SECOND FEED IS FETCHED WHOLE, and only on a reset.
+        //
+        // `/notifications/` offers no limit/offset and no filter — it answers
+        // the latest 50, full stop. So Orders is paged as before and the
+        // framework rows are merged in once, then left alone while "load
+        // more" walks back through Orders. Filtering them is done here for
+        // the same reason.
+        const [ordersRes, frameworkRows] = await Promise.all([
+          api.get("/orders/notifications/history/", {
+            params: { limit: HISTORY_PAGE_SIZE, offset, filter },
+          }),
+          reset
+            ? frameworkNotificationService.list().catch((error) => {
+                // One feed failing must not empty the bell of the other.
+                console.error("Error loading notification history:", error);
+                return [];
+              })
+            : Promise.resolve([]),
+        ]);
+
+        const payload = ordersRes.data ?? ordersRes;
         const results: Notification[] = Array.isArray(payload.results)
-          ? payload.results
+          ? payload.results.map((row: Notification) => ({
+              ...row,
+              key: `orders:${row.id}`,
+              source: "orders" as const,
+            }))
           : [];
-        setHistoryItems((prev) => (reset ? results : [...prev, ...results]));
+
+        const framework = frameworkRows
+          .map(fromFramework)
+          .filter((row) => (filter === "unread" ? !row.is_read : true));
+
+        setHistoryItems((prev) =>
+          (reset ? [...results, ...framework] : [...prev, ...results]).sort(byNewest),
+        );
+        // Only the Orders rows advance the offset: the framework feed is not
+        // paged, so counting it here would skip Orders rows on "load more".
         setHistoryOffset(offset + results.length);
         setHistoryHasMore(payload.next_offset != null);
         if (typeof payload.unread_count === "number") {
-          setUnreadCount(payload.unread_count);
+          // Orders' own count plus whatever of the framework feed is unread.
+          const frameworkUnread = reset
+            ? frameworkRows.filter((row) => !row.is_read).length
+            : 0;
+          setUnreadCount(payload.unread_count + frameworkUnread);
         }
       } catch (error) {
         console.error("Error loading notification history:", error);
@@ -235,7 +331,7 @@ export function useNotifications({
       } else if (event.type === "click") {
         openPayloadRef.current(event.data || {});
       } else if (event.type === "read") {
-        applyRead(event.id);
+        applyRead(event.id, event.key);
       } else if (event.type === "read-all" || event.type === "cleared") {
         setUnreadCount(0);
         setHistoryItems((prev) => prev.map((n) => ({ ...n, is_read: true })));
@@ -398,10 +494,16 @@ export function useNotifications({
 
   const handleMarkAllRead = useCallback(async () => {
     if (unreadCount <= 0) return;
-    try {
-      await api.post("/orders/notifications/", {});
-    } catch (error) {
-      console.error("Error marking all as read:", error);
+    // Both feeds, each settled on its own: one failing must not leave the
+    // other's rows unread with the badge already cleared.
+    const done = await Promise.allSettled([
+      api.post("/orders/notifications/", {}),
+      frameworkNotificationService.markAllRead(),
+    ]);
+    for (const outcome of done) {
+      if (outcome.status === "rejected") {
+        console.error("Error marking all as read:", outcome.reason);
+      }
     }
     // Single update path: the bus listener updates this tab and every other.
     broadcastNotificationEvent({ type: "read-all" });
@@ -412,12 +514,23 @@ export function useNotifications({
       if (!notification.is_read) {
         // Always mark read on open — regardless of role (fixes the bug where
         // actionable roles left notifications unread).
-        await markNotificationRead(notification.id);
+        await markNotificationRead(notification.id, notification.source);
       }
       setShowNotificationsModal(false);
+
+      // WHAT THE ROW IS ABOUT DECIDES WHERE IT GOES — the same table a pushed
+      // notification is routed through (`notificationRoutes`). Until now this
+      // handler only ever called `goToOrder`, so clicking a payment-request or
+      // credit-limit notification, which carries no `order_id`, opened the
+      // order list with nothing selected.
+      const route = routeForNotification(notification);
+      if (route) {
+        navigate(route);
+        return;
+      }
       goToOrder(notification.order_id);
     },
-    [markNotificationRead, goToOrder],
+    [markNotificationRead, goToOrder, navigate],
   );
 
   return {
