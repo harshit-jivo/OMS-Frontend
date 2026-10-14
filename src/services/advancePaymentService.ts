@@ -900,6 +900,49 @@ export interface ExpenseDashboard {
 }
 
 /** The OMS side of the Payments & Expenses board: OMS's own payment requests. */
+/** One main budget head on the Budget board: this month's SAP spending against the yardstick month's. */
+export interface BudgetHead {
+  key: string;
+  name: string;
+  /** Who owns it, by company (Sales: Raju for Oil, Prabhjot for Mart, Shunty for Beverages). */
+  owners: Array<{ company: string; label: string; name: string }>;
+  /** Spent in the yardstick month (August). */
+  base: number;
+  /** Spent this month so far. */
+  current: number;
+  /** current / base; null when the yardstick month had nothing. */
+  ratio: number | null;
+  entries: number;
+  by_company: Array<{ company: string; label: string; base: number; current: number }>;
+  /** What it is made of, to open level by level: SAP budget › sub budget, its G/L accounts, their postings. */
+  tree: Array<
+    BudgetFigures & {
+      accounts: Array<
+        BudgetFigures & {
+          /** This month's largest. */
+          postings: Array<{ date: string | null; company: string; doc_num: number | null; remarks: string; amount: number }>;
+        }
+      >;
+    }
+  >;
+}
+
+/** A line of a head's breakdown: its August and this month's spending, and this month's entries. */
+export interface BudgetFigures {
+  name: string;
+  base: number;
+  current: number;
+  entries: number;
+}
+
+export interface BudgetBoard {
+  current: { month: string; label: string; from: string; to: string; days: number; elapsed: number; pace: number };
+  baseline: { month: string; label: string; from: string; to: string };
+  total: { base: number; current: number; ratio: number | null };
+  /** Largest August spend first; Other last. */
+  heads: BudgetHead[];
+}
+
 export interface OmsDashboard {
   period: ExpenseDashboard["period"];
   filters: { company: string; companies: string[] };
@@ -1834,6 +1877,16 @@ export const advancePaymentService = {
       params: { from: q.from, to: q.to, company: q.company || undefined },
     });
     return unwrap<OmsDashboard>(res.data);
+  },
+
+  /** Every main budget head's SAP spending this month (or `month`), against August's. */
+  async budgetBoard(month?: string): Promise<BudgetBoard> {
+    const res = await api.get(`${BASE}/budget-board/`, {
+      params: { month: month || undefined },
+      // Two companies' reports for two months on a cold cache.
+      timeout: 120_000,
+    });
+    return unwrap<BudgetBoard>(res.data);
   },
 
   /** SAP's actual expenses for the period, broken down, with OMS's expense requests. */

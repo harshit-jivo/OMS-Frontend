@@ -138,6 +138,8 @@ const PAGES: Array<SmokeEntry<any>> = [
   page("/Advance_Payment_Request", () => import("./Advance_Payment_Request")),
   page("/Advance_Payment_Approval", () => import("./Advance_Payment_Approval")),
   page("/Advance_Payment_Dispatch", () => import("./Advance_Payment_Dispatch")),
+  page("/Advance_Payment_Register", () => import("./Advance_Payment_Register")),
+  page("/Payments_Expenses", () => import("./Payments_Expenses")),
   page("/Tracker_Entry", () => import("./Tracker_Entry")),
   page("/Tracker_Queue", () => import("./Tracker_Queue")),
   page("/Tracker_Invoices", () => import("./Tracker_Invoices")),
@@ -207,6 +209,8 @@ describe("coverage", () => {
   const ALIASES: Record<string, string> = {
     "/Billing_status_tracking": "/Auditor_status_tracking",
     "/Rate_Approver_status_tracking": "/Auditor_status_tracking",
+    // Its first name: redirects to the board.
+    "/Expense_Dashboard": "/Payments_Expenses",
   };
 
   it("every guarded route is either smoke-tested or a named alias of one", () => {

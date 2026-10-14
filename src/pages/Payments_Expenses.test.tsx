@@ -2,7 +2,13 @@ import { act, fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { advancePaymentService, type ExpenseDashboard, type OmsDashboard } from "../services/advancePaymentService";
+import {
+  advancePaymentService,
+  type BudgetBoard,
+  type BudgetHead,
+  type ExpenseDashboard,
+  type OmsDashboard,
+} from "../services/advancePaymentService";
 import { renderPage } from "../test/renderPage";
 import Payments_Expenses from "./Payments_Expenses";
 import { changeLabel, compactINR, presetRange } from "./expenseDashboard/format";
@@ -71,7 +77,7 @@ const OMS: OmsDashboard = {
 beforeEach(() => {
   localStorage.removeItem(DWELL_STORAGE_KEY);
   localStorage.removeItem(PAUSED_STORAGE_KEY);
-  localStorage.removeItem("payments-expenses-board-source");
+  localStorage.removeItem("payments-expenses-board-view");
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -95,90 +101,176 @@ describe("the expense board's numbers", () => {
   });
 });
 
-describe("Payments & Expenses board", () => {
-  it("opens on the overview, and steps through its slides by dot and by key", async () => {
-    vi.spyOn(advancePaymentService, "expenseDashboard").mockResolvedValue(DATA);
+const head = (key: string, name: string, base: number, current: number, extra: Partial<BudgetHead> = {}): BudgetHead => ({
+  key,
+  name,
+  owners: [],
+  base,
+  current,
+  ratio: base ? current / base : null,
+  entries: 3,
+  by_company: [{ company: "OIL", label: "Oil", base, current }],
+  tree: [
+    {
+      name: `${name} › MAIN`,
+      base,
+      current,
+      entries: 1,
+      accounts: [
+        {
+          name: `${name.toUpperCase()} EXPENSES`,
+          base,
+          current,
+          entries: 1,
+          postings: [{ date: "2026-10-09", company: "OIL", doc_num: 4501, remarks: "October rent, Mundka", amount: current }],
+        },
+      ],
+    },
+  ],
+  ...extra,
+});
+
+const BOARD: BudgetBoard = {
+  current: { month: "2026-10", label: "Oct 2026", from: "2026-10-01", to: "2026-10-14", days: 31, elapsed: 14, pace: 0.4516 },
+  baseline: { month: "2026-08", label: "Aug 2026", from: "2026-08-01", to: "2026-08-31" },
+  total: { base: 48193620, current: 14380839, ratio: 0.2984 },
+  heads: [
+    head("SALES", "Sales", 17681459, 11693032, {
+      owners: [
+        { company: "OIL", label: "Oil", name: "Raju" },
+        { company: "MART", label: "Mart", name: "Prabhjot" },
+        { company: "BEVERAGES", label: "Beverages", name: "Shunty" },
+      ],
+      by_company: [
+        { company: "OIL", label: "Oil", base: 1124881, current: 539778 },
+        { company: "BEVERAGES", label: "Beverages", base: 7059, current: 0 },
+        { company: "MART", label: "Mart", base: 16549519, current: 11153254 },
+      ],
+    }),
+    head("SALARY", "Salary", 15034094, 0),
+    head("FREIGHT", "Freight", 5000373, 1250),
+    head("FINANCE", "Interest & Finance", 4159019, 1987713),
+    head("FACTORY", "Factory", 2234903, 146463, {
+      by_company: [
+        { company: "OIL", label: "Oil", base: 1310556, current: 0 },
+        { company: "BEVERAGES", label: "Beverages", base: 877721, current: 28755 },
+        { company: "MART", label: "Mart", base: 46626, current: 117708 },
+      ],
+    }),
+    head("ELECTRICITY", "Electricity", 1632252, 0),
+    head("BACKOFFICE", "Back Office", 1263805, 29073),
+    head("RENT", "Rent", 1187653, 1484566),
+    head("OTHER", "Other", 62, 8),
+  ],
+};
+
+const card = (name: RegExp) => screen.getByRole("button", { name });
+const cardsIn = (row: string) =>
+  within(screen.getByRole("region", { name: row }))
+    .getAllByRole("button")
+    .map((b) => b.querySelector(".bgb-card-title")?.textContent);
+
+describe("Payments & Expenses: budget heads", () => {
+  it("lays out JI's rows — Sales by company with its owners, Factory by plant, Back Office — beside a stack of the other heads", async () => {
+    vi.spyOn(advancePaymentService, "budgetBoard").mockResolvedValue(BOARD);
+    renderPage(<Payments_Expenses />, { route: "/Payments_Expenses" });
+    await screen.findByRole("button", { name: /^Sales:/ });
+
+    expect(screen.getAllByRole("region").map((r) => r.getAttribute("aria-label")).filter((n) => n !== "Budget heads board")).toEqual([
+      "Sales",
+      "Factory",
+      "Back Office",
+      "Other heads",
+    ]);
+    expect(cardsIn("Sales")).toEqual(["Sales", "Oil", "Mart", "Beverages"]);
+    expect(cardsIn("Factory")).toEqual(["Factory", "Oil", "Beverages"]);
+    expect(cardsIn("Back Office")).toEqual(["Back Office"]);
+    // The stack, in the order asked for, not by spend.
+    expect(cardsIn("Other heads")).toEqual(["Salary", "Freight", "Electricity", "Rent", "Interest & Finance"]);
+
+    const sales = card(/^Sales:/);
+    expect(sales.textContent).toContain("₹1.17 Cr");
+    expect(sales.textContent).toContain("Aug ₹1.77 Cr");
+    expect(card(/^Sales, Oil:/).textContent).toContain("Raju · Aug ₹11.2 L");
+    expect(card(/^Sales, Mart:/).textContent).toContain("Prabhjot");
+    expect(card(/^Sales, Beverages:/).textContent).toContain("Shunty");
+    expect(card(/^Factory, Beverages:/).textContent).toContain("₹29K");
+    // Other is only ₹62: no card for it.
+    expect(screen.queryByRole("button", { name: /^Other:/ })).toBeNull();
+    expect(screen.getByRole("heading", { name: /Payments & Expenses/ }).textContent).toContain("day 14 of 31");
+  });
+
+  it("marks a head past its August total, and one ahead of August's pace, in words as well as colour", async () => {
+    vi.spyOn(advancePaymentService, "budgetBoard").mockResolvedValue(BOARD);
+    renderPage(<Payments_Expenses />, { route: "/Payments_Expenses" });
+    const rent = await screen.findByRole("button", { name: /^Rent:/ });
+    expect(rent.getAttribute("data-state")).toBe("over");
+    expect(rent.textContent).toContain("▲ 25% over Aug");
+    expect(rent.textContent).toContain("Over by");
+    // Sales: 66% of August with 45% of the month gone.
+    expect(card(/^Sales:/).getAttribute("data-state")).toBe("ahead");
+    expect(card(/^Sales:/).textContent).toContain("Ahead · 66%");
+    expect(card(/^Back Office:/).textContent).toContain("2% of Aug");
+  });
+
+  it("opens a head's breakdown — company cards, then rows that open — with no chart, and closes it with Escape", async () => {
+    vi.spyOn(advancePaymentService, "budgetBoard").mockResolvedValue(BOARD);
     const user = userEvent.setup();
     renderPage(<Payments_Expenses />, { route: "/Payments_Expenses" });
+    await user.click(await screen.findByRole("button", { name: /^Rent:/ }));
 
-    await screen.findByRole("tabpanel", { name: "Overview" });
-    expect(within(panel()).getAllByText("₹1.70 Cr").length).toBe(2); // the tile and the donut
-    expect(within(panel()).getByText("+60.6%")).toBeTruthy();
-    expect(tab("Overview").getAttribute("aria-selected")).toBe("true");
+    const dialog = screen.getByRole("dialog", { name: "Rent" });
+    expect(within(dialog).getByRole("heading", { name: "By company" })).toBeTruthy();
+    expect(within(dialog).getByRole("heading", { name: "Where it went" })).toBeTruthy();
+    expect(dialog.querySelector(".recharts-wrapper, svg.recharts-surface")).toBeNull();
 
-    await user.click(tab("Accounts & entries"));
-    expect(screen.getByRole("tabpanel", { name: "Accounts & entries" }).textContent).toContain("INTEREST ON BANK LOAN");
+    // The biggest budget starts open, showing its accounts as cards; a card opens to its postings.
+    const budget = dialog.querySelector("details.bgb-tree-budget") as HTMLDetailsElement;
+    expect(budget.open).toBe(true);
+    expect(budget.textContent).toContain("Rent › MAIN");
+    const account = budget.querySelector("details.bgb-account") as HTMLDetailsElement;
+    expect(account.textContent).toContain("of ₹11.9 L in Aug");
+    expect(account.open).toBe(false);
+    await user.click(within(account).getByText("RENT EXPENSES"));
+    expect(account.open).toBe(true);
+    expect(account.textContent).toContain("October rent, Mundka");
+    expect(account.textContent).toContain("₹14,84,566");
 
-    fireEvent.keyDown(window, { key: "4" });
-    expect(await screen.findByRole("tabpanel", { name: "Branches & varieties" })).toBeTruthy();
-    expect(panel().textContent).toContain("OIL");
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
 
-    fireEvent.keyDown(window, { key: "ArrowRight" });
-    expect(await screen.findByRole("tabpanel", { name: "Overview" })).toBeTruthy();
+    await user.click(card(/^Sales, Mart:/));
+    const sales = screen.getByRole("dialog", { name: "Sales" });
+    expect(sales.textContent).toContain("Mart · Prabhjot");
   });
 
-  it("moves on by itself after the dwell, and space holds it", async () => {
-    vi.spyOn(advancePaymentService, "expenseDashboard").mockResolvedValue(DATA);
-    localStorage.setItem(DWELL_STORAGE_KEY, "15");
-    renderPage(<Payments_Expenses />, { route: "/Payments_Expenses" });
-    await screen.findByRole("tabpanel", { name: "Overview" });
-
-    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
-    // Restart the turn under the fake clock, then let it run out.
-    fireEvent.keyDown(window, { key: " " });
-    fireEvent.keyDown(window, { key: " " });
-    expect(screen.getByText("ROTATING")).toBeTruthy();
-    act(() => {
-      vi.advanceTimersByTime(15_500);
-    });
-    expect(screen.getByRole("tabpanel", { name: "Budget heads" })).toBeTruthy();
-
-    fireEvent.keyDown(window, { key: " " });
-    expect(screen.getByText("HELD")).toBeTruthy();
-    act(() => {
-      vi.advanceTimersByTime(60_000);
-    });
-    expect(screen.getByRole("tabpanel", { name: "Budget heads" })).toBeTruthy();
-    expect(localStorage.getItem(PAUSED_STORAGE_KEY)).toBe("true");
-  });
-
-  it("holds the slide while somebody opens a budget head", async () => {
-    vi.spyOn(advancePaymentService, "expenseDashboard").mockResolvedValue(DATA);
+  it("reads another month when one is chosen", async () => {
+    const load = vi.spyOn(advancePaymentService, "budgetBoard").mockResolvedValue(BOARD);
     const user = userEvent.setup();
     renderPage(<Payments_Expenses />, { route: "/Payments_Expenses" });
-    await screen.findByRole("tabpanel", { name: "Overview" });
-
-    await user.click(tab("Budget heads"));
-    await user.click(within(panel()).getByRole("button", { name: /Factory/ }));
-    expect(within(panel()).getAllByText("ELECTRICITY").length).toBeGreaterThan(0);
-    expect(screen.getByText("HELD")).toBeTruthy();
+    await screen.findByRole("button", { name: /^Sales:/ });
+    const month = screen.getByLabelText("Month") as HTMLSelectElement;
+    await user.selectOptions(month, month.options[1].value);
+    expect(load).toHaveBeenLastCalledWith(month.options[1].value);
   });
+});
 
-  it("re-reads SAP when a filter changes", async () => {
-    const load = vi.spyOn(advancePaymentService, "expenseDashboard").mockResolvedValue(DATA);
-    const user = userEvent.setup();
-    renderPage(<Payments_Expenses />, { route: "/Payments_Expenses" });
-    await screen.findByRole("tabpanel", { name: "Overview" });
-
-    await user.selectOptions(screen.getByLabelText("Branch"), "BEVERAGES");
-    expect(load).toHaveBeenLastCalledWith(expect.objectContaining({ branch: "BEVERAGES", includeSalary: false }));
-    await user.click(screen.getByRole("button", { name: "Last month" }));
-    expect(load).toHaveBeenLastCalledWith(expect.objectContaining(presetRange("last-month")));
-  });
-
-  it("switches to OMS: its own slides, figures and company filter, and remembers the choice", async () => {
-    vi.spyOn(advancePaymentService, "expenseDashboard").mockResolvedValue(DATA);
+describe("Payments & Expenses: payment requests", () => {
+  const openRequests = async () => {
+    vi.spyOn(advancePaymentService, "budgetBoard").mockResolvedValue(BOARD);
     const loadOms = vi.spyOn(advancePaymentService, "omsDashboard").mockResolvedValue(OMS);
     const user = userEvent.setup();
     renderPage(<Payments_Expenses />, { route: "/Payments_Expenses" });
+    await user.click(await screen.findByRole("button", { name: "Payment requests" }));
     await screen.findByRole("tabpanel", { name: "Overview" });
-    expect(screen.getByRole("heading", { name: /Payments & Expenses/ })).toBeTruthy();
+    return { user, loadOms };
+  };
 
-    await user.click(screen.getByRole("button", { name: "OMS" }));
+  it("switches to the payment requests: its own slides, figures and company filter, and remembers the choice", async () => {
+    const { user, loadOms } = await openRequests();
     expect((await screen.findAllByText("₹3.9 L")).length).toBe(2); // the Raised tile and the donut
     expect(within(panel()).getByText("Pending now")).toBeTruthy();
-    expect(screen.getByRole("tab", { name: "Pipeline" })).toBeTruthy();
-    expect(localStorage.getItem("payments-expenses-board-source")).toBe("oms");
+    expect(localStorage.getItem("payments-expenses-board-view")).toBe("requests");
 
     await user.click(tab("Pipeline"));
     expect(panel().textContent).toContain("AP-2026-0002");
@@ -188,12 +280,39 @@ describe("Payments & Expenses board", () => {
     expect(screen.getByRole("region", { name: "By payment purpose" }).textContent).toContain("Freight Outward");
     expect(screen.getByRole("region", { name: "By budget head" }).textContent).toContain("Del Bkhp");
 
-    await user.click(tab("Expenses"));
+    fireEvent.keyDown(window, { key: "5" });
+    expect(await screen.findByRole("tabpanel", { name: "Expenses" })).toBeTruthy();
     expect(panel().textContent).toContain("AP-2026-0062");
 
     await user.selectOptions(screen.getByLabelText("Company"), "MART");
     expect(loadOms).toHaveBeenLastCalledWith(expect.objectContaining({ company: "MART" }));
-    // No SAP filters on the OMS side.
-    expect(screen.queryByLabelText("Branch")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Last month" }));
+    expect(loadOms).toHaveBeenLastCalledWith(expect.objectContaining(presetRange("last-month")));
+
+    await user.click(screen.getByRole("button", { name: "Budgets" }));
+    expect(await screen.findByRole("button", { name: /^Sales:/ })).toBeTruthy();
+  });
+
+  it("moves on by itself after the dwell, and space holds it", async () => {
+    localStorage.setItem(DWELL_STORAGE_KEY, "15");
+    await openRequests();
+
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    // Restart the turn under the fake clock, then let it run out.
+    fireEvent.keyDown(window, { key: " " });
+    fireEvent.keyDown(window, { key: " " });
+    expect(screen.getByText("ROTATING")).toBeTruthy();
+    act(() => {
+      vi.advanceTimersByTime(15_500);
+    });
+    expect(screen.getByRole("tabpanel", { name: "Pipeline" })).toBeTruthy();
+
+    fireEvent.keyDown(window, { key: " " });
+    expect(screen.getByText("HELD")).toBeTruthy();
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(screen.getByRole("tabpanel", { name: "Pipeline" })).toBeTruthy();
+    expect(localStorage.getItem(PAUSED_STORAGE_KEY)).toBe("true");
   });
 });
