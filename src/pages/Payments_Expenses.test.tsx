@@ -58,6 +58,8 @@ const OMS: OmsDashboard = {
   bill_or_advance: [{ name: "Advance", amount: 336735, entries: 6, share: 85.4 }, { name: "Bill", amount: 45226, entries: 5, share: 11.5 }],
   by_company: [{ name: "OIL", amount: 394206, entries: 14, share: 100 }],
   top_payees: [{ name: "RAJ TECHNOPACK PVT LTD", amount: 700215, entries: 1, share: 60 }],
+  by_purpose: [{ name: "Freight Outward", amount: 185850, entries: 2, share: 47 }, { name: "Expense", amount: 12245, entries: 3, share: 3 }],
+  by_budget: [{ name: "Del Bkhp", amount: 252710, entries: 5, share: 64 }],
   waiting_at: [{ name: "Final Approval", amount: 215850, entries: 2, share: 60.3 }],
   waiting_on: [{ name: "Gurpreet Vg", amount: 215850, entries: 2, share: 60.3 }],
   ageing: [{ name: "Over 15 days", entries: 3, amount: 120000 }],
@@ -181,6 +183,10 @@ describe("Payments & Expenses board", () => {
     await user.click(tab("Pipeline"));
     expect(panel().textContent).toContain("AP-2026-0002");
     expect(panel().textContent).toContain("Gurpreet Vg");
+
+    await user.click(tab("Purposes & budgets"));
+    expect(screen.getByRole("region", { name: "By payment purpose" }).textContent).toContain("Freight Outward");
+    expect(screen.getByRole("region", { name: "By budget head" }).textContent).toContain("Del Bkhp");
 
     await user.click(tab("Expenses"));
     expect(panel().textContent).toContain("AP-2026-0062");

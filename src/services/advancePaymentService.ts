@@ -916,6 +916,10 @@ export interface OmsDashboard {
   bill_or_advance: ExpenseRanked[];
   by_company: ExpenseRanked[];
   top_payees: ExpenseRanked[];
+  /** Raised this period, by payment purpose ("Expense" for an Expense request). */
+  by_purpose: ExpenseRanked[];
+  /** Raised this period, by budget head. */
+  by_budget: ExpenseRanked[];
   waiting_at: ExpenseRanked[];
   waiting_on: ExpenseRanked[];
   ageing: Array<{ name: string; entries: number; amount: number }>;

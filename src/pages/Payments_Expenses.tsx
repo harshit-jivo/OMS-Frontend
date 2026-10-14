@@ -17,6 +17,9 @@
  * countdown and the controls, floating over the header only while the pointer
  * is at the top. Keys: space holds and releases, ← → step, 1–4 jump, F
  * fullscreen. Switching the source starts its slides from the first.
+ *
+ * OMS slides: Overview · Pipeline · Breakdown (type, company, payee) ·
+ * Purposes & budgets (what it was for, whose budget) · Expenses.
  */
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
@@ -80,6 +83,7 @@ const SLIDES = {
     { key: "oms-overview", label: "Overview" },
     { key: "oms-pipeline", label: "Pipeline" },
     { key: "oms-breakdown", label: "Breakdown" },
+    { key: "oms-purposes", label: "Purposes & budgets" },
     { key: "oms-expenses", label: "Expenses" },
   ],
 } as const;
@@ -271,6 +275,19 @@ const OmsSlide = memo(function OmsSlide({ slide, data }: { slide: string; data: 
         </div>
         <Tile title="Top payees" hint="Raised this period">
           <Ranked items={data.top_payees} color="var(--series-2)" extra={(i) => `${i.entries}`} empty="Nothing raised." />
+        </Tile>
+      </div>
+    );
+  }
+
+  if (slide === "oms-purposes") {
+    return (
+      <div className="exb-slide exb-row exb-row--1-1">
+        <Tile title="By payment purpose" hint="Raised this period · requests and amount">
+          <Ranked items={data.by_purpose} color="var(--series-1)" extra={(i) => `${i.entries}`} empty="Nothing raised." />
+        </Tile>
+        <Tile title="By budget head" hint="Raised this period · requests and amount">
+          <Ranked items={data.by_budget} color="var(--series-3)" extra={(i) => `${i.entries}`} empty="Nothing raised." />
         </Tile>
       </div>
     );
