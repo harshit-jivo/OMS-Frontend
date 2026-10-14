@@ -65,6 +65,7 @@ import {
   type ApprovalAction,
 } from "@/components/orders/ApprovalDialogs";
 import { OrderItemsTable } from "@/components/orders/OrderItemsTable";
+import { OrderWithPo } from "@/components/orders/OrderPoAttachments";
 import { OrderTimelineDialog } from "@/components/orders/OrderTimelineDialog";
 import { OrderTotalsRow, VarietyCostCards } from "@/components/orders/OrderTotals";
 import { orderTotals, varietyCosts } from "@/components/orders/orderDetail";
@@ -655,35 +656,38 @@ export default function Auditor_orders() {
               a `DetailSection`: two section headings in two styles on one page
               is what a design system exists to stop, and a bordered section
               inside a bordered card drew the same edge twice. */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Party &amp; delivery</CardTitle>
-            </CardHeader>
-            <DetailGrid>
-              <DetailField label="Party state" value={orderDetails.party_state} />
-              <DetailField label="Delivery date" value={orderDetails.delivery_date} />
-              <DetailField label="PO number" value={orderDetails.po_number} />
-              <DetailField label="Bill to" value={orderDetails.bill_to_address} />
-              <DetailField label="Ship to" value={orderDetails.ship_to_address} />
-              <DetailField label="Dispatch from" value={orderDetails.dispatch_from_name} />
-              <DetailField
-                label="Remark"
-                value={orderDetails.remarks?.trim() ? orderDetails.remarks : ""}
-                span="full"
-                hideWhenEmpty
-              />
-            </DetailGrid>
-          </Card>
+          <OrderWithPo orderId={orderDetails.id}>
+            <Card>
+              <CardHeader>
+                <CardTitle>Party &amp; delivery</CardTitle>
+              </CardHeader>
+              <DetailGrid>
+                <DetailField label="Party state" value={orderDetails.party_state} />
+                <DetailField label="Delivery date" value={orderDetails.delivery_date} />
+                <DetailField label="PO number" value={orderDetails.po_number} />
+                <DetailField label="Bill to" value={orderDetails.bill_to_address} />
+                <DetailField label="Ship to" value={orderDetails.ship_to_address} />
+                <DetailField label="Dispatch from" value={orderDetails.dispatch_from_name} />
+                <DetailField
+                  label="Remark"
+                  value={orderDetails.remarks?.trim() ? orderDetails.remarks : ""}
+                  span="full"
+                  hideWhenEmpty
+                />
+              </DetailGrid>
+            </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Items</CardTitle>
-              <Badge tone="neutral">{selectedItems.length}</Badge>
-            </CardHeader>
-            {/* `variety={false}`: the variety-cost cards above already state
-                the split, and this table is fifteen columns wide as it is. */}
-            <OrderItemsTable items={selectedItems} variety={false} />
-          </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Items</CardTitle>
+                <Badge tone="neutral">{selectedItems.length}</Badge>
+              </CardHeader>
+              {/* `variety={false}`: the variety-cost cards above already state
+                  the split, and this table is fifteen columns wide as it is. */}
+              <OrderItemsTable items={selectedItems} variety={false} />
+            </Card>
+          </OrderWithPo>
         </>
       )}
 

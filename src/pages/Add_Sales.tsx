@@ -27,6 +27,7 @@ import { Button } from "@/components/ui/button";
 import { DetailFields } from "@/components/ui/detail";
 import { Card, Page, PageHeader } from "@/components/ui/page";
 import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 import { HiOutlineCheckCircle } from "react-icons/hi2";
 
 import OrderForm from "./salesOrder/OrderForm";
@@ -168,6 +169,16 @@ export default function Add_Sales({ focMode = false }: AddSalesProps) {
                   ["Received next by", saveSuccess.nextStage],
                 ]}
               />
+              {saveSuccess.poNote && (
+                <p
+                  className={cn(
+                    "m-0 mt-3 text-center text-[12.5px]",
+                    saveSuccess.poFailed ? "text-bad" : "text-subtle",
+                  )}
+                >
+                  {saveSuccess.poNote}
+                </p>
+              )}
             </DialogBody>
             <DialogFooter className="justify-center">
               <Button variant="primary" onClick={handleSuccessClose}>

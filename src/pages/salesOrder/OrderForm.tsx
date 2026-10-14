@@ -70,6 +70,7 @@ import { cn } from "@/lib/utils";
 import type { PartyProduct } from "@/services/ordersService";
 
 import FieldError from "./FieldError";
+import PoAttachmentField from "./PoAttachmentField";
 import ProblemSummary from "./ProblemSummary";
 import WarehouseField from "./WarehouseField";
 import { stepOneComplete, stepThreeComplete } from "./orderHeaderSchema";
@@ -1496,6 +1497,14 @@ export default function OrderWizard({ form }: { form: SalesOrderForm }) {
             )}
           </Field>
         )}
+        <PoAttachmentField
+          poFiles={form.poFiles}
+          existingPoFiles={form.existingPoFiles}
+          poFileError={form.poFileError}
+          addPoFiles={form.addPoFiles}
+          removePoFile={form.removePoFile}
+          removeExistingPoFile={form.removeExistingPoFile}
+        />
         <Field label="Company">
           {(control) =>
             renderTriggerSelect({

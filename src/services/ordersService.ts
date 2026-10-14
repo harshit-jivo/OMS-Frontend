@@ -1,5 +1,19 @@
 import { isLitreItem } from "@/lib/itemUnits";
 import api from "./api"
+import { toBasePath } from "./apiPaths";
+
+/** A PO file attached to an order (`attachments.serializers.AttachmentSerializer`). */
+export interface OrderAttachment {
+  id: number;
+  attachment_type: string;
+  type_display: string;
+  /** The stored extension, e.g. "pdf" or "jpg". */
+  file_type: string;
+  uploaded_by: number;
+  uploaded_by_name: string;
+  download_url: string;
+  created_at: string;
+}
 
 export interface Product {
   id: number;
@@ -970,6 +984,33 @@ export const ordersService = {
       },
       responseType: "blob",
     });
+    return response.data as Blob;
+  },
+
+  // The order's customer PO files, attached on Add Sales.
+  getOrderAttachments: async (orderId: number) => {
+    const response = await api.get(`/orders/${orderId}/attachments/`);
+    return response.data as OrderAttachment[];
+  },
+
+  uploadOrderAttachments: async (orderId: number, files: File[]) => {
+    const form = new FormData();
+    files.forEach((file) => form.append("file", file));
+    // Explicit, as in apInvoiceService: the instance defaults to JSON, which
+    // would make axios serialise the FormData instead of sending the files.
+    const response = await api.post(`/orders/${orderId}/attachments/`, form, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+    return response.data as OrderAttachment[];
+  },
+
+  deleteOrderAttachment: async (orderId: number, attachmentId: number) => {
+    await api.delete(`/orders/${orderId}/attachments/${attachmentId}/`);
+  },
+
+  // The file itself, through the permission-checked download endpoint.
+  fetchOrderAttachmentFile: async (attachment: OrderAttachment) => {
+    const response = await api.get(toBasePath(attachment.download_url), { responseType: "blob" });
     return response.data as Blob;
   },
 

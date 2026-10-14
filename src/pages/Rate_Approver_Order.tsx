@@ -79,6 +79,7 @@ import {
   type ApprovalAction,
 } from "@/components/orders/ApprovalDialogs";
 import { OrderItemCards } from "@/components/orders/OrderItemCards";
+import { OrderWithPo } from "@/components/orders/OrderPoAttachments";
 import { orderTotals } from "@/components/orders/orderDetail";
 
 /**
@@ -663,15 +664,18 @@ export default function RateApproverOrders() {
             />
           </StatRow>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Items</CardTitle>
-              <Badge tone="neutral">{selectedItems.length}</Badge>
-            </CardHeader>
-            {/* Rates are what this screen approves, so schemes (free goods that
-                shift the effective rate) are shown on each card when present. */}
-            <OrderItemCards items={selectedItems} showSchemes />
-          </Card>
+
+          <OrderWithPo orderId={orderDetails.id}>
+            <Card>
+              <CardHeader>
+                <CardTitle>Items</CardTitle>
+                <Badge tone="neutral">{selectedItems.length}</Badge>
+              </CardHeader>
+              {/* Rates are what this screen approves, so schemes (free goods that
+                  shift the effective rate) are shown on each card when present. */}
+              <OrderItemCards items={selectedItems} showSchemes />
+            </Card>
+          </OrderWithPo>
 
           {/* The party / delivery facts, in the "i" dialog — same set and same
               place the Mart and View Orders detail put them. */}
