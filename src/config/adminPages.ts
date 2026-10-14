@@ -87,6 +87,9 @@ export const GRANTABLE_ADMIN_PAGES: GrantablePage[] = [
     label: "Payments — view all requests",
     path: "/Advance_Payment_Register",
   },
+  // SAP's actual expenses (as Control Panel's Expenses) and OMS's expense requests.
+  // The key keeps its first name, so grants already given still open the renamed page.
+  { key: "Expense_Dashboard", label: "Payments & Expenses — dashboard", path: "/Payments_Expenses" },
   {
     key: "Advance_Payment_Dispatch",
     label: "Payments — send bills & POs to users",

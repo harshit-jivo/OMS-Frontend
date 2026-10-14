@@ -827,6 +827,121 @@ interface LookupPage<T> {
   results: T[];
 }
 
+/* ── The Expense dashboard ─────────────────────────────────────────────────── */
+
+export interface ExpenseRanked {
+  name: string;
+  amount: number;
+  entries: number;
+  share: number;
+}
+
+export interface ExpenseRow {
+  date: string | null;
+  doc_num: number | null;
+  trans_id: number | null;
+  budget: string;
+  sub_budget: string;
+  variety: string;
+  account: string;
+  branch: string;
+  kind: string;
+  category: string;
+  amount: number;
+  remarks: string;
+}
+
+export interface ExpenseHead extends ExpenseRanked {
+  previous: number;
+  /** Percent change on the period before; null when it had nothing. */
+  change: number | null;
+  accounts: ExpenseRanked[];
+  sub_budgets: ExpenseRanked[];
+  rows: ExpenseRow[];
+}
+
+export interface ExpenseDashboard {
+  period: { from: string; to: string; days: number; previous_from: string; previous_to: string };
+  filters: { branch: string; kind: "all" | "direct" | "indirect"; include_salary: boolean; branches: string[] };
+  kpis: {
+    total: number;
+    previous: number;
+    change: number | null;
+    direct: number;
+    indirect: number;
+    entries: number;
+    per_day: number;
+    salary: number;
+    salary_included: boolean;
+    top_head: { name: string; amount: number; share: number } | null;
+  };
+  trend: Array<{ month: string; label: string; direct: number; indirect: number; total: number }>;
+  categories: ExpenseRanked[];
+  heads: ExpenseHead[];
+  accounts: ExpenseRanked[];
+  varieties: ExpenseRanked[];
+  branches: ExpenseRanked[];
+  largest: ExpenseRow[];
+  oms: {
+    by_status: Record<string, { count: number; amount: number }>;
+    waiting: Array<{ stage: string; count: number; amount: number }>;
+    latest: Array<{
+      id: number;
+      request_no: string;
+      company: string;
+      payee: string;
+      budget: string;
+      amount: number;
+      status: string;
+      stage: string;
+      created_on: string;
+    }>;
+  };
+}
+
+/** The OMS side of the Payments & Expenses board: OMS's own payment requests. */
+export interface OmsDashboard {
+  period: ExpenseDashboard["period"];
+  filters: { company: string; companies: string[] };
+  kpis: {
+    raised: { count: number; amount: number; previous: number; change: number | null };
+    paid: { count: number; amount: number; previous: number; change: number | null };
+    pending: { count: number; amount: number; returned: number };
+    rejected: { count: number; amount: number };
+    /** Average days from raised to paid, for those paid in the period; null when none. */
+    days_to_pay: number | null;
+  };
+  trend: Array<{ month: string; label: string; raised: number; paid: number }>;
+  by_type: ExpenseRanked[];
+  bill_or_advance: ExpenseRanked[];
+  by_company: ExpenseRanked[];
+  top_payees: ExpenseRanked[];
+  waiting_at: ExpenseRanked[];
+  waiting_on: ExpenseRanked[];
+  ageing: Array<{ name: string; entries: number; amount: number }>;
+  oldest: Array<{
+    id: number;
+    request_no: string;
+    company: string;
+    payee: string;
+    type: string;
+    kind: string;
+    amount: number;
+    stage: string;
+    waiting_on: string;
+    days: number;
+  }>;
+  expenses: ExpenseDashboard["oms"];
+}
+
+export interface ExpenseDashboardQuery {
+  from: string;
+  to: string;
+  branch: string;
+  kind: "all" | "direct" | "indirect";
+  includeSalary: boolean;
+}
+
 function unwrap<T>(payload: unknown): T {
   if (payload && typeof payload === "object" && "success" in (payload as object)) {
     return ((payload as { data: T }).data ?? null) as T;
@@ -1693,6 +1808,24 @@ export const advancePaymentService = {
   },
 
   /** Approve, reject, return, send back, cancel or resubmit. */
+  /** OMS's payment requests: raised and paid in the period, pending now. */
+  async omsDashboard(q: { from: string; to: string; company: string }): Promise<OmsDashboard> {
+    const res = await api.get(`${BASE}/oms-dashboard/`, {
+      params: { from: q.from, to: q.to, company: q.company || undefined },
+    });
+    return unwrap<OmsDashboard>(res.data);
+  },
+
+  /** SAP's actual expenses for the period, broken down, with OMS's expense requests. */
+  async expenseDashboard(q: ExpenseDashboardQuery): Promise<ExpenseDashboard> {
+    const res = await api.get(`${BASE}/expense-dashboard/`, {
+      params: { from: q.from, to: q.to, branch: q.branch || undefined, kind: q.kind, salary: q.includeSalary ? 1 : 0 },
+      // Three SAP reads on a cold cache.
+      timeout: 120_000,
+    });
+    return unwrap<ExpenseDashboard>(res.data);
+  },
+
   async act(id: number, action: StageAction, remarks = "", version?: number): Promise<ApiRequest> {
     // Posting to SAP happens on Audit's approval, which can take a while.
     const res = await api.post(

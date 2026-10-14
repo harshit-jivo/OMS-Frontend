@@ -121,6 +121,7 @@ const AdvancePaymentRequest = lazy(() => import("./pages/Advance_Payment_Request
 const AdvancePaymentApproval = lazy(() => import("./pages/Advance_Payment_Approval"));
 const AdvancePaymentDispatch = lazy(() => import("./pages/Advance_Payment_Dispatch"));
 const AdvancePaymentRegister = lazy(() => import("./pages/Advance_Payment_Register"));
+const PaymentsExpenses = lazy(() => import("./pages/Payments_Expenses"));
 const AddEmployee = lazy(() => import("./pages/advancePayments/Add_Employee"));
 
 import { AuthProvider } from "./auth";
@@ -917,6 +918,17 @@ function App() {
             </ProtectedPage>
           }
         />
+
+        <Route
+          path="/Payments_Expenses"
+          element={
+            <ProtectedPage>
+              <PaymentsExpenses />
+            </ProtectedPage>
+          }
+        />
+        {/* Its first name, kept so a bookmark or a wall screen set up on it still lands. */}
+        <Route path="/Expense_Dashboard" element={<Navigate to="/Payments_Expenses" replace />} />
 
         <Route
           path="/Advance_Payment_Register"

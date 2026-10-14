@@ -216,6 +216,7 @@ export const SIDEBAR_SECTIONS: SidebarSectionDef[] = [
       { to: "/Advance_Payment_Request", label: "Payments", icon: HiOutlineBanknotes },
       { to: "/Advance_Payment_Approval", label: "Payments Approval", icon: HiOutlineCheckBadge },
       { to: "/Advance_Payment_Register", label: "All Payment Requests", icon: HiOutlineQueueList },
+      { to: "/Payments_Expenses", label: "Payments & Expenses", icon: HiOutlineChartPie },
       { to: "/Advance_Payment_Dispatch", label: "Send Bills & POs", icon: HiOutlinePaperAirplane },
     ],
   },
