@@ -53,8 +53,9 @@ import {
   OrderTimeline,
   OrderTimelineDialog,
 } from "@/components/orders/OrderTimelineDialog";
-import { OrderTotalsRow, VarietyCostCards } from "@/components/orders/OrderTotals";
-import { orderTotals, varietyCosts } from "@/components/orders/orderDetail";
+import { OrderTotalsRow, RealisationCards, VarietyCostCards } from "@/components/orders/OrderTotals";
+import { OrderWithPo } from "@/components/orders/OrderPoAttachments";
+import { orderTotals, varietyCosts, varietyRealisation } from "@/components/orders/orderDetail";
 import {
   RATE_APPROVER_TRACKING_FALLBACK_STATUS,
   getDecisionType,
@@ -557,6 +558,8 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
 
           <VarietyCostCards costs={detailVarieties} />
 
+          <RealisationCards realisation={varietyRealisation(selectedItems)} />
+
           {/* The order on the left, its progress trail on the right.
 
               These are the two halves of the one question every tracking desk
@@ -575,7 +578,7 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
                 : "space-y-4"
             }
           >
-            <div className="space-y-4">
+            <OrderWithPo orderId={orderDetails.id}>
             <Card>
               <CardHeader>
                 <CardTitle>Party &amp; delivery</CardTitle>
@@ -608,7 +611,7 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
               </CardHeader>
               <OrderItemsTable items={selectedItems} variety={false} />
             </Card>
-            </div>
+            </OrderWithPo>
 
             {showTrail ? (
               <Card className="lg:sticky lg:top-4">
