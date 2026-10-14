@@ -228,7 +228,7 @@ describe("BackDate", () => {
     expect(body.action).toBe("A");
     // ONE company, not a list of one.
     expect(body.company).toBe("OIL");
-    expect(body.time_limit).toBe("2026-12-31T18:30");
+    expect(body.time_limit).toBe(new Date("2026-12-31T18:30").toISOString());
   });
 
   it("labels the action plainly, with no trailing explanation", async () => {

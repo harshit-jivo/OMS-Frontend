@@ -675,7 +675,7 @@ function NewRequestForm({
           document_type_name: form.document_type_name,
           from_date: form.from_date,
           to_date: form.to_date,
-          time_limit: form.time_limit,
+          time_limit: new Date(form.time_limit).toISOString(),
           action: actionValue,
           remarks: form.remarks,
         });
@@ -1008,7 +1008,7 @@ function EditRequestForm({
         document_type_name: form.document_type_name,
         from_date: form.from_date,
         to_date: form.to_date,
-        time_limit: form.time_limit,
+        time_limit: new Date(form.time_limit).toISOString(),
         remarks: form.remarks,
       });
       onSaved(`Request #${request.id} updated. Approve again to retry SAP.`);
