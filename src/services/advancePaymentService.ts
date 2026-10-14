@@ -916,7 +916,15 @@ export interface BudgetHead {
   /** current / base; null when the yardstick month had nothing. */
   ratio: number | null;
   entries: number;
-  by_company: Array<{ company: string; label: string; base: number; current: number }>;
+  /** Each company's part, with its own breakdown — what its card opens onto. */
+  by_company: Array<{
+    company: string;
+    label: string;
+    base: number;
+    current: number;
+    entries?: number;
+    tree?: BudgetHead["tree"];
+  }>;
   /** What it is made of, to open level by level: SAP budget › sub budget, its G/L accounts, their postings. */
   tree: Array<
     BudgetFigures & {
@@ -942,8 +950,10 @@ export interface BudgetBoard {
   current: { month: string; label: string; from: string; to: string; days: number; elapsed: number; pace: number };
   baseline: { month: string; label: string; from: string; to: string };
   total: { base: number; current: number; ratio: number | null };
-  /** Largest August spend first; Other last. */
+  /** The rows: every posting by its SAP budget, so together they are the whole; Other last. */
   heads: BudgetHead[];
+  /** The costs that cut across them — Salary, Freight, Interest & Finance, Rent, Electricity — in the pie's order. */
+  costs: BudgetHead[];
 }
 
 export interface OmsDashboard {
