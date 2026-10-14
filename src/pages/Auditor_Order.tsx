@@ -67,8 +67,8 @@ import {
 import { OrderItemsTable } from "@/components/orders/OrderItemsTable";
 import { OrderWithPo } from "@/components/orders/OrderPoAttachments";
 import { OrderTimelineDialog } from "@/components/orders/OrderTimelineDialog";
-import { OrderTotalsRow, VarietyCostCards } from "@/components/orders/OrderTotals";
-import { orderTotals, varietyCosts } from "@/components/orders/orderDetail";
+import { OrderTotalsRow, RealisationCards, VarietyCostCards } from "@/components/orders/OrderTotals";
+import { orderTotals, varietyCosts, varietyRealisation } from "@/components/orders/orderDetail";
 
 /**
  * The auditor's approval queue.
@@ -633,6 +633,8 @@ export default function Auditor_orders() {
           <OrderTotalsRow totals={detailTotals} itemCount={selectedItems.length} />
 
           <VarietyCostCards costs={detailVarieties} />
+
+          <RealisationCards realisation={varietyRealisation(selectedItems)} />
 
           {/* The five facts an approver actually checks, and nothing else.
               These were behind `PartyHeader`'s modal — one click away on the

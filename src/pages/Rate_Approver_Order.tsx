@@ -80,7 +80,8 @@ import {
 } from "@/components/orders/ApprovalDialogs";
 import { OrderItemCards } from "@/components/orders/OrderItemCards";
 import { OrderWithPo } from "@/components/orders/OrderPoAttachments";
-import { orderTotals } from "@/components/orders/orderDetail";
+import { orderTotals, varietyRealisation } from "@/components/orders/orderDetail";
+import { RealisationCards } from "@/components/orders/OrderTotals";
 
 /**
  * The rate approver's queue.
@@ -664,6 +665,7 @@ export default function RateApproverOrders() {
             />
           </StatRow>
 
+          <RealisationCards realisation={varietyRealisation(selectedItems)} />
 
           <OrderWithPo orderId={orderDetails.id}>
             <Card>

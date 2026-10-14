@@ -7,8 +7,8 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Card, Stat, StatRow } from "@/components/ui/page";
-import type { OrderTotals as Totals, VarietyCost } from "./orderDetail";
-import { VARIETY_TONE } from "./orderDetail";
+import type { OrderTotals as Totals, VarietyCost, VarietyRealisation } from "./orderDetail";
+import { VARIETY_TONE, formatMoney } from "./orderDetail";
 
 /**
  * An order's money, as the KPI row the list pages already use.
@@ -85,6 +85,34 @@ export function VarietyCostCards({ costs }: { costs: VarietyCost[] }) {
           <Badge tone={VARIETY_TONE[entry.label] ?? "neutral"}>{entry.label}</Badge>
           <span className="text-xl font-bold tabular-nums text-ink">
             {entry.value.toFixed(2)}
+          </span>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Realisation per variety — what each earns per litre shipped — beside the
+ * variety cost cards, in the same card style. See `varietyRealisation`.
+ */
+export function RealisationCards({ realisation }: { realisation: VarietyRealisation[] }) {
+  if (realisation.length === 0) return null;
+
+  return (
+    <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3">
+      {realisation.map((entry) => (
+        <Card key={entry.label} className="flex flex-col gap-1">
+          <span className="flex items-center justify-between gap-3">
+            <Badge tone={VARIETY_TONE[entry.label] ?? "neutral"}>{entry.label}</Badge>
+            <span className="text-xl font-bold tabular-nums text-ink">
+              {formatMoney(entry.perLitre)}
+              <span className="text-[12px] font-medium text-subtle"> / L</span>
+            </span>
+          </span>
+          <span className="text-right text-[12px] tabular-nums text-subtle">
+            {formatMoney(entry.amount)} over{" "}
+            {entry.litres.toLocaleString("en-IN", { maximumFractionDigits: 2 })} L
           </span>
         </Card>
       ))}

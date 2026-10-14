@@ -96,6 +96,46 @@ export function varietyCosts(order: Order | null | undefined): VarietyCost[] {
   ].filter((entry) => entry.value > 0);
 }
 
+/** What one variety earns per litre shipped. */
+export type VarietyRealisation = {
+  label: string;
+  /** Basic value, before tax. */
+  amount: number;
+  /** Every litre that leaves, free (scheme / FOC) litres included. */
+  litres: number;
+  /** `amount / litres` — 0 when there are no litres. */
+  perLitre: number;
+};
+
+const REALISATION_ORDER = ["Premium", "Commodity", "Other"];
+
+/**
+ * Realisation per variety: basic value ÷ total litres, free litres included,
+ * so free goods dilute the rate the way they dilute what the order earns.
+ *
+ * Grouped by each line's `variety_type`, the same classification the item
+ * badges and `varietyCosts` use (`orders.serializers.item_variety_type`).
+ */
+export function varietyRealisation(items: OrderItem[]): VarietyRealisation[] {
+  const groups = new Map<string, { amount: number; litres: number }>();
+  for (const item of items) {
+    const raw = titleCaseVariety(item.variety_type || "OTHERS");
+    const label = raw === "Others" ? "Other" : raw;
+    const group = groups.get(label) ?? { amount: 0, litres: 0 };
+    group.amount += Number(item.total || 0);
+    group.litres += getOrderItemTotalLtrs(item);
+    groups.set(label, group);
+  }
+  return [...groups.entries()]
+    .filter(([, group]) => group.litres > 0)
+    .map(([label, group]) => ({
+      label,
+      ...group,
+      perLitre: group.amount / group.litres,
+    }))
+    .sort((a, b) => REALISATION_ORDER.indexOf(a.label) - REALISATION_ORDER.indexOf(b.label));
+}
+
 /**
  * Status predicates.
  *

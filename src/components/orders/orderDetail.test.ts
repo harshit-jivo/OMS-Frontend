@@ -7,6 +7,7 @@ import {
   titleCaseVariety,
   varietyBadgeTone,
   varietyCosts,
+  varietyRealisation,
 } from "./orderDetail";
 import type { Order, OrderItem } from "@/services/ordersService";
 
@@ -113,5 +114,33 @@ describe("status predicates", () => {
   it("treats a missing status as neither", () => {
     expect(isRejectedOrder({ status_display: null })).toBe(false);
     expect(isCompletedOrder({ status_display: null })).toBe(false);
+  });
+});
+
+describe("varietyRealisation", () => {
+  const line = (variety_type: string, total: number, total_ltrs: number) =>
+    ({ variety_type, total, total_ltrs, ltrs: total_ltrs }) as OrderItem;
+
+  it("is basic value per litre, with free litres diluting it", () => {
+    // 1,000 paid litres at ₹420 plus a 50-litre free line.
+    const result = varietyRealisation([
+      line("PREMIUM", 420000, 1000),
+      line("PREMIUM", 0, 50),
+      line("COMMODITY", 210000, 1500),
+    ]);
+
+    expect(result.map((r) => r.label)).toEqual(["Premium", "Commodity"]);
+    expect(result[0].litres).toBe(1050);
+    expect(result[0].perLitre).toBeCloseTo(400, 6);
+    expect(result[1].perLitre).toBeCloseTo(140, 6);
+  });
+
+  it("files untyped lines under Other and drops varieties with no litres", () => {
+    const result = varietyRealisation([
+      line("", 500, 10),
+      line("COMMODITY", 100, 0),
+    ]);
+
+    expect(result).toEqual([{ label: "Other", amount: 500, litres: 10, perLitre: 50 }]);
   });
 });
