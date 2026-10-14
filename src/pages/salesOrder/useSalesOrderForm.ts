@@ -27,7 +27,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 
 import { litresPerPiece } from "@/lib/itemUnits";
 import { getCurrentUser } from "@/services/authService";
-import { ordersService } from "@/services/ordersService";
+import { ordersService, type OrderAttachment } from "@/services/ordersService";
 import { sapService } from "@/services/sapService";
 import type {
   CreateOrder,
@@ -174,7 +174,15 @@ type OrderSaveSuccess = {
   orderId: string;
   nextStage: string;
   message: string;
+  /** How the customer PO upload went, when files were picked. */
+  poNote?: string;
+  poFailed?: boolean;
 };
+
+/** Matches `attachments.storage`: the server refuses anything else. */
+const PO_FILE_TYPES = ["pdf", "jpg", "jpeg", "png"];
+const PO_MAX_BYTES = 5 * 1024 * 1024;
+const PO_MAX_FILES = 5;
 
 export type AddSalesProps = {
   focMode?: boolean;
@@ -274,6 +282,11 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
   const [confirmProblems, setConfirmProblems] = useState<Record<string, string>>({});
   const [showSaveConfirm, setShowSaveConfirm] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState<OrderSaveSuccess | null>(null);
+  /** Customer PO files picked but not uploaded yet — they go up once the order saves. */
+  const [poFiles, setPoFiles] = useState<File[]>([]);
+  /** Already attached to the order being edited. */
+  const [existingPoFiles, setExistingPoFiles] = useState<OrderAttachment[]>([]);
+  const [poFileError, setPoFileError] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [lastSaveWasDraft, setLastSaveWasDraft] = useState(false);
@@ -1009,6 +1022,8 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
   };
 
   const resetOrderForm = () => {
+    setPoFiles([]);
+    setPoFileError("");
     setFormData({
       parties: "",
       dispatch: branch[0]?.bpl_id ? String(branch[0].bpl_id) : "",
@@ -1093,6 +1108,75 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
   ) => {
     const match = list.find((address) => String(address.id) === String(id));
     return match?.address_name || match?.full_address || "";
+  };
+
+  useEffect(() => {
+    if (!isEditMode || editOrderId === null) return;
+    ordersService
+      .getOrderAttachments(editOrderId)
+      .then(setExistingPoFiles)
+      .catch(() => setExistingPoFiles([]));
+  }, [isEditMode, editOrderId]);
+
+  const addPoFiles = (picked: FileList | File[] | null) => {
+    const files = Array.from(picked || []);
+    if (files.length === 0) return;
+    const bad = files.find((file) => {
+      const ext = file.name.split(".").pop()?.toLowerCase() || "";
+      return !PO_FILE_TYPES.includes(ext) || file.size > PO_MAX_BYTES;
+    });
+    if (bad) {
+      setPoFileError(`${bad.name}: only PDF, JPG or PNG files up to 5 MB.`);
+      return;
+    }
+    if (existingPoFiles.length + poFiles.length + files.length > PO_MAX_FILES) {
+      setPoFileError(`An order can have at most ${PO_MAX_FILES} PO files.`);
+      return;
+    }
+    setPoFileError("");
+    setPoFiles((current) => [...current, ...files]);
+  };
+
+  const removePoFile = (index: number) => {
+    setPoFiles((current) => current.filter((_, i) => i !== index));
+    setPoFileError("");
+  };
+
+  const removeExistingPoFile = async (attachment: OrderAttachment) => {
+    if (editOrderId === null) return;
+    try {
+      await ordersService.deleteOrderAttachment(editOrderId, attachment.id);
+      setExistingPoFiles((current) => current.filter((a) => a.id !== attachment.id));
+      setPoFileError("");
+    } catch {
+      setPoFileError("That PO file could not be removed.");
+    }
+  };
+
+  /** Upload the picked PO files to the saved order. Never throws: the order
+   *  is already saved, so a failed upload is reported, not treated as a
+   *  failed save. */
+  const uploadPendingPoFiles = async (
+    orderId: number | null | undefined,
+  ): Promise<Pick<OrderSaveSuccess, "poNote" | "poFailed">> => {
+    if (poFiles.length === 0) return {};
+    if (!orderId) {
+      return { poNote: "The PO could not be attached: the order id was not returned.", poFailed: true };
+    }
+    try {
+      await ordersService.uploadOrderAttachments(orderId, poFiles);
+      const count = poFiles.length;
+      setPoFiles([]);
+      return { poNote: `${count} PO file${count === 1 ? "" : "s"} attached.` };
+    } catch (error) {
+      const detail =
+        (error as { response?: { data?: { error?: string } } })?.response?.data?.error ||
+        "upload failed";
+      return {
+        poNote: `The order saved, but the PO could not be attached (${detail}). Attach it by editing the order.`,
+        poFailed: true,
+      };
+    }
   };
 
   const submitOrder = async () => {
@@ -1216,8 +1300,10 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
       const data = await ordersService.createOrder(payload);
 
       console.log("API Response:", data);
+      const poResult = await uploadPendingPoFiles(data?.id ?? editOrderId);
       setShowSaveConfirm(false);
       setSaveSuccess({
+        ...poResult,
         orderId: String(data?.order_number || data?.id || editOrderId || "-"),
         nextStage: getNextStageLabel(data),
         message: isEditMode
@@ -1342,8 +1428,10 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
       // as a submitted order minus the fields the backend fills in, which is
       // exactly what `saveDraft` declares it takes.
       const data = await ordersService.saveDraft(payload as Partial<CreateOrder>, draftOrderId);
+      const poResult = await uploadPendingPoFiles(data?.id ?? draftOrderId);
       setLastSaveWasDraft(true);
       setSaveSuccess({
+        ...poResult,
         orderId: String(data?.order_number || data?.id || draftOrderId || "-"),
         nextStage: "Saved as Draft",
         message: "Draft saved successfully",
@@ -2294,6 +2382,12 @@ export function useSalesOrderForm({ focMode = false }: AddSalesProps = {}) {
     setShowSaveConfirm,
     saveSuccess,
     setSaveSuccess,
+    poFiles,
+    existingPoFiles,
+    poFileError,
+    addPoFiles,
+    removePoFile,
+    removeExistingPoFile,
     isSaving,
     isSavingDraft,
     isLoadingEditOrder,
