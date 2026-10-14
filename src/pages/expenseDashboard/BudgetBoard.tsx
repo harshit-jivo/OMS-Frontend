@@ -25,9 +25,24 @@
  * accounts as cards, each opening onto its largest postings this month.
  */
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { memo, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import {
+  memo,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import { createPortal } from "react-dom";
-import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip, type PieLabelRenderProps } from "recharts";
+import {
+  Cell,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  type PieLabelRenderProps,
+} from "recharts";
 
 import {
   advancePaymentError,
@@ -84,8 +99,18 @@ const hueStyle = (key: string) => ({ "--accent": hueOf(key) }) as CSSProperties;
 
 /** The word that goes with the colour. */
 function StateWord({ ratio, state }: { ratio: number | null; state: State }) {
-  if (state === "over") return <span className="bgb-word" data-state="over">▲ {Math.round(((ratio ?? 1) - 1) * 100)}% over Aug</span>;
-  if (state === "ahead") return <span className="bgb-word" data-state="ahead">Ahead of pace</span>;
+  if (state === "over")
+    return (
+      <span className="bgb-word" data-state="over">
+        ▲ {Math.round(((ratio ?? 1) - 1) * 100)}% over
+      </span>
+    );
+  if (state === "ahead")
+    return (
+      <span className="bgb-word" data-state="ahead">
+        Ahead of pace
+      </span>
+    );
   return null;
 }
 
@@ -133,17 +158,13 @@ interface CardData {
   /** Whose hue the card wears: its head's. */
   hue: string;
   title: string;
-  /** Whose it is, where someone owns it (Sales: Raju for Oil) — shown as a name tag. */
+  /** Whose it is, where someone owns it (Sales: Raju for Oil). */
   owner?: string;
-  /** The card's one line of context: August's figure. */
-  sub: string;
   /** A company's card: its breakdown opens on that company alone. */
   company?: string;
   base: number;
   current: number;
   ratio: number | null;
-  /** A head shown with its companies: its bar and legend are made of them. */
-  companies?: Array<{ label: string; current: number }>;
 }
 
 interface SectionData {
@@ -153,32 +174,19 @@ interface SectionData {
   cards: CardData[];
 }
 
-function headCard(head: BudgetHead, baseLabel: string): CardData {
-  const split = SPLITS[head.key];
-  /** A split company's place in its split; any other company after them. */
-  const place = (company: string) => {
-    const i = split ? split.findIndex((s) => s.company === company) : -1;
-    return i === -1 ? split?.length ?? 0 : i;
-  };
+function headCard(head: BudgetHead): CardData {
   return {
     id: head.key,
     headKey: head.key,
     hue: hueOf(head.key),
     title: head.name,
-    sub: `${baseLabel.slice(0, 3)} ${compactINR(head.base)}`,
     base: head.base,
     current: head.current,
     ratio: head.ratio,
-    // Every company with spend this month, the split ones first, in their order.
-    companies: split
-      ? [...head.by_company]
-          .sort((x, y) => place(x.company) - place(y.company))
-          .map((c) => ({ label: COMPANY_LABEL[c.company] ?? c.label, current: c.current }))
-      : undefined,
   };
 }
 
-function partCards(head: BudgetHead, baseLabel: string): CardData[] {
+function partCards(head: BudgetHead): CardData[] {
   return (SPLITS[head.key] ?? []).map(({ company, label }) => {
     const row = head.by_company.find((c) => c.company === company);
     const owner = head.owners.find((o) => o.company === company);
@@ -191,7 +199,6 @@ function partCards(head: BudgetHead, baseLabel: string): CardData[] {
       title: label,
       owner: owner?.name,
       company,
-      sub: `${baseLabel.slice(0, 3)} ${compactINR(base)}`,
       base,
       current,
       ratio: base ? current / base : null,
@@ -216,13 +223,14 @@ const ROWS: ReadonlyArray<{ key: string; label: string; heads: readonly string[]
 /** The rows on the left, each in its given order. */
 function rowsOf(data: BoardData): SectionData[] {
   const byKey = new Map(shownHeads(data).map((h) => [h.key, h] as const));
-  const baseLabel = data.baseline.label;
-  const cardsOf = (head: BudgetHead) => [headCard(head, baseLabel), ...partCards(head, baseLabel)];
+  const cardsOf = (head: BudgetHead) => [headCard(head), ...partCards(head)];
   return ROWS.map((row) => ({
     key: row.key,
     label: row.label,
     hue: hueOf(row.heads[0]),
-    cards: row.heads.flatMap((key) => (byKey.has(key) ? cardsOf(byKey.get(key) as BudgetHead) : [])),
+    cards: row.heads.flatMap((key) =>
+      byKey.has(key) ? cardsOf(byKey.get(key) as BudgetHead) : [],
+    ),
   })).filter((row) => row.cards.length > 0);
 }
 
@@ -231,9 +239,12 @@ function SideTotal({ total, pace }: { total: BoardData["total"]; pace: number })
   const state = stateOf(total.ratio, pace);
   return (
     <div className="bgb-side-card bgb-side-total" data-state={state}>
-      <span className="bgb-side-title">Total</span>
-      <b className="bgb-side-value">{compactINR(total.current)}</b>
-      <span className="bgb-of">of {compactINR(total.base)} · Aug</span>
+      <span className="bgb-side-title">Total Budget</span>
+      <span className="bgb-card-figure">
+        <b className="bgb-side-value">{compactINR(total.current)}</b>
+        <em>spent</em>
+      </span>
+      <span className="bgb-of">Total {compactINR(total.base)}</span>
       <span className="bgb-measure">
         <Meter ratio={total.ratio} state={state} label="The whole budget against August" />
         <b className="bgb-pct">{percent(total.ratio)}</b>
@@ -257,7 +268,14 @@ function sliceLabel({ cx, cy, midAngle, outerRadius, percent, name }: PieLabelRe
   const x = Number(cx) + r * Math.cos(angle);
   const y = Number(cy) + r * Math.sin(angle);
   return (
-    <text x={x} y={y} textAnchor="middle" dominantBaseline="central" className="bgb-pie-label" data-small={percent < 0.12 || undefined}>
+    <text
+      x={x}
+      y={y}
+      textAnchor="middle"
+      dominantBaseline="central"
+      className="bgb-pie-label"
+      data-small={percent < 0.12 || undefined}
+    >
       <tspan x={x} dy="-0.55em">
         {name}
       </tspan>
@@ -277,7 +295,15 @@ function sliceLabel({ cx, cy, midAngle, outerRadius, percent, name }: PieLabelRe
 function SidePie({ costs, onOpen }: { costs: BudgetHead[]; onOpen: (open: Opening) => void }) {
   // Short names inside the slices: a long one ran over its neighbours.
   const short: Record<string, string> = { FINANCE: "Interest" };
-  const slices = costs.map((c) => ({ key: c.key, name: short[c.key] ?? c.name, value: Math.max(c.current, 0), fill: hueOf(c.key) }));
+  // Largest first, clockwise from twelve o'clock.
+  const slices = costs
+    .map((c) => ({
+      key: c.key,
+      name: short[c.key] ?? c.name,
+      value: Math.max(c.current, 0),
+      fill: hueOf(c.key),
+    }))
+    .sort((a, b) => b.value - a.value);
   const total = slices.reduce((sum, s) => sum + s.value, 0);
   return (
     <div
@@ -285,29 +311,34 @@ function SidePie({ costs, onOpen }: { costs: BudgetHead[]; onOpen: (open: Openin
       role="img"
       aria-label={`This month's ${slices.map((s) => `${s.name} ${compactINR(s.value)}`).join(", ")}`}
     >
+      <span className="bgb-side-title">Top 5 spends</span>
       {total > 0 ? (
-        <ResponsiveContainer width="100%" height="100%" debounce={150}>
-          <PieChart>
-            <Pie
-              data={slices}
-              dataKey="value"
-              nameKey="name"
-              innerRadius={0}
-              outerRadius="98%"
-              label={sliceLabel}
-              labelLine={false}
-              stroke="#fff"
-              strokeWidth={2}
-              isAnimationActive={false}
-              onClick={(_slice, index) => onOpen({ key: slices[index].key })}
-            >
-              {slices.map((s) => (
-                <Cell key={s.key} fill={s.fill} cursor="pointer" />
-              ))}
-            </Pie>
-            <Tooltip formatter={(value, name) => [fullINR(Number(value) || 0), String(name)]} />
-          </PieChart>
-        </ResponsiveContainer>
+        <div className="bgb-pie-area">
+          <ResponsiveContainer width="100%" height="100%" debounce={150}>
+            <PieChart>
+              <Pie
+                data={slices}
+                dataKey="value"
+                nameKey="name"
+                innerRadius={0}
+                outerRadius="98%"
+                startAngle={90}
+                endAngle={-270}
+                label={sliceLabel}
+                labelLine={false}
+                stroke="#fff"
+                strokeWidth={2}
+                isAnimationActive={false}
+                onClick={(_slice, index) => onOpen({ key: slices[index].key })}
+              >
+                {slices.map((s) => (
+                  <Cell key={s.key} fill={s.fill} cursor="pointer" />
+                ))}
+              </Pie>
+              <Tooltip formatter={(value, name) => [fullINR(Number(value) || 0), String(name)]} />
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
       ) : (
         <span className="bgb-side-empty">Nothing spent yet this month</span>
       )}
@@ -315,54 +346,37 @@ function SidePie({ costs, onOpen }: { costs: BudgetHead[]; onOpen: (open: Openin
   );
 }
 
-/** The pill at a card's top right: how far into August's total it is, or the state, in words. */
+/** The pill at a card's top right: the percentage spent — amber ahead of pace, red with ▲ past the total. */
 function Badge({ ratio, state }: { ratio: number | null; state: State }) {
-  if (state === "over") {
-    return (
-      <span className="bgb-badge" data-state="over">
-        ▲ {Math.round(((ratio ?? 1) - 1) * 100)}% over Aug
-      </span>
-    );
-  }
-  if (state === "ahead") {
-    return (
-      <span className="bgb-badge" data-state="ahead">
-        Ahead · {percent(ratio)}
-      </span>
-    );
-  }
-  if (state === "none") {
-    return (
-      <span className="bgb-badge" data-state="none">
-        Nothing in Aug
-      </span>
-    );
-  }
-  return <span className="bgb-badge">{percent(ratio)} of Aug</span>;
+  return (
+    <span className="bgb-badge" data-state={state === "ok" ? undefined : state}>
+      {state === "over" ? "▲ " : ""}
+      {percent(ratio)}
+    </span>
+  );
 }
 
 /**
- * The bar, in JI's segmented style: what is spent — company by company on a
- * head shown with its companies — then what is left of August's total, pale.
- * Past August, the part beyond it in red.
+ * The bar, in JI's segmented style: what is spent, then what is left of the
+ * total, pale. Past the total, the part beyond it in red.
  */
 function Bar({ card, state }: { card: CardData; state: State }) {
   const basis = Math.max(card.base, card.current, 1);
   const segments: Array<{ key: string; size: number; tone: string }> = [];
-  if (card.companies) {
-    card.companies.forEach((c, i) => {
-      if (c.current > 0) segments.push({ key: c.label, size: c.current / basis, tone: `shade-${Math.min(i, 2)}` });
+  const within = card.base > 0 ? Math.min(card.current, card.base) : card.current;
+  if (within > 0)
+    segments.push({
+      key: "spent",
+      size: within / basis,
+      tone: state === "ahead" ? "ahead" : "spent",
     });
-  } else {
-    const within = card.base > 0 ? Math.min(card.current, card.base) : card.current;
-    if (within > 0) segments.push({ key: "spent", size: within / basis, tone: state === "ahead" ? "ahead" : "spent" });
-    if (card.base > 0 && card.current > card.base) {
-      segments.push({ key: "over", size: (card.current - card.base) / basis, tone: "over" });
-    }
+  if (card.base > 0 && card.current > card.base) {
+    segments.push({ key: "over", size: (card.current - card.base) / basis, tone: "over" });
   }
-  if (card.base > card.current) segments.push({ key: "left", size: (card.base - card.current) / basis, tone: "left" });
+  if (card.base > card.current)
+    segments.push({ key: "left", size: (card.base - card.current) / basis, tone: "left" });
   return (
-    <span className="bgb-bar" role="img" aria-label={`${percent(card.ratio)} of August's total`}>
+    <span className="bgb-bar" role="img" aria-label={`${percent(card.ratio)} of the total`}>
       {segments.map((s) => (
         <i key={s.key} data-tone={s.tone} style={{ flexGrow: s.size }} />
       ))}
@@ -370,26 +384,13 @@ function Bar({ card, state }: { card: CardData; state: State }) {
   );
 }
 
+/** Under the bar: the total — the figure above it is what is spent. */
 function Legend({ card }: { card: CardData }) {
-  const items = card.companies
-    ? card.companies.map((c, i) => ({ key: c.label, tone: `shade-${Math.min(i, 2)}`, label: c.label, value: c.current }))
-    : card.base > 0 && card.current > card.base
-      ? [
-          { key: "base", tone: "spent", label: "Aug", value: card.base },
-          { key: "over", tone: "over", label: "Over by", value: card.current - card.base },
-        ]
-      : [
-          { key: "spent", tone: "spent", label: "Spent", value: card.current },
-          { key: "left", tone: "left", label: "Left", value: Math.max(card.base - card.current, 0) },
-        ];
   return (
-    <span className="bgb-legend-row" data-split={card.companies ? "" : undefined}>
-      {items.map((item) => (
-        <span key={item.key}>
-          <i data-tone={item.tone} />
-          {item.label} <b>{compactINR(item.value)}</b>
-        </span>
-      ))}
+    <span className="bgb-legend-row">
+      <span>
+        Total <b>{compactINR(card.base)}</b>
+      </span>
     </span>
   );
 }
@@ -397,9 +398,23 @@ function Legend({ card }: { card: CardData }) {
 /** What a click opens: a head, or one company's part of it. */
 type Opening = { key: string; company?: string };
 
-const Card = memo(function Card({ card, pace, onOpen }: { card: CardData; pace: number; onOpen: (open: Opening) => void }) {
+const Card = memo(function Card({
+  card,
+  pace,
+  onOpen,
+  ownerLine = false,
+}: {
+  card: CardData;
+  pace: number;
+  onOpen: (open: Opening) => void;
+  /** Keep the owner's line even without an owner, so the row's figures and bars line up. */
+  ownerLine?: boolean;
+}) {
   const state = stateOf(card.ratio, pace);
-  const name = card.id === card.headKey ? card.title : `${card.headKey === "SALES" ? "Sales" : "Factory"}, ${card.title}`;
+  const name =
+    card.id === card.headKey
+      ? card.title
+      : `${card.headKey === "SALES" ? "Sales" : "Factory"}, ${card.title}`;
   return (
     <button
       type="button"
@@ -415,8 +430,13 @@ const Card = memo(function Card({ card, pace, onOpen }: { card: CardData; pace: 
       </span>
       {/* The owner, large and bold on a line of its own under the title: the
           name a reader looks for first (user, 2026-10-14). */}
-      {card.owner ? <b className="bgb-owner">{card.owner}</b> : null}
-      <span className="bgb-card-sub">{card.sub}</span>
+      {card.owner ? (
+        <b className="bgb-owner">{card.owner}</b>
+      ) : ownerLine ? (
+        <b className="bgb-owner" aria-hidden="true">
+          &nbsp;
+        </b>
+      ) : null}
       <span className="bgb-card-figure">
         <b>{compactINR(card.current)}</b>
         <em>spent</em>
@@ -427,7 +447,15 @@ const Card = memo(function Card({ card, pace, onOpen }: { card: CardData; pace: 
   );
 });
 
-function Section({ section, pace, onOpen }: { section: SectionData; pace: number; onOpen: (open: Opening) => void }) {
+function Section({
+  section,
+  pace,
+  onOpen,
+}: {
+  section: SectionData;
+  pace: number;
+  onOpen: (open: Opening) => void;
+}) {
   return (
     <section
       className="bgb-row"
@@ -439,7 +467,13 @@ function Section({ section, pace, onOpen }: { section: SectionData; pace: number
       </div>
       <div className="bgb-cards">
         {section.cards.map((card) => (
-          <Card key={card.id} card={card} pace={pace} onOpen={onOpen} />
+          <Card
+            key={card.id}
+            card={card}
+            pace={pace}
+            onOpen={onOpen}
+            ownerLine={section.cards.some((c) => c.owner)}
+          />
         ))}
       </div>
     </section>
@@ -449,7 +483,9 @@ function Section({ section, pace, onOpen }: { section: SectionData; pace: number
 /* ── The breakdown of one head: cards and rows, no charts (user, 2026-10-14) ── */
 
 const shortDate = (iso: string | null) =>
-  iso ? new Date(`${iso}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "—";
+  iso
+    ? new Date(`${iso}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short" })
+    : "—";
 
 /** A company's card: this month, August beside it, and how far into August. */
 function CompanyCards({ head, pace }: { head: BudgetHead; pace: number }) {
@@ -474,7 +510,7 @@ function CompanyCards({ head, pace }: { head: BudgetHead; pace: number }) {
               {owner ? <b className="bgb-owner">{owner.name}</b> : null}
             </span>
             <b className="bgb-company-value">{compactINR(c.current)}</b>
-            <span className="bgb-of">of {compactINR(c.base)} in Aug</span>
+            <span className="bgb-of">Total {compactINR(c.base)}</span>
             <span className="bgb-measure">
               <Meter ratio={ratio} state={state} label={`${c.label} against August`} />
               <b className="bgb-pct">{percent(ratio)}</b>
@@ -487,13 +523,27 @@ function CompanyCards({ head, pace }: { head: BudgetHead; pace: number }) {
 }
 
 /** One collapsible row's line: its name, August, this month, and the share of August. */
-function RowLine({ name, base, current, entries }: { name: string; base: number; current: number; entries: number }) {
+function RowLine({
+  name,
+  base,
+  current,
+  entries,
+}: {
+  name: string;
+  base: number;
+  current: number;
+  entries: number;
+}) {
   const over = base > 0 && current > base;
   return (
     <summary className="bgb-tree-line">
       <span className="bgb-tree-name">
         {name}
-        {entries ? <em>{entries.toLocaleString("en-IN")} {entries === 1 ? "entry" : "entries"}</em> : null}
+        {entries ? (
+          <em>
+            {entries.toLocaleString("en-IN")} {entries === 1 ? "entry" : "entries"}
+          </em>
+        ) : null}
       </span>
       <span className="bgb-tree-base">{compactINR(base)}</span>
       <b className="bgb-tree-now">{compactINR(current)}</b>
@@ -546,7 +596,7 @@ function AccountCard({ account, pace }: { account: AccountData; pace: number }) 
       </span>
       <span className="bgb-figure">
         <b className="bgb-account-value">{compactINR(account.current)}</b>
-        <span className="bgb-of">of {compactINR(account.base)} in Aug</span>
+        <span className="bgb-of">Total {compactINR(account.base)}</span>
       </span>
       <span className="bgb-measure">
         <Meter ratio={ratio} state={state} label={`${account.name} against August`} />
@@ -580,8 +630,8 @@ function Breakdown({ tree, pace }: { tree: BudgetHead["tree"]; pace: number }) {
     <div className="bgb-tree" role="list">
       <div className="bgb-tree-head" aria-hidden="true">
         <span>SAP budget › sub budget</span>
-        <span>Aug</span>
-        <span>Now</span>
+        <span>Total</span>
+        <span>Spent</span>
         <span />
       </div>
       {tree.map((budget, i) => (
@@ -602,7 +652,17 @@ function Breakdown({ tree, pace }: { tree: BudgetHead["tree"]; pace: number }) {
  * A head's breakdown — or, opened from a company's card, that company's alone:
  * its figures, its owner, and only its budgets, accounts and postings.
  */
-function Detail({ head, company, data, onClose }: { head: BudgetHead; company?: string; data: BoardData; onClose: () => void }) {
+function Detail({
+  head,
+  company,
+  data,
+  onClose,
+}: {
+  head: BudgetHead;
+  company?: string;
+  data: BoardData;
+  onClose: () => void;
+}) {
   const closeRef = useRef<HTMLButtonElement>(null);
   const part = company ? head.by_company.find((c) => c.company === company) : undefined;
   const label = company ? (COMPANY_LABEL[company] ?? company) : "";
@@ -616,7 +676,14 @@ function Detail({ head, company, data, onClose }: { head: BudgetHead; company?: 
         entries: part?.entries ?? 0,
         tree: part?.tree ?? [],
       }
-    : { title: head.name, base: head.base, current: head.current, ratio: head.ratio, entries: head.entries, tree: head.tree };
+    : {
+        title: head.name,
+        base: head.base,
+        current: head.current,
+        ratio: head.ratio,
+        entries: head.entries,
+        tree: head.tree,
+      };
   const state = stateOf(view.ratio, data.current.pace);
   useEffect(() => {
     closeRef.current?.focus();
@@ -661,15 +728,25 @@ function Detail({ head, company, data, onClose }: { head: BudgetHead; company?: 
           <div className="bgb-figure">
             <b className="bgb-value">{compactINR(view.current)}</b>
             <span className="bgb-of">
-              of {compactINR(view.base)} in {data.baseline.label} · {view.entries.toLocaleString("en-IN")} entries
+              Total {compactINR(view.base)} · {view.entries.toLocaleString("en-IN")} entries
             </span>
           </div>
           <div className="bgb-measure">
-            <Meter ratio={view.ratio} state={state} label={`${view.title} against ${data.baseline.label}`} />
+            <Meter
+              ratio={view.ratio}
+              state={state}
+              label={`${view.title} against ${data.baseline.label}`}
+            />
             <b className="bgb-pct">{percent(view.ratio)}</b>
             <StateWord ratio={view.ratio} state={state} />
           </div>
-          <button ref={closeRef} type="button" className="exb-icon-btn bgb-close" onClick={onClose} aria-label="Close">
+          <button
+            ref={closeRef}
+            type="button"
+            className="exb-icon-btn bgb-close"
+            onClick={onClose}
+            aria-label="Close"
+          >
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M6 6l12 12M18 6L6 18" />
             </svg>
@@ -706,7 +783,9 @@ function Clock() {
   return (
     <div className="bgb-clock">
       <b>{now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</b>
-      <span>{now.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" })}</span>
+      <span>
+        {now.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" })}
+      </span>
     </div>
   );
 }
@@ -724,7 +803,9 @@ function recentMonths(today = new Date()): Array<{ value: string; label: string 
 
 /** Other only when it is worth a cell: at least 1% of the yardstick month. */
 function shownHeads(data: BoardData): BudgetHead[] {
-  return data.heads.filter((h) => h.key !== "OTHER" || Math.abs(h.base) >= Math.abs(data.total.base) * 0.01);
+  return data.heads.filter(
+    (h) => h.key !== "OTHER" || Math.abs(h.base) >= Math.abs(data.total.base) * 0.01,
+  );
 }
 
 export function BudgetBoard({ viewSwitch }: { viewSwitch: ReactNode }) {
@@ -744,8 +825,8 @@ export function BudgetBoard({ viewSwitch }: { viewSwitch: ReactNode }) {
   const data = board.data;
   const live = board.isError ? "down" : board.isFetching ? "busy" : "live";
   const rows = data ? rowsOf(data) : [];
-  const opened = data && open ? [...data.heads, ...data.costs].find((h) => h.key === open.key) : undefined;
-  const totalState = data ? stateOf(data.total.ratio, data.current.pace) : "none";
+  const opened =
+    data && open ? [...data.heads, ...data.costs].find((h) => h.key === open.key) : undefined;
 
   return (
     <div ref={boardRef} className="exb bgb" role="region" aria-label="Budget heads board">
@@ -758,15 +839,20 @@ export function BudgetBoard({ viewSwitch }: { viewSwitch: ReactNode }) {
           <b>Payments &amp; Expenses</b>
           <span>
             {data
-              ? `${data.current.label}${data.current.pace < 1 ? ` · day ${data.current.elapsed} of ${data.current.days}` : ""} vs ${data.baseline.label} · SAP, all companies`
-              : "SAP, all companies"}
+              ? `${data.current.label}${data.current.pace < 1 ? ` · day ${data.current.elapsed} of ${data.current.days}` : ""}`
+              : ""}
           </span>
         </div>
         <div className="exb-filters">
           {viewSwitch}
           <label>
             <span className="exb-sr">Month</span>
-            <select className="exb-select" aria-label="Month" value={month} onChange={(e) => setMonth(e.target.value)}>
+            <select
+              className="exb-select"
+              aria-label="Month"
+              value={month}
+              onChange={(e) => setMonth(e.target.value)}
+            >
               {months.map((m) => (
                 <option key={m.value} value={m.value}>
                   {m.label}
@@ -774,13 +860,6 @@ export function BudgetBoard({ viewSwitch }: { viewSwitch: ReactNode }) {
               ))}
             </select>
           </label>
-        </div>
-        <div className="bgb-grand" data-state={totalState}>
-          <span className="cap">{data ? `${data.current.label.slice(0, 3)} to date` : "To date"}</span>
-          <b className="n">{data ? compactINR(data.total.current) : "—"}</b>
-          <span className="s">
-            {data ? `${percent(data.total.ratio)} of ${compactINR(data.total.base)} · ${data.baseline.label.slice(0, 3)}` : "fetching"}
-          </span>
         </div>
         <Clock />
         {supported ? (
@@ -792,7 +871,13 @@ export function BudgetBoard({ viewSwitch }: { viewSwitch: ReactNode }) {
             title={isFullscreen ? "Exit fullscreen (Esc)" : "Show fullscreen (F)"}
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d={isFullscreen ? "M9 3v6H3M15 3v6h6M15 21v-6h6M9 21v-6H3" : "M3 9V3h6M21 9V3h-6M21 15v6h-6M3 15v6h6"} />
+              <path
+                d={
+                  isFullscreen
+                    ? "M9 3v6H3M15 3v6h6M15 21v-6h6M9 21v-6H3"
+                    : "M3 9V3h6M21 9V3h-6M21 15v6h-6M3 15v6h6"
+                }
+              />
             </svg>
           </button>
         ) : null}
@@ -816,10 +901,19 @@ export function BudgetBoard({ viewSwitch }: { viewSwitch: ReactNode }) {
           <div
             className="bgb-rows"
             // The rows share the screen, the first a little taller.
-            style={{ gridTemplateRows: ["1.15fr", ...rows.slice(1).map(() => "1fr")].map((fr) => `minmax(0, ${fr})`).join(" ") }}
+            style={{
+              gridTemplateRows: ["1.15fr", ...rows.slice(1).map(() => "1fr")]
+                .map((fr) => `minmax(0, ${fr})`)
+                .join(" "),
+            }}
           >
             {rows.map((section) => (
-              <Section key={section.key} section={section} pace={data.current.pace} onOpen={setOpen} />
+              <Section
+                key={section.key}
+                section={section}
+                pace={data.current.pace}
+                onOpen={setOpen}
+              />
             ))}
           </div>
           <aside className="bgb-side" aria-label="Total and costs">

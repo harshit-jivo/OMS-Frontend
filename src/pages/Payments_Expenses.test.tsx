@@ -215,11 +215,13 @@ describe("Payments & Expenses: budget heads", () => {
 
     const sales = card(/^Sales:/);
     expect(sales.textContent).toContain("₹1.17 Cr");
-    expect(sales.textContent).toContain("Aug ₹1.77 Cr");
+    expect(sales.textContent).toContain("Total ₹1.77 Cr");
+    // No month named on the cards, and no company legend on the total card: the companies have their own.
+    expect(sales.textContent).not.toMatch(/Aug|Oil|Mart|Beverages/);
     // The owner, large and bold under the title.
     const oil = card(/^Sales, Oil:/);
     expect(oil.querySelector(".bgb-owner")?.textContent).toBe("Raju");
-    expect(oil.textContent).toContain("Aug ₹11.2 L");
+    expect(oil.textContent).toContain("Total ₹11.2 L");
     expect(card(/^Sales, Mart:/).textContent).toContain("Prabhjot");
     expect(card(/^Sales, Beverages:/).textContent).toContain("Shunty");
     expect(card(/^Factory, Beverages:/).textContent).toContain("₹29K");
@@ -234,28 +236,30 @@ describe("Payments & Expenses: budget heads", () => {
     await screen.findByRole("button", { name: /^Sales:/ });
 
     const side = screen.getByRole("complementary", { name: "Total and costs" });
-    expect(side.textContent).toContain("Total");
+    expect(side.textContent).toContain("Total Budget");
     expect(side.textContent).toContain("₹1.99 Cr");
-    expect(side.textContent).toContain("of ₹3.03 Cr · Aug");
+    expect(side.textContent).toContain("Total ₹3.03 Cr");
+    expect(side.textContent).toContain("Top 5 spends");
     expect(within(side).queryAllByRole("button")).toHaveLength(0);
     expect(within(side).getByRole("img").getAttribute("aria-label")).toBe(
-      "This month's Salary ₹0, Freight ₹60.0 L, Interest ₹19.9 L, Rent ₹14.8 L, Electricity ₹0",
+      // Largest first, clockwise.
+      "This month's Freight ₹60.0 L, Interest ₹19.9 L, Rent ₹14.8 L, Salary ₹0, Electricity ₹0",
     );
   });
 
-  it("marks a head past its August total, and one ahead of August's pace, in words as well as colour", async () => {
+  it("shows each card's percentage — amber ahead of pace, red with an arrow past its total", async () => {
     vi.spyOn(advancePaymentService, "budgetBoard").mockResolvedValue(BOARD);
     renderPage(<Payments_Expenses />, { route: "/Payments_Expenses" });
     await screen.findByRole("button", { name: /^Sales:/ });
     // The row's card (the side has a line for it too).
     const freight = within(screen.getByRole("region", { name: "Back Office" })).getByRole("button", { name: /^Freight \(delivery\):/ });
     expect(freight.getAttribute("data-state")).toBe("over");
-    expect(freight.textContent).toContain("▲ 20% over Aug");
-    expect(freight.textContent).toContain("Over by");
-    // Sales: 66% of August with 45% of the month gone.
+    expect(freight.querySelector(".bgb-badge")?.textContent).toBe("▲ 120%");
+    // Sales: 66% of its total with 45% of the month gone.
     expect(card(/^Sales:/).getAttribute("data-state")).toBe("ahead");
-    expect(card(/^Sales:/).textContent).toContain("Ahead · 66%");
-    expect(card(/^Back Office:/).textContent).toContain("2% of Aug");
+    expect(card(/^Sales:/).querySelector(".bgb-badge")?.getAttribute("data-state")).toBe("ahead");
+    expect(card(/^Sales:/).querySelector(".bgb-badge")?.textContent).toBe("66%");
+    expect(card(/^Back Office:/).querySelector(".bgb-badge")?.textContent).toBe("2%");
   });
 
   it("opens a head's breakdown — company cards, then rows that open onto account cards — with no chart, and closes it with Escape", async () => {
@@ -274,7 +278,7 @@ describe("Payments & Expenses: budget heads", () => {
     expect(budget.open).toBe(true);
     expect(budget.textContent).toContain("Bank Interest › MAIN");
     const account = budget.querySelector("details.bgb-account") as HTMLDetailsElement;
-    expect(account.textContent).toContain("of ₹41.6 L in Aug");
+    expect(account.textContent).toContain("Total ₹41.6 L");
     expect(account.open).toBe(false);
     await user.click(within(account).getByText("BANK INTEREST EXPENSES"));
     expect(account.open).toBe(true);
@@ -291,7 +295,7 @@ describe("Payments & Expenses: budget heads", () => {
     expect(within(mart).queryByRole("heading", { name: "By company" })).toBeNull();
     expect(mart.textContent).toContain("ECOM › E-COM");
     expect(mart.textContent).not.toContain("Sales › MAIN");
-    expect(mart.textContent).toContain("of ₹1.65 Cr in Aug 2026");
+    expect(mart.textContent).toContain("Total ₹1.65 Cr");
   });
 
   it("reads another month when one is chosen", async () => {
