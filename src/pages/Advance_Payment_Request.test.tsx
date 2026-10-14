@@ -996,7 +996,8 @@ describe("Advance Payment Request", () => {
   it("Employee Imprest → Against Bill lists that imprest account's open bills from SAP", async () => {
     const user = await setup();
     await start(user, "EMPLOYEE_IMPREST", "Against Bill");
-    await pick(user, /^Employee/, /RAHUL SHARMA IMPREST/);
+    // Several employees may be chosen here (one request each): ticked, not picked.
+    await tick(user, /^Employee/, /RAHUL SHARMA IMPREST/);
     await waitForBills();
     expect(service.openVendorInvoices).toHaveBeenCalledWith("OIL", "ORGV000901");
     const bills = await openChecklist(user, /^Bills/);

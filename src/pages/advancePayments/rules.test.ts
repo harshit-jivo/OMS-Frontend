@@ -71,7 +71,7 @@ describe("the case table", () => {
     expect(offered("VENDOR")).toEqual(["AGAINST_BILL", "AGAINST_PO"]);
     // No Against Bill for an employee advance.
     expect(offered("EMPLOYEE_ADVANCE")).toEqual(["ADVANCE", "OTHER"]);
-    expect(offered("EMPLOYEE_IMPREST")).toEqual(["ADVANCE", "AGAINST_BILL", "OTHER"]);
+    expect(offered("EMPLOYEE_IMPREST")).toEqual(["ADVANCE", "AGAINST_BILL", "AGAINST_JOURNAL", "OTHER"]);
   });
 
   it("a vendor has no answer that is not a document", () => {

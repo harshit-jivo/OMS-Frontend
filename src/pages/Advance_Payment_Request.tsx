@@ -69,7 +69,7 @@ import {
   useRequestList,
   useStoreRequest,
 } from "./advancePayments/requestQueries";
-import { formatINR, type RequestForm } from "./advancePayments/rules";
+import { formatINR, splitByPartner, type RequestForm } from "./advancePayments/rules";
 import "./advancePayments/sapSkin.css";
 
 type PageTab = "entries" | "create" | "assigned";
@@ -372,28 +372,44 @@ export default function Advance_Payment_Request() {
   if (openId !== null) return <EntryDetails id={openId} onBack={() => setOpenId(null)} />;
 
   const raise = async (form: RequestForm, files: FileAttachment[]) => {
-    try {
-      const input = toApiRequest(form);
-      const api = await advancePaymentService.createRequest(
-        prefill ? { ...input, assignment_id: prefill.assignment.id } : input,
-        newFiles(files),
-      );
-      const entry: AdvanceRequestEntry = store(api);
-      if (prefill) {
-        setPrefill(null);
-        void client.invalidateQueries({ queryKey: ["advance-payments", "assignments"] });
+    // Several employees chosen: one request each, raised in turn.
+    const forms = splitByPartner(form);
+    const raised: { entry: AdvanceRequestEntry; form: RequestForm; stage: string }[] = [];
+    const failed: string[] = [];
+    for (const one of forms) {
+      try {
+        const input = toApiRequest(one);
+        const api = await advancePaymentService.createRequest(
+          prefill ? { ...input, assignment_id: prefill.assignment.id } : input,
+          newFiles(files),
+        );
+        raised.push({ entry: store(api), form: one, stage: api.flow?.current_stage || "its first stage" });
+      } catch (err) {
+        // Nothing raised yet: the form shows why, and nothing is lost.
+        if (forms.length === 1 || raised.length === 0) rethrow(err);
+        failed.push(`${one.partnerName || one.partner}: ${advancePaymentError(err)}`);
       }
-      // Straight back to the list, showing it where it now sits.
-      setFilters({ ...NO_FILTERS, status: "PENDING" });
-      setTab("entries");
-      const raised =
-        `${entry.requestNo} raised for ${formatINR(requestAmount(form))} — it is now waiting at ` +
-        `${api.flow?.current_stage || "its first stage"}.`;
-      setNotice(raised);
-      showToast({ title: `${entry.requestNo} raised`, message: raised, tone: "ok" });
-    } catch (err) {
-      rethrow(err);
     }
+    if (prefill) {
+      setPrefill(null);
+      void client.invalidateQueries({ queryKey: ["advance-payments", "assignments"] });
+    }
+    // Straight back to the list, showing it where it now sits.
+    setFilters({ ...NO_FILTERS, status: "PENDING" });
+    setTab("entries");
+    const message =
+      raised.length === 1
+        ? `${raised[0].entry.requestNo} raised for ${formatINR(requestAmount(raised[0].form))} — it is now waiting at ${raised[0].stage}.`
+        : `${raised.length} requests raised, one per employee: ` +
+          raised.map((r) => `${r.entry.requestNo} (${r.form.partnerName}, ${formatINR(requestAmount(r.form))})`).join(", ") +
+          "." +
+          (failed.length ? ` NOT raised — fix and raise these again: ${failed.join("; ")}.` : "");
+    setNotice(message);
+    showToast({
+      title: raised.length === 1 ? `${raised[0].entry.requestNo} raised` : `${raised.length} requests raised`,
+      message,
+      tone: failed.length ? "bad" : "ok",
+    });
   };
 
   return (
@@ -500,6 +516,7 @@ export default function Advance_Payment_Request() {
               setTab("entries");
             }}
             onSubmit={raise}
+            multiplePartners
           />
         </Card>
       ) : (

@@ -67,6 +67,7 @@ const KIND_OF: Partial<Record<ReferenceKind, "BILL" | "PO" | "LEDGER">> = {
   VENDOR_BILL: "BILL",
   VENDOR_PO: "PO",
   CUSTOMER_LEDGER: "LEDGER",
+  IMPREST_JOURNAL: "LEDGER",
 };
 
 /** A ledger item's SAP object type, named. */

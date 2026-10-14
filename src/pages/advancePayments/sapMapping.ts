@@ -189,7 +189,11 @@ export const REFUNDABLE_OBJECTS: Readonly<Record<number, { byJournal: boolean }>
  * add to the refund; DEBIT items (their invoices) subtract — SAP nets the two
  * the same way. Null for an item that cannot be refunded against.
  */
-export function ledgerToDocument(doc: SapLedgerDocument, partner: string): OpenDocument | null {
+export function ledgerToDocument(
+  doc: SapLedgerDocument,
+  partner: string,
+  owedTo: "customer" | "employee" = "customer",
+): OpenDocument | null {
   const object = doc.doc_type_code ?? -1;
   const rule = REFUNDABLE_OBJECTS[object];
   if (!rule || doc.trans_id === null) return null;
@@ -204,7 +208,8 @@ export function ledgerToDocument(doc: SapLedgerDocument, partner: string): OpenD
     paid: sapAmount(doc.settled_amount),
     open: sapAmount(doc.open_amount),
     docType: doc.doc_type,
-    note: doc.direction === "CREDIT" ? "Owed to the customer" : "Owed by the customer — reduces the refund",
+    note:
+      doc.direction === "CREDIT" ? `Owed to the ${owedTo}` : `Owed by the ${owedTo} — reduces the refund`,
     reference: doc.party_ref || undefined,
     dueDate: doc.due_date || undefined,
     currency: doc.currency || undefined,

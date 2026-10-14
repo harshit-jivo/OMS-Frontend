@@ -38,7 +38,7 @@ import {
 } from "react-icons/hi2";
 
 import { Button } from "../../components/ui/button";
-import { SearchSelect } from "../../components/ui/dropdown";
+import { MultiSelect, SearchSelect } from "../../components/ui/dropdown";
 import { Field, FormActions, FormGrid, Input, Select, Textarea } from "../../components/ui/form";
 import { Notice } from "../../components/ui/page";
 import { cn } from "@/lib/utils";
@@ -83,6 +83,7 @@ import {
   needsDepartmentHead,
   plainAmountError,
   pastDateError,
+  partnerCodes,
   resolveCase,
   todayIso,
   validate,
@@ -139,6 +140,12 @@ export interface AdvancePaymentFormProps {
   onCancel?: () => void;
   /** Shown above the fields — the request page's "Preview" note. */
   intro?: React.ReactNode;
+  /**
+   * A NEW request may name several employees (Employee Imprest against
+   * documents); the page then raises one request each. Off when editing:
+   * an edit is one request.
+   */
+  multiplePartners?: boolean;
 }
 
 export function AdvancePaymentForm({
@@ -149,6 +156,7 @@ export function AdvancePaymentForm({
   secondarySubmit,
   onCancel,
   intro,
+  multiplePartners = false,
 }: AdvancePaymentFormProps) {
   const [form, setForm] = useState<RequestForm>(initial);
   const [files, setFiles] = useState<FileAttachment[]>(initialFiles);
@@ -167,6 +175,8 @@ export function AdvancePaymentForm({
   // rather than once, so a form left open past midnight moves with the day.
   const today = todayIso();
   const company = (form.company || null) as AdvancePaymentCompany | null;
+  // Several employees, one request each: a new Employee Imprest against documents.
+  const multi = multiplePartners && c.multiplePartners;
 
   /**
    * EVERY edit goes through here. `applyChange` clears whatever the edit made
@@ -341,30 +351,53 @@ export function AdvancePaymentForm({
   // One query, keyed on the KIND as well as the vendor, so switching Payment
   // Against between Bill, PO and All never shows one list under another's
   // heading while the next one loads.
+  const partnersShown = multi ? partnerCodes(form) : [form.partner];
   const documentsQuery = useQuery({
-    queryKey: ["advance-payments", "documents", c.reference, company, form.partner],
+    queryKey: ["advance-payments", "documents", c.reference, company, ...partnersShown],
     queryFn: async (): Promise<OpenDocument[]> => {
-      if (c.reference === "VENDOR_PO") {
-        return (await advancePaymentService.openVendorPurchaseOrders(company!, form.partner)).map(
-          (po) => purchaseOrderToDocument(po, company!),
+      const fetchFor = async (partner: string): Promise<OpenDocument[]> => {
+        if (c.reference === "VENDOR_PO") {
+          return (await advancePaymentService.openVendorPurchaseOrders(company!, partner)).map(
+            (po) => purchaseOrderToDocument(po, company!),
+          );
+        }
+        if (c.reference === "CUSTOMER_LEDGER") {
+          // The customer's open ledger items a refund can be applied to, less
+          // any that other OMS requests already hold in full.
+          const ledger = await advancePaymentService.partnerLedger(company!, partner);
+          return ledger.results
+            .map((doc) => ledgerToDocument(doc, partner))
+            .filter((doc): doc is OpenDocument => doc !== null && availableOf(doc) > 0);
+        }
+        if (c.reference === "IMPREST_JOURNAL") {
+          // The journal entries crediting the staff account (TA/DA, incentive),
+          // less any other OMS requests already hold in full.
+          const ledger = await advancePaymentService.partnerLedger(company!, partner);
+          return ledger.results
+            .filter((doc) => doc.doc_type_code === 30 && doc.direction === "CREDIT")
+            .map((doc) => ledgerToDocument(doc, partner, "employee"))
+            .filter((doc): doc is OpenDocument => doc !== null && availableOf(doc) > 0);
+        }
+        if (c.reference === "VENDOR_OTHER") {
+          return (await advancePaymentService.openOtherDocuments(company!, partner)).map(
+            (doc) => otherToDocument(doc, partner),
+          );
+        }
+        return (await advancePaymentService.openVendorInvoices(company!, partner)).map(
+          (invoice) => invoiceToDocument(invoice, company!),
         );
-      }
-      if (c.reference === "CUSTOMER_LEDGER") {
-        // The customer's open ledger items a refund can be applied to, less
-        // any that other OMS requests already hold in full.
-        const ledger = await advancePaymentService.partnerLedger(company!, form.partner);
-        return ledger.results
-          .map((doc) => ledgerToDocument(doc, form.partner))
-          .filter((doc): doc is OpenDocument => doc !== null && availableOf(doc) > 0);
-      }
-      if (c.reference === "VENDOR_OTHER") {
-        return (await advancePaymentService.openOtherDocuments(company!, form.partner)).map(
-          (doc) => otherToDocument(doc, form.partner),
-        );
-      }
-      return (await advancePaymentService.openVendorInvoices(company!, form.partner)).map(
-        (invoice) => invoiceToDocument(invoice, company!),
-      );
+      };
+      const lists = await Promise.all(partnersShown.map(fetchFor));
+      if (lists.length < 2) return lists[0] ?? [];
+      // Several employees: say whose each document is.
+      const names = new Map([
+        [form.partner, form.partnerName],
+        ...form.morePartners.map((p) => [p.code, p.name] as const),
+      ]);
+      return lists.flat().map((doc) => ({
+        ...doc,
+        note: [names.get(doc.partner) || doc.partner, doc.note].filter(Boolean).join(" — "),
+      }));
     },
     enabled: c.liveDocuments && company !== null && form.partner !== "",
     staleTime: 60_000,
@@ -375,7 +408,7 @@ export function AdvancePaymentForm({
   // by its number or vendor ref, and what it finds is offered with the rest.
   const [docSearch, setDocSearch] = useState("");
   const searchTerm = useDebounced(docSearch.trim(), 300);
-  const searchable = c.reference === "VENDOR_PO" || c.reference === "VENDOR_BILL";
+  const searchable = !multi && (c.reference === "VENDOR_PO" || c.reference === "VENDOR_BILL");
   const capped = (documentsQuery.data?.length ?? 0) >= DOCUMENT_LIMIT;
   const searchQuery = useQuery({
     queryKey: ["advance-payments", "documents-search", c.reference, company, form.partner, searchTerm],
@@ -606,7 +639,9 @@ export function AdvancePaymentForm({
             hint={
               partnerError || c.expense
                 ? undefined
-                : c.livePartners && form.company && form.partner && !partnerNotInSap
+                : multi
+                  ? "Choose one or more — one request is raised for each employee, with their own entries."
+                  : c.livePartners && form.company && form.partner && !partnerNotInSap
                   ? (
                       <span className="inline-flex items-center gap-1">
                         Ledger in SAP:{" "}
@@ -620,7 +655,45 @@ export function AdvancePaymentForm({
                   : partnerHint
             }
           >
-            {(f) => (
+            {(f) =>
+              multi ? (
+                <MultiSelect<string>
+                  id={f.id}
+                  value={partnerCodes(form)}
+                  onChange={(codes) => {
+                    const known = new Map([
+                      ...shownPartners.map((p) => [p.value, p.label] as const),
+                      [form.partner, form.partnerName] as const,
+                      ...form.morePartners.map((p) => [p.code, p.name] as const),
+                    ]);
+                    const [first = "", ...rest] = codes;
+                    change({
+                      partner: first,
+                      partnerName: known.get(first) ?? "",
+                      morePartners: rest.map((code) => ({ code, name: known.get(code) ?? code })),
+                    });
+                  }}
+                  disabled={!c.decided || (c.livePartners && !form.company)}
+                  placeholder={`Select ${c.partnerLabel}s`}
+                  searchable
+                  selectAll={false}
+                  namedUpTo={3}
+                  multiline
+                  searchPlaceholder="Search name or code…"
+                  emptyText={c.livePartners ? "No match in SAP" : "No matches"}
+                  onSearch={c.livePartners ? setPartnerQuery : undefined}
+                  options={[
+                    ...form.morePartners
+                      .filter((p) => !shownPartners.some((sp) => sp.value === p.code))
+                      .map((p) => ({ value: p.code, label: p.name, hint: p.code })),
+                    ...shownPartners.map((partner) => ({
+                      value: partner.value,
+                      label: partner.notInSap ? `${partner.label} (Not in SAP)` : partner.label,
+                      hint: partner.code,
+                    })),
+                  ]}
+                />
+              ) : (
               <SearchSelect<string>
                 id={f.id}
                 value={form.partner}
@@ -650,7 +723,8 @@ export function AdvancePaymentForm({
                       : partner.code,
                 }))}
               />
-            )}
+              )
+            }
           </Field>
           {partnerNotInSap ? (
             <Notice

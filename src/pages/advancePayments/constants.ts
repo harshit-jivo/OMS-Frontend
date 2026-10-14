@@ -67,6 +67,9 @@ export const PAYMENT_AGAINST_OPTIONS = [
   { value: "ALL", label: "All" },
   // Customer refunds: against their open ledger items, or a typed amount.
   { value: "AGAINST_LEDGER", label: "Against Ledger" },
+  // Employee Imprest: the journal entries crediting the employee's staff
+  // account (ORGV…) — the monthly TA/DA and incentive entries.
+  { value: "AGAINST_JOURNAL", label: "Against Journal Entry" },
   { value: "ON_ACCOUNT", label: "On Account" },
   { value: "OTHER", label: "Other" },
   // An Expense request: its lines are what it pays. One kind per request,

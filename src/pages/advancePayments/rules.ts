@@ -137,6 +137,13 @@ export interface RequestForm {
    */
   partnerName: string;
   /**
+   * Employee Imprest against documents, on a NEW request: the other employees
+   * chosen besides `partner`. Submitting raises one request per employee
+   * (`splitByPartner`), each with that employee's own documents. Empty
+   * everywhere else.
+   */
+  morePartners: Array<{ code: string; name: string }>;
+  /**
    * The chosen documents — several bills or several POs — as SNAPSHOTS.
    *
    * Whole documents rather than ids, because a live SAP list is fetched by the
@@ -228,6 +235,7 @@ export const EMPTY_FORM: RequestForm = {
   paymentAgainstOther: "",
   partner: "",
   partnerName: "",
+  morePartners: [],
   selected: [],
   allocations: {},
   amount: "",
@@ -261,7 +269,7 @@ export const EMPTY_FORM: RequestForm = {
 
 /* ── The documents a payment can be made against ─────────────────────────── */
 
-export type ReferenceKind = "VENDOR_BILL" | "VENDOR_PO" | "VENDOR_OTHER" | "CUSTOMER_LEDGER";
+export type ReferenceKind = "VENDOR_BILL" | "VENDOR_PO" | "VENDOR_OTHER" | "CUSTOMER_LEDGER" | "IMPREST_JOURNAL";
 
 interface ReferenceKindDef {
   /** One of them — "Bill". The heading form. */
@@ -368,6 +376,23 @@ export const REFERENCE_KINDS: Record<ReferenceKind, ReferenceKindDef> = {
     live: true,
     documents: [],
   },
+  IMPREST_JOURNAL: {
+    label: "Journal Entry",
+    noun: "journal entry",
+    pluralLabel: "Journal Entries",
+    placeholder: "Select Journal Entries",
+    numberLabel: "Journal Entry",
+    dateLabel: "Date",
+    originalLabel: "Credited",
+    paidLabel: "Paid",
+    modes: ["FIXED"],
+    intro:
+      "The journal entries crediting the employee's staff account in SAP and not yet paid — " +
+      "the monthly TA/DA and incentive entries accounts posts.",
+    // Live: `GET /advance-payments/open-documents/?card_code=` (the account's ledger), journal credits only.
+    live: true,
+    documents: [],
+  },
 };
 
 /** A ledger DEBIT counts against the refund; everything else counts for it. */
@@ -428,6 +453,9 @@ export const CASE_RULES: Record<PartnerType, Partial<Record<PaymentAgainst, Case
     // in SAP, and this pays against them, exactly as a vendor's bills are.
     // The bills are the expense already: there is no bill still to expect.
     AGAINST_BILL: { reference: "VENDOR_BILL" },
+    // The month's TA/DA or incentive: the journal entries crediting the
+    // staff account, paid through the journal as SAP itself pays them.
+    AGAINST_JOURNAL: { reference: "IMPREST_JOURNAL" },
     OTHER: { expectedBillDate: true },
   },
   // A REFUND of what the customer is owed: against the open items on their
@@ -534,6 +562,16 @@ export interface ResolvedCase {
   plainAmount: boolean;
   /** An Expense: lines, payee, Sub Budget, Month; no partner, no purpose. */
   expense: boolean;
+  /**
+   * Several employees may be chosen: an Employee Imprest paid against
+   * documents (bills, journal entries) — one request each is raised.
+   */
+  multiplePartners: boolean;
+}
+
+/** Every partner the form names: `partner`, then `morePartners`. */
+export function partnerCodes(form: RequestForm): string[] {
+  return [form.partner, ...form.morePartners.map((p) => p.code)].filter(Boolean);
 }
 
 function samplePartners(source: PartnerSource | null): Partner[] {
@@ -573,9 +611,8 @@ export function resolveCase(form: RequestForm): ResolvedCase {
 
   const documents =
     reference && !liveDocuments && form.partner ? documentsFor(reference, form.partner) : [];
-  const selectedDocuments = reference
-    ? form.selected.filter((doc) => doc.partner === form.partner)
-    : [];
+  const chosen = new Set(partnerCodes(form));
+  const selectedDocuments = reference ? form.selected.filter((doc) => chosen.has(doc.partner)) : [];
 
   return {
     paymentAgainstOptions,
@@ -601,6 +638,7 @@ export function resolveCase(form: RequestForm): ResolvedCase {
     decided,
     plainAmount: decided && reference === null && !rule?.expense,
     expense: Boolean(rule?.expense),
+    multiplePartners: form.type === "EMPLOYEE_IMPREST" && reference !== null && liveDocuments,
   };
 }
 
@@ -633,7 +671,7 @@ export function departmentHeadLoginError(name: string): string {
 /* ── Changing an answer, and what it invalidates ─────────────────────────── */
 
 const CLEARED_DOCUMENTS = { selected: [] as OpenDocument[], allocations: {} } as const;
-const CLEARED_PARTNER = { partner: "", partnerName: "" } as const;
+const CLEARED_PARTNER = { partner: "", partnerName: "", morePartners: [] as RequestForm["morePartners"] };
 /** Budget heads are cost centres of ONE company's SAP. The purpose is not. */
 const CLEARED_DEPARTMENT = { budget: "", budgetName: "", subBudget: "", subBudgetName: "" } as const;
 const CLEARED_REPAYMENT = {
@@ -675,6 +713,13 @@ export function sanitize(form: RequestForm): RequestForm {
     : c.partners.some((partner) => partner.value === next.partner);
   if (!c.decided || !partnerOffered) Object.assign(next, CLEARED_PARTNER);
   if (!next.partner) next.partnerName = "";
+  // Other employees only where several may be chosen, each once, never the first again.
+  next.morePartners =
+    c.multiplePartners && next.partner
+      ? next.morePartners.filter(
+          (p, i, all) => p.code !== next.partner && all.findIndex((q) => q.code === p.code) === i,
+        )
+      : [];
 
   c = resolveCase(next);
   // Keep only documents of THIS partner — and, for a sample kind, only ones
@@ -739,6 +784,26 @@ export function sanitize(form: RequestForm): RequestForm {
   }
 
   return next;
+}
+
+/**
+ * One form per employee chosen: each with only that employee's documents and
+ * their payment lines, and nothing else changed. A form naming one partner
+ * comes back as it is.
+ */
+export function splitByPartner(form: RequestForm): RequestForm[] {
+  if (form.morePartners.length === 0) return [form];
+  return [{ code: form.partner, name: form.partnerName }, ...form.morePartners].map((p) => {
+    const selected = form.selected.filter((doc) => doc.partner === p.code);
+    return {
+      ...form,
+      partner: p.code,
+      partnerName: p.name,
+      morePartners: [],
+      selected,
+      allocations: Object.fromEntries(selected.map((doc) => [doc.id, form.allocations[doc.id]])),
+    };
+  });
 }
 
 /**
@@ -808,7 +873,9 @@ export function applyChange(form: RequestForm, patch: Partial<RequestForm>): Req
   if (next.returnMethod === "EMI") next = linkEmi(form, next, patch);
   // Documents belong to their partner. For a plain-amount case the partner
   // has no documents, so the typed amount stands.
-  if (changed("partner") && resolveCase(next).reference) {
+  // With several employees, each keeps its own documents (`sanitize` drops
+  // those of an employee no longer chosen).
+  if (changed("partner") && resolveCase(next).reference && !resolveCase(next).multiplePartners) {
     next = { ...next, ...CLEARED_DOCUMENTS };
   }
   // An Expense's vendor names who is paid, unless something else was typed.
@@ -1267,6 +1334,13 @@ export function validate(form: RequestForm, today: string = todayIso()): Validat
   if (c.reference) {
     if (form.partner && form.selected.length === 0) {
       missing.push(REFERENCE_KINDS[c.reference].pluralLabel);
+    } else if (form.morePartners.length > 0) {
+      const named = [{ code: form.partner, name: form.partnerName }, ...form.morePartners];
+      for (const p of named) {
+        if (!form.selected.some((doc) => doc.partner === p.code)) {
+          missing.push(`${REFERENCE_KINDS[c.reference].pluralLabel} for ${p.name || p.code}`);
+        }
+      }
     }
     // Every line must carry a payment. Named by document, because "Payment
     // Amount" alone does not say which of four bills is the one left blank.
