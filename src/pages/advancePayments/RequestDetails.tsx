@@ -18,6 +18,7 @@ import {
 
 import {
   billOrAdvance,
+  creditDue,
   creditPeriod,
   paymentAgainstLabel,
   requestAmount,
@@ -89,7 +90,23 @@ export function RequestSummary({
           <DetailField
             label="Credit Period"
             value={creditPeriod(entry.api.credit_terms)}
-            hint={entry.api.credit_terms.set ? "The vendor's payment terms in SAP" : `SAP shows ${entry.api.credit_terms.terms}, its default`}
+            hint={
+              entry.api.credit_terms.set
+                ? "The vendor's payment terms in SAP"
+                : `No terms set in SAP (it shows ${entry.api.credit_terms.terms}): 30 days from the bill's posting date`
+            }
+          />
+        ) : null}
+        {creditDue(entry.api.credit_terms) ? (
+          <DetailField
+            label="Credit Due"
+            value={creditDue(entry.api.credit_terms)?.label ?? ""}
+            hint={
+              entry.api.credit_terms?.posting_date
+                ? `Earliest bill, posted ${formatDate(entry.api.credit_terms.posting_date)}`
+                : undefined
+            }
+            strong={creditDue(entry.api.credit_terms)?.overdue}
           />
         ) : null}
         {c.expense ? (

@@ -1268,6 +1268,22 @@ export interface ApiRequestInput extends ApiRequestFields {
   assignment_id?: number;
 }
 
+/**
+ * The payee's credit period. `credit_days` is the one approvers work to:
+ * SAP's where set, else 30 days (`assumed`). Against bills, `due_date` is when
+ * the earliest of them falls due — SAP's due date, or (terms not set) its
+ * posting date (`posting_date`) plus 30 days.
+ */
+export interface CreditTerms {
+  terms: string;
+  days: number;
+  set: boolean;
+  credit_days?: number;
+  assumed?: boolean;
+  due_date?: string | null;
+  posting_date?: string | null;
+}
+
 export interface ApiRequest extends ApiRequestFields {
   id: number;
   request_no: string;
@@ -1316,7 +1332,7 @@ export interface ApiRequest extends ApiRequestFields {
    * `set` is false on SAP's default "ADVANCE/CASH/0 DAYS", which nobody
    * chose. Null for an employee, a payee not in SAP, or when SAP was down.
    */
-  credit_terms?: { terms: string; days: number; set: boolean } | null;
+  credit_terms?: CreditTerms | null;
   /** The all-requests list only: everyone who approved, rejected, returned or sent it back. */
   approvers?: Array<{ username: string; name: string }>;
   /** The all-requests list only: its latest log row, any action. */

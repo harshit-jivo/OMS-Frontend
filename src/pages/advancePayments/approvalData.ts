@@ -6,11 +6,19 @@
  *
  * Built from the server's answer by `requestApi.fromApiRequest`.
  */
-import type { ApiRequest } from "../../services/advancePaymentService";
+import type { ApiRequest, CreditTerms } from "../../services/advancePaymentService";
 import type { FileAttachment } from "./attachments";
 import { PARTNER_TYPES, PAYMENT_AGAINST_OPTIONS, RETURN_METHODS } from "./constants";
 import type { PayoutDetails } from "./payout";
-import { allocationRows, allocationTotals, expenseNet, expenseTotal, resolveCase, type RequestForm } from "./rules";
+import {
+  allocationRows,
+  allocationTotals,
+  expenseNet,
+  expenseTotal,
+  formatDate,
+  resolveCase,
+  type RequestForm,
+} from "./rules";
 
 /**
  * Where a request stands, in the pages' words. PENDING is the server's
@@ -93,11 +101,31 @@ export function billOrAdvance(form: RequestForm): "Bill" | "Advance" | "" {
   return "";
 }
 
-/** The payee's credit period, as approvers read it: "NET-30 · 30 days credit". */
-export function creditPeriod(terms: { terms: string; days: number; set: boolean } | null | undefined): string {
+/** The credit period assumed where SAP has none set for the vendor. */
+export const DEFAULT_CREDIT_DAYS = 30;
+
+/**
+ * The payee's credit period, as approvers read it: "NET-30 · 30 days credit",
+ * or "30 days credit (default)" where SAP has no terms set for the vendor.
+ */
+export function creditPeriod(terms: CreditTerms | null | undefined): string {
   if (!terms) return "";
-  if (!terms.set) return "Not set in SAP";
+  if (!terms.set) return `${terms.credit_days ?? DEFAULT_CREDIT_DAYS} days credit (default)`;
   return terms.days ? `${terms.terms} · ${terms.days} days credit` : terms.terms;
+}
+
+/**
+ * When the request's earliest bill falls due under that credit period:
+ * "Due 25 Oct 2026", or "Overdue since …" once past. Null without bills.
+ */
+export function creditDue(
+  terms: CreditTerms | null | undefined,
+  today = new Date().toLocaleDateString("en-CA"),
+): { label: string; overdue: boolean } | null {
+  const due = terms?.due_date;
+  if (!due) return null;
+  const overdue = due < today;
+  return { label: `${overdue ? "Overdue since" : "Due"} ${formatDate(due)}`, overdue };
 }
 
 export function returnMethodLabel(form: RequestForm): string {
