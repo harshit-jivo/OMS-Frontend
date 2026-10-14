@@ -37,6 +37,31 @@ describe("PartnerBalance", () => {
     expect(await screen.findByText("Balance in Oil (VENDA000956)")).toBeTruthy();
   });
 
+  it("says where the vendor stands under each balance", async () => {
+    vi.spyOn(advancePaymentService, "vendors").mockResolvedValue([
+      { card_code: "VENDA000948", balance: "-4635" } as never,
+    ]);
+    vi.spyOn(advancePaymentService, "partnerBalances").mockResolvedValue([
+      { company: "BEVERAGES", card_code: "VENDA000948", card_name: "ARNAV", balance: "-4635", matched_by: "self" },
+      { company: "OIL", card_code: "VENDA000956", card_name: "ARNAV", balance: "25000", matched_by: "bank account" },
+    ]);
+    renderPage(<PartnerBalance entry={entry("BEVERAGES", "VENDA000948")} />);
+    expect(await screen.findByText("Payable to the vendor")).toBeTruthy();
+    expect(await screen.findByText("Receivable from the vendor (e.g. advances paid)")).toBeTruthy();
+  });
+
+  it("says for how many days it has stood on that side", async () => {
+    vi.spyOn(advancePaymentService, "vendors").mockResolvedValue([
+      { card_code: "VENDA000948", balance: "-217153" } as never,
+    ]);
+    vi.spyOn(advancePaymentService, "partnerBalances").mockResolvedValue([
+      { company: "BEVERAGES", card_code: "VENDA000948", card_name: "ARNAV", balance: "-217153", matched_by: "self",
+        since: "2025-11-06", days: 342 },
+    ]);
+    renderPage(<PartnerBalance entry={entry("BEVERAGES", "VENDA000948")} />);
+    expect(await screen.findByText(/Payable to the vendor for 342 days \(since 06 Nov 2025\)/)).toBeTruthy();
+  });
+
   it("shows only its own company when SAP finds no same business elsewhere", async () => {
     vi.spyOn(advancePaymentService, "vendors").mockResolvedValue([
       { card_code: "VENDA001056", balance: "-1703088" } as never,

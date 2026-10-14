@@ -506,6 +506,9 @@ export interface SapPartnerCompanyBalance {
   card_name: string;
   balance: string | null;
   matched_by: "self" | "PAN" | "GSTIN" | "bank account" | "name" | "";
+  /** The date the balance crossed onto its current side (Cr / Dr), and days since; null when nil. */
+  since?: string | null;
+  days?: number | null;
   error?: string;
 }
 

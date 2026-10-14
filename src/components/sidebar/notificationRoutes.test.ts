@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { routeForNotification } from "./notificationRoutes";
+import { routeForNotification, type RoutableNotification } from "./notificationRoutes";
 
 describe("routeForNotification", () => {
   it("sends an approver to the desk with the request open", () => {
@@ -57,7 +57,9 @@ describe("routeForNotification", () => {
   it("sends an Orders row back to the order routing, as before", () => {
     // Orders rows carry no event, so this must keep returning null and let
     // `goToOrder` handle them - the second feed must not capture the first.
-    const ordersRow = {
+    // Typed as the feed's rows are: an object with none of the framework's
+    // fields is otherwise refused at compile time, which is the very case here.
+    const ordersRow: RoutableNotification & Record<string, unknown> = {
       id: 9,
       message: "Order SO-1 needs approval",
       is_read: false,

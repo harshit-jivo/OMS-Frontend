@@ -9,6 +9,11 @@
  * Imprest accounts are business partners and have one; an Employee advance
  * is paid to a G/L account, which the desk does not read here.
  *
+ * Each balance says where the payee STANDS in words under the amount:
+ * payable to them (Cr), receivable from them (Dr), or nothing outstanding —
+ * and for how many days it has been on that side (from its SAP ledger:
+ * `sap_relations.standing`).
+ *
  * Beside it, the balance in Oil / Beverages wherever the same business is
  * there, under the same card code or another one, found by GSTIN, PAN, bank
  * account or name (`sap_relations.partner_balances`). Another code is shown
@@ -21,11 +26,47 @@ import {
   advancePaymentError,
   advancePaymentService,
   type AdvancePaymentCompany,
+  type SapPartnerCompanyBalance,
 } from "../../services/advancePaymentService";
 import type { AdvanceRequestEntry } from "./approvalData";
-import { balanceSide, formatINR } from "./rules";
+import { balanceSide, formatDate, formatINR } from "./rules";
 
 const COMPANY_NAME: Record<string, string> = { OIL: "Oil", BEVERAGES: "Beverages", MART: "Mart" };
+
+/** "for 51 days (since 24 Aug 2026)", "since today", or nothing when it is not known. */
+export function standingFor(days: number | null | undefined, since: string | null | undefined): string {
+  if (days == null || !since) return "";
+  if (days <= 0) return "since today";
+  return `for ${days} day${days === 1 ? "" : "s"} (since ${formatDate(since)})`;
+}
+
+/** The amount with its side, and under it where the payee stands, and for how long. */
+function BalanceValue({
+  side,
+  standing = null,
+  primary = false,
+}: {
+  side: ReturnType<typeof balanceSide>;
+  standing?: SapPartnerCompanyBalance | null;
+  primary?: boolean;
+}) {
+  const howLong = side.side ? standingFor(standing?.days, standing?.since) : "";
+  return (
+    <span className="flex flex-col">
+      <span
+        data-slot={primary ? "partner-balance" : undefined}
+        className={side.side === "Cr" ? "text-bad" : side.side === "Dr" ? "text-ok" : undefined}
+      >
+        {formatINR(side.amount)}
+        {side.side ? ` ${side.side}` : ""}
+      </span>
+      <span data-slot="partner-stand" className="text-xs font-normal text-subtle">
+        {side.meaning}
+        {howLong ? ` ${howLong}` : ""}
+      </span>
+    </span>
+  );
+}
 
 export function PartnerBalance({ entry }: { entry: AdvanceRequestEntry }) {
   const company = entry.form.company as AdvancePaymentCompany;
@@ -42,13 +83,14 @@ export function PartnerBalance({ entry }: { entry: AdvanceRequestEntry }) {
     retry: 1,
   });
   const balance = query.data ? balanceSide(query.data.balance, who) : null;
-  const others = useQuery({
+  const companies = useQuery({
     queryKey: ["advance-payments", "partner-balances", company, cardCode],
-    queryFn: async () =>
-      (await advancePaymentService.partnerBalances(company, cardCode)).filter((row) => row.company !== company),
+    queryFn: () => advancePaymentService.partnerBalances(company, cardCode),
     staleTime: 60_000,
     retry: 1,
   });
+  const own = (companies.data ?? []).find((row) => row.matched_by === "self") ?? null;
+  const others = (companies.data ?? []).filter((row) => row.company !== company);
 
   return (
     <DetailGrid>
@@ -59,21 +101,13 @@ export function PartnerBalance({ entry }: { entry: AdvanceRequestEntry }) {
           query.isError
             ? advancePaymentError(query.error)
             : balance
-              ? (
-                  <span
-                    data-slot="partner-balance"
-                    className={balance.side === "Cr" ? "text-bad" : balance.side === "Dr" ? "text-ok" : undefined}
-                  >
-                    {formatINR(balance.amount)}
-                    {balance.side ? ` ${balance.side}` : ""}
-                  </span>
-                )
+              ? <BalanceValue side={balance} standing={own} primary />
               : query.isFetching
                 ? "Loading…"
                 : "Not found in SAP"
         }
       />
-      {(others.data ?? []).map((row) => {
+      {others.map((row) => {
         const side = row.balance != null ? balanceSide(row.balance, who) : null;
         const company = COMPANY_NAME[row.company] ?? row.company;
         return (
@@ -85,10 +119,7 @@ export function PartnerBalance({ entry }: { entry: AdvanceRequestEntry }) {
               row.error ? (
                 <span className="text-subtle">Could not read SAP</span>
               ) : side ? (
-                <span className={side.side === "Cr" ? "text-bad" : side.side === "Dr" ? "text-ok" : undefined}>
-                  {formatINR(side.amount)}
-                  {side.side ? ` ${side.side}` : ""}
-                </span>
+                <BalanceValue side={side} standing={row} />
               ) : (
                 "—"
               )
