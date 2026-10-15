@@ -31,6 +31,8 @@ import { useStoreRequest } from "./requestQueries";
 const STAGE_STATE: Record<string, { label: string; tone: BadgeTone }> = {
   CURRENT: { label: "Waiting", tone: "hold" },
   UPCOMING: { label: "To come", tone: "neutral" },
+  // The same person as the Department Head just before: one approval covers both.
+  WITH_HEAD: { label: "With Department Head's approval", tone: "neutral" },
   APPROVED: { label: "Approved", tone: "ok" },
   REJECTED: { label: "Rejected", tone: "bad" },
   RETURNED: { label: "Returned to creator", tone: "note" },

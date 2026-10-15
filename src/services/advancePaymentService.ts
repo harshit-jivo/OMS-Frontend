@@ -1168,7 +1168,11 @@ export interface ApiStage {
   name: string;
   role: StageRole | "";
   sequence: number;
-  /** CURRENT, UPCOMING, or what was done there this round: APPROVED, REJECTED, RETURNED, SENT_BACK. */
+  /**
+   * CURRENT, UPCOMING, or what was done there this round: APPROVED, REJECTED,
+   * RETURNED, SENT_BACK. WITH_HEAD: the same person as the Department Head
+   * just before it — their one approval covers both.
+   */
   state: string;
   user_id: number | null;
   user_name: string;
