@@ -17,6 +17,7 @@ import type {
   SapOpenInvoice,
   SapOmsUsage,
   SapOpenPurchaseOrder,
+  SapPaymentAccount,
   SapVendor,
 } from "../../services/advancePaymentService";
 
@@ -58,6 +59,15 @@ export function vendorToPartner(vendor: SapVendor): Partner {
     value: vendor.card_code,
     label: vendor.card_name || vendor.card_code,
     code: vendor.card_code,
+  };
+}
+
+/** An Account Payment's payee is the G/L account itself: its code, named, with its group. */
+export function paymentAccountToPartner(account: SapPaymentAccount): Partner {
+  return {
+    value: account.code,
+    label: account.name || account.code,
+    code: [account.code, account.group].filter(Boolean).join(" · "),
   };
 }
 

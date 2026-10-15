@@ -1227,7 +1227,7 @@ export interface SapPartnerLedger {
 
 export interface ApiRequestFields {
   company: AdvancePaymentCompany;
-  request_type: "VENDOR" | "EMPLOYEE_ADVANCE" | "EMPLOYEE_IMPREST" | "CUSTOMER" | "EXPENSE";
+  request_type: "VENDOR" | "EMPLOYEE_ADVANCE" | "EMPLOYEE_IMPREST" | "CUSTOMER" | "EXPENSE" | "ACCOUNT";
   payment_against: string;
   payment_against_other: string;
   partner_code: string;
@@ -1255,6 +1255,15 @@ export interface ApiRequestFields {
 }
 
 /** An expense G/L account an Expense line may pay to. */
+/** A G/L account an Account Payment may pay (`GET /payment-accounts/`). */
+export interface SapPaymentAccount {
+  code: string;
+  name: string;
+  /** The parent account it sits under: CREDITORS MART, TPT & BSU. */
+  group: string;
+  balance: string;
+}
+
 export interface SapExpenseAccount {
   code: string;
   name: string;
@@ -1454,6 +1463,14 @@ export const advancePaymentService = {
       params: { company, search: search || undefined, limit },
     });
     return results<SapVendor>(res.data);
+  },
+
+  /** The G/L accounts an Account Payment may pay, matching `search`; none for most companies. */
+  async paymentAccounts(company: AdvancePaymentCompany, search = ""): Promise<SapPaymentAccount[]> {
+    const res = await api.get(`${BASE}/payment-accounts/`, {
+      params: { company, search: search || undefined, limit: PICKER_LIMIT },
+    });
+    return results<SapPaymentAccount>(res.data);
   },
 
   /** Employee advance accounts matching `search`. */

@@ -44,7 +44,7 @@ import {
 } from "./advancePayments/register";
 import { STATUS_LABEL, STATUS_TONE, formatDateTime, historySummary, statusSummary } from "./advancePayments/requestLabels";
 import { useRequestDetail, useRequestList } from "./advancePayments/requestQueries";
-import { formatINR } from "./advancePayments/rules";
+import { formatINR, paysGlAccount } from "./advancePayments/rules";
 
 /* ── One request, all of it ─────────────────────────────────────────────── */
 
@@ -119,7 +119,7 @@ function RegisterDetail({ id, onBack }: { id: number; onBack: () => void }) {
               requestAmount={amount}
               readOnly
               company={entry.form.company}
-              payeeCardCode={entry.form.type === "EMPLOYEE_ADVANCE" ? "" : entry.form.partner}
+              payeeCardCode={paysGlAccount(entry.form.type) ? "" : entry.form.partner}
               tds={null}
             />
           </Card>

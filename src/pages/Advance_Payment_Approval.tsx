@@ -111,7 +111,7 @@ import {
   useRequestList,
   useStoreRequest,
 } from "./advancePayments/requestQueries";
-import { expenseNet, formatINR, validateExpense, type RequestForm } from "./advancePayments/rules";
+import { expenseNet, formatINR, paysGlAccount, validateExpense, type RequestForm } from "./advancePayments/rules";
 import { useTdsCodes } from "./advancePayments/expenseLookups";
 import { useLinkedRequest } from "./advancePayments/useLinkedRequest";
 
@@ -589,7 +589,7 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
               company={entry.form.company}
               // An Employee is paid to a G/L account, not a SAP partner,
               // so there are no bank accounts on file to offer.
-              payeeCardCode={entry.form.type === "EMPLOYEE_ADVANCE" ? "" : entry.form.partner}
+              payeeCardCode={paysGlAccount(entry.form.type) ? "" : entry.form.partner}
               tds={
                 entry.form.type === "VENDOR" && entry.form.company
                   ? {
@@ -636,7 +636,7 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
               context={{
                 company: entry.form.company as AdvancePaymentCompany,
                 toAccount: entry.payout.toAccountNumber,
-                cardCode: entry.form.type === "EMPLOYEE_ADVANCE" ? "" : entry.form.partner,
+                cardCode: paysGlAccount(entry.form.type) ? "" : entry.form.partner,
                 // The request's documents, by number and by the vendor's own
                 // reference: either may be in the transfer's remarks.
                 invoices: entry.form.selected.flatMap((doc) =>

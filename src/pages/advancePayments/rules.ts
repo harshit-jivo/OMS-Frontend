@@ -34,6 +34,7 @@
  * `sanitize` is the net under them.
  */
 import {
+  PARTNER_TYPES,
   PAYMENT_AGAINST_OPTIONS,
   VENDORS,
   type Company,
@@ -469,7 +470,45 @@ export const CASE_RULES: Record<PartnerType, Partial<Record<PaymentAgainst, Case
     DIRECT_EXPENSE: { expense: true },
     INDIRECT_EXPENSE: { expense: true },
   },
+  // Straight to one G/L account that is no partner (Katebaa, TPT, BSU): a
+  // typed amount, as SAP's own such payments are.
+  ACCOUNT: {
+    ON_ACCOUNT: {},
+  },
 };
+
+/**
+ * The companies whose SAP has accounts an Account Payment may pay — the
+ * server's `PAYMENT_ACCOUNT_PARENTS`: Mart's creditors and its TPT & BSU units.
+ * Elsewhere the type is not offered.
+ */
+export const ACCOUNT_PAYMENT_COMPANIES: ReadonlyArray<string> = ["MART"];
+
+/** The types offered for a company: Account Payment only where it has accounts. */
+export const typesFor = (company: string) =>
+  PARTNER_TYPES.filter((t) => t.value !== "ACCOUNT" || ACCOUNT_PAYMENT_COMPANIES.includes(company));
+
+/**
+ * The payee is a G/L account, not a business partner — an Employee's advance
+ * account, an Account Payment's account: no SAP bank accounts, no partner ledger.
+ */
+/**
+ * The Payment Purpose an Account Payment's account suggests — filled in when
+ * the account is picked, still the requester's to change (user, 2026-10-15).
+ * Read off what Mart pays these accounts (OVPM DocType A, Apr 2025-Oct 2026):
+ *
+ *   TPT & BSU (1110400…)   money moved to Mart's own units: the TPT's bus
+ *                          loan EMIs, BSU's suppliers      -> Intercompany Transfer
+ *   Katebaa (2120014-26)   funds to and from Katebaa      -> Intercompany Transfer
+ *   other creditors        G P Stationery, Ruia Exports…  -> Finished Goods / Trading Purchase
+ */
+export function suggestedAccountPurpose(code: string, name: string): string {
+  if (!code) return "";
+  if (code.startsWith("11104") || /KATEBAA/i.test(name)) return "INTERCOMPANY";
+  return "FINISHED_GOODS";
+}
+
+export const paysGlAccount = (type: PartnerType | "") => type === "EMPLOYEE_ADVANCE" || type === "ACCOUNT";
 
 /* ── What the current answers make visible ───────────────────────────────── */
 
@@ -483,6 +522,7 @@ export const CASE_RULES: Record<PartnerType, Partial<Record<PaymentAgainst, Case
  *   SAMPLE_VENDORS  the sample vendors that own the sample POs / documents
  */
 export type PartnerSource =
+  | "SAP_ACCOUNTS"
   | "SAP_VENDORS"
   | "SAP_IMPREST"
   | "SAP_EMPLOYEES"
@@ -517,12 +557,14 @@ export function partnerSourceFor(
   if (type === "EMPLOYEE_ADVANCE") return "SAP_EMPLOYEES";
   if (type === "EMPLOYEE_IMPREST") return "SAP_IMPREST";
   if (type === "CUSTOMER") return "SAP_CUSTOMERS";
+  if (type === "ACCOUNT") return "SAP_ACCOUNTS";
   // An Expense may name the SAP vendor it pays (optional).
   if (type === "EXPENSE") return "SAP_VENDORS";
   return null;
 }
 
 export const isLiveSource = (source: PartnerSource | null) =>
+  source === "SAP_ACCOUNTS" ||
   source === "SAP_VENDORS" ||
   source === "SAP_IMPREST" ||
   source === "SAP_EMPLOYEES" ||
@@ -628,7 +670,9 @@ export function resolveCase(form: RequestForm): ResolvedCase {
           ? "Customer"
           : form.type === "EXPENSE"
             ? "Vendor"
-            : "Employee",
+            : form.type === "ACCOUNT"
+              ? "Account"
+              : "Employee",
     partnerSource,
     livePartners,
     liveDocuments,
@@ -657,6 +701,8 @@ const HEAD_TYPES: ReadonlyArray<PartnerType> = ["EMPLOYEE_ADVANCE", "EMPLOYEE_IM
  */
 export function needsDepartmentHead(form: RequestForm): boolean {
   if (!form.company || form.company === "MART") return false;
+  // An Account Payment always goes to Avtar (user, 2026-10-15).
+  if (form.type === "ACCOUNT") return false;
   // A plant's staff salary advance goes to the plant's fixed approver, by
   // amount (approval matrix, 2026-10-09) — the server's same rule.
   if (form.type === "EMPLOYEE_ADVANCE" && FACTORY_BUDGETS.includes(form.budget)) return false;
@@ -699,6 +745,10 @@ function tidyAllocation(allocation: Allocation): Allocation {
  */
 export function sanitize(form: RequestForm): RequestForm {
   const next = { ...form };
+  // A company with no accounts to pay has no Account Payment.
+  if (next.type === "ACCOUNT" && next.company && !ACCOUNT_PAYMENT_COMPANIES.includes(next.company)) {
+    next.type = "";
+  }
 
   let c = resolveCase(next);
   if (!c.paymentAgainstOptions.some((option) => option.value === next.paymentAgainst)) {

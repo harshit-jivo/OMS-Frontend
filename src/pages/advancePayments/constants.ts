@@ -49,6 +49,10 @@ export const PARTNER_TYPES = [
   // Paid straight to expense G/L accounts (rent, utilities, bank charges…):
   // no vendor, no bill. Routed by the budget head's owner; Audit posts it.
   { value: "EXPENSE", label: "Expense" },
+  // Paid straight to ONE G/L account that is no business partner — a party SAP
+  // keeps as a ledger account (Mart's Katebaa, its TPT and BSU units). Avtar
+  // approves, then Payment. Offered only where `ACCOUNT_PAYMENT_COMPANIES` says.
+  { value: "ACCOUNT", label: "Account Payment" },
 ] as const;
 export type PartnerType = (typeof PARTNER_TYPES)[number]["value"];
 

@@ -55,7 +55,6 @@ import {
   ACCEPTED_FILE_TYPES,
   COMPANIES,
   MAX_FILE_SIZE_MB,
-  PARTNER_TYPES,
   type Company,
   type OpenDocument,
   type Partner,
@@ -72,6 +71,8 @@ import {
 import {
   EMPTY_FORM,
   PARTNER_CODE_PREFIX,
+  suggestedAccountPurpose,
+  typesFor,
   REFERENCE_KINDS,
   allocationRows,
   allocationTotals,
@@ -97,6 +98,7 @@ import {
   notInSapEmployeeToPartner,
   ownerLabel,
   otherToDocument,
+  paymentAccountToPartner,
   purchaseOrderToDocument,
   vendorToPartner,
   withCodePrefix,
@@ -214,6 +216,10 @@ export function AdvancePaymentForm({
             .catch(() => []),
         ]);
         return [...inSap.map(employeeToPartner), ...notInSap.map(notInSapEmployeeToPartner)];
+      }
+      // The G/L accounts an Account Payment may pay (Katebaa, TPT, BSU…).
+      if (c.partnerSource === "SAP_ACCOUNTS") {
+        return (await advancePaymentService.paymentAccounts(company!, search)).map(paymentAccountToPartner);
       }
       // SAP's customers (CardType C): who a refund is paid to.
       if (c.partnerSource === "SAP_CUSTOMERS") {
@@ -593,7 +599,7 @@ export function AdvancePaymentForm({
                 <option value="" disabled hidden>
                   Select Type
                 </option>
-                {PARTNER_TYPES.map((type) => (
+                {typesFor(form.company).map((type) => (
                   <option key={type.value} value={type.value}>
                     {type.label}
                   </option>
@@ -697,12 +703,22 @@ export function AdvancePaymentForm({
               <SearchSelect<string>
                 id={f.id}
                 value={form.partner}
-                onChange={(next) =>
-                  change({
-                    partner: next,
-                    partnerName: shownPartners.find((p) => p.value === next)?.label ?? "",
-                  })
-                }
+                onChange={(next) => {
+                  const partnerName = shownPartners.find((p) => p.value === next)?.label ?? "";
+                  const patch: Partial<RequestForm> = { partner: next, partnerName };
+                  // An Account Payment's purpose follows from its account: suggested,
+                  // unless the requester already chose another than the last suggestion.
+                  const suggested = suggestedAccountPurpose(form.partner, form.partnerName);
+                  if (form.type === "ACCOUNT" && (!form.purpose || form.purpose === suggested)) {
+                    const purpose = suggestedAccountPurpose(next, partnerName);
+                    Object.assign(patch, {
+                      purpose,
+                      purposeLabel: purposeOptions.find((o) => o.value === purpose)?.label ?? "",
+                      purposeNeedsHead: purposeNeedsHead(purpose),
+                    });
+                  }
+                  change(patch);
+                }}
                 disabled={!c.decided || (c.livePartners && !form.company)}
                 placeholder={c.expense ? "No vendor (optional)" : `Select ${c.partnerLabel}`}
                 clearLabel={c.expense ? "No vendor" : undefined}

@@ -69,7 +69,7 @@ import {
   useRequestList,
   useStoreRequest,
 } from "./advancePayments/requestQueries";
-import { formatINR, splitByPartner, type RequestForm } from "./advancePayments/rules";
+import { formatINR, paysGlAccount, splitByPartner, type RequestForm } from "./advancePayments/rules";
 import "./advancePayments/sapSkin.css";
 
 type PageTab = "entries" | "create" | "assigned";
@@ -319,7 +319,7 @@ function EntryDetails({ id, onBack }: { id: number; onBack: () => void }) {
                   requestAmount={amount}
                   readOnly
                   company={entry.form.company}
-                  payeeCardCode={entry.form.type === "EMPLOYEE_ADVANCE" ? "" : entry.form.partner}
+                  payeeCardCode={paysGlAccount(entry.form.type) ? "" : entry.form.partner}
                   tds={
                     entry.form.type === "VENDOR" && entry.form.company
                       ? {
