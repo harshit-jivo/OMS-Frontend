@@ -193,73 +193,80 @@ const BOARD: BudgetBoard = {
 };
 
 const card = (name: RegExp) => screen.getByRole("button", { name });
-const cardsIn = (row: string) =>
-  within(screen.getByRole("region", { name: row }))
+const region = (name: string) => screen.getByRole("region", { name });
+const linesIn = (name: string) =>
+  within(region(name))
     .getAllByRole("button")
-    .map((b) => b.querySelector(".bgb-card-title")?.textContent);
+    .map((b) => b.getAttribute("aria-label")?.split(":")[0]);
 
 describe("Payments & Expenses: budget heads", () => {
-  it("lays out JI's rows — Sales by company with its owners, Factory by plant, Back Office in three — beside the total and the costs", async () => {
+  it("lays out the banner, three category cards — Sales by company with its owners, Factory by plant, Other Heads (Back Office, freight, interest) — and two charts", async () => {
     vi.spyOn(advancePaymentService, "budgetBoard").mockResolvedValue(BOARD);
     renderPage(<Payments_Expenses />, { route: "/Payments_Expenses" });
     await screen.findByRole("button", { name: /^Sales:/ });
 
     expect(screen.getAllByRole("region").map((r) => r.getAttribute("aria-label")).filter((n) => n !== "Budget heads board")).toEqual([
+      "This month",
       "Sales",
       "Factory",
-      "Back Office",
+      "Other Heads",
+      "Where it went",
+      "Top 5 spends",
     ]);
-    expect(cardsIn("Sales")).toEqual(["Sales", "Oil", "Mart", "Beverages"]);
-    expect(cardsIn("Factory")).toEqual(["Factory", "Oil", "Beverages"]);
-    expect(cardsIn("Back Office")).toEqual(["Back Office", "Freight (delivery)", "Bank Interest"]);
+    expect(linesIn("Sales")).toEqual(["Sales", "Sales, Oil", "Sales, Mart", "Sales, Beverages"]);
+    // Mart has factory spending too: it gets a line, so the lines add up to the card.
+    expect(linesIn("Factory")).toEqual(["Factory", "Factory, Oil", "Factory, Beverages", "Factory, Mart"]);
+    // Three heads: the card itself opens nothing, its lines do. Other is only ₹62: no line.
+    expect(linesIn("Other Heads")).toEqual(["Back Office", "Freight (delivery)", "Bank Interest"]);
 
     const sales = card(/^Sales:/);
     expect(sales.textContent).toContain("₹1.17 Cr");
     expect(sales.textContent).toContain("Total ₹1.77 Cr");
-    // No month named on the cards, and no company legend on the total card: the companies have their own.
-    expect(sales.textContent).not.toMatch(/Aug|Oil|Mart|Beverages/);
-    // The owner, large and bold under the title.
+    // The owner, large and bold beside the company.
     const oil = card(/^Sales, Oil:/);
     expect(oil.querySelector(".bgb-owner")?.textContent).toBe("Raju");
-    expect(oil.textContent).toContain("Total ₹11.2 L");
+    expect(oil.textContent).toContain("₹11.2 L");
     expect(card(/^Sales, Mart:/).textContent).toContain("Prabhjot");
     expect(card(/^Sales, Beverages:/).textContent).toContain("Shunty");
     expect(card(/^Factory, Beverages:/).textContent).toContain("₹29K");
-    // Other is only ₹62: no card for it.
+    // Other Heads' figure is its three heads together.
+    expect(region("Other Heads").textContent).toContain("Total ₹1.04 Cr");
     expect(screen.queryByRole("button", { name: /^Other:/ })).toBeNull();
     expect(screen.getByRole("heading", { name: /Payments & Expenses/ }).textContent).toContain("day 14 of 31");
   });
 
-  it("shows the whole budget beside the rows — what they add up to — and a pie of the costs, with no legend", async () => {
+  it("shows the whole month in the banner, and the top 5 spends as a half pie (where it went) and as bars", async () => {
     vi.spyOn(advancePaymentService, "budgetBoard").mockResolvedValue(BOARD);
     renderPage(<Payments_Expenses />, { route: "/Payments_Expenses" });
     await screen.findByRole("button", { name: /^Sales:/ });
 
-    const side = screen.getByRole("complementary", { name: "Total and costs" });
-    expect(side.textContent).toContain("Total Budget");
-    expect(side.textContent).toContain("₹1.99 Cr");
-    expect(side.textContent).toContain("Total ₹3.03 Cr");
-    expect(side.textContent).toContain("Top 5 spends");
-    expect(within(side).queryAllByRole("button")).toHaveLength(0);
-    expect(within(side).getByRole("img").getAttribute("aria-label")).toBe(
-      // Largest first, clockwise.
+    const hero = region("This month");
+    expect(hero.textContent).toContain("₹1.99 Cr");
+    expect(hero.textContent).toContain("of ₹3.03 Cr");
+    expect(hero.textContent).toContain("Budget used65%");
+    expect(hero.textContent).toContain("Left₹1.05 Cr");
+    expect(hero.textContent).toContain("Month gone45%");
+    expect(within(region("Where it went")).getByRole("img").getAttribute("aria-label")).toBe(
+      // Largest first.
+      "This month's Freight ₹60.0 L, Interest ₹19.9 L, Rent ₹14.8 L, Salary ₹0, Electricity ₹0",
+    );
+    expect(within(region("Top 5 spends")).getByRole("img").getAttribute("aria-label")).toBe(
       "This month's Freight ₹60.0 L, Interest ₹19.9 L, Rent ₹14.8 L, Salary ₹0, Electricity ₹0",
     );
   });
 
-  it("shows each card's percentage — amber ahead of pace, red with an arrow past its total", async () => {
+  it("shows each percentage — amber ahead of pace, red with an arrow past its total", async () => {
     vi.spyOn(advancePaymentService, "budgetBoard").mockResolvedValue(BOARD);
     renderPage(<Payments_Expenses />, { route: "/Payments_Expenses" });
     await screen.findByRole("button", { name: /^Sales:/ });
-    // The row's card (the side has a line for it too).
-    const freight = within(screen.getByRole("region", { name: "Back Office" })).getByRole("button", { name: /^Freight \(delivery\):/ });
+    const freight = card(/^Freight \(delivery\):/);
     expect(freight.getAttribute("data-state")).toBe("over");
-    expect(freight.querySelector(".bgb-badge")?.textContent).toBe("▲ 120%");
+    expect(freight.querySelector(".bgb-pct-pill")?.textContent).toBe("▲ 120%");
     // Sales: 66% of its total with 45% of the month gone.
-    expect(card(/^Sales:/).getAttribute("data-state")).toBe("ahead");
-    expect(card(/^Sales:/).querySelector(".bgb-badge")?.getAttribute("data-state")).toBe("ahead");
-    expect(card(/^Sales:/).querySelector(".bgb-badge")?.textContent).toBe("66%");
-    expect(card(/^Back Office:/).querySelector(".bgb-badge")?.textContent).toBe("2%");
+    expect(region("Sales").getAttribute("data-state")).toBe("ahead");
+    expect(card(/^Sales:/).querySelector(".bgb-pct-pill")?.getAttribute("data-state")).toBe("ahead");
+    expect(card(/^Sales:/).querySelector(".bgb-pct-pill")?.textContent).toBe("66%");
+    expect(card(/^Back Office:/).querySelector(".bgb-pct-pill")?.textContent).toBe("2%");
   });
 
   it("opens a head's breakdown — company cards, then rows that open onto account cards — with no chart, and closes it with Escape", async () => {

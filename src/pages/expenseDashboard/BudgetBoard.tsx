@@ -1,46 +1,43 @@
 /**
- * The Budget board — one page in JI's wall-board style (ji.jivo.in, its Plant
- * Control board): every main budget head's SAP spending this month against
- * what it spent in August (the yardstick, decided 2026-10-14), Oil, Beverages
- * and Mart together.
+ * The Budget board — one screen, nothing to scroll (user, 2026-10-15, after a
+ * mockup): every rupee SAP posted this month against what was spent in August
+ * (the yardstick, decided 2026-10-14), Oil, Beverages and Mart together.
  *
- * TWO COLUMNS, 90:10. Left, JI's rows, each on its own tinted panel with a
- * rail naming it — Sales with Oil · Raju, Mart · Prabhjot and Beverages ·
- * Shunty beside it; Factory with its Oil and Beverages plants; Back Office,
- * Freight (delivery) and Bank Interest. Right, the smaller heads — Salary,
- * Freight, Bank Interest, Rent, Electricity: their total, a pie of them, and
- * a line each that opens its breakdown (`ROWS`, `SIDE`).
+ * TOP TO BOTTOM
+ * 1. The banner: this month's spending, the whole budget, how much of it is
+ *    used and how much of the month is gone.
+ * 2. Three category cards — Sales (Oil · Raju, Mart · Prabhjot, Beverages ·
+ *    Shunty), Factory (its Oil and Beverages plants), Other Heads (Back
+ *    Office, Freight (delivery), Bank Interest). Each: its figure, a bar of its
+ *    lines' spending against its total, and a line each that opens its
+ *    breakdown. Together the three are the whole (`CATEGORIES`).
+ * 3. The top 5 spends — the costs that cut across the cards (salary, freight,
+ *    interest, rent, electricity) — as a half pie (where it went) and as bars.
  *
- * A CARD, as JI's: its name and a pill (how far into August's total, or the
- * state in words), one line of context, the figure, a segmented bar — spent
- * (company by company on a split head), then what is left of August, pale —
- * and a short legend. Amber when ahead of August's pace for the day, red past
- * August's total, always with the word.
+ * Numbers only, no explaining sentences (user, 2026-10-15).
  *
- * JI'S COLOUR RULE: colour belongs to the head — its rail, its cards' wash and
- * bars — never to its rank; a split head's companies wear tints of its hue.
+ * COLOUR belongs to the head, never its rank; a split head's companies wear
+ * tints of its hue. Amber is kept for ahead of August's pace for the day, red
+ * for past August's total — always with the figure or ▲ beside it.
  *
- * Clicking a card opens its head — no charts (user, 2026-10-14): a card per
- * company, then a row per SAP budget › sub budget that opens onto its G/L
- * accounts as cards, each opening onto its largest postings this month.
+ * Clicking opens a head (or one company's part of it) — no charts (user,
+ * 2026-10-14): a card per company, then a row per SAP budget › sub budget that
+ * opens onto its G/L accounts as cards, each opening onto its largest postings.
  */
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import {
-  memo,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type CSSProperties,
-  type ReactNode,
-} from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
+  Bar,
+  BarChart,
   Cell,
+  LabelList,
   Pie,
   PieChart,
   ResponsiveContainer,
   Tooltip,
+  XAxis,
+  type LabelProps,
   type PieLabelRenderProps,
 } from "recharts";
 
@@ -71,29 +68,30 @@ function stateOf(ratio: number | null, pace: number): State {
 
 const percent = (ratio: number | null) => (ratio === null ? "—" : `${Math.round(ratio * 100)}%`);
 
+const ratioOf = (base: number, current: number) => (base ? current / base : null);
+
 /**
  * Each head's hue: the dataviz reference palette's cool slots and three more,
- * validated as a set (all hard checks pass; every cell carries its name, the
- * relief the two warnings ask for). None is amber or red, which the meters
- * keep for "ahead of pace" and "over August".
+ * validated as a set (all hard checks pass; Sales, Factory and Back Office
+ * pass on their own too, for the half pie). None is amber or red, which the
+ * states keep.
  */
 const HEAD_HUE: Record<string, string> = {
   SALES: "#6250d6",
   SALARY: "#1baf7a",
   FREIGHT: "#2a78d6",
   FINANCE: "#e87ba4",
-  // The rows that are those costs' own budgets wear their hues.
+  // The heads that are those costs' own budgets wear their hues.
   DELIVERY: "#2a78d6",
   INTEREST: "#e87ba4",
   FACTORY: "#008300",
-  // Violet (2026-10-14): in the side pie, beside Rent and Salary, the teal it
-  // had failed the colour-blind check; this passes every pair round the circle.
+  // Violet (2026-10-14): the teal it had failed the colour-blind check beside Rent and Salary.
   ELECTRICITY: "#7e57c2",
   BACKOFFICE: "#9b4dca",
   RENT: "#7a8c1a",
 };
 
-const hueOf = (key: string) => HEAD_HUE[key] ?? "#a2968c";
+const hueOf = (key: string) => HEAD_HUE[key] ?? "#93a0ae";
 
 const hueStyle = (key: string) => ({ "--accent": hueOf(key) }) as CSSProperties;
 
@@ -132,9 +130,21 @@ function Meter({ ratio, state, label }: { ratio: number | null; state: State; la
   );
 }
 
+/** The percentage spent, as a pill: amber ahead of pace, red with ▲ past the total. */
+function Pct({ ratio, state }: { ratio: number | null; state: State }) {
+  return (
+    <span className="bgb-pct-pill" data-state={state === "ok" ? undefined : state}>
+      {state === "over" ? "▲ " : ""}
+      {percent(ratio)}
+    </span>
+  );
+}
+
 /**
- * Heads shown company by company, beside their total (user, 2026-10-14):
- * Sales by company, each with its owner; Factory by its two plants.
+ * Heads shown company by company (user, 2026-10-14): Sales by company, each
+ * with its owner; Factory by its two plants. These always have their line; a
+ * company outside them gets one only when it has spending, so a card's lines
+ * add up to its figure.
  */
 const SPLITS: Record<string, ReadonlyArray<{ company: string; label: string }>> = {
   SALES: [
@@ -150,153 +160,346 @@ const SPLITS: Record<string, ReadonlyArray<{ company: string; label: string }>> 
 
 const COMPANY_LABEL: Record<string, string> = { OIL: "Oil", BEVERAGES: "Beverages", MART: "Mart" };
 
-/** One card's numbers: a head, or one company's part of it. */
-interface CardData {
+/** What a click opens: a head, or one company's part of it. */
+type Opening = { key: string; company?: string };
+
+/** One line of a category card, and one piece of its bar. */
+interface Line {
   id: string;
-  /** The head a click opens. */
-  headKey: string;
-  /** Whose hue the card wears: its head's. */
-  hue: string;
-  title: string;
+  open: Opening;
+  /** What the line says, and what a screen reader hears first. */
+  label: string;
+  name: string;
   /** Whose it is, where someone owns it (Sales: Raju for Oil). */
   owner?: string;
-  /** A company's card: its breakdown opens on that company alone. */
-  company?: string;
   base: number;
   current: number;
-  ratio: number | null;
+  /** Its dot and bar piece: a tint of the head's hue, or a head's own. */
+  tone: string;
+  hue: string;
 }
 
-interface SectionData {
+interface Category {
   key: string;
   label: string;
   hue: string;
-  cards: CardData[];
+  /** A one-head card opens that head; Other Heads, three heads, opens by its lines. */
+  open?: Opening;
+  base: number;
+  current: number;
+  lines: Line[];
 }
 
-function headCard(head: BudgetHead): CardData {
-  return {
-    id: head.key,
-    headKey: head.key,
-    hue: hueOf(head.key),
-    title: head.name,
-    base: head.base,
-    current: head.current,
-    ratio: head.ratio,
-  };
-}
+/**
+ * The three cards, every posting counted by its SAP budget, so together they
+ * are the whole: Sales and Factory by company, and Other Heads (user,
+ * 2026-10-15): Back Office, Freight (delivery), Bank Interest and — when it is
+ * worth a line — Other.
+ */
+const CATEGORIES: ReadonlyArray<{ key: string; label: string; heads: readonly string[] }> = [
+  { key: "SALES", label: "Sales", heads: ["SALES"] },
+  { key: "FACTORY", label: "Factory", heads: ["FACTORY"] },
+  {
+    key: "BACKOFFICE",
+    label: "Other Heads",
+    heads: ["BACKOFFICE", "DELIVERY", "INTEREST", "OTHER"],
+  },
+];
 
-function partCards(head: BudgetHead): CardData[] {
-  return (SPLITS[head.key] ?? []).map(({ company, label }) => {
+/** A split head's companies: its own first, in order, then any other with spending. */
+function companyLines(head: BudgetHead): Line[] {
+  const split = SPLITS[head.key] ?? [];
+  const others = head.by_company
+    .filter((c) => !split.some((s) => s.company === c.company) && (c.base || c.current))
+    .map((c) => ({ company: c.company, label: c.label }));
+  return [...split, ...others].map(({ company, label }, i) => {
     const row = head.by_company.find((c) => c.company === company);
-    const owner = head.owners.find((o) => o.company === company);
-    const base = row?.base ?? 0;
-    const current = row?.current ?? 0;
     return {
       id: `${head.key}-${company}`,
-      headKey: head.key,
+      open: { key: head.key, company },
+      label: `${head.name}, ${label}`,
+      name: label,
+      owner: head.owners.find((o) => o.company === company)?.name,
+      base: row?.base ?? 0,
+      current: row?.current ?? 0,
+      tone: `shade-${Math.min(i, 2)}`,
       hue: hueOf(head.key),
-      title: label,
-      owner: owner?.name,
-      company,
-      base,
-      current,
-      ratio: base ? current / base : null,
     };
   });
 }
 
-/**
- * The board, in two columns, 90:10 (user, 2026-10-14). Left: the rows — every
- * posting counted by its SAP budget, so together they are the whole: Sales with
- * its companies, Factory with its plants, and Back Office in three: Back
- * Office, Freight (delivery), Bank Interest. Right: the total, and a pie of the
- * five costs that cut across those rows (salary, freight, interest, rent,
- * electricity) — a slice opens its breakdown.
- */
-const ROWS: ReadonlyArray<{ key: string; label: string; heads: readonly string[] }> = [
-  { key: "SALES", label: "Sales", heads: ["SALES"] },
-  { key: "FACTORY", label: "Factory", heads: ["FACTORY"] },
-  { key: "BACKOFFICE", label: "Back Office", heads: ["BACKOFFICE", "DELIVERY", "INTEREST"] },
-];
-
-/** The rows on the left, each in its given order. */
-function rowsOf(data: BoardData): SectionData[] {
-  const byKey = new Map(shownHeads(data).map((h) => [h.key, h] as const));
-  const cardsOf = (head: BudgetHead) => [headCard(head), ...partCards(head)];
-  return ROWS.map((row) => ({
-    key: row.key,
-    label: row.label,
-    hue: hueOf(row.heads[0]),
-    cards: row.heads.flatMap((key) =>
-      byKey.has(key) ? cardsOf(byKey.get(key) as BudgetHead) : [],
-    ),
-  })).filter((row) => row.cards.length > 0);
+function headLine(head: BudgetHead): Line {
+  return {
+    id: head.key,
+    open: { key: head.key },
+    label: head.name,
+    name: head.name,
+    base: head.base,
+    current: head.current,
+    tone: "spent",
+    hue: hueOf(head.key),
+  };
 }
 
-/** The side's first square: the whole budget, this month against August. */
-function SideTotal({ total, pace }: { total: BoardData["total"]; pace: number }) {
-  const state = stateOf(total.ratio, pace);
-  return (
-    <div className="bgb-side-card bgb-side-total" data-state={state}>
-      <span className="bgb-side-title">Total Budget</span>
-      <span className="bgb-card-figure">
-        <b className="bgb-side-value">{compactINR(total.current)}</b>
-        <em>spent</em>
-      </span>
-      <span className="bgb-of">Total {compactINR(total.base)}</span>
-      <span className="bgb-measure">
-        <Meter ratio={total.ratio} state={state} label="The whole budget against August" />
-        <b className="bgb-pct">{percent(total.ratio)}</b>
-      </span>
-    </div>
+function categoriesOf(data: BoardData): Category[] {
+  const byKey = new Map(shownHeads(data).map((h) => [h.key, h] as const));
+  return CATEGORIES.flatMap((cat) => {
+    const heads = cat.heads.flatMap((key) =>
+      byKey.has(key) ? [byKey.get(key) as BudgetHead] : [],
+    );
+    if (!heads.length) return [];
+    const single = heads.length === 1 && heads[0].key === cat.key;
+    return [
+      {
+        key: cat.key,
+        label: cat.label,
+        hue: hueOf(cat.key),
+        open: single ? { key: cat.key } : undefined,
+        base: heads.reduce((sum, h) => sum + h.base, 0),
+        current: heads.reduce((sum, h) => sum + h.current, 0),
+        lines: single ? companyLines(heads[0]) : heads.map(headLine),
+      },
+    ];
+  });
+}
+
+/** Other only when it is worth a line: at least 1% of the yardstick month. */
+function shownHeads(data: BoardData): BudgetHead[] {
+  return data.heads.filter(
+    (h) => h.key !== "OTHER" || Math.abs(h.base) >= Math.abs(data.total.base) * 0.01,
   );
 }
+
+/* ── The banner ──────────────────────────────────────────────────────────── */
+
+function Hero({ data }: { data: BoardData }) {
+  const { total, current } = data;
+  const state = stateOf(total.ratio, current.pace);
+  const left = total.base - total.current;
+  return (
+    <section className="bgb-hero" aria-label="This month" data-state={state}>
+      <div className="bgb-hero-main">
+        <span className="bgb-hero-kicker">Spent · {current.label}</span>
+        <span className="bgb-hero-figure">
+          <b>{compactINR(total.current)}</b>
+          <span>of {compactINR(total.base)}</span>
+        </span>
+        <Meter ratio={total.ratio} state={state} label="The whole budget against August" />
+      </div>
+      <dl className="bgb-hero-stats">
+        <div data-state={state === "ok" ? undefined : state}>
+          <dt>Budget used</dt>
+          <dd>
+            {state === "over" ? "▲ " : ""}
+            {percent(total.ratio)}
+          </dd>
+        </div>
+        <div>
+          <dt>{left < 0 ? "Over by" : "Left"}</dt>
+          <dd>{compactINR(Math.abs(left))}</dd>
+        </div>
+        <div>
+          <dt>Month gone</dt>
+          <dd>{percent(current.pace)}</dd>
+        </div>
+      </dl>
+    </section>
+  );
+}
+
+/* ── A category card ─────────────────────────────────────────────────────── */
+
+/**
+ * The card's bar: each line's spending in its tint, then what is left of the
+ * total, pale. Past the total there is nothing left to draw: the pill says ▲.
+ */
+function Stack({ cat }: { cat: Category }) {
+  const basis = Math.max(cat.base, cat.current, 1);
+  const left = cat.base - cat.current;
+  return (
+    <span
+      className="bgb-stack"
+      role="img"
+      aria-label={`${percent(ratioOf(cat.base, cat.current))} of the total`}
+    >
+      {cat.lines
+        .filter((line) => line.current > 0)
+        .map((line) => (
+          <i
+            key={line.id}
+            data-tone={line.tone}
+            style={{ flexGrow: line.current / basis, "--accent": line.hue } as CSSProperties}
+          />
+        ))}
+      {left > 0 ? <i data-tone="left" style={{ flexGrow: left / basis }} /> : null}
+    </span>
+  );
+}
+
+function CategoryCard({
+  cat,
+  pace,
+  onOpen,
+}: {
+  cat: Category;
+  pace: number;
+  onOpen: (open: Opening) => void;
+}) {
+  const ratio = ratioOf(cat.base, cat.current);
+  const state = stateOf(ratio, pace);
+  const face = (
+    <>
+      <span className="bgb-cat-top">
+        <b className="bgb-cat-title">{cat.label}</b>
+        <Pct ratio={ratio} state={state} />
+      </span>
+      <span className="bgb-cat-figure">
+        <b>{compactINR(cat.current)}</b>
+        <em>spent</em>
+      </span>
+      <Stack cat={cat} />
+      <span className="bgb-cat-total">
+        Total <b>{compactINR(cat.base)}</b>
+      </span>
+    </>
+  );
+  return (
+    <section
+      className="bgb-cat"
+      aria-label={cat.label}
+      data-state={state}
+      style={{ "--accent": cat.hue } as CSSProperties}
+    >
+      {cat.open ? (
+        <button
+          type="button"
+          className="bgb-cat-face"
+          onClick={() => onOpen(cat.open as Opening)}
+          aria-label={`${cat.label}: ${compactINR(cat.current)} this month, ${percent(ratio)} of ${compactINR(cat.base)}. Open the breakdown.`}
+        >
+          {face}
+        </button>
+      ) : (
+        <div className="bgb-cat-face">{face}</div>
+      )}
+      <ul className="bgb-lines">
+        {cat.lines.map((line) => {
+          const lineRatio = ratioOf(line.base, line.current);
+          const lineState = stateOf(lineRatio, pace);
+          return (
+            <li key={line.id}>
+              <button
+                type="button"
+                className="bgb-line"
+                data-state={lineState}
+                style={{ "--accent": line.hue } as CSSProperties}
+                onClick={() => onOpen(line.open)}
+                aria-label={`${line.label}: ${compactINR(line.current)} this month, ${percent(lineRatio)} of ${compactINR(line.base)}. Open the breakdown.`}
+              >
+                <i className="bgb-dot" data-tone={line.tone} aria-hidden="true" />
+                <span className="bgb-line-name">
+                  {line.name}
+                  {line.owner ? <b className="bgb-owner">{line.owner}</b> : null}
+                </span>
+                <b className="bgb-line-value">{compactINR(line.current)}</b>
+                <span className="bgb-line-of">/ {compactINR(line.base)}</span>
+                <Pct ratio={lineRatio} state={lineState} />
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+/* ── The charts ──────────────────────────────────────────────────────────── */
 
 const RADIAN = Math.PI / 180;
 
+/** Below this share a slice is too thin to hold its label: it goes outside the rim. */
+const INSIDE_SHARE = 0.1;
+
 /**
- * A slice's label, inside it: the cost's name, and its share in bold — read
- * without hovering (user, 2026-10-14). Dark ink with a white outline, so it
- * reads on every slice's hue; a small slice's sits nearer the rim, where the
- * slice is widest. One under 2% is left to the tooltip.
+ * The half pie's labels, read without hovering (user, 2026-10-14): dark ink
+ * with a white outline, so they read on every hue. A slice of 10% or more has
+ * its name and share inside it; a thinner one has them on one line just
+ * outside the rim — the smallest sit together at the right end, so each is
+ * lifted clear of the one below it. Under 1% is left to the tooltip.
  */
-function sliceLabel({ cx, cy, midAngle, outerRadius, percent, name }: PieLabelRenderProps) {
-  if (!percent || percent < 0.02) return null;
-  const angle = -(Number(midAngle) || 0) * RADIAN;
-  const r = Number(outerRadius) * (percent < 0.12 ? 0.78 : 0.58);
-  const x = Number(cx) + r * Math.cos(angle);
-  const y = Number(cy) + r * Math.sin(angle);
-  return (
-    <text
-      x={x}
-      y={y}
-      textAnchor="middle"
-      dominantBaseline="central"
-      className="bgb-pie-label"
-      data-small={percent < 0.12 || undefined}
-    >
-      <tspan x={x} dy="-0.55em">
-        {name}
-      </tspan>
-      <tspan x={x} dy="1.2em" className="bgb-pie-pct">
-        {Math.round(percent * 100)}%
-      </tspan>
-    </text>
-  );
+function halfPieLabels(slices: ReadonlyArray<{ name: string; value: number }>) {
+  const total = slices.reduce((sum, s) => sum + s.value, 0) || 1;
+  // Each slice's middle, in degrees: from 180 (left) clockwise to 0 (right).
+  let start = 180;
+  const mids = slices.map((s) => {
+    const sweep = (s.value / total) * 180;
+    start -= sweep;
+    return start + sweep / 2;
+  });
+  const outside = (i: number) => {
+    const share = slices[i].value / total;
+    return share >= 0.01 && share < INSIDE_SHARE;
+  };
+
+  return function label({ cx, cy, outerRadius, percent, name }: PieLabelRenderProps) {
+    if (!percent || percent < 0.01) return null;
+    const share = `${Math.round(percent * 100)}%`;
+    const index = slices.findIndex((s) => s.name === name);
+    const radius = Number(outerRadius);
+    if (!outside(index)) {
+      const angle = mids[index] * RADIAN;
+      const x = Number(cx) + radius * 0.6 * Math.cos(angle);
+      const y = Number(cy) - radius * 0.6 * Math.sin(angle);
+      return (
+        <text x={x} y={y} textAnchor="middle" dominantBaseline="central" className="bgb-pie-label">
+          <tspan x={x} dy="-0.55em">
+            {name}
+          </tspan>
+          <tspan x={x} dy="1.2em" className="bgb-pie-pct">
+            {share}
+          </tspan>
+        </text>
+      );
+    }
+    // From the right end inwards, each outside label at least a line above the last.
+    const line = Math.max(14, radius * 0.12);
+    const reach = radius + line * 0.5;
+    let floor = Number(cy) + line * 0.5;
+    let x = 0;
+    let y = 0;
+    for (let i = slices.length - 1; i >= index; i--) {
+      if (!outside(i)) continue;
+      const angle = mids[i] * RADIAN;
+      floor = Math.min(Number(cy) - reach * Math.sin(angle), floor - line);
+      if (i === index) {
+        x = Number(cx) + reach * Math.cos(angle);
+        y = floor;
+      }
+    }
+    return (
+      <text
+        x={x}
+        y={y}
+        textAnchor={x >= Number(cx) ? "start" : "end"}
+        dominantBaseline="central"
+        className="bgb-pie-label"
+        data-outside
+      >
+        {name} <tspan className="bgb-pie-pct">{share}</tspan>
+      </text>
+    );
+  };
 }
 
 /**
- * The side's second square: a pie of this month's spending on the five costs,
- * each slice in its cost's hue (validated round the circle in this order),
- * named with its share inside it, filling its card. Hovering gives the rupees; clicking opens
- * its breakdown.
+ * The top 5 spends — the costs that cut across the cards: salary, freight,
+ * interest, rent, electricity — largest first, each in its hue (validated
+ * round the circle in this order). Short names, to fit inside a slice or
+ * under a bar.
  */
-function SidePie({ costs, onOpen }: { costs: BudgetHead[]; onOpen: (open: Opening) => void }) {
-  // Short names inside the slices: a long one ran over its neighbours.
+function spendsOf(costs: BudgetHead[]) {
   const short: Record<string, string> = { FINANCE: "Interest" };
-  // Largest first, clockwise from twelve o'clock.
-  const slices = costs
+  return costs
     .map((c) => ({
       key: c.key,
       name: short[c.key] ?? c.name,
@@ -304,177 +507,116 @@ function SidePie({ costs, onOpen }: { costs: BudgetHead[]; onOpen: (open: Openin
       fill: hueOf(c.key),
     }))
     .sort((a, b) => b.value - a.value);
+}
+
+/** Where this month's money went: the top 5 spends as a half pie, largest from the left (user, 2026-10-15). */
+function WhereItWent({ costs, onOpen }: { costs: BudgetHead[]; onOpen: (open: Opening) => void }) {
+  const slices = spendsOf(costs);
   const total = slices.reduce((sum, s) => sum + s.value, 0);
   return (
-    <div
-      className="bgb-side-card bgb-side-pie"
-      role="img"
-      aria-label={`This month's ${slices.map((s) => `${s.name} ${compactINR(s.value)}`).join(", ")}`}
-    >
-      <span className="bgb-side-title">Top 5 spends</span>
+    <section className="bgb-chart" aria-label="Where it went">
+      <h2 className="bgb-chart-title">Where it went</h2>
       {total > 0 ? (
-        <div className="bgb-pie-area">
-          <ResponsiveContainer width="100%" height="100%" debounce={150}>
-            <PieChart>
-              <Pie
-                data={slices}
-                dataKey="value"
-                nameKey="name"
-                innerRadius={0}
-                outerRadius="98%"
-                startAngle={90}
-                endAngle={-270}
-                label={sliceLabel}
-                labelLine={false}
-                stroke="#fff"
-                strokeWidth={2}
-                isAnimationActive={false}
-                onClick={(_slice, index) => onOpen({ key: slices[index].key })}
-              >
-                {slices.map((s) => (
-                  <Cell key={s.key} fill={s.fill} cursor="pointer" />
-                ))}
-              </Pie>
-              <Tooltip formatter={(value, name) => [fullINR(Number(value) || 0), String(name)]} />
-            </PieChart>
-          </ResponsiveContainer>
+        <div
+          className="bgb-chart-area bgb-half"
+          role="img"
+          aria-label={`This month's ${slices.map((s) => `${s.name} ${compactINR(s.value)}`).join(", ")}`}
+        >
+          <div className="bgb-half-box">
+            <ResponsiveContainer width="100%" height="100%" debounce={150}>
+              <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+                <Pie
+                  data={slices}
+                  dataKey="value"
+                  nameKey="name"
+                  // Left of centre: the thin slices, labelled outside, are on the right.
+                  cx="42%"
+                  cy="100%"
+                  innerRadius={0}
+                  // Of half the box's height: the box is 2.6 times as wide as it is
+                  // tall, room beside the pie for the thin slices' labels.
+                  outerRadius="184%"
+                  startAngle={180}
+                  endAngle={0}
+                  label={halfPieLabels(slices)}
+                  labelLine={false}
+                  stroke="#fff"
+                  strokeWidth={2}
+                  isAnimationActive={false}
+                  onClick={(_slice, index) => onOpen({ key: slices[index].key })}
+                >
+                  {slices.map((s) => (
+                    <Cell key={s.key} fill={s.fill} cursor="pointer" />
+                  ))}
+                </Pie>
+                <Tooltip formatter={(value, name) => [fullINR(Number(value) || 0), String(name)]} />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
         </div>
       ) : (
-        <span className="bgb-side-empty">Nothing spent yet this month</span>
+        <span className="bgb-chart-empty">₹0</span>
       )}
-    </div>
+    </section>
   );
 }
 
-/** The pill at a card's top right: the percentage spent — amber ahead of pace, red with ▲ past the total. */
-function Badge({ ratio, state }: { ratio: number | null; state: State }) {
+/** A bar's figure, on top of it and on one line (recharts' own wraps to the bar's width). */
+function barFigure({ x, y, width, value }: LabelProps) {
   return (
-    <span className="bgb-badge" data-state={state === "ok" ? undefined : state}>
-      {state === "over" ? "▲ " : ""}
-      {percent(ratio)}
-    </span>
-  );
-}
-
-/**
- * The bar, in JI's segmented style: what is spent, then what is left of the
- * total, pale. Past the total, the part beyond it in red.
- */
-function Bar({ card, state }: { card: CardData; state: State }) {
-  const basis = Math.max(card.base, card.current, 1);
-  const segments: Array<{ key: string; size: number; tone: string }> = [];
-  const within = card.base > 0 ? Math.min(card.current, card.base) : card.current;
-  if (within > 0)
-    segments.push({
-      key: "spent",
-      size: within / basis,
-      tone: state === "ahead" ? "ahead" : "spent",
-    });
-  if (card.base > 0 && card.current > card.base) {
-    segments.push({ key: "over", size: (card.current - card.base) / basis, tone: "over" });
-  }
-  if (card.base > card.current)
-    segments.push({ key: "left", size: (card.base - card.current) / basis, tone: "left" });
-  return (
-    <span className="bgb-bar" role="img" aria-label={`${percent(card.ratio)} of the total`}>
-      {segments.map((s) => (
-        <i key={s.key} data-tone={s.tone} style={{ flexGrow: s.size }} />
-      ))}
-    </span>
-  );
-}
-
-/** Under the bar: the total — the figure above it is what is spent. */
-function Legend({ card }: { card: CardData }) {
-  return (
-    <span className="bgb-legend-row">
-      <span>
-        Total <b>{compactINR(card.base)}</b>
-      </span>
-    </span>
-  );
-}
-
-/** What a click opens: a head, or one company's part of it. */
-type Opening = { key: string; company?: string };
-
-const Card = memo(function Card({
-  card,
-  pace,
-  onOpen,
-  ownerLine = false,
-}: {
-  card: CardData;
-  pace: number;
-  onOpen: (open: Opening) => void;
-  /** Keep the owner's line even without an owner, so the row's figures and bars line up. */
-  ownerLine?: boolean;
-}) {
-  const state = stateOf(card.ratio, pace);
-  const name =
-    card.id === card.headKey
-      ? card.title
-      : `${card.headKey === "SALES" ? "Sales" : "Factory"}, ${card.title}`;
-  return (
-    <button
-      type="button"
-      className="bgb-card"
-      data-state={state}
-      style={{ "--accent": card.hue } as CSSProperties}
-      onClick={() => onOpen({ key: card.headKey, company: card.company })}
-      aria-label={`${name}: ${compactINR(card.current)} this month, ${percent(card.ratio)} of ${compactINR(card.base)} in August. Open the breakdown.`}
+    <text
+      x={Number(x) + Number(width) / 2}
+      y={Number(y) - 8}
+      textAnchor="middle"
+      className="bgb-bar-label"
     >
-      <span className="bgb-card-top">
-        <b className="bgb-card-title">{card.title}</b>
-        <Badge ratio={card.ratio} state={state} />
-      </span>
-      {/* The owner, large and bold on a line of its own under the title: the
-          name a reader looks for first (user, 2026-10-14). */}
-      {card.owner ? (
-        <b className="bgb-owner">{card.owner}</b>
-      ) : ownerLine ? (
-        <b className="bgb-owner" aria-hidden="true">
-          &nbsp;
-        </b>
-      ) : null}
-      <span className="bgb-card-figure">
-        <b>{compactINR(card.current)}</b>
-        <em>spent</em>
-      </span>
-      <Bar card={card} state={state} />
-      <Legend card={card} />
-    </button>
+      {compactINR(Number(value) || 0)}
+    </text>
   );
-});
+}
 
-function Section({
-  section,
-  pace,
-  onOpen,
-}: {
-  section: SectionData;
-  pace: number;
-  onOpen: (open: Opening) => void;
-}) {
+/** The top 5 spends as bars, each with its figure on top. A bar opens its breakdown. */
+function TopSpends({ costs, onOpen }: { costs: BudgetHead[]; onOpen: (open: Opening) => void }) {
+  const bars = spendsOf(costs);
   return (
-    <section
-      className="bgb-row"
-      aria-label={section.label}
-      style={{ "--accent": section.hue, "--cards": section.cards.length } as CSSProperties}
-    >
-      <div className="bgb-rail" aria-hidden="true">
-        <span>{section.label}</span>
-      </div>
-      <div className="bgb-cards">
-        {section.cards.map((card) => (
-          <Card
-            key={card.id}
-            card={card}
-            pace={pace}
-            onOpen={onOpen}
-            ownerLine={section.cards.some((c) => c.owner)}
-          />
-        ))}
+    <section className="bgb-chart" aria-label="Top 5 spends">
+      <h2 className="bgb-chart-title">Top 5 spends</h2>
+      <div
+        className="bgb-chart-area"
+        role="img"
+        aria-label={`This month's ${bars.map((b) => `${b.name} ${compactINR(b.value)}`).join(", ")}`}
+      >
+        <ResponsiveContainer width="100%" height="100%" debounce={150}>
+          <BarChart
+            data={bars}
+            margin={{ top: 28, right: 8, bottom: 0, left: 8 }}
+            barCategoryGap="22%"
+          >
+            <XAxis
+              dataKey="name"
+              axisLine={{ stroke: "var(--hair)" }}
+              tickLine={false}
+              interval={0}
+              tick={{ className: "bgb-bar-tick" }}
+            />
+            <Tooltip
+              cursor={{ fill: "rgba(14, 23, 38, 0.04)" }}
+              formatter={(value) => [fullINR(Number(value) || 0), "Spent"]}
+            />
+            <Bar
+              dataKey="value"
+              radius={[6, 6, 0, 0]}
+              isAnimationActive={false}
+              cursor="pointer"
+              onClick={(_bar, index) => onOpen({ key: bars[index].key })}
+            >
+              {bars.map((b) => (
+                <Cell key={b.key} fill={b.fill} />
+              ))}
+              <LabelList dataKey="value" content={barFigure} />
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
       </div>
     </section>
   );
@@ -770,25 +912,7 @@ function Detail({
     document.fullscreenElement ?? document.body,
   );
 }
-
 /* ── The board ───────────────────────────────────────────────────────────── */
-
-/** The time on the wall, to the minute. */
-function Clock() {
-  const [now, setNow] = useState(() => new Date());
-  useEffect(() => {
-    const id = window.setInterval(() => setNow(new Date()), 15_000);
-    return () => window.clearInterval(id);
-  }, []);
-  return (
-    <div className="bgb-clock">
-      <b>{now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</b>
-      <span>
-        {now.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" })}
-      </span>
-    </div>
-  );
-}
 
 /** This month and the five before it: `[{value: "2026-10", label: "Oct 2026"}]`. */
 function recentMonths(today = new Date()): Array<{ value: string; label: string }> {
@@ -799,13 +923,6 @@ function recentMonths(today = new Date()): Array<{ value: string; label: string 
       label: d.toLocaleDateString("en-IN", { month: "short", year: "numeric" }),
     };
   });
-}
-
-/** Other only when it is worth a cell: at least 1% of the yardstick month. */
-function shownHeads(data: BoardData): BudgetHead[] {
-  return data.heads.filter(
-    (h) => h.key !== "OTHER" || Math.abs(h.base) >= Math.abs(data.total.base) * 0.01,
-  );
 }
 
 export function BudgetBoard({ viewSwitch }: { viewSwitch: ReactNode }) {
@@ -824,9 +941,15 @@ export function BudgetBoard({ viewSwitch }: { viewSwitch: ReactNode }) {
   });
   const data = board.data;
   const live = board.isError ? "down" : board.isFetching ? "busy" : "live";
-  const rows = data ? rowsOf(data) : [];
+  const cats = data ? categoriesOf(data) : [];
   const opened =
     data && open ? [...data.heads, ...data.costs].find((h) => h.key === open.key) : undefined;
+  const updated = board.dataUpdatedAt
+    ? new Date(board.dataUpdatedAt).toLocaleTimeString("en-IN", {
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : "";
 
   return (
     <div ref={boardRef} className="exb bgb" role="region" aria-label="Budget heads board">
@@ -838,8 +961,9 @@ export function BudgetBoard({ viewSwitch }: { viewSwitch: ReactNode }) {
         <div className="exb-title" role="heading" aria-level={1}>
           <b>Payments &amp; Expenses</b>
           <span>
+            All companies · SAP data
             {data
-              ? `${data.current.label}${data.current.pace < 1 ? ` · day ${data.current.elapsed} of ${data.current.days}` : ""}`
+              ? ` · ${data.current.label}${data.current.pace < 1 ? ` · day ${data.current.elapsed} of ${data.current.days}` : ""}`
               : ""}
           </span>
         </div>
@@ -861,7 +985,10 @@ export function BudgetBoard({ viewSwitch }: { viewSwitch: ReactNode }) {
             </select>
           </label>
         </div>
-        <Clock />
+        <div className="bgb-updated">
+          <span>Last updated</span>
+          <b>{updated || "—"}</b>
+        </div>
         {supported ? (
           <button
             type="button"
@@ -897,29 +1024,17 @@ export function BudgetBoard({ viewSwitch }: { viewSwitch: ReactNode }) {
           <p>Two companies, two months: the first load takes a few seconds.</p>
         </div>
       ) : (
-        <div className="bgb-body">
-          <div
-            className="bgb-rows"
-            // The rows share the screen, the first a little taller.
-            style={{
-              gridTemplateRows: ["1.15fr", ...rows.slice(1).map(() => "1fr")]
-                .map((fr) => `minmax(0, ${fr})`)
-                .join(" "),
-            }}
-          >
-            {rows.map((section) => (
-              <Section
-                key={section.key}
-                section={section}
-                pace={data.current.pace}
-                onOpen={setOpen}
-              />
+        <div className="bgb-main">
+          <Hero data={data} />
+          <div className="bgb-cats">
+            {cats.map((cat) => (
+              <CategoryCard key={cat.key} cat={cat} pace={data.current.pace} onOpen={setOpen} />
             ))}
           </div>
-          <aside className="bgb-side" aria-label="Total and costs">
-            <SideTotal total={data.total} pace={data.current.pace} />
-            <SidePie costs={data.costs} onOpen={setOpen} />
-          </aside>
+          <div className="bgb-charts">
+            <WhereItWent costs={data.costs} onOpen={setOpen} />
+            <TopSpends costs={data.costs} onOpen={setOpen} />
+          </div>
         </div>
       )}
 
