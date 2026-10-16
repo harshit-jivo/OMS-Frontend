@@ -102,3 +102,12 @@ describe("round off", () => {
     expect(payload).not.toHaveProperty("RoundingDiffAmount");
   });
 });
+
+describe("buildInvoicePayload for an item not tracked by batch", () => {
+  it("sends the line with no BatchNumbers at all", () => {
+    const line: SelectedLine = { ...orderLine, BatchManaged: false, BatchNumbers: [], WhsCode: "BH-SC" };
+    const payload = buildInvoicePayload(party, { "10985-1": line }, form);
+    expect(payload.DocumentLines[0]).not.toHaveProperty("BatchNumbers");
+    expect(payload.DocumentLines[0]).toMatchObject({ WarehouseCode: "BH-SC" });
+  });
+});

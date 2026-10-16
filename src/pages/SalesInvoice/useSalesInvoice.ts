@@ -1030,6 +1030,7 @@ export function useSalesInvoice() {
   const selectedLineBatchError = useMemo(
     () =>
       selectedLineList.some((line) => {
+        if (line.BatchManaged === false) return false;
         const batchQty = line.BatchNumbers?.reduce((sum, batch) => sum + toNumber(batch.Quantity), 0) || 0;
         return !line.BatchNumbers?.length || Math.abs(batchQty - toNumber(line.invoiceQty)) >= 0.0001;
       })

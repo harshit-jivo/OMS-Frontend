@@ -45,6 +45,9 @@ export type SelectedLine = {
   TaxCode: string;
   WhsCode: string;
   SalesOrderWhsCode?: string;
+  /** false for an item SAP does not track by batch (OITM.ManBtchNum = 'N'):
+   *  it posts with no BatchNumbers and needs no batch to match its quantity. */
+  BatchManaged?: boolean;
   OcrCode?: string;
   ShipDate?: string;
   /**
@@ -288,7 +291,7 @@ export const buildInvoicePayload = (
         ...(line.TaxCode ? { TaxCode: line.TaxCode } : {}),
         ...(line.ShipDate ? { ShipDate: normalizeDateInput(line.ShipDate) } : {}),
         ...(schemeAgainst ? { U_SchemeAgst: schemeAgainst } : {}),
-        BatchNumbers: batchNumbers,
+        ...(batchNumbers.length ? { BatchNumbers: batchNumbers } : {}),
       };
     }),
     ...(additionalExpenses.length ? { DocumentAdditionalExpenses: additionalExpenses } : {}),

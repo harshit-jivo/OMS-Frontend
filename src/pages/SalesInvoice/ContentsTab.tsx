@@ -10,7 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Field, Input } from "@/components/ui/form";
+import { Field, Input, Select } from "@/components/ui/form";
 import { Card, EmptyState, Notice, SectionHeading } from "@/components/ui/page";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -43,8 +43,12 @@ type InventoryWarehouse = {
   AvailableQty?: number | string | null;
   AvailableQuantity?: number | string | null;
   TotalQty?: number | string | null;
+  /** 'N' when SAP does not track the item by batch — see get_inventory_details. */
+  ManBtchNum?: string;
   [key: string]: unknown;
 };
+
+type WarehouseStock = { whsCode: string; quantity: number };
 
 type BatchPickerContext = {
   key: string;
@@ -488,6 +492,8 @@ export default function ContentsTab({ state }: Props) {
   const autoAllocatedRef = useRef<Set<string>>(new Set());
   const [skuImageByCode, setSkuImageByCode] = useState<Record<string, string>>({});
   const [warehouseQtyByItemAndWhs, setWarehouseQtyByItemAndWhs] = useState<Record<string, number>>({});
+  /** Per item that SAP does not track by batch: its stock per warehouse, most first. */
+  const [nonBatchStock, setNonBatchStock] = useState<Record<string, WarehouseStock[]>>({});
   const [batchApplyError, setBatchApplyError] = useState("");
   const inventoryItemCodesKey = useMemo(() => {
     const itemCodes = state.selectedLineList
@@ -557,6 +563,33 @@ export default function ContentsTab({ state }: Props) {
           return lookup;
         }, {});
         setWarehouseQtyByItemAndWhs(nextWarehouseQty);
+
+        const nextNonBatch = entries.reduce<Record<string, WarehouseStock[]>>((lookup, [itemCode, warehouses]) => {
+          if (warehouses.length > 0 && warehouses.every((warehouse) => warehouse.ManBtchNum === "N")) {
+            lookup[getSkuCodeKey(itemCode)] = warehouses
+              .map((warehouse) => ({ whsCode: getWarehouseCode(warehouse), quantity: getWarehouseQuantity(warehouse) }))
+              .filter((stock) => stock.whsCode)
+              .sort((a, b) => b.quantity - a.quantity);
+          }
+          return lookup;
+        }, {});
+        setNonBatchStock(nextNonBatch);
+
+        // A line of such an item needs no batches; and if its warehouse holds
+        // none of it (the default BH-BT, say), move it to where the stock is.
+        state.selectedLineList.forEach((line) => {
+          const stock = nextNonBatch[getSkuCodeKey(line.ItemCode)];
+          if (!stock) return;
+          const currentWhs = line.WhsCode || line.SalesOrderWhsCode || "";
+          const hasStockHere = stock.some(
+            (entry) => getSkuCodeKey(entry.whsCode) === getSkuCodeKey(currentWhs) && entry.quantity > 0,
+          );
+          state.updateLine(lineKey(line.DocEntry, line.LineNum), {
+            BatchManaged: false,
+            BatchNumbers: [],
+            ...(hasStockHere || !stock[0] ? {} : { WhsCode: stock[0].whsCode }),
+          });
+        });
       } catch (err) {
         console.error("Unable to load warehouse quantities for invoice lines:", err);
       }
@@ -566,6 +599,8 @@ export default function ContentsTab({ state }: Props) {
     return () => {
       active = false;
     };
+    // Re-run per set of items only; the line updates above must not retrigger it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inventoryItemCodesKey]);
 
   /** Other drafts' holds plus what `lines` of this invoice already take. */
@@ -627,6 +662,7 @@ export default function ContentsTab({ state }: Props) {
     const pending = state.selectedLineList.filter((line) => {
       const whsCode = line.WhsCode || line.SalesOrderWhsCode || "";
       if (!whsCode) return false;
+      if (line.BatchManaged === false) return false;
       if ((line.BatchNumbers?.length || 0) > 0) return false;
       const signature = `${lineKey(line.DocEntry, line.LineNum)}|${whsCode}|${toNumber(line.invoiceQty)}`;
       return !autoAllocatedRef.current.has(signature);
@@ -746,7 +782,8 @@ export default function ContentsTab({ state }: Props) {
             const selectedBatchQty =
               line.BatchNumbers?.reduce((sum, batch) => sum + toNumber(batch.Quantity), 0) || 0;
             const invoiceQty = toNumber(line.invoiceQty);
-            const batchQtyMismatch = Math.abs(selectedBatchQty - invoiceQty) >= 0.0001;
+            const nonBatch = line.BatchManaged === false;
+            const batchQtyMismatch = !nonBatch && Math.abs(selectedBatchQty - invoiceQty) >= 0.0001;
             const batchWarehouse = line.WhsCode || line.SalesOrderWhsCode || "-";
             const warehouseQty =
               warehouseQtyByItemAndWhs[
@@ -824,6 +861,39 @@ export default function ContentsTab({ state }: Props) {
                   </div>
                 </dl>
 
+                {nonBatch ? (
+                  /* Not tracked by batch in SAP: there is nothing to pick but
+                     the warehouse, and its stock has to cover the quantity. */
+                  <div
+                    className={cn(
+                      "flex flex-wrap items-center gap-x-2 gap-y-1 rounded-sm border px-2.5 py-1.5 text-[12px]",
+                      warehouseQty !== undefined && warehouseQty + 0.0001 < invoiceQty
+                        ? "border-bad/40 bg-bad-soft text-bad"
+                        : "border-line bg-surface text-body",
+                    )}
+                  >
+                    <span>Warehouse</span>
+                    <Select
+                      value={line.WhsCode}
+                      aria-label={"Warehouse for " + (line.Dscription || line.ItemCode || "item")}
+                      className="h-control-xs w-auto"
+                      onChange={(event) => state.updateLine(key, { WhsCode: event.target.value })}
+                    >
+                      {(nonBatchStock[getSkuCodeKey(line.ItemCode)] || []).map((stock) => (
+                        <option key={stock.whsCode} value={stock.whsCode}>
+                          {stock.whsCode} ({stock.quantity.toLocaleString("en-IN")})
+                        </option>
+                      ))}
+                    </Select>
+                    <span>available {availableQtyText} · no batch needed</span>
+                    {warehouseQty !== undefined && warehouseQty + 0.0001 < invoiceQty && (
+                      <strong className="block w-full font-semibold">
+                        Not enough stock in this warehouse.
+                      </strong>
+                    )}
+                  </div>
+                ) : (
+                <>
                 {/*
                   Opens the batch picker. It carries the warehouse, the stock
                   there, and — when they disagree — the reason this line cannot
@@ -859,6 +929,8 @@ export default function ContentsTab({ state }: Props) {
                     </strong>
                   )}
                 </button>
+                </>
+                )}
               </li>
             );
           })}

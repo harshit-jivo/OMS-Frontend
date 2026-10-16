@@ -106,6 +106,8 @@ type ItemPriceApiResponse =
 type InventoryWarehouse = {
   WhsCode: string;
   "SUM(Quantity)"?: number;
+  /** 'N' when SAP does not track the item by batch — see get_inventory_details. */
+  ManBtchNum?: string;
 };
 
 type BatchDetail = {
@@ -140,6 +142,8 @@ type BatchDetail = {
 type SelectedBatch = {
   warehouseCode: string;
   warehouseQuantity: number;
+  /** false: no batches exist, the warehouse stock alone must cover the quantity. */
+  batchManaged: boolean;
   batches: Array<{
     batch: BatchDetail;
     quantity: number;
@@ -1584,13 +1588,15 @@ const getItemRowsValidationError = (rows: ItemInvoiceRow[]) => {
   if (selectedRows.length === 0) return "Select at least one item.";
 
   const rowWithoutBatch = selectedRows.find(
-    (row) => !row.batch?.warehouseCode || row.batch.batches.length === 0,
+    (row) =>
+      !row.batch?.warehouseCode || (row.batch.batchManaged && row.batch.batches.length === 0),
   );
   if (rowWithoutBatch)
     return `Choose batches for ${rowWithoutBatch.item?.ItemName || "every selected item"}.`;
 
   const mismatchedRow = selectedRows.find((row) => {
     const invoiceQty = toFiniteQuantity(row.invoiceQty);
+    if (row.batch && !row.batch.batchManaged) return row.batch.warehouseQuantity + 0.0001 < invoiceQty;
     const batchQty =
       row.batch?.batches.reduce((sum, allocation) => sum + allocation.quantity, 0) || 0;
     const displayedBatchQty = row.batch?.warehouseQuantity || batchQty;
@@ -1632,6 +1638,7 @@ const itemRowsToSelectedLines = (rows: ItemInvoiceRow[]): SelectedLine[] =>
         VatPrcnt: pickItemNumber(row.item, ["VatPrcnt", "TaxPercent"], 0),
         TaxCode: taxCode,
         WhsCode: row.batch.warehouseCode,
+        BatchManaged: row.batch.batchManaged,
         U_SchemeAgst: String(row.item.SchemeAgst || "").trim(),
         invoiceQty,
         BatchNumbers: row.batch.batches
@@ -1759,11 +1766,14 @@ function BatchPickerModal({
   const selectedWarehouse =
     warehouses.find((warehouse) => warehouse.WhsCode === selectedWhsCode) || null;
   const selectedWarehouseQuantity = Number(selectedWarehouse?.["SUM(Quantity)"] || 0);
+  // Not tracked by batch: there are no batches to pick, and the warehouse's
+  // stock alone has to cover the quantity.
+  const batchManaged = selectedWarehouse?.ManBtchNum !== "N";
   const unitPrice = pickItemNumber(item, ["Price", "UnitPrice", "PriceBefDi"], 0);
   const allocations = allocateFefoBatches(batches, invoiceQty);
   const allocatedQty = allocations.reduce((sum, allocation) => sum + allocation.quantity, 0);
   const displayedBatchQty = selectedWarehouseQuantity || allocatedQty;
-  const batchAllocationMatches = allocatedQty + 0.0001 >= invoiceQty;
+  const batchAllocationMatches = !batchManaged || allocatedQty + 0.0001 >= invoiceQty;
   const quantityMatches =
     selectedWarehouseQuantity > 0 &&
     selectedWarehouseQuantity + 0.0001 >= invoiceQty &&
@@ -1775,15 +1785,17 @@ function BatchPickerModal({
     .join("|")}`;
 
   useEffect(() => {
-    if (!selectedWhsCode || loadingBatches || batches.length === 0) return;
+    if (!selectedWhsCode || loadingBatches) return;
+    if (batchManaged && batches.length === 0) return;
     if (lastAppliedBatchSignature.current === batchSignature) return;
     lastAppliedBatchSignature.current = batchSignature;
     onSelect({
       warehouseCode: selectedWhsCode,
       warehouseQuantity: selectedWarehouseQuantity,
-      batches: allocations,
+      batchManaged,
+      batches: batchManaged ? allocations : [],
     });
-  }, [batchSignature, batches.length, loadingBatches, selectedWarehouseQuantity, selectedWhsCode]);
+  }, [batchSignature, batches.length, batchManaged, loadingBatches, selectedWarehouseQuantity, selectedWhsCode]);
 
   return (
     <Dialog
@@ -1887,7 +1899,8 @@ function BatchPickerModal({
                 equal its invoice quantity, so this is the gate on Create Draft. */}
             <Notice tone={quantityMatches ? "ok" : "bad"}>
               <span className="tabular-nums">
-                Invoice qty {invoiceQty.toLocaleString("en-IN")} - batch qty{" "}
+                Invoice qty {invoiceQty.toLocaleString("en-IN")} -{" "}
+                {batchManaged ? "batch qty" : "in stock"}{" "}
                 {displayedBatchQty.toLocaleString("en-IN")}
               </span>
             </Notice>
@@ -1901,6 +1914,10 @@ function BatchPickerModal({
               </p>
             ) : loadingBatches ? (
               <Skeleton className="h-24 w-full" aria-label="Loading batches" />
+            ) : !batchManaged ? (
+              <p className="m-0 rounded-sm border border-line bg-surface px-3 py-4 text-center text-[12px] text-subtle">
+                This item is not tracked by batch in SAP, so no batch is needed.
+              </p>
             ) : batches.length === 0 ? (
               <p className="m-0 rounded-sm border border-line bg-surface px-3 py-4 text-center text-[12px] text-subtle">
                 No batches found for this warehouse.
@@ -1945,7 +1962,13 @@ function BatchPickerModal({
           <Button
             variant="primary"
             disabled={cannotCreateDraft}
-            title={quantityMatches ? undefined : "Batch quantity must match the invoice quantity."}
+            title={
+              quantityMatches
+                ? undefined
+                : batchManaged
+                  ? "Batch quantity must match the invoice quantity."
+                  : "Not enough stock in this warehouse."
+            }
             onClick={onCreateDraft}
           >
             {creatingDraft ? "Creating..." : "Create draft"}
