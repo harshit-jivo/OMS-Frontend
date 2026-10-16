@@ -36,6 +36,7 @@ import { SapDocLink, SapPartnerLink } from "./SapDocument";
 import { DocumentHistory } from "./DocumentHistory";
 import { SapAttachmentLink, SapAttachmentList } from "./SapAttachmentLink";
 import { historyTargetOf, sapDocumentOf } from "./sapMapping";
+import { deductionTargets, useDeductions, type Deduction } from "./deductions";
 import { STATUS_LABEL, formatDateTime } from "./requestLabels";
 import { EditChanges } from "./RequestProgress";
 import { RequestFileName } from "./RequestFileLink";
@@ -365,6 +366,7 @@ export function DocumentLines({
   entry,
   showReading = false,
   showBreakdown = false,
+  showDeductions = false,
 }: {
   entry: AdvanceRequestEntry;
   showReading?: boolean;
@@ -374,9 +376,21 @@ export function DocumentLines({
    * opens — not repeated on the page.
    */
   showBreakdown?: boolean;
+  /**
+   * The desk, from the Payment stage on (user, 2026-10-16): each bill's TDS
+   * and debit notes as SAP has them, so neither is deducted twice.
+   */
+  showDeductions?: boolean;
 }) {
   const c = resolveCase(entry.form);
+  const deductions = useDeductions(
+    entry.form.company,
+    deductionTargets(entry.form.selected),
+    showDeductions && !!c.reference,
+  );
   if (!c.reference) return null;
+  const deducted = showDeductions ? deductions.data : undefined;
+  const columns = deducted ? 8 : 7;
   const def = REFERENCE_KINDS[c.reference];
   const rows = allocationRows(entry.form);
   const totals = allocationTotals(rows);
@@ -389,6 +403,11 @@ export function DocumentLines({
         </CardTitle>
         {c.liveDocuments ? null : <span className="text-[12px] font-medium text-hold">Sample data</span>}
       </CardHeader>
+      {showDeductions && deductions.isError ? (
+        <p role="alert" className="m-0 mb-2 text-[12.5px] text-hold">
+          Could not read the TDS and debit notes from SAP — check each bill&apos;s golden arrow.
+        </p>
+      ) : null}
       <Table>
         <TableHeader>
           <TableRow className="hover:bg-transparent">
@@ -396,6 +415,7 @@ export function DocumentLines({
             <TableHead>Vendor Ref.</TableHead>
             <TableHead>{def.dateLabel}</TableHead>
             <TableHead>Due Date</TableHead>
+            {deducted ? <TableHead className="text-right">Deducted in SAP</TableHead> : null}
             <TableHead className="text-right">Open Amount</TableHead>
             <TableHead>Payment</TableHead>
             <TableHead className="text-right">Payment Amount</TableHead>
@@ -436,6 +456,11 @@ export function DocumentLines({
               <TableCell className="font-medium text-ink">{doc.reference || "—"}</TableCell>
               <TableCell>{formatDate(doc.date)}</TableCell>
               <TableCell>{doc.dueDate ? formatDate(doc.dueDate) : "—"}</TableCell>
+              {deducted ? (
+                <TableCell className="text-right">
+                  <SapDeduction deduction={deducted.byId.get(doc.id)} />
+                </TableCell>
+              ) : null}
               <TableCell className="text-right tabular-nums">
                 {formatINR(doc.open)}
                 {holdOf(allocation) > 0 ? (
@@ -457,7 +482,7 @@ export function DocumentLines({
             </TableRow>
             {source && !showBreakdown ? (
               <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={7}>
+                <TableCell colSpan={columns}>
                   <p className="m-0 mb-1.5 text-[11.5px] font-semibold uppercase tracking-[0.06em] text-subtle">
                     {doc.number}&apos;s SAP attachments
                   </p>
@@ -467,7 +492,7 @@ export function DocumentLines({
             ) : null}
             {history ? (
               <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={7}>
+                <TableCell colSpan={columns}>
                   <p className="m-0 mb-1.5 text-[11.5px] font-semibold uppercase tracking-[0.06em] text-subtle">
                     OMS payments against {doc.number}
                   </p>
@@ -477,7 +502,7 @@ export function DocumentLines({
             ) : null}
             {showReading && doc.reading ? (
               <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={7} className="bg-surface">
+                <TableCell colSpan={columns} className="bg-surface">
                   <p className="m-0 mb-1.5 text-[11.5px] font-semibold uppercase tracking-[0.06em] text-subtle">
                     Read from {doc.number}&apos;s SAP attachment
                   </p>
@@ -489,9 +514,14 @@ export function DocumentLines({
             );
           })}
           <TableRow className="bg-surface hover:bg-surface">
-            <TableCell className="font-semibold text-ink" colSpan={3}>
+            <TableCell className="font-semibold text-ink" colSpan={4}>
               Total
             </TableCell>
+            {deducted ? (
+              <TableCell className="text-right">
+                <SapDeduction deduction={{ tds: deducted.tds, bills: null, debit: deducted.debit, notes: [] }} />
+              </TableCell>
+            ) : null}
             <TableCell className="text-right font-semibold tabular-nums">{formatINR(totals.open)}</TableCell>
             <TableCell />
             <TableCell className="text-right text-base font-bold tabular-nums text-ink">
@@ -501,6 +531,39 @@ export function DocumentLines({
         </TableBody>
       </Table>
     </Card>
+  );
+}
+
+/**
+ * One bill's (or PO's) TDS and debit notes in SAP, stacked; "None" when SAP
+ * took nothing off it — then TDS, if due, is still to be deducted at Payment.
+ */
+function SapDeduction({ deduction }: { deduction: Deduction | undefined }) {
+  if (!deduction || (deduction.tds <= 0 && deduction.debit <= 0)) {
+    return <span className="text-[12px] text-subtle">None</span>;
+  }
+  return (
+    <span className="block space-y-0.5 text-[12.5px] tabular-nums">
+      {deduction.tds > 0 ? (
+        <span className="block font-semibold text-ink">
+          TDS {formatINR(deduction.tds)}
+          {deduction.bills ? (
+            <span className="font-normal text-subtle">
+              {" "}
+              on {deduction.bills} {deduction.bills === 1 ? "bill" : "bills"}
+            </span>
+          ) : null}
+        </span>
+      ) : null}
+      {deduction.debit > 0 ? (
+        <span className="block font-semibold text-hold">
+          Debit note {formatINR(deduction.debit)}
+          {deduction.notes.length ? (
+            <span className="block text-[11px] font-normal text-subtle">{deduction.notes.join(", ")}</span>
+          ) : null}
+        </span>
+      ) : null}
+    </span>
   );
 }
 

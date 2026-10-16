@@ -508,6 +508,7 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
           entry={entry}
           showReading={reachedPayment(entry) && can.see_account}
           showBreakdown={reachedPayment(entry)}
+          showDeductions={reachedPayment(entry)}
         />
 
         {/* An Expense: read-only lines, or at Payment the whole request to correct. */}

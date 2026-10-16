@@ -31,18 +31,29 @@ const OPTIONS: TdsOptions = {
 
 vi.mock("../../services/advancePaymentService", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../services/advancePaymentService")>();
-  return { ...actual, advancePaymentService: { tdsOptions: vi.fn(async () => OPTIONS) } };
+  return { ...actual, advancePaymentService: {
+    tdsOptions: vi.fn(async () => OPTIONS),
+    documentDeductions: vi.fn(async () => []),
+  } };
 });
 
 const CONTEXT: TdsContext = { company: "OIL", cardCode: "VENDA000062", bills: [] };
 
-function Harness({ readOnly = false, start }: { readOnly?: boolean; start?: PayoutDetails }) {
+function Harness({
+  readOnly = false,
+  start,
+  context = CONTEXT,
+}: {
+  readOnly?: boolean;
+  start?: PayoutDetails;
+  context?: TdsContext;
+}) {
   const [value, setValue] = React.useState<PayoutDetails>(
     start ?? { ...EMPTY_PAYOUT, lines: [{ ...newPayoutLine("NEFT"), amount: "100000" }] },
   );
   return (
     <>
-      <TdsSection value={value} onChange={setValue} requestAmount={100000} context={CONTEXT} readOnly={readOnly} />
+      <TdsSection value={value} onChange={setValue} requestAmount={100000} context={context} readOnly={readOnly} />
       <output aria-label="state">{JSON.stringify({ tds: value.tds, line: value.lines[0]?.amount })}</output>
     </>
   );
@@ -106,5 +117,17 @@ describe("TDS at the Payment stage", () => {
     expect(screen.queryByLabelText("Deduct TDS")).toBeNull();
     expect(screen.getByText(/₹2,000 deducted at 2% under 194C TDS ON CONTRACTER- COMPANY/)).toBeTruthy();
     expect(screen.getByText(/payee receives ₹98,000/)).toBeTruthy();
+  });
+
+  it("says what SAP already took off the bills: TDS at booking and debit notes", async () => {
+    vi.mocked(advancePaymentService.documentDeductions).mockResolvedValueOnce([
+      { doc_entry: 69, tds: "23695", bills: null, debits: { amount: "8140", notes: [725025903] } },
+      { doc_entry: 80, tds: "14870", bills: null, debits: { amount: "0", notes: [] } },
+    ]);
+    renderPage(<Harness readOnly context={{ ...CONTEXT, company: "MART", bills: [69, 80] }} />);
+    expect(screen.getByText("No TDS deducted on this payment.")).toBeTruthy();
+    expect(await screen.findByText("TDS ₹38,565")).toBeTruthy();
+    expect(screen.getByText("debit notes ₹8,140")).toBeTruthy();
+    expect(advancePaymentService.documentDeductions).toHaveBeenCalledWith("MART", "bill", [69, 80]);
   });
 });

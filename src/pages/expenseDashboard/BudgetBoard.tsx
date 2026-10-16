@@ -1495,7 +1495,7 @@ export function BudgetBoard({ viewSwitch }: { viewSwitch: ReactNode }) {
                   setOpen(null);
                 }}
               >
-                <option value="">Everyone (whole board)</option>
+                <option value="">Management (whole board)</option>
                 {(data.views ?? []).map((v) => (
                   <option key={v.key} value={v.key}>
                     {v.owner} — {v.label}

@@ -588,6 +588,17 @@ export interface SapDebits {
   notes: number[];
 }
 
+/** What SAP already took off one of a request's bills or POs (`/document-deductions/`). */
+export interface SapDocumentDeduction {
+  doc_entry: number;
+  /** TDS SAP withheld: on the bill, or on a PO's bills. */
+  tds: string;
+  /** A PO: how many bills it has; null for a bill. */
+  bills: number | null;
+  /** Its debit notes; null when SAP could not say. */
+  debits: SapDebits | null;
+}
+
 export interface SapOpenInvoice {
   doc_entry: number;
   doc_num: number | null;
@@ -1861,6 +1872,18 @@ export const advancePaymentService = {
       params: { company, card_code: cardCode, bills: bills.join(",") },
     });
     return unwrap<TdsOptions>(res.data);
+  },
+
+  /** The TDS and debit notes SAP has against a request's bills (or POs' bills). */
+  async documentDeductions(
+    company: AdvancePaymentCompany,
+    kind: "bill" | "po",
+    docEntries: number[],
+  ): Promise<SapDocumentDeduction[]> {
+    const res = await api.get(`${BASE}/document-deductions/`, {
+      params: { company, kind, doc_entries: docEntries.join(",") },
+    });
+    return results<SapDocumentDeduction>(res.data);
   },
 
   /** The request's documents against SAP as it is now: what Final checks before posting. */

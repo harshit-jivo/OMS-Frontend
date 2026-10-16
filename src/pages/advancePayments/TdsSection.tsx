@@ -15,6 +15,7 @@ import {
   type TdsCode,
 } from "../../services/advancePaymentService";
 
+import { useDeductions } from "./deductions";
 import { FormSection } from "./PaymentSections";
 import { tdsAmountFor, type PayoutDetails } from "./payout";
 import { formatINR } from "./rules";
@@ -50,6 +51,30 @@ export function TdsSection({
     retry: 1,
   });
   const tds = value.tds;
+  // What SAP already took off the bills — TDS at booking, debit notes —
+  // said here too (user, 2026-10-16): the bill-wise figures are in the table above.
+  const sap = useDeductions(
+    context.company,
+    context.bills.length ? { kind: "bill", entries: context.bills } : null,
+    true,
+  ).data;
+  const inSap =
+    sap && (sap.tds > 0 || sap.debit > 0) ? (
+      <p className="m-0 text-[13px] text-body">
+        Already deducted in SAP on the bills:{" "}
+        {[
+          sap.tds > 0 ? <strong key="tds">TDS {formatINR(sap.tds)}</strong> : null,
+          sap.debit > 0 ? (
+            <strong key="debit" className="text-hold">
+              debit notes {formatINR(sap.debit)}
+            </strong>
+          ) : null,
+        ]
+          .filter(Boolean)
+          .flatMap((part, i) => (i ? [" · ", part] : [part]))}
+        . The bills&apos; open amounts are already net of {sap.tds > 0 && sap.debit > 0 ? "both" : "it"}.
+      </p>
+    ) : null;
 
   if (readOnly) {
     return (
@@ -58,8 +83,9 @@ export function TdsSection({
           {tds
             ? `${formatINR(tds.amount)} deducted at ${tds.rate}% under ${tds.label || tds.code} ` +
               `(account ${tds.account}). The payee receives ${formatINR(requestAmount - tds.amount)}.`
-            : "No TDS deducted."}
+            : "No TDS deducted on this payment."}
         </p>
+        {inSap}
       </FormSection>
     );
   }
@@ -98,6 +124,7 @@ export function TdsSection({
           {advancePaymentError(query.error)}
         </p>
       ) : null}
+      {inSap}
       {blocked.length ? (
         <p className="m-0 text-[13px] text-subtle">
           TDS cannot be deducted here: SAP already deducted it on{" "}
