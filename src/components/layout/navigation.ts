@@ -216,7 +216,9 @@ export const SIDEBAR_SECTIONS: SidebarSectionDef[] = [
       { to: "/Advance_Payment_Request", label: "Payments", icon: HiOutlineBanknotes },
       { to: "/Advance_Payment_Approval", label: "Payments Approval", icon: HiOutlineCheckBadge },
       { to: "/Advance_Payment_Register", label: "All Payment Requests", icon: HiOutlineQueueList },
-      { to: "/Factory_Daily_Limit", label: "Factory Daily Limit", icon: HiOutlineScale },
+      // Factory Daily Limit: switched off (2026-10-16). Put this back with
+      // `FACTORY_DAILY_LIMIT_ON` and the server's ADVANCE_PAYMENT_FACTORY_LIMIT.
+      // { to: "/Factory_Daily_Limit", label: "Factory Daily Limit", icon: HiOutlineScale },
       { to: "/Payments_Expenses", label: "Payments & Expenses", icon: HiOutlineChartPie },
       { to: "/Advance_Payment_Dispatch", label: "Send Bills & POs", icon: HiOutlinePaperAirplane },
     ],
