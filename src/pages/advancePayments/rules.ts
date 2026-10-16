@@ -55,9 +55,21 @@ export interface Allocation {
   mode: PaymentMode;
   amount: string;
   percentage: string;
+  /**
+   * A bill only: what is held back from the vendor (user, 2026-10-16) — SAP
+   * keeps no hold amount. Blank holds nothing; filled, the line pays at most
+   * the open amount less it.
+   */
+  hold: string;
 }
 
-export const EMPTY_ALLOCATION: Allocation = { mode: "FIXED", amount: "", percentage: "" };
+export const EMPTY_ALLOCATION: Allocation = { mode: "FIXED", amount: "", percentage: "", hold: "" };
+
+/** The hold on a line, as a number: 0 when blank or not a positive figure. */
+export function holdOf(allocation: Allocation): number {
+  const value = Number(allocation.hold);
+  return allocation.hold.trim() !== "" && Number.isFinite(value) && value > 0 ? value : 0;
+}
 
 /**
  * One line of an Expense request: an amount (the invoice value) to an
@@ -1018,7 +1030,23 @@ export function calculatePayment(
   mode: PaymentMode,
   amount: string,
   percentage: string,
+  hold = "",
 ): Calculation {
+  // A bill's hold, only when filled in: the line then pays at most what is
+  // left of the open amount (and of what other requests leave) after it.
+  const holdValue = parseNumber(hold);
+  if (holdValue !== null) {
+    if (Number.isNaN(holdValue) || holdValue < 0) {
+      return { payment: null, error: "Enter a hold amount of zero or more." };
+    }
+    if (holdValue > document.open) {
+      return {
+        payment: null,
+        error: `The hold cannot be more than the open amount of ${formatINR(document.open)}.`,
+      };
+    }
+  }
+  const held = holdValue && holdValue > 0 ? holdValue : 0;
   if (mode === "FIXED") {
     const value = parseNumber(amount);
     if (value === null) return { payment: null, error: null };
@@ -1031,7 +1059,13 @@ export function calculatePayment(
         error: `Cannot exceed the open amount of ${formatINR(document.open)}.`,
       };
     }
-    if (value > availableOf(document)) return { payment: null, error: heldError(document) };
+    if (held && value > toPaise(document.open - held)) {
+      return {
+        payment: null,
+        error: `Cannot exceed ${formatINR(toPaise(document.open - held))}: the open amount less the ${formatINR(held)} on hold.`,
+      };
+    }
+    if (value > availableOf(document) - held) return { payment: null, error: heldError(document) };
     return { payment: toPaise(value), error: null };
   }
 
@@ -1067,7 +1101,13 @@ export function allocationRows(form: RequestForm): AllocationRow[] {
     return {
       document,
       allocation,
-      calc: calculatePayment(document, allocation.mode, allocation.amount, allocation.percentage),
+      calc: calculatePayment(
+        document,
+        allocation.mode,
+        allocation.amount,
+        allocation.percentage,
+        allocation.hold,
+      ),
     };
   });
 }

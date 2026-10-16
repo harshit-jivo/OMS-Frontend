@@ -52,6 +52,7 @@ import {
   type AllocationRow,
   type AllocationTotals,
   type ReferenceKind,
+  holdOf,
 } from "./rules";
 
 /* ── Section frame ───────────────────────────────────────────────────────── */
@@ -304,6 +305,52 @@ function documentSubtitle(doc: OpenDocument): string {
 // input to stretch, and the amount box stops at a sensible size.
 const LINE_GRID = "md:grid-cols-[minmax(9rem,1fr)_8.5rem_13.5rem_minmax(15rem,21rem)_2.5rem]";
 
+/**
+ * A bill's hold amount (user, 2026-10-16): what is held back from the vendor,
+ * which SAP does not record. Optional — blank holds nothing; filled, the line
+ * pays at most the open amount less it.
+ */
+function HoldInput({
+  documentNumber,
+  value,
+  open,
+  onChange,
+}: {
+  documentNumber: string;
+  value: string;
+  open: number;
+  onChange: (hold: string) => void;
+}) {
+  const hold = Number(value);
+  const set = value.trim() !== "" && Number.isFinite(hold) && hold > 0;
+  return (
+    <div className="mt-1.5 md:ml-auto md:max-w-[8.5rem]">
+      <input
+        type="number"
+        min="0"
+        max={open}
+        step="0.01"
+        inputMode="decimal"
+        aria-label={`Hold amount for ${documentNumber}`}
+        placeholder="Hold (optional)"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className={cn(
+          "h-7 w-full rounded-sm border border-line bg-surface px-2 text-right text-[12px] tabular-nums text-ink",
+          "[font-family:inherit] placeholder:text-left placeholder:text-subtle",
+          "focus:border-brand focus:bg-card focus:outline-none",
+          set && "border-hold/60 bg-hold-soft/40",
+        )}
+      />
+      {set ? (
+        <span className="mt-0.5 block text-[11px] text-hold">
+          Payable {formatINR(Math.max(open - hold, 0))}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 function SelectedDocuments({
   kind,
   rows,
@@ -410,11 +457,22 @@ function SelectedDocuments({
                 </span>
               </button>
 
-              <div className="order-3 col-span-2 flex items-baseline justify-between gap-2 md:order-2 md:col-span-1 md:block md:text-right">
-                <span className="text-[11px] text-subtle md:hidden">Open Amount</span>
-                <span className="text-[13px] font-medium tabular-nums text-ink">
-                  {formatINR(doc.open)}
-                </span>
+              <div className="order-3 col-span-2 md:order-2 md:col-span-1 md:text-right">
+                <div className="flex items-baseline justify-between gap-2 md:block">
+                  <span className="text-[11px] text-subtle md:hidden">Open Amount</span>
+                  <span className="text-[13px] font-medium tabular-nums text-ink">
+                    {formatINR(doc.open)}
+                  </span>
+                </div>
+                {/* A bill's hold: SAP keeps none. Blank holds nothing back. */}
+                {kind === "VENDOR_BILL" ? (
+                  <HoldInput
+                    documentNumber={doc.number}
+                    value={allocation.hold}
+                    open={doc.open}
+                    onChange={(hold) => onAllocationChange(doc.id, { hold })}
+                  />
+                ) : null}
               </div>
 
               <div className="order-4 col-span-2 md:order-3 md:col-span-1">
@@ -444,7 +502,7 @@ function SelectedDocuments({
                   allocation={allocation}
                   payment={calc.payment}
                   error={calc.error}
-                  openAmount={doc.open}
+                  openAmount={Math.max(doc.open - holdOf(allocation), 0)}
                   onChange={(patch) => onAllocationChange(doc.id, patch)}
                 />
               </div>

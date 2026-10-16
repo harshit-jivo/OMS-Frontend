@@ -55,6 +55,7 @@ import {
   lineTaxable,
   lineTds,
   resolveCase,
+  holdOf,
 } from "./rules";
 
 export function RequestSummary({
@@ -435,7 +436,15 @@ export function DocumentLines({
               <TableCell className="font-medium text-ink">{doc.reference || "—"}</TableCell>
               <TableCell>{formatDate(doc.date)}</TableCell>
               <TableCell>{doc.dueDate ? formatDate(doc.dueDate) : "—"}</TableCell>
-              <TableCell className="text-right tabular-nums">{formatINR(doc.open)}</TableCell>
+              <TableCell className="text-right tabular-nums">
+                {formatINR(doc.open)}
+                {holdOf(allocation) > 0 ? (
+                  <span className="block text-[11.5px] font-semibold text-hold">
+                    On hold {formatINR(holdOf(allocation))} · payable{" "}
+                    {formatINR(Math.max(doc.open - holdOf(allocation), 0))}
+                  </span>
+                ) : null}
+              </TableCell>
               <TableCell>
                 {PAYMENT_MODES.find((m) => m.value === allocation.mode)?.label}
                 {allocation.mode === "PERCENT" && allocation.percentage

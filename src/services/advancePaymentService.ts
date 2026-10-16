@@ -1096,6 +1096,8 @@ export interface ApiRequestDocument {
   mode: "FIXED" | "PERCENT";
   percentage: string | null;
   amount: string;
+  /** A bill only: what the requester holds back from the vendor; null when nothing. */
+  hold_amount?: string | null;
   attachment_file: string;
   attachment_count: number;
   attachment_date: string | null;

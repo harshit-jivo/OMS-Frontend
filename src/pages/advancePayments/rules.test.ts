@@ -246,7 +246,7 @@ describe("selecting several documents", () => {
     const form = abcBothBills();
     expect(ids(form)).toEqual(["PCH-10256", "PCH-10271"]);
     expect(Object.keys(form.allocations)).toEqual(["PCH-10256", "PCH-10271"]);
-    expect(form.allocations["PCH-10256"]).toEqual({ mode: "FIXED", amount: "", percentage: "" });
+    expect(form.allocations["PCH-10256"]).toEqual({ mode: "FIXED", amount: "", percentage: "", hold: "" });
   });
 
   it("keeps a line's entry when another document is ticked or unticked", () => {
@@ -359,7 +359,7 @@ describe("payment lines and the total", () => {
   it("pays a bill by AMOUNT only — a percentage is not taken", () => {
     let form = changeAllocation(abcBothBills(), "PCH-10271", { amount: "20000" });
     form = changeAllocation(form, "PCH-10256", { mode: "PERCENT", percentage: "50" });
-    expect(form.allocations["PCH-10256"]).toEqual({ mode: "FIXED", amount: "", percentage: "" });
+    expect(form.allocations["PCH-10256"]).toEqual({ mode: "FIXED", amount: "", percentage: "", hold: "" });
     // …and the other line is untouched.
     expect(form.allocations["PCH-10271"].amount).toBe("20000");
   });
@@ -381,7 +381,7 @@ describe("payment lines and the total", () => {
 
     // A switch to amount starts the line afresh — 10 is not ₹10.
     form = changeAllocation(form, "POR-4512", { mode: "FIXED", amount: "5000" });
-    expect(form.allocations["POR-4512"]).toEqual({ mode: "FIXED", amount: "5000", percentage: "" });
+    expect(form.allocations["POR-4512"]).toEqual({ mode: "FIXED", amount: "5000", percentage: "", hold: "" });
     expect(allocationRows(form)[0].calc.payment).toBe(5000);
   });
 

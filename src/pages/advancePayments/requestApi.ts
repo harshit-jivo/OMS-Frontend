@@ -39,6 +39,7 @@ import {
   type Allocation,
   type ReferenceKind,
   type RequestForm,
+  holdOf,
 } from "./rules";
 
 /* ── Small conversions ───────────────────────────────────────────────────── */
@@ -104,6 +105,8 @@ export function toApiRequest(form: RequestForm): ApiRequestInput {
         mode: allocation.mode,
         percentage: allocation.mode === "PERCENT" ? allocation.percentage : null,
         amount: String(calc.payment ?? 0),
+        // Only when filled in: blank holds nothing back.
+        hold_amount: holdOf(allocation) > 0 ? String(holdOf(allocation)) : null,
         attachment_file: document.attachment?.fileName ?? "",
         attachment_count: document.attachment?.count ?? 0,
         attachment_date: document.attachment?.date || null,
@@ -223,9 +226,10 @@ function documentFromApi(doc: ApiRequestDocument, partner: string, company: Adva
 
 function allocationFromApi(doc: ApiRequestDocument): Allocation {
   const mode = doc.mode as PaymentMode;
+  const hold = doc.hold_amount ? plain(doc.hold_amount) : "";
   return mode === "PERCENT"
-    ? { ...EMPTY_ALLOCATION, mode, percentage: plain(doc.percentage) }
-    : { ...EMPTY_ALLOCATION, mode, amount: plain(doc.amount) };
+    ? { ...EMPTY_ALLOCATION, mode, percentage: plain(doc.percentage), hold }
+    : { ...EMPTY_ALLOCATION, mode, amount: plain(doc.amount), hold };
 }
 
 export function formFromApi(api: ApiRequest): RequestForm {
