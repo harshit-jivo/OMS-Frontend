@@ -308,6 +308,11 @@ export default function Factory_Daily_Limit() {
         title="Factory Daily Limit"
         description="How much may be raised each day in Factory payment requests — oil purchases excluded. Set by Ziyaul; a day without its own limit keeps the last one."
       />
+      {query.data && !query.data.enabled ? (
+        <Notice tone="hold" title="Switched off">
+          The daily limit is not being applied: requests are not held back by it.
+        </Notice>
+      ) : null}
       <SegmentedControl
         aria-label="Company"
         value={company}

@@ -1284,6 +1284,8 @@ export interface FactoryLimit {
   /** The past days, newest first: the limit then and what was raised. */
   history: Array<{ day: string; limit: string | null; used: string }>;
   changes: Array<{ day: string; old: string | null; new: string; by: string; on: string }>;
+  /** Whether the server refuses requests past it (`ADVANCE_PAYMENT_FACTORY_LIMIT`); off for now. */
+  enabled: boolean;
   /** Only Ziyaul may set it. */
   can_set: boolean;
   setter: string;

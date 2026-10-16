@@ -26,7 +26,7 @@ export function FactoryLimitStrip({
     );
   }
   const data = query.data;
-  if (!data) return null;
+  if (!data?.enabled) return null;
   const company = COMPANY_LABEL[data.company] ?? data.company;
   if (!data.limit) {
     return (

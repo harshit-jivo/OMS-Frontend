@@ -44,6 +44,7 @@ const LIMIT: FactoryLimit = {
       on: "2026-10-15T10:00:00+05:30",
     },
   ],
+  enabled: true,
   can_set: false,
   setter: "ziyaul",
   open_bills: { bills: 864, open: "97147809.89", packing: "50204753.05" },
@@ -65,6 +66,10 @@ describe("Factory daily limit: what counts", () => {
       "This request (₹2,00,000) is ₹20,000 over today's Factory limit for Oil: ₹5,00,000, ₹3,20,000 already raised, ₹1,80,000 left.",
     );
     expect(factoryLimitError({ ...LIMIT, limit: null, left: null }, 9e9)).toBeNull();
+  });
+
+  it("holds nothing back while the server has it switched off", () => {
+    expect(factoryLimitError({ ...LIMIT, enabled: false }, 9e9)).toBeNull();
   });
 
   it("shows the strip on the form, red when the request goes over", () => {
@@ -97,13 +102,11 @@ describe("Factory Daily Limit page", () => {
 
   it("lets Ziyaul set it", async () => {
     vi.spyOn(advancePaymentService, "factoryLimit").mockResolvedValue({ ...LIMIT, can_set: true });
-    const save = vi
-      .spyOn(advancePaymentService, "setFactoryLimit")
-      .mockResolvedValue({
-        ...LIMIT,
-        can_set: true,
-        limit: { ...LIMIT.limit!, amount: "600000.00", carried: false },
-      });
+    const save = vi.spyOn(advancePaymentService, "setFactoryLimit").mockResolvedValue({
+      ...LIMIT,
+      can_set: true,
+      limit: { ...LIMIT.limit!, amount: "600000.00", carried: false },
+    });
     const user = userEvent.setup();
     renderPage(<Factory_Daily_Limit />, { route: "/Factory_Daily_Limit" });
     const box = (await screen.findByRole("heading", { name: "Set the limit" })).closest(
