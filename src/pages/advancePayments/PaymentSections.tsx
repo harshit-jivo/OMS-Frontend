@@ -20,7 +20,15 @@ import { cn } from "@/lib/utils";
 import { ChoiceOrText } from "./ChoiceOrText";
 import { DocumentHistory } from "./DocumentHistory";
 import { SapAttachmentLink, SapAttachmentList } from "./SapAttachmentLink";
-import { historyTargetOf, omsSummary, sapDocumentOf, sapTdsLabel } from "./sapMapping";
+import {
+  billDebit,
+  historyTargetOf,
+  omsSummary,
+  paidWithoutDebit,
+  sapDebitLabel,
+  sapDocumentOf,
+  sapTdsLabel,
+} from "./sapMapping";
 import { SapDocLink } from "./SapDocument";
 
 import {
@@ -69,16 +77,11 @@ export function FormSection({
 }) {
   return (
     <section
-      className={cn(
-        "space-y-3 border-t border-line pt-5 first:border-t-0 first:pt-0",
-        className,
-      )}
+      className={cn("space-y-3 border-t border-line pt-5 first:border-t-0 first:pt-0", className)}
     >
       <div>
         <h3 className="m-0 text-[14px] font-semibold text-ink">{title}</h3>
-        {description ? (
-          <p className="m-0 mt-0.5 text-[12px] text-subtle">{description}</p>
-        ) : null}
+        {description ? <p className="m-0 mt-0.5 text-[12px] text-subtle">{description}</p> : null}
       </div>
       {children}
     </section>
@@ -274,6 +277,7 @@ function documentSubtitle(doc: OpenDocument): string {
     formatDate(doc.date),
     // What other OMS requests already hold against it, seen before it is ticked.
     omsSummary(doc) || null,
+    sapDebitLabel(doc),
     sapTdsLabel(doc),
   ]
     .filter(Boolean)
@@ -298,8 +302,7 @@ function documentSubtitle(doc: OpenDocument): string {
 // number or a wide screen pull the columns out of line with their headings.
 // Only the number column flexes, so spare width lands where there is no
 // input to stretch, and the amount box stops at a sensible size.
-const LINE_GRID =
-  "md:grid-cols-[minmax(9rem,1fr)_8.5rem_13.5rem_minmax(15rem,21rem)_2.5rem]";
+const LINE_GRID = "md:grid-cols-[minmax(9rem,1fr)_8.5rem_13.5rem_minmax(15rem,21rem)_2.5rem]";
 
 function SelectedDocuments({
   kind,
@@ -471,13 +474,20 @@ function SelectedDocuments({
                         value={(() => {
                           const source = company ? sapDocumentOf(doc, company) : null;
                           return source ? (
-                            <SapDocLink company={source.company} kind={source.kind} docEntry={source.docEntry} number={doc.number} />
+                            <SapDocLink
+                              company={source.company}
+                              kind={source.kind}
+                              docEntry={source.docEntry}
+                              number={doc.number}
+                            />
                           ) : (
                             doc.number
                           );
                         })()}
                       />
-                      {doc.docType ? <DetailField label="Document Type" value={doc.docType} /> : null}
+                      {doc.docType ? (
+                        <DetailField label="Document Type" value={doc.docType} />
+                      ) : null}
                       <DetailField label={def.dateLabel} value={formatDate(doc.date)} />
                       {doc.reference ? (
                         <DetailField label="Vendor Ref." value={doc.reference} />
@@ -486,13 +496,27 @@ function SelectedDocuments({
                         <DetailField label="Due Date" value={formatDate(doc.dueDate)} />
                       ) : null}
                       <DetailField label={def.originalLabel} value={formatINR(doc.original)} />
+                      {/* A bill: Original − Debit Note − Paid = Open (user, 2026-10-16). */}
+                      {billDebit(doc) > 0 ? (
+                        <DetailField
+                          label="Debit Note"
+                          value={`− ${formatINR(billDebit(doc))} (${doc.sapDebit?.notes.join(", ")})`}
+                          strong
+                        />
+                      ) : null}
                       {/* From the cut-off OMS alone tracks it: `paid` is what OMS paid. */}
                       <DetailField
                         label={doc.oms?.tracked ? "Paid via OMS" : def.paidLabel}
-                        value={formatINR(doc.paid)}
+                        value={formatINR(paidWithoutDebit(doc))}
                       />
                       <DetailField label="Open Amount" value={formatINR(doc.open)} strong />
-                      {sapTdsLabel(doc) ? <DetailField label="TDS in SAP" value={sapTdsLabel(doc)} /> : null}
+                      {/* A PO's debit notes are against its bills: said, not subtracted. */}
+                      {billDebit(doc) === 0 && sapDebitLabel(doc) ? (
+                        <DetailField label="Debit in SAP" value={sapDebitLabel(doc)} strong />
+                      ) : null}
+                      {sapTdsLabel(doc) ? (
+                        <DetailField label="TDS in SAP" value={sapTdsLabel(doc)} />
+                      ) : null}
                       {doc.note ? <DetailField label="Description" value={doc.note} /> : null}
                       {(() => {
                         const target = company ? historyTargetOf(doc, company) : null;
@@ -780,10 +804,7 @@ export function RepaymentDetails({
         : "Type the EMI, or the number of installments.";
 
   return (
-    <FormSection
-      title="Repayment & Settlement"
-      description="How the advance comes back, and when."
-    >
+    <FormSection title="Repayment & Settlement" description="How the advance comes back, and when.">
       <FormGrid className="md:grid-cols-3">
         <Field label="Return Method" required>
           {(c) => (
@@ -802,11 +823,7 @@ export function RepaymentDetails({
 
         {returnMethod === "EMI" ? (
           <>
-            <Field
-              label="Number of Installments"
-              required
-              error={fromCount.error ?? undefined}
-            >
+            <Field label="Number of Installments" required error={fromCount.error ?? undefined}>
               {(c) => (
                 <Input
                   {...c}
@@ -853,10 +870,7 @@ export function RepaymentDetails({
             )}
           </Field>
 
-          <Field
-            label="Expected To Date"
-            hint="EMI start date plus one month per installment."
-          >
+          <Field label="Expected To Date" hint="EMI start date plus one month per installment.">
             {(c) => (
               // Read-only and styled as a value: it is worked out, not typed.
               <Input

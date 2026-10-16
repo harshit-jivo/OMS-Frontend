@@ -196,6 +196,11 @@ export interface OpenDocument {
    * raised from a PO. Absent where SAP was not asked or could not say.
    */
   sapTds?: { amount: number; bills?: number };
+  /**
+   * SAP's debit notes against it (a PO: against its bills) — their gross total
+   * and numbers (user, 2026-10-16). Absent where SAP was not asked or could not say.
+   */
+  sapDebit?: { amount: number; notes: string[] };
 }
 
 export interface LedgerKey {

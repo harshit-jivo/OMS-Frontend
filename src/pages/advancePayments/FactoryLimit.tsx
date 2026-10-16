@@ -26,24 +26,41 @@ export function FactoryLimitStrip({
     );
   }
   const data = query.data;
-  if (!data?.enabled) return null;
+  if (!data) return null;
   const company = COMPANY_LABEL[data.company] ?? data.company;
+  // Whose limit it is and what it covers — said on the form (user, 2026-10-16).
+  const whose = (
+    <span className="block">
+      Set by Ziyaul for {company}&apos;s <b>Factory requests</b>: Department Factory or FACT_COM, or
+      packing material, raw material (not oil), semi-finished goods or fixed-asset spares. Oil
+      purchases are not counted.
+    </span>
+  );
+  const enforced = data.enabled ? null : (
+    <span className="mt-1 block">Not applied yet: requests are not held back by it.</span>
+  );
   if (!data.limit) {
     return (
       <Notice tone="info" title={`Factory daily limit · ${company}`}>
-        No limit has been set yet. {formatINR(Number(data.used))} of Factory requests raised today.
+        {whose}
+        <span className="mt-1 block" data-testid="factory-limit">
+          No limit set yet · raised today {formatINR(Number(data.used))}
+        </span>
+        {enforced}
       </Notice>
     );
   }
   const over = factoryLimitError(data, amount);
   return (
     <Notice tone={over ? "bad" : "info"} title={`Factory daily limit · ${company}`}>
-      <span data-testid="factory-limit">
-        Limit {formatINR(Number(data.limit.amount))}
+      {whose}
+      <span className="mt-1 block" data-testid="factory-limit">
+        Limit <b>{formatINR(Number(data.limit.amount))}</b>
         {data.limit.carried ? " (carried from an earlier day)" : ""} · raised today{" "}
-        {formatINR(Number(data.used))} · left {formatINR(Number(data.left))}
+        <b>{formatINR(Number(data.used))}</b> · left <b>{formatINR(Number(data.left))}</b>
       </span>
       {over ? <span className="mt-1 block font-semibold">{over}</span> : null}
+      {enforced}
     </Notice>
   );
 }

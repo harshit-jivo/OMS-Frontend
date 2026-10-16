@@ -13,11 +13,11 @@ import {
 import { FACTORY_LIMIT_COMPANIES, countsAgainstFactoryLimit, formatINR } from "./rules";
 
 /**
- * Switched off for now (user, 2026-10-16): the request form neither shows the
- * limit nor holds Submit back. Turn on with the server's
- * `ADVANCE_PAYMENT_FACTORY_LIMIT` setting, and the menu link in `navigation.ts`.
+ * Shown on the request form (user, 2026-10-16). Whether Submit is held back is
+ * the server's: its `ADVANCE_PAYMENT_FACTORY_LIMIT` setting, read back as
+ * `enabled` — until it is on, the strip only informs.
  */
-export const FACTORY_DAILY_LIMIT_ON = false;
+export const FACTORY_DAILY_LIMIT_ON = true;
 
 export const FACTORY_LIMIT_KEY = ["advance-payments", "factory-limit"] as const;
 

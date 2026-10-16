@@ -140,7 +140,94 @@ function SetLimit({ data }: { data: FactoryLimit }) {
   );
 }
 
+/**
+ * The due factory bills behind the page's figure (user, 2026-10-16): a row per
+ * vendor — what is due to them, how many bills — that opens onto its bills.
+ */
+function DueBills({ company }: { company: FactoryLimitCompany }) {
+  const query = useQuery({
+    queryKey: [...FACTORY_LIMIT_KEY, "bills", company],
+    queryFn: () => advancePaymentService.factoryDueBills(company),
+    staleTime: 5 * 60_000,
+  });
+  return (
+    <Card className="p-4 md:p-5" id="factory-due-bills">
+      <CardHeader>
+        <CardTitle>Due bills by vendor</CardTitle>
+      </CardHeader>
+      {query.isError ? (
+        <Notice className="mt-3" tone="bad" title="Could not read SAP">
+          {advancePaymentError(query.error)}
+        </Notice>
+      ) : !query.data ? (
+        <p className="mt-3 text-[13px] text-subtle" role="status">
+          Reading SAP…
+        </p>
+      ) : query.data.vendors.length === 0 ? (
+        <p className="mt-3 text-[13px] text-subtle">No factory bills are due.</p>
+      ) : (
+        <div className="mt-3 divide-y divide-line rounded-lg border border-line">
+          {query.data.vendors.map((v) => (
+            <details key={v.card_code} className="group">
+              <summary className="flex cursor-pointer list-none items-center gap-3 px-3 py-2.5 hover:bg-surface-strong">
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-semibold text-ink">{v.card_name}</span>
+                  <span className="block text-[11.5px] text-subtle">
+                    {v.card_code} · {v.bills.length} {v.bills.length === 1 ? "bill" : "bills"}
+                  </span>
+                </span>
+                <b className="tabular-nums text-ink">{money(v.amount)}</b>
+                <span aria-hidden="true" className="text-subtle transition group-open:rotate-90">
+                  ›
+                </span>
+              </summary>
+              <Table className="mb-2">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Bill</TableHead>
+                    <TableHead>Vendor ref.</TableHead>
+                    <TableHead>Bill date</TableHead>
+                    <TableHead>Due</TableHead>
+                    <TableHead className="text-right">Bill total</TableHead>
+                    <TableHead className="text-right">Due (factory)</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {v.bills.map((b) => (
+                    <TableRow key={b.doc_entry}>
+                      <TableCell className="font-medium text-ink">
+                        {b.doc_num ?? b.doc_entry}
+                      </TableCell>
+                      <TableCell>{b.party_ref || "—"}</TableCell>
+                      <TableCell>{b.doc_date ? formatDate(b.doc_date) : "—"}</TableCell>
+                      <TableCell>
+                        {b.due_date ? formatDate(b.due_date) : "—"}
+                        {b.days_overdue ? (
+                          <span className="block text-[11.5px] font-semibold text-bad">
+                            {b.days_overdue} {b.days_overdue === 1 ? "day" : "days"} overdue
+                          </span>
+                        ) : null}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {money(b.doc_total)}
+                      </TableCell>
+                      <TableCell className="text-right font-semibold tabular-nums">
+                        {money(b.open)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </details>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function Body({ data }: { data: FactoryLimit }) {
+  const [showBills, setShowBills] = useState(false);
   const limit = data.limit;
   const left = data.left === null ? null : Number(data.left);
   return (
@@ -172,18 +259,30 @@ function Body({ data }: { data: FactoryLimit }) {
           value={left === null ? "—" : money(data.left)}
           hint={left !== null && left <= 0 ? "No more Factory requests today" : undefined}
         />
-        <Stat
-          label="Open SAP bills (Factory, not oil)"
-          icon={HiOutlineDocumentText}
-          tone="hold"
-          value={data.open_bills ? formatINR(Math.round(Number(data.open_bills.open))) : "—"}
-          hint={
-            data.open_bills
-              ? `${data.open_bills.bills} bills · packing material ${formatINR(Math.round(Number(data.open_bills.packing)))}`
-              : "SAP could not be read"
-          }
-        />
+        {/* Due bills only (user, 2026-10-16); a click shows them by vendor. */}
+        <button
+          type="button"
+          className="block w-full cursor-pointer rounded-xl text-left focus-visible:outline-2 focus-visible:outline-brand"
+          onClick={() => setShowBills((v) => !v)}
+          aria-expanded={showBills}
+          aria-controls="factory-due-bills"
+          disabled={!data.open_bills}
+        >
+          <Stat
+            label="Due SAP bills (Factory, not oil)"
+            icon={HiOutlineDocumentText}
+            tone="hold"
+            value={data.open_bills ? formatINR(Math.round(Number(data.open_bills.open))) : "—"}
+            hint={
+              data.open_bills
+                ? `${data.open_bills.bills} bills · packing material ${formatINR(Math.round(Number(data.open_bills.packing)))} · ${showBills ? "hide" : "see"} vendors`
+                : "SAP could not be read"
+            }
+          />
+        </button>
       </StatRow>
+
+      {showBills ? <DueBills company={data.company} /> : null}
 
       {data.can_set ? <SetLimit data={data} /> : null}
 

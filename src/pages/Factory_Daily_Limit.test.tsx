@@ -118,3 +118,54 @@ describe("Factory Daily Limit page", () => {
     expect(await screen.findByText(/Saved: ₹6,00,000/)).toBeTruthy();
   });
 });
+
+describe("Factory daily limit: whose it is, and the due bills behind it", () => {
+  it("says on the request form whose limit it is and what it covers, and when it is not applied", () => {
+    const query = { data: { ...LIMIT, enabled: false }, isError: false, error: null } as never;
+    render(<FactoryLimitStrip counts query={query} amount={900000} />);
+    const strip = screen.getByText(/Set by Ziyaul for Oil/).closest("[role]") ?? document.body;
+    expect(strip.textContent).toContain("Factory requests");
+    expect(strip.textContent).toContain("Oil purchases are not counted");
+    expect(strip.textContent).toContain("Not applied yet");
+    // Not applied: nothing held back, however large.
+    expect(screen.queryByText(/over today's Factory limit/)).toBeNull();
+  });
+
+  it("shows the due bills by vendor when their figure is clicked", async () => {
+    vi.spyOn(advancePaymentService, "factoryLimit").mockResolvedValue(LIMIT);
+    const bills = vi.spyOn(advancePaymentService, "factoryDueBills").mockResolvedValue({
+      bills: 2,
+      open: "160000",
+      packing: "70000",
+      vendors: [
+        {
+          card_code: "VENDA000101",
+          card_name: "NATIONAL TIN INDUSTRIES",
+          amount: "160000",
+          bills: [
+            {
+              doc_entry: 1,
+              doc_num: 626001,
+              party_ref: "NTI/77",
+              doc_date: "2026-09-01",
+              due_date: "2026-10-01",
+              days_overdue: 15,
+              doc_total: "180000",
+              open: "160000",
+            },
+          ],
+        },
+      ],
+    });
+    const user = userEvent.setup();
+    renderPage(<Factory_Daily_Limit />, { route: "/Factory_Daily_Limit" });
+    const figure = await screen.findByRole("button", { name: /Due SAP bills/ });
+    expect(bills).not.toHaveBeenCalled();
+    await user.click(figure);
+    expect(await screen.findByText("NATIONAL TIN INDUSTRIES")).toBeTruthy();
+    await user.click(screen.getByText("NATIONAL TIN INDUSTRIES"));
+    expect(screen.getByText("626001")).toBeTruthy();
+    expect(screen.getByText("15 days overdue")).toBeTruthy();
+    expect(bills).toHaveBeenCalledWith("OIL");
+  });
+});

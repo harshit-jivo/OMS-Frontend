@@ -582,6 +582,12 @@ export interface SapPurchaseOrder {
   attachments: SapRelatedAttachment[];
 }
 
+/** SAP's debit notes (A/P credit memos) against a bill, or a PO's bills: their gross total and numbers. */
+export interface SapDebits {
+  amount: string;
+  notes: number[];
+}
+
 export interface SapOpenInvoice {
   doc_entry: number;
   doc_num: number | null;
@@ -603,6 +609,8 @@ export interface SapOpenInvoice {
   attachment: SapAttachment | null;
   /** What OMS already holds against it. */
   oms?: SapOmsUsage;
+  /** SAP's debit notes against it: their total and numbers. Null when SAP could not be asked. */
+  debits?: SapDebits | null;
 }
 
 /**
@@ -639,6 +647,8 @@ export interface SapOpenPurchaseOrder {
    */
   tds_on_bills?: string | null;
   billed?: number | null;
+  /** SAP's debit notes against its bills: their total and numbers. Null when SAP could not be asked. */
+  debits?: SapDebits | null;
   attachment: SapAttachment | null;
   /** What OMS already holds against it. */
   oms?: SapOmsUsage;
@@ -1304,8 +1314,28 @@ export interface FactoryLimit {
   /** Only Ziyaul may set it. */
   can_set: boolean;
   setter: string;
-  /** SAP's open bills on factory spending other than oil; null when SAP could not be read. */
+  /** SAP's DUE bills (due today or before) on factory spending other than oil; null when SAP could not be read. */
   open_bills: { bills: number; open: string; packing: string } | null;
+}
+
+/** One due bill behind the Factory limit page's figure; `open` is its factory lines' share. */
+export interface FactoryDueBill {
+  doc_entry: number;
+  doc_num: number | null;
+  party_ref: string;
+  doc_date: string | null;
+  due_date: string | null;
+  days_overdue: number | null;
+  doc_total: string;
+  open: string;
+}
+
+/** SAP's due factory bills (`GET /factory-limit/bills/`), by vendor, largest first. */
+export interface FactoryDueBills {
+  bills: number;
+  open: string;
+  packing: string;
+  vendors: Array<{ card_code: string; card_name: string; amount: string; bills: FactoryDueBill[] }>;
 }
 
 /** A G/L account an Account Payment may pay (`GET /payment-accounts/`). */
@@ -1971,6 +2001,12 @@ export const advancePaymentService = {
   async factoryLimit(company: FactoryLimitCompany): Promise<FactoryLimit> {
     const res = await api.get(`${BASE}/factory-limit/`, { params: { company } });
     return unwrap<FactoryLimit>(res.data);
+  },
+
+  /** The due factory bills behind the limit page's figure, by vendor. */
+  async factoryDueBills(company: FactoryLimitCompany): Promise<FactoryDueBills> {
+    const res = await api.get(`${BASE}/factory-limit/bills/`, { params: { company } });
+    return unwrap<FactoryDueBills>(res.data);
   },
 
   /** Ziyaul sets today's Factory daily limit (or a later day's). */

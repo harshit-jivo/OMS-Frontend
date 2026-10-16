@@ -17,6 +17,7 @@ import type {
   SapOpenInvoice,
   SapOmsUsage,
   SapOpenPurchaseOrder,
+  SapDebits,
   SapPaymentAccount,
   SapVendor,
 } from "../../services/advancePaymentService";
@@ -131,6 +132,7 @@ export function invoiceToDocument(
     attachment: toAttachment(invoice.attachment, company, "bill", invoice.doc_entry),
     oms: omsOf(invoice.oms),
     sapTds: invoice.tds != null ? { amount: sapAmount(invoice.tds) } : undefined,
+    sapDebit: debitOf(invoice.debits),
   };
 }
 
@@ -163,6 +165,7 @@ export function purchaseOrderToDocument(
       po.tds_on_bills != null
         ? { amount: sapAmount(po.tds_on_bills), bills: po.billed ?? 0 }
         : undefined,
+    sapDebit: debitOf(po.debits),
   };
 }
 
@@ -219,7 +222,9 @@ export function ledgerToDocument(
     open: sapAmount(doc.open_amount),
     docType: doc.doc_type,
     note:
-      doc.direction === "CREDIT" ? `Owed to the ${owedTo}` : `Owed by the ${owedTo} — reduces the refund`,
+      doc.direction === "CREDIT"
+        ? `Owed to the ${owedTo}`
+        : `Owed by the ${owedTo} — reduces the refund`,
     reference: doc.party_ref || undefined,
     dueDate: doc.due_date || undefined,
     currency: doc.currency || undefined,
@@ -310,10 +315,16 @@ export interface HistoryTarget {
 export function historyTargetOf(doc: OpenDocument, company: string): HistoryTarget | null {
   if (!COMPANY_CODES.includes(company)) return null;
   const co = company as AdvancePaymentCompany;
-  if (doc.ledger) return { company: co, kind: "ledger", docEntry: doc.ledger.entry, line: doc.ledger.line };
+  if (doc.ledger)
+    return { company: co, kind: "ledger", docEntry: doc.ledger.entry, line: doc.ledger.line };
   const match = /^(PCH|POR)-(\d+)$/.exec(doc.id);
   if (!match) return null;
-  return { company: co, kind: match[1] === "PCH" ? "bill" : "po", docEntry: Number(match[2]), line: 0 };
+  return {
+    company: co,
+    kind: match[1] === "PCH" ? "bill" : "po",
+    docEntry: Number(match[2]),
+    line: 0,
+  };
 }
 
 /** "₹10 reserved · ₹40 paid via OMS · ₹50 available", for a picker line; "" when OMS holds nothing. */
@@ -337,11 +348,49 @@ export function omsSummary(doc: OpenDocument): string {
  * knows whether the payment still has TDS to come. A PO never carries TDS in
  * SAP; its bills do, so a PO speaks for the bills raised from it.
  */
+/** SAP's debit notes, as the document carries them; none when the server sent nothing. */
+function debitOf(debits: SapDebits | null | undefined): OpenDocument["sapDebit"] {
+  if (!debits) return undefined;
+  return { amount: sapAmount(debits.amount), notes: debits.notes.map(String) };
+}
+
+/**
+ * "Debit note ₹21,982 (725025903)": the debit notes SAP has against the bill
+ * (or the PO's bills), seen before it is paid; null when it has none.
+ */
+export function sapDebitLabel(doc: OpenDocument): string | null {
+  const debit = doc.sapDebit;
+  if (!debit || debit.amount <= 0) return null;
+  const notes = debit.notes.length === 1 ? "Debit note" : `${debit.notes.length} debit notes`;
+  return `${notes} ${formatINR(debit.amount)} (${debit.notes.join(", ")})`;
+}
+
+/**
+ * What a BILL's debit notes took off it (user, 2026-10-16): SAP counts them in
+ * the bill's "paid", so Original − Debit note − Paid = Open. 0 for anything
+ * else — a PO's debit notes are against its bills, not its open amount.
+ */
+export function billDebit(doc: OpenDocument): number {
+  return doc.id.startsWith("PCH-") && doc.sapDebit ? doc.sapDebit.amount : 0;
+}
+
+/**
+ * What was actually paid against it. A bill OMS tracks already carries what
+ * OMS paid (the server takes its debit notes off the open amount); otherwise
+ * SAP's "paid", which counts the debit notes, less them.
+ */
+export function paidWithoutDebit(doc: OpenDocument): number {
+  if (doc.oms?.tracked) return doc.paid;
+  return Math.max(Math.round((doc.paid - billDebit(doc)) * 100) / 100, 0);
+}
+
 export function sapTdsLabel(doc: OpenDocument): string | null {
   const tds = doc.sapTds;
   if (!tds) return null;
   if (tds.bills === undefined) {
-    return tds.amount > 0 ? `TDS deducted in SAP ${formatINR(tds.amount)}` : "No TDS deducted in SAP";
+    return tds.amount > 0
+      ? `TDS deducted in SAP ${formatINR(tds.amount)}`
+      : "No TDS deducted in SAP";
   }
   if (tds.bills === 0) return "Not billed yet — no TDS deducted in SAP";
   const bills = `${tds.bills} ${tds.bills === 1 ? "bill" : "bills"}`;
