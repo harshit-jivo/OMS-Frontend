@@ -374,6 +374,17 @@ export default function Payments_Expenses() {
       /* the choice is simply not remembered */
     }
   };
+  // A budget head's owner sees their own head's board and nothing else
+  // (user, 2026-10-16): no Payment requests view, no switch.
+  const me = useQuery({
+    queryKey: ["budget-board", "me"],
+    queryFn: () => advancePaymentService.budgetBoardMe(),
+    staleTime: 10 * 60_000,
+    retry: 1,
+  });
+  if (me.data?.view && !me.data.can_switch) return <BudgetBoard viewSwitch={null} />;
   const viewSwitch = <ViewSwitch view={view} onChange={setView} />;
+  // Until it is known, only Budgets is shown: an owner must never see the requests.
+  if (me.isPending && view === "requests") return null;
   return view === "budgets" ? <BudgetBoard viewSwitch={viewSwitch} /> : <RequestsBoard viewSwitch={viewSwitch} />;
 }

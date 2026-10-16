@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -15,34 +15,78 @@ import { changeLabel, compactINR, presetRange } from "./expenseDashboard/format"
 import { DWELL_STORAGE_KEY, PAUSED_STORAGE_KEY } from "./expenseDashboard/rotation";
 
 const row = (account: string, amount: number) => ({
-  date: "2026-09-10", doc_num: 1, trans_id: 1, budget: "Factory", sub_budget: "PLANT", variety: "",
-  account, branch: "OIL", kind: "Direct", category: "Operations & Factory", amount, remarks: "",
+  date: "2026-09-10",
+  doc_num: 1,
+  trans_id: 1,
+  budget: "Factory",
+  sub_budget: "PLANT",
+  variety: "",
+  account,
+  branch: "OIL",
+  kind: "Direct",
+  category: "Operations & Factory",
+  amount,
+  remarks: "",
 });
 
 const DATA: ExpenseDashboard = {
-  period: { from: "2026-09-01", to: "2026-09-30", days: 30, previous_from: "2026-08-02", previous_to: "2026-08-31" },
+  period: {
+    from: "2026-09-01",
+    to: "2026-09-30",
+    days: 30,
+    previous_from: "2026-08-02",
+    previous_to: "2026-08-31",
+  },
   filters: { branch: "", kind: "all", include_salary: false, branches: ["OIL", "BEVERAGES"] },
   kpis: {
-    total: 17025855, previous: 10599588, change: 60.6, direct: 12422544, indirect: 4603311, entries: 1969,
-    per_day: 567528, salary: 860332, salary_included: false,
+    total: 17025855,
+    previous: 10599588,
+    change: 60.6,
+    direct: 12422544,
+    indirect: 4603311,
+    entries: 1969,
+    per_day: 567528,
+    salary: 860332,
+    salary_included: false,
     top_head: { name: "Interest", amount: 5457719, share: 32.1 },
   },
-  trend: [{ month: "2026-09", label: "Sep 26", direct: 12422544, indirect: 4603311, total: 17025855 }],
+  trend: [
+    { month: "2026-09", label: "Sep 26", direct: 12422544, indirect: 4603311, total: 17025855 },
+  ],
   categories: [{ name: "Sales & Marketing", amount: 5473143, entries: 400, share: 32.1 }],
-  heads: [{
-    name: "Factory", amount: 3235412, entries: 104, share: 19, previous: 2838000, change: 14,
-    accounts: [{ name: "ELECTRICITY", amount: 1914328, entries: 12, share: 59 }],
-    sub_budgets: [{ name: "PLANT", amount: 3235412, entries: 104, share: 100 }],
-    rows: [row("ELECTRICITY", 1914328)],
-  }],
+  heads: [
+    {
+      name: "Factory",
+      amount: 3235412,
+      entries: 104,
+      share: 19,
+      previous: 2838000,
+      change: 14,
+      accounts: [{ name: "ELECTRICITY", amount: 1914328, entries: 12, share: 59 }],
+      sub_budgets: [{ name: "PLANT", amount: 3235412, entries: 104, share: 100 }],
+      rows: [row("ELECTRICITY", 1914328)],
+    },
+  ],
   accounts: [{ name: "INTEREST ON BANK LOAN", amount: 5431818, entries: 50, share: 32 }],
-  varieties: [], branches: [{ name: "OIL", amount: 12951676, entries: 1302, share: 76.1 }],
+  varieties: [],
+  branches: [{ name: "OIL", amount: 12951676, entries: 1302, share: 76.1 }],
   largest: [row("INTEREST ON BANK LOAN", 2500000)],
   oms: {
     by_status: { IN_APPROVAL: { count: 1, amount: 10000 }, COMPLETED: { count: 1, amount: 1000 } },
     waiting: [{ stage: "Payment Approval", count: 1, amount: 10000 }],
-    latest: [{ id: 62, request_no: "AP-2026-0062", company: "OIL", payee: "Ravi", budget: "Factory",
-               amount: 10000, status: "IN_APPROVAL", stage: "Payment Approval", created_on: "2026-10-09T10:00:00Z" }],
+    latest: [
+      {
+        id: 62,
+        request_no: "AP-2026-0062",
+        company: "OIL",
+        payee: "Ravi",
+        budget: "Factory",
+        amount: 10000,
+        status: "IN_APPROVAL",
+        stage: "Payment Approval",
+        created_on: "2026-10-09T10:00:00Z",
+      },
+    ],
   },
 };
 
@@ -61,16 +105,34 @@ const OMS: OmsDashboard = {
   },
   trend: [{ month: "2026-10", label: "Oct 26", raised: 234955, paid: 26221 }],
   by_type: [{ name: "Vendor", amount: 271961, entries: 9, share: 69 }],
-  bill_or_advance: [{ name: "Advance", amount: 336735, entries: 6, share: 85.4 }, { name: "Bill", amount: 45226, entries: 5, share: 11.5 }],
+  bill_or_advance: [
+    { name: "Advance", amount: 336735, entries: 6, share: 85.4 },
+    { name: "Bill", amount: 45226, entries: 5, share: 11.5 },
+  ],
   by_company: [{ name: "OIL", amount: 394206, entries: 14, share: 100 }],
   top_payees: [{ name: "RAJ TECHNOPACK PVT LTD", amount: 700215, entries: 1, share: 60 }],
-  by_purpose: [{ name: "Freight Outward", amount: 185850, entries: 2, share: 47 }, { name: "Expense", amount: 12245, entries: 3, share: 3 }],
+  by_purpose: [
+    { name: "Freight Outward", amount: 185850, entries: 2, share: 47 },
+    { name: "Expense", amount: 12245, entries: 3, share: 3 },
+  ],
   by_budget: [{ name: "Del Bkhp", amount: 252710, entries: 5, share: 64 }],
   waiting_at: [{ name: "Final Approval", amount: 215850, entries: 2, share: 60.3 }],
   waiting_on: [{ name: "Gurpreet Vg", amount: 215850, entries: 2, share: 60.3 }],
   ageing: [{ name: "Over 15 days", entries: 3, amount: 120000 }],
-  oldest: [{ id: 2, request_no: "AP-2026-0002", company: "OIL", payee: "ABC", type: "Vendor", kind: "Bill",
-             amount: 30000, stage: "Payment Approval", waiting_on: "taran", days: 18.9 }],
+  oldest: [
+    {
+      id: 2,
+      request_no: "AP-2026-0002",
+      company: "OIL",
+      payee: "ABC",
+      type: "Vendor",
+      kind: "Bill",
+      amount: 30000,
+      stage: "Payment Approval",
+      waiting_on: "taran",
+      days: 18.9,
+    },
+  ],
   expenses: DATA.oms,
 };
 
@@ -78,6 +140,11 @@ beforeEach(() => {
   localStorage.removeItem(DWELL_STORAGE_KEY);
   localStorage.removeItem(PAUSED_STORAGE_KEY);
   localStorage.removeItem("payments-expenses-board-view");
+  // Not a budget head's owner, unless a test says so.
+  vi.spyOn(advancePaymentService, "budgetBoardMe").mockResolvedValue({
+    view: null,
+    can_switch: false,
+  });
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -101,7 +168,13 @@ describe("the expense board's numbers", () => {
   });
 });
 
-const head = (key: string, name: string, base: number, current: number, extra: Partial<BudgetHead> = {}): BudgetHead => ({
+const head = (
+  key: string,
+  name: string,
+  base: number,
+  current: number,
+  extra: Partial<BudgetHead> = {},
+): BudgetHead => ({
   key,
   name,
   owners: [],
@@ -122,7 +195,15 @@ const head = (key: string, name: string, base: number, current: number, extra: P
           base,
           current,
           entries: 1,
-          postings: [{ date: "2026-10-09", company: "OIL", doc_num: 4501, remarks: "October, Mundka", amount: current }],
+          postings: [
+            {
+              date: "2026-10-09",
+              company: "OIL",
+              doc_num: 4501,
+              remarks: "October, Mundka",
+              amount: current,
+            },
+          ],
         },
       ],
     },
@@ -131,7 +212,15 @@ const head = (key: string, name: string, base: number, current: number, extra: P
 });
 
 const BOARD: BudgetBoard = {
-  current: { month: "2026-10", label: "Oct 2026", from: "2026-10-01", to: "2026-10-14", days: 31, elapsed: 14, pace: 0.4516 },
+  current: {
+    month: "2026-10",
+    label: "Oct 2026",
+    from: "2026-10-01",
+    to: "2026-10-14",
+    days: 31,
+    elapsed: 14,
+    pace: 0.4516,
+  },
   baseline: { month: "2026-08", label: "Aug 2026", from: "2026-08-01", to: "2026-08-31" },
   // The rows' sum: every posting is in one of them.
   total: { base: 30339621, current: 19856289, ratio: 0.6545 },
@@ -163,7 +252,15 @@ const BOARD: BudgetBoard = {
                   base: 16549519,
                   current: 11153254,
                   entries: 1,
-                  postings: [{ date: "2026-10-13", company: "MART", doc_num: 7101, remarks: "RECO ADJUSTMENT", amount: 11153254 }],
+                  postings: [
+                    {
+                      date: "2026-10-13",
+                      company: "MART",
+                      doc_num: 7101,
+                      remarks: "RECO ADJUSTMENT",
+                      amount: 11153254,
+                    },
+                  ],
                 },
               ],
             },
@@ -205,17 +302,20 @@ describe("Payments & Expenses: budget heads", () => {
     renderPage(<Payments_Expenses />, { route: "/Payments_Expenses" });
     await screen.findByRole("button", { name: /^Sales:/ });
 
-    expect(screen.getAllByRole("region").map((r) => r.getAttribute("aria-label")).filter((n) => n !== "Budget heads board")).toEqual([
-      "This month",
-      "Sales",
-      "Factory",
-      "Other Heads",
-      "Where it went",
-      "Top 5 spends",
-    ]);
+    expect(
+      screen
+        .getAllByRole("region")
+        .map((r) => r.getAttribute("aria-label"))
+        .filter((n) => n !== "Budget heads board"),
+    ).toEqual(["This month", "Sales", "Factory", "Other Heads", "Where it went", "Top 5 spends"]);
     expect(linesIn("Sales")).toEqual(["Sales", "Sales, Oil", "Sales, Mart", "Sales, Beverages"]);
     // Mart has factory spending too: it gets a line, so the lines add up to the card.
-    expect(linesIn("Factory")).toEqual(["Factory", "Factory, Oil", "Factory, Beverages", "Factory, Mart"]);
+    expect(linesIn("Factory")).toEqual([
+      "Factory",
+      "Factory, Oil",
+      "Factory, Beverages",
+      "Factory, Mart",
+    ]);
     // Three heads: the card itself opens nothing, its lines do. Other is only ₹62: no line.
     expect(linesIn("Other Heads")).toEqual(["Back Office", "Freight (delivery)", "Bank Interest"]);
 
@@ -232,7 +332,9 @@ describe("Payments & Expenses: budget heads", () => {
     // Other Heads' figure is its three heads together.
     expect(region("Other Heads").textContent).toContain("Total ₹1.04 Cr");
     expect(screen.queryByRole("button", { name: /^Other:/ })).toBeNull();
-    expect(screen.getByRole("heading", { name: /Payments & Expenses/ }).textContent).toContain("day 14 of 31");
+    expect(screen.getByRole("heading", { name: /Payments & Expenses/ }).textContent).toContain(
+      "day 14 of 31",
+    );
   });
 
   it("shows the whole month in the banner, and the top 5 spends as a half pie (where it went) and as bars", async () => {
@@ -264,12 +366,16 @@ describe("Payments & Expenses: budget heads", () => {
     expect(freight.querySelector(".bgb-pct-pill")?.textContent).toBe("▲ 120%");
     // Sales: 66% of its total with 45% of the month gone.
     expect(region("Sales").getAttribute("data-state")).toBe("ahead");
-    expect(card(/^Sales:/).querySelector(".bgb-pct-pill")?.getAttribute("data-state")).toBe("ahead");
+    expect(
+      card(/^Sales:/)
+        .querySelector(".bgb-pct-pill")
+        ?.getAttribute("data-state"),
+    ).toBe("ahead");
     expect(card(/^Sales:/).querySelector(".bgb-pct-pill")?.textContent).toBe("66%");
     expect(card(/^Back Office:/).querySelector(".bgb-pct-pill")?.textContent).toBe("2%");
   });
 
-  it("opens a head's breakdown — company cards, then rows that open onto account cards — with no chart, and closes it with Escape", async () => {
+  it("opens a head's breakdown — company cards, then its budgets, accounts and postings a level at a time — with no chart, and closes it with Escape", async () => {
     vi.spyOn(advancePaymentService, "budgetBoard").mockResolvedValue(BOARD);
     const user = userEvent.setup();
     renderPage(<Payments_Expenses />, { route: "/Payments_Expenses" });
@@ -280,17 +386,20 @@ describe("Payments & Expenses: budget heads", () => {
     expect(within(dialog).getByRole("heading", { name: "Where it went" })).toBeTruthy();
     expect(dialog.querySelector(".recharts-wrapper, svg.recharts-surface")).toBeNull();
 
-    // The biggest budget starts open, showing its accounts as cards; a card opens to its postings.
-    const budget = dialog.querySelector("details.bgb-tree-budget") as HTMLDetailsElement;
-    expect(budget.open).toBe(true);
-    expect(budget.textContent).toContain("Bank Interest › MAIN");
-    const account = budget.querySelector("details.bgb-account") as HTMLDetailsElement;
-    expect(account.textContent).toContain("Total ₹41.6 L");
-    expect(account.open).toBe(false);
-    await user.click(within(account).getByText("BANK INTEREST EXPENSES"));
-    expect(account.open).toBe(true);
-    expect(account.textContent).toContain("October, Mundka");
-    expect(account.textContent).toContain("₹19,87,713");
+    // A level at a time: its budgets as cards; a budget, its accounts; an account, its postings.
+    await user.click(within(dialog).getByRole("button", { name: /^Bank Interest › MAIN:/ }));
+    const account = within(dialog).getByRole("button", { name: /^Bank Interest Expenses:/ });
+    expect(account.textContent).toContain("of ₹41.6 L");
+    await user.click(account);
+    const postings = within(dialog).getByRole("table");
+    expect(postings.textContent).toContain("October, Mundka");
+    expect(postings.textContent).toContain("₹19,87,713");
+    expect(within(dialog).getByRole("navigation", { name: "Where you are" }).textContent).toBe(
+      "Budgets›Bank Interest › MAIN›Bank Interest Expenses",
+    );
+    // …and back up the trail.
+    await user.click(within(dialog).getByRole("button", { name: "Budgets" }));
+    expect(within(dialog).getByRole("button", { name: /^Bank Interest › MAIN:/ })).toBeTruthy();
 
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -305,6 +414,20 @@ describe("Payments & Expenses: budget heads", () => {
     expect(mart.textContent).toContain("Total ₹1.65 Cr");
   });
 
+  it("opens one company of a head from its card, and goes back to all of them", async () => {
+    vi.spyOn(advancePaymentService, "budgetBoard").mockResolvedValue(BOARD);
+    const user = userEvent.setup();
+    renderPage(<Payments_Expenses />, { route: "/Payments_Expenses" });
+    await user.click(await screen.findByRole("button", { name: /^Sales:/ }));
+    const sales = screen.getByRole("dialog", { name: "Sales" });
+    await user.click(within(sales).getByRole("button", { name: /^Mart:.*Open Mart alone/ }));
+    const mart = screen.getByRole("dialog", { name: "Sales · Mart" });
+    expect(mart.querySelector(".bgb-owner")?.textContent).toBe("Prabhjot");
+    expect(mart.textContent).toContain("ECOM › E-COM");
+    await user.click(within(mart).getByRole("button", { name: "← All companies" }));
+    expect(screen.getByRole("dialog", { name: "Sales" })).toBeTruthy();
+  });
+
   it("reads another month when one is chosen", async () => {
     const load = vi.spyOn(advancePaymentService, "budgetBoard").mockResolvedValue(BOARD);
     const user = userEvent.setup();
@@ -312,7 +435,119 @@ describe("Payments & Expenses: budget heads", () => {
     await screen.findByRole("button", { name: /^Sales:/ });
     const month = screen.getByLabelText("Month") as HTMLSelectElement;
     await user.selectOptions(month, month.options[1].value);
-    expect(load).toHaveBeenLastCalledWith(month.options[1].value);
+    expect(load).toHaveBeenLastCalledWith(month.options[1].value, "");
+  });
+});
+
+describe("Payments & Expenses: each owner's own board", () => {
+  const SALES_OIL = { key: "SALES_OIL", label: "Sales · Oil", owner: "Raju Vg" };
+  const sales = BOARD.heads[0];
+  const oil = sales.by_company.find((c) => c.company === "OIL")!;
+  const RAJU: BudgetBoard = {
+    ...BOARD,
+    total: { base: oil.base, current: oil.current, ratio: oil.current / oil.base },
+    heads: [
+      {
+        ...sales,
+        base: oil.base,
+        current: oil.current,
+        by_company: [oil],
+        owners: [sales.owners[0]],
+      },
+    ],
+    costs: [],
+    view: SALES_OIL,
+    can_switch: false,
+    views: [],
+  };
+
+  it("shows an owner their own head, with no switch to the payment requests", async () => {
+    vi.spyOn(advancePaymentService, "budgetBoardMe").mockResolvedValue({
+      view: SALES_OIL,
+      can_switch: false,
+    });
+    vi.spyOn(advancePaymentService, "budgetBoard").mockResolvedValue(RAJU);
+    localStorage.setItem("payments-expenses-board-view", "requests");
+    renderPage(<Payments_Expenses />, { route: "/Payments_Expenses" });
+    expect(await screen.findByRole("button", { name: /^Sales:/ })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: /Payments & Expenses/ }).textContent).toContain(
+      "Sales · Oil · Raju Vg",
+    );
+    expect(screen.queryByRole("button", { name: "Payment requests" })).toBeNull();
+    expect(screen.queryByLabelText("View as")).toBeNull();
+    expect(screen.getByRole("region", { name: "This month" }).textContent).toContain("₹5.4 L");
+    // Laid out as the whole board: big cards, where it went, the top spends.
+    expect(screen.getByRole("region", { name: "Where it went" })).toBeTruthy();
+    expect(
+      screen
+        .getByRole("region", { name: "Top 5 spends" })
+        .querySelector("[role=img]")
+        ?.getAttribute("aria-label"),
+    ).toBe("This month's MAIN ₹1.17 Cr");
+    // A big card of one budget lists its accounts, not itself again, and opens
+    // straight onto them; an account opens onto its postings.
+    const card = screen.getByRole("button", { name: /^Sales:/ });
+    expect(card.textContent).toContain("Total ₹1.77 Cr");
+    expect(card.closest("section")?.textContent).toContain("Sales Expenses");
+    const user = userEvent.setup();
+    await user.click(card);
+    const dialog = screen.getByRole("dialog", { name: "Sales" });
+    expect(within(dialog).getByRole("heading", { name: "Accounts" })).toBeTruthy();
+    await user.click(within(dialog).getByRole("button", { name: /^Sales Expenses:/ }));
+    expect(within(dialog).getByRole("table").textContent).toContain("October, Mundka");
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("says when nothing is booked yet this month, rather than drawing empty charts", async () => {
+    vi.spyOn(advancePaymentService, "budgetBoardMe").mockResolvedValue({
+      view: SALES_OIL,
+      can_switch: false,
+    });
+    const zero = (tree: BudgetHead["tree"]) =>
+      tree.map((b) => ({
+        ...b,
+        current: 0,
+        accounts: b.accounts.map((a) => ({ ...a, current: 0, postings: [] })),
+      }));
+    vi.spyOn(advancePaymentService, "budgetBoard").mockResolvedValue({
+      ...RAJU,
+      total: { ...RAJU.total, current: 0, ratio: 0 },
+      heads: [{ ...RAJU.heads[0], current: 0, ratio: 0, tree: zero(RAJU.heads[0].tree) }],
+    });
+    renderPage(<Payments_Expenses />, { route: "/Payments_Expenses" });
+    expect(await screen.findByRole("button", { name: /^Sales:/ })).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Where it went" }).textContent).toContain(
+      "Nothing booked in Oct 2026 yet",
+    );
+    expect(screen.getByRole("region", { name: "Top 5 spends" }).textContent).toContain(
+      "Nothing booked in Oct 2026 yet",
+    );
+  });
+
+  it("lets an administrator look at any owner's board as the owner sees it", async () => {
+    const load = vi
+      .spyOn(advancePaymentService, "budgetBoard")
+      .mockImplementation(async (_month, view) =>
+        view
+          ? { ...RAJU, can_switch: true, views: [SALES_OIL] }
+          : { ...BOARD, view: null, can_switch: true, views: [SALES_OIL] },
+      );
+    const user = userEvent.setup();
+    renderPage(<Payments_Expenses />, { route: "/Payments_Expenses" });
+    await screen.findByRole("button", { name: /^Sales:/ });
+    expect(screen.getByRole("button", { name: "Payment requests" })).toBeTruthy();
+    await user.selectOptions(screen.getByLabelText("View as"), "SALES_OIL");
+    expect(await screen.findByRole("region", { name: "Top 5 spends" })).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: /Payments & Expenses/ }).textContent).toContain(
+        "Raju Vg",
+      ),
+    );
+    expect(load).toHaveBeenLastCalledWith(expect.any(String), "SALES_OIL");
+    // Back to everyone.
+    await user.selectOptions(screen.getByLabelText("View as"), "");
+    expect(await screen.findByRole("button", { name: /^Sales:/ })).toBeTruthy();
   });
 });
 
@@ -338,8 +573,12 @@ describe("Payments & Expenses: payment requests", () => {
     expect(panel().textContent).toContain("Gurpreet Vg");
 
     await user.click(tab("Purposes & budgets"));
-    expect(screen.getByRole("region", { name: "By payment purpose" }).textContent).toContain("Freight Outward");
-    expect(screen.getByRole("region", { name: "By budget head" }).textContent).toContain("Del Bkhp");
+    expect(screen.getByRole("region", { name: "By payment purpose" }).textContent).toContain(
+      "Freight Outward",
+    );
+    expect(screen.getByRole("region", { name: "By budget head" }).textContent).toContain(
+      "Del Bkhp",
+    );
 
     fireEvent.keyDown(window, { key: "5" });
     expect(await screen.findByRole("tabpanel", { name: "Expenses" })).toBeTruthy();

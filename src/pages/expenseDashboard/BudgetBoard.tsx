@@ -234,6 +234,8 @@ function headLine(head: BudgetHead): Line {
     open: { key: head.key },
     label: head.name,
     name: head.name,
+    // A whole head's one owner (Back Office: Nirmal Didi), named on its line.
+    owner: head.owners.find((o) => !o.company)?.name,
     base: head.base,
     current: head.current,
     tone: "spent",
@@ -497,7 +499,10 @@ function halfPieLabels(slices: ReadonlyArray<{ name: string; value: number }>) {
  * round the circle in this order). Short names, to fit inside a slice or
  * under a bar.
  */
-function spendsOf(costs: BudgetHead[]) {
+/** A slice of the half pie, or a bar: what it is, its rupees, its hue. */
+type Slice = { key: string; name: string; value: number; fill: string };
+
+function spendsOf(costs: BudgetHead[]): Slice[] {
   const short: Record<string, string> = { FINANCE: "Interest" };
   return costs
     .map((c) => ({
@@ -509,9 +514,21 @@ function spendsOf(costs: BudgetHead[]) {
     .sort((a, b) => b.value - a.value);
 }
 
-/** Where this month's money went: the top 5 spends as a half pie, largest from the left (user, 2026-10-15). */
-function WhereItWent({ costs, onOpen }: { costs: BudgetHead[]; onOpen: (open: Opening) => void }) {
-  const slices = spendsOf(costs);
+/**
+ * Where this month's money went, as a half pie, largest from the left (user,
+ * 2026-10-15): the whole board's top 5 spends, or an owner's accounts. A
+ * slice opens its breakdown where `onPick` says how.
+ */
+function WhereItWent({
+  slices,
+  onPick,
+  empty = "₹0",
+}: {
+  slices: Slice[];
+  onPick?: (key: string) => void;
+  /** Said in place of the chart when nothing was spent. */
+  empty?: string;
+}) {
   const total = slices.reduce((sum, s) => sum + s.value, 0);
   return (
     <section className="bgb-chart" aria-label="Where it went">
@@ -530,12 +547,12 @@ function WhereItWent({ costs, onOpen }: { costs: BudgetHead[]; onOpen: (open: Op
                   dataKey="value"
                   nameKey="name"
                   // Left of centre: the thin slices, labelled outside, are on the right.
-                  cx="42%"
+                  cx="36%"
                   cy="100%"
                   innerRadius={0}
                   // Of half the box's height: the box is 2.6 times as wide as it is
                   // tall, room beside the pie for the thin slices' labels.
-                  outerRadius="184%"
+                  outerRadius="172%"
                   startAngle={180}
                   endAngle={0}
                   label={halfPieLabels(slices)}
@@ -543,10 +560,10 @@ function WhereItWent({ costs, onOpen }: { costs: BudgetHead[]; onOpen: (open: Op
                   stroke="#fff"
                   strokeWidth={2}
                   isAnimationActive={false}
-                  onClick={(_slice, index) => onOpen({ key: slices[index].key })}
+                  onClick={(_slice, index) => onPick?.(slices[index].key)}
                 >
                   {slices.map((s) => (
-                    <Cell key={s.key} fill={s.fill} cursor="pointer" />
+                    <Cell key={s.key} fill={s.fill} cursor={onPick ? "pointer" : "default"} />
                   ))}
                 </Pie>
                 <Tooltip formatter={(value, name) => [fullINR(Number(value) || 0), String(name)]} />
@@ -555,7 +572,7 @@ function WhereItWent({ costs, onOpen }: { costs: BudgetHead[]; onOpen: (open: Op
           </div>
         </div>
       ) : (
-        <span className="bgb-chart-empty">₹0</span>
+        <span className="bgb-chart-empty">{empty}</span>
       )}
     </section>
   );
@@ -576,11 +593,29 @@ function barFigure({ x, y, width, value }: LabelProps) {
 }
 
 /** The top 5 spends as bars, each with its figure on top. A bar opens its breakdown. */
-function TopSpends({ costs, onOpen }: { costs: BudgetHead[]; onOpen: (open: Opening) => void }) {
-  const bars = spendsOf(costs);
+function TopSpends({
+  bars,
+  onPick,
+  title = "Top 5 spends",
+  empty = "₹0",
+}: {
+  bars: Slice[];
+  onPick: (key: string) => void;
+  title?: string;
+  /** Said in place of the chart when nothing was spent. */
+  empty?: string;
+}) {
+  if (!bars.some((b) => b.value > 0)) {
+    return (
+      <section className="bgb-chart" aria-label={title}>
+        <h2 className="bgb-chart-title">{title}</h2>
+        <span className="bgb-chart-empty">{empty}</span>
+      </section>
+    );
+  }
   return (
-    <section className="bgb-chart" aria-label="Top 5 spends">
-      <h2 className="bgb-chart-title">Top 5 spends</h2>
+    <section className="bgb-chart" aria-label={title}>
+      <h2 className="bgb-chart-title">{title}</h2>
       <div
         className="bgb-chart-area"
         role="img"
@@ -608,7 +643,7 @@ function TopSpends({ costs, onOpen }: { costs: BudgetHead[]; onOpen: (open: Open
               radius={[6, 6, 0, 0]}
               isAnimationActive={false}
               cursor="pointer"
-              onClick={(_bar, index) => onOpen({ key: bars[index].key })}
+              onClick={(_bar, index) => onPick(bars[index].key)}
             >
               {bars.map((b) => (
                 <Cell key={b.key} fill={b.fill} />
@@ -630,7 +665,16 @@ const shortDate = (iso: string | null) =>
     : "—";
 
 /** A company's card: this month, August beside it, and how far into August. */
-function CompanyCards({ head, pace }: { head: BudgetHead; pace: number }) {
+function CompanyCards({
+  head,
+  pace,
+  onPick,
+}: {
+  head: BudgetHead;
+  pace: number;
+  /** A company's card opens that company alone (user, 2026-10-16). */
+  onPick?: (company: string) => void;
+}) {
   if (!head.by_company.length) return null;
   // A split head's companies in the board's order (Sales: Oil, Mart, Beverages).
   const split = SPLITS[head.key] ?? [];
@@ -645,8 +689,20 @@ function CompanyCards({ head, pace }: { head: BudgetHead; pace: number }) {
         const ratio = c.base ? c.current / c.base : null;
         const state = stateOf(ratio, pace);
         const owner = head.owners.find((o) => o.company === c.company);
+        const Tag = onPick ? "button" : "div";
         return (
-          <div key={c.company} className="bgb-company" data-state={state}>
+          <Tag
+            key={c.company}
+            className="bgb-company"
+            data-state={state}
+            {...(onPick
+              ? {
+                  type: "button" as const,
+                  onClick: () => onPick(c.company),
+                  "aria-label": `${c.label}: ${compactINR(c.current)} this month, ${percent(ratio)} of ${compactINR(c.base)}. Open ${c.label} alone.`,
+                }
+              : {})}
+          >
             <span className="bgb-company-name">
               {c.label}
               {owner ? <b className="bgb-owner">{owner.name}</b> : null}
@@ -657,135 +713,183 @@ function CompanyCards({ head, pace }: { head: BudgetHead; pace: number }) {
               <Meter ratio={ratio} state={state} label={`${c.label} against August`} />
               <b className="bgb-pct">{percent(ratio)}</b>
             </span>
-          </div>
+          </Tag>
         );
       })}
     </div>
   );
 }
 
-/** One collapsible row's line: its name, August, this month, and the share of August. */
-function RowLine({
+/** "REPAIR AND MAINTENANCE" -> "Repair And Maintenance". */
+const titled = (name: string) => name.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+
+type AccountData = BudgetHead["tree"][number]["accounts"][number];
+
+/** An account's largest postings this month, as a table. */
+function PostingTable({ postings }: { postings: AccountData["postings"] }) {
+  if (!postings.length) return <p className="bgb-empty">No postings this month.</p>;
+  return (
+    <table className="bgb-postings-table">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Company</th>
+          <th>Document</th>
+          <th>Narration</th>
+          <th className="bgb-num">Amount</th>
+        </tr>
+      </thead>
+      <tbody>
+        {postings.map((p, k) => (
+          <tr key={k}>
+            <td>{shortDate(p.date)}</td>
+            <td>{COMPANY_LABEL[p.company] ?? p.company}</td>
+            <td className="bgb-num-plain">{p.doc_num ?? "—"}</td>
+            <td className="bgb-narration">{p.remarks || "—"}</td>
+            <td className="bgb-num">
+              <b>{fullINR(p.amount)}</b>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+/**
+ * A budget or an account, as a card: its name, what it spent, a bar, its total
+ * — nothing to read past the figures. A click goes a level down.
+ */
+function FigureCard({
   name,
   base,
   current,
-  entries,
+  pace,
+  opens,
+  onOpen,
 }: {
   name: string;
   base: number;
   current: number;
-  entries: number;
+  pace: number;
+  /** What a click opens, for a screen reader: "its accounts". */
+  opens: string;
+  onOpen?: () => void;
 }) {
-  const over = base > 0 && current > base;
-  return (
-    <summary className="bgb-tree-line">
-      <span className="bgb-tree-name">
-        {name}
-        {entries ? (
-          <em>
-            {entries.toLocaleString("en-IN")} {entries === 1 ? "entry" : "entries"}
-          </em>
-        ) : null}
-      </span>
-      <span className="bgb-tree-base">{compactINR(base)}</span>
-      <b className="bgb-tree-now">{compactINR(current)}</b>
-      <span className="bgb-tree-pct" data-state={over ? "over" : undefined}>
-        {base ? percent(current / base) : current ? "new" : "—"}
-      </span>
-    </summary>
-  );
-}
-
-type AccountData = BudgetHead["tree"][number]["accounts"][number];
-
-/** A posting: date · company · what it was · amount. */
-function Postings({ postings }: { postings: AccountData["postings"] }) {
-  return (
-    <ul className="bgb-postings">
-      {postings.map((p, k) => (
-        <li key={k}>
-          <span className="bgb-posting-date">{shortDate(p.date)}</span>
-          <span className="bgb-posting-co">{COMPANY_LABEL[p.company] ?? p.company}</span>
-          <span className="bgb-posting-text" title={p.remarks}>
-            {p.remarks || `Entry ${p.doc_num ?? ""}`}
-          </span>
-          <b>{fullINR(p.amount)}</b>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-/**
- * A G/L account under an open budget, as a card: this month, August, the bar.
- * With postings this month it opens — taking the whole width — to list them;
- * without, it is just the card.
- */
-function AccountCard({ account, pace }: { account: AccountData; pace: number }) {
-  const ratio = account.base ? account.current / account.base : null;
+  const ratio = ratioOf(base, current);
   const state = stateOf(ratio, pace);
-  const face = (
+  const said = `${name}: ${compactINR(current)} this month, ${percent(ratio)} of ${compactINR(base)}.`;
+  // Name, amount, a thin bar, one quiet line — no pill, no count (user, 2026-10-16).
+  const body = (
     <>
-      <span className="bgb-account-top">
-        <b className="bgb-account-name" title={account.name}>
-          {account.name}
+      <b className="bgb-bcard-name">{name}</b>
+      <b className="bgb-bcard-value">{compactINR(current)}</b>
+      <Meter ratio={ratio} state={state} label={`${name} against its total`} />
+      <span className="bgb-bcard-foot">
+        <span>of {compactINR(base)}</span>
+        <b data-state={state === "ok" ? undefined : state}>
+          {state === "over" ? "▲ " : ""}
+          {percent(ratio)}
         </b>
-        {account.entries ? (
-          <em>
-            {account.entries.toLocaleString("en-IN")} {account.entries === 1 ? "entry" : "entries"}
-          </em>
-        ) : null}
-      </span>
-      <span className="bgb-figure">
-        <b className="bgb-account-value">{compactINR(account.current)}</b>
-        <span className="bgb-of">Total {compactINR(account.base)}</span>
-      </span>
-      <span className="bgb-measure">
-        <Meter ratio={ratio} state={state} label={`${account.name} against August`} />
-        <b className="bgb-pct">{account.base ? percent(ratio) : account.current ? "new" : "—"}</b>
       </span>
     </>
   );
-  if (!account.postings.length) {
-    return (
-      <div className="bgb-account" data-state={state}>
-        <span className="bgb-account-face">{face}</span>
-      </div>
-    );
-  }
-  return (
-    <details className="bgb-account" data-state={state}>
-      <summary className="bgb-account-face">{face}</summary>
-      <Postings postings={account.postings} />
-    </details>
+  return onOpen ? (
+    <button
+      type="button"
+      className="bgb-bcard"
+      data-state={state}
+      onClick={onOpen}
+      aria-label={`${said} Open ${opens}.`}
+    >
+      {body}
+    </button>
+  ) : (
+    <div className="bgb-bcard" data-state={state} data-still="true" aria-label={said}>
+      {body}
+    </div>
   );
 }
 
 /**
- * What a head is made of: each SAP budget › sub budget as a row that opens
- * onto its G/L accounts, as cards; an account card opens onto its largest
- * postings this month. The biggest budget starts open.
+ * What a head (or a company's part of it, or one budget) is made of, a level
+ * at a time (user, 2026-10-16): its budgets as cards; a budget's accounts as
+ * cards; an account's largest postings as a table — with a trail back up.
+ * `start`: open on that budget's accounts.
  */
-function Breakdown({ tree, pace }: { tree: BudgetHead["tree"]; pace: number }) {
+function Drill({ tree, pace, start }: { tree: BudgetHead["tree"]; pace: number; start?: string }) {
+  const [budgetName, setBudgetName] = useState(start);
+  const [accountName, setAccountName] = useState<string>();
+  const budget = tree.find((b) => b.name === budgetName);
+  const account = budget?.accounts.find((a) => a.name === accountName);
   if (!tree.length) return <p className="bgb-empty">Nothing posted here in either month.</p>;
+
+  const trail: Array<{ label: string; go?: () => void }> = [
+    {
+      label: "Budgets",
+      go: budget
+        ? () => {
+            setBudgetName(undefined);
+            setAccountName(undefined);
+          }
+        : undefined,
+    },
+  ];
+  if (budget)
+    trail.push({ label: budget.name, go: account ? () => setAccountName(undefined) : undefined });
+  if (account) trail.push({ label: titled(account.name) });
+
   return (
-    <div className="bgb-tree" role="list">
-      <div className="bgb-tree-head" aria-hidden="true">
-        <span>SAP budget › sub budget</span>
-        <span>Total</span>
-        <span>Spent</span>
-        <span />
-      </div>
-      {tree.map((budget, i) => (
-        <details key={budget.name} className="bgb-tree-budget" role="listitem" open={i === 0}>
-          <RowLine {...budget} />
-          <div className="bgb-account-cards">
-            {budget.accounts.map((account) => (
-              <AccountCard key={account.name} account={account} pace={pace} />
+    <div className="bgb-drill">
+      <nav className="bgb-crumbs" aria-label="Where you are">
+        {trail.map((step, i) => (
+          <span key={i} className="bgb-crumb">
+            {i ? <i aria-hidden="true">›</i> : null}
+            {step.go ? (
+              <button type="button" onClick={step.go}>
+                {step.label}
+              </button>
+            ) : (
+              <b aria-current="page">{step.label}</b>
+            )}
+          </span>
+        ))}
+      </nav>
+      {account ? (
+        <PostingTable postings={account.postings} />
+      ) : budget ? (
+        budget.accounts.length ? (
+          <div className="bgb-bcards">
+            {budget.accounts.map((a) => (
+              <FigureCard
+                key={a.name}
+                name={titled(a.name)}
+                base={a.base}
+                current={a.current}
+                pace={pace}
+                opens="its postings"
+                onOpen={a.postings.length ? () => setAccountName(a.name) : undefined}
+              />
             ))}
           </div>
-        </details>
-      ))}
+        ) : (
+          <p className="bgb-empty">Nothing posted here in either month.</p>
+        )
+      ) : (
+        <div className="bgb-bcards">
+          {tree.map((b) => (
+            <FigureCard
+              key={b.name}
+              name={b.name}
+              base={b.base}
+              current={b.current}
+              pace={pace}
+              opens="its accounts"
+              onOpen={() => setBudgetName(b.name)}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -799,11 +903,14 @@ function Detail({
   company,
   data,
   onClose,
+  onCompany,
 }: {
   head: BudgetHead;
   company?: string;
   data: BoardData;
   onClose: () => void;
+  /** Switch to one company's part of the head, or (undefined) back to all of it. */
+  onCompany?: (company?: string) => void;
 }) {
   const closeRef = useRef<HTMLButtonElement>(null);
   const part = company ? head.by_company.find((c) => c.company === company) : undefined;
@@ -850,6 +957,11 @@ function Detail({
       >
         <header className="bgb-detail-head" data-state={state}>
           <div>
+            {company && onCompany && head.by_company.length > 1 ? (
+              <button type="button" className="bgb-back" onClick={() => onCompany(undefined)}>
+                ← All companies
+              </button>
+            ) : null}
             <h2 id="bgb-detail-title">{view.title}</h2>
             {company ? (
               owner ? (
@@ -899,12 +1011,12 @@ function Detail({
           {company ? null : (
             <section className="bgb-section bgb-section--wide">
               <h3>By company</h3>
-              <CompanyCards head={head} pace={data.current.pace} />
+              <CompanyCards head={head} pace={data.current.pace} onPick={onCompany} />
             </section>
           )}
           <section className="bgb-section bgb-section--wide">
             <h3>Where it went</h3>
-            <Breakdown tree={view.tree} pace={data.current.pace} />
+            <Drill key={company ?? "all"} tree={view.tree} pace={data.current.pace} />
           </section>
         </div>
       </div>
@@ -912,6 +1024,406 @@ function Detail({
     document.fullscreenElement ?? document.body,
   );
 }
+/* ── An owner's own board ───────────────────────────────────────────────── */
+
+type BudgetData = BudgetHead["tree"][number];
+
+/** The panel an owner's card or budget opens: a title, its figures, and what is below them. */
+function OwnerPanel({
+  title,
+  base,
+  current,
+  entries,
+  hue,
+  pace,
+  section,
+  onClose,
+  children,
+}: {
+  title: string;
+  base: number;
+  current: number;
+  entries: number;
+  hue: string;
+  pace: number;
+  section: string;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const ratio = ratioOf(base, current);
+  const state = stateOf(ratio, pace);
+  useEffect(() => {
+    closeRef.current?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return createPortal(
+    <div className="bgb-overlay" onClick={onClose}>
+      <div
+        className="bgb-detail"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="bgb-owner-panel-title"
+        style={{ "--accent": hue } as CSSProperties}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header className="bgb-detail-head" data-state={state}>
+          <div>
+            <h2 id="bgb-owner-panel-title">{title}</h2>
+          </div>
+          <div className="bgb-figure">
+            <b className="bgb-value">{compactINR(current)}</b>
+            <span className="bgb-of">
+              of {compactINR(base)} · {entries.toLocaleString("en-IN")} entries
+            </span>
+          </div>
+          <div className="bgb-measure">
+            <Meter ratio={ratio} state={state} label={`${title} against its total`} />
+            <b className="bgb-pct">{percent(ratio)}</b>
+            <StateWord ratio={ratio} state={state} />
+          </div>
+          <button
+            ref={closeRef}
+            type="button"
+            className="exb-icon-btn bgb-close"
+            onClick={onClose}
+            aria-label="Close"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+        </header>
+        <div className="bgb-detail-body">
+          <section className="bgb-section bgb-section--wide">
+            <h3>{section}</h3>
+            {children}
+          </section>
+        </div>
+      </div>
+    </div>,
+    document.fullscreenElement ?? document.body,
+  );
+}
+
+/** One of an owner's three big cards: a company, or a SAP budget, with its sub budgets. */
+interface OwnerGroup {
+  key: string;
+  label: string;
+  hue: string;
+  base: number;
+  current: number;
+  entries: number;
+  /** What the panel it opens lists: its budgets (or, of a one-budget card, that budget's accounts). */
+  items: BudgetData[];
+  /** Its lines, where they differ from `items`: an account's card lists the budgets it is booked under. */
+  lines?: BudgetData[];
+}
+
+type AccountRow = BudgetData["accounts"][number];
+
+/** An account as a budget-shaped item: a card or a line that opens onto that account alone. */
+const asItem = (account: AccountRow, name = account.name): BudgetData => ({
+  name,
+  base: account.base,
+  current: account.current,
+  entries: account.entries,
+  accounts: [account],
+});
+
+/**
+ * The owner's three cards' hues: the board's own three, validated together
+ * (all checks pass), none amber or red.
+ */
+const GROUP_HUES = ["#6250d6", "#008300", "#9b4dca"];
+/** Lines on an owner's card; the panel it opens has them all. */
+const GROUP_LINES = 4;
+
+const sumOf = (items: BudgetData[], pick: (b: BudgetData) => number) =>
+  items.reduce((sum, b) => sum + pick(b), 0);
+
+/**
+ * An owner's spending in three big cards, as the whole board's (user,
+ * 2026-10-16): by company when their head spans three, else by SAP budget
+ * (Sales, Med MKT…), else by budget › sub budget; past three, the largest two
+ * and "Everything else".
+ */
+function ownerGroups(head: BudgetHead): OwnerGroup[] {
+  const make = (key: string, label: string, items: BudgetData[], lines?: BudgetData[]) => ({
+    key,
+    label,
+    items: [...items].sort((a, b) => b.current - a.current || b.base - a.base),
+    lines,
+    base: sumOf(items, (b) => b.base),
+    current: sumOf(items, (b) => b.current),
+    entries: sumOf(items, (b) => b.entries),
+  });
+  // Three cards on top, always (user, 2026-10-16): the first way of cutting
+  // the head that gives at least three — by company, by SAP budget, by budget
+  // › sub budget, by G/L account — else the one that gives the most.
+  const byBudget = new Map<string, BudgetData[]>();
+  for (const item of head.tree) {
+    const budget = item.name.split(" › ")[0];
+    byBudget.set(budget, [...(byBudget.get(budget) ?? []), item]);
+  }
+  // An account across the budgets it is booked under: one card, a line per budget.
+  const byAccount = new Map<string, { total: AccountRow; parts: BudgetData[] }>();
+  for (const budget of head.tree) {
+    for (const account of budget.accounts) {
+      const seen = byAccount.get(account.name);
+      const total = seen
+        ? {
+            ...seen.total,
+            base: seen.total.base + account.base,
+            current: seen.total.current + account.current,
+            entries: seen.total.entries + account.entries,
+            postings: [...seen.total.postings, ...account.postings]
+              .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount))
+              .slice(0, 8),
+          }
+        : account;
+      byAccount.set(account.name, {
+        total,
+        parts: [...(seen?.parts ?? []), asItem(account, budget.name)],
+      });
+    }
+  }
+  const cuts = [
+    head.by_company.length > 1
+      ? head.by_company.map((c) => make(c.company, c.label, c.tree ?? []))
+      : [],
+    [...byBudget].map(([budget, items]) => make(budget, budget, items)),
+    head.tree.map((item) => make(item.name, item.name, [item])),
+    [...byAccount.values()].map(({ total, parts }) =>
+      make(total.name, titled(total.name), [asItem(total, titled(total.name))], parts),
+    ),
+  ];
+  let groups =
+    cuts.find((cut) => cut.length >= 3) ?? cuts.reduce((a, b) => (b.length > a.length ? b : a));
+  groups = [...groups].sort((a, b) => b.current - a.current || b.base - a.base);
+  if (groups.length > 3) {
+    const rest = groups.slice(2).flatMap((g) => g.items);
+    groups = [...groups.slice(0, 2), make("REST", "Everything else", rest)];
+  }
+  return groups.map((g, i) => ({ ...g, hue: GROUP_HUES[i % GROUP_HUES.length] }));
+}
+
+/**
+ * A card's lines: its own (an account's budgets), else its items — and a
+ * one-budget card lists that budget's accounts rather than repeating itself.
+ */
+function linesOf(group: OwnerGroup): BudgetData[] {
+  if (group.lines) return group.lines;
+  if (group.items.length === 1 && group.items[0].accounts.length > 0) {
+    return group.items[0].accounts.map((a) => asItem(a, titled(a.name)));
+  }
+  return group.items;
+}
+
+/** A group as a card of the whole board's kind. `i`: its place, which its lines and face are keyed by. */
+function groupCategory(group: OwnerGroup, i: number): Category {
+  return {
+    key: group.key,
+    label: group.label,
+    hue: group.hue,
+    open: { key: `group:${i}` },
+    base: group.base,
+    current: group.current,
+    lines: linesOf(group)
+      .slice(0, GROUP_LINES)
+      .map((item, n) => ({
+        id: `${group.key}-${n}`,
+        open: { key: `line:${i}:${n}` },
+        label: `${group.label}, ${item.name}`,
+        name: item.name,
+        base: item.base,
+        current: item.current,
+        tone: `shade-${Math.min(n, 2)}`,
+        hue: group.hue,
+      })),
+  };
+}
+
+/** The hues of "where it went" by account: the cost hues, validated round the circle in this order. */
+const ACCOUNT_HUES = ["#1baf7a", "#2a78d6", "#e87ba4", "#7e57c2", "#7a8c1a"];
+const REST_HUE = "#b4bcc6";
+
+/** Short enough to sit inside a slice or beside it: "SALARY EXPENSE" -> "Salary Expense", cut at 14. */
+function shortName(name: string) {
+  const full = titled(name);
+  return full.length > 14 ? `${full.slice(0, 13)}…` : full;
+}
+
+/** What the money was spent on: the G/L accounts across the head, the largest five and the rest. */
+function accountSlices(head: BudgetHead): Slice[] {
+  const byAccount = new Map<string, number>();
+  for (const budget of head.tree) {
+    for (const account of budget.accounts) {
+      byAccount.set(account.name, (byAccount.get(account.name) ?? 0) + account.current);
+    }
+  }
+  const top = [...byAccount]
+    .filter(([, value]) => value > 0)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5);
+  const slices: Slice[] = top.map(([name, value], i) => ({
+    key: name,
+    name: shortName(name),
+    value,
+    fill: ACCOUNT_HUES[i],
+  }));
+  const rest = head.current - top.reduce((sum, [, value]) => sum + value, 0);
+  if (rest > head.current * 0.005)
+    slices.push({ key: "REST", name: "Other", value: rest, fill: REST_HUE });
+  return slices;
+}
+
+/** Its five largest SAP budgets, as bars in the head's hue. */
+function budgetBars(head: BudgetHead): Slice[] {
+  return [...head.tree]
+    .sort((a, b) => b.current - a.current)
+    .slice(0, 5)
+    .filter((b) => b.current > 0)
+    .map((b) => ({
+      key: b.name,
+      name: b.name.split(" › ").pop() ?? b.name,
+      value: b.current,
+      fill: hueOf(head.key),
+    }));
+}
+
+/** What an owner opened: a card's budgets, or one budget's accounts (`start`). */
+type OwnerOpen = {
+  title: string;
+  base: number;
+  current: number;
+  entries: number;
+  hue: string;
+  tree: BudgetData[];
+  start?: string;
+};
+
+const openBudget = (budget: BudgetData, hue: string, title = budget.name): OwnerOpen => ({
+  title,
+  base: budget.base,
+  current: budget.current,
+  entries: budget.entries,
+  hue,
+  tree: [budget],
+  start: budget.name,
+});
+
+/**
+ * The board an owner sees, laid out as the whole board (user, 2026-10-16):
+ * their figures in the banner; three big cards of their spending, each
+ * opening onto its budgets and a budget onto its accounts and postings;
+ * where it went, by account, as a half pie; and their top 5 budgets as bars.
+ * An owner of more than one (Avtar: Bank Interest, Interest & Finance)
+ * switches between them. An administrator sees the same under "View as".
+ */
+function OwnerBoard({ data }: { data: BoardData }) {
+  const heads = [...data.heads, ...data.costs];
+  const [active, setActive] = useState(0);
+  const [opened, setOpened] = useState<OwnerOpen | null>(null);
+  const head = heads[Math.min(active, heads.length - 1)];
+  if (!head) return null;
+  const groups = ownerGroups(head);
+  const pace = data.current.pace;
+  // A month with nothing booked yet says so, rather than drawing empty charts.
+  const nothingYet = `Nothing booked in ${data.current.label} yet`;
+  // The banner: the view's total, or the chosen head's when there are several.
+  const shown: BoardData =
+    heads.length > 1
+      ? { ...data, total: { base: head.base, current: head.current, ratio: head.ratio } }
+      : data;
+  const onOpen = (open: Opening) => {
+    const [kind, at, line] = open.key.split(":");
+    const group = groups[Number(at)];
+    if (!group) return;
+    if (kind === "line") {
+      setOpened(openBudget(linesOf(group)[Number(line)], group.hue));
+    } else if (group.items.length === 1) {
+      // One budget (or one account): straight to its accounts.
+      setOpened(openBudget(group.items[0], group.hue, group.label));
+    } else {
+      setOpened({
+        title: group.label,
+        base: group.base,
+        current: group.current,
+        entries: group.entries,
+        hue: group.hue,
+        tree: group.items,
+      });
+    }
+  };
+  const byBudget = (key: string) => {
+    const budget = head.tree.find((b) => b.name === key);
+    if (budget) setOpened(openBudget(budget, hueOf(head.key)));
+  };
+  return (
+    <div className={`bgb-main${heads.length > 1 ? " bgb-main--tabs" : ""}`}>
+      <Hero data={shown} />
+      {heads.length > 1 ? (
+        <div className="exb-chips bgb-owner-tabs" role="group" aria-label="Which">
+          {heads.map((h, i) => (
+            <button
+              key={h.key}
+              type="button"
+              className="exb-chip"
+              aria-pressed={i === active}
+              onClick={() => setActive(i)}
+            >
+              {h.name}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      {groups.length ? (
+        <div className="bgb-cats" style={{ "--cats": groups.length } as CSSProperties}>
+          {groups.map((group, i) => (
+            <CategoryCard
+              key={group.key}
+              cat={groupCategory(group, i)}
+              pace={pace}
+              onOpen={onOpen}
+            />
+          ))}
+        </div>
+      ) : (
+        <p className="bgb-empty">Nothing posted this month.</p>
+      )}
+      <div className="bgb-charts">
+        <WhereItWent slices={accountSlices(head)} empty={nothingYet} />
+        <TopSpends
+          title="Top 5 spends"
+          bars={budgetBars(head)}
+          onPick={byBudget}
+          empty={nothingYet}
+        />
+      </div>
+      {opened ? (
+        <OwnerPanel
+          title={opened.title}
+          base={opened.base}
+          current={opened.current}
+          entries={opened.entries}
+          hue={opened.hue}
+          pace={pace}
+          section={opened.start ? "Accounts" : "Budgets"}
+          onClose={() => setOpened(null)}
+        >
+          <Drill tree={opened.tree} pace={pace} start={opened.start} />
+        </OwnerPanel>
+      ) : null}
+    </div>
+  );
+}
+
 /* ── The board ───────────────────────────────────────────────────────────── */
 
 /** This month and the five before it: `[{value: "2026-10", label: "Oct 2026"}]`. */
@@ -929,12 +1441,14 @@ export function BudgetBoard({ viewSwitch }: { viewSwitch: ReactNode }) {
   const months = useMemo(() => recentMonths(), []);
   const [month, setMonth] = useState(months[0].value);
   const [open, setOpen] = useState<Opening | null>(null);
+  // An administrator's "View as": an owner's board, as the owner sees it ("" = the whole board).
+  const [viewAs, setViewAs] = useState("");
   const boardRef = useRef<HTMLDivElement>(null);
   const { isFullscreen, supported, toggle } = useFullscreen(boardRef);
 
   const board = useQuery({
-    queryKey: ["budget-board", month],
-    queryFn: () => advancePaymentService.budgetBoard(month),
+    queryKey: ["budget-board", month, viewAs],
+    queryFn: () => advancePaymentService.budgetBoard(month, viewAs),
     placeholderData: keepPreviousData,
     staleTime: 60_000,
     refetchInterval: 10 * 60_000,
@@ -961,14 +1475,35 @@ export function BudgetBoard({ viewSwitch }: { viewSwitch: ReactNode }) {
         <div className="exb-title" role="heading" aria-level={1}>
           <b>Payments &amp; Expenses</b>
           <span>
-            All companies · SAP data
+            {data?.view ? `${data.view.label} · ${data.view.owner}` : "All companies · SAP data"}
             {data
               ? ` · ${data.current.label}${data.current.pace < 1 ? ` · day ${data.current.elapsed} of ${data.current.days}` : ""}`
               : ""}
           </span>
         </div>
         <div className="exb-filters">
-          {viewSwitch}
+          {data?.view && !data.can_switch ? null : viewSwitch}
+          {data?.can_switch ? (
+            <label className="bgb-view-as">
+              <span>View as</span>
+              <select
+                className="exb-select"
+                aria-label="View as"
+                value={viewAs}
+                onChange={(e) => {
+                  setViewAs(e.target.value);
+                  setOpen(null);
+                }}
+              >
+                <option value="">Everyone (whole board)</option>
+                {(data.views ?? []).map((v) => (
+                  <option key={v.key} value={v.key}>
+                    {v.owner} — {v.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           <label>
             <span className="exb-sr">Month</span>
             <select
@@ -1023,6 +1558,8 @@ export function BudgetBoard({ viewSwitch }: { viewSwitch: ReactNode }) {
           <b>Reading SAP's expenses…</b>
           <p>Two companies, two months: the first load takes a few seconds.</p>
         </div>
+      ) : data.view ? (
+        <OwnerBoard key={data.view.key} data={data} />
       ) : (
         <div className="bgb-main">
           <Hero data={data} />
@@ -1032,14 +1569,20 @@ export function BudgetBoard({ viewSwitch }: { viewSwitch: ReactNode }) {
             ))}
           </div>
           <div className="bgb-charts">
-            <WhereItWent costs={data.costs} onOpen={setOpen} />
-            <TopSpends costs={data.costs} onOpen={setOpen} />
+            <WhereItWent slices={spendsOf(data.costs)} onPick={(key) => setOpen({ key })} />
+            <TopSpends bars={spendsOf(data.costs)} onPick={(key) => setOpen({ key })} />
           </div>
         </div>
       )}
 
       {opened && data && open ? (
-        <Detail head={opened} company={open.company} data={data} onClose={() => setOpen(null)} />
+        <Detail
+          head={opened}
+          company={open.company}
+          data={data}
+          onClose={() => setOpen(null)}
+          onCompany={(company) => setOpen({ key: open.key, company })}
+        />
       ) : null}
     </div>
   );

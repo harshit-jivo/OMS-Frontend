@@ -954,6 +954,21 @@ export interface BudgetBoard {
   heads: BudgetHead[];
   /** The costs that cut across them — Salary, Freight, Interest & Finance, Rent, Electricity — in the pie's order. */
   costs: BudgetHead[];
+  /**
+   * An owner's own board: their head (or their company's part of it), their
+   * costs, their total. Null for the whole board.
+   */
+  view?: BoardView | null;
+  /** An administrator: may look at any owner's board (`views`) as the owner sees it. */
+  can_switch?: boolean;
+  views?: BoardView[];
+}
+
+/** One owner's board: Sales · Oil, Raju Vg. */
+export interface BoardView {
+  key: string;
+  label: string;
+  owner: string;
 }
 
 export interface OmsDashboard {
@@ -1964,9 +1979,15 @@ export const advancePaymentService = {
     return unwrap<FactoryLimit>(res.data);
   },
 
-  async budgetBoard(month?: string): Promise<BudgetBoard> {
+  /** Whose board this login sees: an owner's own (`view`), or the whole board. */
+  async budgetBoardMe(): Promise<{ view: BoardView | null; can_switch: boolean }> {
+    const res = await api.get(`${BASE}/budget-board/me/`);
+    return unwrap<{ view: BoardView | null; can_switch: boolean }>(res.data);
+  },
+
+  async budgetBoard(month?: string, view?: string): Promise<BudgetBoard> {
     const res = await api.get(`${BASE}/budget-board/`, {
-      params: { month: month || undefined },
+      params: { month: month || undefined, view: view || undefined },
       // Two companies' reports for two months on a cold cache.
       timeout: 120_000,
     });

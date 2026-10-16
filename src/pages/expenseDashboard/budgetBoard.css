@@ -257,7 +257,8 @@
 
 .bgb-cats {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  /* Three; an owner's board may have fewer (`--cats`). */
+  grid-template-columns: repeat(var(--cats, 3), minmax(0, 1fr));
   gap: calc(0.75 * var(--u));
   min-height: 0;
 }
@@ -431,8 +432,10 @@ button.bgb-cat-face:focus-visible,
 
 .bgb-line-name {
   display: flex;
+  /* A long owner's name goes under the line's name rather than being cut. */
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: calc(0.55 * var(--u));
+  gap: 0 calc(0.55 * var(--u));
   min-width: 0;
   overflow: hidden;
   font-size: calc(1.02 * var(--u));
@@ -535,7 +538,8 @@ button.bgb-cat-face:focus-visible,
 
 .bgb-chart-empty {
   margin: auto;
-  font-size: calc(1.6 * var(--u));
+  text-align: center;
+  font-size: calc(1.25 * var(--u));
   font-weight: 700;
   color: var(--ink-3);
 }
@@ -823,6 +827,51 @@ button.bgb-cat-face:focus-visible,
   border-radius: calc(0.6 * var(--u));
   background: linear-gradient(180deg, #fff 30%, color-mix(in srgb, var(--accent) 10%, #fff));
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+/* A company's card that opens it alone. */
+button.bgb-company {
+  width: 100%;
+  border: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform 120ms ease,
+    box-shadow 120ms ease;
+}
+
+button.bgb-company:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent),
+    0 calc(0.4 * var(--u)) calc(1 * var(--u)) calc(-0.5 * var(--u)) rgba(14, 23, 38, 0.2);
+}
+
+button.bgb-company:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+/* Back from one company to the whole head. */
+.bgb-back {
+  all: unset;
+  display: inline-block;
+  margin-bottom: calc(0.3 * var(--u));
+  font-size: calc(0.9 * var(--u));
+  font-weight: 700;
+  color: color-mix(in srgb, var(--accent) 80%, #000);
+  cursor: pointer;
+}
+
+.bgb-back:hover {
+  text-decoration: underline;
+}
+
+.bgb-back:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
 }
 
 .bgb-company[data-state="over"] {
@@ -1149,4 +1198,226 @@ summary.bgb-account-face:focus-visible {
   .bgb-detail-body {
     grid-template-columns: 1fr;
   }
+}
+
+/* ───────── an owner's own board (user, 2026-10-16) ───────── */
+
+/* The administrator's "View as": a labelled select beside the month. */
+.bgb-view-as {
+  display: flex;
+  align-items: center;
+  gap: calc(0.4 * var(--u));
+  font-size: calc(0.85 * var(--u));
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+/* An owner of more than one head: the switch between them under the banner. */
+.bgb-main--tabs {
+  grid-template-rows: auto auto minmax(0, 1.5fr) minmax(0, 1fr);
+}
+
+.bgb-owner-tabs {
+  justify-self: start;
+}
+
+/* A group's budgets, in the panel it opens: a card each. */
+.bgb-bcards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(calc(20 * var(--u)), 1fr));
+  gap: calc(1 * var(--u));
+}
+
+.bgb-bcard {
+  all: unset;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: calc(0.5 * var(--u));
+  padding: calc(1 * var(--u)) calc(1.1 * var(--u)) calc(0.9 * var(--u));
+  border-radius: calc(0.8 * var(--u));
+  background: var(--card);
+  box-shadow:
+    inset 0 0 0 1px var(--hair),
+    0 calc(0.3 * var(--u)) calc(0.8 * var(--u)) calc(-0.5 * var(--u)) rgba(14, 23, 38, 0.12);
+  cursor: pointer;
+  transition:
+    transform 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.bgb-bcard:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent),
+    0 calc(0.6 * var(--u)) calc(1.3 * var(--u)) calc(-0.5 * var(--u)) rgba(14, 23, 38, 0.18);
+}
+
+.bgb-bcard:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.bgb-bcard[data-state="over"] {
+  box-shadow: inset 0 0 0 calc(0.12 * var(--u)) var(--over);
+}
+
+.bgb-bcard-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: calc(0.98 * var(--u));
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--ink-2);
+}
+
+.bgb-bcard-value {
+  font-size: calc(1.9 * var(--u));
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  line-height: 1;
+  color: var(--ink);
+}
+
+/* A thin bar: the figure above it is what matters. */
+.bgb-bcard .bgb-meter {
+  height: calc(0.32 * var(--u));
+}
+
+/* In a budget's own panel the accounts are the whole of it: no indent, no tint. */
+.bgb-account-cards--flat {
+  padding: 0;
+  background: none;
+  border-bottom: 0;
+}
+
+@media (max-width: 1100px) {
+  .bgb-bcards {
+    overflow: visible;
+  }
+}
+
+/* ───────── a breakdown, a level at a time (user, 2026-10-16) ───────── */
+
+.bgb-drill {
+  display: grid;
+  gap: calc(0.8 * var(--u));
+}
+
+/* The trail back up: Budgets › Sales RE › MT › Promotional Discount. */
+.bgb-crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: calc(0.3 * var(--u)) calc(0.5 * var(--u));
+  font-size: calc(1 * var(--u));
+}
+
+.bgb-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(0.5 * var(--u));
+}
+
+.bgb-crumb i {
+  font-style: normal;
+  color: var(--ink-3);
+}
+
+.bgb-crumb button {
+  all: unset;
+  font-weight: 700;
+  color: color-mix(in srgb, var(--accent) 80%, #000);
+  cursor: pointer;
+}
+
+.bgb-crumb button:hover {
+  text-decoration: underline;
+}
+
+.bgb-crumb button:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.bgb-crumb b {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+/* A card that opens nothing (an account without postings this month). */
+.bgb-bcard[data-still] {
+  cursor: default;
+}
+
+.bgb-bcard[data-still]:hover {
+  transform: none;
+}
+
+.bgb-bcard-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: calc(0.5 * var(--u));
+  font-size: calc(0.88 * var(--u));
+  font-weight: 500;
+  color: var(--ink-3);
+}
+
+.bgb-bcard-foot b {
+  font-weight: 700;
+  color: var(--ink-2);
+}
+
+.bgb-bcard-foot b[data-state="ahead"] {
+  color: var(--ahead-ink);
+}
+
+.bgb-bcard-foot b[data-state="over"] {
+  color: var(--over-ink);
+}
+
+/* An account's postings. */
+.bgb-postings-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: calc(0.98 * var(--u));
+  font-variant-numeric: tabular-nums;
+}
+
+.bgb-postings-table th {
+  padding: calc(0.5 * var(--u)) calc(0.7 * var(--u));
+  text-align: left;
+  font-size: calc(0.82 * var(--u));
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  border-bottom: 1px solid var(--hair);
+}
+
+.bgb-postings-table td {
+  padding: calc(0.6 * var(--u)) calc(0.7 * var(--u));
+  border-bottom: 1px solid var(--hair);
+  color: var(--ink-2);
+  vertical-align: top;
+}
+
+.bgb-postings-table tbody tr:hover td {
+  background: color-mix(in srgb, var(--accent) 5%, #fff);
+}
+
+.bgb-postings-table .bgb-num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.bgb-postings-table .bgb-num b {
+  color: var(--ink);
+}
+
+.bgb-postings-table .bgb-narration {
+  width: 50%;
+  overflow-wrap: anywhere;
 }
