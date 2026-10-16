@@ -332,8 +332,12 @@ export const trackerService = {
     return data;
   },
 
-  async getVendors(): Promise<Vendor[]> {
-    const { data } = await api.get("/tracker/vendors/");
+  /**
+   * The vendors of the invoice's company — its branch and unit decide which
+   * (Mart, Oil or Beverages): each company has its own vendor codes.
+   */
+  async getVendors(branch: number, unit: number): Promise<Vendor[]> {
+    const { data } = await api.get("/tracker/vendors/", { params: { branch, unit } });
     return data;
   },
 

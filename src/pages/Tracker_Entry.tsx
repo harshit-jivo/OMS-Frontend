@@ -24,7 +24,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { FilterBar, FilterCount, FilterDate, FilterSearch, FilterSpacer } from "@/components/ui/filter-bar";
+import {
+  FilterBar,
+  FilterCount,
+  FilterDate,
+  FilterSearch,
+  FilterSpacer,
+} from "@/components/ui/filter-bar";
 import { Field, FormGrid, Input, Select } from "@/components/ui/form";
 import { Card, CardHeader, CardTitle, Page, PageHeader } from "@/components/ui/page";
 import { TableSkeleton } from "@/components/ui/skeleton";
@@ -98,12 +104,10 @@ export default function Tracker_Entry() {
     queryKey: ["tracker", "lookups"],
     queryFn: () => trackerService.getLookups(),
   });
-  const { data: vendors = NO_VENDORS } = useQuery({
-    queryKey: ["tracker", "vendors"],
-    // SAP being down is not an error here — the party name falls back to free
-    // text — so a failure resolves to an empty list rather than propagating.
-    queryFn: () => trackerService.getVendors().catch(() => NO_VENDORS),
-  });
+  /*
+   * The form's state is declared below; the vendor list reads the chosen
+   * branch and unit from it (`companyPicked`), so it is fetched further down.
+   */
   const { data: myInvoices = NO_INVOICES } = useQuery({
     queryKey: ["tracker", "invoices"],
     queryFn: () => trackerService.listInvoices(),
@@ -135,6 +139,18 @@ export default function Tracker_Entry() {
     mode: "onTouched",
   });
   const form = watch();
+  // Branch and unit first (user, 2026-10-16): they decide the company — Mart,
+  // Oil or Beverages — and each company has its own vendor codes. With Oil's
+  // codes on a Mart invoice, Save in SAP could never match the posted bill.
+  const companyPicked = form.branch > 0 && form.unit > 0;
+  const { data: vendors = NO_VENDORS, isFetching: vendorsLoading } = useQuery({
+    queryKey: ["tracker", "vendors", form.branch, form.unit],
+    // SAP being down is not an error here — the party name falls back to free
+    // text — so a failure resolves to an empty list rather than propagating.
+    queryFn: () => trackerService.getVendors(form.branch, form.unit).catch(() => NO_VENDORS),
+    enabled: companyPicked,
+    staleTime: 5 * 60_000,
+  });
   const [showForm, setShowForm] = useState(false);
   const [showReview, setShowReview] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -166,7 +182,6 @@ export default function Tracker_Entry() {
       setDeleting(false);
     }
   };
-
 
   // Vendors matching the typed party name (client-side filter, capped).
   const vendorMatches = useMemo(() => {
@@ -211,8 +226,15 @@ export default function Tracker_Entry() {
     return list;
   }, [mine, search, monthFilter]);
 
-  const setField = (k: keyof TrackerInvoiceInput, v: string | number) =>
+  const setField = (k: keyof TrackerInvoiceInput, v: string | number) => {
     setValue(k, v as never, { shouldValidate: true, shouldTouch: true });
+    // Another branch or unit may be another company, whose codes differ: the
+    // vendor is picked again from that company's list.
+    if ((k === "branch" || k === "unit") && v !== form[k] && form.party_code) {
+      setValue("party_code", "");
+      setValue("party_gstin", "");
+    }
+  };
 
   const onReview = async () => {
     // `trigger()` runs the same schema the resolver runs, so Review cannot
@@ -249,7 +271,10 @@ export default function Tracker_Entry() {
         setShowReview(false); // send them back to the form to fix it
         setError("invoice_number", { type: "server", message: duplicate });
       }
-      flash("Could not save the invoice", duplicate ?? messageFrom(err, "The server refused the request."));
+      flash(
+        "Could not save the invoice",
+        duplicate ?? messageFrom(err, "The server refused the request."),
+      );
     } finally {
       setSaving(false);
     }
@@ -367,7 +392,9 @@ export default function Tracker_Entry() {
       setAdvRemarks("");
       flash(
         `${res.processed_count} sent to SAP Approval`,
-        res.errors.length ? `${res.errors.length} failed.` : "Pre-Audit and Data Entry were skipped.",
+        res.errors.length
+          ? `${res.errors.length} failed.`
+          : "Pre-Audit and Data Entry were skipped.",
       );
       refresh();
     } catch (err) {
@@ -513,62 +540,84 @@ export default function Tracker_Entry() {
                   />
                 ))}
 
+                {/* Branch and unit before the party: they decide the company,
+                    and so whose vendor list (and codes) the party is picked from. */}
+                {field(
+                  "branch",
+                  "Branch",
+                  sel(
+                    "branch",
+                    lookups.branches.map((b) => ({ id: b.id, label: b.name })),
+                  ),
+                )}
+                {field(
+                  "unit",
+                  "Unit",
+                  sel(
+                    "unit",
+                    lookups.units.map((u) => ({ id: u.id, label: u.name })),
+                  ),
+                )}
+
                 {/* The party is typed OR picked. It is not a plain SearchSelect:
                     an invoice may name a party SAP has never heard of, so the
                     free text is the value and the vendor list only fills the
                     code and GSTIN beside it. */}
-                {field(
-                  "party_name",
-                  "Party name",
-                  (c) => (
-                    <div className="relative">
-                      <Input
-                        {...c}
-                        value={form.party_name}
-                        autoComplete="off"
-                        placeholder={vendors.length ? "Type to search vendors…" : "Loading vendors…"}
-                        onChange={(e) => {
-                          setValue("party_name", e.target.value, {
-                            shouldValidate: true,
-                            shouldTouch: true,
-                          });
-                          // Typing over a picked vendor un-picks it: the code and
-                          // GSTIN below belong to the name that was there before.
-                          setValue("party_code", "");
-                          setValue("party_gstin", "");
-                          setVendorOpen(true);
-                        }}
-                        onFocus={() => setVendorOpen(true)}
-                        onBlur={() => setTimeout(() => setVendorOpen(false), 150)}
-                      />
-                      {vendorOpen && vendors.length > 0 && (
-                        <div className="absolute left-0 right-0 top-[calc(100%+4px)] z-30 max-h-64 overflow-y-auto rounded-card border border-line bg-card p-1 shadow-panel">
-                          {vendorOptions.length === 0 ? (
-                            <p className="m-0 px-2.5 py-3 text-center text-[12px] text-subtle">
-                              No matching vendor — you can still type a name.
-                            </p>
-                          ) : (
-                            vendorOptions.map((o) => (
-                              <button
-                                key={o.value}
-                                type="button"
-                                className="flex w-full appearance-none flex-col items-start gap-0.5 rounded-sm border-0 bg-transparent px-2.5 py-1.5 text-left [font-family:inherit] cursor-pointer hover:bg-surface"
-                                onMouseDown={(e) => {
-                                  e.preventDefault();
-                                  const v = vendorMatches.find((m) => m.card_code === o.value);
-                                  if (v) pickVendor(v);
-                                }}
-                              >
-                                <span className="text-[13px] font-medium text-ink">{o.label}</span>
-                                <span className="text-[11px] text-subtle">{o.hint}</span>
-                              </button>
-                            ))
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  ),
-                )}
+                {field("party_name", "Party name", (c) => (
+                  <div className="relative">
+                    <Input
+                      {...c}
+                      value={form.party_name}
+                      autoComplete="off"
+                      disabled={!companyPicked}
+                      placeholder={
+                        !companyPicked
+                          ? "Choose the branch and unit first"
+                          : vendorsLoading
+                            ? "Loading vendors…"
+                            : "Type to search vendors…"
+                      }
+                      onChange={(e) => {
+                        setValue("party_name", e.target.value, {
+                          shouldValidate: true,
+                          shouldTouch: true,
+                        });
+                        // Typing over a picked vendor un-picks it: the code and
+                        // GSTIN below belong to the name that was there before.
+                        setValue("party_code", "");
+                        setValue("party_gstin", "");
+                        setVendorOpen(true);
+                      }}
+                      onFocus={() => setVendorOpen(true)}
+                      onBlur={() => setTimeout(() => setVendorOpen(false), 150)}
+                    />
+                    {vendorOpen && vendors.length > 0 && (
+                      <div className="absolute left-0 right-0 top-[calc(100%+4px)] z-30 max-h-64 overflow-y-auto rounded-card border border-line bg-card p-1 shadow-panel">
+                        {vendorOptions.length === 0 ? (
+                          <p className="m-0 px-2.5 py-3 text-center text-[12px] text-subtle">
+                            No matching vendor — you can still type a name.
+                          </p>
+                        ) : (
+                          vendorOptions.map((o) => (
+                            <button
+                              key={o.value}
+                              type="button"
+                              className="flex w-full appearance-none flex-col items-start gap-0.5 rounded-sm border-0 bg-transparent px-2.5 py-1.5 text-left [font-family:inherit] cursor-pointer hover:bg-surface"
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                const v = vendorMatches.find((m) => m.card_code === o.value);
+                                if (v) pickVendor(v);
+                              }}
+                            >
+                              <span className="text-[13px] font-medium text-ink">{o.label}</span>
+                              <span className="text-[11px] text-subtle">{o.hint}</span>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
 
                 <Field
                   label="GST number"
@@ -667,22 +716,6 @@ export default function Tracker_Entry() {
                   sel(
                     "category",
                     lookups.categories.map((c) => ({ id: c.id, label: c.name })),
-                  ),
-                )}
-                {field(
-                  "unit",
-                  "Unit",
-                  sel(
-                    "unit",
-                    lookups.units.map((u) => ({ id: u.id, label: u.name })),
-                  ),
-                )}
-                {field(
-                  "branch",
-                  "Branch",
-                  sel(
-                    "branch",
-                    lookups.branches.map((b) => ({ id: b.id, label: b.name })),
                   ),
                 )}
                 {field(
