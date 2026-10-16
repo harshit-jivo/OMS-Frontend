@@ -64,6 +64,7 @@ import { RequestFilters, RequestKpis, RequestTable } from "./advancePayments/Req
 import { RequestFilesProvider } from "./advancePayments/RequestFileLink";
 import { RequestHistory, RouteTimeline, SapPayment } from "./advancePayments/RequestProgress";
 import { toApiRequest } from "./advancePayments/requestApi";
+import { FACTORY_LIMIT_KEY } from "./advancePayments/factoryLimitData";
 import {
   useRequestDetail,
   useRequestList,
@@ -394,6 +395,8 @@ export default function Advance_Payment_Request() {
       setPrefill(null);
       void client.invalidateQueries({ queryKey: ["advance-payments", "assignments"] });
     }
+    // What today's Factory requests use has changed.
+    void client.invalidateQueries({ queryKey: FACTORY_LIMIT_KEY });
     // Straight back to the list, showing it where it now sits.
     setFilters({ ...NO_FILTERS, status: "PENDING" });
     setTab("entries");
@@ -502,6 +505,7 @@ export default function Advance_Payment_Request() {
             // A new prefill is a new form, not an edit of the last one.
             key={prefill ? `assignment-${prefill.assignment.id}` : "blank"}
             initial={prefill?.form}
+            dailyLimit
             intro={
               prefill ? (
                 <Notice tone="info" title="Filled from SAP">

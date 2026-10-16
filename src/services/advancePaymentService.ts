@@ -1255,6 +1255,42 @@ export interface ApiRequestFields {
 }
 
 /** An expense G/L account an Expense line may pay to. */
+/** The companies with a factory, and so a Factory daily limit. */
+export type FactoryLimitCompany = "OIL" | "BEVERAGES";
+
+/**
+ * The Factory daily limit (`GET /factory-limit/`): Ziyaul's cap on a day's
+ * Factory payment requests in one company, what they use, and what is left.
+ * Rupees as strings.
+ */
+export interface FactoryLimit {
+  company: FactoryLimitCompany;
+  day: string;
+  /** In force today; `carried` when it was set on an earlier day. Null until one was ever set. */
+  limit: { amount: string; day: string; carried: boolean; set_by: string; set_on: string } | null;
+  used: string;
+  left: string | null;
+  requests: Array<{
+    id: number;
+    request_no: string;
+    partner_name: string;
+    amount: string;
+    budget_code: string;
+    purpose_label: string;
+    status: string;
+    raised_by: string;
+    raised_on: string;
+  }>;
+  /** The past days, newest first: the limit then and what was raised. */
+  history: Array<{ day: string; limit: string | null; used: string }>;
+  changes: Array<{ day: string; old: string | null; new: string; by: string; on: string }>;
+  /** Only Ziyaul may set it. */
+  can_set: boolean;
+  setter: string;
+  /** SAP's open bills on factory spending other than oil; null when SAP could not be read. */
+  open_bills: { bills: number; open: string; packing: string } | null;
+}
+
 /** A G/L account an Account Payment may pay (`GET /payment-accounts/`). */
 export interface SapPaymentAccount {
   code: string;
@@ -1914,6 +1950,18 @@ export const advancePaymentService = {
   },
 
   /** Every main budget head's SAP spending this month (or `month`), against August's. */
+  /** The Factory daily limit in force today for a company, and what it is used by. */
+  async factoryLimit(company: FactoryLimitCompany): Promise<FactoryLimit> {
+    const res = await api.get(`${BASE}/factory-limit/`, { params: { company } });
+    return unwrap<FactoryLimit>(res.data);
+  },
+
+  /** Ziyaul sets today's Factory daily limit (or a later day's). */
+  async setFactoryLimit(company: FactoryLimitCompany, amount: string, day?: string): Promise<FactoryLimit> {
+    const res = await api.put(`${BASE}/factory-limit/`, { company, amount, day: day || undefined });
+    return unwrap<FactoryLimit>(res.data);
+  },
+
   async budgetBoard(month?: string): Promise<BudgetBoard> {
     const res = await api.get(`${BASE}/budget-board/`, {
       params: { month: month || undefined },

@@ -87,6 +87,8 @@ import {
   partnerCodes,
   resolveCase,
   todayIso,
+  expenseTotal,
+  parseNumber,
   validate,
   type Allocation,
   type RequestForm,
@@ -108,6 +110,8 @@ import { VendorOnAccount } from "./VendorOnAccount";
 import { SapPartnerLink } from "./SapDocument";
 import { ExpenseDetails } from "./ExpenseDetails";
 import { docEntryOf } from "./requestApi";
+import { FactoryLimitStrip } from "./FactoryLimit";
+import { factoryLimitError, useFactoryLimit } from "./factoryLimitData";
 
 
 /** `value`, once it has stopped changing for `ms` — for search-as-you-type. */
@@ -148,6 +152,12 @@ export interface AdvancePaymentFormProps {
    * an edit is one request.
    */
   multiplePartners?: boolean;
+  /**
+   * A NEW request: show Ziyaul's Factory daily limit while a Factory request
+   * is raised, and refuse Submit past it. Off when editing — an edit counts
+   * against the day it was raised, which the server checks.
+   */
+  dailyLimit?: boolean;
 }
 
 export function AdvancePaymentForm({
@@ -159,6 +169,7 @@ export function AdvancePaymentForm({
   onCancel,
   intro,
   multiplePartners = false,
+  dailyLimit = false,
 }: AdvancePaymentFormProps) {
   const [form, setForm] = useState<RequestForm>(initial);
   const [files, setFiles] = useState<FileAttachment[]>(initialFiles);
@@ -450,6 +461,14 @@ export function AdvancePaymentForm({
   const rows = allocationRows(form);
   const totals = allocationTotals(rows);
 
+  // What the request will ask for: its lines, its documents, or the typed amount.
+  const requestAmount = c.expense
+    ? expenseTotal(form.expenseLines)
+    : c.reference
+      ? totals.payment
+      : parseNumber(form.amount) || 0; // blank (null) or half-typed (NaN): nothing yet
+  const factoryLimit = useFactoryLimit(form.company, form.budget, form.purpose, dailyLimit);
+
   // The chosen documents' SAP attachments are NOT read (OCR) any more — not in
   // the background here, not on the desk (removed 2026-10-07). Approvers open
   // the attachments themselves.
@@ -494,9 +513,11 @@ export function AdvancePaymentForm({
     save: (form: RequestForm, files: FileAttachment[]) => Promise<string | void> | string | void = onSubmit,
   ) => {
     const { missing, problems } = validate(form, today);
+    const overLimit = factoryLimit.counts ? factoryLimitError(factoryLimit.query.data, requestAmount) : null;
     const messages = [
       ...(missing.length > 0 ? [`Still needed: ${missing.join(", ")}.`] : []),
       ...problems,
+      ...(overLimit ? [overLimit] : []),
     ];
 
     if (messages.length > 0) {
@@ -1102,6 +1123,8 @@ export function AdvancePaymentForm({
           </ul>
         ) : null}
       </FormSection>
+
+      <FactoryLimitStrip {...factoryLimit} amount={requestAmount} />
 
       <FormActions>
         <Button variant="secondary" onClick={cancel} disabled={saving}>

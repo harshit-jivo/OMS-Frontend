@@ -691,6 +691,28 @@ export function resolveCase(form: RequestForm): ResolvedCase {
 /** The plant's budget heads (`purposes.FACTORY_BUDGETS` on the server). */
 const FACTORY_BUDGETS: ReadonlyArray<string> = ["Factory", "FACT_COM"];
 
+/* ── The Factory daily limit ─────────────────────────────────────────────── */
+
+/** The companies with a factory, and so a limit (`daily_limit.LIMITED_COMPANIES`). */
+export const FACTORY_LIMIT_COMPANIES: ReadonlyArray<string> = ["OIL", "BEVERAGES"];
+/** Factory spending in any department (`daily_limit.FACTORY_PURPOSES`). */
+export const FACTORY_LIMIT_PURPOSES: ReadonlyArray<string> = [
+  "PACKING_MATERIAL",
+  "RAW_MATERIAL",
+  "SEMI_FINISHED",
+  "FA_CONSUMABLES",
+];
+
+/**
+ * Whether a request counts against Ziyaul's Factory daily limit — the
+ * server's `daily_limit.counts`: Department Factory or FACT_COM, or a factory
+ * purpose in any department; never an oil purchase; Oil and Beverages only.
+ */
+export function countsAgainstFactoryLimit(company: string, budget: string, purpose: string): boolean {
+  if (!FACTORY_LIMIT_COMPANIES.includes(company) || purpose === "OIL_PURCHASE") return false;
+  return FACTORY_BUDGETS.includes(budget) || FACTORY_LIMIT_PURPOSES.includes(purpose);
+}
+
 /** Employee and Imprest requests always go to the requester's Department Head. */
 const HEAD_TYPES: ReadonlyArray<PartnerType> = ["EMPLOYEE_ADVANCE", "EMPLOYEE_IMPREST"];
 
@@ -969,7 +991,7 @@ function toPaise(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
-function parseNumber(raw: string): number | null {
+export function parseNumber(raw: string): number | null {
   if (raw.trim() === "") return null;
   const value = Number(raw);
   return Number.isFinite(value) ? value : NaN;
