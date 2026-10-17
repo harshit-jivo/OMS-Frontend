@@ -214,6 +214,18 @@ export interface RequestForm {
    */
   purposeNeedsHead: boolean;
   /**
+   * The purpose is paid by a due date (its `due_date`: utilities, insurance):
+   * the request names its Bill Due Date, and a vendor may be paid On Account
+   * for it. Set with the purpose, from the list.
+   */
+  purposeDueDate: boolean;
+  /**
+   * The due date printed on the utility's bill, or the policy's renewal date —
+   * typed, because SAP holds none for these vendors. Due within 2 days, the
+   * request skips its approvals and goes straight to Payment.
+   */
+  billDueDate: string;
+  /**
    * The Department Head: an HOD of the employee master, by employee code,
    * with their name. Asked only when `needsDepartmentHead`. They approve
    * through the OMS login the server matched to them (`departmentHeadLogin`,
@@ -265,6 +277,8 @@ export const EMPTY_FORM: RequestForm = {
   purpose: "",
   purposeLabel: "",
   purposeNeedsHead: false,
+  purposeDueDate: false,
+  billDueDate: "",
   departmentHead: "",
   departmentHeadName: "",
   departmentHeadLogin: "",
@@ -427,6 +441,8 @@ interface CaseRule {
   expectedBillDate?: boolean;
   /** An Expense: lines to G/L accounts, a payee, Sub Budget and Month. */
   expense?: boolean;
+  /** Offered only for the purposes paid by a due date (utilities, insurance). */
+  dueDatePurposesOnly?: boolean;
 }
 
 /**
@@ -453,6 +469,10 @@ export const CASE_RULES: Record<PartnerType, Partial<Record<PaymentAgainst, Case
   VENDOR: {
     AGAINST_PO: { reference: "VENDOR_PO", expectedDate: true },
     AGAINST_BILL: { reference: "VENDOR_BILL" },
+    // Electricity boards and insurers: paid on account, as SAP pays them, and
+    // matched to the bill when accounts book it (user, 2026-10-17). They have
+    // no POs. Only for those purposes, so it is no way around a bill or a PO.
+    ON_ACCOUNT: { dueDatePurposesOnly: true },
   },
   // No Against Bill: an employee advance is paid ahead of expenses, and the
   // bills that follow are settled against the advance, not paid here.
@@ -616,6 +636,8 @@ export interface ResolvedCase {
   plainAmount: boolean;
   /** An Expense: lines, payee, Sub Budget, Month; no partner, no purpose. */
   expense: boolean;
+  /** Only the purposes paid by a due date may be chosen (Vendor On Account). */
+  dueDatePurposesOnly: boolean;
   /**
    * Several employees may be chosen: an Employee Imprest paid against
    * documents (bills, journal entries) — one request each is raised.
@@ -694,6 +716,7 @@ export function resolveCase(form: RequestForm): ResolvedCase {
     decided,
     plainAmount: decided && reference === null && !rule?.expense,
     expense: Boolean(rule?.expense),
+    dueDatePurposesOnly: Boolean(rule?.dueDatePurposesOnly),
     multiplePartners: form.type === "EMPLOYEE_IMPREST" && reference !== null && liveDocuments,
   };
 }
@@ -741,6 +764,28 @@ export function needsDepartmentHead(form: RequestForm): boolean {
   // amount (approval matrix, 2026-10-09) — the server's same rule.
   if (form.type === "EMPLOYEE_ADVANCE" && FACTORY_BUDGETS.includes(form.budget)) return false;
   return (form.type !== "" && HEAD_TYPES.includes(form.type)) || form.purposeNeedsHead;
+}
+
+/**
+ * Whether the request names its Bill Due Date: a purpose paid by a due date
+ * on a route that reads it — Oil and Beverages, routed by purpose. Mart, the
+ * Employee / Imprest route, Account Payments and Expenses are not. The server
+ * applies the same rule (`purposes.needs_bill_due_date`).
+ */
+export function needsBillDueDate(form: RequestForm): boolean {
+  if (!form.company || form.company === "MART" || !form.purposeDueDate) return false;
+  if (form.type === "" || HEAD_TYPES.includes(form.type)) return false;
+  return form.type !== "ACCOUNT" && form.type !== "EXPENSE";
+}
+
+/** Raised fewer than this many days before its Bill Due Date, a request goes straight to Payment. */
+export const DUE_SOON_DAYS = 2;
+
+/** Whether a Bill Due Date skips the approvals when raised on `today` (both ISO dates). */
+export function dueSoon(billDueDate: string, today: string): boolean {
+  if (!billDueDate || !today) return false;
+  const days = (Date.parse(billDueDate) - Date.parse(today)) / 86_400_000;
+  return days < DUE_SOON_DAYS;
 }
 
 /** An HOD picked who has no OMS login: they could not approve it. */
@@ -856,7 +901,15 @@ export function sanitize(form: RequestForm): RequestForm {
     next.purpose = "";
     next.purposeLabel = "";
     next.purposeNeedsHead = false;
+    next.purposeDueDate = false;
   }
+  // Vendor On Account: only a purpose paid by a due date may stay chosen.
+  if (c.dueDatePurposesOnly && next.purpose && !next.purposeDueDate) {
+    next.purpose = "";
+    next.purposeLabel = "";
+    next.purposeNeedsHead = false;
+  }
+  if (!needsBillDueDate(next)) next.billDueDate = "";
 
   // Typed answers live only as long as the "other" choice they describe.
   if (next.paymentAgainst !== "OTHER") next.paymentAgainstOther = "";
@@ -1432,6 +1485,7 @@ export function validate(form: RequestForm, today: string = todayIso()): Validat
     missing.push(...expense.missing);
     problems.push(...expense.problems);
   } else if (!form.purpose) missing.push("Payment Purpose");
+  if (needsBillDueDate(form) && !form.billDueDate) missing.push("Bill Due Date");
   if (needsDepartmentHead(form)) {
     if (!form.departmentHead) missing.push("Department Head");
     else if (!form.departmentHeadLogin) problems.push(departmentHeadLoginError(form.departmentHeadName));

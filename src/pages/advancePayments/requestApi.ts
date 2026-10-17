@@ -34,6 +34,7 @@ import {
   allocationRows,
   allocationTotals,
   expenseTotal,
+  needsBillDueDate,
   needsDepartmentHead,
   resolveCase,
   type Allocation,
@@ -144,6 +145,7 @@ export function toApiRequest(form: RequestForm): ApiRequestInput {
     documents,
     expected_date: orNull(form.expectedDate),
     expected_bill_date: orNull(form.expectedBillDate),
+    bill_due_date: needsBillDueDate(form) ? orNull(form.billDueDate) : null,
     return_method: form.returnMethod,
     return_method_other: form.returnMethod === "CUSTOM" ? form.returnMethodOther : "",
     installments: form.installments ? Number(form.installments) : null,
@@ -265,6 +267,9 @@ export function formFromApi(api: ApiRequest): RequestForm {
     // The form re-reads it from the purpose list once that loads; a head on
     // the request says its purpose needed one when it was raised.
     purposeNeedsHead: Boolean(api.department_head_employee),
+    // Likewise: a Bill Due Date on the request says its purpose is paid by one.
+    purposeDueDate: Boolean(api.bill_due_date),
+    billDueDate: api.bill_due_date ?? "",
     departmentHead: api.department_head_employee?.employee_code ?? "",
     departmentHeadName: api.department_head_employee?.employee_name ?? "",
     departmentHeadLogin: api.department_head?.username ?? "",

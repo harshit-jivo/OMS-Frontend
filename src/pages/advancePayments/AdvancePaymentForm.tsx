@@ -81,6 +81,9 @@ import {
   changeAllocation,
   departmentHeadLoginError,
   documentsFor,
+  dueSoon,
+  DUE_SOON_DAYS,
+  needsBillDueDate,
   needsDepartmentHead,
   plainAmountError,
   pastDateError,
@@ -298,17 +301,29 @@ export function AdvancePaymentForm({
     staleTime: 60 * 60_000,
     retry: 1,
   });
-  const purposeOptions = (purposesQuery.data ?? []).map((p) => ({
-    value: p.code,
-    label: p.label,
-    hint: p.group,
-  }));
+  // Vendor On Account: only the purposes paid by a due date (utilities, insurance).
+  const purposeOptions = (purposesQuery.data ?? [])
+    .filter((p) => !c.dueDatePurposesOnly || p.due_date)
+    .map((p) => ({
+      value: p.code,
+      label: p.label,
+      hint: p.group,
+    }));
   // A request saved with a purpose since retired keeps showing it.
   if (form.purpose && !purposeOptions.some((o) => o.value === form.purpose)) {
     purposeOptions.unshift({ value: form.purpose, label: form.purposeLabel || form.purpose, hint: "" });
   }
   const purposeNeedsHead = (code: string) =>
     Boolean(purposesQuery.data?.find((p) => p.code === code)?.needs_head);
+  const purposeDueDate = (code: string) =>
+    Boolean(purposesQuery.data?.find((p) => p.code === code)?.due_date);
+  // As with the head: an edited request learns from the list whether its purpose takes a due date.
+  const listedDueDate = purposesQuery.data ? purposeDueDate(form.purpose) : null;
+  useEffect(() => {
+    if (listedDueDate !== null && listedDueDate !== form.purposeDueDate) {
+      setForm((current) => applyChange(current, { purposeDueDate: listedDueDate }));
+    }
+  }, [listedDueDate, form.purposeDueDate]);
   // An edited request learns from the list whether its purpose is approved by
   // department: the saved request only says whether a head was named.
   const listedNeedsHead = purposesQuery.data ? purposeNeedsHead(form.purpose) : null;
@@ -513,6 +528,8 @@ export function AdvancePaymentForm({
     save: (form: RequestForm, files: FileAttachment[]) => Promise<string | void> | string | void = onSubmit,
   ) => {
     const { missing, problems } = validate(form, today);
+    // The Payment desk checks the typed Bill Due Date against the bill or policy.
+    if (needsBillDueDate(form) && files.length === 0) missing.push("Attachment (the bill or policy)");
     const overLimit = factoryLimit.counts ? factoryLimitError(factoryLimit.query.data, requestAmount) : null;
     const messages = [
       ...(missing.length > 0 ? [`Still needed: ${missing.join(", ")}.`] : []),
@@ -736,6 +753,7 @@ export function AdvancePaymentForm({
                       purpose,
                       purposeLabel: purposeOptions.find((o) => o.value === purpose)?.label ?? "",
                       purposeNeedsHead: purposeNeedsHead(purpose),
+                      purposeDueDate: purposeDueDate(purpose),
                     });
                   }
                   change(patch);
@@ -933,6 +951,7 @@ export function AdvancePaymentForm({
                       purpose: next,
                       purposeLabel: purposeOptions.find((o) => o.value === next)?.label ?? "",
                       purposeNeedsHead: purposeNeedsHead(next),
+                      purposeDueDate: purposeDueDate(next),
                     })
                   }
                   placeholder="Select payment purpose"
@@ -973,6 +992,28 @@ export function AdvancePaymentForm({
                   emptyText="No HOD matches"
                   loading={headsQuery.isFetching}
                   options={headOptions}
+                />
+              )}
+            </Field>
+          ) : null}
+
+          {/* Utilities and insurance: the date on the bill or policy decides the route. */}
+          {needsBillDueDate(form) ? (
+            <Field
+              label="Bill Due Date"
+              required
+              hint={
+                form.billDueDate && dueSoon(form.billDueDate, today)
+                  ? `Due within ${DUE_SOON_DAYS} days: this request skips the Department Head and the Director and goes straight to Payment.`
+                  : "The due date printed on the bill, or the policy's renewal date. Attach the bill or policy below."
+              }
+            >
+              {(f) => (
+                <Input
+                  {...f}
+                  type="date"
+                  value={form.billDueDate}
+                  onChange={(e) => change({ billDueDate: e.target.value })}
                 />
               )}
             </Field>
@@ -1037,7 +1078,14 @@ export function AdvancePaymentForm({
       </FormSection>
 
       {/* ── Attachments ─────────────────────────────────────────────── */}
-      <FormSection title="Attachments">
+      <FormSection
+        title="Attachments"
+        description={
+          needsBillDueDate(form)
+            ? "Required: the bill or the insurance policy that shows the Bill Due Date."
+            : undefined
+        }
+      >
         <div
           onDragOver={(e) => {
             e.preventDefault();

@@ -453,8 +453,8 @@ describe("Advance Payment Request", () => {
       };
 
       await user.selectOptions(screen.getByLabelText(/^Type/), "VENDOR");
-      // A vendor advance is always against a document — exactly two answers.
-      expect(await listed()).toEqual(["Against Bill", "Against PO"]);
+      // A vendor is paid against a document — or on account, for utilities and insurance only.
+      expect(await listed()).toEqual(["Against Bill", "Against PO", "On Account"]);
 
       await user.selectOptions(screen.getByLabelText(/^Type/), "EMPLOYEE_ADVANCE");
       expect(await listed()).toEqual(["Advance"]);

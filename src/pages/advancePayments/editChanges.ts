@@ -29,6 +29,7 @@ const LABEL: Record<string, string> = {
   amount: "Amount",
   expected_date: "Expected date",
   expected_bill_date: "Expected bill date",
+  bill_due_date: "Bill due date",
   return_method: "Return method",
   return_method_other: "Return method (typed)",
   installments: "Installments",

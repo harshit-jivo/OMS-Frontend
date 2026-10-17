@@ -160,6 +160,12 @@ export interface PaymentPurpose {
   group: string;
   /** Outside Mart, approved by the Department Head the requester picks. */
   needs_head?: boolean;
+  /**
+   * Paid by a Bill Due Date the requester types (utilities, insurance): due
+   * within 2 days, the request goes straight to Payment. A vendor may be paid
+   * On Account only for these purposes.
+   */
+  due_date?: boolean;
 }
 
 /**
@@ -1273,6 +1279,8 @@ export interface ApiRequestFields {
   amount: string;
   expected_date: string | null;
   expected_bill_date: string | null;
+  /** Utilities / insurance: the due date on the bill or the policy's renewal date. */
+  bill_due_date: string | null;
   return_method: string;
   return_method_other: string;
   installments: number | null;

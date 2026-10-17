@@ -177,6 +177,7 @@ export function apiRequest(id: number, fields: Partial<ApiRequest> = {}): ApiReq
     currency: "INR",
     expected_date: null,
     expected_bill_date: null,
+    bill_due_date: null,
     return_method: "",
     return_method_other: "",
     installments: null,

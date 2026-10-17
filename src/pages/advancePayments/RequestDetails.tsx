@@ -46,6 +46,7 @@ import {
   allocationTotals,
   dueFirst,
   dueLabel,
+  DUE_SOON_DAYS,
   expenseNet,
   expenseTds,
   expenseTotal,
@@ -154,6 +155,14 @@ export function RequestSummary({
           <DetailField
             label="Expected Bill Date"
             value={form.expectedBillDate ? formatDate(form.expectedBillDate) : ""}
+          />
+        ) : null}
+        {/* Utilities and insurance: typed by the requester, and it may have skipped the approvals. */}
+        {form.billDueDate ? (
+          <DetailField
+            label="Bill Due Date"
+            value={formatDate(form.billDueDate)}
+            hint={`Typed by the requester: check it against the attached bill or policy. A bill due within ${DUE_SOON_DAYS} days of raising skips the Department Head and the Director.`}
           />
         ) : null}
         {c.repayment ? (

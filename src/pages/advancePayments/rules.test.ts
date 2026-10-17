@@ -66,9 +66,9 @@ describe("the case table", () => {
   it("offers each type its own Payment Against answers", () => {
     const offered = (type: RequestForm["type"]) =>
       resolveCase(answer({ type })).paymentAgainstOptions.map((o) => o.value);
-    // A vendor advance is always against a document: a bill or a PO. "All" is
-    // switched off.
-    expect(offered("VENDOR")).toEqual(["AGAINST_BILL", "AGAINST_PO"]);
+    // A vendor advance is against a document: a bill or a PO — or, for
+    // utilities and insurance only, on account. "All" is switched off.
+    expect(offered("VENDOR")).toEqual(["AGAINST_BILL", "AGAINST_PO", "ON_ACCOUNT"]);
     // No Against Bill for an employee advance.
     expect(offered("EMPLOYEE_ADVANCE")).toEqual(["ADVANCE", "OTHER"]);
     expect(offered("EMPLOYEE_IMPREST")).toEqual(["ADVANCE", "AGAINST_BILL", "AGAINST_JOURNAL", "OTHER"]);
