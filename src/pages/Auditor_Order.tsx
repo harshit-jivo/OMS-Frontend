@@ -634,7 +634,7 @@ export default function Auditor_orders() {
 
           <VarietyCostCards costs={detailVarieties} />
 
-          <RealisationCards realisation={varietyRealisation(selectedItems)} />
+          <RealisationCards realisation={varietyRealisation(selectedItems)} totals={detailTotals} />
 
           {/* The five facts an approver actually checks, and nothing else.
               These were behind `PartyHeader`'s modal — one click away on the

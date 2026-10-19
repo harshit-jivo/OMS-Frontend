@@ -558,7 +558,7 @@ export default function Order_Status_Tracking({ mode }: OrderStatusTrackingProps
 
           <VarietyCostCards costs={detailVarieties} />
 
-          <RealisationCards realisation={varietyRealisation(selectedItems)} />
+          <RealisationCards realisation={varietyRealisation(selectedItems)} totals={detailTotals} />
 
           {/* The order on the left, its progress trail on the right.
 

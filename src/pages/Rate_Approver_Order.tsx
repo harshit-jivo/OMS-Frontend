@@ -665,7 +665,7 @@ export default function RateApproverOrders() {
             />
           </StatRow>
 
-          <RealisationCards realisation={varietyRealisation(selectedItems)} />
+          <RealisationCards realisation={varietyRealisation(selectedItems)} totals={detailTotals} />
 
           <OrderWithPo orderId={orderDetails.id}>
             <Card>

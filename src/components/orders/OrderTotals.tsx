@@ -96,12 +96,22 @@ export function VarietyCostCards({ costs }: { costs: VarietyCost[] }) {
  * Realisation per variety — what each earns per litre shipped — beside the
  * variety cost cards, in the same card style. See `varietyRealisation`.
  */
-export function RealisationCards({ realisation }: { realisation: VarietyRealisation[] }) {
-  if (realisation.length === 0) return null;
+export function RealisationCards({ realisation, totals }: {
+  realisation: VarietyRealisation[];
+  totals: Totals;
+}) {
+  if (realisation.length === 0 && totals.litres <= 0) return null;
+
+  const entries = totals.litres > 0 ? [{
+    label: "Total Realise",
+    amount: totals.subtotal,
+    litres: totals.litres,
+    perLitre: totals.subtotal / totals.litres,
+  }, ...realisation] : realisation;
 
   return (
     <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3">
-      {realisation.map((entry) => (
+      {entries.map((entry) => (
         <Card key={entry.label} className="flex flex-col gap-1">
           <span className="flex items-center justify-between gap-3">
             <Badge tone={VARIETY_TONE[entry.label] ?? "neutral"}>{entry.label}</Badge>
