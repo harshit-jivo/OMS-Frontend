@@ -162,7 +162,7 @@ export function RequestSummary({
           <DetailField
             label="Bill Due Date"
             value={formatDate(form.billDueDate)}
-            hint={`Typed by the requester: check it against the attached bill or policy. A bill due within ${DUE_SOON_DAYS} days of raising skips the Department Head and the Director.`}
+            hint={`Typed by the requester: check it against the attached bill or policy. A bill due ${DUE_SOON_DAYS} days or less after raising skips the Department Head and the Director.`}
           />
         ) : null}
         {c.repayment ? (

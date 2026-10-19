@@ -221,7 +221,7 @@ export function ReferenceDetails({
               placeholder={loading ? "Loading…" : def.placeholder}
               searchable
               multiline
-              searchPlaceholder={`Search ${def.numberLabel.toLowerCase()} or vendor ref…`}
+              searchPlaceholder={`Search ${def.numberLabel.toLowerCase()} or ${def.searchAlso ?? "vendor ref"}…`}
               onSearch={onSearch}
               emptyText={`No open ${noun} for this ${partnerLabel.toLowerCase()}`}
               // Names read better than "2 selected" while they still fit.

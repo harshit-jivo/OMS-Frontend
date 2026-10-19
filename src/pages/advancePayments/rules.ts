@@ -320,6 +320,8 @@ interface ReferenceKindDef {
   modes: readonly PaymentMode[];
   /** A sentence under the section title, when the list needs explaining. */
   intro?: string;
+  /** What the picker's search also matches besides the number; "vendor ref" when unset. */
+  searchAlso?: string;
   /**
    * Read live from SAP by the page. `documents` is then empty: the rules
    * never hold a live list, only the snapshots the requester chose.
@@ -409,6 +411,7 @@ export const REFERENCE_KINDS: Record<ReferenceKind, ReferenceKindDef> = {
     pluralLabel: "Journal Entries",
     placeholder: "Select Journal Entries",
     numberLabel: "Journal Entry",
+    searchAlso: "JV number",
     dateLabel: "Date",
     originalLabel: "Credited",
     paidLabel: "Paid",
@@ -758,6 +761,8 @@ const HEAD_TYPES: ReadonlyArray<PartnerType> = ["EMPLOYEE_ADVANCE", "EMPLOYEE_IM
  */
 export function needsDepartmentHead(form: RequestForm): boolean {
   if (!form.company || form.company === "MART") return false;
+  // A bill due within 2 days goes straight to Payment: no head approves it.
+  if (paysToday(form)) return false;
   // An Account Payment always goes to Avtar (user, 2026-10-15).
   if (form.type === "ACCOUNT") return false;
   // A plant's staff salary advance goes to the plant's fixed approver, by
@@ -778,14 +783,36 @@ export function needsBillDueDate(form: RequestForm): boolean {
   return form.type !== "ACCOUNT" && form.type !== "EXPENSE";
 }
 
-/** Raised fewer than this many days before its Bill Due Date, a request goes straight to Payment. */
+/** Due this many days or fewer after the day it is raised, a request goes straight to Payment. */
 export const DUE_SOON_DAYS = 2;
 
-/** Whether a Bill Due Date skips the approvals when raised on `today` (both ISO dates). */
+/**
+ * Whether a Bill Due Date skips the approvals when raised on `today` (both ISO
+ * dates): due in 2 days or fewer, or already past. Due 20 Oct: raised on the
+ * 18th or later, yes; on the 17th or before, no.
+ */
 export function dueSoon(billDueDate: string, today: string): boolean {
   if (!billDueDate || !today) return false;
   const days = (Date.parse(billDueDate) - Date.parse(today)) / 86_400_000;
-  return days < DUE_SOON_DAYS;
+  return days <= DUE_SOON_DAYS;
+}
+
+/**
+ * Due in 2 days or fewer, or overdue (user, 2026-10-19): the request goes
+ * straight to Payment — no Department Head is asked — and is paid the day it
+ * is raised. The server applies the same rule (`purposes.is_due_soon`).
+ */
+export function paysToday(form: RequestForm, today: string = todayIso()): boolean {
+  return needsBillDueDate(form) && dueSoon(form.billDueDate, today);
+}
+
+/**
+ * The Payment Date is not asked but is the day it is raised: a bill due soon,
+ * and every vendor paid On Account (user, 2026-10-19). The server sets it the
+ * same way.
+ */
+export function paymentDateIsToday(form: RequestForm, today: string = todayIso()): boolean {
+  return paysToday(form, today) || (form.type === "VENDOR" && form.paymentAgainst === "ON_ACCOUNT");
 }
 
 /** An HOD picked who has no OMS login: they could not approve it. */
@@ -910,6 +937,8 @@ export function sanitize(form: RequestForm): RequestForm {
     next.purposeNeedsHead = false;
   }
   if (!needsBillDueDate(next)) next.billDueDate = "";
+  // Due soon: paid the day it is raised.
+  if (paymentDateIsToday(next)) next.paymentDate = todayIso();
 
   // Typed answers live only as long as the "other" choice they describe.
   if (next.paymentAgainst !== "OTHER") next.paymentAgainstOther = "";

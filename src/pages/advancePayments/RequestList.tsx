@@ -38,6 +38,7 @@ import {
   STATUS_LABEL,
   STATUS_TONE,
   formatDateTime,
+  pendingWith,
   type CompanyFilter,
   type DeskCounts,
   type DeskFilter,
@@ -240,6 +241,22 @@ function CreditLines({ entry }: { entry: AdvanceRequestEntry }) {
 }
 
 /** "Bill" or "Advance", where it is either: what the approver is paying for. */
+/** The request's status, and for a pending one the stage and person it waits on. */
+function StatusCell({ entry }: { entry: AdvanceRequestEntry }) {
+  const waiting = pendingWith(entry);
+  return (
+    <div className="flex flex-col items-start gap-1">
+      <Badge tone={STATUS_TONE[entry.status]}>{STATUS_LABEL[entry.status]}</Badge>
+      {waiting ? (
+        <span className="text-[11px] leading-snug text-subtle">
+          {waiting.stage ? <span className="block">{waiting.stage}</span> : null}
+          {waiting.who ? <span className="block font-medium text-ink">{waiting.who}</span> : null}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 function BillOrAdvance({ form }: { form: AdvanceRequestEntry["form"] }) {
   const kind = billOrAdvance(form);
   if (!kind) return null;
@@ -339,7 +356,7 @@ export function RequestTable({
                         {status ? (
                           status.cell(e)
                         ) : (
-                          <Badge tone={STATUS_TONE[e.status]}>{STATUS_LABEL[e.status]}</Badge>
+                          <StatusCell entry={e} />
                         )}
                       </div>
                       <Button
@@ -446,7 +463,7 @@ export function RequestTable({
                   {status ? (
                     status.cell(e)
                   ) : (
-                    <Badge tone={STATUS_TONE[e.status]}>{STATUS_LABEL[e.status]}</Badge>
+                    <StatusCell entry={e} />
                   )}
                 </TableCell>
                 <TableCell className="text-right">

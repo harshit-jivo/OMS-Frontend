@@ -4,7 +4,7 @@
  * within 2 days skips the approvals. The server applies the same rules
  * (`purposes.needs_bill_due_date`, `hierarchy.BILL_DUE_SOON`).
  */
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { toApiRequest } from "./requestApi";
 import {
@@ -12,6 +12,9 @@ import {
   applyChange,
   dueSoon,
   needsBillDueDate,
+  needsDepartmentHead,
+  paymentDateIsToday,
+  paysToday,
   resolveCase,
   validate,
   type RequestForm,
@@ -92,11 +95,12 @@ describe("the Bill Due Date", () => {
   });
 });
 
-describe("due within 2 days", () => {
-  // Due 20 Oct: raised on the 18th or before, the full route; the 19th or later, straight to Payment.
+describe("due in 2 days or less", () => {
+  // Due 20 Oct: raised on the 17th or before, the full route; the 18th or later, straight to Payment.
   it.each([
+    ["2026-10-16", false],
     ["2026-10-17", false],
-    ["2026-10-18", false],
+    ["2026-10-18", true],
     ["2026-10-19", true],
     ["2026-10-20", true],
     ["2026-10-22", true],
@@ -106,5 +110,52 @@ describe("due within 2 days", () => {
 
   it("needs a date to decide", () => {
     expect(dueSoon("", "2026-10-19")).toBe(false);
+  });
+});
+
+describe("due soon: straight to the Payment desk (user, 2026-10-19)", () => {
+  // Today is 19 Oct 2026, India.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 9, 19, 10, 0));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it.each(["2026-10-21", "2026-10-20", "2026-10-19", "2026-10-02"])(
+    "due %s: no Department Head, paid the day it is raised",
+    (billDueDate) => {
+      const form = electricityOnAccount({ billDueDate });
+      expect(paysToday(form)).toBe(true);
+      expect(needsDepartmentHead(form)).toBe(false);
+      expect(form.departmentHead).toBe("");
+      expect(form.paymentDate).toBe("2026-10-19");
+      expect(validate(form).missing).toEqual([]);
+      const input = toApiRequest(form);
+      expect(input.department_head_code).toBeNull();
+      expect(input.payment_date).toBe("2026-10-19");
+    },
+  );
+
+  it("due in more than 2 days: the chosen Department Head; on account, still paid the day it is raised", () => {
+    const form = electricityOnAccount({ billDueDate: "2026-10-22", paymentDate: "2026-10-21" });
+    expect(paysToday(form)).toBe(false);
+    expect(needsDepartmentHead(form)).toBe(true);
+    expect(form.departmentHead).toBe("TEMP0001");
+    expect(paymentDateIsToday(form)).toBe(true);
+    expect(form.paymentDate).toBe("2026-10-19");
+  });
+
+  it("against a bill, a far-off due date keeps the Payment Date the requester types", () => {
+    const form = electricityOnAccount({ paymentAgainst: "AGAINST_BILL" });
+    const typed = applyChange({ ...form, ...UTILITIES }, { billDueDate: "2026-11-30", paymentDate: "2026-11-25" });
+    expect(paymentDateIsToday(typed)).toBe(false);
+    expect(typed.paymentDate).toBe("2026-11-25");
+  });
+
+  it("moving the date out again asks for a head once more", () => {
+    const soon = electricityOnAccount({ billDueDate: "2026-10-20" });
+    const later = applyChange(soon, { billDueDate: "2026-11-30" });
+    expect(needsDepartmentHead(later)).toBe(true);
+    expect(validate(later).missing).toContain("Department Head");
   });
 });

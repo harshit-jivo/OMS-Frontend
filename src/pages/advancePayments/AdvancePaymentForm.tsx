@@ -85,6 +85,7 @@ import {
   DUE_SOON_DAYS,
   needsBillDueDate,
   needsDepartmentHead,
+  paymentDateIsToday,
   plainAmountError,
   pastDateError,
   partnerCodes,
@@ -964,6 +965,28 @@ export function AdvancePaymentForm({
             </Field>
           )}
 
+          {/* Utilities and insurance: the date on the bill or policy decides the route. */}
+          {needsBillDueDate(form) ? (
+            <Field
+              label="Bill Due Date"
+              required
+              hint={
+                form.billDueDate && dueSoon(form.billDueDate, today)
+                  ? `Due in ${DUE_SOON_DAYS} days or less, or overdue: no Department Head or Director — it goes straight to the Payment desk, paid today.`
+                  : `The due date printed on the bill, or the policy's renewal date. More than ${DUE_SOON_DAYS} days away: your Department Head, then the Director. Attach the bill or policy below.`
+              }
+            >
+              {(f) => (
+                <Input
+                  {...f}
+                  type="date"
+                  value={form.billDueDate}
+                  onChange={(e) => change({ billDueDate: e.target.value })}
+                />
+              )}
+            </Field>
+          ) : null}
+
           {/* Approved "by department": the requester names the HOD who
               approves it, from the employee master. The route's Department
               Head stage goes to that HOD's OMS login. */}
@@ -997,28 +1020,6 @@ export function AdvancePaymentForm({
             </Field>
           ) : null}
 
-          {/* Utilities and insurance: the date on the bill or policy decides the route. */}
-          {needsBillDueDate(form) ? (
-            <Field
-              label="Bill Due Date"
-              required
-              hint={
-                form.billDueDate && dueSoon(form.billDueDate, today)
-                  ? `Due within ${DUE_SOON_DAYS} days: this request skips the Department Head and the Director and goes straight to Payment.`
-                  : "The due date printed on the bill, or the policy's renewal date. Attach the bill or policy below."
-              }
-            >
-              {(f) => (
-                <Input
-                  {...f}
-                  type="date"
-                  value={form.billDueDate}
-                  onChange={(e) => change({ billDueDate: e.target.value })}
-                />
-              )}
-            </Field>
-          ) : null}
-
           {/* Not asked on an Expense: dated the day it is raised. */}
           {c.expense ? null : (
             <>
@@ -1043,23 +1044,26 @@ export function AdvancePaymentForm({
                 )}
               </Field>
 
-              <Field
-                label="Payment Date"
-                required
-                error={pastDateError("Payment Date", form.paymentDate, today) ?? undefined}
-              >
-                {(f) => (
-                  <Input
-                    {...f}
-                    type="date"
-                    // No past dates: the picker offers none, and `validate` refuses
-                    // a typed one.
-                    min={today}
-                    value={form.paymentDate}
-                    onChange={(e) => change({ paymentDate: e.target.value })}
-                  />
-                )}
-              </Field>
+              {/* Not asked for a vendor On Account or a bill due soon: the day it is raised. */}
+              {paymentDateIsToday(form, today) ? null : (
+                <Field
+                  label="Payment Date"
+                  required
+                  error={pastDateError("Payment Date", form.paymentDate, today) ?? undefined}
+                >
+                  {(f) => (
+                    <Input
+                      {...f}
+                      type="date"
+                      // No past dates: the picker offers none, and `validate` refuses
+                      // a typed one.
+                      min={today}
+                      value={form.paymentDate}
+                      onChange={(e) => change({ paymentDate: e.target.value })}
+                    />
+                  )}
+                </Field>
+              )}
             </>
           )}
         </FormGrid>

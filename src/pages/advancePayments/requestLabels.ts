@@ -222,6 +222,20 @@ export function reachedPayment(entry: AdvanceRequestEntry): boolean {
   return BALANCE_ROLES.has(entry.api.flow?.current_role ?? "") || entry.status === "APPROVED";
 }
 
+/**
+ * Where a pending request waits, and on whom: `{ stage, who }`, or null when it
+ * is not pending. `who` is the person who acts today — the picked Department
+ * Head on that stage, a stand-in when one covers — as the server worked it out.
+ */
+export function pendingWith(entry: AdvanceRequestEntry): { stage: string; who: string } | null {
+  if (entry.status !== "PENDING") return null;
+  const flow = entry.api.flow;
+  const user = flow?.current_user;
+  const stage = flow?.current_stage ?? "";
+  const who = user ? user.name || user.username : "";
+  return stage || who ? { stage, who } : null;
+}
+
 /** One line on the closed Status card: where it stands. */
 export function statusSummary(entry: AdvanceRequestEntry): string {
   const stage = entry.api.flow?.current_stage;

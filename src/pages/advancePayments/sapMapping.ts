@@ -225,7 +225,9 @@ export function ledgerToDocument(
       doc.direction === "CREDIT"
         ? `Owed to the ${owedTo}`
         : `Owed by the ${owedTo} — reduces the refund`,
-    reference: doc.party_ref || undefined,
+    // A journal entry has no party ref; accounts know it by its Journal
+    // Voucher, so that is shown — and searched — instead ("JV 7101").
+    reference: doc.party_ref || (doc.voucher_num ? `JV ${doc.voucher_num}` : undefined),
     dueDate: doc.due_date || undefined,
     currency: doc.currency || undefined,
     ledger: { object, entry, line, direction: doc.direction },

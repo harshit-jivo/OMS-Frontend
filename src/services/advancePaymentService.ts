@@ -725,6 +725,8 @@ export interface SapLedgerDocument {
   doc_entry: number | null;
   doc_num: string;
   party_ref: string;
+  /** A manual journal entry keyed through a Journal Voucher: its JV number (OJDT.BatchNum). */
+  voucher_num?: number | null;
   document_date: string | null;
   posting_date: string | null;
   due_date: string | null;
