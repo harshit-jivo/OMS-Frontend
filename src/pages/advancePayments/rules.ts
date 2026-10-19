@@ -751,6 +751,9 @@ export function countsAgainstFactoryLimit(company: string, budget: string, purpo
   return FACTORY_BUDGETS.includes(budget) || FACTORY_LIMIT_PURPOSES.includes(purpose);
 }
 
+/** Freight (`purposes.FREIGHT_PURPOSES`): Navdeep first, then Payment — no Department Head (2026-10-19). */
+export const FREIGHT_PURPOSES: ReadonlyArray<string> = ["FREIGHT_IN", "FREIGHT_OUT", "FREIGHT_IMPORT"];
+
 /** Employee and Imprest requests always go to the requester's Department Head. */
 const HEAD_TYPES: ReadonlyArray<PartnerType> = ["EMPLOYEE_ADVANCE", "EMPLOYEE_IMPREST"];
 
@@ -763,6 +766,12 @@ export function needsDepartmentHead(form: RequestForm): boolean {
   if (!form.company || form.company === "MART") return false;
   // A bill due within 2 days goes straight to Payment: no head approves it.
   if (paysToday(form)) return false;
+  // Every bill goes straight to the Payment desk (user, 2026-10-19).
+  if (form.paymentAgainst === "AGAINST_BILL") return false;
+  // Freight goes to Navdeep, then Payment — an Employee / Imprest request aside.
+  if (FREIGHT_PURPOSES.includes(form.purpose) && !(form.type !== "" && HEAD_TYPES.includes(form.type))) {
+    return false;
+  }
   // An Account Payment always goes to Avtar (user, 2026-10-15).
   if (form.type === "ACCOUNT") return false;
   // A plant's staff salary advance goes to the plant's fixed approver, by
@@ -780,6 +789,8 @@ export function needsDepartmentHead(form: RequestForm): boolean {
 export function needsBillDueDate(form: RequestForm): boolean {
   if (!form.company || form.company === "MART" || !form.purposeDueDate) return false;
   if (form.type === "" || HEAD_TYPES.includes(form.type)) return false;
+  // A bill goes straight to Payment whenever it is due: the date decides nothing.
+  if (form.paymentAgainst === "AGAINST_BILL") return false;
   return form.type !== "ACCOUNT" && form.type !== "EXPENSE";
 }
 

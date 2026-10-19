@@ -196,7 +196,7 @@ export function deskCounts(entries: AdvanceRequestEntry[]): DeskCounts {
 
 /* ── The payee's balance ─────────────────────────────────────────────────── */
 
-const BALANCE_ROLES = new Set(["PAYMENT", "AUDIT", "FINAL"]);
+const BALANCE_ROLES = new Set(["PAYMENT", "CA", "AUDIT", "FINAL"]);
 
 /**
  * Whether the desk shows the payee's SAP balance: at or past Payment (or

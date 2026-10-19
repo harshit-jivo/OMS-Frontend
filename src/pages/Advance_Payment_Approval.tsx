@@ -132,6 +132,10 @@ function stageGuidance(entry: AdvanceRequestEntry): string {
       return entry.api.partner_not_in_sap
         ? `${entry.form.partnerName} has no employee advance account in SAP yet — create it in SAP first.`
         : "Fill in the payment and bank details and save them.";
+    case "CA":
+      return entry.form.type === "EXPENSE"
+        ? "Check the expense lines and payment details, then approve on to Expense Audit. Nothing is posted to SAP yet."
+        : "Check the payment details, then approve on to Audit. Nothing is posted to SAP yet.";
     case "AUDIT":
       return "Check the payment details, then approve on to Final. Nothing is posted to SAP yet.";
     case "FINAL":
@@ -547,9 +551,9 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
           <ExpenseLines entry={entry} />
         )}
 
-        {/* SAP as it is now, while the request is still at Payment, Audit or Final:
+        {/* SAP as it is now, while the request is still at Payment, CA, Audit or Final:
           what Final checks before posting, seen before it gets there. */}
-        {["PAYMENT", "AUDIT", "FINAL"].includes(flow?.current_role ?? "") &&
+        {["PAYMENT", "CA", "AUDIT", "FINAL"].includes(flow?.current_role ?? "") &&
         entry.form.selected.length ? (
           <SapCheck requestId={entry.serverId} />
         ) : null}

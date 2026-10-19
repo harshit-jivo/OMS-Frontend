@@ -1248,14 +1248,13 @@ describe("Advance Payment Request", () => {
       });
     });
 
-    it("asks the Department Head only where the purpose is approved by department, and sends who it is", async () => {
+    it("asks no Department Head on a bill, whatever the purpose, and sends none", async () => {
+      // Every bill goes straight to the Payment desk (user, 2026-10-19).
       const user = await open();
       await user.click(screen.getByRole("tab", { name: /New Request/ }));
       await start(user, "VENDOR", "Against Bill");
-      await pick(user, /^Payment Purpose/, /Raw Material – Other than Oil/);
-      expect(screen.queryByLabelText(/^Department Head/)).toBeNull(); // a fixed owner approves it
-
       await pick(user, /^Payment Purpose/, /^Rent/);
+      expect(screen.queryByLabelText(/^Department Head/)).toBeNull();
       await pick(user, /^Business Partner/, /ABC Technologies/);
       await waitForBills();
       await tick(user, /^Bills/, /10256/);
@@ -1265,17 +1264,33 @@ describe("Advance Payment Request", () => {
       await user.type(field(/^Payment Date/), "2026-10-01");
       await user.type(field(/^Remarks/), "Office rent");
       await user.click(screen.getByRole("button", { name: "Submit Request" }));
-      expect(await screen.findByText(/Still needed: Department Head/)).toBeTruthy();
+      await screen.findByText(/AP-2026-0015 raised/);
+      const [input] = vi.mocked(advancePaymentService.createRequest).mock.calls.at(-1)!;
+      expect(input).toMatchObject({ purpose_code: "RENT", department_head_code: null });
+    });
 
-      // The HODs of the employee master; one with no OMS login cannot approve it.
+    it("asks an Employee advance's Department Head from the HODs, one with an OMS login", async () => {
+      const user = await open();
+      await user.click(screen.getByRole("tab", { name: /New Request/ }));
+      await start(user, "EMPLOYEE_ADVANCE", "Other");
+      await answer(user, /^Payment Against/, "Tools");
+      await pick(user, /^Employee/, /RAVINDER SINGH SHUNTY/);
+      await user.type(field(/^Amount/), "5000");
+      await pick(user, /^Department(?! Head)/, /Back Office/);
+      await pick(user, /^Payment Purpose/, /Employee Advance/);
+      await pick(user, /^Ownership/, /Arvinder/);
+      await user.type(field(/^Payment Date/), "2026-10-01");
+      await user.type(field(/^Remarks/), "Tools");
+      await user.click(screen.getByRole("button", { name: "Submit Request" }));
+      expect(await screen.findByText(/Still needed: Department Head/)).toBeTruthy();
       await pick(user, /^Department Head/, /Arshdeep Singh/);
       expect(screen.getAllByText(/Arshdeep Singh has no OMS login to approve with/).length).toBeGreaterThan(0);
       await pick(user, /^Department Head/, /Jasbir Singh Raju/);
       expect(advancePaymentService.departmentHeads).toHaveBeenCalled();
       await user.click(screen.getByRole("button", { name: "Submit Request" }));
-      await screen.findByText(/AP-2026-0015 raised/);
+      await screen.findByText(/raised/);
       const [input] = vi.mocked(advancePaymentService.createRequest).mock.calls.at(-1)!;
-      expect(input).toMatchObject({ purpose_code: "RENT", department_head_code: "JWPL000C" });
+      expect(input).toMatchObject({ department_head_code: "JWPL000C" });
     });
 
     it("shows the server's refusal above the buttons, and keeps the form", async () => {

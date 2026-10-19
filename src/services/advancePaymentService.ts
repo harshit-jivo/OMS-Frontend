@@ -1089,7 +1089,8 @@ export type ApiRequestStatus = "IN_APPROVAL" | "RETURNED" | "COMPLETED" | "REJEC
  * Payment is an APPROVAL (named freely, as many as the route needs); the
  * last three are Payment, Audit and Final by name.
  */
-export type StageRole = "APPROVAL" | "PAYMENT" | "AUDIT" | "FINAL";
+/** CA: the CA desk (Navdeep), after Payment on every route (2026-10-19). */
+export type StageRole = "APPROVAL" | "PAYMENT" | "CA" | "AUDIT" | "FINAL";
 
 export interface ApiUser {
   id: number;
