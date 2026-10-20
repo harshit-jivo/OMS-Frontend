@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { advancePaymentService } from "../services/advancePaymentService";
 import { renderPage } from "../test/renderPage";
 import Advance_Payment_Request from "./Advance_Payment_Request";
+import Expense_Request from "./Expense_Request";
 import { apiRequest } from "./advancePayments/testRequests";
 
 const TARAN = { id: 14, username: "taran", name: "Taran" };
@@ -38,5 +39,30 @@ describe("Entries", () => {
     const done = screen.getByText("AP-2026-0161").closest("tr")!;
     expect(within(done).queryByText("Payment Approval")).toBeNull();
     expect(within(done).queryByText("Taran")).toBeNull();
+  });
+});
+
+describe("Payments and Expenses list their own (2026-10-20)", () => {
+  const mixed = [
+    apiRequest(190, { partner_name: "SBP (FOOD & HYGIENE) PVT LTD" }),
+    apiRequest(191, { request_type: "EXPENSE", payment_against: "INDIRECT_EXPENSE", partner_name: "Office rent" }),
+  ];
+
+  it("the Payments page leaves Expenses out", async () => {
+    vi.spyOn(advancePaymentService, "requests").mockResolvedValue(mixed);
+    renderPage(<Advance_Payment_Request />, { route: "/Advance_Payment_Request" });
+    expect(await screen.findByText("AP-2026-0190")).toBeTruthy();
+    expect(screen.queryByText("AP-2026-0191")).toBeNull();
+    expect(screen.getByRole("columnheader", { name: "Type" })).toBeTruthy();
+  });
+
+  it("the Expenses page lists only Expenses", async () => {
+    vi.spyOn(advancePaymentService, "requests").mockResolvedValue(mixed);
+    renderPage(<Expense_Request />, { route: "/Expense_Request" });
+    expect(await screen.findByText("AP-2026-0191")).toBeTruthy();
+    expect(screen.queryByText("AP-2026-0190")).toBeNull();
+    expect(screen.getByRole("tab", { name: /New Expense/ })).toBeTruthy();
+    // Every row is an Expense: no Type column (2026-10-20).
+    expect(screen.queryByRole("columnheader", { name: "Type" })).toBeNull();
   });
 });

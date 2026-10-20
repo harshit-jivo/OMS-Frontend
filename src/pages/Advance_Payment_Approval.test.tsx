@@ -783,7 +783,9 @@ describe("Payments Approval", () => {
       expect(field("Beneficiary Name").value).toBe("KAMAL KUMAR");
       // Not the desk's to change: no picker or box for them, and no adding or removing lines.
       const editor = within(document.querySelector<HTMLElement>('[data-slot="expense-editor"]')!);
-      for (const fixed of [/^Pay To/, /^Vendor/, /^Department/, /^Payment Against/, /^Amount/]) {
+      // The budget head is the desk's to change since 2026-10-20; who is paid and the amounts are not.
+      expect(editor.getByLabelText(/^Department/)).toBeTruthy();
+      for (const fixed of [/^Pay To/, /^Vendor/, /^Payment Against/, /^Amount/]) {
         expect(editor.queryByLabelText(fixed)).toBeNull();
       }
       expect(screen.queryByRole("button", { name: /Add line/ })).toBeNull();
@@ -820,7 +822,8 @@ describe("Payments Approval", () => {
       expect(await screen.findByText("Expense request saved.")).toBeTruthy();
       const [, sent] = vi.mocked(advancePaymentService.editExpense).mock.calls[0];
       expect(Object.keys(sent).sort()).toEqual(
-        ["effect_month", "expense_lines", "expense_tds_code", "is_electricity", "sub_budget_code"],
+        ["budget_code", "effect_month", "expense_bill_date", "expense_bill_number", "expense_category",
+         "expense_lines", "expense_tds_code", "is_electricity", "sub_budget_code"],
       );
       expect(sent).toMatchObject({
         sub_budget_code: "Accounts",

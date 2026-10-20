@@ -36,6 +36,7 @@ import {
   HiOutlineArrowPath,
   HiOutlineArrowTrendingUp,
   HiOutlineBanknotes,
+  HiOutlineReceiptRefund,
   HiOutlineBeaker,
   HiOutlineBellAlert,
   HiOutlineBuildingStorefront,
@@ -214,6 +215,8 @@ export const SIDEBAR_SECTIONS: SidebarSectionDef[] = [
       // The request form reads SAP for vendors, open bills and employees; it
       // does not submit yet (no create endpoint).
       { to: "/Advance_Payment_Request", label: "Payments", icon: HiOutlineBanknotes },
+      // Expense requests, on their own page (2026-10-20).
+      { to: "/Expense_Request", label: "Expenses", icon: HiOutlineReceiptRefund },
       { to: "/Advance_Payment_Approval", label: "Payments Approval", icon: HiOutlineCheckBadge },
       { to: "/Advance_Payment_Register", label: "All Payment Requests", icon: HiOutlineQueueList },
       // Factory Daily Limit: switched off (2026-10-16). Put this back with

@@ -41,6 +41,7 @@ import {
   type ReferenceKind,
   type RequestForm,
   holdOf,
+  expensePayeeOf,
 } from "./rules";
 
 /* ── Small conversions ───────────────────────────────────────────────────── */
@@ -141,6 +142,10 @@ export function toApiRequest(form: RequestForm): ApiRequestInput {
     partner_code: form.partner,
     // An Expense: paid to its vendor, else (the server fills it in) whoever raised it.
     partner_name: c.expense ? (form.partner ? form.partnerName : form.payee.trim()) : form.partnerName,
+    expense_payee: c.expense ? form.expensePayee : "",
+    expense_category: form.expenseCategory,
+    expense_bill_number: form.expenseBillNumber.trim(),
+    expense_bill_date: orNull(form.expenseBillDate),
     amount: kind ? String(total) : c.expense ? String(expenseTotal(form.expenseLines)) : form.amount,
     documents,
     expected_date: orNull(form.expectedDate),
@@ -167,9 +172,13 @@ export function toApiRequest(form: RequestForm): ApiRequestInput {
 /** What the Payment desk sends to correct an Expense request (`PUT /requests/<id>/expense/`). */
 export function expenseEditToApi(form: RequestForm): ApiExpenseEdit {
   const input = toApiRequest(form);
-  // Not the company, budget head, who is paid or any amount: the requester's.
+  // Not the company, who is paid or any amount: the requester's.
   return {
+    budget_code: input.budget_code,
     sub_budget_code: input.sub_budget_code ?? "",
+    expense_category: input.expense_category ?? "",
+    expense_bill_number: input.expense_bill_number ?? "",
+    expense_bill_date: input.expense_bill_date ?? null,
     effect_month: input.effect_month,
     is_electricity: input.is_electricity,
     expense_tds_code: input.expense_tds_code ?? "",
@@ -277,6 +286,10 @@ export function formFromApi(api: ApiRequest): RequestForm {
     paymentDate: api.payment_date ?? "",
     remarks: api.remarks,
     payee: expense ? api.partner_name : "",
+    expensePayee: expense ? expensePayeeOf(api.partner_code) : "",
+    expenseCategory: (api.expense_category ?? "") as RequestForm["expenseCategory"],
+    expenseBillNumber: api.expense_bill_number ?? "",
+    expenseBillDate: api.expense_bill_date ?? "",
     subBudget: expense ? api.sub_budget_code ?? "" : "",
     subBudgetName: expense ? api.sub_budget_name ?? "" : "",
     effectMonth: expense ? api.effect_month ?? "" : "",

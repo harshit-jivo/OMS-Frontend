@@ -40,6 +40,11 @@ const line = (patch: Partial<ExpenseLineForm>): ExpenseLineForm => ({
 function expense(patch: Partial<RequestForm> = {}): RequestForm {
   return [
     { company: "OIL" as const, type: "EXPENSE" as const },
+    // Who is paid (2026-10-20): Pay To, then the partner it names — both required.
+    { expensePayee: "VENDOR" as const },
+    { partner: "VENDA000101", partnerName: "ABC Technologies" },
+    // The vendor's bill it pays (2026-10-20).
+    { expenseCategory: "SERVICE" as const, expenseBillNumber: "INV-118", expenseBillDate: "2026-10-05" },
     {
       budget: "Factory",
       budgetName: "Factory",
@@ -60,12 +65,21 @@ describe("an Expense request", () => {
     expect(form.paymentAgainst).toBe("INDIRECT_EXPENSE");
     expect([form.effectMonth, form.expenseLines.length]).toEqual(["", 1]);
     const c = resolveCase(form);
-    expect([c.expense, c.plainAmount, c.reference, c.partnerSource]).toEqual([
-      true,
-      false,
-      null,
-      "SAP_VENDORS",
-    ]);
+    // No partner list until Pay To says whose: vendors, or imprest accounts.
+    expect([c.expense, c.plainAmount, c.reference, c.partnerSource]).toEqual([true, false, null, null]);
+    expect(validate(form, TODAY).missing).toContain("Pay To");
+    const vendor = resolveCase(applyChange(form, { expensePayee: "VENDOR" }));
+    expect([vendor.partnerSource, vendor.partnerLabel]).toEqual(["SAP_VENDORS", "Vendor"]);
+    const imprest = resolveCase(applyChange(form, { expensePayee: "IMPREST" }));
+    expect([imprest.partnerSource, imprest.partnerLabel]).toEqual(["SAP_IMPREST", "Imprest Account"]);
+  });
+
+  it("needs the partner its Pay To names, and a new Pay To clears it", () => {
+    expect(validate(expense({ partner: "", partnerName: "" }), TODAY).missing).toContain("Vendor");
+    const switched = applyChange(expense(), { expensePayee: "IMPREST" });
+    expect(switched.partner).toBe("");
+    expect(validate(switched, TODAY).missing).toContain("Imprest Account");
+    expect(toApiRequest(expense()).expense_payee).toBe("VENDOR");
   });
 
   it("is complete without a payee, ownership, payment date, sub budget, month or remarks", () => {
@@ -126,8 +140,9 @@ describe("an Expense request", () => {
     const input = toApiRequest(expense({ remarks: "" }));
     expect(input).toMatchObject({
       request_type: "EXPENSE",
-      partner_code: "",
-      partner_name: "",
+      expense_payee: "VENDOR",
+      partner_code: "VENDA000101",
+      partner_name: "ABC Technologies",
       amount: "14800.5",
       budget_code: "Factory",
       sub_budget_code: "",
@@ -173,7 +188,11 @@ describe("an Expense request", () => {
     );
     expect(Object.keys(edit).sort()).toEqual(
       [
+        "budget_code",
         "effect_month",
+        "expense_bill_date",
+        "expense_bill_number",
+        "expense_category",
         "expense_lines",
         "expense_tds_code",
         "is_electricity",
@@ -200,7 +219,7 @@ describe("an Expense request", () => {
         budget_name: "Factory",
       }),
     );
-    expect(back.payee).toBe("Tester"); // no vendor: whoever raised it
+    expect([back.expensePayee, back.partner, back.payee]).toEqual(["VENDOR", "VENDA000101", "ABC Technologies"]);
     expect([back.subBudget, back.effectMonth, back.isElectricity, back.expenseTdsCode]).toEqual([
       "Accounts",
       "10-2026",
@@ -216,5 +235,25 @@ describe("an Expense request", () => {
     // Read back, the payment pays the amounts less the server's TDS.
     expect(paidAmount(back)).toBe(14800.5 - 296);
     expect(validate(back, TODAY)).toEqual({ missing: [], problems: [] });
+  });
+});
+
+describe("an Expense paid to a vendor names its bill (2026-10-20)", () => {
+  it("needs the bill number and Doc Date — not the category, the Payment desk's; an imprest none of them", () => {
+    const missing = validate(expense({ expenseCategory: "", expenseBillNumber: "", expenseBillDate: "" }), TODAY).missing;
+    expect(missing).toEqual(expect.arrayContaining(["Bill Number", "Doc Date"]));
+    expect(missing).not.toContain("Category");
+    expect(validate(expense({ expenseBillDate: "2026-12-01" }), TODAY).problems).toContain(
+      "The Doc Date cannot be in the future.",
+    );
+    const imprest = applyChange(expense(), { expensePayee: "IMPREST" });
+    expect([imprest.expenseCategory, imprest.expenseBillNumber, imprest.expenseBillDate]).toEqual(["", "", ""]);
+  });
+
+  it("goes to the API and comes back", () => {
+    const input = toApiRequest(expense());
+    expect(input).toMatchObject({ expense_category: "SERVICE", expense_bill_number: "INV-118", expense_bill_date: "2026-10-05" });
+    const back = formFromApi(apiRequest(41, storedInput(input)));
+    expect([back.expenseCategory, back.expenseBillNumber, back.expenseBillDate]).toEqual(["SERVICE", "INV-118", "2026-10-05"]);
   });
 });

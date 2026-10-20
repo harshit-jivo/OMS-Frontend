@@ -270,6 +270,7 @@ export function RequestTable({
   emptyText,
   status,
   selection,
+  hideType = false,
 }: {
   entries: AdvanceRequestEntry[];
   onOpen: (entry: AdvanceRequestEntry) => void;
@@ -287,6 +288,8 @@ export function RequestTable({
     selected: ReadonlySet<number>;
     onChange: (next: Set<number>) => void;
   };
+  /** No Type column: every row is the same type (the Expenses page, 2026-10-20). */
+  hideType?: boolean;
 }) {
   const narrow = useNarrow();
   const selectable = selection ? entries.filter(selection.canSelect).map((e) => e.serverId) : [];
@@ -346,7 +349,9 @@ export function RequestTable({
                       <CreditLines entry={e} />
                     </p>
                     <p className="m-0 mt-0.5 text-[11px] text-subtle">
-                      {[e.form.company, typeLabel(e.form), paymentAgainstLabel(e.form)].filter(Boolean).join(" · ")}
+                      {[e.form.company, hideType ? "" : typeLabel(e.form), paymentAgainstLabel(e.form)]
+                        .filter(Boolean)
+                        .join(" · ")}
                     </p>
                     <p className="m-0 text-[11px] text-subtle">
                       {e.requestedBy} · {formatDateTime(e.requestedOn)}
@@ -396,7 +401,7 @@ export function RequestTable({
           ) : null}
           <TableHead>Request</TableHead>
           <TableHead>Company</TableHead>
-          <TableHead>Type</TableHead>
+          {hideType ? null : <TableHead>Type</TableHead>}
           <TableHead>Payment Against</TableHead>
           <TableHead>Partner</TableHead>
           <TableHead className="text-right">Amount</TableHead>
@@ -438,7 +443,7 @@ export function RequestTable({
                   </span>
                 </TableCell>
                 <TableCell>{e.form.company}</TableCell>
-                <TableCell>{typeLabel(e.form)}</TableCell>
+                {hideType ? null : <TableCell>{typeLabel(e.form)}</TableCell>}
                 <TableCell>
                   {billOrAdvance(e.form) ? (
                     <span className="mb-0.5 block">

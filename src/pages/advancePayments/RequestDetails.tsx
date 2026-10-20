@@ -115,6 +115,14 @@ export function RequestSummary({
         {c.expense ? (
           <>
             <DetailField label="Pay To" value={form.payee} hint={form.partner || undefined} />
+            {/* Paid to a vendor: the bill it pays (2026-10-20). */}
+            {form.expenseBillNumber ? (
+              <DetailField
+                label="Bill"
+                value={`${form.expenseBillNumber}${form.expenseBillDate ? ` · ${formatDate(form.expenseBillDate)}` : ""}`}
+                hint={form.expenseCategory === "ITEM" ? "Item" : form.expenseCategory === "SERVICE" ? "Service" : undefined}
+              />
+            ) : null}
             <DetailField label="Amount" value={formatINR(requestAmount(form))} strong />
             {expenseTds(form) ? (
               <DetailField
@@ -124,7 +132,7 @@ export function RequestSummary({
             ) : null}
             <DetailField
               label="Month"
-              value={form.effectMonth ? `${monthLabel(form.effectMonth)} (${form.effectMonth})` : "Set by the Payment desk"}
+              value={form.effectMonth ? `${monthLabel(form.effectMonth)} (${form.effectMonth})` : "Set by the Accounts desk"}
             />
             <DetailField label="Electricity" value={form.isElectricity ? "Yes — the Director approves too" : "No"} />
           </>
@@ -209,7 +217,7 @@ export function RequestSummary({
           value={form.budgetName || form.budget || entry.api.department?.name || ""}
         />
         {c.expense ? (
-          <DetailField label="Sub Budget" value={form.subBudgetName || form.subBudget || "Set by the Payment desk"} />
+          <DetailField label="Sub Budget" value={form.subBudgetName || form.subBudget || "Set by the Accounts desk"} />
         ) : (
           <DetailField label="Payment Purpose" value={form.purposeLabel || form.purpose} />
         )}
@@ -277,7 +285,7 @@ export function ExpenseEditHistory({ entry }: { entry: AdvanceRequestEntry }) {
   );
 }
 
-/** An Expense's lines: amount, G/L, month, remarks — read-only, with the Payment desk's edits. */
+/** An Expense's lines: amount, G/L, month, remarks — read-only, with the Accounts desk's edits. */
 export function ExpenseLines({ entry }: { entry: AdvanceRequestEntry }) {
   const { form } = entry;
   if (form.type !== "EXPENSE") return null;
@@ -333,11 +341,11 @@ export function ExpenseLines({ entry }: { entry: AdvanceRequestEntry }) {
                       {line.glName ? <span className="text-subtle"> · {line.glName}</span> : null}
                     </span>
                   ) : (
-                    <span className="text-subtle">Payment desk to choose</span>
+                    <span className="text-subtle">Accounts desk to choose</span>
                   )}
                 </TableCell>
                 <TableCell>
-                  {month ? monthLabel(month) : <span className="text-subtle">Payment desk to set</span>}
+                  {month ? monthLabel(month) : <span className="text-subtle">Accounts desk to set</span>}
                   {line.effectMonth && line.effectMonth !== form.effectMonth ? (
                     <span className="block text-[11px] text-subtle">its own month</span>
                   ) : null}

@@ -1,6 +1,11 @@
 /**
  * Payments — the requester's page: their ENTRIES, and a NEW REQUEST.
  *
+ * Two pages share it (user, 2026-10-20): Payments (`/Advance_Payment_Request`)
+ * raises and lists every type but Expense, and Expenses (`/Expense_Request`,
+ * `Expense_Request.tsx`) raises and lists Expense requests only. Each lists
+ * only its own entries; a request opened from either page is the same.
+ *
  * Laid out like BackDate's: KPI cards that are the status filter, an Entries
  * / New Request tab strip, and search / company / status controls beside it
  * while the list is showing. The point of the Entries tab is that a requester
@@ -17,7 +22,7 @@ import { useMemo, useState } from "react";
 
 import { showToast } from "@/lib/toastStore";
 import { useQueryClient } from "@tanstack/react-query";
-import { HiOutlineBanknotes, HiPlus } from "react-icons/hi2";
+import { HiOutlineBanknotes, HiOutlineReceiptRefund, HiPlus } from "react-icons/hi2";
 
 import { Badge } from "../components/ui/badge";
 import { Breadcrumbs } from "../components/ui/breadcrumbs";
@@ -39,7 +44,7 @@ import {
   type ApiAssignment,
 } from "../services/advancePaymentService";
 
-import { AdvancePaymentForm } from "./advancePayments/AdvancePaymentForm";
+import { AdvancePaymentForm, type RequestSection } from "./advancePayments/AdvancePaymentForm";
 import { AssignedToMe } from "./advancePayments/AssignedToMe";
 import { CollapsibleCard } from "./advancePayments/CollapsibleCard";
 import { useAssignedToMe } from "./advancePayments/assignments";
@@ -70,7 +75,14 @@ import {
   useRequestList,
   useStoreRequest,
 } from "./advancePayments/requestQueries";
-import { formatINR, paysGlAccount, splitByPartner, type RequestForm } from "./advancePayments/rules";
+import {
+  EMPTY_FORM,
+  applyChange,
+  formatINR,
+  paysGlAccount,
+  splitByPartner,
+  type RequestForm,
+} from "./advancePayments/rules";
 import "./advancePayments/sapSkin.css";
 
 type PageTab = "entries" | "create" | "assigned";
@@ -81,14 +93,46 @@ interface Prefill {
   assignment: ApiAssignment;
 }
 
-const pageTitle = (
-  <span className="flex items-center gap-2.5">
-    <span className="grid size-8 shrink-0 place-items-center rounded-full bg-brand text-white">
-      <HiOutlineBanknotes className="size-4" aria-hidden="true" />
+/** What each page calls itself, and what it raises. */
+const SECTIONS: Record<
+  RequestSection,
+  { name: string; icon: typeof HiOutlineBanknotes; description: string; newLabel: string; empty: string }
+> = {
+  payments: {
+    name: "Payments",
+    icon: HiOutlineBanknotes,
+    description: "Raise advance payments to vendors and employees, and follow each one through approval.",
+    newLabel: "New Request",
+    empty: "No payment requests yet.",
+  },
+  expenses: {
+    name: "Expenses",
+    icon: HiOutlineReceiptRefund,
+    description:
+      "Raise expenses paid straight to expense accounts — rent, utilities, bank charges — and follow each one through approval.",
+    newLabel: "New Expense",
+    empty: "No expense requests yet.",
+  },
+};
+
+/** Whether a request belongs on this page: Expenses on Expenses, the rest on Payments. */
+const inSection = (section: RequestSection, entry: AdvanceRequestEntry) =>
+  (entry.form.type === "EXPENSE") === (section === "expenses");
+
+/** A new Expense starts as one: the Expenses page has no type to choose. */
+const BLANK_EXPENSE = applyChange(EMPTY_FORM, { type: "EXPENSE" });
+
+function pageTitle(section: RequestSection) {
+  const { name, icon: Icon } = SECTIONS[section];
+  return (
+    <span className="flex items-center gap-2.5">
+      <span className="grid size-8 shrink-0 place-items-center rounded-full bg-brand text-white">
+        <Icon className="size-4" aria-hidden="true" />
+      </span>
+      {name}
     </span>
-    Payments
-  </span>
-);
+  );
+}
 
 /** The server's message, thrown so the form shows it above its buttons. */
 function rethrow(err: unknown): never {
@@ -104,7 +148,8 @@ const inSap = (entry: AdvanceRequestEntry) =>
   Boolean(entry.form.partner) &&
   !entry.api.partner_not_in_sap;
 
-function EntryDetails({ id, onBack }: { id: number; onBack: () => void }) {
+function EntryDetails({ id, onBack, section }: { id: number; onBack: () => void; section: RequestSection }) {
+  const pageName = SECTIONS[section].name;
   const detail = useRequestDetail(id);
   const store = useStoreRequest();
   const [editing, setEditing] = useState(false);
@@ -117,7 +162,7 @@ function EntryDetails({ id, onBack }: { id: number; onBack: () => void }) {
   if (!entry) {
     return (
       <Page className="sap-skin">
-        <Breadcrumbs items={[{ label: "Payments", onClick: onBack }, { label: "Request" }]} />
+        <Breadcrumbs items={[{ label: pageName, onClick: onBack }, { label: "Request" }]} />
         {detail.isError ? (
           <Notice tone="bad" title="Could not open the request">
             {advancePaymentError(detail.error)}
@@ -181,10 +226,10 @@ function EntryDetails({ id, onBack }: { id: number; onBack: () => void }) {
   return (
     <RequestFilesProvider value={entry.serverId}>
       <Page className="sap-skin">
-        <Breadcrumbs items={[{ label: "Payments", onClick: onBack }, { label: entry.requestNo }]} />
+        <Breadcrumbs items={[{ label: pageName, onClick: onBack }, { label: entry.requestNo }]} />
 
         <PageHeader
-          eyebrow="Payments"
+          eyebrow={pageName}
           title={entry.requestNo}
           badges={
             <>
@@ -342,11 +387,15 @@ function EntryDetails({ id, onBack }: { id: number; onBack: () => void }) {
   );
 }
 
-export default function Advance_Payment_Request() {
+/** The requester's page: Payments or Expenses (2026-10-20). */
+export function RequestsPage({ section }: { section: RequestSection }) {
+  const page = SECTIONS[section];
+  const expenses = section === "expenses";
   const list = useRequestList("mine");
   const [tab, setTab] = useState<PageTab>("entries");
   const store = useStoreRequest();
-  const entries = useMemo(() => list.data ?? [], [list.data]);
+  // Only this page's own: Expenses here, the rest on Payments.
+  const entries = useMemo(() => (list.data ?? []).filter((e) => inSection(section, e)), [list.data, section]);
   const [filters, setFilters] = useState<RequestFilterState>(NO_FILTERS);
   const [openId, setOpenId] = useState<number | null>(null);
   // A notification links here with `?request=<id>`.
@@ -370,7 +419,7 @@ export default function Advance_Payment_Request() {
     setTab("entries");
   };
 
-  if (openId !== null) return <EntryDetails id={openId} onBack={() => setOpenId(null)} />;
+  if (openId !== null) return <EntryDetails id={openId} onBack={() => setOpenId(null)} section={section} />;
 
   const raise = async (form: RequestForm, files: FileAttachment[]) => {
     // Several employees chosen: one request each, raised in turn.
@@ -419,19 +468,15 @@ export default function Advance_Payment_Request() {
     <Page className="sap-skin">
       <Breadcrumbs
         items={[
-          { label: "Payments" },
+          { label: page.name },
           {
             label:
-              tab === "entries" ? "Entries" : tab === "assigned" ? "Assigned to Me" : "New Request",
+              tab === "entries" ? "Entries" : tab === "assigned" ? "Assigned to Me" : page.newLabel,
           },
         ]}
       />
 
-      <PageHeader
-        eyebrow="Payments"
-        title={pageTitle}
-        description="Raise advance payments to vendors and employees, and follow each one through approval."
-      />
+      <PageHeader eyebrow={page.name} title={pageTitle(section)} description={page.description} />
 
       {notice ? (
         <Notice tone="ok" title="Submitted">
@@ -455,24 +500,27 @@ export default function Advance_Payment_Request() {
       </StatRow>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <TabList label="Payments">
+        <TabList label={page.name}>
           <Tab selected={tab === "entries"} onClick={() => setTab("entries")}>
             Entries
           </Tab>
-          <Tab
-            selected={tab === "assigned"}
-            onClick={() => {
-              setTab("assigned");
-              setNotice("");
-            }}
-          >
-            Assigned to Me
-            {assigned.data?.length ? (
-              <Badge tone="info" className="ml-1.5">
-                {assigned.data.length}
-              </Badge>
-            ) : null}
-          </Tab>
+          {/* Bills and POs sent to raise from: vendor payments, not expenses. */}
+          {expenses ? null : (
+            <Tab
+              selected={tab === "assigned"}
+              onClick={() => {
+                setTab("assigned");
+                setNotice("");
+              }}
+            >
+              Assigned to Me
+              {assigned.data?.length ? (
+                <Badge tone="info" className="ml-1.5">
+                  {assigned.data.length}
+                </Badge>
+              ) : null}
+            </Tab>
+          )}
           <Tab
             selected={tab === "create"}
             onClick={() => {
@@ -481,7 +529,7 @@ export default function Advance_Payment_Request() {
               setPrefill(null);
             }}
           >
-            <HiPlus aria-hidden /> New Request
+            <HiPlus aria-hidden /> {page.newLabel}
           </Tab>
         </TabList>
 
@@ -504,7 +552,8 @@ export default function Advance_Payment_Request() {
           <AdvancePaymentForm
             // A new prefill is a new form, not an edit of the last one.
             key={prefill ? `assignment-${prefill.assignment.id}` : "blank"}
-            initial={prefill?.form}
+            initial={prefill?.form ?? (expenses ? BLANK_EXPENSE : undefined)}
+            section={section}
             dailyLimit
             intro={
               prefill ? (
@@ -529,16 +578,22 @@ export default function Advance_Payment_Request() {
             entries={shown}
             onOpen={(e) => setOpenId(e.serverId)}
             action={() => ({ label: "Details", variant: "secondary" })}
+            hideType={expenses}
             emptyText={
               list.isLoading
                 ? "Loading…"
                 : filters.search || filters.company || filters.status
                   ? "No requests match these filters."
-                  : "No payment requests yet."
+                  : page.empty
             }
           />
         </Card>
       )}
     </Page>
   );
+}
+
+/** Payments: every type but Expense. */
+export default function Advance_Payment_Request() {
+  return <RequestsPage section="payments" />;
 }

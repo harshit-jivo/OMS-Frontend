@@ -73,6 +73,8 @@ import {
   PARTNER_CODE_PREFIX,
   suggestedAccountPurpose,
   typesFor,
+  EXPENSE_PAYEES,
+  type ExpensePayee,
   REFERENCE_KINDS,
   allocationRows,
   allocationTotals,
@@ -85,6 +87,8 @@ import {
   DUE_SOON_DAYS,
   needsBillDueDate,
   needsDepartmentHead,
+  needsProof,
+  vendorExpense,
   paymentDateIsToday,
   plainAmountError,
   pastDateError,
@@ -110,6 +114,7 @@ import {
   withCodePrefix,
 } from "./sapMapping";
 import { attachFile, formatSize, type FileAttachment } from "./attachments";
+import { VendorExpenseBill } from "./VendorExpenseBill";
 import { VendorOnAccount } from "./VendorOnAccount";
 import { SapPartnerLink } from "./SapDocument";
 import { ExpenseDetails } from "./ExpenseDetails";
@@ -162,7 +167,16 @@ export interface AdvancePaymentFormProps {
    * against the day it was raised, which the server checks.
    */
   dailyLimit?: boolean;
+  /**
+   * Which page raises it (user, 2026-10-20): Payments offers every type but
+   * Expense; Expenses offers Expense only. Unset (an edit, the desk): every
+   * type, so a saved request always finds its own.
+   */
+  section?: RequestSection;
 }
+
+/** The two pages that raise requests: Payments, and Expenses (2026-10-20). */
+export type RequestSection = "payments" | "expenses";
 
 export function AdvancePaymentForm({
   initial = EMPTY_FORM,
@@ -173,6 +187,7 @@ export function AdvancePaymentForm({
   onCancel,
   intro,
   multiplePartners = false,
+  section,
   dailyLimit = false,
 }: AdvancePaymentFormProps) {
   const [form, setForm] = useState<RequestForm>(initial);
@@ -529,8 +544,8 @@ export function AdvancePaymentForm({
     save: (form: RequestForm, files: FileAttachment[]) => Promise<string | void> | string | void = onSubmit,
   ) => {
     const { missing, problems } = validate(form, today);
-    // The Payment desk checks the typed Bill Due Date against the bill or policy.
-    if (needsBillDueDate(form) && files.length === 0) missing.push("Attachment (the bill or policy)");
+    // The Payment desk checks the bill (or policy) against what is entered.
+    if (needsProof(form) && files.length === 0) missing.push("Attachment (the bill or policy)");
     const overLimit = factoryLimit.counts ? factoryLimitError(factoryLimit.query.data, requestAmount) : null;
     const messages = [
       ...(missing.length > 0 ? [`Still needed: ${missing.join(", ")}.`] : []),
@@ -628,27 +643,53 @@ export function AdvancePaymentForm({
             )}
           </Field>
 
-          <Field label="Type" required>
-            {(f) => (
-              <Select
-                {...f}
-                value={form.type}
-                onChange={(e) => change({ type: e.target.value as PartnerType | "" })}
-              >
-                <option value="" disabled hidden>
-                  Select Type
-                </option>
-                {typesFor(form.company).map((type) => (
-                  <option key={type.value} value={type.value}>
-                    {type.label}
+          {/* The Expenses page raises Expenses only: no type to show (2026-10-20). */}
+          {section === "expenses" ? null : (
+            <Field label="Type" required>
+              {(f) => (
+                <Select
+                  {...f}
+                  value={form.type}
+                  onChange={(e) => change({ type: e.target.value as PartnerType | "" })}
+                >
+                  <option value="" disabled hidden>
+                    Select Type
                   </option>
-                ))}
-              </Select>
-            )}
-          </Field>
+                  {typesFor(form.company)
+                    // Payments: every type but Expense, which has its own page.
+                    .filter((type) => section !== "payments" || type.value !== "EXPENSE")
+                    .map((type) => (
+                      <option key={type.value} value={type.value}>
+                        {type.label}
+                      </option>
+                    ))}
+                </Select>
+              )}
+            </Field>
+          )}
 
-          {/* An Expense is not asked it: direct or indirect follows from its G/L accounts. */}
-          {c.expense ? null : (
+          {/* An Expense is not asked Payment Against (its G/L accounts decide
+              direct or indirect): it is asked who is paid (2026-10-20). */}
+          {c.expense ? (
+            <Field label="Pay To" required>
+              {(f) => (
+                <Select
+                  {...f}
+                  value={form.expensePayee}
+                  onChange={(e) => change({ expensePayee: e.target.value as ExpensePayee | "" })}
+                >
+                  <option value="" disabled hidden>
+                    Vendor or Imprest
+                  </option>
+                  {EXPENSE_PAYEES.map((p) => (
+                    <option key={p.value} value={p.value}>
+                      {p.label}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </Field>
+          ) : (
             <Field
               label="Payment Against"
               required
@@ -679,7 +720,7 @@ export function AdvancePaymentForm({
         <FormGrid className="md:grid-cols-3">
           <Field
             label={c.partnerLabel}
-            required={!c.expense}
+            required
             error={partnerError}
             hint={
               partnerError || c.expense
@@ -759,9 +800,8 @@ export function AdvancePaymentForm({
                   }
                   change(patch);
                 }}
-                disabled={!c.decided || (c.livePartners && !form.company)}
-                placeholder={c.expense ? "No vendor (optional)" : `Select ${c.partnerLabel}`}
-                clearLabel={c.expense ? "No vendor" : undefined}
+                disabled={!c.decided || (c.livePartners && !form.company) || (c.expense && !form.expensePayee)}
+                placeholder={c.expense && !form.expensePayee ? "Choose Pay To first" : `Select ${c.partnerLabel}`}
                 searchPlaceholder="Search name or code…"
                 // A vendor's full name, wrapped — never cut off on a narrow screen.
                 multiline
@@ -846,6 +886,11 @@ export function AdvancePaymentForm({
                 />
               )}
             </Field>
+          ) : null}
+
+          {/* An Expense to a vendor: the bill it pays, and how SAP books it. */}
+          {vendorExpense(form) ? (
+            <VendorExpenseBill company={company} form={form} onChange={change} today={today} />
           ) : null}
         </FormGrid>
       </FormSection>
@@ -935,7 +980,7 @@ export function AdvancePaymentForm({
             )}
           </Field>
 
-          {/* An Expense has no purpose (its budget head routes it); the Payment desk sets its Sub Budget. */}
+          {/* An Expense has no purpose (its budget head routes it); the Accounts desk sets its Sub Budget. */}
           {c.expense ? null : (
             /* What the money is for: the Payment Desk's purpose list. */
             <Field
@@ -1085,9 +1130,11 @@ export function AdvancePaymentForm({
       <FormSection
         title="Attachments"
         description={
-          needsBillDueDate(form)
-            ? "Required: the bill or the insurance policy that shows the Bill Due Date."
-            : undefined
+          vendorExpense(form)
+            ? "Required: the vendor's bill this expense pays."
+            : needsBillDueDate(form)
+              ? "Required: the bill or the insurance policy that shows the Bill Due Date."
+              : undefined
         }
       >
         <div

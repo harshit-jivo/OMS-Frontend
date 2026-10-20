@@ -1285,6 +1285,10 @@ export interface ApiRequestFields {
   expected_bill_date: string | null;
   /** Utilities / insurance: the due date on the bill or the policy's renewal date. */
   bill_due_date: string | null;
+  /** An Expense paid to a vendor (2026-10-20): the bill — ITEM / SERVICE, its number, its date. */
+  expense_category?: string;
+  expense_bill_number?: string;
+  expense_bill_date?: string | null;
   return_method: string;
   return_method_other: string;
   installments: number | null;
@@ -1372,6 +1376,17 @@ export interface SapPaymentAccount {
   balance: string;
 }
 
+/**
+ * How SAP books a vendor's bills, one category (`/vendor-expense-history/`,
+ * 2026-10-20): its latest bill with an expense account, and that bill's
+ * expense accounts in line order.
+ */
+export interface SapVendorBillHistory {
+  category: "ITEM" | "SERVICE";
+  bill: { doc_num: number; doc_date: string | null; vendor_ref: string } | null;
+  accounts: SapExpenseAccount[];
+}
+
 export interface SapExpenseAccount {
   code: string;
   name: string;
@@ -1405,7 +1420,13 @@ export interface ApiExpenseLineInput {
 
 /** The Payment desk's correction of an Expense request. */
 export interface ApiExpenseEdit {
+  /** The budget head: the desk's to change since 2026-10-20. */
+  budget_code: string;
   sub_budget_code: string;
+  /** The bill an Expense to a vendor pays (2026-10-20): its category, number, Doc Date. */
+  expense_category: string;
+  expense_bill_number: string;
+  expense_bill_date: string | null;
   effect_month: string;
   is_electricity: boolean;
   expense_tds_code: string;
@@ -1432,6 +1453,8 @@ export interface ApiExpenseLine extends ApiExpenseLineInput {
 
 /** What the form sends to raise or edit a request. */
 export interface ApiRequestInput extends ApiRequestFields {
+  /** Expense only (2026-10-20): VENDOR or IMPREST, who is paid; "" otherwise. */
+  expense_payee?: string;
   /** The Department Head: an HOD's employee code; null where none is asked. */
   department_head_code: string | null;
   documents: ApiRequestDocument[];
@@ -1626,6 +1649,12 @@ export const advancePaymentService = {
   },
 
   /** The expense G/L accounts an Expense line may pay to. */
+  /** The vendor's bills in SAP, per category: what an Expense to them starts from. */
+  async vendorExpenseHistory(company: AdvancePaymentCompany, cardCode: string): Promise<SapVendorBillHistory[]> {
+    const res = await api.get(`${BASE}/vendor-expense-history/`, { params: { company, card_code: cardCode } });
+    return results<SapVendorBillHistory>(res.data);
+  },
+
   async expenseAccounts(company: AdvancePaymentCompany): Promise<SapExpenseAccount[]> {
     const res = await api.get(`${BASE}/expense-accounts/`, { params: { company } });
     return results<SapExpenseAccount>(res.data);

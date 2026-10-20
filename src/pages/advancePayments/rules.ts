@@ -129,6 +129,29 @@ export function monthCodeOf(isoDate: string): string {
   return year && month ? `${month}-${year}` : "";
 }
 
+/** Who an Expense is paid to (2026-10-20). */
+export type ExpensePayee = "VENDOR" | "IMPREST";
+
+export const EXPENSE_PAYEES: ReadonlyArray<{ value: ExpensePayee; label: string }> = [
+  { value: "VENDOR", label: "Vendor" },
+  { value: "IMPREST", label: "Imprest" },
+];
+
+/** A vendor's bill, as SAP books it (OPCH.DocType): Item or Service. */
+export type ExpenseCategory = "ITEM" | "SERVICE";
+
+export const EXPENSE_CATEGORIES: ReadonlyArray<{ value: ExpenseCategory; label: string }> = [
+  { value: "ITEM", label: "Item" },
+  { value: "SERVICE", label: "Service" },
+];
+
+/** An Expense paid to a vendor: it names the bill it pays, attached. */
+export const vendorExpense = (form: RequestForm) => form.type === "EXPENSE" && form.expensePayee === "VENDOR";
+
+/** Which a partner code is: an ORGV imprest account, or a vendor. */
+export const expensePayeeOf = (code: string): ExpensePayee | "" =>
+  !code ? "" : code.toUpperCase().startsWith("ORGV") ? "IMPREST" : "VENDOR";
+
 export interface RequestForm {
   company: Company | "";
   type: PartnerType | "";
@@ -241,6 +264,19 @@ export interface RequestForm {
   /* ── Expense only ── */
   /** Who is paid: an Expense has no SAP partner, so the name is typed. */
   payee: string;
+  /**
+   * An Expense's Pay To (user, 2026-10-20): a SAP vendor, or an employee's
+   * imprest account (ORGV). Either way the partner is required.
+   */
+  expensePayee: ExpensePayee | "";
+  /**
+   * An Expense paid to a vendor (2026-10-20): the bill it pays — its category
+   * as SAP books the vendor's bills, the vendor's bill number and its date.
+   * All required, with the bill attached; not asked for an imprest.
+   */
+  expenseCategory: ExpenseCategory | "";
+  expenseBillNumber: string;
+  expenseBillDate: string;
   /** SAP's Sub Budget (dimension 4): every expense line in SAP carries one. */
   subBudget: string;
   subBudgetName: string;
@@ -286,6 +322,10 @@ export const EMPTY_FORM: RequestForm = {
   paymentDate: "",
   remarks: "",
   payee: "",
+  expensePayee: "",
+  expenseCategory: "",
+  expenseBillNumber: "",
+  expenseBillDate: "",
   subBudget: "",
   subBudgetName: "",
   effectMonth: "",
@@ -672,7 +712,16 @@ export function resolveCase(form: RequestForm): ResolvedCase {
   const reference: ReferenceKind | null = rule?.reference ?? null;
   const decided = Boolean(rule);
 
-  const partnerSource = rule ? partnerSourceFor(form.type, reference) : null;
+  // An Expense lists the partners of its Pay To: vendors, or imprest accounts.
+  const partnerSource = !rule
+    ? null
+    : rule.expense
+      ? form.expensePayee === "IMPREST"
+        ? "SAP_IMPREST"
+        : form.expensePayee === "VENDOR"
+          ? "SAP_VENDORS"
+          : null
+      : partnerSourceFor(form.type, reference);
   const livePartners = isLiveSource(partnerSource);
   const liveDocuments = Boolean(reference && REFERENCE_KINDS[reference].live);
 
@@ -706,7 +755,9 @@ export function resolveCase(form: RequestForm): ResolvedCase {
         : form.type === "CUSTOMER"
           ? "Customer"
           : form.type === "EXPENSE"
-            ? "Vendor"
+            ? form.expensePayee === "IMPREST"
+              ? "Imprest Account"
+              : "Vendor"
             : form.type === "ACCOUNT"
               ? "Account"
               : "Employee",
@@ -929,6 +980,7 @@ export function sanitize(form: RequestForm): RequestForm {
   // Expense fields live only on an Expense; an Expense names no purpose.
   if (!c.expense) {
     next.payee = "";
+    next.expensePayee = "";
     next.subBudget = "";
     next.subBudgetName = "";
     next.effectMonth = "";
@@ -948,6 +1000,12 @@ export function sanitize(form: RequestForm): RequestForm {
     next.purposeNeedsHead = false;
   }
   if (!needsBillDueDate(next)) next.billDueDate = "";
+  // The bill an Expense pays: only when it is paid to a vendor.
+  if (!vendorExpense(next)) {
+    next.expenseCategory = "";
+    next.expenseBillNumber = "";
+    next.expenseBillDate = "";
+  }
   // Due soon: paid the day it is raised.
   if (paymentDateIsToday(next)) next.paymentDate = todayIso();
 
@@ -1055,6 +1113,9 @@ export function applyChange(form: RequestForm, patch: Partial<RequestForm>): Req
   if (changed("partner") && resolveCase(next).reference && !resolveCase(next).multiplePartners) {
     next = { ...next, ...CLEARED_DOCUMENTS };
   }
+  if (changed("expensePayee")) next = { ...next, ...CLEARED_PARTNER };
+  // Another vendor: SAP says again how its bills are booked.
+  if (changed("partner") && resolveCase(next).expense) next = { ...next, expenseCategory: "" };
   // An Expense's vendor names who is paid, unless something else was typed.
   if (changed("partner") && resolveCase(next).expense && (!form.payee || form.payee === form.partnerName)) {
     next = { ...next, payee: next.partnerName };
@@ -1518,7 +1579,14 @@ export function validate(form: RequestForm, today: string = todayIso()): Validat
   else if (form.paymentAgainst === "OTHER" && !form.paymentAgainstOther.trim()) {
     missing.push("Payment Against (what it is)");
   }
-  if (c.decided && !c.expense && !form.partner) missing.push(c.partnerLabel);
+  if (c.expense && !form.expensePayee) missing.push("Pay To");
+  else if (c.decided && !form.partner) missing.push(c.partnerLabel);
+  // The category is the Payment desk's (it is filled from SAP, not asked).
+  if (vendorExpense(form)) {
+    if (!form.expenseBillNumber.trim()) missing.push("Bill Number");
+    if (!form.expenseBillDate) missing.push("Doc Date");
+    else if (form.expenseBillDate > today) problems.push("The Doc Date cannot be in the future.");
+  }
   if (!form.budget) missing.push("Department");
   if (c.expense) {
     const expense = validateExpense(form);
@@ -1694,3 +1762,10 @@ export function dueFirst<T>(items: T[], docOf: (item: T) => OpenDocument, today:
   return [...due, ...items.filter((item) => !dueState(docOf(item), today))];
 }
 
+/**
+ * The request must carry a file: the bill or policy showing a Bill Due Date,
+ * or the vendor's bill an Expense pays (2026-10-20). The server refuses it too.
+ */
+export function needsProof(form: RequestForm): boolean {
+  return needsBillDueDate(form) || vendorExpense(form);
+}

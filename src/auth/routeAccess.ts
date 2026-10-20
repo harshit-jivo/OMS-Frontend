@@ -268,6 +268,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
    * while the page was a mock, before the backend module existed.
    */
   "/Advance_Payment_Request": { permissions: ["Advance_Payment"] },
+  // The same people raise Expenses (2026-10-20): the same permission.
+  "/Expense_Request": { permissions: ["Advance_Payment"] },
   /*
    * Advance Payments — approval desk.
    *

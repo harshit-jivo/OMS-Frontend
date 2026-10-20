@@ -118,6 +118,7 @@ const Ap_Invoice_Entry = lazy(() => import("./pages/Ap_Invoice_Entry"));
 // Advance Payments — the request FORM only, and it is UI with mock data:
 // no endpoint, no model, no approval route. See the page header comment.
 const AdvancePaymentRequest = lazy(() => import("./pages/Advance_Payment_Request"));
+const ExpenseRequest = lazy(() => import("./pages/Expense_Request"));
 const AdvancePaymentApproval = lazy(() => import("./pages/Advance_Payment_Approval"));
 const AdvancePaymentDispatch = lazy(() => import("./pages/Advance_Payment_Dispatch"));
 const AdvancePaymentRegister = lazy(() => import("./pages/Advance_Payment_Register"));
@@ -907,6 +908,16 @@ function App() {
           element={
             <ProtectedPage>
               <AdvancePaymentRequest />
+            </ProtectedPage>
+          }
+        />
+
+        {/* Expenses — moved off the Payments page (2026-10-20). */}
+        <Route
+          path="/Expense_Request"
+          element={
+            <ProtectedPage>
+              <ExpenseRequest />
             </ProtectedPage>
           }
         />

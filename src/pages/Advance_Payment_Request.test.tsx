@@ -8,7 +8,7 @@
  * The SAP service is mocked with SAP-shaped rows (`advancePayments/testData`),
  * so the live paths run exactly as they do against the server, minus HANA.
  */
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -16,6 +16,7 @@ import { advancePaymentService } from "../services/advancePaymentService";
 import { FakeRequestServer, TESTER, apiRequest, sampleRequests } from "./advancePayments/testRequests";
 import { renderPage } from "../test/renderPage";
 import Advance_Payment_Request from "./Advance_Payment_Request";
+import Expense_Request from "./Expense_Request";
 import {
   SAP_EMPLOYEES,
   SAP_OPEN_INVOICES,
@@ -106,6 +107,8 @@ vi.mock("../services/advancePaymentService", async (importOriginal) => {
         { code: "5100008", name: "CASUAL LABOUR", group: "DIRECT EXPENSE", kind: "DIRECT" },
       ]),
       expenseMonths: vi.fn(async () => ({ company: "OIL", months: ["10-2026", "09-2026"], variety: "CANOLA" })),
+      // A vendor's bills in SAP, per category (2026-10-20): none unless a test says.
+      vendorExpenseHistory: vi.fn(async () => []),
       partnerLedger: vi.fn(async (_company: string, cardCode: string) =>
         cardCode === "CUSTA000846" ? CUSTOMER_LEDGER : LEDGER,
       ),
@@ -190,6 +193,14 @@ async function setup() {
   return user;
 }
 
+/** The Expenses page (2026-10-20), on its New Expense tab. */
+async function setupExpenses() {
+  const user = userEvent.setup();
+  renderPage(<Expense_Request />, { route: "/Expense_Request" });
+  await user.click(screen.getByRole("tab", { name: /New Expense/ }));
+  return user;
+}
+
 const field = (label: RegExp) => screen.getByLabelText(label) as HTMLInputElement;
 
 /**
@@ -263,7 +274,7 @@ describe("Advance Payment Request", () => {
     expect(heading("Reference Details")).toBeNull();
   });
 
-  it("offers the five types", async () => {
+  it("offers every type but Expense, which has its own page", async () => {
     await setup();
     const type = screen.getByLabelText(/^Type/) as HTMLSelectElement;
     expect([...type.options].map((o) => o.text)).toEqual([
@@ -272,33 +283,112 @@ describe("Advance Payment Request", () => {
       "Employee",
       "Employee Imprest",
       "Customer",
-      "Expense",
     ]);
   });
 
+  it("the Expenses page raises Expenses only: no Type field to show", async () => {
+    await setupExpenses();
+    expect(screen.queryByLabelText(/^Type/)).toBeNull();
+    // Still an Expense: its own fields are asked (Pay To, the lines).
+    expect(screen.getByLabelText(/^Pay To/)).toBeTruthy();
+    expect(screen.queryByRole("tab", { name: /Assigned to Me/ })).toBeNull();
+  });
+
   describe("Expense: paid straight to expense G/L accounts", () => {
+    it("to a vendor: the category and the G/L come from its latest bill in SAP; the bill is required", async () => {
+      service.vendorExpenseHistory.mockResolvedValueOnce([
+        {
+          category: "SERVICE",
+          bill: { doc_num: 726093159, doc_date: "2026-09-30", vendor_ref: "100550077450" },
+          accounts: [{ code: "5680011", name: "ELECTRICITY EXPENSES", group: "GENERAL EXPENSES", kind: "INDIRECT" }],
+        },
+      ]);
+      const user = await setupExpenses();
+      await user.selectOptions(screen.getByLabelText(/^Company/), "OIL");
+      await user.selectOptions(screen.getByLabelText(/^Pay To/), "VENDOR");
+      await pick(user, /^Vendor/, /ABC Technologies/);
+      // Category and expense type are not the requester's (2026-10-20): the desk's, and the G/L's.
+      expect(screen.queryByLabelText(/^Category/)).toBeNull();
+      expect(screen.queryByLabelText(/^Expense Type/)).toBeNull();
+      await waitFor(() => expect(service.vendorExpenseHistory).toHaveBeenCalledWith("OIL", "VENDA000101"));
+      await waitFor(() =>
+        expect(within(screen.getByRole("group", { name: "Line 1" })).getByLabelText(/^G\/L account/).textContent).toMatch(
+          /5680011/,
+        ),
+      );
+
+      await user.click(screen.getByRole("button", { name: "Submit Request" }));
+      expect(await screen.findByText(/Still needed: .*Bill Number, Doc Date.*Attachment/)).toBeTruthy();
+      expect(screen.queryByText(/Category/)).toBeNull();
+    });
+
+    it("picking the vendor fills the G/L from its latest bill that has one, and says which", async () => {
+      service.vendorExpenseHistory.mockResolvedValueOnce([
+        // Newest: item bills with no expense account.
+        { category: "ITEM", bill: { doc_num: 626104116, doc_date: "2026-10-05", vendor_ref: "" }, accounts: [] },
+        {
+          category: "SERVICE",
+          bill: { doc_num: 726093159, doc_date: "2026-09-30", vendor_ref: "" },
+          accounts: [{ code: "5680011", name: "ELECTRICITY EXPENSES", group: "GENERAL EXPENSES", kind: "INDIRECT" }],
+        },
+      ]);
+      const user = await setupExpenses();
+      await user.selectOptions(screen.getByLabelText(/^Company/), "OIL");
+      await user.selectOptions(screen.getByLabelText(/^Pay To/), "VENDOR");
+      await pick(user, /^Vendor/, /ABC Technologies/);
+      await waitFor(() =>
+        expect(within(screen.getByRole("group", { name: "Line 1" })).getByLabelText(/^G\/L account/).textContent).toMatch(
+          /5680011/,
+        ),
+      );
+      expect(await screen.findByText(/G\/L 5680011 ELECTRICITY EXPENSES filled in from the vendor's latest bill in SAP, 726093159/)).toBeTruthy();
+    });
+
+    it("a vendor with no expense bill in SAP says so, and leaves the G/L to choose", async () => {
+      const user = await setupExpenses();
+      await user.selectOptions(screen.getByLabelText(/^Company/), "OIL");
+      await user.selectOptions(screen.getByLabelText(/^Pay To/), "VENDOR");
+      await pick(user, /^Vendor/, /ABC Technologies/);
+      expect(await screen.findByText(/No expense bill from this vendor in SAP yet/)).toBeTruthy();
+    });
+
+    it("to an imprest: no bill is asked", async () => {
+      const user = await setupExpenses();
+      await user.selectOptions(screen.getByLabelText(/^Company/), "OIL");
+      await user.selectOptions(screen.getByLabelText(/^Pay To/), "IMPREST");
+      for (const gone of [/^Category/, /^Bill Number/, /^Doc Date/, /^Expense Type/]) {
+        expect(screen.queryByLabelText(gone)).toBeNull();
+      }
+    });
+
     const lineBox = (n: number) => within(screen.getByRole("group", { name: `Line ${n}` }));
 
     it("asks only what the requester knows: no Payment Against, payee, ownership, date, sub budget or GST", async () => {
-      const user = await setup();
+      const user = await setupExpenses();
       await user.selectOptions(screen.getByLabelText(/^Company/), "OIL");
-      await user.selectOptions(screen.getByLabelText(/^Type/), "EXPENSE");
-      for (const gone of [/^Payment Against/, /^Pay To/, /^Ownership/, /^Payment Date/, /^Sub Budget/,
+      for (const gone of [/^Payment Against/, /^Ownership/, /^Payment Date/, /^Sub Budget/,
                           /^Payment Purpose/, /^Month/, /^GST/, /^Taxable/, /TDS/,
                           /Electricity/]) {
         expect(screen.queryByLabelText(gone)).toBeNull();
       }
-      // The vendor stays, optional.
-      expect(screen.getByLabelText(/^Vendor/).textContent).toMatch(/No vendor \(optional\)/);
+      // Who is paid is asked (2026-10-20): a Vendor or an Imprest, then that partner.
+      const payTo = screen.getByLabelText(/^Pay To/) as HTMLSelectElement;
+      expect([...payTo.options].map((o) => o.text)).toEqual(["Vendor or Imprest", "Vendor", "Imprest"]);
+      expect(screen.getByLabelText(/^Vendor/).textContent).toMatch(/Choose Pay To first/);
       expect(heading("Expense lines")).not.toBeNull();
       // Remarks are optional.
       expect(field(/^Remarks/).required).toBe(false);
     });
 
     it("takes each line's amount and G/L — or, not knowing it, what it is for — and sends them", async () => {
-      const user = await setup();
+      const user = await setupExpenses();
       await user.selectOptions(screen.getByLabelText(/^Company/), "OIL");
-      await user.selectOptions(screen.getByLabelText(/^Type/), "EXPENSE");
+      await user.selectOptions(screen.getByLabelText(/^Pay To/), "VENDOR");
+      await pick(user, /^Vendor/, /ABC Technologies/);
+      // The bill it pays: its number and Doc Date (the category is the desk's).
+      await user.type(field(/^Bill Number/), "INV-118");
+      await user.type(field(/^Doc Date/), "2026-09-01");
+      await user.upload(document.querySelector('input[type="file"]') as HTMLInputElement, new File(["%PDF"], "bill.pdf"));
       await pick(user, /^Department(?! Head)/, /Factory/);
       await user.type(lineBox(1).getByLabelText(/^Amount/), "11800");
       // Direct and indirect accounts in one list, each labelled.
@@ -327,8 +417,11 @@ describe("Advance Payment Request", () => {
       expect(input).toMatchObject({
         company: "OIL",
         request_type: "EXPENSE",
-        partner_code: "",
-        partner_name: "",
+        expense_payee: "VENDOR",
+        partner_code: "VENDA000101",
+        expense_category: "",
+        expense_bill_number: "INV-118",
+        expense_bill_date: "2026-09-01",
         amount: "14800.5",
         budget_code: "Factory",
         sub_budget_code: "",
