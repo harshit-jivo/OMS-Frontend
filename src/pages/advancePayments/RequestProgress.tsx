@@ -33,6 +33,8 @@ const STAGE_STATE: Record<string, { label: string; tone: BadgeTone }> = {
   UPCOMING: { label: "To come", tone: "neutral" },
   // The same person as the Department Head just before: one approval covers both.
   WITH_HEAD: { label: "With Department Head's approval", tone: "neutral" },
+  // The CA desk's own person: they approve once, at CA (2026-10-20).
+  WITH_CA: { label: "Approves at CA", tone: "neutral" },
   APPROVED: { label: "Approved", tone: "ok" },
   REJECTED: { label: "Rejected", tone: "bad" },
   RETURNED: { label: "Returned to creator", tone: "note" },

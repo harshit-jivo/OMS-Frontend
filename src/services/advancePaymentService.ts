@@ -1218,7 +1218,8 @@ export interface ApiStage {
   /**
    * CURRENT, UPCOMING, or what was done there this round: APPROVED, REJECTED,
    * RETURNED, SENT_BACK. WITH_HEAD: the same person as the Department Head
-   * just before it — their one approval covers both.
+   * just before it — their one approval covers both. WITH_CA: the same person
+   * as the CA desk — they approve once, at CA.
    */
   state: string;
   user_id: number | null;
