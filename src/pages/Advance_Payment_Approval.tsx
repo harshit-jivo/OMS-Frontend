@@ -118,6 +118,20 @@ import { useLinkedRequest } from "./advancePayments/useLinkedRequest";
 /** What each stage is told when the request is waiting on them. */
 function stageGuidance(entry: AdvanceRequestEntry): string {
   const flow = entry.api.flow;
+  // An Expense to a vendor is booked as its A/P invoice, not paid (2026-10-20).
+  if (entry.api.books_ap_invoice) {
+    if (flow?.current_role === "PAYMENT") {
+      return entry.form.expenseCategory === "ITEM"
+        ? "Check the bill, choose its branch and the GRPO it is copied from, then approve. No bank details: the bill is paid later, against its A/P invoice."
+        : "Check the bill, choose its branch, and set each line's G/L, tax code, Variety and State, then approve. No bank details: the bill is paid later, against its A/P invoice.";
+    }
+    if (flow?.current_role === "CA") {
+      return "Check the bill and its A/P invoice fields, then approve on to Expense Audit. Nothing is booked in SAP yet.";
+    }
+    if (flow?.current_role === "AUDIT") {
+      return "Approving books the vendor's A/P invoice in SAP and completes the request.";
+    }
+  }
   // An Expense has no Final: Audit's approval posts it.
   if (entry.form.type === "EXPENSE") {
     if (flow?.current_role === "PAYMENT") {
@@ -242,7 +256,10 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
   const version = entry?.api.flow?.version;
   useEffect(() => {
     if (!entry) return;
-    if (entry.api.can.edit_payout && !entry.payout) {
+    if (entry.api.books_ap_invoice) {
+      // Booked as an A/P invoice: nothing is paid here, so no payment details.
+      setDraft(undefined);
+    } else if (entry.api.can.edit_payout && !entry.payout) {
       setDraft(startPayout(paidAmount(entry.form), payeeOf(entry.form).toUpperCase()));
     } else {
       setDraft(entry.payout);
@@ -287,7 +304,15 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
   // An Expense's route has no Final: Audit's approval posts it.
   const postsToSap = flow?.current_role === (isExpense ? "AUDIT" : "FINAL");
   const sapFailure = entry.api.sap_failure;
-  const approveLabel = postsToSap ? (sapFailure ? "Post to SAP again" : "Post to SAP") : "Approve";
+  const approveLabel = postsToSap
+    ? entry.api.books_ap_invoice
+      ? sapFailure
+        ? "Book A/P Invoice again"
+        : "Book A/P Invoice in SAP"
+      : sapFailure
+        ? "Post to SAP again"
+        : "Post to SAP"
+    : "Approve";
   const approveDone = postsToSap ? "Posted to SAP." : "Approved.";
 
   /** Save the payout, then send the files it gained and drop the ones it lost. */
@@ -374,8 +399,8 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
       showToast({ title: "Not done", message: "Say why, in the remarks.", tone: "bad" });
       return;
     }
-    if (action === "approve" && can.edit_payout && draft) {
-      const { missing, problems } = validatePayout(draft, amount);
+    if (action === "approve" && can.edit_payout && (draft || editsExpense)) {
+      const { missing, problems } = draft ? validatePayout(draft, amount) : { missing: [], problems: [] };
       if (editsExpense && expenseDraft) {
         const expense = validateExpense(expenseDraft, { atPayment: true });
         missing.unshift(...expense.missing);
@@ -519,7 +544,7 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
         {editsExpense && expenseDraft ? (
           <Card className="p-4 md:p-5">
             <CardHeader>
-              <CardTitle>Expense — correct at Payment</CardTitle>
+              <CardTitle>Expense — correct at Accounts</CardTitle>
               {expenseDirty ? (
                 <Button
                   variant="secondary"

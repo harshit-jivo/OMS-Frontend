@@ -309,3 +309,15 @@ export const GST_OPTIONS = [
 ] as const;
 
 export type GstCode = (typeof GST_OPTIONS)[number]["value"];
+
+/** The record's GST for the SAP tax codes it has a choice for (the server's `TAX_CODE_GST`). */
+export const TAX_CODE_GST: Record<string, GstCode> = {
+  "CG+SG@5": "CGST_SGST_5",
+  "CG+SG@18": "CGST_SGST_18",
+  "IGST@5": "IGST_5",
+  "IGST@18": "IGST_18",
+};
+/** ...and back: the SAP tax code a line's recorded GST starts from. */
+export const GST_TAX_CODE: Record<string, string> = Object.fromEntries(
+  Object.entries(TAX_CODE_GST).map(([code, gst]) => [gst, code]),
+);

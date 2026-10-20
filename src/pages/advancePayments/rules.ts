@@ -98,6 +98,15 @@ export interface ExpenseLineForm {
   /** As the server last worked them out (read-only): the TDS code and amount. */
   tdsCode: string;
   tdsAmount: string;
+  /**
+   * An Expense to a vendor, booked as an A/P invoice (2026-10-20): the
+   * Accounts desk's SAP Variety and State (dimensions 1 and 5), GST tax code
+   * and GST location ("" for the branch's).
+   */
+  variety: string;
+  state: string;
+  taxCode: string;
+  location: string;
 }
 
 let expenseLineSeq = 0;
@@ -117,6 +126,10 @@ export function newExpenseLine(): ExpenseLineForm {
     tdsOverride: "",
     tdsCode: "",
     tdsAmount: "",
+    variety: "",
+    state: "",
+    taxCode: "",
+    location: "",
   };
 }
 
@@ -277,6 +290,16 @@ export interface RequestForm {
   expenseCategory: ExpenseCategory | "";
   expenseBillNumber: string;
   expenseBillDate: string;
+  /**
+   * ...and its A/P invoice (2026-10-20), the Accounts desk's: the SAP branch
+   * (BPLId, as text), the due date ("" for the vendor's terms) and, an Item
+   * bill, the GRPO it is copied from (DocEntry and DocNum, as text).
+   */
+  expenseBranch: string;
+  expenseBranchName: string;
+  expenseDueDate: string;
+  expenseGrpoEntry: string;
+  expenseGrpoNum: string;
   /** SAP's Sub Budget (dimension 4): every expense line in SAP carries one. */
   subBudget: string;
   subBudgetName: string;
@@ -326,6 +349,11 @@ export const EMPTY_FORM: RequestForm = {
   expenseCategory: "",
   expenseBillNumber: "",
   expenseBillDate: "",
+  expenseBranch: "",
+  expenseBranchName: "",
+  expenseDueDate: "",
+  expenseGrpoEntry: "",
+  expenseGrpoNum: "",
   subBudget: "",
   subBudgetName: "",
   effectMonth: "",
@@ -1005,6 +1033,14 @@ export function sanitize(form: RequestForm): RequestForm {
     next.expenseCategory = "";
     next.expenseBillNumber = "";
     next.expenseBillDate = "";
+    next.expenseBranch = "";
+    next.expenseBranchName = "";
+    next.expenseDueDate = "";
+  }
+  // Only an Item bill is copied from a GRPO.
+  if (next.expenseCategory !== "ITEM") {
+    next.expenseGrpoEntry = "";
+    next.expenseGrpoNum = "";
   }
   // Due soon: paid the day it is raised.
   if (paymentDateIsToday(next)) next.paymentDate = todayIso();
@@ -1546,13 +1582,28 @@ export function validateExpense(form: RequestForm, { atPayment = false } = {}): 
   if (atPayment && form.expenseLines.some((line) => !(line.effectMonth || form.effectMonth))) {
     missing.push("Month");
   }
+  // Paid to a vendor, the Accounts desk books its A/P invoice (2026-10-20):
+  // the branch, and an Item bill's GRPO — whose lines it copies, accounts and all.
+  const invoice = atPayment && vendorExpense(form);
+  const itemBill = invoice && form.expenseCategory === "ITEM";
+  if (invoice) {
+    if (!form.expenseCategory) missing.push("Category");
+    if (!form.expenseBranch) missing.push("Branch");
+    if (itemBill && !form.expenseGrpoEntry) missing.push("GRPO");
+  }
   form.expenseLines.forEach((line, index) => {
     const n = index + 1;
     const error = plainAmountError(line.amount);
     if (error) problems.push(`Line ${n}: enter an amount above zero.`);
     else if (!line.amount) missing.push(`Amount on line ${n}`);
     if (atPayment) {
+      if (itemBill) return;
       if (!line.glAccount) missing.push(`G/L account on line ${n}`);
+      if (invoice) {
+        if (!line.taxCode) missing.push(`Tax Code on line ${n}`);
+        if (!line.variety) missing.push(`Variety on line ${n}`);
+        if (!line.state) missing.push(`State on line ${n}`);
+      }
     } else if (line.glUnknown) {
       // Not knowing the G/L is allowed (Payment picks it), but then say what it is for.
       if (!line.remarks.trim()) missing.push(`Remarks on line ${n} (what it is for)`);

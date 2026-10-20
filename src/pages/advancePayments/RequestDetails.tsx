@@ -123,6 +123,17 @@ export function RequestSummary({
                 hint={form.expenseCategory === "ITEM" ? "Item" : form.expenseCategory === "SERVICE" ? "Service" : undefined}
               />
             ) : null}
+            {/* ...booked in SAP as an A/P invoice: the Accounts desk's (2026-10-20). */}
+            {form.expenseBranch ? (
+              <DetailField
+                label="A/P Invoice Branch"
+                value={form.expenseBranchName || form.expenseBranch}
+                hint={form.expenseDueDate ? `Due ${formatDate(form.expenseDueDate)}` : "Due: vendor's terms"}
+              />
+            ) : null}
+            {form.expenseGrpoNum || form.expenseGrpoEntry ? (
+              <DetailField label="GRPO" value={form.expenseGrpoNum || form.expenseGrpoEntry} hint="Copied into the A/P invoice" />
+            ) : null}
             <DetailField label="Amount" value={formatINR(requestAmount(form))} strong />
             {expenseTds(form) ? (
               <DetailField
@@ -290,6 +301,8 @@ export function ExpenseLines({ entry }: { entry: AdvanceRequestEntry }) {
   const { form } = entry;
   if (form.type !== "EXPENSE") return null;
   const missing = form.expenseLines.filter((l) => !l.glAccount).length;
+  // Booked as an A/P invoice, a Service bill's lines carry SAP's tax code, Variety and State.
+  const invoiceFields = Boolean(entry.api.books_ap_invoice) && form.expenseCategory !== "ITEM";
   return (
     <Card className="p-4 md:p-5">
       <CardHeader>
@@ -308,6 +321,7 @@ export function ExpenseLines({ entry }: { entry: AdvanceRequestEntry }) {
             <TableHead className="text-right">Paid</TableHead>
             <TableHead>G/L account</TableHead>
             <TableHead>Month</TableHead>
+            {invoiceFields ? <TableHead>Tax · Variety · State</TableHead> : null}
             <TableHead>Remarks</TableHead>
           </TableRow>
         </TableHeader>
@@ -350,6 +364,13 @@ export function ExpenseLines({ entry }: { entry: AdvanceRequestEntry }) {
                     <span className="block text-[11px] text-subtle">its own month</span>
                   ) : null}
                 </TableCell>
+                {invoiceFields ? (
+                  <TableCell>
+                    {[line.taxCode, line.variety, line.state].filter(Boolean).join(" · ") || (
+                      <span className="text-subtle">Accounts desk to set</span>
+                    )}
+                  </TableCell>
+                ) : null}
                 <TableCell className="text-body">{line.remarks || "—"}</TableCell>
               </TableRow>
             );

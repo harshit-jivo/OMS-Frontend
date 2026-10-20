@@ -8,6 +8,10 @@
  * lines as raised and adds what only the desk sets: each line's G/L, GST (how
  * much of the amount is tax), month and TDS — one code for the request, any
  * line its own or none — deducted on the taxable amount; and the Month.
+ *
+ * `apInvoice` (an Expense to a vendor, booked as an A/P invoice, 2026-10-20):
+ * each line's GST is SAP's tax code, and the desk also sets its Variety,
+ * State and GST location — what SAP's expense bills carry on every line.
  */
 import { useQuery } from "@tanstack/react-query";
 import { HiOutlinePlus, HiOutlineXMark } from "react-icons/hi2";
@@ -19,10 +23,11 @@ import {
   advancePaymentError,
   advancePaymentService,
   type AdvancePaymentCompany,
+  type ApInvoiceOptions,
   type TdsCode,
 } from "../../services/advancePaymentService";
 
-import { GST_OPTIONS, type GstCode } from "./constants";
+import { GST_OPTIONS, TAX_CODE_GST, type GstCode } from "./constants";
 import { monthLabel, useExpenseAccounts } from "./expenseLookups";
 import { FormSection, RupeeInput } from "./PaymentSections";
 import {
@@ -51,6 +56,7 @@ export interface ExpenseTds {
 }
 
 const tdsLabel = (c: TdsCode) => `${c.name || c.code} (${Number(c.rate)}%)`;
+
 const KIND_LABEL = { DIRECT: "Direct", INDIRECT: "Indirect" } as const;
 
 /** Small read-only figure inside a line. */
@@ -67,6 +73,12 @@ function Figure({ label, value, strong }: { label: string; value: string; strong
   );
 }
 
+/** SAP's codes as choices, keeping a saved one SAP no longer lists. */
+function withCode(rows: Array<{ code: string; name: string }>, saved: string) {
+  const options = rows.map((r) => ({ value: r.code, label: r.name && r.name !== r.code ? `${r.code} · ${r.name}` : r.code, hint: "" }));
+  return saved && !rows.some((r) => r.code === saved) ? [{ value: saved, label: saved, hint: "" }, ...options] : options;
+}
+
 export function ExpenseDetails({
   company,
   form,
@@ -74,6 +86,8 @@ export function ExpenseDetails({
   description,
   atPayment = false,
   tds,
+  apInvoice,
+  branchLocation,
 }: {
   company: AdvancePaymentCompany | null;
   form: RequestForm;
@@ -84,6 +98,10 @@ export function ExpenseDetails({
   atPayment?: boolean;
   /** The desk's TDS codes (with `atPayment`). */
   tds?: ExpenseTds;
+  /** Booked as an A/P invoice: SAP's tax codes, Varieties, States, locations (with `atPayment`). */
+  apInvoice?: ApInvoiceOptions;
+  /** ...the chosen branch's GST location, a line's unless it names its own. */
+  branchLocation?: number | null;
 }) {
   const accounts = useExpenseAccounts(company, null);
   const monthsQuery = useQuery({
@@ -295,6 +313,36 @@ export function ExpenseDetails({
               <p className="m-0 text-[12.5px] font-semibold text-ink">Line {n}</p>
               <FormGrid className="md:grid-cols-3">
                 <Figure label="Amount" value={formatINR(lineInvoice(line))} strong />
+                {apInvoice ? (
+                  <Field
+                    label="Tax Code"
+                    required
+                    hint={`Taxable ${formatINR(lineTaxable(line))} · GST ${formatINR(lineGst(line))}`}
+                  >
+                    {(f) => (
+                      <Select
+                        {...f}
+                        value={line.taxCode}
+                        onChange={(e) =>
+                          setLine(line.id, {
+                            taxCode: e.target.value,
+                            // The record's GST follows SAP's code where it has one.
+                            gstCode: TAX_CODE_GST[e.target.value] ?? "",
+                          })
+                        }
+                      >
+                        <option value="" disabled hidden>
+                          SAP tax code
+                        </option>
+                        {apInvoice.tax_codes.map((t) => (
+                          <option key={t.code} value={t.code}>
+                            {t.code} · {t.name}
+                          </option>
+                        ))}
+                      </Select>
+                    )}
+                  </Field>
+                ) : (
                 <Field
                   label="GST"
                   hint={`Taxable ${formatINR(lineTaxable(line))} · GST ${formatINR(lineGst(line))}`}
@@ -313,6 +361,7 @@ export function ExpenseDetails({
                     </Select>
                   )}
                 </Field>
+                )}
                 <Figure
                   label="TDS · Paid"
                   value={`${formatINR(lineTdsAmount)} · ${formatINR(lineInvoice(line) - lineTdsAmount)}`}
@@ -350,6 +399,60 @@ export function ExpenseDetails({
                     </Select>
                   )}
                 </Field>
+                {apInvoice ? (
+                  <>
+                    <Field label="Variety" required>
+                      {(f) => (
+                        <SearchSelect<string>
+                          id={f.id}
+                          value={line.variety}
+                          onChange={(next) => setLine(line.id, { variety: next })}
+                          placeholder="Choose the Variety"
+                          searchPlaceholder="Search variety…"
+                          emptyText="No variety matches"
+                          options={withCode(apInvoice.varieties, line.variety)}
+                          maxShown={120}
+                        />
+                      )}
+                    </Field>
+                    <Field label="State" required>
+                      {(f) => (
+                        <Select {...f} value={line.state} onChange={(e) => setLine(line.id, { state: e.target.value })}>
+                          <option value="" disabled hidden>
+                            Choose the State
+                          </option>
+                          {withCode(apInvoice.states, line.state).map((o) => (
+                            <option key={o.value} value={o.value}>
+                              {o.label}
+                            </option>
+                          ))}
+                        </Select>
+                      )}
+                    </Field>
+                    <Field label="GST Location">
+                      {(f) => (
+                        <Select
+                          {...f}
+                          value={line.location}
+                          onChange={(e) => setLine(line.id, { location: e.target.value })}
+                        >
+                          <option value="">
+                            {`Branch's${
+                              branchLocation
+                                ? ` (${apInvoice.locations.find((l) => l.code === branchLocation)?.name ?? branchLocation})`
+                                : ""
+                            }`}
+                          </option>
+                          {apInvoice.locations.map((l) => (
+                            <option key={l.code} value={String(l.code)}>
+                              {l.name}
+                            </option>
+                          ))}
+                        </Select>
+                      )}
+                    </Field>
+                  </>
+                ) : null}
                 <Field label="Line TDS">
                   {(f) => (
                     <Select

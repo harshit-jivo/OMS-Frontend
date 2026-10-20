@@ -92,7 +92,11 @@ export function SapPayment({ entry }: { entry: AdvanceRequestEntry }) {
     <DetailGrid>
       {live ? (
         <>
-          <DetailField label="SAP Outgoing Payment" value={String(live.sap_doc_num ?? "—")} strong />
+          <DetailField
+            label={live.sap_object === "PURCHASE_INVOICE" ? "SAP A/P Invoice" : "SAP Outgoing Payment"}
+            value={String(live.sap_doc_num ?? "—")}
+            strong
+          />
           <DetailField label="DocEntry" value={String(live.sap_doc_entry ?? "—")} />
           <DetailField
             label="Posted"

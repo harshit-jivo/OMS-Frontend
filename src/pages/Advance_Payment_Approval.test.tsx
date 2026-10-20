@@ -7,7 +7,7 @@
  * server (SAP's, at Final) is shown as it came, and a decided request is
  * read-only.
  */
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -83,6 +83,23 @@ vi.mock("../services/advancePaymentService", async (importOriginal) => {
       vendorOnAccount: vi.fn().mockResolvedValue({ company: "OIL", card_code: "", total_open: "0", outside_oms: "0", results: [] }),
       documentAttachments: vi.fn(async () => []),
       tdsOptions: vi.fn(async () => ({ rates: ["2"], codes: [], bills_with_tds: [] })),
+      // An Expense to a vendor's A/P invoice (2026-10-20).
+      apInvoiceOptions: vi.fn(async () => ({
+        branches: [
+          { bpl_id: 1, name: "DELHI", state: "DL", location: 1, used: 1021 },
+          { bpl_id: 2, name: "FACTORY", state: "HR", location: 2, used: 1674 },
+        ],
+        default_branch: 2,
+        locations: [{ code: 1, name: "Delhi" }, { code: 2, name: "HARYANA" }],
+        tax_codes: [
+          { code: "CG+SG@18", name: "CGST+SGST@18%", rate: "18", reverse_charge: false },
+          { code: "IGST@18", name: "IGST@18%", rate: "18", reverse_charge: false },
+          { code: "RIGST@5", name: "RCM IGST @5%", rate: "5", reverse_charge: true },
+        ],
+        varieties: [{ code: "CANOLA", name: "CANOLA" }, { code: "OLIVE", name: "OLIVE" }],
+        states: [{ code: "DL", name: "Delhi" }, { code: "HR", name: "Haryana" }],
+      })),
+      openGrpos: vi.fn(async () => []),
       purchaseOrder: vi.fn(async () => {
         throw new Error("not in these tests");
       }),
@@ -778,7 +795,7 @@ describe("Payments Approval", () => {
       onDesk(21, 3, ["Payment Approval"], { ...EXPENSE, effect_month: "" });
       const user = setup();
       await review(user, "AP-2026-0021");
-      expect(screen.getByRole("heading", { name: "Expense — correct at Payment" })).toBeTruthy();
+      expect(screen.getByRole("heading", { name: "Expense — correct at Accounts" })).toBeTruthy();
       expect(screen.getByText(/Set each line's G\/L account/)).toBeTruthy();
       expect(field("Beneficiary Name").value).toBe("KAMAL KUMAR");
       // Not the desk's to change: no picker or box for them, and no adding or removing lines.
@@ -822,7 +839,8 @@ describe("Payments Approval", () => {
       expect(await screen.findByText("Expense request saved.")).toBeTruthy();
       const [, sent] = vi.mocked(advancePaymentService.editExpense).mock.calls[0];
       expect(Object.keys(sent).sort()).toEqual(
-        ["budget_code", "effect_month", "expense_bill_date", "expense_bill_number", "expense_category",
+        ["budget_code", "effect_month", "expense_bill_date", "expense_bill_number", "expense_bpl_id",
+         "expense_bpl_name", "expense_category", "expense_due_date", "expense_grpo_entry", "expense_grpo_num",
          "expense_lines", "expense_tds_code", "is_electricity", "sub_budget_code"],
       );
       expect(sent).toMatchObject({
@@ -840,6 +858,69 @@ describe("Payments Approval", () => {
       expect(history.textContent).toMatch(/Sub budget—Accounts/);
       expect(history.textContent).toMatch(/Line 2no G\/L · 3000.505670001 · 3000.50/);
       expect(screen.getByText("No unsaved changes")).toBeTruthy();
+    });
+
+    it("paid to a vendor, Accounts books its A/P invoice: branch and SAP's line fields, no bank details", async () => {
+      onDesk(21, 3, ["Payment Approval"], {
+        ...EXPENSE,
+        partner_code: "VENDA000101",
+        partner_name: "ABC Technologies",
+        books_ap_invoice: true,
+        expense_category: "SERVICE",
+        expense_bill_number: "INV-118",
+        expense_bill_date: "2026-09-01",
+        sub_budget_code: "Accounts",
+        sub_budget_name: "Accounts",
+        expense_lines: [
+          { ...EXPENSE.expense_lines[0], gst_code: "IGST_18" },
+          { ...EXPENSE.expense_lines[1], gl_account: "5670001", gl_name: "RENT" },
+        ],
+      });
+      const user = setup();
+      await review(user, "AP-2026-0021");
+      expect(screen.getByText(/No bank details: the bill is paid later, against its A\/P invoice/)).toBeTruthy();
+      // Nothing is paid here: no payment details to fill.
+      expect(screen.queryByRole("heading", { name: /Payment & Bank Details/ })).toBeNull();
+      // SAP fills what it can: the busiest branch, its State, the company's Variety, the GST's tax code.
+      await waitFor(() => expect((field("Branch") as unknown as HTMLSelectElement).value).toBe("2"));
+      await waitFor(() => expect((lineBox(1).getByLabelText(/^State/) as HTMLSelectElement).value).toBe("HR"));
+      expect((lineBox(1).getByLabelText(/^Tax Code/) as HTMLSelectElement).value).toBe("IGST@18");
+      expect((lineBox(2).getByLabelText(/^Tax Code/) as HTMLSelectElement).value).toBe("");
+      // Line 2 has no GST on record: its tax code is the desk's to choose.
+      await approve(user);
+      expect(screen.getByText(/Still needed:/).textContent).toMatch(/Tax Code on line 2/);
+      expect(advancePaymentService.act).not.toHaveBeenCalled();
+      await user.selectOptions(lineBox(2).getByLabelText(/^Tax Code/), "RIGST@5");
+      await approve(user);
+      await backOnDesk();
+      const [, sent] = vi.mocked(advancePaymentService.editExpense).mock.calls[0];
+      expect(sent).toMatchObject({
+        expense_bpl_id: 2,
+        expense_bpl_name: "FACTORY",
+        expense_lines: [
+          expect.objectContaining({ tax_code: "IGST@18", variety: "CANOLA", state: "HR", location: null }),
+          expect.objectContaining({ tax_code: "RIGST@5", variety: "CANOLA", state: "HR" }),
+        ],
+      });
+      expect(advancePaymentService.savePayout).not.toHaveBeenCalled();
+    });
+
+    it("at Expense Audit, a vendor's Expense books its A/P invoice", async () => {
+      onDesk(21, 4, ["Audit Approval"], {
+        ...EXPENSE,
+        partner_code: "VENDA000101",
+        partner_name: "ABC Technologies",
+        books_ap_invoice: true,
+        expense_category: "SERVICE",
+        expense_bpl_id: 2,
+        expense_bpl_name: "FACTORY",
+        sub_budget_code: "Accounts",
+      });
+      const user = setup();
+      await review(user, "AP-2026-0021");
+      expect(screen.getByText(/Approving books the vendor's A\/P invoice in SAP/)).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Book A/P Invoice in SAP" })).toBeTruthy();
+      expect(screen.getByText("FACTORY")).toBeTruthy();
     });
 
     it("at Audit, approving posts it to SAP — an Expense has no Final", async () => {

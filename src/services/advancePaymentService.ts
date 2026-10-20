@@ -1185,6 +1185,8 @@ export interface ApiVoucher {
   status: "POSTED" | "FAILED" | "CANCELLED";
   sap_doc_entry: number | null;
   sap_doc_num: number | null;
+  /** What was posted: the outgoing payment, or (an Expense to a vendor) its A/P invoice. */
+  sap_object?: "OUTGOING_PAYMENT" | "JOURNAL_ENTRY" | "PURCHASE_INVOICE";
   error: string;
   posted_by: ApiUser | null;
   posted_on: string | null;
@@ -1289,6 +1291,15 @@ export interface ApiRequestFields {
   expense_category?: string;
   expense_bill_number?: string;
   expense_bill_date?: string | null;
+  /**
+   * ...booked in SAP as an A/P invoice (2026-10-20): the Accounts desk's SAP
+   * branch, due date (blank: the vendor's terms) and, an Item bill, its GRPO.
+   */
+  expense_bpl_id?: number | null;
+  expense_bpl_name?: string;
+  expense_due_date?: string | null;
+  expense_grpo_entry?: number | null;
+  expense_grpo_num?: number | null;
   return_method: string;
   return_method_other: string;
   installments: number | null;
@@ -1387,6 +1398,44 @@ export interface SapVendorBillHistory {
   accounts: SapExpenseAccount[];
 }
 
+/** What an Expense's A/P invoice fields are picked from (`/ap-invoice-options/`). */
+export interface ApInvoiceOptions {
+  /** SAP's branches; `location` is the GST location its bills use most, `state` its State code. */
+  branches: Array<{ bpl_id: number; name: string; state: string; location: number | null; used: number }>;
+  /** The branch SAP books most service bills to. */
+  default_branch: number | null;
+  locations: Array<{ code: number; name: string }>;
+  tax_codes: Array<{ code: string; name: string; rate: string; reverse_charge: boolean }>;
+  varieties: Array<{ code: string; name: string }>;
+  states: Array<{ code: string; name: string }>;
+}
+
+/** A vendor's open GRPO and its open lines: what an Item bill's A/P invoice is copied from. */
+export interface SapOpenGrpo {
+  doc_entry: number;
+  doc_num: number;
+  doc_date: string | null;
+  vendor_ref: string;
+  doc_total: string;
+  open_amount: string;
+  bpl_id: number | null;
+  bpl_name: string;
+  attachment_entry: number | null;
+  /** Its vendor ref is the request's bill number. */
+  matches: boolean;
+  category: "ITEM" | "SERVICE";
+  lines: Array<{
+    line_num: number;
+    item_code: string;
+    description: string;
+    open_qty: string;
+    price: string;
+    open_amount: string;
+    tax_code: string;
+    warehouse: string;
+  }>;
+}
+
 export interface SapExpenseAccount {
   code: string;
   name: string;
@@ -1416,6 +1465,11 @@ export interface ApiExpenseLineInput {
   remarks: string;
   /** The Payment desk's TDS for the line: "" (the request's), "NONE", or a code. */
   tds_override?: string;
+  /** An Expense to a vendor's A/P invoice line: SAP's Variety (dim 1), State (dim 5), tax code, GST location. */
+  variety?: string;
+  state?: string;
+  tax_code?: string;
+  location?: number | null;
 }
 
 /** The Payment desk's correction of an Expense request. */
@@ -1427,6 +1481,12 @@ export interface ApiExpenseEdit {
   expense_category: string;
   expense_bill_number: string;
   expense_bill_date: string | null;
+  /** Its A/P invoice: branch, due date, and an Item bill's GRPO. */
+  expense_bpl_id: number | null;
+  expense_bpl_name: string;
+  expense_due_date: string | null;
+  expense_grpo_entry: number | null;
+  expense_grpo_num: number | null;
   effect_month: string;
   is_electricity: boolean;
   expense_tds_code: string;
@@ -1501,6 +1561,8 @@ export interface ApiRequest extends ApiRequestFields {
   expense_lines: ApiExpenseLine[];
   /** Expense only: the Payment desk's TDS code for every line not naming its own. */
   expense_tds_code: string;
+  /** An Expense to a vendor: booked in SAP as an A/P invoice, not paid (2026-10-20). */
+  books_ap_invoice?: boolean;
   purpose_label: string;
   /** The Department Head picked on the request (an HOD), or null where the route has none. */
   department_head_employee: { employee_code: string; employee_name: string } | null;
@@ -1648,13 +1710,27 @@ export const advancePaymentService = {
     return results<SapBudget>(res.data);
   },
 
-  /** The expense G/L accounts an Expense line may pay to. */
   /** The vendor's bills in SAP, per category: what an Expense to them starts from. */
   async vendorExpenseHistory(company: AdvancePaymentCompany, cardCode: string): Promise<SapVendorBillHistory[]> {
     const res = await api.get(`${BASE}/vendor-expense-history/`, { params: { company, card_code: cardCode } });
     return results<SapVendorBillHistory>(res.data);
   },
 
+  /** What an Expense's A/P invoice fields are picked from: branches, tax codes, Variety, State. */
+  async apInvoiceOptions(company: AdvancePaymentCompany): Promise<ApInvoiceOptions> {
+    const res = await api.get(`${BASE}/ap-invoice-options/`, { params: { company } });
+    return unwrap<{ results: ApInvoiceOptions }>(res.data).results;
+  },
+
+  /** The vendor's open GRPOs, those whose vendor ref is the bill number first (`matches`). */
+  async openGrpos(company: AdvancePaymentCompany, cardCode: string, billNumber: string): Promise<SapOpenGrpo[]> {
+    const res = await api.get(`${BASE}/open-grpos/`, {
+      params: { company, card_code: cardCode, bill_number: billNumber },
+    });
+    return results<SapOpenGrpo>(res.data);
+  },
+
+  /** The expense G/L accounts an Expense line may pay to. */
   async expenseAccounts(company: AdvancePaymentCompany): Promise<SapExpenseAccount[]> {
     const res = await api.get(`${BASE}/expense-accounts/`, { params: { company } });
     return results<SapExpenseAccount>(res.data);

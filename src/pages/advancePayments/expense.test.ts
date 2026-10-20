@@ -106,11 +106,44 @@ describe("an Expense request", () => {
   });
 
   it("at Payment needs every line's G/L, a month and a sub budget", () => {
-    const { missing } = validateExpense(expense(), { atPayment: true });
+    // Paid to an imprest: nothing booked as an A/P invoice.
+    const imprest = expense({ expensePayee: "IMPREST", partner: "ORGV000044", partnerName: "Ziyaul" });
+    const { missing } = validateExpense(imprest, { atPayment: true });
     expect(missing).toEqual(["Sub Budget", "Month", "G/L account on line 2"]);
-    const set = expense({ effectMonth: "10-2026", subBudget: "Accounts" });
-    set.expenseLines[1] = { ...set.expenseLines[1], glAccount: "5670001" };
+    const set = { ...imprest, effectMonth: "10-2026", subBudget: "Accounts" };
+    set.expenseLines = [set.expenseLines[0], { ...set.expenseLines[1], glAccount: "5670001" }];
     expect(validateExpense(set, { atPayment: true })).toEqual({ missing: [], problems: [] });
+  });
+
+  it("paid to a vendor, the Accounts desk also sets its A/P invoice: branch, and each line's tax code, Variety, State", () => {
+    const bill = expense({ effectMonth: "10-2026", subBudget: "Accounts" });
+    bill.expenseLines = bill.expenseLines.map((l) => ({ ...l, glAccount: "5670001" }));
+    expect(validateExpense(bill, { atPayment: true }).missing).toEqual([
+      "Branch",
+      "Tax Code on line 1",
+      "Variety on line 1",
+      "State on line 1",
+      "Tax Code on line 2",
+      "Variety on line 2",
+      "State on line 2",
+    ]);
+    const ready = {
+      ...bill,
+      expenseBranch: "2",
+      expenseLines: bill.expenseLines.map((l) => ({ ...l, taxCode: "IGST@18", variety: "CANOLA", state: "HR" })),
+    };
+    expect(validateExpense(ready, { atPayment: true })).toEqual({ missing: [], problems: [] });
+    // An Item bill: its GRPO, not the lines.
+    const item = applyChange(bill, { expenseCategory: "ITEM", expenseBranch: "2" });
+    expect(validateExpense(item, { atPayment: true }).missing).toEqual(["GRPO"]);
+    expect(validateExpense({ ...item, expenseGrpoEntry: "27962" }, { atPayment: true }).missing).toEqual([]);
+  });
+
+  it("forgets the GRPO when the bill is no longer an Item one", () => {
+    const item = expense({ expenseCategory: "ITEM", expenseGrpoEntry: "27962", expenseGrpoNum: "2026106669" });
+    expect(item.expenseGrpoEntry).toBe("27962");
+    const service = applyChange(item, { expenseCategory: "SERVICE" });
+    expect([service.expenseGrpoEntry, service.expenseGrpoNum]).toEqual(["", ""]);
   });
 
   it("is worth its lines' amounts; the desk's GST backs the taxable amount out", () => {
@@ -162,6 +195,10 @@ describe("an Expense request", () => {
         effect_month: "",
         remarks: "",
         tds_override: "",
+        variety: "",
+        state: "",
+        tax_code: "",
+        location: null,
       },
       {
         amount: "3000.50",
@@ -170,6 +207,10 @@ describe("an Expense request", () => {
         effect_month: "",
         remarks: "Penalty, G/L to confirm",
         tds_override: "",
+        variety: "",
+        state: "",
+        tax_code: "",
+        location: null,
       },
     ]);
   });
@@ -192,7 +233,12 @@ describe("an Expense request", () => {
         "effect_month",
         "expense_bill_date",
         "expense_bill_number",
+        "expense_bpl_id",
+        "expense_bpl_name",
         "expense_category",
+        "expense_due_date",
+        "expense_grpo_entry",
+        "expense_grpo_num",
         "expense_lines",
         "expense_tds_code",
         "is_electricity",
