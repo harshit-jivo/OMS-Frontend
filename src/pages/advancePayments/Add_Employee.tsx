@@ -34,6 +34,7 @@ import {
   type NewMasterEmployee,
 } from "../../services/advancePaymentService";
 
+import { employeeCodeProblem, employeeNameProblem } from "./employeeChecks";
 import { formatDateTime } from "./requestLabels";
 
 const ROLES = [
@@ -103,10 +104,13 @@ export default function Add_Employee() {
   const error = save.error ? saveError(save.error) : null;
 
   const missing = !form.employeeCode.trim() || !form.employeeName.trim();
+  // The code and the name swapped (2026-10-21): said here, before saving.
+  const codeProblem = employeeCodeProblem(form.employeeCode);
+  const nameProblem = employeeNameProblem(form.employeeName);
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
-    if (missing) return;
+    if (missing || codeProblem || nameProblem) return;
     setAdded(null);
     save.mutate({
       employee_code: form.employeeCode.trim(),
@@ -159,7 +163,12 @@ export default function Add_Employee() {
           ) : null}
 
           <FormGrid>
-            <Field label="Employee Code" required error={error?.fields.employee_code} hint="e.g. JWPL3100">
+            <Field
+              label="Employee Code"
+              required
+              error={codeProblem ?? error?.fields.employee_code}
+              hint="Letters and digits, no spaces — e.g. JWPL3100"
+            >
               {(f) => (
                 <Input
                   {...f}
@@ -169,7 +178,7 @@ export default function Add_Employee() {
                 />
               )}
             </Field>
-            <Field label="Employee Name" required error={error?.fields.employee_name}>
+            <Field label="Employee Name" required error={nameProblem ?? error?.fields.employee_name}>
               {(f) => (
                 <Input
                   {...f}
@@ -261,7 +270,11 @@ export default function Add_Employee() {
             <Button type="button" variant="ghost" onClick={() => setForm(EMPTY)} disabled={save.isPending}>
               Clear
             </Button>
-            <Button type="submit" variant="primary" disabled={missing || save.isPending}>
+            <Button
+              type="submit"
+              variant="primary"
+              disabled={missing || Boolean(codeProblem || nameProblem) || save.isPending}
+            >
               <HiOutlineUserPlus className="size-4" aria-hidden="true" />
               {save.isPending ? "Adding…" : "Add Employee"}
             </Button>
