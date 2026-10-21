@@ -231,8 +231,8 @@ export type AttachmentCheck = AttachmentReading | { error: string };
 /** The document kinds `/document-attachment/` reads, and whose attachments are listed. */
 export type SapAttachmentKind = "po" | "bill";
 
-/** Any document an attachment can sit on: a bill's GRPO, a payment too. */
-export type SapAttachmentSource = SapAttachmentKind | "grpo" | "payment";
+/** Any document an attachment can sit on: a bill's GRPO, a payment, a journal entry (by TransId) too. */
+export type SapAttachmentSource = SapAttachmentKind | "grpo" | "payment" | "journal";
 
 /** The documents whose attachments can be LISTED (`/document-attachments/`). */
 export type SapAttachmentListKind = SapAttachmentSource;
@@ -442,6 +442,13 @@ export interface SapJournalEntry {
     base_ref: string;
     ref1: string;
     ref2: string;
+    /** Since 2026-10-21: what accounts see of it in SAP. */
+    ref3?: string;
+    due_date?: string | null;
+    /** The Journal Voucher it was posted from (OJDT.BatchNum); null when posted directly. */
+    voucher?: number | null;
+    project?: string;
+    created_on?: string | null;
     debit: string;
     credit: string;
   };
@@ -454,7 +461,16 @@ export interface SapJournalEntry {
     debit: string;
     credit: string;
     memo: string;
+    ref1?: string;
+    ref2?: string;
+    due_date?: string | null;
+    /** Variety, Effective Month, Budget, Sub Budget, State: SAP's dimensions 1-5. */
+    dimensions?: string[];
+    /** Still unpaid on the line (credit positive): what an imprest against it pays. */
+    open?: string;
   }>;
+  /** Every file attached to it in SAP, opened by (journal, TransId, line). */
+  attachments?: SapRelatedAttachment[];
 }
 
 /** Every line of the partner's ledger, with a running balance (`/full-ledger/`). */

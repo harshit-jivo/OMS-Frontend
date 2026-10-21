@@ -5,11 +5,24 @@ import {
   employeeToPartner,
   invoiceToDocument,
   sapAmount,
+  sapDocumentOf,
   sapTdsLabel,
   vendorToPartner,
   withCodePrefix,
 } from "./sapMapping";
 import { SAP_EMPLOYEES, SAP_OPEN_INVOICES, SAP_VENDORS } from "./testData";
+
+describe("a request's document, opened as SAP shows it", () => {
+  const doc = (id: string) => ({ id }) as OpenDocument;
+  it("is a bill, a PO, or (2026-10-21) the journal entry an imprest pays, by its TransId", () => {
+    expect(sapDocumentOf(doc("PCH-52169"), "OIL")).toEqual({ company: "OIL", kind: "bill", docEntry: 52169 });
+    expect(sapDocumentOf(doc("POR-12556"), "OIL")).toEqual({ company: "OIL", kind: "po", docEntry: 12556 });
+    expect(sapDocumentOf(doc("LDG-30-90910-1"), "MART")).toEqual({ company: "MART", kind: "journal", docEntry: 90910 });
+    // A receipt or an A/R invoice on a refund's ledger has no window here.
+    expect(sapDocumentOf(doc("LDG-24-5501-0"), "OIL")).toBeNull();
+    expect(sapDocumentOf(doc("LDG-30-90910-1"), "")).toBeNull();
+  });
+});
 
 describe("SAP rows → form data", () => {
   it("parses SAP's string money, to the paisa, and never yields NaN", () => {

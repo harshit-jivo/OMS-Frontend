@@ -30,13 +30,14 @@ import { DocumentHistory } from "./DocumentHistory";
 import { formatDate, formatINR } from "./rules";
 import { SapAttachmentList } from "./SapAttachmentLink";
 
-type DocKind = "bill" | "po" | "grpo" | "payment";
+type DocKind = "bill" | "po" | "grpo" | "payment" | "journal";
 
 const TITLE: Record<DocKind, string> = {
   bill: "A/P Invoice",
   po: "Purchase Order",
   grpo: "Goods Receipt PO",
   payment: "Outgoing Payment",
+  journal: "Journal Entry",
 };
 const money = (value: string | null | undefined) => formatINR(Number(value ?? 0) || 0);
 const date = (value: string | null | undefined) => (value ? formatDate(value) : "");
@@ -768,6 +769,94 @@ function JournalLines({ company, transId }: { company: AdvancePaymentCompany; tr
   );
 }
 
+/**
+ * A journal entry an imprest pays (TA/DA, incentives — 2026-10-21), as SAP
+ * shows it: its number, voucher, dates, references and remarks; each line's
+ * account or partner, debit / credit, remarks, dimensions and what is still
+ * open on it; and every file attached to it. `docEntry` is its TransId.
+ */
+function JournalWindow({ company, docEntry }: { company: AdvancePaymentCompany; docEntry: number }) {
+  const query = useQuery({
+    queryKey: ["advance-payments", "journal-entry", company, docEntry],
+    queryFn: () => advancePaymentService.journalEntry(company, docEntry),
+    staleTime: 5 * 60_000,
+    retry: 1,
+  });
+  if (!query.data) return <Status query={query} />;
+  const { header: h, lines } = query.data;
+  const number = String(h.number ?? h.trans_id);
+  const refs = [h.ref1, h.ref2, h.ref3].filter(Boolean).join(" / ");
+  return (
+    <SapWindow
+      header={{
+        left: (
+          <>
+            <SapField label="Journal Entry No." value={number} />
+            <SapField label="Voucher No." value={h.voucher ? String(h.voucher) : "—"} />
+            <SapField label="Remarks" value={h.memo || "—"} />
+            <SapField label="Origin No." value={h.base_ref || "—"} />
+          </>
+        ),
+        right: (
+          <>
+            <SapField label="Posting Date" value={date(h.posting_date)} />
+            <SapField label="Document Date" value={date(h.document_date)} />
+            <SapField label="Due Date" value={date(h.due_date) || "—"} />
+            <SapField label="Ref. 1 / 2 / 3" value={refs || "—"} />
+            {h.project ? <SapField label="Project" value={h.project} /> : null}
+          </>
+        ),
+      }}
+      tabs={[
+        {
+          id: "contents",
+          label: "Contents",
+          body: (
+            <SapGrid
+              label={`Journal entry ${number}`}
+              columns={[
+                { head: "G/L Acct/BP Code" },
+                { head: "G/L Acct/BP Name" },
+                { head: "Debit", right: true },
+                { head: "Credit", right: true },
+                { head: "Remarks" },
+                { head: "Variety / Month / Budget / Sub Budget / State" },
+                { head: "Open", right: true },
+              ]}
+              rows={[
+                ...lines.map((l) => [
+                  l.partner || l.account,
+                  l.partner ? `${l.partner_name || l.partner} (${account(l.account, l.account_name)})` : l.account_name || "—",
+                  Number(l.debit) ? money(l.debit) : "",
+                  Number(l.credit) ? money(l.credit) : "",
+                  l.memo || "—",
+                  (l.dimensions ?? []).filter(Boolean).join(" / ") || "—",
+                  Number(l.open) ? money(String(Math.abs(Number(l.open)))) : "",
+                ]),
+                [
+                  <strong key="t">Total</strong>,
+                  "",
+                  <strong key="d">{money(h.debit)}</strong>,
+                  <strong key="c">{money(h.credit)}</strong>,
+                  "",
+                  "",
+                  "",
+                ],
+              ]}
+              empty="No lines."
+            />
+          ),
+        },
+        {
+          id: "attachments",
+          label: `Attachments (${query.data.attachments?.length ?? 0})`,
+          body: <SapAttachmentList company={company} kind="journal" docEntry={docEntry} />,
+        },
+      ]}
+    />
+  );
+}
+
 /** A Journal Entry tab's body: the document's G/L, or why there is none. */
 function JournalTab({ company, transId }: { company: AdvancePaymentCompany; transId?: number | null }) {
   return transId ? (
@@ -1191,6 +1280,7 @@ const WINDOWS: Record<DocKind, (props: { company: AdvancePaymentCompany; docEntr
   po: PoWindow,
   grpo: GrpoWindow,
   payment: PaymentWindow,
+  journal: JournalWindow,
 };
 
 /** A document number with SAP's golden arrow; the arrow opens the document. */

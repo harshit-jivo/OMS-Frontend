@@ -245,10 +245,14 @@ const COMPANY_CODES: readonly string[] = ["OIL", "BEVERAGES", "MART"];
 export function sapDocumentOf(
   doc: OpenDocument,
   company?: string,
-): { company: AdvancePaymentCompany; kind: SapAttachmentKind; docEntry: number } | null {
-  const match = /^(PCH|POR)-(\d+)$/.exec(doc.id);
+): { company: AdvancePaymentCompany; kind: SapAttachmentKind | "journal"; docEntry: number } | null {
   const co = doc.attachment?.company ?? company;
-  if (!match || !co || !COMPANY_CODES.includes(co)) return null;
+  if (!co || !COMPANY_CODES.includes(co)) return null;
+  // A journal entry an imprest pays (TA/DA, incentives, 2026-10-21): by its TransId.
+  const journal = /^LDG-30-(\d+)-\d+$/.exec(doc.id);
+  if (journal) return { company: co as AdvancePaymentCompany, kind: "journal", docEntry: Number(journal[1]) };
+  const match = /^(PCH|POR)-(\d+)$/.exec(doc.id);
+  if (!match) return null;
   return {
     company: co as AdvancePaymentCompany,
     kind: match[1] === "PCH" ? "bill" : "po",
