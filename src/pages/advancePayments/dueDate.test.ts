@@ -51,14 +51,21 @@ describe("Vendor On Account", () => {
     expect(c.decided).toBe(true);
     expect(c.plainAmount).toBe(true);
     expect(c.reference).toBeNull();
-    expect(c.dueDatePurposesOnly).toBe(true);
+    // Any purpose since 2026-10-21.
+    expect(c.dueDatePurposesOnly).toBe(false);
   });
 
-  it("keeps only a purpose paid by a due date", () => {
+  it("takes any purpose, through the Department Head picked", () => {
     expect(electricityOnAccount().purpose).toBe("UTILITIES");
     const rent = electricityOnAccount(RENT);
-    expect(rent.purpose).toBe("");
-    expect(rent.purposeLabel).toBe("");
+    expect(rent.purpose).toBe("RENT");
+    expect(needsDepartmentHead(rent)).toBe(true);
+    // A fixed owner's purpose too: on account, the head is asked.
+    const material = { ...rent, purpose: "RAW_MATERIAL", purposeNeedsHead: false };
+    expect(needsDepartmentHead(material)).toBe(true);
+    expect(needsDepartmentHead({ ...material, paymentAgainst: "AGAINST_PO" })).toBe(false);
+    // Freight keeps its own route: Navdeep.
+    expect(needsDepartmentHead({ ...material, purpose: "FREIGHT_IN" })).toBe(false);
   });
 
   it("leaves Against Bill free to take any purpose", () => {
@@ -69,9 +76,17 @@ describe("Vendor On Account", () => {
 });
 
 describe("the Bill Due Date", () => {
-  it("is asked for utilities and insurance outside Mart, on a vendor", () => {
+  it("is asked for utilities and insurance in every company, on a vendor", () => {
     expect(needsBillDueDate(electricityOnAccount())).toBe(true);
-    expect(needsBillDueDate({ ...electricityOnAccount(), company: "MART" })).toBe(false);
+    // Mart too, since 2026-10-21; and Beverages as Oil.
+    expect(needsBillDueDate({ ...electricityOnAccount(), company: "MART" })).toBe(true);
+    expect(needsBillDueDate({ ...electricityOnAccount(), company: "BEVERAGES" })).toBe(true);
+    // Any other purpose: never, in any company — picking it clears the date.
+    for (const company of ["OIL", "BEVERAGES", "MART"] as const) {
+      const rent = applyChange({ ...electricityOnAccount(), company }, RENT);
+      expect(needsBillDueDate(rent)).toBe(false);
+      expect(rent.billDueDate).toBe("");
+    }
     expect(needsBillDueDate({ ...electricityOnAccount(), type: "EMPLOYEE_IMPREST" })).toBe(false);
     expect(needsBillDueDate({ ...electricityOnAccount(), purposeDueDate: false })).toBe(false);
   });

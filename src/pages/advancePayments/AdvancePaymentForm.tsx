@@ -317,7 +317,8 @@ export function AdvancePaymentForm({
     staleTime: 60 * 60_000,
     retry: 1,
   });
-  // Vendor On Account: only the purposes paid by a due date (utilities, insurance).
+  // A case may limit its purposes to those paid by a due date (none does since
+  // 2026-10-21: a Vendor On Account takes any purpose).
   const purposeOptions = (purposesQuery.data ?? [])
     .filter((p) => !c.dueDatePurposesOnly || p.due_date)
     .map((p) => ({

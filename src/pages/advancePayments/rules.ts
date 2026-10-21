@@ -543,7 +543,8 @@ export const CASE_RULES: Record<PartnerType, Partial<Record<PaymentAgainst, Case
     // Electricity boards and insurers: paid on account, as SAP pays them, and
     // matched to the bill when accounts book it (user, 2026-10-17). They have
     // no POs. Only for those purposes, so it is no way around a bill or a PO.
-    ON_ACCOUNT: { dueDatePurposesOnly: true },
+    // Any purpose since 2026-10-21, through the Department Head picked.
+    ON_ACCOUNT: {},
   },
   // No Against Bill: an employee advance is paid ahead of expenses, and the
   // bills that follow are settled against the advance, not paid here.
@@ -585,7 +586,7 @@ export const CASE_RULES: Record<PartnerType, Partial<Record<PaymentAgainst, Case
  * server's `PAYMENT_ACCOUNT_PARENTS`: Mart's creditors and its TPT & BSU units.
  * Elsewhere the type is not offered.
  */
-export const ACCOUNT_PAYMENT_COMPANIES: ReadonlyArray<string> = ["MART"];
+export const ACCOUNT_PAYMENT_COMPANIES: ReadonlyArray<string> = ["MART", "OIL", "BEVERAGES"];
 
 /** The types offered for a company: Account Payment only where it has accounts. */
 export const typesFor = (company: string) =>
@@ -608,8 +609,24 @@ export const typesFor = (company: string) =>
 export function suggestedAccountPurpose(code: string, name: string): string {
   if (!code) return "";
   if (code.startsWith("11104") || /KATEBAA/i.test(name)) return "INTERCOMPANY";
+  // Oil and Beverages (2026-10-21): by the account's SAP group.
+  for (const [prefixes, purpose] of ACCOUNT_GROUP_PURPOSES) {
+    if (prefixes.some((p) => code.startsWith(p))) return purpose;
+  }
   return "FINISHED_GOODS";
 }
+
+/** An account's purpose by its group (`sap.PAYMENT_ACCOUNT_PARENTS`): group code prefixes -> purpose. */
+const ACCOUNT_GROUP_PURPOSES: ReadonlyArray<[ReadonlyArray<string>, string]> = [
+  [["11101", "11102", "22022"], "INTERCOMPANY"], // JIVO, ARY, Subsidiary
+  [["22011", "22012", "22014", "22023"], "LOAN_REPAY"], // bank CC, term, vehicle, NBFC loans
+  [["21610"], "SALARY"],
+  [["21630"], "PF_ESI"], // expense payable: ESIC and the like
+  [["21330"], "TDS"],
+  [["21360", "21370"], "GST"],
+  [["55000", "11070"], "OTHER_STATUTORY"], // landed cost (custom duty), deposits & advance tax
+  [["52000"], "OTHER_EXPENSE"], // import expense
+];
 
 export const paysGlAccount = (type: PartnerType | "") => type === "EMPLOYEE_ADVANCE" || type === "ACCOUNT";
 
@@ -856,6 +873,8 @@ export function needsDepartmentHead(form: RequestForm): boolean {
   // A plant's staff salary advance goes to the plant's fixed approver, by
   // amount (approval matrix, 2026-10-09) — the server's same rule.
   if (form.type === "EMPLOYEE_ADVANCE" && FACTORY_BUDGETS.includes(form.budget)) return false;
+  // A Vendor paid On Account, for any purpose: the head picked (user, 2026-10-21).
+  if (form.type === "VENDOR" && form.paymentAgainst === "ON_ACCOUNT") return true;
   return (form.type !== "" && HEAD_TYPES.includes(form.type)) || form.purposeNeedsHead;
 }
 
@@ -866,7 +885,8 @@ export function needsDepartmentHead(form: RequestForm): boolean {
  * applies the same rule (`purposes.needs_bill_due_date`).
  */
 export function needsBillDueDate(form: RequestForm): boolean {
-  if (!form.company || form.company === "MART" || !form.purposeDueDate) return false;
+  // Every company (Mart since 2026-10-21: due soon, straight to Payment; else Prabhjot).
+  if (!form.company || !form.purposeDueDate) return false;
   if (form.type === "" || HEAD_TYPES.includes(form.type)) return false;
   // A bill goes straight to Payment whenever it is due: the date decides nothing.
   if (form.paymentAgainst === "AGAINST_BILL") return false;

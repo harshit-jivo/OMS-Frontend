@@ -16,13 +16,24 @@ const fill = (...patches: Array<Partial<RequestForm>>) =>
   patches.reduce<RequestForm>((form, patch) => applyChange(form, patch), EMPTY_FORM);
 
 describe("Account Payment: one G/L account that is no business partner", () => {
-  it("is offered only where SAP has accounts to pay — Mart", () => {
-    expect(typesFor("MART").map((t) => t.value)).toContain("ACCOUNT");
-    for (const company of ["OIL", "BEVERAGES", ""]) {
-      expect(typesFor(company).map((t) => t.value)).not.toContain("ACCOUNT");
+  it("is offered where SAP has accounts to pay — Mart, and Oil and Beverages since 2026-10-21", () => {
+    for (const company of ["MART", "OIL", "BEVERAGES"]) {
+      expect(typesFor(company).map((t) => t.value)).toContain("ACCOUNT");
     }
-    // Moving the request to a company without any drops the type.
-    expect(fill({ company: "MART" }, { type: "ACCOUNT" }, { company: "OIL" }).type).toBe("");
+    expect(typesFor("").map((t) => t.value)).not.toContain("ACCOUNT");
+    // Moving the request to another company with accounts keeps the type.
+    expect(fill({ company: "MART" }, { type: "ACCOUNT" }, { company: "OIL" }).type).toBe("ACCOUNT");
+  });
+
+  it("suggests an Oil or Beverages account's purpose by its group", () => {
+    expect(suggestedAccountPurpose("2201106", "TRADEPAY HSBC-41001")).toBe("LOAN_REPAY");
+    expect(suggestedAccountPurpose("1110109", "JIVO WELLNESS BEVERAGES INTERNAL")).toBe("INTERCOMPANY");
+    expect(suggestedAccountPurpose("2202203", "JIVO MART PVT. LTD. SALARY")).toBe("INTERCOMPANY");
+    expect(suggestedAccountPurpose("2133011", "TDS PAYABLE")).toBe("TDS");
+    expect(suggestedAccountPurpose("2137001", "GST PAYABLE ON RCM")).toBe("GST");
+    expect(suggestedAccountPurpose("2161013", "EX-GRATIA")).toBe("SALARY");
+    expect(suggestedAccountPurpose("2163016", "ESIC PAYABLE")).toBe("PF_ESI");
+    expect(suggestedAccountPurpose("5500002", "CUSTOM DUTY-IMPORT")).toBe("OTHER_STATUTORY");
   });
 
   it("is a typed amount On Account, picked from SAP's accounts, with no Department Head", () => {
