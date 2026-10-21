@@ -134,7 +134,19 @@ export function invoiceToDocument(
     oms: omsOf(invoice.oms),
     sapTds: invoice.tds != null ? { amount: sapAmount(invoice.tds) } : undefined,
     sapDebit: debitOf(invoice.debits),
+    litres: invoice.litres ? sapAmount(invoice.litres) : undefined,
   };
+}
+
+/** "1,26,882.05 L": litres as the desk reads them. */
+export function formatLitres(litres: number): string {
+  return `${litres.toLocaleString("en-IN", { maximumFractionDigits: 2 })} L`;
+}
+
+/** The litres of the documents that carry any; null when none does. */
+export function totalLitres(docs: OpenDocument[]): number | null {
+  const carried = docs.filter((d) => d.litres !== undefined);
+  return carried.length ? carried.reduce((sum, d) => sum + (d.litres ?? 0), 0) : null;
 }
 
 /**

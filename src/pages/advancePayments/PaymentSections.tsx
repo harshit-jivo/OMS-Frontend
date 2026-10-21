@@ -23,8 +23,10 @@ import { SapAttachmentLink, SapAttachmentList } from "./SapAttachmentLink";
 import {
   billDebit,
   historyTargetOf,
+  formatLitres,
   heldMessages,
   heldSummary,
+  totalLitres,
   omsSummary,
   paidWithoutDebit,
   sapDebitLabel,
@@ -286,6 +288,8 @@ function documentSubtitle(doc: OpenDocument, ownRequestNo?: string): string {
     // and which requests, where they are and with whom (2026-10-21).
     omsSummary(doc) || null,
     heldSummary(doc, ownRequestNo) || null,
+    // A freight bill's litres (2026-10-21).
+    doc.litres !== undefined ? formatLitres(doc.litres) : null,
     sapDebitLabel(doc),
     sapTdsLabel(doc),
   ]
@@ -639,6 +643,12 @@ function SelectedDocuments({
           <span className="ml-1 font-normal text-subtle">
             ({rows.length} {rows.length === 1 ? one : def.pluralLabel.toLowerCase()})
           </span>
+          {/* Freight: the litres the bills carried, all of them (2026-10-21). */}
+          {totalLitres(rows.map((r) => r.document)) !== null ? (
+            <span className="block text-[12px] font-medium text-body" data-slot="total-litres">
+              Litres {formatLitres(totalLitres(rows.map((r) => r.document)) ?? 0)}
+            </span>
+          ) : null}
         </span>
         <span className="text-right text-[13px] font-semibold tabular-nums text-ink">
           {formatINR(totals.open)}

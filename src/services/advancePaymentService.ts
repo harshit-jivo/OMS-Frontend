@@ -637,6 +637,8 @@ export interface SapOpenInvoice {
   doc_total: string;
   paid_to_date: string;
   balance_due: string;
+  /** A bill's litres, summed over its lines (2026-10-21); none when it carries none. */
+  litres?: string | null;
   /** The TDS SAP withheld on the bill (`WTSum`); "0" when none was. */
   tds?: string;
   attachment: SapAttachment | null;
@@ -1140,6 +1142,8 @@ export interface ApiRequestDocument {
   attachment_count: number;
   attachment_date: string | null;
   attachment_check?: AttachmentCheck | null;
+  /** A freight request's bill: its litres, from SAP (detail only, 2026-10-21). */
+  litres?: string | null;
 }
 
 export interface ApiRequestFile {

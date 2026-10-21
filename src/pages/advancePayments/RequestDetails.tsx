@@ -35,7 +35,7 @@ import { GST_OPTIONS, PAYMENT_MODES } from "./constants";
 import { SapDocLink, SapPartnerLink } from "./SapDocument";
 import { DocumentHistory } from "./DocumentHistory";
 import { SapAttachmentLink, SapAttachmentList } from "./SapAttachmentLink";
-import { historyTargetOf, sapDocumentOf } from "./sapMapping";
+import { formatLitres, historyTargetOf, sapDocumentOf, totalLitres } from "./sapMapping";
 import { deductionTargets, useDeductions, type Deduction } from "./deductions";
 import { STATUS_LABEL, formatDateTime } from "./requestLabels";
 import { EditChanges } from "./RequestProgress";
@@ -435,7 +435,9 @@ export function DocumentLines({
   );
   if (!c.reference) return null;
   const deducted = showDeductions ? deductions.data : undefined;
-  const columns = deducted ? 8 : 7;
+  // A freight request's bills: their litres, each and in all (2026-10-21).
+  const litres = totalLitres(entry.form.selected);
+  const columns = (deducted ? 8 : 7) + (litres !== null ? 1 : 0);
   const def = REFERENCE_KINDS[c.reference];
   const rows = allocationRows(entry.form);
   const totals = allocationTotals(rows);
@@ -460,6 +462,7 @@ export function DocumentLines({
             <TableHead>Vendor Ref.</TableHead>
             <TableHead>{def.dateLabel}</TableHead>
             <TableHead>Due Date</TableHead>
+            {litres !== null ? <TableHead className="text-right">Litres</TableHead> : null}
             {deducted ? <TableHead className="text-right">Deducted in SAP</TableHead> : null}
             <TableHead className="text-right">Open Amount</TableHead>
             <TableHead>Payment</TableHead>
@@ -501,6 +504,11 @@ export function DocumentLines({
               <TableCell className="font-medium text-ink">{doc.reference || "—"}</TableCell>
               <TableCell>{formatDate(doc.date)}</TableCell>
               <TableCell>{doc.dueDate ? formatDate(doc.dueDate) : "—"}</TableCell>
+              {litres !== null ? (
+                <TableCell className="text-right tabular-nums">
+                  {doc.litres !== undefined ? formatLitres(doc.litres) : "—"}
+                </TableCell>
+              ) : null}
               {deducted ? (
                 <TableCell className="text-right">
                   <SapDeduction deduction={deducted.byId.get(doc.id)} />
@@ -562,6 +570,11 @@ export function DocumentLines({
             <TableCell className="font-semibold text-ink" colSpan={4}>
               Total
             </TableCell>
+            {litres !== null ? (
+              <TableCell className="text-right font-semibold tabular-nums" data-slot="total-litres">
+                {formatLitres(litres)}
+              </TableCell>
+            ) : null}
             {deducted ? (
               <TableCell className="text-right">
                 <SapDeduction deduction={{ tds: deducted.tds, bills: null, debit: deducted.debit, notes: [] }} />

@@ -144,6 +144,8 @@ export const VENDORS: Partner[] = [
  * reads like the document it imitates; `rules.test.ts` checks the three agree.
  */
 export interface OpenDocument {
+  /** A bill's litres, from SAP — shown on a freight request (2026-10-21). */
+  litres?: number;
   id: string;
   /** The document number the requester recognises. */
   number: string;

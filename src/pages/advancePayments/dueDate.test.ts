@@ -61,11 +61,12 @@ describe("Vendor On Account", () => {
     expect(rent.purpose).toBe("RENT");
     expect(needsDepartmentHead(rent)).toBe(true);
     // A fixed owner's purpose too: on account, the head is asked.
-    const material = { ...rent, purpose: "RAW_MATERIAL", purposeNeedsHead: false };
+    const material = { ...rent, purpose: "SEMI_FINISHED", purposeNeedsHead: false };
     expect(needsDepartmentHead(material)).toBe(true);
     expect(needsDepartmentHead({ ...material, paymentAgainst: "AGAINST_PO" })).toBe(false);
-    // Freight keeps its own route: Navdeep.
+    // Freight keeps its own route: Navdeep; Raw / Packing Material, Bhupinder (2026-10-21).
     expect(needsDepartmentHead({ ...material, purpose: "FREIGHT_IN" })).toBe(false);
+    expect(needsDepartmentHead({ ...material, purpose: "RAW_MATERIAL" })).toBe(false);
   });
 
   it("leaves Against Bill free to take any purpose", () => {

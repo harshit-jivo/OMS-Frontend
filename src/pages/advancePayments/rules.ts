@@ -861,6 +861,9 @@ const HEAD_TYPES: ReadonlyArray<PartnerType> = ["EMPLOYEE_ADVANCE", "EMPLOYEE_IM
  * an Employee or Imprest request, or a purpose approved "by department".
  * The server applies the same rule (`purposes.needs_department_head`).
  */
+/** Raw / Packing Material: Bhupinder first in every company (`purposes.RM_PM_PURPOSES`). */
+const RM_PM_PURPOSES: ReadonlyArray<string> = ["RAW_MATERIAL", "PACKING_MATERIAL"];
+
 export function needsDepartmentHead(form: RequestForm): boolean {
   if (!form.company || form.company === "MART") return false;
   // A bill due within 2 days goes straight to Payment: no head approves it.
@@ -878,6 +881,10 @@ export function needsDepartmentHead(form: RequestForm): boolean {
   // A plant's staff salary advance goes to the plant's fixed approver, by
   // amount (approval matrix, 2026-10-09) — the server's same rule.
   if (form.type === "EMPLOYEE_ADVANCE" && FACTORY_BUDGETS.includes(form.budget)) return false;
+  // Raw / Packing Material: Bhupinder, however it is paid (user, 2026-10-21).
+  if (RM_PM_PURPOSES.includes(form.purpose) && !(form.type !== "" && HEAD_TYPES.includes(form.type))) {
+    return false;
+  }
   // A Vendor paid On Account, for any purpose: the head picked (user, 2026-10-21).
   if (form.type === "VENDOR" && form.paymentAgainst === "ON_ACCOUNT") return true;
   return (form.type !== "" && HEAD_TYPES.includes(form.type)) || form.purposeNeedsHead;

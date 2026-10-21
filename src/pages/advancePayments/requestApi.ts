@@ -247,6 +247,7 @@ function documentFromApi(doc: ApiRequestDocument, partner: string, company: Adva
         }
       : undefined,
     reading: doc.attachment_check ?? undefined,
+    litres: doc.litres ? number(doc.litres) : undefined,
   };
 }
 
