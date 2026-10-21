@@ -226,6 +226,18 @@ export interface OmsUsage {
   available: number;
   /** How many OMS requests have touched it, whatever became of them. */
   requests: number;
+  /** The requests holding it now, where each is and with whom (2026-10-21). */
+  holders: OmsHolder[];
+}
+
+/** A request holding a document: its number, the stage it waits at (or returned), and with whom. */
+export interface OmsHolder {
+  requestNo: string;
+  /** Returned to its creator: with them, to edit and resubmit. */
+  returned: boolean;
+  stage: string;
+  user: string;
+  amount: number;
 }
 
 export interface DocumentAttachment {

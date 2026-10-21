@@ -3,7 +3,10 @@ import { describe, expect, it } from "vitest";
 import type { OpenDocument } from "./constants";
 import {
   employeeToPartner,
+  heldMessages,
+  heldSummary,
   invoiceToDocument,
+  omsOf,
   sapAmount,
   sapDocumentOf,
   sapTdsLabel,
@@ -21,6 +24,34 @@ describe("a request's document, opened as SAP shows it", () => {
     // A receipt or an A/R invoice on a refund's ledger has no window here.
     expect(sapDocumentOf(doc("LDG-24-5501-0"), "OIL")).toBeNull();
     expect(sapDocumentOf(doc("LDG-30-90910-1"), "")).toBeNull();
+  });
+});
+
+describe("a document another request holds (2026-10-21)", () => {
+  const oms = omsOf({
+    reserved: "12000", paid: "0", available: "0", requests: 2,
+    holders: [
+      { request_no: "AP-2026-0100", status: "RETURNED", stage: "Returned to its creator", user: "Sushil Kumar", amount: "6000" },
+      { request_no: "AP-2026-0185", status: "IN_APPROVAL", stage: "Payment Approval", user: "taran", amount: "6000" },
+    ],
+  });
+  const doc = { id: "PCH-52448", oms } as OpenDocument;
+
+  it("says which requests hold it, where each is and with whom", () => {
+    expect(heldSummary(doc)).toBe(
+      "In AP-2026-0100 (returned to Sushil Kumar), AP-2026-0185 (at Payment Approval with taran)",
+    );
+    expect(heldMessages(doc, "bill")).toEqual([
+      "This bill is in AP-2026-0100, returned to Sushil Kumar — ₹6,000 held.",
+      "This bill is in AP-2026-0185, at Payment Approval with taran — ₹6,000 held.",
+    ]);
+  });
+
+  it("leaves out the request being edited, and says nothing when no other holds it", () => {
+    expect(heldMessages(doc, "bill", "AP-2026-0100")).toEqual([
+      "This bill is in AP-2026-0185, at Payment Approval with taran — ₹6,000 held.",
+    ]);
+    expect(heldSummary({ id: "PCH-1", oms: omsOf({ reserved: "0", paid: "0", available: "5", requests: 0 }) } as OpenDocument)).toBe("");
   });
 });
 

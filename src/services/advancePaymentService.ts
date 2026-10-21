@@ -705,6 +705,8 @@ export interface SapOmsUsage {
   unadjusted?: string;
   available: string;
   requests: number;
+  /** The requests holding it now (in approval, or returned), where each is and with whom (2026-10-21). */
+  holders?: Array<{ request_no: string; status: string; stage: string; user: string; amount: string }>;
 }
 
 /** One line of a request against SAP as it is now (`/requests/<id>/sap-check/`). */

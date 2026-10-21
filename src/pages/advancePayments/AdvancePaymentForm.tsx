@@ -138,6 +138,8 @@ function useDebounced<T>(value: T, ms: number): T {
 export interface AdvancePaymentFormProps {
   /** Start from an existing entry — the approver's edit. Blank by default. */
   initial?: RequestForm;
+  /** The request being edited (its number): its own hold on a document is not another request's. */
+  requestNo?: string;
   initialFiles?: FileAttachment[];
   submitLabel?: string;
   /**
@@ -180,6 +182,7 @@ export type RequestSection = "payments" | "expenses";
 
 export function AdvancePaymentForm({
   initial = EMPTY_FORM,
+  requestNo,
   initialFiles = [],
   submitLabel = "Submit Request",
   onSubmit,
@@ -954,6 +957,7 @@ export function AdvancePaymentForm({
           onAllocationChange={changeLine}
           company={form.company}
           onSearch={searchable ? setDocSearch : undefined}
+          ownRequestNo={requestNo}
         />
       ) : null}
 

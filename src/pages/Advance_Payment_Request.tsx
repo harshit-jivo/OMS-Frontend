@@ -306,6 +306,7 @@ function EntryDetails({ id, onBack, section }: { id: number; onBack: () => void;
           <Card className="p-4 md:p-5">
             <AdvancePaymentForm
               initial={entry.form}
+              requestNo={entry.requestNo}
               initialFiles={entry.files}
               submitLabel={returned ? "Save & Resubmit" : "Save Changes"}
               secondarySubmit={

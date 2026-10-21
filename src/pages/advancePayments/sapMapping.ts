@@ -25,6 +25,7 @@ import type {
 import {
   NOT_IN_SAP_PREFIX,
   type DocumentAttachment,
+  type OmsHolder,
   type OmsUsage,
   type OpenDocument,
   type Partner,
@@ -180,7 +181,41 @@ export function omsOf(usage: SapOmsUsage | undefined): OmsUsage | undefined {
     unadjusted: sapAmount(usage.unadjusted ?? "0"),
     available: sapAmount(usage.available),
     requests: usage.requests,
+    holders: (usage.holders ?? []).map((h) => ({
+      requestNo: h.request_no,
+      returned: h.status === "RETURNED",
+      stage: h.stage,
+      user: h.user,
+      amount: sapAmount(h.amount),
+    })),
   };
+}
+
+/**
+ * The OTHER requests holding a document (user, 2026-10-21): every one but
+ * `ownRequestNo`, the request being edited, whose own hold is no news.
+ */
+export function heldElsewhere(doc: OpenDocument, ownRequestNo?: string): OmsHolder[] {
+  return (doc.oms?.holders ?? []).filter((h) => h.requestNo !== ownRequestNo);
+}
+
+/** Where a holding request is: "returned to Sushil Kumar", "at Payment Approval with taran". */
+export function holderWhere(h: OmsHolder): string {
+  if (h.returned) return h.user ? `returned to ${h.user}` : "returned to its creator";
+  return h.user ? `at ${h.stage} with ${h.user}` : `at ${h.stage}`;
+}
+
+/** The picker line's: "In AP-2026-0100 (returned to Sushil Kumar)"; "" when no other request holds it. */
+export function heldSummary(doc: OpenDocument, ownRequestNo?: string): string {
+  const held = heldElsewhere(doc, ownRequestNo);
+  return held.length ? `In ${held.map((h) => `${h.requestNo} (${holderWhere(h)})`).join(", ")}` : "";
+}
+
+/** Under a chosen document: "This bill is in AP-2026-0100, returned to Sushil Kumar — ₹6,000 held." */
+export function heldMessages(doc: OpenDocument, noun: string, ownRequestNo?: string): string[] {
+  return heldElsewhere(doc, ownRequestNo).map(
+    (h) => `This ${noun} is in ${h.requestNo}, ${holderWhere(h)} — ${formatINR(h.amount)} held.`,
+  );
 }
 
 /**

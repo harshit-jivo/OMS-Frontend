@@ -23,6 +23,8 @@ import { SapAttachmentLink, SapAttachmentList } from "./SapAttachmentLink";
 import {
   billDebit,
   historyTargetOf,
+  heldMessages,
+  heldSummary,
   omsSummary,
   paidWithoutDebit,
   sapDebitLabel,
@@ -161,6 +163,7 @@ export function ReferenceDetails({
   onAllocationChange,
   company,
   onSearch,
+  ownRequestNo,
 }: {
   kind: ReferenceKind;
   documents: OpenDocument[];
@@ -178,6 +181,8 @@ export function ReferenceDetails({
   onAllocationChange: (id: string, patch: Partial<Allocation>) => void;
   /** The request's company: what a chosen document's SAP attachments are read from. */
   company?: string;
+  /** The request being edited: its own hold on a document is not another request's. */
+  ownRequestNo?: string;
   /** The picker's search term, for a list SAP holds more of than was read. */
   onSearch?: (term: string) => void;
 }) {
@@ -232,7 +237,7 @@ export function ReferenceDetails({
                 return {
                   value: doc.id,
                   label: doc.number,
-                  hint: documentSubtitle(doc),
+                  hint: documentSubtitle(doc, ownRequestNo),
                   // Searchable on its number and the vendor's own ref, whatever the hint shows.
                   keywords: [due, doc.number, doc.reference].filter(Boolean).join(" "),
                   meta: due ? (
@@ -257,6 +262,7 @@ export function ReferenceDetails({
           onAllocationChange={onAllocationChange}
           onDelete={(id) => onChange(value.filter((selected) => selected !== id))}
           company={company}
+          ownRequestNo={ownRequestNo}
         />
       ) : null}
     </FormSection>
@@ -267,7 +273,7 @@ export function ReferenceDetails({
  * The small line under a document number: what kind it is (under "All"), the
  * vendor's own reference (on a SAP bill), its date, and whether SAP withheld TDS.
  */
-function documentSubtitle(doc: OpenDocument): string {
+function documentSubtitle(doc: OpenDocument, ownRequestNo?: string): string {
   // The note is on the picker line, not only in the expanded row: under "All"
   // it is what marks a credit memo or a payment already made as money owed TO
   // us, and that has to be seen before it is ticked, not after.
@@ -276,8 +282,10 @@ function documentSubtitle(doc: OpenDocument): string {
     doc.note,
     doc.reference ? `Ref ${doc.reference}` : null,
     formatDate(doc.date),
-    // What other OMS requests already hold against it, seen before it is ticked.
+    // What other OMS requests already hold against it, seen before it is ticked —
+    // and which requests, where they are and with whom (2026-10-21).
     omsSummary(doc) || null,
+    heldSummary(doc, ownRequestNo) || null,
     sapDebitLabel(doc),
     sapTdsLabel(doc),
   ]
@@ -358,6 +366,7 @@ function SelectedDocuments({
   onAllocationChange,
   onDelete,
   company,
+  ownRequestNo,
 }: {
   kind: ReferenceKind;
   rows: AllocationRow[];
@@ -365,6 +374,8 @@ function SelectedDocuments({
   onAllocationChange: (id: string, patch: Partial<Allocation>) => void;
   onDelete: (id: string) => void;
   company?: string;
+  /** The request being edited: its own hold is not another request's. */
+  ownRequestNo?: string;
 }) {
   const def = REFERENCE_KINDS[kind];
   const one = def.noun;
@@ -453,7 +464,13 @@ function SelectedDocuments({
                     ) : null}
                     {due ? <Badge tone="bad">{due}</Badge> : null}
                   </span>
-                  <span className="block text-[11px] text-subtle">{documentSubtitle(doc)}</span>
+                  <span className="block text-[11px] text-subtle">{documentSubtitle(doc, ownRequestNo)}</span>
+                  {/* Held by another request (2026-10-21): which, where it is, with whom. */}
+                  {heldMessages(doc, one, ownRequestNo).map((message) => (
+                    <span key={message} className="block text-[11.5px] font-medium text-hold" data-slot="held-elsewhere">
+                      {message}
+                    </span>
+                  ))}
                 </span>
               </button>
 
