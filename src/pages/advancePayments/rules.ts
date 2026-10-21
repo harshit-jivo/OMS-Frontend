@@ -864,6 +864,8 @@ export function needsDepartmentHead(form: RequestForm): boolean {
   if (paysToday(form)) return false;
   // Every bill goes straight to the Payment desk (user, 2026-10-19).
   if (form.paymentAgainst === "AGAINST_BILL") return false;
+  // Against a journal entry: Navdeep alone, every company (user, 2026-10-21).
+  if (form.type === "EMPLOYEE_IMPREST" && form.paymentAgainst === "AGAINST_JOURNAL") return false;
   // Freight goes to Navdeep, then Payment — an Employee / Imprest request aside.
   if (FREIGHT_PURPOSES.includes(form.purpose) && !(form.type !== "" && HEAD_TYPES.includes(form.type))) {
     return false;
