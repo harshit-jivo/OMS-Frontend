@@ -852,6 +852,23 @@ export function AdvancePaymentForm({
             </Field>
           ) : null}
 
+          {/* An Account Payment: the Director approves it instead of Avtar when ticked (2026-10-21). */}
+          {form.type === "ACCOUNT" ? (
+            <label
+              className="flex cursor-pointer items-center gap-2 self-end pb-2 text-[13px] text-body"
+              data-slot="director-approval"
+            >
+              <input
+                type="checkbox"
+                className="size-4 accent-brand"
+                checked={form.directorApproval}
+                onChange={(e) => change({ directorApproval: e.target.checked })}
+              />
+              Director approval
+              <span className="text-[12px] text-subtle">— the Director approves it, not Avtar</span>
+            </label>
+          ) : null}
+
           {/* Vendor → Against PO only: when the payment is expected to be
               adjusted against the PO(s). Optional. */}
           {c.expectedDate ? (

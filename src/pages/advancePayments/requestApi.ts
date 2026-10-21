@@ -160,6 +160,7 @@ export function toApiRequest(form: RequestForm): ApiRequestInput {
     expected_date: orNull(form.expectedDate),
     expected_bill_date: orNull(form.expectedBillDate),
     bill_due_date: needsBillDueDate(form) ? orNull(form.billDueDate) : null,
+    director_approval: form.type === "ACCOUNT" && form.directorApproval,
     return_method: form.returnMethod,
     return_method_other: form.returnMethod === "CUSTOM" ? form.returnMethodOther : "",
     installments: form.installments ? Number(form.installments) : null,
@@ -293,6 +294,7 @@ export function formFromApi(api: ApiRequest): RequestForm {
     // Likewise: a Bill Due Date on the request says its purpose is paid by one.
     purposeDueDate: Boolean(api.bill_due_date),
     billDueDate: api.bill_due_date ?? "",
+    directorApproval: Boolean(api.director_approval),
     departmentHead: api.department_head_employee?.employee_code ?? "",
     departmentHeadName: api.department_head_employee?.employee_name ?? "",
     departmentHeadLogin: api.department_head?.username ?? "",

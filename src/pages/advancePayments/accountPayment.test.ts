@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { toApiRequest } from "./requestApi";
 import { paymentAccountToPartner } from "./sapMapping";
 import {
   EMPTY_FORM,
@@ -23,6 +24,16 @@ describe("Account Payment: one G/L account that is no business partner", () => {
     expect(typesFor("").map((t) => t.value)).not.toContain("ACCOUNT");
     // Moving the request to another company with accounts keeps the type.
     expect(fill({ company: "MART" }, { type: "ACCOUNT" }, { company: "OIL" }).type).toBe("ACCOUNT");
+  });
+
+  it("may be ticked for the Director, sent to the API; another type forgets the tick", () => {
+    const form = fill({ company: "OIL" }, { type: "ACCOUNT" }, { directorApproval: true });
+    expect(form.directorApproval).toBe(true);
+    expect(toApiRequest(form).director_approval).toBe(true);
+    expect(fill({ company: "OIL" }, { type: "ACCOUNT" }).directorApproval).toBe(false);
+    const vendor = applyChange(form, { type: "VENDOR" });
+    expect(vendor.directorApproval).toBe(false);
+    expect(toApiRequest(vendor).director_approval).toBe(false);
   });
 
   it("suggests an Oil or Beverages account's purpose by its group", () => {

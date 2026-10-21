@@ -176,6 +176,13 @@ export function RequestSummary({
             value={form.expectedBillDate ? formatDate(form.expectedBillDate) : ""}
           />
         ) : null}
+        {/* An Account Payment ticked for the Director: he approves it, not Avtar (2026-10-21). */}
+        {form.type === "ACCOUNT" ? (
+          <DetailField
+            label="Director Approval"
+            value={form.directorApproval ? "Yes — the Director approves it" : "No — Avtar approves it"}
+          />
+        ) : null}
         {/* Utilities and insurance: typed by the requester, and it may have skipped the approvals. */}
         {form.billDueDate ? (
           <DetailField

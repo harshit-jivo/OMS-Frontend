@@ -261,6 +261,8 @@ export interface RequestForm {
    * request skips its approvals and goes straight to Payment.
    */
   billDueDate: string;
+  /** An Account Payment sent to the Director instead of Avtar (2026-10-21). */
+  directorApproval: boolean;
   /**
    * The Department Head: an HOD of the employee master, by employee code,
    * with their name. Asked only when `needsDepartmentHead`. They approve
@@ -338,6 +340,7 @@ export const EMPTY_FORM: RequestForm = {
   purposeNeedsHead: false,
   purposeDueDate: false,
   billDueDate: "",
+  directorApproval: false,
   departmentHead: "",
   departmentHeadName: "",
   departmentHeadLogin: "",
@@ -1050,6 +1053,8 @@ export function sanitize(form: RequestForm): RequestForm {
     next.purposeNeedsHead = false;
   }
   if (!needsBillDueDate(next)) next.billDueDate = "";
+  // The Director's tick is an Account Payment's alone.
+  if (next.type !== "ACCOUNT") next.directorApproval = false;
   // The bill an Expense pays: only when it is paid to a vendor.
   if (!vendorExpense(next)) {
     next.expenseCategory = "";

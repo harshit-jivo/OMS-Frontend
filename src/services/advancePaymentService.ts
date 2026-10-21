@@ -1287,6 +1287,8 @@ export interface ApiRequestFields {
   expected_bill_date: string | null;
   /** Utilities / insurance: the due date on the bill or the policy's renewal date. */
   bill_due_date: string | null;
+  /** An Account Payment sent to the Director instead of Avtar (2026-10-21). */
+  director_approval?: boolean;
   /** An Expense paid to a vendor (2026-10-20): the bill — ITEM / SERVICE, its number, its date. */
   expense_category?: string;
   expense_bill_number?: string;
