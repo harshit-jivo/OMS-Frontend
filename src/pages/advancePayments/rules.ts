@@ -864,8 +864,24 @@ const HEAD_TYPES: ReadonlyArray<PartnerType> = ["EMPLOYEE_ADVANCE", "EMPLOYEE_IM
 /** Raw / Packing Material: Bhupinder first in every company (`purposes.RM_PM_PURPOSES`). */
 const RM_PM_PURPOSES: ReadonlyArray<string> = ["RAW_MATERIAL", "PACKING_MATERIAL"];
 
+/**
+ * E-commerce's purposes (`purposes.ECOM_PURPOSES`, 2026-10-22): under the ECOM
+ * budget head Prabhjot approves and no Department Head is asked; under any
+ * other head, the head picked — bills included.
+ */
+export const ECOM_PURPOSES: ReadonlyArray<string> = ["ASSPL"];
+export const ECOM_BUDGET = "ECOM";
+
 export function needsDepartmentHead(form: RequestForm): boolean {
   if (!form.company || form.company === "MART") return false;
+  if (
+    ECOM_PURPOSES.includes(form.purpose) &&
+    form.type !== "ACCOUNT" &&
+    form.type !== "EXPENSE" &&
+    !(form.type === "EMPLOYEE_IMPREST" && form.paymentAgainst === "AGAINST_JOURNAL")
+  ) {
+    return form.budget !== ECOM_BUDGET;
+  }
   // A bill due within 2 days goes straight to Payment: no head approves it.
   if (paysToday(form)) return false;
   // Every bill goes straight to the Payment desk (user, 2026-10-19).

@@ -2015,6 +2015,18 @@ export const advancePaymentService = {
     return unwrap<TdsOptions>(res.data);
   },
 
+  /** Whether this login may download the payment slot sheet (the Final desk, administrators). */
+  async slotSheetAllowed(): Promise<boolean> {
+    const res = await api.get(`${BASE}/slot-sheet/`, { params: { check: 1 } });
+    return Boolean(unwrap<{ allowed: boolean }>(res.data)?.allowed);
+  },
+
+  /** The payment slot sheet as Excel: today's posted payments, or all of them. */
+  async slotSheet(scope: "today" | "all"): Promise<Blob> {
+    const res = await api.get(`${BASE}/slot-sheet/`, { params: { scope }, responseType: "blob" });
+    return res.data as Blob;
+  },
+
   /** The TDS and debit notes SAP has against a request's bills (or POs' bills). */
   async documentDeductions(
     company: AdvancePaymentCompany,

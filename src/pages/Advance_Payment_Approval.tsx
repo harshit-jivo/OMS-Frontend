@@ -71,6 +71,7 @@ import { PartnerBalance } from "./advancePayments/PartnerBalance";
 import { PaymentProofPanel } from "./advancePayments/PaymentProofPanel";
 import { PayoutDetailsForm } from "./advancePayments/PayoutDetailsForm";
 import { SapCheck } from "./advancePayments/SapCheck";
+import { SlotSheetButtons } from "./advancePayments/SlotSheet";
 import { VendorOnAccount } from "./advancePayments/VendorOnAccount";
 import { isBankAccountNumber, startPayout, validatePayout, type PayoutDetails } from "./advancePayments/payout";
 import {
@@ -1007,6 +1008,8 @@ export default function Advance_Payment_Approval() {
         eyebrow="Payments"
         title="Payments Approval"
         description="Review payment requests at your stage: approve, return, send back or reject, and fill the payment details at Payment."
+        // The Final desk's Excel of what SAP has paid (2026-10-22).
+        actions={<SlotSheetButtons />}
       />
 
       {list.isError ? (
