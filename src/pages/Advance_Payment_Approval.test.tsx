@@ -840,7 +840,7 @@ describe("Payments Approval", () => {
       const [, sent] = vi.mocked(advancePaymentService.editExpense).mock.calls[0];
       expect(Object.keys(sent).sort()).toEqual(
         ["budget_code", "effect_month", "expense_bill_date", "expense_bill_number", "expense_bpl_id",
-         "expense_bpl_name", "expense_category", "expense_due_date", "expense_grpo_entry", "expense_grpo_num",
+         "expense_bpl_name", "expense_category", "expense_due_date", "expense_grpo_entry", "expense_grpo_fields", "expense_grpo_num",
          "expense_lines", "expense_tds_code", "is_electricity", "sub_budget_code"],
       );
       expect(sent).toMatchObject({

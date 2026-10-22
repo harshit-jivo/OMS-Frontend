@@ -72,6 +72,8 @@ import { PaymentProofPanel } from "./advancePayments/PaymentProofPanel";
 import { PayoutDetailsForm } from "./advancePayments/PayoutDetailsForm";
 import { SapCheck } from "./advancePayments/SapCheck";
 import { SlotSheetButtons } from "./advancePayments/SlotSheet";
+import { GrpoFields } from "./advancePayments/GrpoFields";
+import { KeepDocuments } from "./advancePayments/KeepDocuments";
 import { VendorOnAccount } from "./advancePayments/VendorOnAccount";
 import { isBankAccountNumber, startPayout, validatePayout, type PayoutDetails } from "./advancePayments/payout";
 import {
@@ -541,6 +543,21 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
           showDeductions={reachedPayment(entry)}
         />
 
+        {/* Payment or Audit: pay only some of them; the rest are freed (2026-10-22). */}
+        {can.keep_documents ? (
+          <KeepDocuments
+            key={`${entry.serverId}-${version}`}
+            documents={entry.api.documents}
+            busy={busy}
+            onKeep={(keep, why) =>
+              void run(
+                () => advancePaymentService.keepDocuments(entry.serverId, keep, why, version),
+                "Taken off, and the creator told.",
+              )
+            }
+          />
+        ) : null}
+
         {/* An Expense: read-only lines, or at Payment the whole request to correct. */}
         {editsExpense && expenseDraft ? (
           <Card className="p-4 md:p-5">
@@ -574,7 +591,22 @@ function ReviewRequest({ id, onBack }: { id: number; onBack: () => void }) {
             <ExpenseEditHistory entry={entry} />
           </Card>
         ) : (
-          <ExpenseLines entry={entry} />
+          <>
+            <ExpenseLines entry={entry} />
+            {/* An Item bill's GRPO fields, as Accounts left them: read only here. */}
+            {entry.form.type === "EXPENSE" && entry.form.expenseGrpoEntry ? (
+              <Card className="p-4 md:p-5">
+                <CardHeader>
+                  <CardTitle>GRPO {entry.form.expenseGrpoNum || entry.form.expenseGrpoEntry} Details</CardTitle>
+                </CardHeader>
+                <GrpoFields
+                  company={(entry.form.company || null) as AdvancePaymentCompany | null}
+                  docEntry={entry.form.expenseGrpoEntry}
+                  changes={entry.form.expenseGrpoFields}
+                />
+              </Card>
+            ) : null}
+          </>
         )}
 
         {/* SAP as it is now, while the request is still at Payment, CA, Audit or Final:
@@ -876,11 +908,19 @@ function AllRequests({ onOpen }: { onOpen: (id: number) => void }) {
 }
 
 /** What the desk may do to many requests at once. */
-type BulkAction = "approve" | "reject";
+type BulkAction = "approve" | "reject" | "return";
 
 const BULK_WORDS: Record<BulkAction, { verb: string; done: string; progress: string }> = {
   approve: { verb: "Approve", done: "Approved", progress: "Approving" },
   reject: { verb: "Reject", done: "Rejected", progress: "Rejecting" },
+  return: { verb: "Send to creator", done: "Sent to creator", progress: "Sending" },
+};
+
+/** The ability each bulk action needs on a request. */
+const BULK_CAN: Record<BulkAction, "approve" | "reject" | "return_to_creator"> = {
+  approve: "approve",
+  reject: "reject",
+  return: "return_to_creator",
 };
 
 export default function Advance_Payment_Approval() {
@@ -929,10 +969,11 @@ export default function Advance_Payment_Approval() {
   const awaiting = entries.filter((e) => e.api.flow?.awaiting_me).length;
   // Refused by SAP and not posted since: each needs its posting stage to post again.
   const refused = entries.filter((e) => e.api.sap_failure).length;
-  const canBulk = (e: AdvanceRequestEntry) => Boolean(e.api.can.approve || e.api.can.reject);
+  const canBulk = (e: AdvanceRequestEntry) =>
+    Boolean(e.api.can.approve || e.api.can.reject || e.api.can.return_to_creator);
   // Only what is still shown and still yours to decide counts as chosen.
   const chosen = shown.filter((e) => ticked.has(e.serverId) && canBulk(e));
-  const chosenFor = (action: BulkAction) => chosen.filter((e) => e.api.can[action]);
+  const chosenFor = (action: BulkAction) => chosen.filter((e) => e.api.can[BULK_CAN[action]]);
   const acting = bulk ? chosenFor(bulk) : [];
   const postsSome = acting.some((e) => e.api.flow?.current_role === (e.form.type === "EXPENSE" ? "AUDIT" : "FINAL"));
 
@@ -945,8 +986,8 @@ export default function Advance_Payment_Approval() {
   /** Approve or reject the chosen one by one; each with its own version, as its screen would. */
   const actOnChosen = async (action: BulkAction) => {
     const words = BULK_WORDS[action];
-    // Rejecting is final and needs a reason, here as on each request's screen.
-    if (action === "reject" && !bulkRemarks.trim()) {
+    // Rejecting and sending back to the creator need a reason, here as on each request's screen.
+    if (action !== "approve" && !bulkRemarks.trim()) {
       setBulkError("Say why, in the remarks.");
       return;
     }
@@ -1084,6 +1125,12 @@ export default function Advance_Payment_Approval() {
                   Reject selected ({chosenFor("reject").length})
                 </Button>
               ) : null}
+              {chosenFor("return").length ? (
+                <Button variant="secondary" size="xs" onClick={() => openBulk("return")}>
+                  <HiOutlineArrowUturnLeft className="size-4" aria-hidden="true" />
+                  Send to creator ({chosenFor("return").length})
+                </Button>
+              ) : null}
               {chosenFor("approve").length ? (
                 <Button variant="primary" size="xs" onClick={() => openBulk("approve")}>
                   <HiOutlineCheckCircle className="size-4" aria-hidden="true" />
@@ -1126,16 +1173,25 @@ export default function Advance_Payment_Approval() {
               {bulk === "reject" ? (
                 <p className="m-0 text-[13px] text-body">Rejecting is final: they cannot be resubmitted.</p>
               ) : null}
+              {bulk === "return" ? (
+                <p className="m-0 text-[13px] text-body">Each creator can edit theirs and resubmit it.</p>
+              ) : null}
               <Field
                 label="Remarks"
-                required={bulk === "reject"}
+                required={bulk !== "approve"}
                 error={bulkError || undefined}
               >
                 {(f) => (
                   <Textarea
                     {...f}
                     rows={2}
-                    placeholder={bulk === "reject" ? "Why they are rejected" : "Optional"}
+                    placeholder={
+                      bulk === "reject"
+                        ? "Why they are rejected"
+                        : bulk === "return"
+                          ? "What the creators should change"
+                          : "Optional"
+                    }
                     value={bulkRemarks}
                     onChange={(e) => {
                       setBulkRemarks(e.target.value);

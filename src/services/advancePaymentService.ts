@@ -1267,6 +1267,8 @@ export interface RequestAbilities {
    */
   change_decision?: boolean;
   edit_payout: boolean;
+  /** Payment or Audit: pay only some of its bills / POs / journal entries (2026-10-22). */
+  keep_documents?: boolean;
   record_utr: boolean;
   /** After posting: attach to the SAP payment the files SAP does not have yet. */
   attach_to_sap?: boolean;
@@ -1324,6 +1326,8 @@ export interface ApiRequestFields {
   expense_due_date?: string | null;
   expense_grpo_entry?: number | null;
   expense_grpo_num?: number | null;
+  /** The Accounts desk's changes to the GRPO's user fields; null for none. */
+  expense_grpo_fields?: GrpoFieldChanges | null;
   return_method: string;
   return_method_other: string;
   installments: number | null;
@@ -1435,6 +1439,29 @@ export interface ApInvoiceOptions {
 }
 
 /** A vendor's open GRPO and its open lines: what an Item bill's A/P invoice is copied from. */
+/** One user field of a GRPO (bilty, vehicle, litres…), as the Accounts desk sees it. */
+export interface GrpoField {
+  field: string;
+  label: string;
+  kind: "text" | "date" | "number";
+  /** The GRPO's value; "" when empty. */
+  value: string;
+  /** The Accounts desk may change it for this bill; else read only. */
+  editable: boolean;
+}
+
+export interface GrpoFields {
+  company: string;
+  header: GrpoField[];
+  lines: Array<{ line_num: number; item_code: string; description: string; fields: GrpoField[] }>;
+}
+
+/** The Accounts desk's changes to them: `lines` keyed by the GRPO line number. */
+export interface GrpoFieldChanges {
+  header: Record<string, string>;
+  lines: Record<string, Record<string, string>>;
+}
+
 export interface SapOpenGrpo {
   doc_entry: number;
   doc_num: number;
@@ -1511,6 +1538,7 @@ export interface ApiExpenseEdit {
   expense_due_date: string | null;
   expense_grpo_entry: number | null;
   expense_grpo_num: number | null;
+  expense_grpo_fields: GrpoFieldChanges | null;
   effect_month: string;
   is_electricity: boolean;
   expense_tds_code: string;
@@ -1747,6 +1775,12 @@ export const advancePaymentService = {
   },
 
   /** The vendor's open GRPOs, those whose vendor ref is the bill number first (`matches`). */
+  /** An Item bill's GRPO user fields, each editable or read only (2026-10-22). */
+  async grpoFields(company: AdvancePaymentCompany, docEntry: number): Promise<GrpoFields> {
+    const res = await api.get(`${BASE}/grpo-fields/`, { params: { company, doc_entry: docEntry } });
+    return unwrap<GrpoFields>(res.data);
+  },
+
   async openGrpos(company: AdvancePaymentCompany, cardCode: string, billNumber: string): Promise<SapOpenGrpo[]> {
     const res = await api.get(`${BASE}/open-grpos/`, {
       params: { company, card_code: cardCode, bill_number: billNumber },
@@ -2015,7 +2049,13 @@ export const advancePaymentService = {
     return unwrap<TdsOptions>(res.data);
   },
 
-  /** Whether this login may download the payment slot sheet (the Final desk, administrators). */
+  /** Payment or Audit: pay only `keep` (document ids); the rest are taken off and the creator told. */
+  async keepDocuments(id: number, keep: number[], remarks: string, version?: number): Promise<ApiRequest> {
+    const res = await api.post(`${BASE}/requests/${id}/keep-documents/`, { keep, remarks, version });
+    return unwrap<ApiRequest>(res.data);
+  },
+
+  /** Whether this login may download the payment slot sheet (Payment, Audit and Final desks, administrators). */
   async slotSheetAllowed(): Promise<boolean> {
     const res = await api.get(`${BASE}/slot-sheet/`, { params: { check: 1 } });
     return Boolean(unwrap<{ allowed: boolean }>(res.data)?.allowed);

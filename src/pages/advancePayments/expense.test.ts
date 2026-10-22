@@ -238,6 +238,7 @@ describe("an Expense request", () => {
         "expense_category",
         "expense_due_date",
         "expense_grpo_entry",
+        "expense_grpo_fields",
         "expense_grpo_num",
         "expense_lines",
         "expense_tds_code",

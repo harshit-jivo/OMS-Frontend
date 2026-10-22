@@ -155,6 +155,11 @@ export function toApiRequest(form: RequestForm): ApiRequestInput {
     expense_due_date: orNull(form.expenseDueDate),
     expense_grpo_entry: form.expenseGrpoEntry ? Number(form.expenseGrpoEntry) : null,
     expense_grpo_num: form.expenseGrpoNum ? Number(form.expenseGrpoNum) : null,
+    expense_grpo_fields:
+      form.expenseGrpoEntry &&
+      (Object.keys(form.expenseGrpoFields.header).length || Object.keys(form.expenseGrpoFields.lines).length)
+        ? form.expenseGrpoFields
+        : null,
     amount: kind ? String(total) : c.expense ? String(expenseTotal(form.expenseLines)) : form.amount,
     documents,
     expected_date: orNull(form.expectedDate),
@@ -194,6 +199,7 @@ export function expenseEditToApi(form: RequestForm): ApiExpenseEdit {
     expense_due_date: input.expense_due_date ?? null,
     expense_grpo_entry: input.expense_grpo_entry ?? null,
     expense_grpo_num: input.expense_grpo_num ?? null,
+    expense_grpo_fields: input.expense_grpo_fields ?? null,
     effect_month: input.effect_month,
     is_electricity: input.is_electricity,
     expense_tds_code: input.expense_tds_code ?? "",
@@ -312,6 +318,10 @@ export function formFromApi(api: ApiRequest): RequestForm {
     expenseDueDate: api.expense_due_date ?? "",
     expenseGrpoEntry: api.expense_grpo_entry ? String(api.expense_grpo_entry) : "",
     expenseGrpoNum: api.expense_grpo_num ? String(api.expense_grpo_num) : "",
+    expenseGrpoFields: {
+      header: api.expense_grpo_fields?.header ?? {},
+      lines: api.expense_grpo_fields?.lines ?? {},
+    },
     subBudget: expense ? api.sub_budget_code ?? "" : "",
     subBudgetName: expense ? api.sub_budget_name ?? "" : "",
     effectMonth: expense ? api.effect_month ?? "" : "",

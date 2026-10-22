@@ -47,6 +47,7 @@ import {
   type PaymentMode,
   type ReturnMethod,
 } from "./constants";
+import type { GrpoFieldChanges } from "../../services/advancePaymentService";
 
 /* ── Form state ──────────────────────────────────────────────────────────── */
 
@@ -302,6 +303,8 @@ export interface RequestForm {
   expenseDueDate: string;
   expenseGrpoEntry: string;
   expenseGrpoNum: string;
+  /** The Accounts desk's changes to that GRPO's user fields (bilty, vehicle, litres…). */
+  expenseGrpoFields: GrpoFieldChanges;
   /** SAP's Sub Budget (dimension 4): every expense line in SAP carries one. */
   subBudget: string;
   subBudgetName: string;
@@ -357,6 +360,7 @@ export const EMPTY_FORM: RequestForm = {
   expenseDueDate: "",
   expenseGrpoEntry: "",
   expenseGrpoNum: "",
+  expenseGrpoFields: { header: {}, lines: {} },
   subBudget: "",
   subBudgetName: "",
   effectMonth: "",
@@ -1091,6 +1095,10 @@ export function sanitize(form: RequestForm): RequestForm {
   if (next.expenseCategory !== "ITEM") {
     next.expenseGrpoEntry = "";
     next.expenseGrpoNum = "";
+  }
+  // Another GRPO: the changes made to the last one's fields do not carry over.
+  if (next.expenseGrpoEntry !== form.expenseGrpoEntry) {
+    next.expenseGrpoFields = { header: {}, lines: {} };
   }
   // Due soon: paid the day it is raised.
   if (paymentDateIsToday(next)) next.paymentDate = todayIso();

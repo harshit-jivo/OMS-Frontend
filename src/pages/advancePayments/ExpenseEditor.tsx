@@ -31,6 +31,7 @@ import {
 import { GST_TAX_CODE } from "./constants";
 import { ExpenseDetails, type ExpenseTds } from "./ExpenseDetails";
 import { useBudgetOptions } from "./expenseLookups";
+import { GrpoFields } from "./GrpoFields";
 import { GrpoPicker } from "./GrpoPicker";
 import { FormSection } from "./PaymentSections";
 import {
@@ -270,6 +271,19 @@ export function ExpenseEditor({
           description="An Item bill is booked by copying its GRPO: the one whose vendor ref is the bill number, or one you pick."
         >
           <GrpoPicker company={company} form={form} onChange={change} />
+        </FormSection>
+      ) : null}
+      {itemBill && form.expenseGrpoEntry ? (
+        <FormSection
+          title="GRPO Details"
+          description="Everything the GRPO carries, as the A/P invoice will get it: correct the bilty, transport and litres for this bill; the rest stay as the GRPO has them."
+        >
+          <GrpoFields
+            company={company}
+            docEntry={form.expenseGrpoEntry}
+            changes={form.expenseGrpoFields}
+            onChange={(expenseGrpoFields) => change({ expenseGrpoFields })}
+          />
         </FormSection>
       ) : null}
       <ExpenseDetails

@@ -20,6 +20,8 @@ const ROUTES: Record<string, string> = {
   ADVANCE_PAYMENT_REJECTED: "/Advance_Payment_Request",
   ADVANCE_PAYMENT_RETURNED: "/Advance_Payment_Request",
   ADVANCE_PAYMENT_ASSIGNED: "/Advance_Payment_Request",
+  // Bills taken off a request at Payment or Audit (2026-10-22): the creator's request.
+  ADVANCE_PAYMENT_DOCUMENTS_NOT_PAID: "/Advance_Payment_Request",
 };
 
 /** `"/Credit_Limit?request=12"`, `"/Credit_Limit_Approval"`, or null. */
